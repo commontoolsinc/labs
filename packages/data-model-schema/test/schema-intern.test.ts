@@ -28,7 +28,7 @@ import {
 } from "@/schema-intern.ts";
 import { SchemaAndHash } from "@/SchemaAndHash.ts";
 import { isDeepFrozen, taggedHashStringOf } from "@commonfabric/data-model";
-import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
+import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { toDeepFrozenSchema } from "@/schema-copy.ts";
 

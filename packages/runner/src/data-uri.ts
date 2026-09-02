@@ -1,6 +1,6 @@
 /**
  * Cell-side integration of the `data:` cell URI codec. The dividing line
- * between this module and `data-model`'s `data-uri-codec.ts` is the need
+ * between this module and `data-model`'s `codec-data-uri.ts` is the need
  * for the cell/link machinery: everything that can be expressed against
  * `data-model` alone lives in the codec (in that package); this module
  * holds the two operations that cannot -- {@link dataUriFromValueWithResolvedLinks},
@@ -32,7 +32,7 @@ import {
   dataUriFromValue,
   isFabricDataUri,
   valueFromDataUri,
-} from "@commonfabric/data-model/data-uri-codec";
+} from "@commonfabric/data-model/codec-data-uri";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { type Cell, isCell } from "./cell.ts";

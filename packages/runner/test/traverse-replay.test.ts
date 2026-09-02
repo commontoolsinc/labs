@@ -11,7 +11,7 @@
 
 import { assert } from "@std/assert";
 import type { FabricValue } from "@commonfabric/data-model";
-import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/data-uri-codec";
+import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/codec-data-uri";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import {
   diffOracles,

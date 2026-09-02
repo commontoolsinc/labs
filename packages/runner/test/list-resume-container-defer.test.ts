@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
-import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
+import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
 import { Identity } from "@commonfabric/identity";
 import type { Signer } from "@commonfabric/memory/interface";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";

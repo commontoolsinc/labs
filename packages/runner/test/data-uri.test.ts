@@ -25,8 +25,8 @@ import {
   setModernCellRepConfig,
 } from "@commonfabric/data-model/cell-rep";
 import { UnknownValue } from "@commonfabric/data-model/codec-common";
+import { valueFromDataUri } from "@commonfabric/data-model/codec-data-uri";
 import { JsonCodecEngine } from "@commonfabric/data-model/codec-json";
-import { valueFromDataUri } from "@commonfabric/data-model/data-uri-codec";
 import { FabricHash } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";

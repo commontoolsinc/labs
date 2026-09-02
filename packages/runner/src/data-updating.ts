@@ -16,7 +16,7 @@ import {
   toCompactDebugString,
 } from "@commonfabric/data-model";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
-import { isFabricDataUri } from "@commonfabric/data-model/data-uri-codec";
+import { isFabricDataUri } from "@commonfabric/data-model/codec-data-uri";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";

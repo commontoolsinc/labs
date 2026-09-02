@@ -3,7 +3,7 @@ import { cloneIfNecessary, hashStringOf } from "@commonfabric/data-model";
 import {
   hasDataUriScheme,
   valueFromDataUri,
-} from "@commonfabric/data-model/data-uri-codec";
+} from "@commonfabric/data-model/codec-data-uri";
 import { aclDocId } from "@commonfabric/memory/acl";
 import type { Entity } from "@commonfabric/memory/interface";
 import {

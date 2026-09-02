@@ -10,7 +10,7 @@ import {
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
-import { hasDataUriScheme } from "@commonfabric/data-model/data-uri-codec";
+import { hasDataUriScheme } from "@commonfabric/data-model/codec-data-uri";
 import {
   internSchema,
   isNontrivialSchema,

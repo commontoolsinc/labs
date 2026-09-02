@@ -4,7 +4,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import type { SchemaPathSelector } from "@commonfabric/api";
 import type { FabricValue } from "@commonfabric/data-model";
-import { dataUriFromValue } from "@commonfabric/data-model/data-uri-codec";
+import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import {
   internPathSelector,
