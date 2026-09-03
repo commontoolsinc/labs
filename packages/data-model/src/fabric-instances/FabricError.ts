@@ -557,8 +557,18 @@ export class FabricError extends FabricNativeWrapper<Error>
     const type = (typeof className === "string") && (className !== "")
       ? className
       : "Error";
-    const { name: rawName, message, stack, cause } = error;
+    const {
+      name: rawName,
+      message: rawMessage,
+      stack,
+      cause: rawCause,
+    } = error;
     const name = (rawName === type) ? null : rawName;
+    // `message` is normally inherited from `Error.prototype`, so a severed
+    // prototype leaves a message-less error without one at all. `FabricError`
+    // declares a `string`, and the empty string is what such an error means.
+    const message = (typeof rawMessage === "string") ? rawMessage : "";
+    const cause = (rawCause === undefined) ? undefined : convert(rawCause);
     const extras: Array<[string, FabricValue]> = [];
     for (const key of Object.keys(error)) {
       if (isUnsafeObjectKey(key) || FABRIC_ERROR_RESERVED_KEYS.has(key)) {
@@ -569,17 +579,7 @@ export class FabricError extends FabricNativeWrapper<Error>
         convert((error as unknown as Record<string, unknown>)[key]),
       ]);
     }
-    return new FabricError({
-      type,
-      name,
-      // `message` is normally inherited from `Error.prototype`, so a severed
-      // prototype leaves a message-less error without one at all. `FabricError`
-      // declares a `string`, and the empty string is what such an error means.
-      message: (typeof message === "string") ? message : "",
-      stack,
-      cause: (cause === undefined) ? undefined : convert(cause),
-      extras,
-    });
+    return new FabricError({ type, name, message, stack, cause, extras });
   }
 }
 
