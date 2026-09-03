@@ -11,6 +11,9 @@
   return {
     plain: FabricError.fromNativeError(withStack(new Error("boom"))),
     bare: bare("boom"),
+    "type other than `Error`": FabricError.fromNativeError(
+      withStack(new TypeError("not a thing")),
+    ),
     "name differs from type": new FabricError({
       type: "TypeError",
       name: "FrobError",
@@ -30,7 +33,7 @@
     "with extras": FabricError.fromNativeError(
       Object.assign(withStack(new Error("extra")), {
         code: 42,
-        when: new Date(0),
+        when: new Date("2026-09-03T12:34:56.789Z"),
       }),
     ),
     "cause chain": FabricError.fromNativeError(
@@ -54,6 +57,12 @@
     type: "Error",
     name: null,
     message: "boom"
+  ),
+  "type other than `Error`": /Error(
+    type: "TypeError",
+    name: null,
+    message: "not a thing",
+    stack: "TypeError: not a thing\n    at frob (file:///example/frob.ts:12:34)"
   ),
   "name differs from type": /Error(
     type: "TypeError",
@@ -90,7 +99,7 @@
     message: "extra",
     stack: "Error: extra\n    at frob (file:///example/frob.ts:12:34)",
     code: 42,
-    when: /EpochNsec(0n)
+    when: /EpochNsec(1788438896789000000n)
   ),
   "cause chain": /Error(
     type: "Error",
