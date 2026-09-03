@@ -35,7 +35,6 @@ import {
   declaredTier,
   hasMarkerLine,
   type MarkedTier,
-  tableTierOf,
   TIER_DIRECTORIES,
   TIER_FILES,
   UNTIERED_FILES,
@@ -65,8 +64,35 @@ export function isWritable(
   return !hasMarkerLine(source) || declaredTier(source) !== undefined;
 }
 
+/** The three membership tables, injectable so their guards can be tested. */
+export interface TierTables {
+  directories: Readonly<Record<string, MarkedTier>>;
+  files: Readonly<Record<string, MarkedTier>>;
+  untiered: Readonly<Record<string, string>>;
+}
+
+const LIVE_TABLES: TierTables = {
+  directories: TIER_DIRECTORIES,
+  files: TIER_FILES,
+  untiered: UNTIERED_FILES,
+};
+
 /** Table entries that match nothing under `keys`, and so have gone stale. */
-export function staleTableEntries(keys: readonly string[]): string[] {
+export function staleTableEntries(
+  keys: readonly string[],
+  tables: TierTables = LIVE_TABLES,
+): string[] {
+  const {
+    directories: TIER_DIRECTORIES,
+    files: TIER_FILES,
+    untiered: UNTIERED_FILES,
+  } = tables;
+  // The tier a table would give a key, ignoring the exemptions, computed from
+  // the tables in hand rather than the live ones.
+  const tableTier = (key: string): MarkedTier | undefined =>
+    TIER_FILES[key] ??
+      Object.entries(TIER_DIRECTORIES)
+        .find(([prefix]) => key.startsWith(prefix))?.[1];
   const stale: string[] = [];
   for (const prefix of Object.keys(TIER_DIRECTORIES)) {
     // Without the trailing slash the prefix match spills into any sibling
@@ -91,9 +117,9 @@ export function staleTableEntries(keys: readonly string[]): string[] {
       );
       continue;
     }
-    // `tableTierOf`, not `tierOf`: the latter honours the exemption, so it
+    // The table lookup, not `tierOf`: the latter honours the exemption, so it
     // reports undefined for every entry here and tests nothing.
-    if (tableTierOf(file) === undefined) {
+    if (tableTier(file) === undefined) {
       stale.push(
         `UNTIERED_FILES exempts "${file}", which no table would tier.`,
       );
@@ -127,9 +153,32 @@ export function problemWith(
   return `is marked ${declared} but the tables place it in ${expected}.`;
 }
 
-async function main() {
-  const write = Deno.args.includes("--write");
-  const targets = await collectTierTargets(PATTERNS_DIR);
+/** What one pass over a patterns tree found, and what it changed. */
+export interface TierReport {
+  /** Every pattern source examined. */
+  examined: number;
+  /** How many of those the tables place in a marked tier. */
+  marked: number;
+  /** Keys whose marker `--write` applied or corrected, in walk order. */
+  written: string[];
+  /** Files whose marker disagrees with the tables. */
+  problems: Problem[];
+  /** Table entries that match nothing under this tree. */
+  stale: string[];
+}
+
+/**
+ * Check `dir`, optionally writing markers, and report what was found.
+ *
+ * Separated from `main` so the walk, the per-file verdict and the write are
+ * reachable from a test against a temporary tree; `main` adds only argument
+ * reading, the report, and the exit status.
+ */
+export async function runTierCheck(
+  dir: string,
+  write: boolean,
+): Promise<TierReport> {
+  const targets = await collectTierTargets(dir);
   const problems: Problem[] = [];
   const written: string[] = [];
 
@@ -145,7 +194,29 @@ async function main() {
     problems.push({ key, detail });
   }
 
-  const stale = staleTableEntries(targets.map((target) => target.key));
+  return {
+    examined: targets.length,
+    marked: targets.filter((target) => target.tier !== undefined).length,
+    written,
+    problems,
+    stale: staleTableEntries(targets.map((target) => target.key)),
+  };
+}
+
+/**
+ * Check `dir`, report to the console, and answer with the exit status.
+ *
+ * Returns the code rather than exiting so a test can call it; only the
+ * `import.meta.main` line below turns the answer into an exit.
+ */
+export async function main(
+  dir: string = PATTERNS_DIR,
+  write: boolean = Deno.args.includes("--write"),
+): Promise<number> {
+  const { examined, marked, written, problems, stale } = await runTierCheck(
+    dir,
+    write,
+  );
 
   if (written.length > 0) {
     console.log(`Marked ${written.length} pattern source(s):`);
@@ -153,16 +224,15 @@ async function main() {
   }
 
   if (problems.length === 0 && stale.length === 0) {
-    const marked = targets.filter((target) => target.tier !== undefined).length;
     console.log(
       `Pattern tier markers agree with the tables (${marked} marked of ` +
-        `${targets.length} pattern sources).`,
+        `${examined} pattern sources).`,
     );
-    return;
+    return 0;
   }
 
   for (const { key, detail } of problems) {
-    console.error(`  ${PATTERNS_DIR}/${key}\n    ${detail}`);
+    console.error(`  ${dir}/${key}\n    ${detail}`);
   }
   for (const detail of stale) console.error(`  ${detail}`);
   console.error(
@@ -171,9 +241,7 @@ async function main() {
       `tiers and their members are in tasks/pattern-tiers.ts; run ` +
       `\`deno task fix-pattern-tiers\` to apply or correct a marker.`,
   );
-  Deno.exit(1);
+  return 1;
 }
 
-if (import.meta.main) {
-  await main();
-}
+if (import.meta.main) Deno.exit(await main());
