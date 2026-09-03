@@ -162,6 +162,33 @@ describe("verbs", () => {
       });
     });
 
+    it("returns a refusal for a word naming a member every object carries", async () => {
+      // A word a person can type is not a verb because the table happens to
+      // answer for it. Looked up on an object, three of these hand back a
+      // function of `Object.prototype`'s and each fails its own way: `toString`
+      // and `constructor` return something that is no outcome — the second of
+      // them the shuttle record itself, identity path and all — while `valueOf`
+      // and `hasOwnProperty` throw out of the dispatch, where a throw means a
+      // read that failed. `__proto__` answers with nothing and was already
+      // refused, and it is here so that it stays refused.
+
+      for (
+        const word of [
+          "toString",
+          "constructor",
+          "valueOf",
+          "hasOwnProperty",
+          "__proto__",
+        ]
+      ) {
+        expect(await runLine(word, shuttleIn(), READS_NOTHING)).toEqual({
+          kind: "refused",
+          reason: `\`${word}\` is not a verb. The verbs are \`cd\`, \`get\`, ` +
+            "`ls`, `pwd`, and `wish`.",
+        });
+      }
+    });
+
     it("returns the reason the split gave a line it would not split", async () => {
       expect(await runLine("get 'a", shuttleIn(), READS_NOTHING)).toEqual({
         kind: "refused",
@@ -247,6 +274,23 @@ describe("verbs", () => {
       expect(
         reasonOf(await runLine("cd a b", shuttleIn(), READS_NOTHING)),
       ).toBe("`cd` takes one operand, and was given 2.");
+    });
+
+    it("refuses an operand ending in `#argument`, a place being result-rooted", async () => {
+      // The asymmetry `get`'s own door turns on: `cd` refuses the suffix in
+      // every spelling that takes one, and `get` reads it.
+      const shuttle = shuttleIn();
+      shuttle.place.cd("slugs");
+      expect(
+        reasonOf(await runLine("cd board#argument", shuttle, READS_NOTHING)),
+      )
+        .toBe(
+          "A place is result-rooted, so `cd` takes no `#argument` suffix. A " +
+            "place rooted at the arguments cell would leave every later " +
+            "relative read ambiguous about which side of the piece it " +
+            "addressed. Reach arguments per operand instead, as in " +
+            "`get topics/3#argument`.",
+        );
     });
 
     describe("a `#name` target", () => {
@@ -687,6 +731,81 @@ describe("verbs", () => {
         spaceNamed: () => Promise.resolve(SPACE),
       });
       expect(shuttle.place.place).toBe(before);
+    });
+
+    describe("the `#argument` suffix", () => {
+      // Standing in an arguments cell is what a result-rooted place cannot do,
+      // and reading one is a different act — `cf cell get` performs it, and
+      // `grammar.md` spells it `get topics/3#argument`. So `get`'s door is
+      // `cd`'s plus this suffix, and each case names which of the two cells
+      // the read was aimed at.
+
+      /** Helper for the cases below, which is what `line` read, and where. */
+      async function reads(
+        shuttle: Shuttle,
+        line: string,
+      ): Promise<
+        { config?: PieceConfig; path?: (string | number)[]; input?: boolean }
+      > {
+        const seen: {
+          config?: PieceConfig;
+          path?: (string | number)[];
+          input?: boolean;
+        } = {};
+        await runLine(line, shuttle, {
+          ...READS_NOTHING,
+          getCellValue: (config, path, options) => {
+            seen.config = config;
+            seen.path = path;
+            seen.input = options?.input;
+            return Promise.resolve(null);
+          },
+        });
+        return seen;
+      }
+
+      it("reads the result cell for an operand carrying no suffix", async () => {
+        expect((await reads(atPiece(), "get title")).input).toBe(false);
+      });
+
+      it("reads the arguments cell for an operand ending in the suffix", async () => {
+        expect((await reads(atPiece(), "get title#argument")).input).toBe(true);
+      });
+
+      it("reads the arguments cell at the path the operand names", async () => {
+        const seen = await reads(atPiece("topics"), "get 3#argument");
+        expect(seen.path).toEqual(["topics", 3]);
+        expect(seen.input).toBe(true);
+      });
+
+      it("reads the arguments cell a bare piece designation selects", async () => {
+        const shuttle = shuttleIn();
+        shuttle.place.cd("slugs");
+        const seen = await reads(shuttle, "get board#argument");
+        expect(seen.config?.piece).toBe("board");
+        expect(seen.path).toEqual([]);
+        expect(seen.input).toBe(true);
+      });
+
+      it("reads the arguments cell a rooted reference selects", async () => {
+        const seen = await reads(shuttleIn(), `get /${HANDLE}/title#argument`);
+        expect(seen.config?.piece).toBe(HANDLE);
+        expect(seen.path).toEqual(["title"]);
+        expect(seen.input).toBe(true);
+      });
+
+      it("reads a `#` inside a piece as a character of a key", async () => {
+        expect((await reads(atPiece(), "get a#b")).path).toEqual(["a#b"]);
+      });
+
+      it("refuses the suffix written with nothing in front of it", async () => {
+        expect(
+          reasonOf(await runLine("get #argument", atPiece(), READS_NOTHING)),
+        ).toBe(
+          "`#argument` selects a piece's arguments cell, so it follows the " +
+            "target it selects, as in `get topics#argument`.",
+        );
+      });
     });
 
     it("refuses a space written as a name that resolved to another space", async () => {

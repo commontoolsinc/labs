@@ -236,12 +236,23 @@ Landed:
   `./lib/cell-selection` export entry lands with this slice, `--select`'s own
   parser being what `cd` asks a wish through.
 
-  `get`'s operand goes through the door `cd`'s goes through, read from where
-  shuttle stands rather than from a standing built for the occasion, which is
-  what makes the two agree about `..`; `CurrentPlace` carries the two
-  non-moving twins that needs. The one spelling `get` does not take is a
-  `#name` target: `cf cell get` takes none and `cf wish` does, and a data
-  verb here means what it means there, so the refusal names `wish`.
+  `get`'s operand goes through the door `cd`'s goes through *plus the
+  `#argument` suffix that door turns down*, read from where shuttle stands
+  rather than from a standing built for the occasion, which is what makes the
+  two agree about `..`. `CurrentPlace.aim` is that door and
+  `CurrentPlace.resolveNamedSpace` the settling twin beside it. A place is
+  result-rooted and cannot stand in an arguments cell, which is why `cd`
+  refuses the suffix in every spelling; reading one is a different act, and
+  `get topics/3#argument` is how an operand asks for it.
+
+  The one spelling `get` does not take is a `#name` target: `cf cell get`
+  takes none and `cf wish` does, and a data verb here means what it means
+  there. The two `#` readings pull opposite ways for a reason that is not
+  arbitrary — the suffix says which of a piece's two cells to read and its
+  place is reachable either way, so refusing it would put a cell out of reach,
+  while a `#name` is a whole target with a verb of its own that answers a
+  second way as well as a second time, so taking it would put a second answer
+  in reach.
 
 Still to come:
 

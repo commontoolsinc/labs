@@ -127,10 +127,10 @@ export async function runLine(
   if (split.kind === "refused") return refuse(split.reason);
   const [word, ...operands] = split.tokens;
   if (word === undefined) return { kind: "nothing" };
-  const verb = VERBS[word];
+  const verb = VERBS.get(word);
   if (verb === undefined) {
     return refuse(
-      `\`${word}\` is not a verb. The verbs are ${listed(Object.keys(VERBS))}.`,
+      `\`${word}\` is not a verb. The verbs are ${listed([...VERBS.keys()])}.`,
     );
   }
   return await verb(shuttle, operands, deps);
@@ -168,6 +168,11 @@ async function cd(
  * Reads the value at the cell `operands` name, which is where shuttle stands
  * where they name nothing.
  *
+ * The operand is read through the door `cd` reads one through, plus the
+ * `#argument` suffix that door turns down: standing in an arguments cell is
+ * what a result-rooted place cannot do, and reading one is a different act
+ * that `cf cell get` performs too.
+ *
  * A container is refused rather than read: a space root and a facet are lists
  * of what stands inside them and hold no value of their own.
  */
@@ -180,12 +185,13 @@ async function get(
   if (tooMany !== undefined) return tooMany;
   const operand = operands[0];
   if (operand === undefined) {
-    return await read(shuttle, shuttle.place.place, deps);
+    return await read(shuttle, shuttle.place.place, false, deps);
   }
-  const where = await reading(shuttle, shuttle.place.resolve(operand), deps);
+  const aim = shuttle.place.aim(operand);
+  const where = await reading(shuttle, aim.move, deps);
   return where.kind === "refused"
     ? where
-    : await read(shuttle, where.place, deps);
+    : await read(shuttle, where.place, aim.input, deps);
 }
 
 /** Lists what stands where shuttle stands. */
@@ -249,8 +255,21 @@ async function wish(
 /**
  * The verbs, by the word that names one. It is the one record of what a line
  * may say, so the refusal listing them lists exactly what the dispatch takes.
+ *
+ * A `Map` rather than an object, because an object answers for every key
+ * `Object.prototype` carries as well as for its own: `toString` and
+ * `constructor` are words a person can type, and looked up on an object each
+ * hands back a function the dispatch would then call with a shuttle. A `Map`
+ * holds what was put in it and nothing else, so the word that names no verb
+ * has no answer to give rather than one that has to be guarded against.
  */
-const VERBS: Readonly<Record<string, Verb>> = { cd, get, ls, pwd, wish };
+const VERBS: ReadonlyMap<string, Verb> = new Map<string, Verb>([
+  ["cd", cd],
+  ["get", get],
+  ["ls", ls],
+  ["pwd", pwd],
+  ["wish", wish],
+]);
 
 /**
  * Helper for {@link cd}, which finishes `move`.
@@ -308,7 +327,17 @@ type Targeting =
  * A space written as a name is settled the way {@link landing} settles one. A
  * `#name` target is not: `cf cell get` takes no such target and `cf wish`
  * does, and a data verb here means what it means there, so the refusal names
- * the verb that reads one.
+ * the verb that reads one. Resolving it here would answer a second way as
+ * well as a second time — `wish` hands back what the fabric resolved with its
+ * handles written as markers, and a cell read of the same address hands back
+ * the raw value.
+ *
+ * That is the `#argument` suffix's opposite and for a reason that is not
+ * arbitrary. The suffix says which of a piece's two cells to read and the
+ * place it rides is reachable either way, so refusing it would put a cell out
+ * of reach; a `#name` is a whole target with a verb of its own, so taking it
+ * would put a second answer in reach. The two share the character and nothing
+ * else (`docs/plans/shuttle/grammar.md`).
  */
 async function reading(
   shuttle: Shuttle,
@@ -340,7 +369,8 @@ async function reading(
 }
 
 /**
- * Helper for {@link get}, which is the value at `place`.
+ * Helper for {@link get}, which is the value at `place`, in the piece's
+ * arguments cell where `input` says so and in its result otherwise.
  *
  * The piece, the path and the scope all ride the config, as they do for a
  * listing, so a slug stands unresolved in the place and the read resolves it
@@ -350,6 +380,7 @@ async function reading(
 async function read(
   shuttle: Shuttle,
   place: Place,
+  input: boolean,
   deps: VerbDeps,
 ): Promise<Outcome> {
   const position = place.position;
@@ -367,7 +398,7 @@ async function read(
   const value = await (deps.getCellValue ?? getCellValue)(
     pieceConfig,
     [...position.path],
-    {},
+    { input },
     { loadPieces: () => shuttle.connection.pieces() },
   );
   return { kind: "value", value };
