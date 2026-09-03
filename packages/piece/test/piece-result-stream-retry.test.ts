@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
+import { spy } from "@std/testing/mock";
 
 import { createSession, Identity } from "@commonfabric/identity";
 import { type Pattern, Runtime } from "@commonfabric/runner";
@@ -73,6 +74,7 @@ async function runRetryScenario(withoutSessionId = false) {
     ) {
       throw new Error("test storage does not support event reconciliation");
     }
+    const cellSet = spy(Object.getPrototypeOf(piece), "set");
 
     let reconciliationCalls = 0;
     const eventIds: string[] = [];
@@ -96,12 +98,20 @@ async function runRetryScenario(withoutSessionId = false) {
       await controller.result.set(7, ["event"]);
       await activeRuntime.idle();
 
+      const streamSends = cellSet.calls.flatMap(({ args }) => {
+        const options = args[2] as
+          | { eventId?: string; session?: string }
+          | undefined;
+        return options?.eventId === undefined ? [] : [options];
+      });
+
       return {
         eventIds,
         received,
         reconciliationCalls,
         runtimeId: activeRuntime.id,
         sessionId: activeRuntime.scopeKeyIdentity.sessionId,
+        streamSends,
       };
     } finally {
       if (withoutSessionId) {
@@ -109,6 +119,7 @@ async function runRetryScenario(withoutSessionId = false) {
       }
       provider.loadUnexaminedAbsences = originalReconciliation;
       replica.enqueueEventAppend = originalEnqueue;
+      cellSet.restore();
       removeHandler();
     }
   } finally {
@@ -126,6 +137,12 @@ describe("piece-result-stream-retry", () => {
 
     expect(result.sessionId).toBeDefined();
     expect(result.reconciliationCalls).toBe(2);
+    expect(result.streamSends).toHaveLength(2);
+    expect(
+      result.streamSends.every(({ session }) => session === result.sessionId),
+    ).toBe(true);
+    expect(new Set(result.streamSends.map(({ eventId }) => eventId)).size)
+      .toBe(1);
     expect(new Set(result.eventIds).size).toBe(1);
     expect(result.received).toEqual([7]);
   });
@@ -134,8 +151,13 @@ describe("piece-result-stream-retry", () => {
     const result = await runRetryScenario(true);
 
     expect(result.sessionId).toBeUndefined();
-    expect(result.runtimeId).not.toBe("");
     expect(result.reconciliationCalls).toBe(2);
+    expect(result.streamSends).toHaveLength(2);
+    expect(
+      result.streamSends.every(({ session }) => session === result.runtimeId),
+    ).toBe(true);
+    expect(new Set(result.streamSends.map(({ eventId }) => eventId)).size)
+      .toBe(1);
     expect(new Set(result.eventIds).size).toBe(1);
     expect(result.received).toEqual([7]);
   });
