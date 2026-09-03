@@ -306,7 +306,7 @@ and is not listed (`listSlugs`, `packages/piece/src/slugs.ts`), and a listing
 that implied completeness would be false.
 
 **Every name a listing prints is one `cd` takes back to that row**, and a row
-`cd` cannot reach prints no name at all. Most rows print their own name,
+it has no name for prints none at all. Most rows print their own name,
 written as a token by the rule above — a slug, a handle and an ordinary key
 each print as themselves. A row whose name's own characters are readings —
 a key called `..` or `-`, one holding the separator, one beginning with `@` —
@@ -319,10 +319,13 @@ what `cd` takes, and that is the claim rather than anything about the whole
 line: an error written after a name is text the fabric produced, and an odd
 quote in it leaves the line as a whole refusing to split.
 
-A row nothing reaches prints a marker in place of a name:
-everything on a listed line that is not a name is written between angle
-brackets, and the printer quotes every value holding one, so a line opening
-with `<` carries no name. A row is one line, so a name carrying a line break
+A row with no name prints a marker in its place, and says no more than that:
+a key whose first character is `#` is reached by a route, as above, and a
+listing prints names rather than routes. Everything on a listed line that is
+not a name is written between angle brackets. A name holding an angle bracket
+is printed quoted, the grammar reserving it, so a line opening with `<` carries
+no name — while a marker's own payload is not escaped, those brackets
+delimiting for a reader and not for a parser. Nothing parses a listed line. A row is one line, so a name carrying a line break
 is described rather than written, and a message carrying one has it written
 as a space.
 

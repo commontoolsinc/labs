@@ -49,7 +49,9 @@ export interface ListingRow {
 
   /**
    * The operand `cd` takes to reach it, written as a token, and absent where
-   * no operand reaches it.
+   * `operandForChild` offers none. Absent is the narrower claim it makes:
+   * that neither the name nor the reference names the row, not that nothing
+   * reaches it.
    */
   readonly operand?: string;
 
@@ -122,8 +124,8 @@ export async function listPlace(
  * here: `<` is one of the characters the grammar reserves, so a name holding
  * one is printed quoted and a printed name never opens with it.
  *
- * Everything else on a line — the row no operand reaches, a row's error, and
- * the bound — is written between angle brackets. Those brackets delimit for a
+ * Everything else on a line — the row with no operand, a row's error, and the
+ * bound — is written between angle brackets. Those brackets delimit for a
  * reader and not for a parser: a payload may hold an angle bracket of its own
  * and nothing escapes it. Nothing parses a listed line, and a form that could
  * be parsed is a second output form rather than a rule for this one
@@ -222,24 +224,33 @@ function rowFor(place: Place, name: string, error?: string): ListingRow {
 
 /** Helper for {@link renderListing}, which is the line `row` prints as. */
 function lineFor(row: ListingRow): string {
-  const head = row.operand ?? marker(unreachable(row.name));
+  const head = row.operand ?? marker(noOperandFor(row.name));
   return row.error === undefined
     ? head
     : `${head} ${marker(`error: ${oneLine(row.error)}`)}`;
 }
 
 /**
- * Helper for {@link renderListing}, which says that no operand reaches a row
- * called `name`, naming it where a line has room for it.
+ * Helper for {@link renderListing}, which says that a row called `name` has no
+ * operand, showing the name where a line has room for it.
  *
- * A name holding a newline is described rather than written, because a row is
- * one line. Nothing a reader could have used is lost: such a name is one no
- * operand reaches, so there was nothing to copy either way.
+ * It says no operand rather than that nothing reaches the row, which is the
+ * wider claim and a false one: a key whose first character is `#` is reached
+ * by a multi-segment operand, `#` being data in every segment but the first.
+ * What holds of every row this is written for is that neither the name nor the
+ * reference names it, and a name is what a listing prints. The name is shown
+ * as it is written and not as something to type — it sits inside a marker,
+ * which by the rule above carries no name.
+ *
+ * A name holding a newline is described rather than shown, because a row is
+ * one line. That row is also one nothing reaches at all, a segment holding a
+ * break being refused at every door, so what the description withholds is a
+ * string no operand would have carried anyway.
  */
-function unreachable(name: string): string {
+function noOperandFor(name: string): string {
   return name.includes("\n")
-    ? "no operand reaches this row, whose name holds a line break"
-    : `no operand reaches ${quoteToken(name)}`;
+    ? "no operand: a name holding a line break"
+    : `no operand: ${quoteToken(name)}`;
 }
 
 /** Helper for {@link renderListing}, which writes `text` as a marker. */
@@ -252,8 +263,8 @@ function marker(text: string): string {
  * as a space, so that what is written on a line takes one line. The payloads
  * that are a caller's own text go through it, the bound as much as an error —
  * the two agreeing is what keeps "a row is one line" a rule rather than a
- * habit of one of them. The marker for a row nothing reaches builds its own
- * text and answers a break by describing the name instead of writing it.
+ * habit of one of them. The marker for a row with no operand builds its own
+ * text and answers a break by describing the name instead of showing it.
  */
 function oneLine(text: string): string {
   return text.replaceAll("\n", " ");

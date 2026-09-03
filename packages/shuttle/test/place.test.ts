@@ -1143,14 +1143,12 @@ describe("place", () => {
             // A relative operand is not a reference, so the reference
             // grammar's `~1` escaping does not reach it: `~1` is literal
             // here where a reference reads it as a literal `/` inside the
-            // key. The case
-            // below is the consequence — a key holding a `/` has no
-            // relative spelling at all, since neither candidate reaches it
-            // — and both are pinned so that teaching the walk to unescape
-            // reds a case rather than arriving unremarked. Which vocabulary
-            // a relative segment speaks is settled where `ls` decides how
-            // such a key prints, the render and the read wanting to be
-            // decided together.
+            // key. The case below is the consequence — a key holding a `/`
+            // has no relative spelling, the walk splitting on the separator
+            // it holds — and both are pinned so that teaching the walk to
+            // unescape reds a case rather than arriving unremarked. Such a
+            // key is named by a reference instead, which unescapes `~1`, and
+            // that is the spelling `operandForChild` offers for it.
 
             const place = atReferencedPiece();
             place.cd("a~1b");

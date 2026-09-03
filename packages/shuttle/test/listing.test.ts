@@ -16,7 +16,7 @@
  * a name `cd` takes back to the row it was printed for. It is driven over a
  * construction rather than a hand-listed few, because the interesting names
  * are the ones nobody thinks to list — and its other half matters as much,
- * that a row `cd` cannot reach prints no name at all.
+ * that a row it has no operand for prints no name at all.
  */
 
 import { expect } from "@std/expect";
@@ -397,15 +397,15 @@ describe("listing", () => {
       })).toBe("/@space/of:fid1:x@space/..");
     });
 
-    it("returns a marker in place of a name for a row no operand reaches", () => {
+    it("returns a marker in place of a name for a row with no operand", () => {
       expect(renderListing({ rows: [{ name: "#b" }] })).toBe(
-        "<no operand reaches '#b'>",
+        "<no operand: '#b'>",
       );
     });
 
     it("returns a marker that writes no name where the name holds a line break", () => {
       expect(renderListing({ rows: [{ name: "a\nb" }] })).toBe(
-        "<no operand reaches this row, whose name holds a line break>",
+        "<no operand: a name holding a line break>",
       );
     });
 
@@ -444,8 +444,8 @@ describe("listing", () => {
   describe("naming a row back", () => {
     // The property, over a construction rather than a list: what a listing
     // prints as a name, `cd` takes back to the row it was printed for; and a
-    // row `cd` cannot reach prints no name at all, so nothing on the surface
-    // invites a reader to type a string that reaches somewhere else.
+    // row it has no operand for prints no name at all, so nothing on the
+    // surface invites a reader to type a string that reaches somewhere else.
     //
     // A named row's line never opens with `<`, which is what keeps a name and
     // a marker apart on one surface. `quoteToken` is the whole of that
@@ -575,7 +575,7 @@ describe("listing", () => {
       }
     }
 
-    it("prints a name `cd` takes back to the row, and no name for a row it cannot reach", async () => {
+    it("prints a name `cd` takes back to the row, and no name for a row it has no operand for", async () => {
       let named = 0;
       let unnamed = 0;
       let reported = 0;
