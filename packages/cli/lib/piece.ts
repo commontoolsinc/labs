@@ -145,6 +145,12 @@ export interface SpaceConfig {
   space: string;
   identity: string;
   jsonOutput?: boolean;
+
+  /**
+   * Whether opening the connection defers reading the space cell until an
+   * operation addresses it. Defaults to `true`; pass `false` when the caller
+   * requires the complete space record before `loadPieces()` returns.
+   */
   deferSpaceCellSync?: boolean;
 
   /**
@@ -491,6 +497,11 @@ async function makeSession(config: SpaceConfig): Promise<Session> {
  * controller over it: a space session, a runtime carrying that deployment's
  * experimental options, and a server proven live before it returns.
  *
+ * The connection authenticates the space session but leaves the space cell
+ * unread until an operation addresses it. Piece IDs, slug documents, and
+ * content-addressed pattern artifacts can all be reached without that record;
+ * registry and default-pattern operations sync the space cell on demand.
+ *
  * Throws when this process is already connected to a different deployment.
  * The settings a connection writes — the LLM endpoint below among them — are
  * the process's rather than the connection's, so a process serves one
@@ -590,14 +601,15 @@ export async function loadPieces(
       throw new Error(`Could not connect to "${config.apiUrl.toString()}".`);
     }
 
+    const deferSpaceCellSync = config.deferSpaceCellSync !== false;
     const pieces = await timeCliPhase(
       "loadPieces.controller",
       () =>
         new PiecesController(session, runtime, {
-          deferSpaceCellSync: config.deferSpaceCellSync,
+          deferSpaceCellSync,
         }),
     );
-    if (config.deferSpaceCellSync) {
+    if (deferSpaceCellSync) {
       await timeCliPhase(
         "loadPieces.ensureSpaceSession",
         () => pieces.ensureSpaceSession(),

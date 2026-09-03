@@ -64,12 +64,15 @@ describe("CLI runtime creation", () => {
     await Deno.writeFile(keyPath, identity.toPkcs8());
     const originalHealthCheck = Runtime.prototype.healthCheck;
     const originalGetSpaceCell = Runtime.prototype.getSpaceCell;
+    const originalEnsureSpaceSession =
+      PiecesController.prototype.ensureSpaceSession;
     const originalSynced = PiecesController.prototype.synced;
     let manager: PiecesController | undefined;
     Runtime.prototype.healthCheck = () => Promise.resolve(true);
     Runtime.prototype.getSpaceCell = function () {
       return { sync: () => Promise.resolve() } as any;
     };
+    PiecesController.prototype.ensureSpaceSession = () => Promise.resolve();
     PiecesController.prototype.synced = () => Promise.resolve();
 
     try {
@@ -111,6 +114,8 @@ describe("CLI runtime creation", () => {
     } finally {
       Runtime.prototype.healthCheck = originalHealthCheck;
       Runtime.prototype.getSpaceCell = originalGetSpaceCell;
+      PiecesController.prototype.ensureSpaceSession =
+        originalEnsureSpaceSession;
       PiecesController.prototype.synced = originalSynced;
       if (manager) {
         await (manager.runtime.storageManager as unknown as {
@@ -122,7 +127,7 @@ describe("CLI runtime creation", () => {
     }
   });
 
-  it("authenticates a deferred manager without syncing its space cell", async () => {
+  it("defers the space cell by default and admits an eager override", async () => {
     const identity = await Identity.fromPassphrase(
       "piece manager deferred sync test",
       { implementation: "noble" },
@@ -163,19 +168,19 @@ describe("CLI runtime creation", () => {
         await loadPieces({
           apiUrl: "https://toolshed.test",
           identity: keyPath,
-          space: "piece-manager-eager-sync",
+          space: "piece-manager-deferred-sync",
         }),
       );
-      expect(spaceCellSyncCalls).toBe(1);
-      expect(spaceSessionCalls).toBe(0);
-      expect(managerSyncCalls).toBe(1);
+      expect(spaceCellSyncCalls).toBe(0);
+      expect(spaceSessionCalls).toBe(1);
+      expect(managerSyncCalls).toBe(0);
 
       managers.push(
         await loadPieces({
           apiUrl: "https://toolshed.test",
           identity: keyPath,
-          space: "piece-manager-deferred-sync",
-          deferSpaceCellSync: true,
+          space: "piece-manager-eager-sync",
+          deferSpaceCellSync: false,
         }),
       );
       expect(spaceCellSyncCalls).toBe(1);
