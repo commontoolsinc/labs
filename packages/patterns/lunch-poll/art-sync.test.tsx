@@ -1,27 +1,32 @@
 /**
- * Test: lunch-poll generated-art wiring — one host-gated editor plus explicit
- * keep-action persistence.
+ * Test: lunch-poll generated-art wiring — host-gated generation + explicit
+ * keep-action persistence (the post-CT-1836 structure: the card reads the
+ * GeneratedArt sub-pattern's fetch-derived outputs directly; nothing sends
+ * from inside a computed).
  *
  * Single-identity caveat (as main.test.tsx): this runtime's one identity IS
  * the host after joining, so the host path runs end-to-end: join → add an
- * option → the card opens the shared editor → GeneratedArt fetches the mocked
- * /api/ai/img generation → the host keeps it → the option carries `imageUrl`
- * and the stored <img> renders. Every other viewer renders that same stored
- * value without instantiating a generator for each option.
+ * option → the host-gated GeneratedArt fetches the mocked /api/ai/img
+ * generation (visible as the cf-image overlay) → the host keeps it — the
+ * card's keep button sends { optionId, imageUrl } into `setOptionImage`; this
+ * test drives that same stream directly with the imageUrl the button would
+ * read — → the option carries `imageUrl` and the stored <img> renders. Every
+ * other viewer renders that same stored value by construction (sourceUrl
+ * short-circuits generation); the gate itself (shouldGenerate) is covered at
+ * the sub-pattern level in generated-art.test.tsx.
  */
 
 import { action, assert, pattern, TESTS, UI, Writable } from "commonfabric";
 import {
   findElement,
   findNodeByProp,
-  propsOf,
   readValue,
 } from "../test/vnode-helpers.ts";
 import CozyPoll, { type LunchProfile } from "./main.tsx";
 
 // 1×1 transparent PNG, the mocked generation response body. The persisted
 // value is its exact data URL: FetchBinary bytes → base64 re-encode is an
-// identity round-trip on the same bytes, so the editor's keep button and this
+// identity round-trip on the same bytes, so the card's keep button and this
 // test send the same string. (Both plain literals: SES-mode module scope
 // rejects computed top-level values like template joins.)
 const TINY_PNG_BASE64 =
@@ -58,38 +63,23 @@ export default pattern(() => {
     poll.options.length === 1 && poll.options[0]?.title === "Sushi Palace"
   );
 
-  const action_open_art_editor = action(() => {
-    const button = findNodeByProp(
-      poll[UI],
-      "aria-label",
-      "Generate art (host)",
-    );
-    const onClick = propsOf(button)?.onClick;
-    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
-      (onClick as { send: (event: Record<string, never>) => void }).send({});
-    }
-  });
-
-  const assert_art_editor_opens = assert(() =>
-    findNodeByProp(poll[UI], "data-art-editor", true) !== undefined
-  );
-
-  // Post-settle the host's client has generated: the cf-image overlay is in
-  // the shared editor's rendered tree.
+  // Post-settle the host's client has generated: the cf-image overlay
+  // (generated, not yet stored) is in the rendered tree — the fetch-derived
+  // read chain through both sub-pattern boundaries works. (Until CT-1836's
+  // traversal fix this file carried a canary pinning the opposite.)
   const assert_generated_overlay_renders = assert(() =>
     findElement(poll[UI], "cf-image") !== undefined
   );
 
+  // The host keeps the art: the same payload the card's keep button sends
+  // (the button reads `art.imageDataUrl`, which equals EXPECTED_DATA_URL for
+  // the mocked bytes — the identity round-trip noted above).
   const action_keep_art = action(() => {
-    const button = findNodeByProp(
-      poll[UI],
-      "aria-label",
-      "Keep this art (host)",
-    );
-    const onClick = propsOf(button)?.onClick;
-    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
-      (onClick as { send: (event: Record<string, never>) => void }).send({});
-    }
+    const optionId = readValue(poll.options[0]?.id);
+    poll.setOptionImage.send({
+      optionId: typeof optionId === "string" ? optionId : "",
+      imageUrl: EXPECTED_DATA_URL,
+    });
   });
 
   const assert_image_persisted = assert(() =>
@@ -106,8 +96,6 @@ export default pattern(() => {
       { action: action_join_as_host },
       { action: action_add_sushi },
       { assertion: assert_option_added },
-      { action: action_open_art_editor },
-      { assertion: assert_art_editor_opens },
       // Drives the mocked generation fetch to completion.
       { settle: true },
       { assertion: assert_generated_overlay_renders },

@@ -68,7 +68,6 @@
  */
 
 import {
-  action,
   type Cell,
   computed,
   Default,
@@ -86,9 +85,9 @@ import {
   wish,
   Writable,
 } from "commonfabric";
-import GeneratedArt, { safeImageUrl } from "./generated-art.tsx";
 import PollOptionCard from "./poll-option-card.tsx";
 import ParticipantIdentityCard from "./participant-identity-card.tsx";
+import { safeImageUrl } from "./generated-art.tsx";
 
 /**
  * The minimal profile shape this pattern reads: the stable identity cell for
@@ -227,11 +226,6 @@ export interface RemoveOptionEvent {
   optionId: string;
 }
 
-/** Selects an option for a per-session editor or confirmation surface. */
-export interface OptionTargetEvent {
-  optionId: string;
-}
-
 export interface CastVoteEvent {
   optionId: string;
   voteType: VoteColor;
@@ -239,9 +233,9 @@ export interface CastVoteEvent {
 
 /**
  * Art persistence event: the host keeps a generated thumbnail by storing its
- * data URL onto the option. Sent by the parent-owned editor's host-only keep
- * action, which reads the one GeneratedArt sub-pattern's `imageDataUrl` output
- * directly (fetch-derived child outputs materialize for parents since CT-1836).
+ * data URL onto the option. Sent by the option card's host-only keep action,
+ * which reads the GeneratedArt sub-pattern's `imageDataUrl` output directly
+ * (fetch-derived child outputs materialize for parents since CT-1836).
  */
 export interface SetOptionImageEvent {
   optionId: string;
@@ -703,10 +697,6 @@ const overrideViewer = handler<ViewerOverride, {
   });
 });
 
-const selectOptionTarget = handler<OptionTargetEvent, {
-  target: Writable<string | null | undefined>;
-}>(({ optionId }, { target }) => target.set(optionId));
-
 const addOption = handler<AddOptionEvent, {
   options: OptionsCell;
   votes: VotesCell;
@@ -740,7 +730,7 @@ const addOption = handler<AddOptionEvent, {
 );
 
 // Host persists the generated cuisine thumbnail (a data URL read from the
-// shared GeneratedArt editor by its keep action) onto the selected option.
+// GeneratedArt sub-pattern by the card's keep action) onto its option.
 // Idempotent on the stored value, keyed-collection addressed, and admin-gated
 // like every other mutation — only the host's client generates, but the gate
 // holds regardless.
@@ -1191,12 +1181,6 @@ export interface CozyPollOutput {
 const EMPTY_OPTIONS: Option[] = [];
 const EMPTY_VOTES: Vote[] = [];
 const EMPTY_USERS: User[] = [];
-const EMPTY_OPTION_SELECTION: Option = {
-  id: "",
-  title: "",
-  addedByName: "",
-  imageUrl: "",
-};
 
 export default pattern<CozyPollInput, CozyPollOutput>(
   (
@@ -1238,7 +1222,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const removeConfirmTarget = Writable.perSession.of<
       string | null | undefined
     >(null);
-    const artTarget = Writable.perSession.of<string | null | undefined>(null);
     const resetConfirmPending = Writable.perSession.of<boolean>(false);
     const clearHistoryConfirmPending = Writable.perSession.of<boolean>(false);
     // Resolve the viewer's shared profile at the TOP LEVEL, per the
@@ -1325,10 +1308,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       myProfile: viewerProfileCell,
       host,
     });
-    const requestRemoveOption = selectOptionTarget({
-      target: removeConfirmTarget,
-    });
-    const requestArt = selectOptionTarget({ target: artTarget });
     const boundCastVote = castVote({
       votes,
       users,
@@ -1434,43 +1413,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // Rank from today's votes only — the tallies, swatches, and top choice all
     // reflect the current day.
     const ranked = tallyOptions(options, todaysVotes, users, viewerProfileCell);
-    const removeSelection = computed(() => {
-      const target = removeConfirmTarget.get();
-      return options.find((option) => option.id === target) ??
-        EMPTY_OPTION_SELECTION;
-    });
-    const showRemoveConfirm = computed(() => removeSelection.id !== "");
-    const confirmRemoveOption = action(() => {
-      const optionId = removeConfirmTarget.get() ?? "";
-      if (optionId === "") return;
-      boundRemoveOption.send({ optionId });
-      removeConfirmTarget.set(null);
-    });
-    const closeRemoveConfirm = action(() => removeConfirmTarget.set(null));
-    const artSelection = computed(() => {
-      const target = artTarget.get();
-      return options.find((option) => option.id === target) ??
-        EMPTY_OPTION_SELECTION;
-    });
-    // One editor serves every option. An empty prompt keeps its fetch dormant
-    // until the host explicitly selects an option from a card.
-    const generatedArt = GeneratedArt({
-      prompt: artSelection.title,
-      sourceUrl: artSelection.imageUrl,
-      shouldGenerate: isAdmin,
-    });
-    const showArtEditor = computed(() => artSelection.id !== "");
-    const generatedArtReady = computed(() =>
-      generatedArt.fetchState === "generated"
-    );
-    const keepGeneratedArt = action(() => {
-      const optionId = artTarget.get() ?? "";
-      const imageUrl = generatedArt.imageDataUrl ?? "";
-      if (optionId === "" || imageUrl === "") return;
-      boundSetOptionImage.send({ optionId, imageUrl });
-      artTarget.set(null);
-    });
-    const closeArtEditor = action(() => artTarget.set(null));
 
     const topChoice = todayVoteCount > 0 && ranked.length > 0
       ? ranked[0]
@@ -1891,104 +1833,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   );
                 })}
 
-                {showRemoveConfirm
-                  ? (
-                    <div
-                      data-remove-option-confirm
-                      style={{
-                        marginBottom: "12px",
-                        padding: "10px 12px",
-                        backgroundColor: "#fef2f2",
-                        border: "1px solid #fecaca",
-                        borderRadius: "8px",
-                        fontSize: "12px",
-                        color: "#991b1b",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "8px",
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <span>
-                        Remove "{removeSelection.title}" and discard its votes?
-                      </span>
-                      <cf-button
-                        size="sm"
-                        variant="primary"
-                        onClick={confirmRemoveOption}
-                      >
-                        Yes, remove
-                      </cf-button>
-                      <cf-button
-                        size="sm"
-                        variant="ghost"
-                        onClick={closeRemoveConfirm}
-                      >
-                        Cancel
-                      </cf-button>
-                    </div>
-                  )
-                  : null}
-
-                {showArtEditor
-                  ? (
-                    <div
-                      data-art-editor
-                      style={{
-                        marginBottom: "12px",
-                        padding: "12px",
-                        border: "1px solid #c7d2fe",
-                        borderRadius: "8px",
-                        backgroundColor: "#eef2ff",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "12px",
-                      }}
-                    >
-                      {generatedArt[UI]}
-                      <div style={{ flex: 1 }}>
-                        <div
-                          style={{
-                            fontSize: "13px",
-                            fontWeight: 600,
-                            color: "#312e81",
-                          }}
-                        >
-                          Generating art for {artSelection.title}
-                        </div>
-                        <div
-                          style={{
-                            marginTop: "8px",
-                            display: "flex",
-                            gap: "8px",
-                          }}
-                        >
-                          {generatedArtReady
-                            ? (
-                              <cf-button
-                                size="sm"
-                                variant="primary"
-                                aria-label="Keep this art (host)"
-                                onClick={keepGeneratedArt}
-                              >
-                                Keep art
-                              </cf-button>
-                            )
-                            : null}
-                          <cf-button
-                            size="sm"
-                            variant="ghost"
-                            aria-label="Close art editor"
-                            onClick={closeArtEditor}
-                          >
-                            Cancel
-                          </cf-button>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                  : null}
-
                 {/* Interactive options — vote per option */}
                 {options.map((option) => {
                   const oid = option.id;
@@ -2013,14 +1857,14 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       option={cardOption}
                       rank={rank}
                       viewerProfile={viewerProfileCell}
-                      votes={todaysVotes}
                       isJoined={isJoined}
                       isAdmin={isAdmin}
-                      requestRemove={requestRemoveOption}
-                      requestArt={requestArt}
-                      parentOwnsEditors
+                      votes={todaysVotes}
+                      removeConfirmTarget={removeConfirmTarget}
                       castVote={boundCastVote}
+                      removeOption={boundRemoveOption}
                       logVisit={boundLogVisit}
+                      setOptionImage={boundSetOptionImage}
                     />
                   );
                 })}

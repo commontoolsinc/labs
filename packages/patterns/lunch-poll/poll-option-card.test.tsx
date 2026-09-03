@@ -23,17 +23,20 @@ import type {
   LogVisitEvent,
   LunchProfile,
   Option,
-  OptionTargetEvent,
+  RemoveOptionEvent,
+  SetOptionImageEvent,
   Vote,
 } from "./main.tsx";
 
 type EmptyState = Record<PropertyKey, never>;
 
 const noopCastVote = handler<CastVoteEvent, EmptyState>(() => {});
+const noopRemoveOption = handler<RemoveOptionEvent, EmptyState>(() => {});
 const noopLogVisit = handler<LogVisitEvent, EmptyState>(() => {});
-const recordOptionTarget = handler<OptionTargetEvent, {
-  target: Writable<string | null | undefined>;
-}>(({ optionId }, { target }) => target.set(optionId));
+const recordSetOptionImage = handler<
+  SetOptionImageEvent,
+  { lastEvent: Writable<SetOptionImageEvent | undefined> }
+>((event, { lastEvent }) => lastEvent.set(event));
 
 // Carries a stored image so this admin-viewer card takes the stored-art path
 // (no generation request).
@@ -45,13 +48,25 @@ const STORED_OPTION: Option = {
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ",
 };
 
-// Nothing stored: the admin card can open the shared generated-art editor.
+// Nothing stored: the admin card generates via the mocked endpoint below.
 const GENERATING_OPTION: Option = {
   id: "opt-tacos",
   title: "Taco Truck",
   addedByName: "Alex",
   imageUrl: "",
 };
+
+export const fetchMocks = [
+  {
+    urlIncludes: "/api/ai/img",
+    contentType: "image/png",
+    base64Body:
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+  },
+];
+
+const GENERATED_IMAGE_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
 
 export default pattern(() => {
   // Identity is a profile cell, so the viewer and their vote are built here
@@ -63,31 +78,31 @@ export default pattern(() => {
   const removeConfirmTarget = new Writable<string | null | undefined>(
     undefined,
   );
-  const artTarget = new Writable<string | null | undefined>(undefined);
   const rank = new Writable<number | undefined>(undefined);
   const reactiveRank = computed(() => rank.get());
 
   const castVote: Stream<CastVoteEvent> = noopCastVote({});
+  const removeOption: Stream<RemoveOptionEvent> = noopRemoveOption({});
   const logVisit: Stream<LogVisitEvent> = noopLogVisit({});
-  const requestRemove: Stream<OptionTargetEvent> = recordOptionTarget({
-    target: removeConfirmTarget,
-  });
-  const requestArt: Stream<OptionTargetEvent> = recordOptionTarget({
-    target: artTarget,
+  const lastSetOptionImage = new Writable<SetOptionImageEvent | undefined>(
+    undefined,
+  );
+  const setOptionImage: Stream<SetOptionImageEvent> = recordSetOptionImage({
+    lastEvent: lastSetOptionImage,
   });
 
   const card = PollOptionCard({
     option: STORED_OPTION,
     rank: reactiveRank,
     viewerProfile: alex,
-    votes,
     isJoined: true,
     isAdmin: true,
-    requestRemove,
-    requestArt,
-    parentOwnsEditors: true,
+    votes,
+    removeConfirmTarget,
     castVote,
+    removeOption,
     logVisit,
+    setOptionImage,
   });
 
   const assert_my_green_vote_label_renders = assert(() =>
@@ -182,71 +197,47 @@ export default pattern(() => {
     ) !== undefined
   );
 
-  const assert_stored_image_renders_without_generator = assert(() =>
-    findNodeByProp(card[UI], "src", STORED_OPTION.imageUrl) !== undefined &&
+  // Stored art ⇒ artSyncState "stored" ⇒ no keep affordance.
+  const assert_no_keep_button_when_stored = assert(() =>
+    readValue(card.artSyncState) === "stored" &&
     findNodeByProp(
         card[UI],
         "aria-label",
-        "Generate art (host)",
+        "Keep this art (host)",
       ) === undefined
   );
 
-  // An empty card opens the one parent-owned generator rather than
-  // materializing a generator of its own.
+  // The generation path: an admin card with nothing stored generates (mocked
+  // endpoint), surfaces the live fetch state through `artSyncState` (a direct
+  // fetch-derived read — post-CT-1836), and shows the keep affordance.
   const generatingCard = PollOptionCard({
     option: GENERATING_OPTION,
     rank: 2,
     viewerProfile: alex,
-    votes,
     isJoined: true,
     isAdmin: true,
-    requestRemove,
-    requestArt,
-    parentOwnsEditors: true,
-    castVote,
-    logVisit,
-  });
-
-  const assert_generate_button_when_image_missing = assert(() =>
-    findNodeByProp(
-      generatingCard[UI],
-      "aria-label",
-      "Generate art (host)",
-    ) !== undefined
-  );
-
-  // A card instantiated under the previous argument contract has neither of
-  // the new parent-editor streams, so it must not render the controls those
-  // streams would carry.
-  const legacyGeneratingCard = PollOptionCard({
-    option: GENERATING_OPTION,
-    rank: 2,
-    viewerProfile: alex,
     votes,
-    isJoined: true,
-    isAdmin: true,
+    removeConfirmTarget,
     castVote,
+    removeOption,
     logVisit,
+    setOptionImage,
   });
 
-  const assert_legacy_card_hides_unwired_controls = assert(() =>
+  const assert_keep_button_when_generated = assert(() =>
+    readValue(generatingCard.artSyncState) === "generated" &&
     findNodeByProp(
-        legacyGeneratingCard[UI],
+        generatingCard[UI],
         "aria-label",
-        "Remove option (host)",
-      ) === undefined &&
-    findNodeByProp(
-        legacyGeneratingCard[UI],
-        "aria-label",
-        "Generate art (host)",
-      ) === undefined
+        "Keep this art (host)",
+      ) !== undefined
   );
 
-  const action_open_generated_art = action(() => {
+  const action_keep_generated_art = action(() => {
     const button = findNodeByProp(
       generatingCard[UI],
       "aria-label",
-      "Generate art (host)",
+      "Keep this art (host)",
     );
     const onClick = propsOf(button)?.onClick;
     if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
@@ -254,9 +245,13 @@ export default pattern(() => {
     }
   });
 
-  const assert_generate_targets_option = assert(() =>
-    readValue(artTarget) === "opt-tacos"
-  );
+  const assert_keep_sends_generated_image = assert(() => {
+    const event = readValue(lastSetOptionImage);
+    return typeof event === "object" && event !== null &&
+      readValue((event as SetOptionImageEvent).optionId) === "opt-tacos" &&
+      readValue((event as SetOptionImageEvent).imageUrl) ===
+        GENERATED_IMAGE_DATA_URL;
+  });
 
   return {
     [TESTS]: [
@@ -272,11 +267,13 @@ export default pattern(() => {
       { assertion: assert_remove_control_is_underlined },
       { assertion: assert_remove_separator_is_plain },
       { assertion: assert_log_visit_control_renders },
-      { assertion: assert_stored_image_renders_without_generator },
-      { assertion: assert_generate_button_when_image_missing },
-      { assertion: assert_legacy_card_hides_unwired_controls },
-      { action: action_open_generated_art },
-      { assertion: assert_generate_targets_option },
+      // Drives the generating card's mocked fetch to completion (and gives
+      // both cards' art state a settle beat before it is read directly).
+      { settle: true },
+      { assertion: assert_no_keep_button_when_stored },
+      { assertion: assert_keep_button_when_generated },
+      { action: action_keep_generated_art },
+      { assertion: assert_keep_sends_generated_image },
     ],
     card,
     generatingCard,

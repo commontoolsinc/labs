@@ -14,12 +14,6 @@ not restorable backups, live in [`DEPLOY-AND-SHARE.md`](./DEPLOY-AND-SHARE.md).
 By default, diagnostics run against `main.tsx` so runtime changes are measured
 against the product lunch-poll graph instead of a comparison fixture.
 
-Generated art and remove confirmation each use one parent-owned editor instead
-of instantiating a dormant sub-pattern for every option. The option list is not
-paged: under the current scope rules a per-session page index would leave
-session-scoped links in the shared card collection, and a shared page index
-moves every viewer's page at once.
-
 Each case opens one poll across as many runtimes as it has voters, gives every
 voter an identity, joins them, has the host add the options, and then runs the
 requested number of rounds of concurrent voting. Every phase is sampled for

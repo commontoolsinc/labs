@@ -582,25 +582,24 @@ pick a shared profile before joining the poll.
 ## Performance notes
 
 Measured on the 14-option, one-viewer reproduction below (server-execution OFF,
-the arm the estuary poll runs), the reactive graph after option creation is
-about 1,100 nodes and 2,600 edges, down from about 1,360 and 3,350 before one
-parent-owned art editor replaced the generator every card carried. That smaller
-graph did not move vote latency: settle times per vote sit between roughly 85
-and 145 ms in both shapes, run to run, with no commit conflicts or reverts. Two
-things were measured on the way and are worth keeping in mind:
+the arm the estuary poll runs; September 2026): the reactive graph after option
+creation is about 1,360 nodes and 3,350 edges, a vote settles in roughly 85 to
+145 ms headless and 200 to 450 ms in a browser, and the worker spends only about
+75 ms of CPU per vote. Where that time goes is the runtime, not this pattern: on
+every settle the poll's root document is re-read through its schema in full,
+about 8,500 schema visits over some 525 linked documents at depth 42, 100 to 300
+ms each and several times per vote, and the per-traversal schema memo starts
+empty each time. The cost scales with the size of the rendered tree (options,
+votes, history), so pattern-side changes that shrink the graph without shrinking
+the rendered tree do not move it. Cold load pulls about 940 cells in parallel
+waves, roughly 2 s warm and 7 s cold locally, and barely changes under 80 ms of
+added round-trip latency.
 
-- Passing each card a derived "my vote" color from the parent's ranked tallies
-  re-ran about three times as many nodes per vote as letting the card find its
-  own vote in the shared list, so the card does the lookup itself.
-- A card with no nested sub-pattern at all settles an option add in about 130 ms
-  where the old card, which nested a generator, settled it in about 30 ms. That
-  is a runtime question, not a pattern one, and is under investigation; option
-  adds are rare enough that the change ships with it.
-
-Paging the composed cards was tried and cut the graph roughly in half, but the
-page index cannot be per-session without leaving session-scoped links in the
-shared card collection, and a shared index moves every viewer's page at once, so
-it is not in this pattern. Run the same workload with:
+One latency-sensitive failure is the pattern's own: under a slow link the join
+button can render before the viewer's profile document has been pulled, the
+first join click then reads that profile as absent and leaves "Join needs a
+resolved profile" on screen, and a second click succeeds. Run the same workload
+with:
 
 ```bash
 deno run -A packages/patterns/tools/lunch-poll-diagnose.ts --production
@@ -610,11 +609,14 @@ The probe pins `EXPERIMENTAL_SERVER_EXECUTION=false` for itself unless the
 variable is already set: headless, the ON posture would wait forever on a
 toolshed that is not running.
 
-Cuisine art is generated only after the host clicks **generate art** for an
-option. One shared `generated-art.tsx` editor then requests `/api/ai/img` via
-`fetchBinary`; cards with stored art render that value directly and instantiate
-no generator. **Keep art** fires `setOptionImage` to persist the data URL onto
-the selected option, and every viewer then reads the stored image.
+Per-option cuisine art is generated in the browser, and only on the **host's**
+client: `generated-art.tsx` requests `/api/ai/img` via `fetchBinary` under a 30s
+mutex, and skips the request entirely for any option that already carries a
+stored image. The host keeps a thumbnail with the card's keep action, which
+fires `setOptionImage` to persist the data URL onto that option's `imageUrl`;
+every other viewer reads the stored value rather than generating its own. Art
+therefore costs at most one request per option across the whole poll, not one
+per option per viewer.
 
 For the deeper aggregate + write-conflict findings that still apply to a poll
 with many options and voters, see willkelly's perf investigation in

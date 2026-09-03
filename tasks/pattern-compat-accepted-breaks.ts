@@ -282,26 +282,6 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     record: "docs/history/lunch-poll-identity-break.md",
   },
   {
-    // Generated art moved from one GeneratedArt child per option row to a
-    // single parent-owned editor (see
-    // docs/history/lunch-poll-art-editor-break.md). The card's published
-    // `artSyncState` was that per-row generator's lifecycle; with no
-    // generator in the row there is no lifecycle to publish, and nothing
-    // read the field. The argument side is compatible: the new request
-    // streams are optional and the discriminator carries a default.
-    pattern: "lunch-poll/poll-option-card.tsx",
-    baselines: [
-      "20260729T022742Z-FzI6KTHR_TQ4QStb",
-      "20260821T000143Z-EHrqoO5qAEz6rL_W",
-    ],
-    paths: ["result.artSyncState"],
-    reason: "Generated art moved from a per-row GeneratedArt child to one " +
-      "parent-owned editor, so the row no longer has a generation " +
-      "lifecycle to publish. `artSyncState` had no readers; keeping it " +
-      "would mean publishing a fabricated value for old instances.",
-    record: "docs/history/lunch-poll-art-editor-break.md",
-  },
-  {
     pattern: "agent-sessions-debug/main.tsx",
     baselines: ["20260818T001423Z-_DSuxwZWgUTcB_2z"],
     // The proof reports `ownerDid` first. Holding it compatible in a separate

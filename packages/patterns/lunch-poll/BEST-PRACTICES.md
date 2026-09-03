@@ -31,20 +31,19 @@ shared pattern documentation.
 
 ## Mapped Children
 
-- Every composed child contributes graph nodes and invalidation work, even while
-  dormant. Paging a mapped collection before composition bounds that, but the
-  page index cannot be per-session without leaving session-scoped links in the
-  shared collection, and a shared index moves every viewer's page at once.
-  Reduce what each child composes instead.
-- Measure before narrowing a row's inputs. Handing each lunch-poll card a
-  derived "my vote" color from the parent's ranked tallies re-ran about three
-  times as many nodes per vote as letting the card find its own vote in the
-  shared list; the smaller input was the slower one.
-- Instantiating an editor once at the owning boundary and selecting the row it
-  edits shrinks the graph (about a fifth fewer nodes for the lunch poll), but
-  did not change vote settle time there, and a card with no nested sub-pattern
-  settled option adds slower than one nesting a dormant generator. Treat graph
-  size as a hint, and settle time under the real workload as the verdict.
+- Graph size is a hint; settle time under the real workload is the verdict.
+  Three lunch-poll experiments (September 2026, `--production` probe) each cut
+  graph nodes and none cut vote latency: paging the composed cards halved the
+  graph but a page index cannot be per-session without leaving session-scoped
+  links in the shared collection, and a shared index moves every viewer's page
+  at once; handing each card a derived "my vote" color from the parent's ranked
+  tallies re-ran about three times as many nodes per vote as letting the card
+  find its own vote in the shared list; and moving the per-card art generator to
+  one parent-owned editor removed a fifth of the nodes while a card with no
+  nested sub-pattern then settled option adds slower than one nesting a dormant
+  generator. Vote latency in this poll is set by the runtime's per-settle schema
+  traversal of the rendered tree (see the runbook's performance notes), not by
+  the pattern's own wiring.
 - When instantiating a sub-pattern inside `array.map(...)`, make every child
   field read explicit in the map body. Passing a reactive item object through
   without touching its fields can produce a narrowed element schema that omits

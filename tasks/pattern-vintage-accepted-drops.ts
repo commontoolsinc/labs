@@ -226,23 +226,6 @@ export const ACCEPTED_STATE_DROPS: readonly AcceptedStateDrop[] = [
     record: "docs/history/lunch-poll-identity-break.md",
   },
   {
-    // Generated art moved from one GeneratedArt child per option row to a
-    // single parent-owned editor (docs/history/lunch-poll-art-editor-break.md,
-    // with the matching entry in tasks/pattern-compat-accepted-breaks.ts).
-    // A pinned vintage's card rows hold `"generated"` from the host client's
-    // per-row generator; the row has no generator now, so the marker does
-    // not survive on purpose. The stored option image, the only durable art
-    // state, lives on the parent's `options[]` and is untouched.
-    pattern: "lunch-poll/poll-option-card.tsx",
-    paths: ["artSyncState"],
-    capturedThrough: "2026-07-30T21-32-46.548Z",
-    reason: "Generated art moved from a per-row GeneratedArt child to one " +
-      "parent-owned editor. The row's published generation lifecycle " +
-      "(`artSyncState`) is retired with the generator that produced it; " +
-      "the persisted option image on the parent survives unchanged.",
-    record: "docs/history/lunch-poll-art-editor-break.md",
-  },
-  {
     // The card half of the same decision: it published the viewer's name as
     // `me`, now removed, and derived joined-ness/host status from it.
     pattern: "lunch-poll/participant-identity-card.tsx",
