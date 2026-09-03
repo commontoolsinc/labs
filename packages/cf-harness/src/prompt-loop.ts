@@ -3057,14 +3057,23 @@ export class CfHarnessPromptLoop {
     // Installing the runner here rather than at construction is what puts that
     // turn in the same two records every other model call lands in: an attempt
     // in the run report, and its tokens beside a delegation's.
-    this.engine.setExploreQueryRunner(
-      createExploreQueryRunner({
-        modelClient: this.modelClient,
-        runId: this.engine.getRunState().runId,
-        onAttempt: recordModelAttempt,
-        onUsage: (usage) => descendantUsage.push(usage),
-      }),
-    );
+    const runExploreQuery = createExploreQueryRunner({
+      modelClient: this.modelClient,
+      runId: this.engine.getRunState().runId,
+      onAttempt: recordModelAttempt,
+      onUsage: (usage) => descendantUsage.push(usage),
+    });
+    this.engine.setExploreQueryRunner(async (request) => {
+      try {
+        return await runExploreQuery(request);
+      } catch (error) {
+        // The tool turns this into an error the model reads and carries on
+        // from, which is right for the model and invisible to the operator.
+        // Counting it here is what puts a docs-blind run in the summary.
+        this.engine.recordDocsQueryFailures(1);
+        throw error;
+      }
+    });
     await this.engine.ensureDiagnosticsInitialized();
     this.engine.startRun();
     if (options.promptSlotBinding !== undefined) {
@@ -3481,7 +3490,7 @@ export class CfHarnessPromptLoop {
         ? { effectClass: options.effectClass }
         : {}),
       cfcEnforcementMode: runState.cfcEnforcementMode,
-      policyDecision: "denied",
+      policyDecision: "invalid",
       executionStatus: "not-run",
       ...(options.promptSlotBinding !== undefined
         ? { promptSlot: options.promptSlotBinding }
@@ -3500,7 +3509,11 @@ export class CfHarnessPromptLoop {
         ? { effectClass: options.effectClass }
         : {}),
       cfcEnforcementMode: runState.cfcEnforcementMode,
-      decision: "denied",
+      // Not `denied`: nothing about the run's policy refused this call. The
+      // loop could not read its arguments, so no policy question was ever put,
+      // and recording it as a denial would put an unmediated refusal in the
+      // trace that no policy event can account for.
+      decision: "invalid",
       reasonCodes: ["invalid_tool_call"],
       detail: invalid.detail,
       ...(options.promptSlotBinding !== undefined
@@ -4831,6 +4844,11 @@ export class CfHarnessPromptLoop {
         // fail, so the parent failure report remains cost-complete.
         options.recordDescendantUsage(childUsage);
       }
+      // The child's documentation failures are the family's, and the operator
+      // reads one summary: the root's.
+      this.engine.recordDocsQueryFailures(
+        childResult.runState.docsQueryFailures ?? 0,
+      );
       if (childResult.runState.status !== "completed") {
         subagentStatus = "failed";
       }

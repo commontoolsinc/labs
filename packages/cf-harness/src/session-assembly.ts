@@ -34,6 +34,7 @@ import type { HarnessInputCellSpec } from "./contracts/input-cells.ts";
 import type {
   HarnessAllowedSkillScript,
   HarnessSkillScriptExecutionTarget,
+  HarnessSkillsRootRecord,
 } from "./contracts/skill.ts";
 import type { HarnessDocsCorpusRecord } from "./contracts/docs-corpus.ts";
 import { resolveHarnessDocsCorpus } from "./docs-corpus/corpus.ts";
@@ -83,6 +84,9 @@ export interface HarnessSessionConfig {
 
   /** The skills tree scanned into the run's registry, on the host. */
   skillsRoot?: string;
+
+  /** Where {@link skillsRoot} came from, as the run records it. */
+  skillsRootRecord?: HarnessSkillsRootRecord;
 
   /** The same tree as the sandbox addresses it, when the two differ. */
   skillsRootSandboxPath?: string;
@@ -227,6 +231,9 @@ export const harnessSessionEngineOptions = (
       : {}),
     ...(config.skillsRoot !== undefined
       ? { skillsRoot: config.skillsRoot }
+      : {}),
+    ...(config.skillsRootRecord !== undefined
+      ? { skillsRootRecord: config.skillsRootRecord }
       : {}),
     ...(config.docsCorpus !== undefined
       ? { docsCorpus: config.docsCorpus }

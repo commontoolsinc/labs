@@ -669,7 +669,7 @@
     // ------------------------------------------------------------------ layout data
     // The state of this repository the map describes. Bump both when the
     // map is re-verified; the stamp is drawn in the canvas's top-left corner.
-    const SNAPSHOT = { date: "2026-09-03", sha: "884a99f898" };
+    const SNAPSHOT = { date: "2026-09-03", sha: "220c2567e1" };
     const W = 2760, H = 1840;
     const bands = [
       {
@@ -2291,7 +2291,7 @@
       e_child_parent:
         `<p>Return is validated, sanitized and re-minted through the parent's boundary. Raw child evidence is retained outside the parent's return channel. CT-2036 tracks inert numeric fields that can encode sealed strings; CT-2199 tracks program text and diagnostics crossing in the summary.</p>`,
       e_query_docs:
-        `<p><code>query_docs</code> is how a pattern-author child reaches documentation it has no path to: the child has no <code>delegate_task</code> and the subagent manifest pins the depth at one, so an explore agent is a tool on this surface or it is unreachable. The harness selects the matching sections on the host, an <code>explore</code> profile with no tools at all answers out of them in one model call, and the child receives a bounded answer plus inert citations — a path and a heading, never the text. What was sent is kept on the tool-output artifact and stripped before the child sees it.</p><p>Not yet built: the optional <code>fullTextRef</code>, a capability-scoped handle over the retrieved text by the <code>acquire_skill</code> route, and any policy that would declassify it.</p>`,
+        `<p><code>query_docs</code> is how a pattern-author child reaches documentation it has no path to: the child has no <code>delegate_task</code> and the subagent manifest pins the depth at one, so an explore agent is a tool on this surface or it is unreachable. The harness selects the matching sections on the host, an <code>explore</code> profile with no tools at all answers out of them in one model call, and the child receives a bounded answer plus inert citations — a path and a heading, never the text. What was sent is kept on the tool-output artifact and stripped before the child sees it. Which cheap model answers is resolved from the run's own transport, since a transport serves only its own models; a call that reached none is counted on the run and printed in the operator summary, so a documentation-blind run is visible from the artifacts rather than only from the child's tool errors.</p><p>Not yet built: the optional <code>fullTextRef</code>, a capability-scoped handle over the retrieved text by the <code>acquire_skill</code> route, and any policy that would declassify it.</p>`,
       e_skillssh:
         `<p><code>acquire_skill</code>: fetch a skill from skills.sh, pin it by digest, stamp ExternalIngest, return a capability-typed handle.</p>`,
       e_web_www:

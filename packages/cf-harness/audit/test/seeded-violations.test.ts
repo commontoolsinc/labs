@@ -372,6 +372,79 @@ describe("seeded violations", () => {
         }
       });
     });
+
+    it("counts denials rather than defects when one denial fails twice", () => {
+      const seededFamily = seeded((root) => {
+        const denied = reportOf(root).toolActivity.find((activity) =>
+          activity.policyDecision === "denied"
+        )!;
+        // One denial, two defects: no policy event accounts for it, and the
+        // message answering it is untyped free text.
+        const state = stateOf(root);
+        state.policyEvents = state.policyEvents.filter((event) =>
+          event.toolCallId !== denied.toolCallId
+        );
+        const report = reportOf(root);
+        report.policyEvents = (report.policyEvents ?? []).filter((event) =>
+          event.toolCallId !== denied.toolCallId
+        );
+        for (const message of transcriptOf(root)) {
+          if (
+            message.role === "tool" && message.toolCallId === denied.toolCallId
+          ) {
+            message.content = "refused";
+          }
+        }
+      });
+      const outcome = auditRunFamily(seededFamily, RUN_CHECKS).find((result) =>
+        result.checkId === "AUD-4" && result.runId === FIXTURE_RUN_ID
+      )!;
+
+      expect(outcome.verdict).toBe("fail");
+      expect(outcome.message).toContain("1 of 1 denial");
+      expect(outcome.evidence?.length).toBe(2);
+    });
+
+    it("does not count an invalid-argument rejection as a denial", () => {
+      const invalidated = (root: RunEvidence): void => {
+        const trace = traceOf(root);
+        const decision = trace.decisions.at(-1)!;
+        decision.decision = "invalid";
+        decision.reasonCodes = ["invalid_tool_call"];
+        trace.decisionCounts.allowed -= 1;
+        trace.decisionCounts.invalid = (trace.decisionCounts.invalid ?? 0) + 1;
+        const report = reportOf(root);
+        const reported = (report.policyDecisions ?? []).find((candidate) =>
+          candidate.toolCallId === decision.toolCallId
+        );
+        if (reported !== undefined) {
+          reported.decision = "invalid";
+          reported.reasonCodes = ["invalid_tool_call"];
+        }
+        if (report.policyDecisionCounts !== undefined) {
+          report.policyDecisionCounts.allowed -= 1;
+          report.policyDecisionCounts.invalid =
+            (report.policyDecisionCounts.invalid ?? 0) + 1;
+        }
+        const state = stateOf(root);
+        const held = (state.policyDecisions ?? []).find((candidate) =>
+          candidate.toolCallId === decision.toolCallId
+        );
+        if (held !== undefined) {
+          held.decision = "invalid";
+          held.reasonCodes = ["invalid_tool_call"];
+        }
+        for (const activity of report.toolActivity) {
+          if (activity.toolCallId === decision.toolCallId) {
+            activity.policyDecision = "invalid";
+          }
+        }
+      };
+
+      // A rejection the loop made over arguments it could not read reached no
+      // policy question, so it owes the typed deny channel nothing.
+      expect(verdicts(seeded(invalidated))).toEqual(CLEAN);
+    });
   });
 
   describe("AUD-5 handle discipline", () => {

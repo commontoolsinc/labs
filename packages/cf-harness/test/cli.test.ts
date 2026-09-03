@@ -1122,18 +1122,33 @@ Deno.test({
   },
 });
 
-Deno.test("parseCfHarnessCliArgs rejects skill preloads without a skills root", async () => {
+Deno.test("parseCfHarnessCliArgs preloads a skill out of the checkout's own skills tree", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--prompt", "hi", "--skill", "pattern-dev"],
+    { cwd: "/tmp/project", env: {} },
+  );
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.skillNames, ["pattern-dev"]);
+  assertEquals(parsed.skillsRootRecord?.source, "checkout-default");
+  assertEquals(parsed.skillsRoot, parsed.skillsRootRecord?.hostPath);
+  // The default is read on the host, so it has no sandbox address; a skill
+  // script, which needs one, still asks for the flag.
+  assertEquals(parsed.skillsRootSandboxPath, undefined);
   await assertRejects(
     () =>
       parseCfHarnessCliArgs(
-        ["--prompt", "hi", "--skill", "pattern-dev"],
-        {
-          cwd: "/tmp/project",
-          env: {},
-        },
+        [
+          "--prompt",
+          "hi",
+          "--allow-skill-script",
+          "pattern-dev:scripts/probe.ts",
+        ],
+        { cwd: "/tmp/project", env: {} },
       ),
     Error,
-    "--skill requires --skills-root",
+    "--allow-skill-script requires --skills-root",
   );
 });
 
@@ -4872,11 +4887,32 @@ Deno.test("formatCfHarnessCliResult includes policy event summaries", () => {
       "modelTurns: 1",
       "cfcMode: observe (harness)",
       "docsCorpus: none — query_docs is absent and children cannot look documentation up",
+      "skillsRoot: none — this run scanned no skills tree, so no profile preloads any skill",
       "policyEvents: 1",
       "- warning bash: bash would require direct-command authorization in enforce modes",
       "",
     ].join("\n"),
   );
+});
+
+Deno.test("formatCfHarnessCliResult names the skills tree and a docs channel that answered nothing", () => {
+  const result = completedCliResult("run-docs-blind");
+  result.runState.skillsRoot = {
+    type: "cf-harness.skills-root-record",
+    source: "checkout-default",
+    hostPath: "/checkout/skills",
+  };
+  result.runState.docsQueryFailures = 3;
+
+  const text = formatCfHarnessCliResult(result);
+
+  assertEquals(
+    text.includes("skillsRoot: checkout-default /checkout/skills"),
+    true,
+  );
+  // The model read an error and carried on; the operator has no other place
+  // to learn the run's documentation channel was down.
+  assertEquals(text.includes("docsQueryFailures: 3"), true);
 });
 
 Deno.test("formatCfHarnessCliResult summarizes cache usage and cost", () => {

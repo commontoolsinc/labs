@@ -282,11 +282,66 @@ export const isRunPatternToolSuccessOutput = (
   "resultRef" in output && typeof output.resultRef === "string" &&
   "resultRefSchema" in output;
 
+/** The module every Common Fabric pattern imports the runtime from. */
+export const RUNTIME_MODULE_SPECIFIER = "commonfabric";
+
+/** The import line a pattern opens with, as the tool description states it. */
+export const RUNTIME_MODULE_IMPORT_LINE =
+  `import { Default, NAME, pattern, UI } from "${RUNTIME_MODULE_SPECIFIER}";`;
+
+/**
+ * Specifiers close enough to the runtime module that an author writing one
+ * meant it. Each names the product rather than the module, which is how the
+ * guess is arrived at, and none of them resolves — so a bare "could not
+ * resolve" reads as a missing dependency instead of a wrong name.
+ */
+const RUNTIME_MODULE_ALIASES: readonly string[] = [
+  "commontools",
+  "common-tools",
+  "@commontools",
+];
+
+/** Whether `specifier` is one of the aliases, or a subpath of a scoped one. */
+const isRuntimeModuleAlias = (specifier: string): boolean =>
+  RUNTIME_MODULE_ALIASES.some((alias) =>
+    specifier === alias || specifier.startsWith(`${alias}/`)
+  );
+
+/**
+ * The specifiers a compiler diagnostic said it could not resolve. The bundler
+ * quotes each one it failed on, so the quoted text is the author's own
+ * specifier rather than a path the harness reconstructed.
+ */
+const unresolvedSpecifiersIn = (diagnostic: string): readonly string[] =>
+  [...diagnostic.matchAll(/could not resolve ["']([^"']+)["']/gi)]
+    .map((match) => match[1]);
+
+/**
+ * A compile diagnostic, with the module name that does exist named where the
+ * author guessed one that does not. The first failure is the cheapest place to
+ * correct the guess: without this the author sees only that a name did not
+ * resolve, and the next guess is another spelling of the same wrong name.
+ */
+export const withRuntimeModuleCorrection = (diagnostic: string): string => {
+  const guessed = unresolvedSpecifiersIn(diagnostic).filter(
+    isRuntimeModuleAlias,
+  );
+  if (guessed.length === 0) {
+    return diagnostic;
+  }
+  return [
+    diagnostic,
+    `${guessed.map((specifier) => `"${specifier}"`).join(" and ")} ${
+      guessed.length === 1 ? "does" : "do"
+    } not exist. The Common Fabric runtime module is "${RUNTIME_MODULE_SPECIFIER}": ${RUNTIME_MODULE_IMPORT_LINE}`,
+  ].join("\n\n");
+};
+
 export const runPatternToolDescriptor: HarnessToolDescriptor = {
   toolId: "run_pattern",
   title: "Run Pattern",
   description:
-    "Compile and run a Common Fabric pattern in the configured space, returning a reference to its live result cell. Give it either your own sourceText or the patternId of a pattern search_patterns found. The piece stays out of the space's piece list; assign_slug names and lists it when it deserves a public address.",
+    `Compile and run a Common Fabric pattern in the configured space, returning a reference to its live result cell. Give it either your own sourceText or the patternId of a pattern search_patterns found. Source you write imports the runtime from "${RUNTIME_MODULE_SPECIFIER}" and from no other module — every pattern opens with a line of the form ${RUNTIME_MODULE_IMPORT_LINE} — and no package named after the product resolves. The piece stays out of the space's piece list; assign_slug names and lists it when it deserves a public address.`,
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
@@ -1161,7 +1216,10 @@ export const runPatternTool: HarnessToolDefinition<
       // a diagnostic quotes the line it failed on, so there the artifact
       // keeps the diagnostic and the model gets the fact of the failure.
       return patternId === undefined
-        ? errorOutput("compile-error", errorMessage(error))
+        ? errorOutput(
+          "compile-error",
+          withRuntimeModuleCorrection(errorMessage(error)),
+        )
         : {
           ...errorOutput(
             "compile-error",

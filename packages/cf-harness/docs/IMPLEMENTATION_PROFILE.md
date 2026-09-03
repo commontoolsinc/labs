@@ -243,14 +243,14 @@ separately records its Fabric CFC enforcement and flow-label posture.
 Current child profiles are `default`, `browser`, `web_fetch`, `web_search`, and
 `pattern-author`. Each profile supplies an exact tool/network/skill policy.
 Parent skills and authority do not transfer implicitly. Beside them sits one
-internal profile, `explore`: no tools, one turn, a cheap model override, and a
-bounded answer-and-citations return contract it holds authority over. Its call
-declares no ceiling and evaluates no boundary policy, so it is outside the
-posture's caveat policy — admissible because the corpus it reads is trusted for
-confidentiality by ruling, and no wider. No delegation may name it — it is what
-`query_docs` runs, on a corpus the harness supplies, and a delegation naming it
-would put a model with no documentation in front of a schema asking for
-citations.
+internal profile, `explore`: no tools, one turn, a cheap model resolved from the
+run's transport, and a bounded answer-and-citations return contract it holds
+authority over. Its call declares no ceiling and evaluates no boundary policy,
+so it is outside the posture's caveat policy — admissible because the corpus it
+reads is trusted for confidentiality by ruling, and no wider. No delegation may
+name it — it is what `query_docs` runs, on a corpus the harness supplies, and a
+delegation naming it would put a model with no documentation in front of a
+schema asking for citations.
 
 The `pattern-author` profile combines `run_pattern`, `read_file`, `bash`,
 `read_skill_resource`, and `query_docs` without workspace writes. It preloads

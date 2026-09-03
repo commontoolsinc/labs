@@ -1,5 +1,6 @@
 import {
   type CfcEnforcementMode,
+  cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
   isCfcEnforcementMode,
 } from "@commonfabric/runner/cfc";
@@ -13,6 +14,7 @@ import {
 import type {
   HarnessAllowedSkillScript,
   HarnessSkillScriptExecutionTarget,
+  HarnessSkillsRootRecord,
 } from "./contracts/skill.ts";
 import type { HarnessBrowserAccessLease } from "./contracts/browser-access.ts";
 import type { HarnessDocsCorpusRecord } from "./contracts/docs-corpus.ts";
@@ -112,6 +114,9 @@ interface HarnessCommonConfig {
   harnessHomeIdentity?: string;
   skillsRoot?: string;
 
+  /** The skills tree {@link skillsRoot} names, and where it came from. */
+  skillsRootRecord?: HarnessSkillsRootRecord;
+
   /**
    * Host directories of operator-provisioned reference material `query_docs`
    * answers out of, and where they came from. Read-only by use: the harness
@@ -184,6 +189,7 @@ export interface ResolveHarnessConfigOptions {
   cwd?: string;
   model?: string;
   skillsRoot?: string;
+  skillsRootRecord?: HarnessSkillsRootRecord;
   docsCorpus?: HarnessDocsCorpusRecord;
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget?: HarnessSkillScriptExecutionTarget;
@@ -227,6 +233,84 @@ export const parseHarnessGatewayAuthMode = (
 ): HarnessGatewayAuthMode | undefined =>
   isHarnessGatewayAuthMode(input) ? input : undefined;
 
+/**
+ * The mode a fabric session enforces at, whether or not it named one: the
+ * session's preset pins `enforce-explicit`, and `--fabric-cfc-enforcement-mode`
+ * raises from there.
+ */
+export const fabricSessionCfcEnforcementMode = (
+  fabricSession: HarnessFabricSessionConfig,
+): HarnessFabricCfcEnforcementMode =>
+  fabricSession.cfcEnforcementMode ?? "enforce-explicit";
+
+/** What the operator stated the harness's own dial to be, if anything. */
+const statedCfcEnforcementMode = (
+  options: Pick<
+    ResolveHarnessConfigOptions,
+    "cfcEnforcementModeOverride" | "cfcEnforcementMode"
+  >,
+): CfcEnforcementMode | undefined =>
+  (typeof options.cfcEnforcementModeOverride === "string"
+    ? parseCfcEnforcementMode(options.cfcEnforcementModeOverride)
+    : options.cfcEnforcementModeOverride) ?? options.cfcEnforcementMode;
+
+/**
+ * Whether the session's dial decides this run's harness dial.
+ *
+ * Only `enforce-strict` does. The session's preset pins `enforce-explicit`
+ * whether an operator asked for it or not, and a harness loop deliberately run
+ * weaker than that pin is an ordinary configuration; a loop left weaker than a
+ * session an operator raised to strict is the pair nobody stated, and the one
+ * an audit reads as an enforcing run that did not enforce.
+ */
+const fabricSessionRaisesCfcEnforcement = (
+  options: Pick<
+    ResolveHarnessConfigOptions,
+    | "cfcEnforcementModeOverride"
+    | "cfcEnforcementMode"
+    | "inheritedCfcEnforcementMode"
+    | "runManifest"
+    | "fabricSession"
+  >,
+): CfcEnforcementMode | undefined => {
+  if (options.fabricSession === undefined) {
+    return undefined;
+  }
+  const session = fabricSessionCfcEnforcementMode(options.fabricSession);
+  if (session !== "enforce-strict") {
+    return undefined;
+  }
+  const stated = statedCfcEnforcementMode(options);
+  if (
+    stated !== undefined &&
+    cfcEnforcementStrictness(stated) < cfcEnforcementStrictness(session)
+  ) {
+    // Two flags, one of them weaker, and no reading of the pair is safe: the
+    // operator either meant the loop to enforce as the session does or meant
+    // the session not to. Refusing names both rather than picking one.
+    throw new Error(
+      `--cfc-enforcement-mode ${stated} is weaker than the ${session} this run's fabric session enforces; raise it to ${session} or lower --fabric-cfc-enforcement-mode`,
+    );
+  }
+  const otherwise = stated ??
+    options.inheritedCfcEnforcementMode ??
+    parseCfcEnforcementMode(options.runManifest?.cfc?.enforcementMode) ??
+    DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE;
+  return cfcEnforcementStrictness(session) > cfcEnforcementStrictness(otherwise)
+    ? session
+    : undefined;
+};
+
+/**
+ * This run's harness enforcement dial. The harness loop and the session's
+ * Runtime are two dial families over one run, and a run under a session raised
+ * to `enforce-strict` follows it rather than the harness default: a loop
+ * weaker than the session it writes through enforces less than the run claims,
+ * and says nothing about it.
+ *
+ * @throws Error when the operator stated a harness dial weaker than the
+ * `enforce-strict` its session enforces.
+ */
 export const resolveCfcEnforcementMode = (
   options: Pick<
     ResolveHarnessConfigOptions,
@@ -234,16 +318,17 @@ export const resolveCfcEnforcementMode = (
     | "cfcEnforcementMode"
     | "inheritedCfcEnforcementMode"
     | "runManifest"
+    | "fabricSession"
   >,
 ): CfcEnforcementMode => {
-  const parsedOverride = typeof options.cfcEnforcementModeOverride === "string"
-    ? parseCfcEnforcementMode(options.cfcEnforcementModeOverride)
-    : options.cfcEnforcementModeOverride;
+  const raised = fabricSessionRaisesCfcEnforcement(options);
+  if (raised !== undefined) {
+    return raised;
+  }
   const parsedRunManifestMode = parseCfcEnforcementMode(
     options.runManifest?.cfc?.enforcementMode,
   );
-  return parsedOverride ??
-    options.cfcEnforcementMode ??
+  return statedCfcEnforcementMode(options) ??
     options.inheritedCfcEnforcementMode ??
     parsedRunManifestMode ??
     DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE;
@@ -256,8 +341,12 @@ export const resolveCfcEnforcementModeSource = (
     | "cfcEnforcementMode"
     | "inheritedCfcEnforcementMode"
     | "runManifest"
+    | "fabricSession"
   >,
 ): HarnessCfcEnforcementModeSource => {
+  if (fabricSessionRaisesCfcEnforcement(options) !== undefined) {
+    return "fabric-session";
+  }
   const parsedOverride = typeof options.cfcEnforcementModeOverride === "string"
     ? parseCfcEnforcementMode(options.cfcEnforcementModeOverride)
     : options.cfcEnforcementModeOverride;
@@ -349,14 +438,22 @@ export const resolveHarnessConfig = (
   // is the checkout the harness runs out of, resolved here so that every
   // surface — the CLI, the console, a child engine — reaches the same answer.
   const docsCorpus = resolveHarnessDocsCorpus(options.docsCorpus);
+  // A caller that resolved the tree itself says where it came from; one that
+  // only names a path said so by naming it.
+  const skillsRootRecord = options.skillsRootRecord ??
+    (options.skillsRoot === undefined ? undefined : {
+      type: "cf-harness.skills-root-record" as const,
+      source: "configured" as const,
+      hostPath: options.skillsRoot,
+    });
   const common: HarnessCommonConfig = {
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
     ...(options.model !== undefined ? { model: options.model } : {}),
     ...(modelAuthSource !== undefined ? { modelAuthSource } : {}),
     ...(credentialOwner !== undefined ? { credentialOwner } : {}),
     ...(harnessHomeIdentity !== undefined ? { harnessHomeIdentity } : {}),
-    ...(options.skillsRoot !== undefined
-      ? { skillsRoot: options.skillsRoot }
+    ...(skillsRootRecord !== undefined
+      ? { skillsRoot: skillsRootRecord.hostPath, skillsRootRecord }
       : {}),
     ...(docsCorpus !== undefined ? { docsCorpus } : {}),
     ...(options.allowedSkillScripts !== undefined

@@ -17,6 +17,7 @@ import {
   type HarnessArtifactStore,
 } from "./artifacts.ts";
 import {
+  fabricSessionCfcEnforcementMode,
   type HarnessConfig,
   type ResolvedHarnessConfig,
   resolveHarnessConfig,
@@ -124,6 +125,7 @@ import type {
 } from "./contracts/input-cells.ts";
 import { mintInputCellHandles } from "./input-cells.ts";
 import {
+  addHarnessDocsQueryFailures,
   appendHarnessCfcModelContextObservations,
   appendHarnessFailureRecord,
   appendToHarnessRunState,
@@ -750,8 +752,9 @@ export class CfHarnessEngine {
       : harnessFabricSessionPosture(this.config.fabricSession);
     const fabricSessionCfc = this.config.fabricSession !== undefined
       ? {
-        enforcementMode: this.config.fabricSession.cfcEnforcementMode ??
-          "enforce-explicit" as const,
+        enforcementMode: fabricSessionCfcEnforcementMode(
+          this.config.fabricSession,
+        ),
         enforcementModeSource:
           this.config.fabricSession.cfcEnforcementMode !== undefined
             ? "configured" as const
@@ -840,6 +843,7 @@ export class CfHarnessEngine {
         runManifest: this.config.runManifest,
         runManifestPath: this.config.runManifestPath,
         docsCorpus: this.config.docsCorpus,
+        skillsRoot: this.config.skillsRootRecord,
         lineage: options.lineage,
         now: this.#now(),
       });
@@ -1027,6 +1031,21 @@ export class CfHarnessEngine {
       );
     }
     this.#runModelBound = true;
+    return this.getRunState();
+  }
+
+  /**
+   * Counts documentation queries this run could not get an answer for, its
+   * descendants' included. A `query_docs` failure is a normal tool error to
+   * the model that asked, so without this the operator's own summary is the
+   * one place a docs-blind run leaves no trace.
+   */
+  recordDocsQueryFailures(count: number): HarnessRunState {
+    this.#runState = addHarnessDocsQueryFailures(
+      this.#runState,
+      count,
+      this.#now(),
+    );
     return this.getRunState();
   }
 
