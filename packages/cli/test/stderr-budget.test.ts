@@ -62,6 +62,24 @@ function render(prefix: string, values: unknown[]): string {
   ].join(" ");
 }
 
+// A slow-traversal report as a console renders it, its prefix wrapped in the
+// escapes that color it. The prefix is the first space-delimited token of the
+// line, which is what the logger hands the console separately from the rest.
+function coloredSlowTraverseLine(): string {
+  const [prefix, ...rest] = logLines(
+    "warn",
+    "traverse",
+    "slow-traverse",
+    "321ms",
+  )[0].split(" ");
+  return `\x1b[36m${prefix}\x1b[0m ${rest.join(" ")}`;
+}
+
+// A line of a stack trace, which is indented and holds a balanced pair of
+// parentheses, so nothing about its own shape says whether it continues the
+// line above it.
+const STACK_LINE = "    at executeCommand (cli.ts:42:7)";
+
 // The link a slow-`Cell.get` report names. It is too wide for one line, so a
 // console inspects it across several.
 const REPORTED_LINK = {
@@ -101,15 +119,18 @@ describe("stderr budget", () => {
     });
 
     it("drops a report whose prefix a console colored", () => {
-      const [prefix, ...rest] = logLines(
-        "warn",
-        "traverse",
-        "slow-traverse",
-        "321ms",
-      )[0].split(" ");
-      const colored = `\x1b[36m${prefix}\x1b[0m ${rest.join(" ")}`;
+      expect(relevantStderr([TASK_ECHO, coloredSlowTraverseLine()])).toEqual([
+        TASK_ECHO,
+      ]);
+    });
 
-      expect(relevantStderr([TASK_ECHO, colored])).toEqual([TASK_ECHO]);
+    it("keeps a line that follows a report whose prefix a console colored", () => {
+      const colored = coloredSlowTraverseLine();
+
+      expect(relevantStderr([TASK_ECHO, colored, "no such piece"])).toEqual([
+        TASK_ECHO,
+        "no such piece",
+      ]);
     });
 
     it("drops every line of a report whose value a console inspected", () => {
@@ -125,11 +146,34 @@ describe("stderr budget", () => {
       expect(relevantStderr([TASK_ECHO, ...report])).toEqual([TASK_ECHO]);
     });
 
+    it("drops every line of a report whose message closes a bracket it never opened", () => {
+      const report = logLines(
+        "warn",
+        "cell",
+        "get >210ms",
+        "get() took 213ms)",
+        REPORTED_LINK,
+      );
+
+      expect(report.length).toBeGreaterThan(1);
+      expect(relevantStderr([TASK_ECHO, ...report])).toEqual([TASK_ECHO]);
+    });
+
     it("keeps a command's line that follows an ignorable record", () => {
       const report = logLines("warn", "traverse", "slow-traverse", "321ms");
 
       expect(relevantStderr([...report, "no such piece"])).toEqual([
         "no such piece",
+      ]);
+    });
+
+    it("keeps an indented line that follows a report closing on its own line", () => {
+      const report = logLines("warn", "traverse", "slow-traverse", "321ms");
+
+      expect(report.length).toBe(1);
+      expect(relevantStderr([TASK_ECHO, ...report, STACK_LINE])).toEqual([
+        TASK_ECHO,
+        STACK_LINE,
       ]);
     });
 
@@ -163,6 +207,16 @@ describe("stderr budget", () => {
 
       await captureStderr(() => {
         expect(() => checkStderr([TASK_ECHO, "no such piece"])).toThrow();
+        return Promise.resolve();
+      });
+    });
+
+    it("throws where an indented line follows a slow-traversal report", async () => {
+      const report = logLines("warn", "traverse", "slow-traverse", "321ms");
+
+      await captureStderr(() => {
+        expect(() => checkStderr([TASK_ECHO, ...report, STACK_LINE]))
+          .toThrow();
         return Promise.resolve();
       });
     });

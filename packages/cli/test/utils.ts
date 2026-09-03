@@ -50,30 +50,47 @@ function isIgnorableStderrLine(line: string): boolean {
     isPerfDiagnosticLogLine(trimmed);
 }
 
-// True when `line` continues the record above it rather than opening one of
-// its own. A logger hands the console the values it reports, and a console
-// inspects one too wide for a line across several: the lines after the first
-// are indented, and the bracket the first opened closes alone on the last.
-const CONTINUATION_LINE = /^\s|^[\]})]+,?$/;
+// The bracket characters a console pairs off when it inspects a value.
+const OPENING_BRACKETS = "([{";
+const CLOSING_BRACKETS = ")]}";
+
+// How many brackets stand open after `line`, given that `openBefore` of them
+// already did. `line` comes with its ANSI escapes stripped, because each of
+// those carries a `[` that pairs with nothing. The count floors at zero, so
+// that a closer with no opener above it — one inside a message, say — cannot
+// carry a deficit down into the lines below.
+function bracketsStillOpen(openBefore: number, line: string): number {
+  let open = openBefore;
+  for (const character of line) {
+    if (OPENING_BRACKETS.includes(character)) open += 1;
+    else if (CLOSING_BRACKETS.includes(character)) open = Math.max(0, open - 1);
+  }
+  return open;
+}
 
 /**
  * The lines of `stderr` a test has business asserting on: everything left
  * once the ignorable records are dropped.
  *
- * A record rather than a line, so that an ignorable line takes the
- * continuations beneath it along with it. A budget over lines alone would
- * count the tail of an inspected value as though the command had written it.
+ * A record rather than a line, so that an ignorable line takes with it the
+ * lines a console spilled inspecting a value it was handed. The brackets are
+ * what say how far that reaches: the record runs until the value its first
+ * line left open is closed again, so an ignorable line that balances takes
+ * nothing with it, whatever the line beneath it happens to look like.
  */
 export function relevantStderr(stderr: string[]): string[] {
   const relevant: string[] = [];
-  let ignoring = false;
+  let open = 0;
   for (const line of stderr) {
-    if (isIgnorableStderrLine(line)) {
-      ignoring = true;
+    const plain = stripAnsi(line);
+    if (open > 0) {
+      open = bracketsStillOpen(open, plain);
       continue;
     }
-    if (ignoring && CONTINUATION_LINE.test(stripAnsi(line))) continue;
-    ignoring = false;
+    if (isIgnorableStderrLine(plain)) {
+      open = bracketsStillOpen(0, plain);
+      continue;
+    }
     relevant.push(line);
   }
   return relevant;
