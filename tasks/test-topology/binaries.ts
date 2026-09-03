@@ -31,6 +31,7 @@
  */
 
 import { BINARY_NAMES, type BinaryName } from "../build-binaries.ts";
+import { serverExecutionCiLane } from "../server-execution-ci.ts";
 import {
   claimsIdentity,
   type Invocation,
@@ -38,7 +39,6 @@ import {
   type Suite,
   type Unit,
 } from "./suite.ts";
-import { SERVER_EXECUTION_OFF_VARIANT } from "./patterns.ts";
 
 /** What a unit's record is named for. */
 const PREFIX = "build-binary";
@@ -107,11 +107,12 @@ function binarySuite(
  * two configurations, two histories that never stand in for each other.
  */
 export function loadBinarySuites(): Suite[] {
+  const opposite = serverExecutionCiLane("opposite");
   return [
     binarySuite("binaries", BINARY_NAMES),
-    binarySuite("binaries-off", ["toolshed"], {
-      variant: SERVER_EXECUTION_OFF_VARIANT,
-      env: { EXPERIMENTAL_SERVER_EXECUTION: "false" },
+    binarySuite("binaries-opposite", ["toolshed"], {
+      variant: opposite.recordVariant,
+      env: { EXPERIMENTAL_SERVER_EXECUTION: String(opposite.enabled) },
     }),
   ];
 }

@@ -10,6 +10,7 @@ import {
   pidOfBackgroundLaunch,
   resolveCapabilities,
 } from "./ci-capabilities.ts";
+import { serverExecutionCiLane } from "./server-execution-ci.ts";
 
 describe("ci capabilities", () => {
   it("opens what a capability is built on before the capability", () => {
@@ -61,7 +62,7 @@ describe("ci capabilities", () => {
       "jq",
       "local-dev-servers",
       "toolshed",
-      "toolshed-baked-off",
+      "toolshed-baked-opposite",
     ]);
   });
 
@@ -359,8 +360,12 @@ describe("opening a capability on a machine that answers", () => {
   });
 
   it("builds the server-execution binary only when none was restored", async () => {
-    const answers = { "toolshed-off": "listening (pid 999999). Logs: x\n" };
-    const openOff = async (restored: boolean) => {
+    const opposite = serverExecutionCiLane("opposite");
+    const binaryName = `toolshed-baked-${opposite.experimentalValue}`;
+    const answers = {
+      [binaryName]: "listening (pid 999999). Logs: x\n",
+    };
+    const openOpposite = async (restored: boolean) => {
       const m = machine(answers);
       const root = await Deno.makeTempDir({ prefix: "capability-" });
       // What a build leaves behind, so the copy into the cache has
@@ -370,11 +375,11 @@ describe("opening a capability on a machine that answers", () => {
       if (restored) {
         await Deno.mkdir(`${root}/${BINARY_CACHE_DIR}`, { recursive: true });
         await Deno.writeTextFile(
-          `${root}/${BINARY_CACHE_DIR}/toolshed-off`,
+          `${root}/${BINARY_CACHE_DIR}/${binaryName}`,
           "",
         );
       }
-      const opened = await openCapabilities(["toolshed-baked-off"], {
+      const opened = await openCapabilities(["toolshed-baked-opposite"], {
         root,
         dryRun: false,
         workDir: root,
@@ -386,8 +391,8 @@ describe("opening a capability on a machine that answers", () => {
     };
     // A cache miss builds; a restore does not, which is the difference
     // between forty seconds and seventeen on every lane that needs it.
-    expect(await openOff(false)).toBe(true);
-    expect(await openOff(true)).toBe(false);
+    expect(await openOpposite(false)).toBe(true);
+    expect(await openOpposite(true)).toBe(false);
   });
 
   it("builds the background service binary only when none was restored", async () => {

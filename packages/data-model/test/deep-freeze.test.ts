@@ -355,9 +355,11 @@ describe("deep-freeze", () => {
         // the recursed `cause`.
         expect(result).toBe(fe);
         expect(Object.isFrozen(fe)).toBe(true);
-        // There is no wrapped-`Error` slot to check directly: the native
-        // projection is lazy, and any projection that gets built is frozen.
-        expect(Object.isFrozen(inner)).toBe(true);
+        // The recursed `cause` is the converted `FabricError`; `inner` itself
+        // is the conversion's input, which it leaves alone.
+        expect(fe.cause).toBeInstanceOf(FabricError);
+        expect(Object.isFrozen(fe.cause)).toBe(true);
+        expect(Object.isFrozen(inner)).toBe(false);
       });
 
       it("recurses into nested `FabricValue`s", () => {

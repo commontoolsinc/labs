@@ -559,20 +559,25 @@ export class FabricError extends FabricNativeWrapper<Error> {
 
   /**
    * Constructs from a `FabricErrorState` record. All state values must
-   * already be in `FabricValue` form -- the conversion layer is
-   * responsible for ensuring this when converting from a native `Error`.
-   * Unsafe keys (`__proto__`, `constructor`) and fixed-schema slot names
-   * are silently skipped in `extras`.
+   * already be in `FabricValue` form. Unsafe keys (`__proto__`,
+   * `constructor`) and fixed-schema slot names are silently skipped in
+   * `extras`.
    */
   constructor(state: FabricErrorState);
 
   /**
-   * Shallow conversion from a native `Error`, used by the shallow
-   * conversion layer (Section 8.2). The error's `.cause` and custom
-   * properties are stored as-is; the deep conversion path converts them
-   * when needed.
+   * Conversion from a native `Error`. The error's `.cause` and custom
+   * properties go through `options.convert`: by default one that holds a
+   * valid `FabricValue` as it stands and puts anything else through the
+   * deep conversion of Section 8.2 without freezing, so the result is a
+   * valid `FabricValue` throughout. The shallow conversion layer passes an
+   * identity converter and stores them as they stand, for the deep path to
+   * convert when it rebuilds the instance.
    */
-  static fromNativeError(error: Error): FabricError;
+  static fromNativeError(
+    error: Error,
+    options?: { readonly convert?: (value: unknown) => FabricValue },
+  ): FabricError;
 
   // Extras-bag access (the bag is not exposed as an own property).
   // `setExtra`/`deleteExtra` throw on a frozen instance, on fixed-schema

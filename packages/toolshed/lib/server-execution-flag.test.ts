@@ -9,27 +9,13 @@ import {
 // The toolshed process's ONE flag resolution (server-execution v2 Phase 7,
 // the flip): unset means the FIRST-PARTY DEFAULT — the value of
 // `SERVER_EXECUTION_DEFAULT_ENABLED`, whichever it is — and an explicit
-// "false" is the OFF arm, an explicit "true" the ON arm. Pinned against
-// the constant, not a literal, so the tests state the contract rather
-// than the current default — except the ONE absolute pin below.
+// "false" is the OFF arm and an explicit "true" the ON arm. Tests pin the
+// contract against the constant rather than duplicating its current value,
+// so a deliberate default change stays a one-value edit while CI exercises
+// both resolved roles.
 
 const envOf = (values: Record<string, string | undefined>) => (name: string) =>
   values[name];
-
-describe("the flipped posture (server-execution v2 Phase 7, the flip PR — default ON after the plan's ordered gates)", () => {
-  it("the first-party default IS ON — flipped by the flip PR (docs/plans/server-execution-v2.md Phase 7 task 1), which updates this pin, the CI lane roles, and EXPERIMENTAL_OPTIONS.md together; un-flipping is reverting that PR, never an edit here", () => {
-    // Every other flip pin in the tree is deliberately RELATIVE to the
-    // constant (so the flip PR is one line plus this pin); this is the
-    // one ABSOLUTE pin, so a silent flip in EITHER direction cannot hide
-    // behind green relative pins — flipped silently OFF, the default
-    // lanes (the ON arm since the flip) would run OFF with every test
-    // still green while the explicit-`false` OFF guard lanes ran the
-    // same arm twice; flipped silently ON before the flip PR, the
-    // REQUIRED default lanes would have carried an unreviewed posture
-    // change (the P7 independent review's blocker class).
-    expect(SERVER_EXECUTION_DEFAULT_ENABLED).toBe(true);
-  });
-});
 
 describe("serverExecutionEnabledFromEnv", () => {
   it("resolves an UNSET flag to the first-party default", () => {
@@ -38,7 +24,7 @@ describe("serverExecutionEnabledFromEnv", () => {
     );
   });
 
-  it("honors an explicit value either way (both arms stay selectable — CI's explicit-`true` lanes run the ON posture on an ON-built binary)", () => {
+  it("honors an explicit value either way so both CI arms stay selectable", () => {
     expect(
       serverExecutionEnabledFromEnv(
         envOf({ EXPERIMENTAL_SERVER_EXECUTION: "false" }),

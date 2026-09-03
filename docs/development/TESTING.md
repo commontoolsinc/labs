@@ -97,14 +97,19 @@ a focused browser regression with a plain Deno unit test for any extracted
 policy or state machine, because code executed inside Chrome does not enter
 Deno's V8 coverage profile.
 
-### Running a test under the server-execution ON arm
+### Running a test under a server-execution posture
 
-`serverExecution` is off by default, and CI runs the ON arm as its own lanes on
-a toolshed binary built with `EXPERIMENTAL_SERVER_EXECUTION=true`.
-[EXPERIMENTAL_OPTIONS.md](EXPERIMENTAL_OPTIONS.md#serverexecution) covers the
-flag itself.
+`serverExecution`'s first-party default is the constant
+`SERVER_EXECUTION_DEFAULT_ENABLED`; the summary table in
+[EXPERIMENTAL_OPTIONS.md](EXPERIMENTAL_OPTIONS.md#serverexecution) states its
+current value. CI keeps stable `default` and
+`opposite` roles; `tasks/server-execution-ci.ts` derives their actual ON/OFF
+posture from the first-party default constant. The opposite toolshed binary is
+built with an explicit inverse so its browser shell, server, and test processes
+stay aligned. [EXPERIMENTAL_OPTIONS.md](EXPERIMENTAL_OPTIONS.md#serverexecution)
+covers the flag itself.
 
-Running one of those tests locally means putting the flag on every process the
+Running an explicit posture locally means putting the flag on every process the
 test spans, not only the one `deno test` starts. A pattern integration test
 drives a runtime in the test process and commits through a toolshed, and the
 per-class commit admission rows are enforced by the memory server under the
@@ -148,9 +153,9 @@ worth avoiding here.
 None of this reaches a test that opens a browser. The shell's half of the
 posture is a build-time define that the local dev servers do not carry:
 `/api/meta` reports `shellServerExecutionDefine` as null whatever the toolshed
-was started with, where CI's ON lane requires `"true"`. So this recipe covers a
-browser-free test, whose whole posture is the test process and the toolshed. A
-browser test on a faithful ON arm needs the built binary.
+was started with. That is faithful only to the default role, whose shell follows
+the first-party constant. A browser test on the opposite role needs a binary
+built with the same explicit flag as the server and test process.
 
 ### Tests that start Deno
 
@@ -281,6 +286,33 @@ Deno.exit(0);
 **Adding integration tests:**
 
 When adding runtime features, consider adding integration tests to `packages/runner/integration/` that verify the feature works end-to-end. See existing tests like `basic-persistence.test.ts` or `array_push.test.ts` for examples.
+
+### Diagnostics a test must not fail on
+
+Some of the runtime's warnings report wall time rather than behavior: the
+slow-traversal report in `packages/runner/src/traverse.ts`, above 100ms, and
+the slow-`Cell.get` report in `packages/runner/src/cell.ts`, above 50ms. A busy
+machine crosses those thresholds and an idle one does not, so a test that
+counted such a warning would pass or fail on how loaded the machine was.
+
+`packages/cli/lib/perf-diagnostic-logs.ts` holds the one list of them, by
+logger name and key prefix, and both places that hold a run's warnings to
+account read it: the pattern test runner, which fails a test on a logger
+warning the pattern did not allow, and the stderr budget the CLI tests assert
+in `packages/cli/test/utils.ts`. A new timing-triggered warning belongs on that
+list. A warning about behavior does not, and must keep failing tests.
+
+The budget drops records rather than lines. A logger hands the console the
+values it is reporting, and a console inspects one too wide for a line across
+several, so a dropped warning whose line ends by opening a bracket takes the
+indented lines beneath it and the bracket closing them. One a console fitted on
+a single line takes nothing, and whatever follows it is held to the budget as
+usual.
+
+Writing such a diagnostic so that its own coverage does not move with the clock
+is a separate obligation, and
+[`COVERAGE.md`](COVERAGE.md#diagnostics-that-fire-on-wall-clock-time) carries
+it.
 
 ### Recording browser integration tests as video demos
 

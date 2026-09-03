@@ -3,16 +3,15 @@
  *
  * `ipc-crossing.bench.ts` times the whole round trip, which is what a reader
  * means by "what does a message cost" and is the number to quote. It cannot
- * say which step to work on, because it reports one figure for six walks. This
+ * say which step to work on, because it reports one figure for five walks. This
  * file takes the same payloads and times each walk on its own, so a
  * work-reduction candidate can be picked by size rather than by guess.
  *
- * The six steps, in the order a message meets them:
+ * The five steps, in the order a message meets them:
  *
  * | step | status quo | envelope |
  * | --- | --- | --- |
  * | worker: `convertCellsToLinks()` | yes | yes |
- * | worker: redact carried label views | yes | yes |
  * | worker: encode | -- | yes |
  * | transport | yes | yes |
  * | client: decode | -- | yes |
@@ -43,10 +42,10 @@
  * the real one and bounds this.
  *
  * Both flavors of payload are measured, because which one is representative
- * changes over time. A tree carrying no `cfcLabelView` is what crosses today,
- * and the redaction walk over it visits every container to find nothing. A
- * tree carrying one on every link is what crosses once CFC is meaningful, and
- * there the redaction rebuilds the spine as well.
+ * changes over time. A tree whose cells carry no `cfcLabelView` is what
+ * crosses today. A tree whose every cell carries one is what crosses once CFC
+ * is meaningful, and there the conversion attaches the display form of each
+ * view to the link it mints, which is where the labeled flavor pays.
  *
  * Run with:
  *
@@ -60,17 +59,21 @@ import {
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
-import { convertCellsToLinks, KeepAsCell } from "@commonfabric/runner";
 import {
-  type CfcLabelView,
-  redactSigilCfcLabelViewsForDisplay,
-  setLinkCfcLabelView,
-} from "@commonfabric/runner/cfc";
+  type CellLinkInput,
+  convertCellsToLinks,
+  KeepAsCell,
+  type SigilLink,
+} from "@commonfabric/runner";
+import { type CfcLabelView, linkCfcLabelView } from "@commonfabric/runner/cfc";
 
 import { CellHandle } from "@/cell-handle.ts";
 import { $conn, type RuntimeClient } from "@/runtime-client.ts";
 
-import { readRecordList } from "./fixtures/schema-read.ts";
+import {
+  cellCarryingLabelView,
+  readRecordList,
+} from "./fixtures/schema-read.ts";
 
 /** The options the IPC response and notification paths convert under. */
 const CONVERT_OPTIONS = {
@@ -101,24 +104,31 @@ function makeLabelView(index: number): CfcLabelView {
 }
 
 /**
- * Builds the link that a converted cell becomes, distinct per index, carrying
- * a label view when `labeled`.
+ * Builds what a record's `source` holds, distinct per index: the link a
+ * converted cell becomes, or when `labeled` a cell carrying a label view, for
+ * the conversion to mint the link from.
  */
-function makeLink(index: number, labeled: boolean): FabricValue {
-  const link = linkRefFrom({
+function makeSource(index: number, labeled: boolean): CellLinkInput {
+  if (labeled) {
+    return cellCarryingLabelView(
+      `steps-labeled-${index}`,
+      makeLabelView(index),
+    );
+  }
+
+  return linkRefFrom({
     id: `of:${"0".repeat(56)}${index.toString(16).padStart(8, "0")}`,
     space: `did:key:z${"a".repeat(47)}`,
     path: ["items", String(index)],
-  });
-
-  if (labeled) setLinkCfcLabelView(link as never, makeLabelView(index));
-
-  return link as unknown as FabricValue;
+  }) as unknown as FabricValue;
 }
 
-/** A list of records, each with a few scalars, a nested array, and one link. */
-function makeList(items: number, labeled: boolean): FabricValue {
-  const list: FabricValue[] = [];
+/**
+ * A list of records, each with a few scalars, a nested array, and one
+ * `source`.
+ */
+function makeList(items: number, labeled: boolean): CellLinkInput {
+  const list: CellLinkInput[] = [];
 
   for (let i = 0; i < items; i++) {
     list.push({
@@ -126,7 +136,7 @@ function makeList(items: number, labeled: boolean): FabricValue {
       count: i,
       done: (i % 3) === 0,
       tags: [`tag-${i % 7}`, `tag-${i % 11}`],
-      source: makeLink(i, labeled),
+      source: makeSource(i, labeled),
     });
   }
 
@@ -161,9 +171,9 @@ const base = new CellHandle(
 /** One subject: a payload, and what each step of the crossing turns it into. */
 type Subject = {
   readonly name: string;
-  readonly value: FabricValue;
+  readonly value: CellLinkInput;
 
-  /** Whether the payload's links carry a label view. */
+  /** Whether the payload's cells carry a label view. */
   readonly labeled: boolean;
 };
 
@@ -178,34 +188,42 @@ const SUBJECTS: readonly Subject[] = [
   // annotated and frozen, and each `source` a `Cell` rather than a link.
   {
     name: "100 records, read",
-    value: await readRecordList(100) as FabricValue,
+    value: await readRecordList(100) as CellLinkInput,
     labeled: false,
   },
   {
     name: "1000 records, read",
-    value: await readRecordList(1000) as FabricValue,
+    value: await readRecordList(1000) as CellLinkInput,
     labeled: false,
   },
 ];
 
 for (const { name, value, labeled } of SUBJECTS) {
-  const converted = convertCellsToLinks(value as never, CONVERT_OPTIONS);
-  const redacted = redactSigilCfcLabelViewsForDisplay(converted);
-  const encoded = realmFromFabricValue(redacted as FabricValue);
+  const converted = convertCellsToLinks(value, CONVERT_OPTIONS);
+  const encoded = realmFromFabricValue(converted);
 
   // What each far side is handed: a message arrives as a clone, never as the
   // object the sender held, and a decode reading a fresh clone is what the
   // crossing does.
   const encodedArrival = structuredClone(encoded);
-  const rawArrival = structuredClone(redacted);
+  const rawArrival = structuredClone(converted);
   const decoded = fabricFromRealmValue(encodedArrival);
 
-  // A labeled subject whose redaction finds nothing would be a second copy of
-  // the labelless one wearing a different name, and would read as a result.
-  // Copy-on-write returns the input by reference when no view is found, so
-  // identity is the check: it separates the two flavors exactly.
-  if ((redacted !== converted) !== labeled) {
+  // A labeled subject whose links carry no view would be a second copy of the
+  // labelless one under a different name, and would read as a result; and a
+  // view still naming its source would say the conversion attached the wrong
+  // form. The first record's link is the check, on every subject that has one.
+  const first = (converted as { items?: readonly { source: SigilLink }[] })
+    .items?.[0];
+  const attached = first === undefined
+    ? undefined
+    : linkCfcLabelView(first.source);
+  if ((attached !== undefined) !== labeled) {
     throw new Error(`Fixture is not what it claims: ${name}`);
+  }
+  const caveat = attached?.entries[0].label.confidentiality?.[0];
+  if (typeof caveat === "object" && caveat !== null && "source" in caveat) {
+    throw new Error(`Fixture carries an unredacted view: ${name}`);
   }
 
   Deno.bench({
@@ -213,19 +231,15 @@ for (const { name, value, labeled } of SUBJECTS) {
     group: name,
     baseline: true,
   }, () => {
-    convertCellsToLinks(value as never, CONVERT_OPTIONS);
-  });
-
-  Deno.bench({ name: `redact — ${name}`, group: name }, () => {
-    redactSigilCfcLabelViewsForDisplay(converted);
+    convertCellsToLinks(value, CONVERT_OPTIONS);
   });
 
   Deno.bench({ name: `encode — ${name}`, group: name }, () => {
-    realmFromFabricValue(redacted as FabricValue);
+    realmFromFabricValue(converted);
   });
 
   Deno.bench({ name: `transport, raw — ${name}`, group: name }, () => {
-    structuredClone(redacted);
+    structuredClone(converted);
   });
 
   Deno.bench({ name: `transport, encoded — ${name}`, group: name }, () => {

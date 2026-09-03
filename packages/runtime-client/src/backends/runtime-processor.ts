@@ -79,7 +79,6 @@ import {
   createRenderConfidentialityResolver,
   createRuntimeSpaceMembershipProvider,
   redactCaveatSourcesForDisplay,
-  redactSigilCfcLabelViewsForDisplay,
   type RenderConfidentialityResolver,
   type SpaceMembershipProvider,
   stripSigilCfcLabelViews,
@@ -365,19 +364,24 @@ function sqliteParamForRuntime(
   return value;
 }
 
-/** Converts a runtime cell value into the redacted client wire domain. */
+/**
+ * Converts a runtime cell value into the client wire domain. Each link it
+ * mints for a cell carries the display form of that cell's CFC label view,
+ * with every caveat's source redacted. A sigil link already in the value is
+ * rebuilt as the container it is, view and all; stored data carries no view
+ * on a link, the persist seam having stripped it, so the minted links are
+ * where a view crosses.
+ */
 function cellValueForClient(value: unknown): FabricValue {
-  return redactSigilCfcLabelViewsForDisplay(
-    convertCellsToLinks(
-      value as Parameters<typeof convertCellsToLinks>[0],
-      {
-        includeSchema: true,
-        keepAsCell: KeepAsCell.All,
-        doNotConvertCellResults: true,
-        includeCfcLabelView: true,
-      },
-    ),
-  ) as FabricValue;
+  return convertCellsToLinks(
+    value as Parameters<typeof convertCellsToLinks>[0],
+    {
+      includeSchema: true,
+      keepAsCell: KeepAsCell.All,
+      doNotConvertCellResults: true,
+      includeCfcLabelView: true,
+    },
+  );
 }
 
 function sqliteParamsForRuntime(
@@ -1243,11 +1247,10 @@ export class RuntimeProcessor {
       }
     }
     const value = cell.get();
-    // The sigil links inside the response carry cfcLabelView copies; redact
-    // Caveat.source in those too (inv-12 Stage 0, same display redaction as
-    // the top-level cfcLabel below). Display-only: the worker neither
-    // persists nor re-imports inbound views, so the redacted copies cannot
-    // round-trip into under-labeled state.
+    // The sigil links inside the response carry each cell's `cfcLabelView`
+    // in its display form, the same redaction the top-level `cfcLabel` below
+    // gets. Display-only: the worker neither persists nor re-imports inbound
+    // views, so a redacted copy cannot round-trip into under-labeled state.
     //
     // `convertCellsToLinks()` preserves a `FabricPrimitive` by identity, and
     // the envelope's encoding carries one to the main thread with its class,
@@ -1690,16 +1693,7 @@ export class RuntimeProcessor {
             `  schema: ${JSON.stringify(request.cell.schema)}`,
         );
       }
-      // As in handleCellGet: redact Caveat.source in the cfcLabelView copies
-      // riding sigil links inside the update value (inv-12 Stage 0).
-      const converted = redactSigilCfcLabelViewsForDisplay(
-        convertCellsToLinks(value, {
-          includeSchema: true,
-          keepAsCell: KeepAsCell.All,
-          doNotConvertCellResults: true,
-          includeCfcLabelView: true,
-        }),
-      ) as FabricValue;
+      const converted = cellValueForClient(value);
       // The sink read the raw label on its tracked tx (so cfc writes re-fire
       // it); redact Caveat.source here before it crosses to the main thread.
       const redactedLabel = request.includeCfcLabel

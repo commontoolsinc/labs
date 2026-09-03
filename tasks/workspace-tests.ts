@@ -197,11 +197,11 @@ const INTERNALLY_SHARDED_PACKAGES: Record<
   string,
   { total: number; envVar: string }
 > = {
-  // packages/cli/test/run-tests.ts reads CLI_TEST_SHARD.
   "connectors/agents/host": {
-    total: 3,
+    total: 5,
     envVar: "AGENTS_HOST_TEST_SHARD",
   },
+  // packages/cli/test/run-tests.ts reads CLI_TEST_SHARD.
   cli: { total: 10, envVar: "CLI_TEST_SHARD" },
   piece: { total: 3, envVar: "PIECE_TEST_SHARD" },
   tasks: { total: 3, envVar: "TASK_TEST_SHARD" },

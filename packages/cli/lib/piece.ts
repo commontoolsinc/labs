@@ -108,6 +108,7 @@ import {
   CellSelectionError,
   deriveSelectedValue,
 } from "./cell-selection.ts";
+import { timeCliPhase } from "./trace-timing.ts";
 import { cliCommand } from "./cli-name.ts";
 import {
   type ExecCommandSpec,
@@ -421,8 +422,6 @@ interface PieceOperationDependencies extends PieceResolutionDeps {
   deriveSelectedValue?: typeof deriveSelectedValue;
 }
 
-const CLI_TRACE_TIMINGS = Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
-
 interface DisposableRuntime {
   dispose(): Promise<unknown>;
   storageManager?: unknown;
@@ -474,22 +473,6 @@ export async function withRuntimeCleanupOnFailure<T>(
       },
     );
     throw error;
-  }
-}
-
-async function timeCliPhase<T>(
-  label: string,
-  run: () => T | Promise<T>,
-): Promise<T> {
-  if (!CLI_TRACE_TIMINGS) {
-    return await run();
-  }
-  const start = performance.now();
-  try {
-    return await run();
-  } finally {
-    const elapsed = Math.round(performance.now() - start);
-    console.error(`[cf-phase] ${elapsed}ms :: ${label}`);
   }
 }
 
@@ -1856,13 +1839,13 @@ async function tryResolveLivePieceToolCallable(
   return callableKind === "tool" ? callableCell : null;
 }
 
-/** Load the target piece and its pieces controller for callable
- * resolution/listing —
- * one shared path so `cf piece call` and `cf piece verbs` always see the same
- * piece state. */
+/** Load the target piece and its pieces controller for callable resolution or
+ * discovery. Dispatch may bootstrap the space root before calling; read-only
+ * discovery starts only the addressed piece. */
 async function loadPieceForCallables(
   config: PieceConfig,
   deps: PieceCallableDependencies = {},
+  ensureSpaceRoot = true,
 ): Promise<{
   pieces: any;
   piece: any;
@@ -1872,7 +1855,7 @@ async function loadPieceForCallables(
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
 
-  if (!deps.loadPiece) {
+  if (!deps.loadPiece && ensureSpaceRoot) {
     try {
       await pieces.ensureDefaultPattern();
     } catch (error) {
@@ -3057,7 +3040,7 @@ export async function listPieceCallables(
   config: PieceConfig,
   deps: PieceCallableDependencies = {},
 ): Promise<PieceCallablesListing> {
-  const { piece } = await loadPieceForCallables(config, deps);
+  const { piece } = await loadPieceForCallables(config, deps, false);
   return (await listCallablesForLoadedPiece(piece)).listing;
 }
 
@@ -3343,7 +3326,7 @@ export async function describePiece(
   config: PieceConfig,
   deps: PieceCallableDependencies = {},
 ): Promise<PieceDescription> {
-  const { piece } = await loadPieceForCallables(config, deps);
+  const { piece } = await loadPieceForCallables(config, deps, false);
   const { listing, compiled } = await listCallablesForLoadedPiece(piece);
   let name: string | undefined;
   try {
@@ -4318,36 +4301,60 @@ export async function getCellValue(
     deps.resolvePieceAddress,
   );
   const shouldStep = options.step === true;
-  const piece = await pieces.get(
-    resolvedConfig.piece,
-    shouldStep,
-    undefined,
-    resolvedConfig.pieceScope,
+  const piece = await timeCliPhase(
+    "getCellValue.piece",
+    () =>
+      pieces.get(
+        resolvedConfig.piece,
+        shouldStep,
+        undefined,
+        resolvedConfig.pieceScope,
+      ),
   );
 
   try {
     if (shouldStep) {
-      await piece.getCell().pull();
+      await timeCliPhase(
+        "getCellValue.step.piece.pull",
+        () => piece.getCell().pull(),
+      );
       const rootCell =
         await (options.input ? piece.input.getCell() : piece.result.getCell());
       const targetCell = rootCell.key(...path);
-      await targetCell.pull();
-      await pieces.synced();
-      await pieces.runtime.idle();
-      await pieces.synced();
+      await timeCliPhase(
+        "getCellValue.step.target.pull",
+        () => targetCell.pull(),
+      );
+      await timeCliPhase(
+        "getCellValue.step.synced.beforeIdle",
+        () => pieces.synced(),
+      );
+      await timeCliPhase(
+        "getCellValue.step.runtime.idle",
+        () => pieces.runtime.idle(),
+      );
+      await timeCliPhase(
+        "getCellValue.step.synced.afterIdle",
+        () => pieces.synced(),
+      );
     }
 
     const prop = options.input ? "input" : "result";
     if (options.selection !== undefined) {
+      const selection = options.selection;
       const rootCell = await piece[prop].getCell();
       const targetCell = rootCell.key(...path);
       let selected: unknown;
       try {
-        selected = await (deps.deriveSelectedValue ?? deriveSelectedValue)(
-          pieces.runtime,
-          pieces.getSpace(),
-          targetCell,
-          options.selection,
+        selected = await timeCliPhase(
+          "getCellValue.selection",
+          () =>
+            (deps.deriveSelectedValue ?? deriveSelectedValue)(
+              pieces.runtime,
+              pieces.getSpace(),
+              targetCell,
+              selection,
+            ),
         );
       } catch (error) {
         // The verb refusal wins over every selection error, not only the

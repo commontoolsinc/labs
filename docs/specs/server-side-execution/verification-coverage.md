@@ -3510,6 +3510,33 @@ personally; the soak starts at ITS merge.** What it carries:
   the corrected call; under OFF the same id executes. The step's ON
   comment points at this row.
 
+Delta 2026-09-03 — the rollback (#6840):
+
+- The first-party default returned to OFF by the first data-only flip:
+  the constant plus current-status prose, with no workflow, test, or role
+  edit. The PR's own CI board is the exercise of the hygiene delta below —
+  the `default` lanes probe OFF, the `opposite` lanes build an ON shell
+  and probe ON, and the docs pin is what forced the status prose to move
+  with the constant.
+
+Delta 2026-09-03 — post-flip toggle hygiene:
+
+- The absolute literal default pin introduced by #6535 is retired. Stable
+  `default` / `opposite` roles already keep both arms exercised, and
+  `tasks/server-execution-ci.test.ts` now pins the source default to the
+  current-status cell in `EXPERIMENTAL_OPTIONS.md` (the posture word, the
+  constant's value, and the rollback arm): an isolated constant edit reds,
+  while an intentional flip changes only the constant and that status. The
+  workflow itself is pinned literal-free: no step may select an arm by a
+  literal `EXPERIMENTAL_SERVER_EXECUTION` value outside a comment.
+- The workflow-facing command adapter is exercised as the program CI invokes
+  (no permissions, exact output, exit 1 on a bad role) rather than opted out
+  of coverage, and the topology's unreadable-directory guard holds on both of
+  its readers.
+- The locally persistent opposite-binary cache includes its baked `true` or
+  `false` posture in the filename, so a default flip cannot restore a shell
+  compiled for the former opposite arm.
+
 Delta 2026-08-16 — fan-out stage A (OW17 leg 1: the instance-keyed
 serving replica + wire; the client arrival gate):
 

@@ -10,13 +10,12 @@
  * overstates what the connection as a whole pays.
  *
  * The subject is a cell update travelling worker to client, which is the
- * connection's highest-volume message. Both arms run the same four steps and
+ * connection's highest-volume message. Both arms run the same three steps and
  * differ only in the two the envelope added:
  *
  * | | status quo | envelope |
  * | --- | --- | --- |
  * | worker: convert cells to links | yes | yes |
- * | worker: redact carried label views | yes | yes |
  * | worker: encode | -- | yes |
  * | `postMessage()` | yes | yes |
  * | client: decode | -- | yes |
@@ -43,8 +42,11 @@ import { BenchWorker } from "@commonfabric/test-support/bench-worker";
 import type { FabricValue } from "@commonfabric/data-model";
 import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
-import { convertCellsToLinks, KeepAsCell } from "@commonfabric/runner";
-import { redactSigilCfcLabelViewsForDisplay } from "@commonfabric/runner/cfc";
+import {
+  type CellLinkInput,
+  convertCellsToLinks,
+  KeepAsCell,
+} from "@commonfabric/runner";
 
 import type { CrossingRequest } from "./fixtures/ipc-far-side.ts";
 import { readRecordList } from "./fixtures/schema-read.ts";
@@ -101,7 +103,7 @@ function makeFlat(count: number): FabricValue {
  * turns on how many containers the walks visit, and these differ in that as
  * well as in total size.
  */
-const SUBJECTS: readonly (readonly [string, FabricValue])[] = [
+const SUBJECTS: readonly (readonly [string, CellLinkInput])[] = [
   ["small record", { title: "a note", count: 3, source: makeLink(0) }],
   ["flat 100 members", makeFlat(100)],
   ["100 records with links", makeList(100)],
@@ -109,16 +111,14 @@ const SUBJECTS: readonly (readonly [string, FabricValue])[] = [
   // The read subjects are the same records as a schema-bearing read hands
   // them back, which is what the worker actually converts: every container
   // annotated and frozen, and each `source` a `Cell` rather than a link.
-  ["100 records, read", await readRecordList(100) as FabricValue],
-  ["1000 records, read", await readRecordList(1000) as FabricValue],
+  ["100 records, read", await readRecordList(100) as CellLinkInput],
+  ["1000 records, read", await readRecordList(1000) as CellLinkInput],
 ];
 
 for (const [name, value] of SUBJECTS) {
-  /** The two worker-side walks both arms run before anything is sent. */
+  /** The worker-side conversion both arms run before anything is sent. */
   const converted = (): FabricValue =>
-    redactSigilCfcLabelViewsForDisplay(
-      convertCellsToLinks(value as never, CONVERT_OPTIONS),
-    ) as FabricValue;
+    convertCellsToLinks(value, CONVERT_OPTIONS);
 
   Deno.bench({
     name: `status quo — ${name}`,

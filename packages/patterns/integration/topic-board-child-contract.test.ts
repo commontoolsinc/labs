@@ -34,11 +34,10 @@ import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-sk
 const { API_URL, SPACE_NAME } = env;
 
 // The RAW env posture, read only to key the skip guard below (testing.md
-// §2): the explicit-`false` OFF regression-guard lane sets
-// EXPERIMENTAL_SERVER_EXECUTION=false; the DEFAULT lanes leave it unset and
-// resolve the first-party default, which is ON since the flip. This value
-// is therefore undefined on the default (ON) lane — NOT the resolved
-// posture. The test's runtime posture is not taken from here: it is
+// §2): the `opposite` lane sets EXPERIMENTAL_SERVER_EXECUTION explicitly
+// to the inverse of the first-party default; the `default` lanes leave it
+// unset and resolve the constant. This value is therefore undefined on the default lane — NOT the
+// resolved posture. The test's runtime posture is not taken from here: it is
 // whatever the lane's toolshed publishes and `PiecesController` adopts.
 const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
   .serverExecution;

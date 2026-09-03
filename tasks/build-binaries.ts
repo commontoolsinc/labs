@@ -262,6 +262,10 @@ async function buildShell(config: BuildConfig): Promise<void> {
       stdout: "inherit",
       stderr: "inherit",
       env: {
+        // `clearEnv` remains false, so this child inherits the caller's
+        // EXPERIMENTAL_SERVER_EXECUTION value and bakes the same posture as
+        // the parent binary build. This is load-bearing for the opposite
+        // CI lane's cache-miss path.
         COMMIT_SHA: Deno.env.get("COMMIT_SHA") || mode,
       },
     }).output();
@@ -474,10 +478,10 @@ export async function prepareWorkspace(
     // define read from this same environment in packages/shell/felt.config.ts
     // when buildShell runs below): the raw `EXPERIMENTAL_SERVER_EXECUTION`
     // value, or null when unset — the shell then follows the first-party
-    // default (ON since the Phase 7 flip). Surfaced on toolshed's /api/meta
-    // as `shellServerExecutionDefine` so CI's posture probes can verify the
-    // binary they run: the explicit-`false` OFF guard lanes require an
-    // OFF-built shell, and the default lanes require the define UNSET
+    // default. Surfaced on toolshed's /api/meta as
+    // `shellServerExecutionDefine` so CI's posture probes can verify the
+    // binary they run: the opposite lanes require an explicitly built shell,
+    // and the default lanes require the define unset
     // (docs/specs/server-side-execution/testing.md §2; the shell define is
     // baked, so a lane on the wrong binary would silently be a mixed
     // posture). Written to both markers because

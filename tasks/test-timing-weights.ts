@@ -8,8 +8,10 @@
  */
 export const AGENTS_HOST_TEST_WEIGHTS: Readonly<Record<string, number>> = {
   "test/debug_view_pattern_test.ts": 40,
-  "test/debug_view_deployment_test.ts": 33,
-  "test/debug_view_replacement_test.ts": 16,
+  "test/debug-view-deployment-lifecycle.test.ts": 25.9,
+  "test/debug-view-deployment-protection.test.ts": 13.8,
+  "test/debug-view-deployment-registry.test.ts": 10,
+  "test/debug_view_replacement_test.ts": 9.6,
   "test/cli_test.ts": 3.3,
   "test/start_test.ts": 3.1,
   "test/host_test.ts": 2.9,
@@ -109,9 +111,11 @@ export const TASK_TEST_WEIGHTS: Readonly<Record<string, number>> = {
 // close even when individual package durations differ.
 export const WORKSPACE_TEST_WEIGHTS: Readonly<Record<string, number>> = {
   api: 2.3,
-  "connectors/agents/host (1/3)": 40,
-  "connectors/agents/host (2/3)": 33,
-  "connectors/agents/host (3/3)": 16,
+  "connectors/agents/host (1/5)": 40,
+  "connectors/agents/host (2/5)": 25.9,
+  "connectors/agents/host (3/5)": 13.8,
+  "connectors/agents/host (4/5)": 12,
+  "connectors/agents/host (5/5)": 11.6,
   "background-piece-service": 7.2,
   "cf-harness": 29.9,
   "cli (1/10)": 50.5,
