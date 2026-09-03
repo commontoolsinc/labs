@@ -62,6 +62,7 @@ import type { CfcPosture } from "@commonfabric/runner";
 import type {
   CfcEnforcementMode,
   CfcFlowLabelsMode,
+  CfcWriteFloorMode,
 } from "@commonfabric/runner/cfc";
 import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
@@ -289,6 +290,7 @@ export class PiecesController<T = unknown> {
       cfcEnforcementMode,
       cfcFlowLabels,
       cfcPosture,
+      cfcWriteFloor,
     }: {
       apiUrl: URL | string;
       identity: Identity;
@@ -333,9 +335,10 @@ export class PiecesController<T = unknown> {
       cfcEnforcementMode?: CfcEnforcementMode;
       cfcFlowLabels?: CfcFlowLabelsMode;
       // Named CFC posture bundle for this controller's runtime (the
-      // remoteClient preset's `cfcPosture` opt-in); the two dials above still
-      // apply over it.
+      // remoteClient preset's `cfcPosture` opt-in); the dials above and below
+      // still apply over it.
       cfcPosture?: CfcPosture;
+      cfcWriteFloor?: CfcWriteFloorMode;
     },
   ): Promise<PiecesController> {
     const api = new URL(apiUrl);
@@ -369,6 +372,7 @@ export class PiecesController<T = unknown> {
       ...(cfcEnforcementMode !== undefined ? { cfcEnforcementMode } : {}),
       ...(cfcFlowLabels !== undefined ? { cfcFlowLabels } : {}),
       ...(cfcPosture !== undefined ? { cfcPosture } : {}),
+      ...(cfcWriteFloor !== undefined ? { cfcWriteFloor } : {}),
       ...(navigateCallback !== undefined ? { navigateCallback } : {}),
       ...(onPatternInstantiated !== undefined ? { onPatternInstantiated } : {}),
       trustSnapshotProvider: () => ({

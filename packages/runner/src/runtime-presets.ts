@@ -64,9 +64,11 @@
  * |                            | rollout)                                         |
  * | cfcFlowLabels              | core-default (off); remoteClient / browserWorker |
  * |                            | delta (host-controlled rollout)                  |
- * | cfcWriteFloor              | core-default (off) — flip in coreOptions when a  |
+ * | cfcWriteFloor              | core-default (off); remoteClient delta           |
+ * |                            | (host-controlled rollout) — flip in coreOptions  |
+ * |                            | when a first-party rollout begins                |
+ * | cfcTriggerReadGating       | core-default (off) — flip in coreOptions when a  |
  * |                            | first-party rollout begins                       |
- * | cfcTriggerReadGating       | core-default (off) — same                        |
  * | cfcDecomposedEnvelopes     | core-default (off) — flip after every deployed   |
  * |                            | reader resolves stored roots' references         |
  * | cfcPolicyEvaluation        | core-default (off) — same                        |
@@ -118,14 +120,17 @@
  * One named departure a caller can opt into: `cfcPosture: "max-enforcement"`
  * (a `CoreParams` field) swaps the core-default CFC dial rows above for the
  * {@link MAX_ENFORCEMENT_CFC_OPTIONS} bundle, for that one runtime. The
- * per-preset host dials (`cfcEnforcementMode`, `cfcFlowLabels`) still apply
- * over the bundle, so a session-level raise wins either way.
+ * per-preset host dials (`cfcEnforcementMode`, `cfcFlowLabels`,
+ * `cfcWriteFloor`) still apply over the bundle, so a session-level raise wins
+ * either way, and a session that wants the floor's `observe` rung rather than
+ * the bundle's `enforce` asks for it the same way.
  */
 
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import {
   type CfcEnforcementMode,
   type CfcFlowLabelsMode,
+  type CfcWriteFloorMode,
   sinkCeilingsOf,
   type SinkGovernanceRegistry,
   type SinkMaxConfidentiality,
@@ -815,6 +820,14 @@ export interface RemoteClientPresetParams extends CoreParams {
 
   /** The other such dial: flow-label persistence, on the same terms. */
   cfcFlowLabels?: CfcFlowLabelsMode;
+
+  /**
+   * A third: the write-side `requiredIntegrity` floor, which the pattern
+   * integration harness sets per session. It is also how a caller reaches the
+   * floor's `observe` rung, since the `max-enforcement` posture names only
+   * `enforce`.
+   */
+  cfcWriteFloor?: CfcWriteFloorMode;
 }
 
 export interface PatternTestPresetParams extends CoreParams {
@@ -911,6 +924,9 @@ export const runtimePresets = {
         : {}),
       ...(params.cfcFlowLabels !== undefined
         ? { cfcFlowLabels: params.cfcFlowLabels }
+        : {}),
+      ...(params.cfcWriteFloor !== undefined
+        ? { cfcWriteFloor: params.cfcWriteFloor }
         : {}),
       ...(params.errorHandlers !== undefined
         ? { errorHandlers: params.errorHandlers }
