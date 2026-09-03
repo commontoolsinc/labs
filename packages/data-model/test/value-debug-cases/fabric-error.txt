@@ -1,18 +1,115 @@
 (() => {
-  // A real stack names this file and a line in it, so the error gets a
-  // representative one instead.
-  const error = new Error("boom");
-  error.stack = "Error: boom\n" +
-    "    at frob (file:///example/frob.ts:12:34)\n" +
-    "    at main (file:///example/main.ts:5:6)";
-  return FabricError.fromNativeError(error);
+  // A real stack names this file and a line in it, so each error that has
+  // one gets a representative one instead.
+  const withStack = (error) => {
+    error.stack = `${error.name}: ${error.message}\n` +
+      "    at frob (file:///example/frob.ts:12:34)";
+    return error;
+  };
+  const bare = (message) =>
+    new FabricError({ type: "Error", message, stack: undefined, cause: undefined });
+  return {
+    plain: FabricError.fromNativeError(withStack(new Error("boom"))),
+    bare: bare("boom"),
+    "name differs from type": new FabricError({
+      type: "TypeError",
+      name: "FrobError",
+      message: "frob failed",
+      stack: undefined,
+      cause: undefined,
+    }),
+    "with native cause": FabricError.fromNativeError(
+      withStack(new Error("outer", { cause: withStack(new Error("inner")) })),
+    ),
+    "with fabric cause": new FabricError({
+      type: "Error",
+      message: "outer",
+      stack: undefined,
+      cause: { detail: 1, where: ["x", 2] },
+    }),
+    "with extras": FabricError.fromNativeError(
+      Object.assign(withStack(new Error("extra")), {
+        code: 42,
+        when: new Date(0),
+      }),
+    ),
+    "cause chain": FabricError.fromNativeError(
+      withStack(new Error("top", {
+        cause: withStack(new Error("middle", {
+          cause: withStack(new Error("root")),
+        })),
+      })),
+    ),
+  };
 })()
 
-/Error(
-  type: "Error",
-  name: null,
-  message: "boom",
-  stack: "Error: boom\n    at frob (file:///example/frob.ts:12:34)\n    at main (file:///example/main.ts:5:6)"
-)
+{
+  plain: /Error(
+    type: "Error",
+    name: null,
+    message: "boom",
+    stack: "Error: boom\n    at frob (file:///example/frob.ts:12:34)"
+  ),
+  bare: /Error(
+    type: "Error",
+    name: null,
+    message: "boom"
+  ),
+  "name differs from type": /Error(
+    type: "TypeError",
+    name: "FrobError",
+    message: "frob failed"
+  ),
+  "with native cause": /Error(
+    type: "Error",
+    name: null,
+    message: "outer",
+    stack: "Error: outer\n    at frob (file:///example/frob.ts:12:34)",
+    cause: /Error(
+      type: "Error",
+      name: null,
+      message: "inner",
+      stack: "Error: inner\n    at frob (file:///example/frob.ts:12:34)"
+    )
+  ),
+  "with fabric cause": /Error(
+    type: "Error",
+    name: null,
+    message: "outer",
+    cause: {
+      detail: 1,
+      where: [
+        "x",
+        2
+      ]
+    }
+  ),
+  "with extras": /Error(
+    type: "Error",
+    name: null,
+    message: "extra",
+    stack: "Error: extra\n    at frob (file:///example/frob.ts:12:34)",
+    code: 42,
+    when: /EpochNsec(0n)
+  ),
+  "cause chain": /Error(
+    type: "Error",
+    name: null,
+    message: "top",
+    stack: "Error: top\n    at frob (file:///example/frob.ts:12:34)",
+    cause: /Error(
+      type: "Error",
+      name: null,
+      message: "middle",
+      stack: "Error: middle\n    at frob (file:///example/frob.ts:12:34)",
+      cause: /Error(
+        type: "Error",
+        name: null,
+        message: "root",
+        stack: "Error: root\n    at frob (file:///example/frob.ts:12:34)"
+      )
+    )
+  )
+}
 
-/Error(type:"Error",name:null,message:"boom",stack:"Error: boom\n    at frob (file:///example/fro...
+{plain:/Error(type:"Error",name:null,message:"boom",stack:"Error: boom\n    at frob (file:///exam...
