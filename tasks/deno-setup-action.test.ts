@@ -14,12 +14,12 @@ const ACTION_PATH = join(
   "deno-setup",
   "action.yml",
 );
-const CACHE_MISS_STEP = "    - name: 🧹 Clear Deno toolchain after cache miss";
 
-function cacheMissStep(action: string): string {
-  const start = action.indexOf(CACHE_MISS_STEP);
-  assert(start >= 0, "cache-miss cleanup step not found");
-  const next = action.indexOf("\n    - name:", start + CACHE_MISS_STEP.length);
+function actionStep(action: string, name: string): string {
+  const header = `    - name: ${name}`;
+  const start = action.indexOf(header);
+  assert(start >= 0, `\`${name}\` step not found`);
+  const next = action.indexOf("\n    - name:", start + header.length);
   return action.slice(start, next < 0 ? action.length : next);
 }
 
@@ -55,7 +55,10 @@ Deno.test(
         "key: deno-bin-${{ runner.os }}-${{ runner.arch }}-" +
           "${{ steps.resolve.outputs.version }}",
       );
-      const step = cacheMissStep(action);
+      const step = actionStep(
+        action,
+        "🧹 Clear Deno toolchain after cache miss",
+      );
       assertStringIncludes(
         step,
         "if: steps.deno-toolchain-cache.outputs.cache-hit != 'true'",
@@ -88,5 +91,39 @@ Deno.test(
     } finally {
       await Deno.remove(root, { recursive: true });
     }
+  },
+);
+
+Deno.test(
+  "Deno setup snapshots the dependency hash before registering the cache",
+  async () => {
+    const action = await Deno.readTextFile(ACTION_PATH);
+    const hashStepName = "🧮 Resolve Deno dependency hash";
+    const cacheStepName = "📦 Cache Deno dependencies";
+    const hashStep = actionStep(action, hashStepName);
+    const cacheStep = actionStep(action, cacheStepName);
+
+    assert(
+      action.indexOf(hashStepName) < action.indexOf(cacheStepName),
+      "dependency hash must be resolved before the cache action is registered",
+    );
+    assertStringIncludes(
+      hashStep,
+      "DEPENDENCY_HASH: ${{ hashFiles('**/deno.jsonc', '**/deno.lock') }}",
+    );
+    assertStringIncludes(hashStep, "id: dependency-hash");
+    assertStringIncludes(hashStep, "if: inputs.cache == 'true'");
+    assertStringIncludes(
+      hashStep,
+      `printf 'hash=%s\\n' "$DEPENDENCY_HASH" >> "$GITHUB_OUTPUT"`,
+    );
+    assert(
+      !cacheStep.includes("hashFiles("),
+      "the cache action would reevaluate `hashFiles()` during its post-job save",
+    );
+    assertStringIncludes(
+      cacheStep,
+      "${{ steps.dependency-hash.outputs.hash }}",
+    );
   },
 );
