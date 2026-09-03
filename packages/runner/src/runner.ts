@@ -6307,6 +6307,7 @@ export class Runner {
     pattern: Module | Pattern,
     inputs?: any,
   ): Promise<boolean> {
+    const mentionedInputsStart = performance.now();
     const seen = new Set<Cell<any>>();
     const promises = new Set<Promise<any>>();
 
@@ -6329,8 +6330,15 @@ export class Runner {
 
     syncAllMentionedCells(inputs);
     await Promise.all(promises);
+    logger.time(
+      mentionedInputsStart,
+      "start",
+      "resumeMentionedInputSyncWave",
+    );
 
+    const resultSyncStart = performance.now();
     await resultCell.sync();
+    logger.time(resultSyncStart, "start", "resumeResultSync");
 
     // We could support this by replicating what happens in runner, but since
     // we're calling this again when returning false, this is good enough for now.
@@ -6459,11 +6467,11 @@ export class Runner {
     ) {
       cells.push(resultCell.key(UI).asSchema(rendererVDOMSchema));
     }
-
     // Per-cell spans: `n` in the timing stats is the number of cells this
     // resume pre-synced, total/max its round-trip cost (spans overlap, so the
     // wall cost is bounded by the enclosing `#syncCellsForRunningPattern()`
     // span).
+    const cellSyncWaveStart = performance.now();
     await Promise.all(cells.map((cell) => {
       const c = documentBoundedResumeCell(cell);
       const cellSyncStart = performance.now();
@@ -6471,6 +6479,7 @@ export class Runner {
         logger.time(cellSyncStart, "start", "resumeCellSync")
       );
     }));
+    logger.time(cellSyncWaveStart, "start", "resumeCellSyncWave");
 
     // Second wave: argument LINK TARGETS. An argument document synced above
     // may hold a link to a document nothing in this pattern tree owns (the
@@ -6482,6 +6491,7 @@ export class Runner {
     // pass subscribed such targets in aborted transactions before any
     // commit). Each root's declared schema bounds its scan — see the method
     // for the exact rules and the fallback where a declaration runs out.
+    const followupSyncStart = performance.now();
     await Promise.all([
       this.#syncArgumentLinkTargets(
         argumentRoots,
@@ -6492,6 +6502,7 @@ export class Runner {
       // and it must finish before instantiation runs those children.
       this.#syncResumeListChildren(instances),
     ]);
+    logger.time(followupSyncStart, "start", "resumeFollowupSync");
 
     return true;
   }
@@ -6561,6 +6572,7 @@ export class Runner {
     }));
     let wave = 0;
     while (frontier.length > 0) {
+      const waveStart = performance.now();
       const targets: PendingTarget[] = [];
       const targetPromises: Promise<any>[] = [];
       const enqueue = (
@@ -6680,6 +6692,7 @@ export class Runner {
         }
       }
       await Promise.all(targetPromises);
+      logger.time(waveStart, "start", `${timingLabel}Wave`);
       frontier = targets;
       wave++;
     }
@@ -6772,6 +6785,7 @@ export class Runner {
         ]);
         return moving;
       }
+      const syncWaveStart = performance.now();
       await Promise.all(fresh.map((cell) => {
         const syncStart = performance.now();
         return Promise.resolve(documentBoundedResumeCell(cell).sync())
@@ -6785,6 +6799,11 @@ export class Runner {
             logger.time(syncStart, "start", "resumeListChildSync")
           );
       }));
+      logger.time(
+        syncWaveStart,
+        "start",
+        "resumeListSlotResolutionSyncWave",
+      );
     }
   }
 
@@ -6963,7 +6982,9 @@ export class Runner {
       } finally {
         planTx.abort("resume list children: read-only derivation");
       }
+      const syncWaveStart = performance.now();
       await Promise.all(promises);
+      logger.time(syncWaveStart, "start", "resumeListChildSyncWave");
       frontier = next;
     }
   }

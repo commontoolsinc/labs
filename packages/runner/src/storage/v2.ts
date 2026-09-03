@@ -5217,6 +5217,7 @@ export class SpaceReplica
     type: "pull" | "integrate" = "pull",
     watchBranch = "",
   ): Promise<Result<Unit, PullError>> {
+    const refreshStart = performance.now();
     try {
       const { session } = await this.#activeSessionHandle();
       // Per-session (no global): mirror the storage setting onto the session so
@@ -5291,9 +5292,11 @@ export class SpaceReplica
         },
       }));
 
+      const watchAddStart = performance.now();
       const { view, precedingSyncs, sync } = await session.watchAddSync(
         watches,
       );
+      logger.time(watchAddStart, "watchRefresh", "watchAddSync");
 
       if (this.#closed) {
         view.close();
@@ -5301,6 +5304,7 @@ export class SpaceReplica
       }
 
       this.#watchView = view;
+      const applyStart = performance.now();
       try {
         for (const precedingSync of precedingSyncs) {
           this.#applySessionSync(precedingSync, "integrate");
@@ -5316,10 +5320,13 @@ export class SpaceReplica
         throw error;
       }
       // deno-coverage-ignore-stop
+      logger.time(applyStart, "watchRefresh", "applySessionSync");
       this.#consumeWatchView(view);
       return { ok: {} };
     } catch (error) {
       return { error: toPullError(error) };
+    } finally {
+      logger.time(refreshStart, "watchRefresh", "total");
     }
   }
 

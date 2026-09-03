@@ -288,6 +288,8 @@ describe("v2 server slow queries", () => {
       expect(entry!.rootsVisited).toBe(2);
       expect(entry!.rootsElapsedMs).toBeGreaterThan(0);
       expect(entry!.rootsElapsedMs).toBeLessThanOrEqual(entry!.elapsed);
+      expect(entry!.managerReads).toBeGreaterThanOrEqual(2);
+      expect(entry!.upserts).toBe(2);
       const slowest = entry!.slowestRoot;
       expect(slowest).toBeDefined();
       expect(["of:watched:one", "of:watched:two"]).toContain(slowest!.id);
