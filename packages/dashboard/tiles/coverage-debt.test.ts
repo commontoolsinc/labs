@@ -20,6 +20,7 @@ import {
 import { artifactZip } from "../test/artifact-zip.ts";
 import {
   COVERAGE_MIN_DAYS,
+  COVERAGE_STALE_DAYS,
   COVERAGE_TREND_DAYS,
   coverageDebt,
   coverageDebtView,
@@ -237,6 +238,20 @@ describe("coverage-debt", () => {
       const view = coverageDebtView(short, NOW);
       expect(view.status).toBe("unknown");
       expect(view.sub).toContain("not enough history");
+    });
+
+    it("returns gray on the day the run of unmeasured days reaches the threshold", () => {
+      // A newest sample `COVERAGE_STALE_DAYS` days back leaves that many days
+      // — the ones after it, today included — with nothing measured, so the
+      // threshold is reached rather than passed.
+      const upTo = (back: number) =>
+        drift(80000, -100, 40).filter((sample) =>
+          Date.parse(`${sample.day}T00:00:00Z`) <= NOW - back * DAY_MS
+        );
+      expect(coverageDebtView(upTo(COVERAGE_STALE_DAYS), NOW).status)
+        .toBe("unknown");
+      expect(coverageDebtView(upTo(COVERAGE_STALE_DAYS - 1), NOW).status)
+        .toBe("good");
     });
 
     it("returns gray when nothing has measured for days", () => {

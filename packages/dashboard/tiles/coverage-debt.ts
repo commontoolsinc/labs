@@ -139,8 +139,11 @@ export function coverageDebtView(
 ): TileView {
   const label = "coverage debt";
   const newest = samples[samples.length - 1];
+  // At the boundary the day itself is one of the days nothing measured: a
+  // newest sample of five days ago leaves the four days after it and today
+  // without one, which is the five the threshold counts.
   const staleAfter = todayAt(now) - COVERAGE_STALE_DAYS * DAY_MS;
-  if (newest !== undefined && startOf(newest.day) < staleAfter) {
+  if (newest !== undefined && startOf(newest.day) <= staleAfter) {
     return {
       label,
       status: "unknown",

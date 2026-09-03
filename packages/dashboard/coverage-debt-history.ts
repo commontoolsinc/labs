@@ -235,7 +235,6 @@ export class CoverageDebtStore {
       }
     }
     if (!this.#dirty) return;
-    this.#dirty = false;
     const stored: StoredHistory = {
       version: STORE_VERSION,
       days: Object.fromEntries([...this.#days.entries()].sort()),
@@ -244,6 +243,11 @@ export class CoverageDebtStore {
       const temporary = `${this.#file}.tmp`;
       await Deno.writeTextFile(temporary, JSON.stringify(stored));
       await Deno.rename(temporary, this.#file);
+      // Only once the file is in place, so a write that failed is written
+      // again by the next refresh. Clearing it before the write would leave
+      // the store looking saved, and the refresh after a failure usually has
+      // nothing of its own to write and would not come back here at all.
+      this.#dirty = false;
     } catch (error) {
       console.error(
         "coverage debt: could not persist history:",

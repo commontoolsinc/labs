@@ -556,6 +556,40 @@ describe("coverage-debt-history", () => {
       expect(logged).toEqual(["coverage debt: could not persist history:"]);
     });
 
+    it("writes the history it could not write once the next refresh can", async () => {
+      // The refresh after a failed write usually has nothing of its own to
+      // write — that is what the newest-run check buys — so a store that
+      // counted the failed attempt as saved would never come back here.
+      const missing = join(directory, "gone");
+      const store = new CoverageDebtStore(join(missing, "history.json"));
+      const days = { "2026-09-02": [{ id: 111, metrics: metrics(78166) }] };
+      const error = console.error;
+      console.error = () => {};
+      try {
+        await refreshCoverageDebt({
+          token: "t",
+          days: 1,
+          now: NOW,
+          github: fakeGitHub(days),
+          store,
+        });
+      } finally {
+        console.error = error;
+      }
+      await Deno.mkdir(missing);
+      await refreshCoverageDebt({
+        token: "t",
+        days: 1,
+        now: NOW,
+        github: fakeGitHub(days),
+        store,
+      });
+
+      const reopened = new CoverageDebtStore(join(missing, "history.json"));
+      await reopened.load();
+      expect(reopened.get("2026-09-02")?.measured?.uncoveredLines).toBe(78166);
+    });
+
     it("keeps the days of the window it was given and drops the rest", async () => {
       const store = new CoverageDebtStore(file);
       await store.load();
