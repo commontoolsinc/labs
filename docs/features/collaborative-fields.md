@@ -76,6 +76,11 @@ same transaction stores the submitted projection, appends canonical integrated
 operations, advances the field cursor, and writes the ordinary materialized
 revision.
 
+`cf-code-editor` submits every unconfirmed local update in one apply, and
+edits made while that apply is in flight go out in the next one, until none
+remain. A local update is confirmed by Memory or reported through the editor's
+error and reconciliation events; it is never dropped silently.
+
 One collaborative epoch owns a field until it is explicitly released or its
 entity is deleted. An ordinary write may change other paths, but it cannot
 change an active collaborative path. Deliberate release plus replacement may be
