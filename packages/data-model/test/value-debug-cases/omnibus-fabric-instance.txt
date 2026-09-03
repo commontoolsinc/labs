@@ -24,7 +24,12 @@
     name: null,
     message: "outer",
     stack: "Error: outer\n    at main (file:///example/main.ts:5:6)",
-    cause: /Error("Error: inner"),
+    cause: /Error(
+      type: "Error",
+      name: null,
+      message: "inner",
+      stack: "Error: inner\n    at frob (file:///example/frob.ts:12:34)"
+    ),
     code: 42
   ),
   "error, bare": /Error(
