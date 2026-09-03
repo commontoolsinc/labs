@@ -1,3 +1,17 @@
+/**
+ * Covers the stderr budget the CLI tests hold a command to:
+ * `relevantStderr()`, which says which of the lines a command wrote to stderr
+ * a test has business counting, and `checkStderr()`, which holds that count
+ * to the one line `deno task` echoes.
+ *
+ * What the budget counts is a record rather than a line, because a console
+ * handed a value too wide for one line writes it back across several. So the
+ * fixtures come from a real logger rather than being written out here: the
+ * prefix a logger writes and the shape a console gives a spilled value are
+ * the two things the budget reads, and a string composed here would pin these
+ * tests to a guess at that shape instead of to the shape itself.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
