@@ -1,8 +1,9 @@
 /**
  * The verbs a line names, and the dispatch that picks one.
  *
- * A verb returns what it did rather than writing it: a place that moved, text
- * shuttle wrote, a value the fabric holds, or a refusal carrying its reason.
+ * A verb returns what it did rather than writing it: a place that moved, a
+ * rendering shuttle composed, a value the fabric holds, or a refusal carrying
+ * its reason.
  * Nothing here touches a terminal, so where any of it lands is the prompt's
  * decision and a test drives the whole surface with none.
  *
@@ -60,7 +61,7 @@ export type Outcome =
   | { readonly kind: "nothing" }
   /** The place moved, and `place` is where shuttle now stands. */
   | { readonly kind: "moved"; readonly place: Place }
-  /** The verb wrote `text`, which is the whole of what it produced. */
+  /** The verb composed `text`, which is the whole of what it produced. */
   | { readonly kind: "text"; readonly text: string }
   /** The verb read `value` out of the fabric. */
   | { readonly kind: "value"; readonly value: unknown }
@@ -204,7 +205,7 @@ async function ls(
   return { kind: "text", text: renderListing(listing) };
 }
 
-/** Writes where shuttle stands, both halves of the pair. */
+/** Returns where shuttle stands, both halves of the pair. */
 function pwd(shuttle: Shuttle, operands: readonly string[]): Outcome {
   const tooMany = takesNothing("pwd", operands);
   return tooMany ?? { kind: "text", text: shuttle.place.render() };

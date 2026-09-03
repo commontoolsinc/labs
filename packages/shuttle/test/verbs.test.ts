@@ -697,6 +697,12 @@ describe("verbs", () => {
   });
 
   describe("wish", () => {
+    // Reading across spaces costs nothing, where standing in one is what a
+    // single connection cannot do, so the refusal decision 5 carries is `cd`'s
+    // and this verb has none. No case here shows that: what `readWish` answers
+    // a value read with says nothing about the space it resolved in, so the
+    // absent check has nothing to be seen against.
+
     it("returns the value the target resolved to", async () => {
       expect(
         await runLine("wish #profileName", shuttleIn(), wishing("Ada")),
@@ -746,15 +752,6 @@ describe("verbs", () => {
         },
       });
       expect(loaded).toBe(PIECES);
-    });
-
-    it("returns the value of a target that resolved against another space", async () => {
-      // Reading across spaces costs nothing, where standing in one is what a
-      // single connection cannot do, so the refusal decision 5 carries is
-      // `cd`'s and this verb has none.
-      expect(
-        await runLine("wish #profileName", shuttleIn(), wishing("Ada")),
-      ).toEqual({ kind: "value", value: "Ada" });
     });
 
     it("refuses a target that matched nothing, carrying the wish's own error", async () => {
