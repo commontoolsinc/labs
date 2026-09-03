@@ -34,6 +34,12 @@ import { RUN_CHECKS } from "./checks/registry.ts";
 import { auditRunFamily } from "./checks/structural.ts";
 import { discoverRunFamilies, type RunFamily } from "./evidence.ts";
 import {
+  type ExpectedFailuresFile,
+  reconcileExpectedFailures,
+  reconciliationFails,
+  renderReconciliation,
+} from "./expected-failures.ts";
+import {
   type ExpectedPosture,
   loadExpectedPosture,
 } from "./expected-posture.ts";
@@ -55,6 +61,13 @@ export interface AuditCliOptions {
 
   /** Whether the named paths are to be read as one corpus (Group D). */
   corpus: boolean;
+
+  /**
+   * A file listing the findings this run is known to produce, when one was
+   * named. Findings it covers do not fail the run; anything else does, and so
+   * does an entry that matched nothing.
+   */
+  expectedFailures?: string;
 
   /** Whether that corpus is declared adversarial, so no refusal is a failure. */
   expectRefusals: boolean;
@@ -81,6 +94,7 @@ const USAGE = [
   "usage: cfc-audit <runDir | artifactRoot> [more paths...]",
   "                 [--json] [--fail-on fail|warn|inconclusive]",
   "                 [--corpus] [--expect-refusals]",
+  "                 [--expected-failures <path>]",
   "                 [--expected-posture <spec.json>] [--toolshed-url <url>]",
 ].join("\n");
 
@@ -96,6 +110,7 @@ export const parseAuditCliArgs = (
   let json = false;
   let failOn: FailOnThreshold = DEFAULT_FAIL_ON;
   let corpus = false;
+  let expectedFailures: string | undefined;
   let expectRefusals = false;
   let expectedPosture: string | undefined;
   let toolshedUrl: string | undefined;
@@ -109,6 +124,11 @@ export const parseAuditCliArgs = (
     const arg = args[index]!;
     if (arg === "--json") {
       json = true;
+      continue;
+    }
+    if (arg === "--expected-failures") {
+      expectedFailures = valueOf("--expected-failures", args[index + 1]);
+      index += 1;
       continue;
     }
     if (arg === "--corpus") {
@@ -159,6 +179,7 @@ export const parseAuditCliArgs = (
     json,
     failOn,
     corpus,
+    ...(expectedFailures !== undefined ? { expectedFailures } : {}),
     expectRefusals,
     ...(expectedPosture !== undefined ? { expectedPosture } : {}),
     ...(toolshedUrl !== undefined ? { toolshedUrl } : {}),
@@ -339,6 +360,31 @@ export const runAuditCli = async (
       ? JSON.stringify(results, null, 2)
       : renderAuditReport(results, options.failOn),
   );
+  if (options.expectedFailures !== undefined) {
+    // Held to a list rather than to a threshold. A finding no entry covers
+    // fails, and so does an entry that matched nothing — a closed gap takes
+    // its entry with it, which is what stops the list becoming an excuse.
+    let file: ExpectedFailuresFile;
+    try {
+      file = JSON.parse(
+        await Deno.readTextFile(options.expectedFailures),
+      ) as ExpectedFailuresFile;
+    } catch (error) {
+      write(
+        `could not read --expected-failures ${options.expectedFailures}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return 2;
+    }
+    const reconciliation = reconcileExpectedFailures(
+      results,
+      file.expected ?? [],
+      options.failOn,
+    );
+    write(`\n${renderReconciliation(reconciliation)}`);
+    return reconciliationFails(reconciliation) ? 1 : 0;
+  }
   return results.some((result) =>
       verdictFailsThreshold(result.verdict, options.failOn)
     )

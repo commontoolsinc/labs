@@ -17,6 +17,13 @@ name: CFC Property Suite
 # release refusal anywhere" from a warning into a failure: a suite that stopped
 # producing its refusal would otherwise go quiet rather than red.
 #
+# `--expected-failures` is why the threshold stays at `warn` rather than being
+# lowered to make the job green. Every finding the suite is known to produce is
+# named in that file with the issue tracking it; anything else fails the run,
+# and so does an entry that stopped matching. A job that cannot be green trains
+# everyone to ignore it, and a job whose bar was lowered is not a signal — the
+# list is the third option, and it shrinking is the progress to watch.
+#
 # The corpus this writes is fresh every night, which is the whole value. The
 # historic session corpus cannot be re-run, so a check can only ever report
 # what those runs happened to record; this one reports what the current code
@@ -59,7 +66,8 @@ jobs:
             --corpus \
             --expect-refusals \
             --expected-posture audit/profiles/max-enforcement.json \
-            --fail-on warn
+            --fail-on warn \
+            --expected-failures audit/expected-failures.json
 
       - name: 📤 Ship test records
         if: always()

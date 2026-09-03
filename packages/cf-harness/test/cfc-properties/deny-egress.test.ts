@@ -170,39 +170,49 @@ describe("cfc property: egress of a labeled flow", () => {
       expect(episode.output.value).toEqual({ total: 2 });
     });
 
-    it("fails only the two checks a permitted run is known to fail", async () => {
-      // The guard against the audit becoming an always-fails alarm, and the
-      // record of what a clean run does fail today.
-      //
-      // Both failures are findings about the harness, not about this episode,
-      // and both are invisible to the historic corpus:
-      //
-      // AUD-3 — `run_pattern` persists a `run-pattern-source` artifact into
-      // `tool-outputs/` that the run report's `toolOutputs` never lists, so
-      // every fresh run with inline source trips "a tool output on disk the
-      // run report does not list". The corpus holds 534 `run_pattern` outputs
-      // and no source artifact: it was added after those runs were recorded,
-      // and no run has been audited with one since.
-      //
-      // AUD-9 — an executed side effect wants a CFC invocation context, and
-      // `run_pattern` reaches the fabric rather than the sandbox, so no
-      // context is ever recorded for it.
-      //
-      // Asserting the exact set rather than a ceiling: this fails if another
-      // check starts firing, and equally if either of these is fixed, so the
-      // list cannot quietly rot into a permanent excuse.
+    it("leaves the audit with no failing check", async () => {
+      // The guard against the audit becoming an always-fails alarm. A check
+      // that starts over-firing fails here rather than in a nightly report
+      // nobody reads.
       const episode = await runEpisode({ withSource: false });
 
       const audit = await auditArtifacts(episode.runDir);
       const failing = audit.results.filter((result) =>
         result.verdict === "fail"
       );
-      expect(failing.map((result) => result.checkId).sort()).toEqual([
-        "AUD-3",
-        "AUD-9",
+      expect(messagesOf(failing)).toBe("");
+    });
+
+    it("weakens only the checks a one-run permitted corpus cannot satisfy", async () => {
+      // Not a ceiling but the exact set, so a check that starts warning shows
+      // up here. None of these four is a defect; each is what a single
+      // permitted run honestly cannot establish:
+      //
+      // AUD-2  — this run's one side effect is `run_pattern`, which reaches
+      //          the fabric, so nothing exercised the enforcing claim. The
+      //          same fabric-versus-sandbox distinction AUD-9 reads.
+      // AUD-13 — the fabric-session posture predates the full posture record.
+      // AUD-16 — a corpus holding one permitted run has no refusal in it.
+      //          P-deny-egress is where that check is exercised.
+      // AUD-18 — one run records no posture, so there is nothing to compare.
+      // AUD-19 — no surface publishes the shell's render ceiling yet, so the
+      //          line item is inconclusive by construction until one does.
+      const episode = await runEpisode({ withSource: false });
+
+      const audit = await auditArtifacts(episode.runDir);
+      const unsettled = audit.results
+        .filter((result) =>
+          result.verdict !== "pass" && result.verdict !== "not-applicable"
+        )
+        .map((result) => `${result.checkId} ${result.verdict}`)
+        .sort();
+      expect(unsettled).toEqual([
+        "AUD-13 inconclusive",
+        "AUD-16 warn",
+        "AUD-18 inconclusive",
+        "AUD-19 inconclusive",
+        "AUD-2 warn",
       ]);
-      expect(messagesOf(failing)).toContain("run-pattern-source");
-      expect(messagesOf(failing)).toContain("CFC invocation context");
     });
   });
 });

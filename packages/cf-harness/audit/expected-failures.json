@@ -1,0 +1,36 @@
+{
+  "$comment": [
+    "The audit findings the nightly CFC property suite is known to produce, and",
+    "the issue each is tracked under. The job fails on any finding not listed",
+    "here, AND on any entry here that stopped occurring \u2014 a fixed gap must take",
+    "its entry with it, so the list cannot rot into a permanent excuse. The list",
+    "shrinking is the progress signal; it is never appended to without an issue.",
+    "",
+    "This is not a way to lower the bar. `--fail-on warn` stays where it is; an",
+    "entry names one check on one run shape, so a check that starts failing on a",
+    "shape nobody enumerated is still a red run."
+  ],
+  "expected": [
+    {
+      "checkId": "AUD-9",
+      "runShape": "a sandbox-only episode: an enforcing run whose tools reach the sandbox and which mints no handle",
+      "detail": "retained none of: a recorded cell-labels read",
+      "why": "the engine reads a space's cell labels only for the refs its handle table holds, so a run that minted no handle records no read at all. Whether AH-CFC-16 wants a recorded read from a run that touched no cell, or whether 'nobody asked' is the honest answer there, is the open question.",
+      "issue": "CT-2178-followup-cell-labels-without-handles"
+    },
+    {
+      "checkId": "AUD-2",
+      "runShape": "a fabric-only episode: an enforcing run whose only side effect is `run_pattern`",
+      "detail": "never exercised it",
+      "why": "a `run_pattern` side effect reaches the fabric, not the sandbox that carries CFC evidence, so the run's enforcing claim goes untested. Honest reduced assurance rather than a defect; it closes when a property drives a labeled flow through a sandbox side effect as well.",
+      "issue": "PLACEHOLDER-cfc-property-sandbox-side-effect"
+    },
+    {
+      "checkId": "AUD-16",
+      "runShape": "the property corpus, whose runs attest no CFC substrate",
+      "detail": "weakened by",
+      "why": "the suite's episodes supply no run manifest, so every run records `not-attested` and the refusal count carries that qualifier. It closes when the suite runs under a manifest.",
+      "issue": "PLACEHOLDER-cfc-property-run-manifest"
+    }
+  ]
+}
