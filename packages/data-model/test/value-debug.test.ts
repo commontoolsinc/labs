@@ -233,8 +233,16 @@ describe("value-debug", () => {
     });
 
     it("renders a FabricInstance as its debug string, not `{}`", () => {
-      const err = FabricError.fromNativeError(new Error("boom"));
-      expect(Deno.inspect(err)).toBe("/Error(...)");
+      // Built without a stack, since a real one names this file and a line in
+      // it.
+      const err = new FabricError({
+        type: "Error",
+        message: "boom",
+        stack: undefined,
+        cause: undefined,
+      });
+      expect(Deno.inspect(err))
+        .toBe('/Error(type:"Error",name:null,message:"boom")');
     });
 
     it("renders when nested in containers", () => {

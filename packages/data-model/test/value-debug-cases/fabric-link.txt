@@ -1,5 +1,11 @@
 new FabricLink({ id: "of:fid1:abc", path: ["x"], space: "did:key:z" })
 
-/Link(...)
+/Link(
+  id: "of:fid1:abc",
+  path: [
+    "x"
+  ],
+  space: "did:key:z"
+)
 
-/Link(...)
+/Link(id:"of:fid1:abc",path:["x"],space:"did:key:z")

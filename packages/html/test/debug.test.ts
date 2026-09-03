@@ -25,9 +25,16 @@ describe("debug", () => {
 
     it("names a `FabricError`, the `FabricInstance` arm", () => {
       // A debug renderer names an instance rather than refusing it: the value
-      // it was handed is the very thing being debugged.
-      expect(formatTree(FabricError.fromNativeError(new Error("boom"))))
-        .toBe("/Error(...)");
+      // it was handed is the very thing being debugged. The error is built
+      // without a stack, since a real one names this file and a line in it.
+      const error = new FabricError({
+        type: "Error",
+        message: "boom",
+        stack: undefined,
+        cause: undefined,
+      });
+      expect(formatTree(error))
+        .toBe('/Error(type:"Error",name:null,message:"boom")');
     });
 
     it("indents a named special object like any other node", () => {

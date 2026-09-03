@@ -1,0 +1,47 @@
+(() => {
+  // A real stack names this file and a line in it, so the error gets a
+  // representative one instead.
+  const inner = new Error("inner");
+  inner.stack = "Error: inner\n" +
+    "    at frob (file:///example/frob.ts:12:34)";
+  const outer = Object.assign(new Error("outer", { cause: inner }), {
+    code: 42,
+  });
+  outer.stack = "Error: outer\n" +
+    "    at main (file:///example/main.ts:5:6)";
+  return {
+    error: FabricError.fromNativeError(outer),
+    "error, bare": new FabricError({ type: "Error", message: "bare", stack: undefined, cause: undefined }),
+    link: new FabricLink({ id: "of:fid1:abc", path: ["x", 1], space: "did:key:z" }),
+    map: new FabricMap(new Map([["a", 1], [2, "b"]])),
+    set: new FabricSet(new Set([1, "two", null])),
+  };
+})()
+
+{
+  error: /Error(
+    type: "Error",
+    name: null,
+    message: "outer",
+    stack: "Error: outer\n    at main (file:///example/main.ts:5:6)",
+    cause: /Error("Error: inner"),
+    code: 42
+  ),
+  "error, bare": /Error(
+    type: "Error",
+    name: null,
+    message: "bare"
+  ),
+  link: /Link(
+    id: "of:fid1:abc",
+    path: [
+      "x",
+      1
+    ],
+    space: "did:key:z"
+  ),
+  map: /unconvertible("`FabricMap`: not yet implemented"),
+  set: /unconvertible("`FabricSet`: not yet implemented")
+}
+
+{error:/Error(type:"Error",name:null,message:"outer",stack:"Error: outer\n    at main (file:///ex...

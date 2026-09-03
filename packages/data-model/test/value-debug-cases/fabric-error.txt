@@ -8,6 +8,11 @@
   return FabricError.fromNativeError(error);
 })()
 
-/Error(...)
+/Error(
+  type: "Error",
+  name: null,
+  message: "boom",
+  stack: "Error: boom\n    at frob (file:///example/frob.ts:12:34)\n    at main (file:///example/main.ts:5:6)"
+)
 
-/Error(...)
+/Error(type:"Error",name:null,message:"boom",stack:"Error: boom\n    at frob (file:///example/fro...
