@@ -129,7 +129,12 @@ class FakeSandboxRuntime implements SandboxRuntime {
 }
 
 /** A model that reads one file and then stops. */
-const readFileThenStop = (): typeof fetch => {
+const readFileThenStop = (
+  tool: { name: string; arguments: Record<string, unknown> } = {
+    name: "read_file",
+    arguments: { path: "secret.txt" },
+  },
+): typeof fetch => {
   let callCount = 0;
   return () => {
     callCount += 1;
@@ -144,8 +149,8 @@ const readFileThenStop = (): typeof fetch => {
               id: "call-absence-policy",
               type: "function",
               function: {
-                name: "read_file",
-                arguments: JSON.stringify({ path: "secret.txt" }),
+                name: tool.name,
+                arguments: JSON.stringify(tool.arguments),
               },
             }],
           },
@@ -225,7 +230,7 @@ const runUnmediatedRead = async (
   });
 
   const result = await loop.runPrompt({
-    prompt: "Read a file.",
+    prompt: "Touch a file.",
     promptSlotBinding: directPromptSlotBinding,
   });
 
@@ -273,8 +278,21 @@ const runUnmediatedRead = async (
  * different route: the error text names a path whose existence is itself the
  * disclosure, so the boundary will not release it.
  */
+const STATUS_TOOLS = [
+  { name: "read_file", arguments: { path: SENSITIVE_PATH } },
+  {
+    name: "edit_file",
+    arguments: {
+      path: SENSITIVE_PATH,
+      oldText: "before",
+      newText: "after",
+    },
+  },
+] as const;
+
 const runStatusObservation = async (
   mode: CfcEnforcementMode,
+  tool: { name: string; arguments: Record<string, unknown> } = STATUS_TOOLS[0],
 ): Promise<ObservedAbsence> => {
   const sandbox = new FakeSandboxRuntime();
   sandbox.failing = true;
@@ -282,25 +300,29 @@ const runStatusObservation = async (
     apiKey: "test-key",
     engine: new CfHarnessEngine({
       sandboxRuntime: sandbox,
-      runId: `run-status-${mode}`,
+      runId: `run-status-${tool.name}-${mode}`,
       model: "gpt-5.4",
       cfcEnforcementMode: mode,
     }),
-    fetchFn: readFileThenStop(),
+    fetchFn: readFileThenStop(tool),
   });
 
   const result = await loop.runPrompt({
-    prompt: "Read a file.",
+    prompt: "Touch a file.",
     promptSlotBinding: directPromptSlotBinding,
   });
 
   const toolMessage = result.transcript.find((message) =>
-    message.role === "tool" && message.toolName === "read_file"
+    message.role === "tool" && message.toolName === tool.name
   );
   expect(toolMessage).toBeDefined();
   const disclosedContent = toolMessage!.content.includes(SENSITIVE_PATH);
+  // Both tools name their own shape of disclosure — `read_file` a filesystem
+  // path/status, `edit_file` content, digest, path or status — so the event
+  // is found by the tool that wrote it rather than by wording.
   const statusEvents = result.runState.policyEvents.filter((event) =>
-    (event.detail ?? "").includes("filesystem path/status")
+    event.toolId === tool.name &&
+    (event.detail ?? "").includes("may reveal")
   );
 
   // A redacted status error is this path's form of denial: the run answered
@@ -367,21 +389,25 @@ describe("cfc absence policy", () => {
       // error takes the same three-way answer, so a change to the dial cannot
       // move one site without moving all of them — and cannot move any of them
       // without this failing.
-      for (const mode of MODES) {
-        const observed = await runStatusObservation(mode);
-        const published = cfcAbsenceBehaviorForMode(mode);
+      for (const tool of STATUS_TOOLS) {
+        for (const mode of MODES) {
+          const observed = await runStatusObservation(mode, tool);
+          const published = cfcAbsenceBehaviorForMode(mode);
 
-        expect(observed.outcome).toBe(OUTCOME_FOR_BEHAVIOR[published]);
+          expect(observed.outcome).toBe(OUTCOME_FOR_BEHAVIOR[published]);
+        }
       }
     });
 
     it("withholds the path from a status observation in enforcing modes", async () => {
       // The disclosure the redaction exists for: whether the file is there is
       // the fact being withheld, so the path must not survive into the reply.
-      for (const mode of ["enforce-explicit", "enforce-strict"] as const) {
-        const observed = await runStatusObservation(mode);
+      for (const tool of STATUS_TOOLS) {
+        for (const mode of ["enforce-explicit", "enforce-strict"] as const) {
+          const observed = await runStatusObservation(mode, tool);
 
-        expect(observed.disclosedContent).toBe(false);
+          expect(observed.disclosedContent).toBe(false);
+        }
       }
     });
 

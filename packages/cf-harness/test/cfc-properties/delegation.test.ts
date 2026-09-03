@@ -32,6 +32,7 @@ import { FileSystemHarnessArtifactStore } from "../../src/artifacts.ts";
 import { HANDLE_TOKEN_PATTERN } from "../../src/contracts/handle-table.ts";
 import { CfHarnessEngine } from "../../src/engine.ts";
 import { CfHarnessPromptLoop } from "../../src/prompt-loop.ts";
+import { join } from "@std/path";
 
 import {
   adversarialArtifactRoot,
@@ -93,8 +94,17 @@ interface DelegationEpisode {
   withheldRef: string;
   /** Every model-facing message of the family, for a disclosure check. */
   modelVisibleText: string;
-  /** Whether the child's observation came back as a typed denial. */
+  /**
+   * Whether the child's own observation came back as a typed denial.
+   *
+   * Read from the child's transcript rather than the parent's: the denial is
+   * what the child was handed, and the parent sees only the summary the child
+   * wrote afterwards. Looking for it in the parent's `delegate_task` output
+   * finds nothing and says nothing.
+   */
   childObservationDenied: boolean;
+  /** The parent-facing text the delegation returned, which must exist. */
+  delegateReturn: string;
 }
 
 /**
@@ -196,6 +206,16 @@ const runDelegationEpisode = async (
       message.role === "tool" && message.toolName === "delegate_task"
     );
 
+    // The child's own transcript, written beside the parent's as a sibling.
+    const childTranscript = JSON.parse(
+      await Deno.readTextFile(
+        join(artifactRoot, `${runId}.subagent.1`, "transcript.json"),
+      ),
+    ) as readonly { role: string; toolName?: string; content: string }[];
+    const childObservation = childTranscript.find((message) =>
+      message.role === "tool" && message.toolName === "bash"
+    );
+
     return {
       runDir: artifactRoot,
       childCommand: dispatched!.command,
@@ -205,9 +225,10 @@ const runDelegationEpisode = async (
       withheldRef: withheld.ref,
       modelVisibleText: result.transcript.map((message) => message.content)
         .join("\n"),
-      childObservationDenied: (childToolMessage?.content ?? "").includes(
-        "not-observable",
+      childObservationDenied: (childObservation?.content ?? "").includes(
+        "cf-harness.observation-denied",
       ),
+      delegateReturn: childToolMessage?.content ?? "",
     };
   } finally {
     await fabric.dispose();
@@ -259,6 +280,9 @@ describe("cfc property: delegation", () => {
       // would satisfy AH-CFC-12 as written, and would leak.
       const episode = await runDelegationEpisode({ reachForWithheld: true });
 
+      // The witness first: a run that silently dropped the child's result
+      // would satisfy the absence below while establishing nothing.
+      expect(episode.childObservationDenied).toBe(true);
       expect(episode.modelVisibleText).not.toContain("child-observed-secret");
     });
   });
@@ -269,9 +293,13 @@ describe("cfc property: delegation", () => {
       // must not resolve for the parent just because a child wrote it.
       const episode = await runDelegationEpisode({ reachForWithheld: true });
 
-      const parentText = episode.modelVisibleText;
-      const tokens = parentText.match(new RegExp(HANDLE_TOKEN_PATTERN, "g")) ??
-        [];
+      // A return has to have happened for its contents to mean anything: this
+      // loop over the tokens in it would otherwise succeed over none.
+      expect(episode.delegateReturn).not.toBe("");
+
+      const tokens =
+        episode.delegateReturn.match(new RegExp(HANDLE_TOKEN_PATTERN, "g")) ??
+          [];
       for (const token of tokens) {
         expect([episode.boundToken, episode.withheldToken]).toContain(token);
       }

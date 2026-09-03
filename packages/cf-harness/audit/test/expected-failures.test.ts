@@ -11,6 +11,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  assertUsableExpectedFailure,
   type ExpectedFailure,
   reconcileExpectedFailures,
   reconciliationFails,
@@ -22,11 +23,12 @@ const finding = (
   checkId: string,
   verdict: CheckVerdict,
   message: string,
+  runId = "run-1",
 ): CheckResult => ({
   checkId,
   title: checkId,
-  runId: "run-1",
-  runDir: "/runs/run-1",
+  runId,
+  runDir: `/runs/${runId}`,
   verdict,
   message,
   citations: [],
@@ -36,9 +38,11 @@ const finding = (
 const entry = (
   checkId: string,
   detail: string,
+  runs = "run-1",
 ): ExpectedFailure => ({
   checkId,
   runShape: "a shape",
+  runs,
   detail,
   why: "because",
   issue: "CT-0000",
@@ -107,6 +111,87 @@ describe("expected-failures", () => {
 
       expect(reconciliation.unexpected).toEqual([]);
       expect(reconciliation.matched).toEqual([]);
+    });
+
+    it("does not match a finding on a run the entry does not name", () => {
+      // The suppression an entry must not be able to do. `runShape` is prose;
+      // `runs` is what decides, so the same message on a run nobody
+      // considered is a new failure rather than a borrowed excuse.
+      const reconciliation = reconcileExpectedFailures(
+        [
+          finding("AUD-9", "fail", "retained none of: a read", "run-1"),
+          finding("AUD-9", "fail", "retained none of: a read", "run-2"),
+        ],
+        [entry("AUD-9", "a read", "run-1")],
+        "warn",
+      );
+
+      expect(reconciliation.matched).toHaveLength(1);
+      expect(reconciliation.unexpected).toHaveLength(1);
+      expect(reconciliation.unexpected[0].runId).toBe("run-2");
+      expect(reconciliationFails(reconciliation)).toBe(true);
+    });
+
+    it("anchors the run selector rather than matching a substring of an id", () => {
+      // `run-1` must not speak for `run-10`.
+      const reconciliation = reconcileExpectedFailures(
+        [finding("AUD-9", "fail", "retained none of: a read", "run-10")],
+        [entry("AUD-9", "a read", "run-1")],
+        "warn",
+      );
+
+      expect(reconciliation.unexpected).toHaveLength(1);
+    });
+
+    it("matches every run an alternation names", () => {
+      // The other direction: one entry may legitimately speak for a set of
+      // runs, so long as it says which.
+      const reconciliation = reconcileExpectedFailures(
+        [
+          finding("AUD-9", "fail", "retained none of: a read", "alpha"),
+          finding("AUD-9", "fail", "retained none of: a read", "beta"),
+        ],
+        [entry("AUD-9", "a read", "alpha|beta")],
+        "warn",
+      );
+
+      expect(reconciliation.matched).toHaveLength(2);
+      expect(reconciliationFails(reconciliation)).toBe(false);
+    });
+  });
+
+  describe("assertUsableExpectedFailure()", () => {
+    it("refuses an entry whose detail is empty", () => {
+      // An empty detail matches every message the check can write.
+      expect(() =>
+        assertUsableExpectedFailure({ ...entry("AUD-9", ""), detail: "" }, 0)
+      ).toThrow("non-empty `detail`");
+    });
+
+    it("refuses an entry that names no issue", () => {
+      expect(() =>
+        assertUsableExpectedFailure(
+          { ...entry("AUD-9", "a read"), issue: "" },
+          0,
+        )
+      ).toThrow("non-empty `issue`");
+    });
+
+    it("refuses an entry whose run selector is not a regular expression", () => {
+      expect(() =>
+        assertUsableExpectedFailure(entry("AUD-9", "a read", "run-(["), 0)
+      ).toThrow("not a regular expression");
+    });
+
+    it("refuses a malformed entry before any finding is reconciled", () => {
+      // Loud at load rather than quietly broadening at match time.
+      expect(() =>
+        reconcileExpectedFailures(
+          [],
+          [{ ...entry("AUD-9", "x"), issue: "" }],
+          "warn",
+        )
+      ).toThrow("non-empty `issue`");
     });
   });
 

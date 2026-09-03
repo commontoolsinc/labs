@@ -28,10 +28,22 @@ export interface ExpectedFailure {
   runShape: string;
 
   /**
+   * An anchored regular expression over the run id, which decides which runs
+   * this entry speaks for.
+   *
+   * `runShape` is prose and matches nothing. Without a machine-readable
+   * selector beside it, an entry written for one shape suppresses the same
+   * message on every other, and a finding on a run nobody had considered
+   * borrows the entry rather than failing the job.
+   */
+  runs: string;
+
+  /**
    * A substring of the finding's message, which is what matches it.
    *
    * A check fails for more than one reason, and an entry that matched the
-   * check alone would excuse reasons nobody decided about.
+   * check alone would excuse reasons nobody decided about. Empty is refused
+   * for the same reason: it would match every message the check can write.
    */
   detail: string;
 
@@ -41,6 +53,44 @@ export interface ExpectedFailure {
   /** The issue tracking it. An entry without one is not an entry. */
   issue: string;
 }
+
+/**
+ * Refuses an entry that cannot do its job.
+ *
+ * A malformed entry is worse than a missing one: it suppresses findings while
+ * looking like a decision somebody made. Each of these would silently widen
+ * what the list excuses, so each is a hard failure at load rather than a
+ * quiet broadening at match time.
+ */
+export const assertUsableExpectedFailure = (
+  entry: ExpectedFailure,
+  index: number,
+): void => {
+  const at = `expected[${index}]`;
+  for (
+    const [field, value] of [
+      ["checkId", entry.checkId],
+      ["runs", entry.runs],
+      ["detail", entry.detail],
+      ["issue", entry.issue],
+    ] as const
+  ) {
+    if (typeof value !== "string" || value.trim() === "") {
+      throw new Error(
+        `${at} needs a non-empty \`${field}\`; an entry without one matches more than whoever wrote it decided`,
+      );
+    }
+  }
+  try {
+    new RegExp(entry.runs);
+  } catch (error) {
+    throw new Error(
+      `${at} has a \`runs\` that is not a regular expression: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+};
 
 export interface ExpectedFailuresFile {
   expected: readonly ExpectedFailure[];
@@ -62,7 +112,9 @@ const matches = (
   entry: ExpectedFailure,
   finding: CheckResult,
 ): boolean =>
-  entry.checkId === finding.checkId && finding.message.includes(entry.detail);
+  entry.checkId === finding.checkId &&
+  finding.message.includes(entry.detail) &&
+  new RegExp(`^(?:${entry.runs})$`).test(finding.runId);
 
 /**
  * Reconciles the findings at or above `threshold` against the list.
@@ -75,6 +127,7 @@ export const reconcileExpectedFailures = (
   expected: readonly ExpectedFailure[],
   threshold: FailOnThreshold,
 ): ExpectedFailureReconciliation => {
+  expected.forEach(assertUsableExpectedFailure);
   const findings = results.filter((result) =>
     verdictFailsThreshold(result.verdict, threshold)
   );
