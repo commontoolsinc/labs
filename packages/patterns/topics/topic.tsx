@@ -925,6 +925,38 @@ export const submitProfileComment = handler<void, {
   commentDraft.set("");
 });
 
+/** Browser comment retraction under the current Profile snapshot.
+ *
+ * Bound to the element the thread renders, which is an element of a filtered,
+ * sorted `computed()`. Such an element keeps the identity of the position it
+ * was derived from, so `equals()` matches it against the stored array and the
+ * two writes below land on the stored record rather than on a copy of it.
+ * That is a measured property rather than an assumed one — it is what
+ * `view-identity.test.tsx` pins, and what
+ * `integration/topic-retraction-controls.test.ts` proves through a real click.
+ *
+ * The membership check is therefore not redundant. It is what decides how a
+ * regression in that property presents: refused here, a control bound to a
+ * copy does nothing, where without it the copy would be stamped and the
+ * reader would be shown a thread the topic does not hold. */
+export const retractProfileComment = handler<void, {
+  comments: Writable<TopicComment[] | Default<[]>>;
+  // A CELL, for the reason `dropMention` gives about `topic`: bound as a plain
+  // value it arrives resolved, matches no stored position, and removes
+  // nothing.
+  comment: Writable<TopicComment>;
+  profileName: string;
+  profileAvatar: string;
+}>((_, { comments, comment, profileName, profileAvatar }) => {
+  const author = topicAuthorFromPerson(profileName, profileAvatar);
+  if (!author) return;
+  if (!comment || comment.get() === undefined) return;
+  if (!isElementOf(comments, comment)) return;
+  if (comment.get()?.removedAt !== undefined) return;
+  comment.key("removedAt").set(Date.now());
+  comment.key("removedBy").set(author);
+});
+
 /** The one place a rename lands. The contract verb and the browser save both
  * ride it, so the trim rule, the attribution stamp, and the activity clock
  * move together — a title write without its attribution pair is exactly the
@@ -1044,6 +1076,27 @@ export const dropMention = handler<void, {
 }>((_, { mentioned, topic }) => {
   if (!topic) return;
   mentioned.removeByValue(topic);
+});
+
+/** Browser link retraction under the current Profile snapshot.
+ *
+ * The reference form of `removeLink`, bound the way
+ * {@link retractProfileComment} is bound and for the same reasons. A stamped
+ * link additionally stops resolving into `mentions`, so this control retracts
+ * a reference as well as a row. */
+export const retractProfileLink = handler<void, {
+  links: Writable<TopicLink[] | Default<[]>>;
+  link: Writable<TopicLink>;
+  profileName: string;
+  profileAvatar: string;
+}>((_, { links, link, profileName, profileAvatar }) => {
+  const author = topicAuthorFromPerson(profileName, profileAvatar);
+  if (!author) return;
+  if (!link || link.get() === undefined) return;
+  if (!isElementOf(links, link)) return;
+  if (link.get()?.removedAt !== undefined) return;
+  link.key("removedAt").set(Date.now());
+  link.key("removedBy").set(author);
 });
 
 /** Browser link submit under the current Profile snapshot. */
@@ -1719,7 +1772,7 @@ export default pattern<TopicInput, TopicOutput>(
                   ? (
                     <cf-vstack gap="1">
                       {linksView.map((link) => (
-                        <cf-hstack gap="2" align="center">
+                        <cf-hstack gap="2" align="center" data-link-row="">
                           <cf-badge size="xs" color="neutral">
                             {link.kind}
                           </cf-badge>
@@ -1746,6 +1799,20 @@ export default pattern<TopicInput, TopicOutput>(
                               </cf-text>
                             )
                             : null}
+                          <cf-button
+                            variant="ghost"
+                            size="sm"
+                            disabled={!hasProfile}
+                            data-retract="link"
+                            onClick={retractProfileLink({
+                              links,
+                              link,
+                              profileName,
+                              profileAvatar,
+                            })}
+                          >
+                            Retract
+                          </cf-button>
                         </cf-hstack>
                       ))}
                     </cf-vstack>
@@ -1798,6 +1865,7 @@ export default pattern<TopicInput, TopicOutput>(
                       {commentsView.map((comment) => (
                         <cf-vstack
                           gap="0"
+                          data-comment-row=""
                           style="border-left: 2px solid var(--cf-theme-color-border); padding-left: 0.75rem;"
                         >
                           <cf-hstack gap="2" align="center">
@@ -1812,6 +1880,37 @@ export default pattern<TopicInput, TopicOutput>(
                             <cf-text variant="caption" tone="muted">
                               {whenLabel(comment.sentAt)}
                             </cf-text>
+                            {
+                              /* An edit is only honest if a reader can see one
+                                happened. `editedAt` says the body is no longer
+                                what its author sent, and `sentAt` deliberately
+                                still reads as when the thread reached here. */
+                            }
+                            {comment.editedAt
+                              ? (
+                                <cf-text
+                                  variant="caption"
+                                  tone="muted"
+                                  data-edited=""
+                                >
+                                  edited
+                                </cf-text>
+                              )
+                              : null}
+                            <cf-button
+                              variant="ghost"
+                              size="sm"
+                              disabled={!hasProfile}
+                              data-retract="comment"
+                              onClick={retractProfileComment({
+                                comments,
+                                comment,
+                                profileName,
+                                profileAvatar,
+                              })}
+                            >
+                              Retract
+                            </cf-button>
                           </cf-hstack>
                           <cf-text block style="white-space: pre-wrap;">
                             {comment.body}

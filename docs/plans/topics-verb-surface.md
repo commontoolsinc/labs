@@ -152,12 +152,30 @@ usage:
   rather than predicted: only `topic.tsx` needed a new baseline, because
   `main.tsx`'s contract never moved.
 
-  What is not built is the reader's control for them. The rows filter stamped
-  records already, but they render from a filtered, sorted `computed()`, and
-  whether an element of one still carries writable identity is unproven —
-  `dropMention` binds from an unfiltered read, so it settles nothing. A control
-  bound wrongly stamps a copy no reader sees, which is a silent failure, so it
-  wants a browser test rather than an assumption.
+  The reader retracts a comment or a link from the row it is rendered in.
+  Those rows come from a filtered, sorted `computed()`, and an element of one
+  keeps the identity of the record it was derived from, so a control bound to
+  it writes the stored record rather than a copy of it. That is measured
+  rather than assumed, across three files: `view-identity.test.tsx` pins the
+  property, `topics-rejections.test.tsx` holds the negative half — a
+  structural copy of a real stored record is refused, which is the case that
+  separates identity from content — and
+  `integration/topic-retraction-controls.test.ts` proves the shipped controls
+  through a real click, including the step that tells a control bound to the
+  view apart from one bound to the underlying array position.
+
+  Each control proves membership before it writes. That check is not redundant
+  with the property above; it is what decides how a regression in it would
+  present, refusing rather than stamping a record no reader shows.
+
+  A revised comment says so: the row carries an `edited` marker wherever
+  `editedAt` is set, so a comment whose body is no longer what its author sent
+  cannot read as one never touched. `sentAt` is deliberately left showing when
+  the thread reached that point rather than when the revision happened.
+
+  A control for `editComment` is not built, and revising therefore stays a
+  verb call. It needs per-row session state that a retraction does not — which
+  comment is open, and its draft.
 
   Two other gaps are open against this item. An agent can add a comment and
   cannot retract one, because these verbs name their target by reference and a

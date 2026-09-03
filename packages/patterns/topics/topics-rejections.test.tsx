@@ -2,7 +2,7 @@
  * Rejection-path tests for the Topics mutating verbs (verb contract rule 4,
  * docs/plans/pattern-verb-contract.md: rejection is a value, never a silent
  * no-op). Every action here makes a verb throw, so the runtime errors are
- * required (`expectRuntimeErrors: 33` — exact count, so a rejection quietly
+ * required (`expectRuntimeErrors: 34` — exact count, so a rejection quietly
  * reverting to a silent return fails the suite); each assertion then verifies
  * the write did NOT land. Happy and legacy paths live in topics.test.tsx — including the UI
  * composer wrappers, whose silent guards are correct behavior (an empty draft
@@ -265,6 +265,30 @@ export default pattern(() => {
     retractedComments.get()[0]?.body === "once"
   );
 
+  // A structural COPY of a comment this topic really holds. It is
+  // content-identical to a stored record, so every content-based check passes
+  // it and only identity separates the two — which makes it the case that says
+  // whether membership is proved by identity or by shape.
+  //
+  // It is also the negative half of view-identity.test.tsx. The browser's
+  // retraction controls bind the elements a filtered, sorted `computed()`
+  // hands them; that those elements still address the stored array is what
+  // that file pins, and this is the case that would pass anyway if membership
+  // were content-based, leaving the property untested.
+  const action_remove_copied_comment = action(() => {
+    const real = retractedTopic.comments[0];
+    if (real) {
+      retractedTopic.removeComment.send({
+        comment: { ...real } as typeof real,
+        agentName: "Sol",
+      });
+    }
+  });
+  const assert_copied_comment_refused = assert(() =>
+    retractedComments.get()[0]?.removedAt === undefined &&
+    retractedTopic.commentCount === 1
+  );
+
   const action_retract_both = action(() => {
     retractedTopic.removeComment.send({
       comment: retractedComments.key(0),
@@ -340,11 +364,11 @@ export default pattern(() => {
 
   return {
     // Every rejection below MUST surface as a thrown handler error —
-    // thirty-three throwing actions, thirty-three runtime errors. The exact count
+    // thirty-four throwing actions, thirty-four runtime errors. The exact count
     // means a
     // single verb quietly reverting to a silent early-return fails this suite;
     // the no-write assertions then prove the throw also blocked the write.
-    expectRuntimeErrors: 33,
+    expectRuntimeErrors: 34,
     [TESTS]: [
       { action: action_seed_topic },
       { assertion: assert_seeded },
@@ -409,6 +433,8 @@ export default pattern(() => {
       { action: action_seed_retractable },
       { action: action_edit_blank_body },
       { assertion: assert_body_survived_blank_edit },
+      { action: action_remove_copied_comment },
+      { assertion: assert_copied_comment_refused },
       { action: action_retract_both },
       { assertion: assert_one_retraction_each },
       { action: action_retract_comment_again },
