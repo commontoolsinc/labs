@@ -84,24 +84,33 @@ export function undeclaredBindingIsRejected(surface: Surface): Surface {
   };
 }
 
-// `@commonfabric/api/schema` adds schema-carrying overloads to several of the
-// declarations by module augmentation, and those overloads are part of what a
-// binding has to satisfy. This pins one of them, `wish`'s second argument, so
-// that changing its shape has to be done here as well as there.
-//
-// It does not pin that the augmentation reaches the requirement at all. An
-// augmentation applies across the whole program rather than per module, so
-// this file importing `schema.ts` puts the overloads in scope however
-// `builder/types.ts` is written, and no assertion here can see that import go.
-export type SchemaOverloadsAreRequired = Satisfies<
-  Surface["wish"],
-  {
-    <S extends JSONSchema>(
-      target: FactoryInput<WishParams>,
-      schema: S,
-    ): Reactive<WishState<Schema<S>>>;
-  }
->;
+/**
+ * `@commonfabric/api/schema` adds schema-carrying overloads to several of the
+ * declarations by module augmentation, and those overloads are part of what a
+ * binding has to satisfy. This pins the one on `wish` by calling it: an
+ * overload set that had lost the second parameter would not accept this call,
+ * where a type-level assignment would still hold, since a function of fewer
+ * parameters satisfies one that declares more.
+ *
+ * It does not pin that the augmentation reaches the requirement at all. An
+ * augmentation applies across the whole program rather than per module, so this
+ * file importing `schema.ts` puts the overloads in scope however
+ * `builder/types.ts` is written, and no assertion here can see that import go.
+ *
+ * Never called; the body is here for the type checker to read.
+ */
+export function wishTakesASchema(
+  wish: Surface["wish"],
+): Reactive<WishState<{ note: string }>> {
+  return wish(
+    { query: "#note" },
+    {
+      type: "object",
+      properties: { note: { type: "string" } },
+      required: ["note"],
+    } as const,
+  );
+}
 
 // The pins above all turn on `navigateTo`, so they say nothing about how far
 // the requirement reaches. What decides that is the list of declared names
