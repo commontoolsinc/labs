@@ -26,7 +26,11 @@ import {
   type OpenOptions,
   read,
 } from "../v2/engine.ts";
-import { getDocumentCachesDiagnostics, Server } from "../v2/server.ts";
+import {
+  getDocumentCachesDiagnostics,
+  getPushPriorityStats,
+  Server,
+} from "../v2/server.ts";
 import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
 
 const withEngine = async (
@@ -74,6 +78,48 @@ const seed = (
     } as never);
   }
 };
+
+/** A temporary store directory for a Server, removed afterwards. */
+const withStoreDir = async (
+  fn: (store: URL) => Promise<void>,
+): Promise<void> => {
+  const dir = await Deno.makeTempDir();
+  try {
+    await fn(toFileUrl(join(dir, "/")));
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+};
+
+/** Populate each space's store directly, before a server opens it; every
+ * engine is closed whether or not its seeding completes. */
+const seedSpaces = async (
+  store: URL,
+  spaces: readonly `did:${string}:${string}`[],
+  count: number,
+  valueOf: (i: number) => unknown,
+): Promise<void> => {
+  for (const space of spaces) {
+    const url = resolveSpaceStoreUrl(store, space);
+    await ensureDir(new URL("./", url));
+    const engine = await open({ url });
+    try {
+      seed(engine, count, valueOf);
+    } finally {
+      close(engine);
+    }
+  }
+};
+
+const serverOptions = (store: URL, processBudget?: number) => ({
+  store,
+  subscriptionRefreshDelayMs: 0,
+  ...(processBudget === undefined
+    ? {}
+    : { documentCacheProcessBudgetBytes: processBudget }),
+  authorizeSessionOpen: () => "did:key:z6Mk-document-cache-principal",
+  sessionOpenAuth: { audience: "did:key:z6Mk-document-cache-audience" },
+});
 
 describe("v2 document cache", () => {
   it("keeps a working set larger than the old bound resident across passes", async () => {
@@ -193,19 +239,19 @@ describe("v2 document cache", () => {
     }, { documentCacheMaxEntries: 1 });
   });
 
-  it("reports each open space's cache through the health provider", async () => {
+  it("reports each open space's cache through the health provider, withdrawn on close", async () => {
     const space = "did:key:z6Mk-document-cache-diagnostics";
     // Whatever an earlier test left registered is what closing hands back to.
     const registeredBefore = getDocumentCachesDiagnostics();
-    const server = new Server({
-      store: new URL("memory://document-cache-diagnostics"),
-      subscriptionRefreshDelayMs: 0,
-      authorizeSessionOpen: () => "did:key:z6Mk-document-cache-principal",
-      sessionOpenAuth: { audience: "did:key:z6Mk-document-cache-audience" },
-    });
+    const pushBefore = getPushPriorityStats();
+    const server = new Server(
+      serverOptions(new URL("memory://document-cache-diagnostics")),
+    );
     try {
       const empty = getDocumentCachesDiagnostics();
       assertEquals(empty, server.documentCachesDiagnostics());
+      // The push-priority provider follows the same registration.
+      assertEquals(getPushPriorityStats(), server.pushPriorityStats());
       assertEquals(empty?.spaces, {});
       assertEquals(empty?.bytes, 0);
       assertEquals(typeof empty?.processBudgetBytes, "number");
@@ -224,8 +270,10 @@ describe("v2 document cache", () => {
     } finally {
       await server.close();
     }
-    // Closing withdraws the provider (back to whatever was registered before).
+    // Closing withdraws both providers (back to whatever was registered
+    // before), so a closed server is never the one reported.
     assertEquals(getDocumentCachesDiagnostics(), registeredBefore);
+    assertEquals(getPushPriorityStats(), pushBefore);
   });
   it("rejects cache bounds that are not positive integers at open", async () => {
     const url = toFileUrl(await Deno.makeTempFile({ suffix: ".sqlite" }));
@@ -328,112 +376,189 @@ describe("v2 document cache", () => {
   });
 
   it("holds the process-wide budget across spaces, draining the least recently used space first", async () => {
-    const dir = await Deno.makeTempDir();
-    const store = toFileUrl(join(dir, "/"));
     const spaces = [
       "did:key:z6Mk-document-cache-process-a",
       "did:key:z6Mk-document-cache-process-b",
     ] as const;
-    // Populate each space's store directly, before the server opens it.
-    for (const space of spaces) {
-      const url = resolveSpaceStoreUrl(store, space);
-      await ensureDir(new URL("./", url));
-      const engine = await open({ url });
-      // Sixty-odd encoded bytes each: thirty of them do not fit in a
-      // thousand, so each space alone is over the process budget.
-      seed(engine, 30, (index) => `document ${index} ${"·".repeat(20)}`);
-      close(engine);
-    }
-    // Larger than one space's set, smaller than two: the second read must
-    // trim the first space — and only as far as needed.
-    const budget = 2_500;
-    const server = new Server({
-      store,
-      subscriptionRefreshDelayMs: 0,
-      documentCacheProcessBudgetBytes: budget,
-      authorizeSessionOpen: () => "did:key:z6Mk-document-cache-principal",
-      sessionOpenAuth: { audience: "did:key:z6Mk-document-cache-audience" },
+    await withStoreDir(async (store) => {
+      // Thirty documents of one weight each (the index is padded so every
+      // row encodes to the same length): sixty-odd bytes apiece, so one
+      // space's set fits the budget below and two sets do not.
+      await seedSpaces(
+        store,
+        spaces,
+        30,
+        (index) =>
+          `document ${String(index).padStart(2, "0")} ${"·".repeat(20)}`,
+      );
+      // Larger than one space's set, smaller than two: reading the second
+      // space must trim the first — and only as far as needed.
+      const budget = 2_500;
+      const server = new Server(serverOptions(store, budget));
+      try {
+        const readAll = (space: string) =>
+          server.evaluateGraphQuery(space, {
+            roots: Array.from({ length: 30 }, (_, index) => ({
+              id: entityId(index),
+              selector: { path: [], schema: true },
+            })),
+          });
+        await readAll(spaces[0]);
+        const afterA = server.documentCachesDiagnostics();
+        assertEquals(afterA.processBudgetBytes, budget);
+        // One space fits whole.
+        const first = afterA.spaces[spaces[0]];
+        assertEquals(first.entries, 30);
+        assertEquals(first.evictions, 0);
+        assertEquals(afterA.bytes, first.bytes);
+        assertEquals(afterA.bytes > budget / 2, true, `bytes ${afterA.bytes}`);
+        const weight = first.bytes / 30;
+        assertEquals(Number.isInteger(weight), true, "unequal row weights");
+
+        await readAll(spaces[1]);
+        const afterB = server.documentCachesDiagnostics();
+        assertEquals(afterB.bytes <= budget, true, `bytes ${afterB.bytes}`);
+        // The newest space is untouched; the least recently used one gave up
+        // exactly what the budget needed — the fewest entries that bring the
+        // total under it — and kept the rest.
+        const newest = afterB.spaces[spaces[1]];
+        assertEquals(newest.entries, 30);
+        assertEquals(newest.evictions, 0);
+        const older = afterB.spaces[spaces[0]];
+        const required = Math.ceil(
+          (first.bytes + newest.bytes - budget) / weight,
+        );
+        assertEquals(required > 0 && required < 30, true, `${required}`);
+        assertEquals(
+          older.evictions,
+          required,
+          "trimmed further than the budget required",
+        );
+        assertEquals(older.entries, 30 - required);
+        assertEquals(
+          afterB.bytes,
+          first.bytes + newest.bytes - required * weight,
+        );
+      } finally {
+        await server.close();
+      }
     });
-    try {
-      const readAll = (space: string) =>
-        server.evaluateGraphQuery(space, {
-          roots: Array.from({ length: 30 }, (_, index) => ({
-            id: entityId(index),
-            selector: { path: [], schema: true },
-          })),
+  });
+
+  it("holds the process-wide budget on a plain document read, not only after an evaluation", async () => {
+    // The budget is held as each document is cached, so a path with no
+    // enforcement of its own — the public readDocument here — returns
+    // within it: two spaces holding one document each of more than half the
+    // budget cannot both stay resident, and the second read drains the
+    // first space rather than returning over budget.
+    const spaces = [
+      "did:key:z6Mk-document-cache-read-a",
+      "did:key:z6Mk-document-cache-read-b",
+    ] as const;
+    const body = "x".repeat(700);
+    await withStoreDir(async (store) => {
+      await seedSpaces(store, spaces, 1, () => body);
+      const budget = 1_000;
+      const server = new Server(serverOptions(store, budget));
+      try {
+        assertEquals(await server.readDocument(spaces[0], entityId(0)), {
+          value: body,
         });
-      await readAll(spaces[0]);
-      const afterA = server.documentCachesDiagnostics();
-      assertEquals(afterA.processBudgetBytes, budget);
-      // One space fits whole.
-      assertEquals(afterA.spaces[spaces[0]].entries, 30);
-      assertEquals(afterA.spaces[spaces[0]].evictions, 0);
-      assertEquals(afterA.bytes > budget / 2, true, `bytes ${afterA.bytes}`);
+        const afterA = server.documentCachesDiagnostics();
+        assertEquals(afterA.spaces[spaces[0]].entries, 1);
+        assertEquals(afterA.bytes > budget / 2, true, `bytes ${afterA.bytes}`);
+        assertEquals(afterA.bytes <= budget, true, `bytes ${afterA.bytes}`);
 
-      await readAll(spaces[1]);
-      const afterB = server.documentCachesDiagnostics();
-      assertEquals(afterB.bytes <= budget, true, `bytes ${afterB.bytes}`);
-      // The newest space is untouched; the least recently used one gave up
-      // exactly what the budget needed and kept the rest.
-      assertEquals(afterB.spaces[spaces[1]].entries, 30);
-      assertEquals(afterB.spaces[spaces[1]].evictions, 0);
-      const older = afterB.spaces[spaces[0]];
-      assertEquals(older.evictions > 0, true);
-      assertEquals(older.entries > 0 && older.entries < 30, true);
-      assertEquals(
-        afterB.bytes + older.evictions * 0 >= budget - 100,
-        true,
-        "trimmed further than the budget required",
-      );
-    } finally {
-      await server.close();
-      await Deno.remove(dir, { recursive: true });
-    }
+        assertEquals(await server.readDocument(spaces[1], entityId(0)), {
+          value: body,
+        });
+        const afterB = server.documentCachesDiagnostics();
+        assertEquals(afterB.bytes <= budget, true, `bytes ${afterB.bytes}`);
+        assertEquals(afterB.spaces[spaces[1]].entries, 1);
+        assertEquals(afterB.spaces[spaces[0]].entries, 0);
+        assertEquals(afterB.spaces[spaces[0]].evictions, 1);
+      } finally {
+        await server.close();
+      }
+    });
   });
 
-  it("rejects a process-wide budget that is not a positive integer", () => {
-    for (const bad of [0, -5, 2.5]) {
-      assertThrows(
-        () =>
-          new Server({
-            store: new URL("memory://document-cache-bad-process-budget"),
-            documentCacheProcessBudgetBytes: bad,
-            authorizeSessionOpen: () => "did:key:z6Mk-document-cache-principal",
-            sessionOpenAuth: {
-              audience: "did:key:z6Mk-document-cache-audience",
-            },
-          }),
-        TypeError,
-        "documentCacheProcessBudgetBytes",
-      );
+  it("rejects a cache bound that is not a positive integer at construction", () => {
+    // Where it is configured, not at the first request that opens a space —
+    // and a rejected server registers nothing for the health route.
+    const registeredBefore = getDocumentCachesDiagnostics();
+    const pushBefore = getPushPriorityStats();
+    const bounds = [
+      "documentCacheBudgetBytes",
+      "documentCacheMaxEntries",
+      "documentCacheProcessBudgetBytes",
+    ] as const;
+    for (const bound of bounds) {
+      for (const bad of [0, -5, 2.5]) {
+        assertThrows(
+          () =>
+            new Server({
+              ...serverOptions(new URL("memory://document-cache-bad-bound")),
+              [bound]: bad,
+            }),
+          TypeError,
+          bound,
+        );
+      }
     }
+    assertEquals(getDocumentCachesDiagnostics(), registeredBefore);
+    assertEquals(getPushPriorityStats(), pushBefore);
   });
-  it("merges a commit's staged reads without double counting them", async () => {
+  it("remembers the revision a commit wrote once its rows are durable, and serves the next read from it", async () => {
+    const id = entityId(0);
     await withEngine((engine) => {
+      const patch = (localSeq: number, field: string) =>
+        applyCommit(engine, {
+          sessionId: "s:a",
+          commit: commit(localSeq, {
+            operations: [{
+              op: "patch",
+              id,
+              patches: [{ op: "add", path: `/value/${field}`, value: true }],
+            }],
+          }),
+        } as never);
       seed(engine, 1, () => ({ seed: true }));
-      // Cached by a plain read; then a commit patches the same document. What
-      // the commit reads on the way is served from the cache or staged and
-      // merged after the commit — either way the byte accounting must equal
-      // the entries' weights afterwards.
+      // Cold: nothing is cached when the commit below runs. A commit reads
+      // the revision it has just written inside its own transaction
+      // (snapshot materialization asks for the state it wrote), so that read
+      // is staged and reaches the cache only once the commit's rows are
+      // durable — as the one entry here.
       evictDocumentCacheEntries(engine, Number.MAX_SAFE_INTEGER);
-      assertEquals(storedValue(engine, 0), { value: { seed: true } });
-      assertEquals(documentCacheDiagnostics(engine).entries, 1);
-      applyCommit(engine, {
-        sessionId: "s:a",
-        commit: commit(2, {
-          operations: [{
-            op: "patch",
-            id: entityId(0),
-            patches: [{ op: "add", path: "/value/edited", value: true }],
-          }],
-        }),
-      } as never);
+      const cold = documentCacheDiagnostics(engine);
+      assertEquals(cold.entries, 0);
+      patch(2, "edited");
+      const merged = documentCacheDiagnostics(engine);
+      assertEquals(merged.entries, 1, "the commit's read was not remembered");
+      // So the first read after the commit already sees the patched revision
+      // from the cache.
+      assertEquals(storedValue(engine, 0), {
+        value: { seed: true, edited: true },
+      });
+      assertEquals(
+        documentCacheDiagnostics(engine).hits - merged.hits,
+        1,
+        "the patched revision was not served from the cache",
+      );
+      // The next commit stages its own new revision the same way: one more
+      // entry, nothing counted twice — the byte accounting equals the
+      // entries' weights.
+      patch(3, "again");
       const after = documentCacheDiagnostics(engine);
+      assertEquals(after.entries, 2);
+      assertEquals(storedValue(engine, 0), {
+        value: { seed: true, edited: true, again: true },
+      });
+      assertEquals(documentCacheDiagnostics(engine).hits - after.hits, 1);
       let sum = 0;
       for (const entry of engine.documentCache.values()) sum += entry.weight;
       assertEquals(after.bytes, sum, "bytes drifted from the entries' weights");
       assertEquals(after.entries, engine.documentCache.size);
-      assertEquals(after.entries >= 1, true);
     });
   });
 });

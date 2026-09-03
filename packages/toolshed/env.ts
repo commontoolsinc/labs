@@ -232,7 +232,9 @@ export const EnvSchema = z.object({
   // (packages/memory/v2/engine.ts, DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES): a
   // byte budget in encoded bytes and an entry cap. Unset means the engine's
   // defaults. Raise the budget when /api/health/stats `documentCaches` shows
-  // `evictions` climbing for a space that is being read repeatedly.
+  // `evictions` climbing for a space that is being read repeatedly. (`int()`
+  // is a safe-integer check in zod 4, so a value past 2^53 fails here rather
+  // than in the memory server.)
   MEMORY_DOCUMENT_CACHE_BUDGET_BYTES: z.coerce.number().int().positive()
     .optional(),
   MEMORY_DOCUMENT_CACHE_MAX_ENTRIES: z.coerce.number().int().positive()

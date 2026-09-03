@@ -374,7 +374,7 @@ export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
  *   are an ORDERING witness, not a delivered-frame metric.
  * All-zero in the OFF arm by construction: only the serving loop's wave
  * commits classify dirty keys as derived. Registered by the Server
- * instance (last registration wins — one co-hosted server per process);
+ * instance (the newest live server is reported; close() withdraws it);
  * surfaced under the health route's `servingLoop.push` block.
  */
 export type PushPriorityStats = {
@@ -383,10 +383,19 @@ export type PushPriorityStats = {
   mixedFlushes: number;
 };
 
-let pushPriorityStatsProvider: (() => PushPriorityStats) | undefined;
+/** Live servers' push-priority providers in construction order; a server
+ * withdraws its own on close(), so the newest LIVE server is the one
+ * reported, and closing one hands back to the one registered before it. */
+const pushPriorityStatsProviders: (() => PushPriorityStats)[] = [];
 
 export const getPushPriorityStats = (): PushPriorityStats | undefined =>
-  pushPriorityStatsProvider?.();
+  pushPriorityStatsProviders.at(-1)?.();
+
+/** Withdraw one server's health-route provider, leaving every other's. */
+const withdrawProvider = <T>(providers: T[], provider: T): void => {
+  const index = providers.indexOf(provider);
+  if (index >= 0) providers.splice(index, 1);
+};
 
 /** Every open engine's decoded-document cache, keyed by space, under the
  * process-wide budget the Server enforces across them. */
@@ -398,10 +407,11 @@ export type DocumentCachesDiagnostics = {
 
 /**
  * Default process-wide bound on decoded documents retained across every open
- * space's cache: two corpora the size of the Topics board's page load (98 MB
- * measured; see DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES). Enforced least
- * recently used space first, oldest entries first within it, on every
- * request that reaches an engine.
+ * space's cache: twice the per-space default, room for two active corpora at
+ * their full per-space allowance (a Topics-board page load retains 17.7 MB;
+ * see DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES for the sizing). Enforced as each
+ * document is cached (Engine's `onDocumentCached`), least recently used
+ * space first and oldest entries first within it.
  */
 export const DOCUMENT_CACHE_PROCESS_BUDGET_BYTES = 256 * 1024 * 1024;
 
@@ -1574,19 +1584,19 @@ export class Server {
     this.#store = options.store;
     this.#operationCodecs = options.operationCodecs ??
       createDefaultOperationCodecRegistry();
-    // Push-priority counters (Phase 6): module-level provider for the
-    // health route, same last-registration-wins posture as the runner's
-    // serving-loop stats registry (one co-hosted server per process).
-    pushPriorityStatsProvider = () => this.pushPriorityStats();
-    const processBudget = options.documentCacheProcessBudgetBytes;
-    if (
-      processBudget !== undefined &&
-      (!Number.isSafeInteger(processBudget) || processBudget <= 0)
-    ) {
-      throw new TypeError(
-        "documentCacheProcessBudgetBytes must be a positive safe integer",
-      );
-    }
+    // Every document-cache bound is checked here, where it is configured,
+    // not at the first request that opens a space (Engine.open checks the
+    // per-space pair again for its own callers) — and before this server
+    // registers anything a throw would leave behind.
+    Engine.validateDocumentCacheBounds({
+      documentCacheBudgetBytes: options.documentCacheBudgetBytes,
+      documentCacheMaxEntries: options.documentCacheMaxEntries,
+      documentCacheProcessBudgetBytes: options.documentCacheProcessBudgetBytes,
+    });
+    // Module-level providers for the health route (push-priority counters,
+    // Phase 6; document caches): the newest live server is reported, and
+    // close() withdraws exactly this server's.
+    pushPriorityStatsProviders.push(this.#pushPriorityStatsProvider);
     documentCachesDiagnosticsProviders.push(
       this.#documentCachesDiagnosticsProvider,
     );
@@ -1594,8 +1604,11 @@ export class Server {
 
   /** Evict, least recently used space first and oldest entries first
    * within it, until the decoded documents retained across every open
-   * space fit the process-wide budget. Cheap enough to run per request:
-   * a sum over the open engines, and no work at all while under budget. */
+   * space fit the process-wide budget. Runs as each engine caches a
+   * document (`onDocumentCached`) — the one moment the total grows — so the
+   * bound holds at every return, whichever path read; cheap enough for
+   * that: a sum over the open engines, and no work at all while under
+   * budget. */
   #enforceDocumentCacheBudget(): void {
     const budget = this.options.documentCacheProcessBudgetBytes ??
       DOCUMENT_CACHE_PROCESS_BUDGET_BYTES;
@@ -1613,8 +1626,13 @@ export class Server {
     }
   }
 
-  /** This server's health-route provider, kept so close() can withdraw
-   * exactly it and no other server's. */
+  /** Handed to every engine this server opens: the process-wide budget is
+   * held at insertion time. */
+  #onDocumentCached = () => this.#enforceDocumentCacheBudget();
+
+  /** This server's health-route providers, kept so close() can withdraw
+   * exactly them and no other server's. */
+  #pushPriorityStatsProvider = () => this.pushPriorityStats();
   #documentCachesDiagnosticsProvider = () => this.documentCachesDiagnostics();
 
   /** Every open engine's document-cache counters, keyed by space. A peek:
@@ -2123,15 +2141,17 @@ export class Server {
   }
 
   async close(): Promise<void> {
-    // Withdraw this server's health-route provider so a closed server is
+    // Withdraw this server's health-route providers so a closed server is
     // neither reported nor kept alive by the route; synchronous, ahead of
-    // the first await, so an un-awaited close still withdraws it at once.
-    const registered = documentCachesDiagnosticsProviders.indexOf(
+    // the first await, so an un-awaited close still withdraws them at once.
+    withdrawProvider(
+      pushPriorityStatsProviders,
+      this.#pushPriorityStatsProvider,
+    );
+    withdrawProvider(
+      documentCachesDiagnosticsProviders,
       this.#documentCachesDiagnosticsProvider,
     );
-    if (registered >= 0) {
-      documentCachesDiagnosticsProviders.splice(registered, 1);
-    }
     this.#cancelScheduledRefresh();
     await this.#refreshing;
     await this.#drainSpacePublicationLocks();
@@ -4533,7 +4553,6 @@ export class Server {
           // failure (or a failing operation-field attachment) must not
           // leave an already-inserted entry over budget.
           this.#enforceEvaluationCacheBudget();
-          this.#enforceDocumentCacheBudget();
           graphs.set(branch, tracked.state);
           for (const [docKey, entity] of tracked.state.entities) {
             recordUpdate(docKey, entity);
@@ -4763,7 +4782,6 @@ export class Server {
       // cover the throw path too.
       if (cacheEligible) {
         this.#enforceEvaluationCacheBudget();
-        this.#enforceDocumentCacheBudget();
       }
     }
   }
@@ -4802,7 +4820,6 @@ export class Server {
       foldRootAttribution(attribution, result.stats);
       serverSeq = result.serverSeq;
       this.#enforceEvaluationCacheBudget();
-      this.#enforceDocumentCacheBudget();
       graphs.set(branch, result.state);
       for (const [docKey, entity] of result.state.entities) {
         const { scopeKey } = fromDocKey(docKey);
@@ -6798,9 +6815,9 @@ export class Server {
    */
   private openEngine(space: string): Promise<Engine.Engine> {
     // Every request that reaches an engine passes here: stamp the space's
-    // use and hold the cross-space document-cache budget before it grows.
+    // use, the order the cross-space document-cache budget drains in (the
+    // budget itself is held as each engine caches, see #onDocumentCached).
     this.#engineUse.set(space, ++this.#engineUseClock);
-    this.#enforceDocumentCacheBudget();
     const existing = this.#engines.get(space);
     if (existing !== undefined) {
       return existing;
@@ -6822,6 +6839,7 @@ export class Server {
         operationCheckpointInterval: this.options.operationCheckpointInterval,
         documentCacheBudgetBytes: this.options.documentCacheBudgetBytes,
         documentCacheMaxEntries: this.options.documentCacheMaxEntries,
+        onDocumentCached: this.#onDocumentCached,
       });
     })();
     // The SYNC engine view (server-execution v2 Phase 5): the read-row

@@ -360,7 +360,10 @@ process:
   per open space (`Engine.documentCache` in `packages/memory/v2/engine.ts`)
   under the process-wide `processBudgetBytes` (total `bytes` beside it):
   per space, `entries` and `bytes` against `budgetBytes` and `maxEntries`,
-  and the lifetime `hits`, `misses` and `evictions`. A corpus is read again by every
+  and the lifetime `hits`, `misses` and `evictions`. The occupancy figures
+  (`entries`, `bytes`, and which spaces appear at all) are a snapshot of the
+  moment — the one exception to the paragraph below; the three counters
+  accumulate. A corpus is read again by every
   load and every refresh, so a space in good shape shows `hits` climbing
   across loads and `misses` rising only with commits. `evictions` climbing
   while a corpus is being walked means its working set does not fit the

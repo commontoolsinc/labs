@@ -947,9 +947,11 @@ interface PreparedStatements {
 export type DocumentCacheEntry = {
   document: EntityDocument | null;
 
-  /** Encoded bytes of the stored row(s) the document was decoded from — the
-   * entry's weight against the budget, a proxy for the decoded graph it
-   * keeps alive. */
+  /** The entry's weight against the byte budget, in encoded UTF-8 bytes —
+   * a proxy for the decoded graph it keeps alive. For a `set` that is the
+   * stored row's data; for a reconstruction it is the resulting document
+   * as it would be stored: what the entry retains, not the rows replayed
+   * to produce it. */
   weight: number;
 };
 
@@ -1009,6 +1011,11 @@ export type Engine = {
   documentCacheMaxEntries: number;
 
   documentCacheStats: DocumentCacheStats;
+
+  /** Told after each entry that reaches {@link Engine.documentCache} (the
+   * open option of the same name): where a host holds a bound across
+   * engines. */
+  onDocumentCached?: (engine: Engine) => void;
 
   /**
    * Where {@link cacheDocumentForRevision} puts entries while a commit is
@@ -1089,14 +1096,25 @@ export type OpenOptions = {
   operationCheckpointInterval?: number;
   operationCodecs?: OperationCodecRegistry;
 
-  /** Byte budget for the decoded-document cache, in encoded bytes of the
-   * rows its entries were decoded from (default
-   * DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES). */
+  /** Byte budget for the decoded-document cache, in encoded UTF-8 bytes of
+   * the documents as stored (default DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES;
+   * what an entry weighs is under DocumentCacheEntry). */
   documentCacheBudgetBytes?: number;
 
   /** Entry cap for the same cache (default
    * DEFAULT_DOCUMENT_CACHE_MAX_ENTRIES). */
   documentCacheMaxEntries?: number;
+
+  /**
+   * Called with this engine after each entry is added to its cache. A host
+   * that bounds decoded documents across engines (the Server's process-wide
+   * budget) enforces that bound here, at the one moment the total grows,
+   * rather than around the operations that read: every read path is
+   * covered without naming one, and the bound holds at every return. It may
+   * evict from this engine or any other; an entry evicted straight away was
+   * served and is simply not retained.
+   */
+  onDocumentCached?: (engine: Engine) => void;
 };
 
 export type InvocationRecord = {
@@ -1356,7 +1374,7 @@ export const DEFAULT_OPERATION_CHECKPOINT_INTERVAL = 100;
  *
  * Sized to keep one active corpus's working set resident, measured on a copy
  * of the production Topics board (129 topics, 2026-09-02): a full board page
- * load reads 13,313 documents whose retained encoded size is 17.7 MB (135
+ * load reads ~13,300 documents whose retained encoded size is 17.7 MB (135
  * topic piece docs at ~55 KB, ~800 computed cells at ~10 KB, every topic's
  * internals, mostly tiny). Under the earlier bound
  * (256 entries, cleared wholesale when full) no walk over that set ever found
@@ -1368,8 +1386,8 @@ export const DEFAULT_OPERATION_CHECKPOINT_INTERVAL = 100;
  * The byte budget is the retention bound — encoded UTF-8 bytes of the
  * document as stored, a proxy for the decoded graph kept alive (expect a few
  * times that in heap) — and the entry cap is the cardinality backstop, set
- * well above any real working set (the same board load is 13,371 entries;
- * a cap of 8,192 evicted 6,542 of them under 13 MB and served nothing).
+ * well above any real working set (a cap of 8,192 against that ~13,300-entry
+ * load evicted 6,542 entries under 13 MB and served nothing).
  * Least-recently-read eviction under a budget SMALLER than a corpus's working
  * set serves nothing (each miss displaces what the next read wants), so the
  * per-space default errs on the side of fitting; the Server bounds the total
@@ -1381,6 +1399,30 @@ export const DEFAULT_OPERATION_CHECKPOINT_INTERVAL = 100;
  */
 export const DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES = 128 * 1024 * 1024;
 export const DEFAULT_DOCUMENT_CACHE_MAX_ENTRIES = 65_536;
+
+/**
+ * Rejects, by name, a document-cache bound that is not a positive safe
+ * integer; an absent one means the default and passes. Shared by `open`
+ * and the Server's constructor, so a bad bound fails where it is configured
+ * rather than at the first request that opens a space.
+ */
+export const validateDocumentCacheBounds = (
+  bounds: Partial<
+    Record<
+      | "documentCacheBudgetBytes"
+      | "documentCacheMaxEntries"
+      | "documentCacheProcessBudgetBytes",
+      number
+    >
+  >,
+): void => {
+  for (const [name, value] of Object.entries(bounds)) {
+    if (value === undefined) continue;
+    if (!Number.isSafeInteger(value) || value <= 0) {
+      throw new TypeError(`${name} must be a positive safe integer`);
+    }
+  }
+};
 
 const prepareStatements = (database: Database): PreparedStatements => ({
   insertAuthorization: database.prepare(INSERT_AUTHORIZATION),
@@ -1831,6 +1873,7 @@ export const open = async (
     operationCodecs = createDefaultOperationCodecRegistry(),
     documentCacheBudgetBytes = DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES,
     documentCacheMaxEntries = DEFAULT_DOCUMENT_CACHE_MAX_ENTRIES,
+    onDocumentCached,
   }: OpenOptions,
 ): Promise<Engine> => {
   if (
@@ -1841,22 +1884,10 @@ export const open = async (
       "operationCheckpointInterval must be a positive safe integer",
     );
   }
-  if (
-    !Number.isSafeInteger(documentCacheBudgetBytes) ||
-    documentCacheBudgetBytes <= 0
-  ) {
-    throw new TypeError(
-      "documentCacheBudgetBytes must be a positive safe integer",
-    );
-  }
-  if (
-    !Number.isSafeInteger(documentCacheMaxEntries) ||
-    documentCacheMaxEntries <= 0
-  ) {
-    throw new TypeError(
-      "documentCacheMaxEntries must be a positive safe integer",
-    );
-  }
+  validateDocumentCacheBounds({
+    documentCacheBudgetBytes,
+    documentCacheMaxEntries,
+  });
   const database = await new Database(toDatabaseAddress(url), { create: true });
   database.exec(NEW_DB_PRAGMAS);
   database.exec(PRAGMAS);
@@ -1885,6 +1916,7 @@ export const open = async (
     documentCacheBudgetBytes,
     documentCacheMaxEntries,
     documentCacheStats: { hits: 0, misses: 0, evictions: 0 },
+    ...(onDocumentCached === undefined ? {} : { onDocumentCached }),
   };
 };
 
@@ -6856,7 +6888,9 @@ const documentCacheKey = (
  * (see DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES): a working set that fits stays
  * resident across every walk that reads it, and what ages out is what was
  * not read again — superseded revisions foremost. An entry heavier than the
- * whole budget is served but not retained.
+ * whole budget is served but not retained. A host bounding the total across
+ * engines hears of each insertion (`onDocumentCached`) and trims then, the
+ * one moment that total grows.
  */
 const cacheDocumentForRevision = (
   engine: Engine,
@@ -6889,6 +6923,7 @@ const cacheDocumentForRevision = (
   }
   engine.documentCache.set(key, { document: entry.document, weight });
   engine.documentCacheBytes += weight;
+  engine.onDocumentCached?.(engine);
 };
 
 const decodeStoredDocument = (data: string | null): EntityDocument =>
