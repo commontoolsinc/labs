@@ -532,3 +532,60 @@ Deno.test("the package integration tasks that carry the ON skip list hand deno a
     );
   }
 });
+
+//
+// The program CI invokes
+//
+// The workflow runs this file as a program (`deno run --allow-read
+// tasks/server-execution-on-skips.ts <suite> [--filter ...]`) and captures
+// stdout under `bash -e`, so the `import.meta.main` wrapper's exit-code
+// wiring is load-bearing. It is pinned here, by spawning the program the way
+// the workflow does, rather than left to whichever CI lane happens to run
+// it: the ON-arm lanes are the only ones that do, and only the default lanes
+// collect coverage, so under an OFF default the wrapper would otherwise be
+// measured by no run at all (COVERAGE.md, "Coverage must not depend on the
+// execution environment").
+//
+
+async function runAsProgram(args: string[]) {
+  const script = new URL("./server-execution-on-skips.ts", import.meta.url)
+    .pathname;
+  const output = await new Deno.Command(Deno.execPath(), {
+    args: ["run", "--allow-read", script, ...args],
+    cwd: new URL("../", import.meta.url).pathname,
+    stdout: "piped",
+    stderr: "piped",
+  }).output();
+  return {
+    code: output.code,
+    stdout: new TextDecoder().decode(output.stdout),
+    stderr: new TextDecoder().decode(output.stderr),
+  };
+}
+
+Deno.test("run as the program CI invokes, the wrapper exits with main's code and keeps the payload on stdout", async () => {
+  // A suite: exit 0, and stdout carries only the --ignore payload (or
+  // nothing, while the registry is empty) — the report rides stderr.
+  const suite = await runAsProgram(["runner"]);
+  assertEquals(suite.code, 0, suite.stderr);
+  assert(
+    suite.stdout === "" || suite.stdout.startsWith("--ignore="),
+    `stdout must be the payload only: ${JSON.stringify(suite.stdout)}`,
+  );
+  assert(suite.stderr.length > 0, "the skip report goes to stderr");
+
+  // --filter: the candidates come back on stdout, one per line.
+  const candidates = [
+    "packages/patterns/integration/zz-unlisted-a.test.ts",
+    "packages/patterns/integration/zz-unlisted-b.test.ts",
+  ];
+  const filtered = await runAsProgram(["patterns", "--filter", ...candidates]);
+  assertEquals(filtered.code, 0, filtered.stderr);
+  assertEquals(filtered.stdout, candidates.join("\n") + "\n");
+
+  // An unknown suite: a non-zero exit, so a `$( )` capture under `bash -e`
+  // fails the step instead of running with an empty flag.
+  const bogus = await runAsProgram(["bogus"]);
+  assertEquals(bogus.code, 1);
+  assertMatch(bogus.stderr, /Unknown suite "bogus"/);
+});
