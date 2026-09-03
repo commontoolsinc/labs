@@ -44,6 +44,7 @@ import {
   CurrentPlace,
   FACETS,
   type Move,
+  operandForChild,
   placeAtSpaceRoot,
 } from "../src/place.ts";
 
@@ -95,6 +96,75 @@ describe("place", () => {
       expect(placeAtSpaceRoot(SPACE)).toEqual({
         position: { kind: "root", space: SPACE },
         scope: "space",
+      });
+    });
+  });
+
+  describe("operandForChild()", () => {
+    // The readings `cd()` applies, asked in the other direction. A name whose
+    // own characters are not readings is its own operand; one whose characters
+    // are is reached by the reference the child renders as, which reads none of
+    // them; and a child no rendering names back is reached by neither.
+    //
+    // No case here tells the scope half of the comparison apart from nothing.
+    // Both spellings tried fix the scope at the place's own: the reference is
+    // rendered carrying it, and the one reading that moves a scope takes a
+    // piece segment's suffix with it, which moves the piece too and so fails
+    // the position half first. The comparison is over the pair because a place
+    // is one, and an operand landing on the child at another scope would land
+    // on another cell; this paragraph is read again if a spelling ever moves
+    // the scope while descending.
+
+    it("returns the name itself for a key the name's own reading names", () => {
+      expect(operandForChild(atReferencedPiece().place, "title")).toBe("title");
+    });
+
+    it("returns a facet's own name at a space root", () => {
+      expect(operandForChild(placeAtSpaceRoot(SPACE), "slugs")).toBe("slugs");
+    });
+
+    it("returns nothing at a space root for a name it lists no facet under", () => {
+      expect(operandForChild(placeAtSpaceRoot(SPACE), "fuse")).toBeUndefined();
+    });
+
+    it("returns a piece's own name inside a facet", () => {
+      expect(operandForChild(inSlugs().place, "board")).toBe("board");
+    });
+
+    it("returns a reference for a key called `..`", () => {
+      expect(operandForChild(atReferencedPiece().place, "..")).toBe(
+        `/@${SPACE}/${HANDLE}@space/..`,
+      );
+    });
+
+    it("returns a reference escaping a key that holds the separator", () => {
+      expect(operandForChild(atReferencedPiece().place, "a/b")).toBe(
+        `/@${SPACE}/${HANDLE}@space/a~1b`,
+      );
+    });
+
+    it("returns nothing for a key no rendering names back", () => {
+      expect(operandForChild(atReferencedPiece().place, "a ")).toBeUndefined();
+    });
+
+    it("returns nothing for a key whose first character opens a wish target", () => {
+      expect(operandForChild(atReferencedPiece().place, "#b")).toBeUndefined();
+    });
+
+    it("returns nothing for a piece name in neither vocabulary", () => {
+      expect(operandForChild(inSlugs().place, "Board")).toBeUndefined();
+    });
+
+    it("returns an operand `cd` moves to the child by", () => {
+      const place = atReferencedPiece();
+      const operand = operandForChild(place.place, "..");
+      expect(operand).toBeDefined();
+      place.cd(operand as string);
+      expect(place.place.position).toEqual({
+        kind: "piece",
+        space: SPACE,
+        piece: HANDLE,
+        path: [".."],
       });
     });
   });

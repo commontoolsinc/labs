@@ -7,8 +7,9 @@
  * nothing read. The address grammar belongs to the fabric
  * (`normalizeLLMFriendlyRef` over the runner's `parseReferenceParts`) and this
  * module consumes it; what it adds is the navigation spellings that grammar
- * has no room for — `..`, `-`, `/`, and a scope-only `@scope` — and the
- * refusals a place is subject to.
+ * has no room for — `..`, `-`, `/`, and a scope-only `@scope` — the refusals a
+ * place is subject to, and the operand that reaches a child, which is those
+ * same readings asked in the other direction.
  */
 
 import type { CellScope } from "@commonfabric/api";
@@ -172,6 +173,41 @@ export interface ResolvedTarget {
 /** The place a shuttle starts in: the space's root, read at the base scope. */
 export function placeAtSpaceRoot(space: MemorySpace): Place {
   return { position: { kind: "root", space }, scope: "space" };
+}
+
+/**
+ * The operand `cd` takes from `place` to the child of its position called
+ * `child`, and nothing where no operand reaches that child.
+ *
+ * Two spellings are offered, the shorter first. The name on its own is what
+ * `cd` takes wherever none of the name's own characters is a reading; where
+ * one is — a key called `..`, one holding the separator, a name a scope suffix
+ * would come off — the reference the child renders as reads none of them and
+ * reaches it anyway. A child no rendering names back has neither, and that is
+ * what the absent answer means.
+ *
+ * Each spelling is answered by making the move rather than by a second copy of
+ * the readings, so what comes back is an operand `cd` took. The move is made
+ * from a standing with no trail and no previous place, which bounds the answer
+ * in one direction only: `-` is never offered, even where shuttle's own
+ * history would make it reach the child, and what is offered reaches the child
+ * whatever that history holds.
+ */
+export function operandForChild(
+  place: Place,
+  child: string,
+): string | undefined {
+  const position = childPosition(place.position, child);
+  if (position === undefined) return undefined;
+  const goal: Place = { ...place, position };
+  const from: Standing = { place, trail: [] };
+  for (const candidate of [child, renderPosition(goal)]) {
+    const step = movePlace(from, candidate);
+    if (step.kind === "moved" && samePlace(step.to.place, goal)) {
+      return candidate;
+    }
+  }
+  return undefined;
 }
 
 /**
@@ -677,6 +713,64 @@ function enterTarget(
 /** Whether `segment` names one of the facets a space root lists. */
 function isFacet(segment: string): segment is Facet {
   return (FACETS as readonly string[]).includes(segment);
+}
+
+/**
+ * Helper for {@link operandForChild}, which is the position one level inside
+ * `position` called `child`, and nothing where that level has no child of
+ * that name.
+ *
+ * A root's children are its facets and are a closed set, so a name outside it
+ * denotes nothing. A facet's and a piece's are whatever the space holds, so
+ * this builds the position and leaves whether an operand reaches it to the
+ * move that tries one.
+ */
+function childPosition(
+  position: Position,
+  child: string,
+): Position | undefined {
+  switch (position.kind) {
+    case "root":
+      return isFacet(child)
+        ? { kind: "facet", space: position.space, facet: child }
+        : undefined;
+    case "facet":
+      return { kind: "piece", space: position.space, piece: child, path: [] };
+    case "piece":
+      return {
+        ...position,
+        path: [...position.path, linkPathSegmentToCellPathSegment(child)],
+      };
+  }
+}
+
+/**
+ * Helper for {@link operandForChild}, which is whether two places are the same
+ * place: both halves of the pair, since a scope is half of what a place is and
+ * two scopes select two cells at one position.
+ */
+function samePlace(one: Place, other: Place): boolean {
+  return one.scope === other.scope &&
+    samePosition(one.position, other.position);
+}
+
+/**
+ * Helper for {@link samePlace}, which is whether two positions are the same
+ * cell. It is {@link Position}'s own promise read as a comparison: the levels
+ * a position names and nothing about how either was reached.
+ */
+function samePosition(one: Position, other: Position): boolean {
+  if (one.space !== other.space) return false;
+  switch (one.kind) {
+    case "root":
+      return other.kind === "root";
+    case "facet":
+      return other.kind === "facet" && one.facet === other.facet;
+    case "piece":
+      return other.kind === "piece" && one.piece === other.piece &&
+        one.path.length === other.path.length &&
+        one.path.every((segment, index) => segment === other.path[index]);
+  }
 }
 
 /**
