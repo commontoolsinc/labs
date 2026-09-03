@@ -329,9 +329,31 @@ export default pattern(() => {
     poll.resetVotes.send({});
   });
 
-  const action_remove_first_option = action(() => {
-    const first = poll.options[0];
-    if (first) poll.removeOption.send({ optionId: first.id });
+  const action_request_remove_first_option = action(() => {
+    const button = findNodeByProp(
+      poll[UI],
+      "aria-label",
+      "Remove option (host)",
+    );
+    const onClick = propsOf(button)?.onClick;
+    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
+      (onClick as { send: (event: Record<string, never>) => void }).send({});
+    }
+  });
+
+  const assert_remove_confirmation_open = assert(() =>
+    findNodeByProp(poll[UI], "data-remove-option-confirm", true) !== undefined
+  );
+
+  const action_confirm_remove_first_option = action(() => {
+    const button = findNode(
+      poll[UI],
+      (node) => hasExactText(node, "Yes, remove"),
+    );
+    const onClick = propsOf(button)?.onClick;
+    if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
+      (onClick as { send: (event: Record<string, never>) => void }).send({});
+    }
   });
 
   // Cast a green vote on the surviving option (Thai) so that the next
@@ -816,7 +838,9 @@ export default pattern(() => {
 
       // Remove option with votes → option AND its votes are discarded
       { action: action_vote_green_first },
-      { action: action_remove_first_option },
+      { action: action_request_remove_first_option },
+      { assertion: assert_remove_confirmation_open },
+      { action: action_confirm_remove_first_option },
       { assertion: assert_option_removed_with_its_votes },
 
       // "We went here" history. The pre-join attempt above ("Sneaky") must

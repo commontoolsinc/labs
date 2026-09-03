@@ -5,13 +5,13 @@ name-keyed poll to profile-cell identity, share it, verify it actually worked,
 and recover it when it breaks. Written for someone (human or agent) operating
 the poll for the first time — read top to bottom once.
 
-> **Status (2026-08-24): fresh-piece migration required for profile identity.**
-> Ordinary compatible source updates still use `setsrc`, but this identity
-> change does not: `argument.visits[]` is an accepted contract break and the
-> compatibility gate refuses an in-place swap on the populated name-keyed piece.
-> Use Option B for this rollout. Joins are profile-gated: an identity with no
-> resolvable `#profile` CANNOT join, and the gate answers loudly (`joinMessage`)
-> rather than silently no-opping — the smoke test below reads that verdict.
+> **Status (2026-09-02): the current Estuary piece runs the profile-identity,
+> keyed-vote source from `main` at `94eb22057`.** Its question and 14 options
+> (including generated art) are intact. The roster, host, and votes are empty:
+> everyone must re-join, the first joiner becomes host, and votes start fresh.
+> Ordinary compatible source updates use Option A. Option B remains the safe
+> fresh-piece recovery/migration path. Joins are profile-gated: an identity with
+> no resolvable `#profile` cannot join, and `joinMessage` reports why.
 
 ## Where the data lives (mental model)
 
@@ -42,9 +42,9 @@ answering, re-establish it (see "Recovering the piece") and update this block.
 
 ### `estuary` — the stately instance, holding the real poll
 
-`estuary.saga-castor.ts.net` carries the team's poll as two pieces while the
-identity rollout is in progress. The **current** poll runs the profile-cell
-identity source (fresh piece, joined by creating or picking a profile):
+`estuary.saga-castor.ts.net` carries the team's current poll and a legacy
+name-keyed source piece. The **current** poll runs profile-cell identity and
+keyed votes; after the 2026-09-02 source update its participants must re-join:
 
 ```
 space:  team-lunch
@@ -52,9 +52,9 @@ piece:  fid1:gi7f-G8Z353Q_f_yLs_T3kB7A06TZjUmhf-M59bqvrE
 url:    https://estuary.saga-castor.ts.net/team-lunch/fid1:gi7f-G8Z353Q_f_yLs_T3kB7A06TZjUmhf-M59bqvrE
 ```
 
-The **legacy name-keyed** poll still holds the accumulated participants, options
-and votes, and is Option B's migration source. Treat its state as production
-data.
+The **legacy name-keyed** poll is a read-only migration source. Its identity
+links are not portable through `cf get | cf set`; use only the link-free fields
+and stripped visit procedure in Option B. Treat its state as production data.
 
 ```
 space:  team-lunch
@@ -126,6 +126,7 @@ LUNCH_POLL_TEST_ARGS=(
   --test packages/patterns/lunch-poll/lunch-stats.test.tsx
   --test packages/patterns/lunch-poll/main.test.tsx
   --test packages/patterns/lunch-poll/multi-user.test.tsx
+  --test packages/patterns/lunch-poll/pagination.test.tsx
   --test packages/patterns/lunch-poll/participant-identity-card.test.tsx
   --test packages/patterns/lunch-poll/poll-option-card.test.tsx
 )
@@ -146,6 +147,7 @@ deno task cf test packages/patterns/lunch-poll/generated-art.test.tsx --root pac
 deno task cf test packages/patterns/lunch-poll/lunch-stats.test.tsx --root packages/patterns
 deno task cf test packages/patterns/lunch-poll/main.test.tsx --root packages/patterns
 deno task cf test packages/patterns/lunch-poll/multi-user.test.tsx --root packages/patterns
+deno task cf test packages/patterns/lunch-poll/pagination.test.tsx --root packages/patterns
 deno task cf test packages/patterns/lunch-poll/participant-identity-card.test.tsx --root packages/patterns
 deno task cf test packages/patterns/lunch-poll/poll-option-card.test.tsx --root packages/patterns
 ```
@@ -191,15 +193,41 @@ that its stored rows remain readable.
 
 For an ordinary compatible change, update the source of the existing piece to
 **keep all accumulated state**. Do **not** run `cf piece new` for that case — it
-mints a fresh, empty instance.
+mints a fresh, empty instance. Run the exact update once with `--check`; only a
+clean, zero-exit preflight authorizes the apply:
+
+```bash
+# Runs all eight tests and the dry-run compatibility check; writes nothing.
+packages/patterns/lunch-poll/deploy-safe.sh
+
+# Repeats the same gates, applies, then requires a successful render.
+packages/patterns/lunch-poll/deploy-safe.sh --apply
+```
+
+The helper requires the `CF_API_URL`, `CF_IDENTITY`, `SPACE`, and `PIECE`
+variables from Environment setup. Its default is deliberately preflight-only.
+The equivalent commands are:
 
 ```bash
 deno task cf piece setsrc --piece "$PIECE" -s "$SPACE" \
   --root packages/patterns \
   "${LUNCH_POLL_TEST_ARGS[@]}" \
+  --check \
   packages/patterns/lunch-poll/main.tsx
-deno task cf piece step --piece "$PIECE" -s "$SPACE"
+
+# Apply only after the command above exits 0.
+deno task cf piece setsrc --piece "$PIECE" -s "$SPACE" \
+  --root packages/patterns \
+  "${LUNCH_POLL_TEST_ARGS[@]}" \
+  packages/patterns/lunch-poll/main.tsx
+
+# A deploy is not complete until the piece actually starts.
+deno task cf piece render --piece "$PIECE" -s "$SPACE" >/dev/null
 ```
+
+Keep every target, root, test, data-file, repository, and export flag identical
+between preflight and apply. A check against a different package or piece proves
+nothing about the write you apply.
 
 **For a compatible update, what survives (verified):** all the `PerSpace` cells
 (`users`/`votes`/`options`/`visits`/…). Cell ids derive from the causal
@@ -247,9 +275,18 @@ the input interface casually against a piece you care about.
 > compatibility proof, which runs _after_ the load. Recover with `cf piece new`
 > (see "Recovering the piece").
 
-> **`setsrc` can half-succeed.** Saving the source and refreshing the running
-> piece are separate steps, and the second can fail on its own. The command
-> still exits 0, because the source update did commit:
+> **Allocated `viewer` state can block a populated poll.** A browser opening the
+> poll can materialize the per-user `viewer` allocation. Candidate-schema
+> validation may then refuse `--check` even when the same source passes on a
+> fresh piece. Stop on that refusal. Confirm the diagnosis on a disposable piece
+> and, if needed, check the piece's own deployed bytes against itself. Clearing
+> production cells is not a preflight; it spends the state you are trying to
+> protect.
+
+> **`setsrc` can partially succeed.** Saving the source and refreshing the
+> running piece are separate steps, and the second can fail on its own. The
+> command prints the durable commit receipt but now exits nonzero when refresh
+> fails:
 >
 > ```
 > Piece source was saved, but refreshing the running piece failed: [Error: updated arguments do not match the candidate schema: profileAvatar: value does not match type string]
@@ -257,11 +294,12 @@ the input interface casually against a piece you care about.
 > Source revision 0f2c… committed as cf:module/Qy36SQqu…#default, but refreshing the running piece failed: updated arguments do not match the candidate schema: profileAvatar: value does not match type string
 > ```
 >
-> The piece is now on the new source and will not start. Read the whole output,
-> not its tail and not stdout alone: the success line is the only thing on
-> stdout, so `setsrc … > log` records what committed and drops both warnings. A
-> committed receipt is proof the source update landed, never proof the running
-> piece refreshed. See "A piece that saved its source and will not start".
+> The piece is now on the new source, but its running state is unverified. Read
+> the whole output, not its tail and not stdout alone: the receipt is on stdout
+> while the refresh failure is on stderr. A committed receipt proves only that
+> the source update landed. The nonzero exit must stop automation; use
+> `cf piece render` to learn whether a clean start recovers or the piece remains
+> wedged. See "A piece that saved its source and will not start".
 
 ## Option B — migrate the populated name-keyed poll to a fresh piece
 
@@ -281,50 +319,56 @@ MINE="$PIECE"
 ARG=$(deno task cf cell get --piece "$MINE" -s "$SPACE" --input --select '@' -q \
   | grep -oE '/of:fid1:[A-Za-z0-9_-]+')
 
-# 3. Copy each PerSpace field except the votes, the visit log and the host seat.
-#    Votes are deliberately not copied — see below.
-for field in question users options; do
-  deno task cf cell get --piece "$LEGACY_PIECE" -s "$SPACE" "$field" --input -q \
-    | deno task cf cell set -s "$SPACE" "$ARG/$field" -q
+# 3. Dry-run the exact source package against the target before copying data.
+deno task cf piece setsrc --piece "$MINE" -s "$SPACE" \
+  --root packages/patterns \
+  "${LUNCH_POLL_TEST_ARGS[@]}" \
+  --check \
+  packages/patterns/lunch-poll/main.tsx
+
+# 4. Copy only link-free PerSpace fields. Roster, host, and votes start empty.
+for field in question options; do
+  deno task cf get --piece "$LEGACY_PIECE" -s "$SPACE" "$field" --input -q \
+    | deno task cf set -s "$SPACE" "$ARG/$field" -q
 done
 
-# 4. Copy the visit log, deleting the predecessor's roster links (see below).
-deno task cf cell get --piece "$LEGACY_PIECE" -s "$SPACE" visits --input -q \
+# 5. Copy the visit log after deleting every identity link (see below).
+deno task cf get --piece "$LEGACY_PIECE" -s "$SPACE" visits --input -q \
   | deno eval '
       const v = JSON.parse(await new Response(Deno.stdin.readable).text());
       for (const e of v) {
         delete e.loggedBy;
-        for (const s of e.votes ?? []) delete s.voterLink;
+        for (const s of e.votes ?? []) {
+          delete s.voterLink;
+          delete s.voterProfile;
+        }
       }
       console.log(JSON.stringify(v));
     ' \
   | deno task cf cell set -s "$SPACE" "$ARG/visits" -q
 
-# 5. Recompute so derived values (counts, ranking) refresh.
+# 6. Recompute so derived values (counts, ranking) refresh.
 deno task cf piece step --piece "$MINE" -s "$SPACE"
 deno task cf piece inspect --piece "$MINE" -s "$SPACE" --summary
 ```
 
-**The votes do not come across, and copying them would be worse than losing
-them.** A vote lives at an address derived from its key — its voter's profile
-entity and the option — and a whole-list copy writes every row at an address the
-copy minted instead. The handlers address a vote by key, so they cannot reach a
-copied row: the first person to vote again for a place they had already voted
-for gets a second vote beside the copied one, and counts twice in every tally.
-Leaving `votes` out of step 3 starts the new piece empty, and everyone votes
-again. That costs the group nothing they were still looking at, because the poll
-only ever shows the current day's votes. The visit log is a different matter and
-does come across, at step 4: its vote snapshots are frozen records rather than
-live votes, and nothing addresses them by key.
+> **Why the copy writes to `$ARG` and not `cf set --input`.** A `cf set --input`
+> write validates the piece's whole input object, and this pattern's `viewer`
+> slot is a per-user allocation site rather than a plain value. Every field
+> fails on that slot rather than on the field being written, which bites any
+> lunch-poll piece, including one created seconds ago, and a nested path
+> (`users/0/name`) fails alongside a top-level one. A write addressed to the
+> argument document itself is not validated that way, which is what step 2
+> resolves and what the loop above uses. That escape hatch also permits
+> destructive clears, so it is not a general-purpose update path.
 
-> **Why the copy writes to `$ARG` and not `cf cell set --input`.** A
-> `cf cell set --input` write validates the piece's whole input object, and this
-> pattern's `viewer` slot is a per-user allocation site rather than a plain
-> value. Every field fails on that slot rather than on the field being written,
-> which bites any lunch-poll piece, including one created seconds ago, and a
-> nested path (`users/0/name`) fails alongside a top-level one. A write
-> addressed to the argument document itself is not validated that way, which is
-> what step 2 resolves and what the loop above uses.
+> **A JSON link is not a restorable backup.** A value read by `cf get` can be
+> refused when written back, including into the piece that minted it, with
+> `source has no durable schema contract`. This is measured for roster profile
+> links. Never clear `users`, `host`, `votes`, or identity-bearing visits on the
+> theory that captured JSON can restore them. Treat that JSON as an audit
+> snapshot only, and rehearse any link-bearing copy on a disposable piece before
+> touching the source.
 
 > **Why the host seat is left behind.** The name-keyed predecessor has no
 > profile-cell host identity worth carrying. Leave the new seat empty: the first
@@ -343,9 +387,10 @@ live votes, and nothing addresses them by key.
 > The profile-first schema makes those identity fields optional, and the names
 > travel separately in `loggedByName` and `voter`, so deleting the legacy links
 > costs the "who logged this" navigation and nothing else — the "Recently eaten"
-> log and the "Lunch stats" tallies come across intact. For a later
-> profile-first-to-profile-first copy in the same space, the new links point at
-> shared profile cells rather than roster slots and can be copied as-is.
+> log and the "Lunch stats" tallies come across intact. Do not assume a later
+> profile-first-to-profile-first copy can preserve links: `cf get` does not
+> carry the durable source contract required to write those links back. Prove
+> every link-bearing field on the disposable target or strip it.
 
 This is a **one-time snapshot copy**, not a live link — the pieces diverge
 after.
@@ -460,18 +505,11 @@ and they are the only path the browser also takes:
   deno task cf piece call --piece "$PIECE" -s "$SPACE" clearHistory '{}'
   deno task cf piece step --piece "$PIECE" -s "$SPACE"
   ```
-  Or, since `visits` is an ordinary `PerSpace` cell, write it directly (below).
-- **PerSpace cells:** write the input cells directly:
-  ```bash
-  echo '[]' | deno task cf cell set --piece "$PIECE" -s "$SPACE" users     --input -q
-  echo '{}' | deno task cf cell set --piece "$PIECE" -s "$SPACE" host      --input -q
-  echo '[]' | deno task cf cell set --piece "$PIECE" -s "$SPACE" options   --input -q
-  echo '[]' | deno task cf cell set --piece "$PIECE" -s "$SPACE" votes     --input -q
-  echo '[]' | deno task cf cell set --piece "$PIECE" -s "$SPACE" visits    --input -q
-  deno task cf piece step --piece "$PIECE" -s "$SPACE"
-  ```
-  After this, the first person to join in the browser becomes host as their own
-  browser identity.
+- **Whole-poll reset:** create a fresh piece. Do not raw-clear `users`, `host`,
+  `votes`, or identity-bearing visits in place. Their JSON export is useful for
+  audit and manual reconstruction, but its links may not be accepted on restore.
+  A new piece makes the reset explicit and leaves the old piece available for
+  read-only recovery work.
 
 ## Recovering the piece
 
@@ -523,9 +561,9 @@ NEW=$(deno task cf piece new packages/patterns/lunch-poll/main.tsx \
   "${LUNCH_POLL_TEST_ARGS[@]}" \
   -s "$SPACE" | grep -oE 'fid1:[A-Za-z0-9_-]+' | head -1)
 
-# 2. Copy the PerSpace state across with the Option B loop (the visit log
-#    carries too, once its roster links are nulled). Tip: leave users/host
-#    empty so the first joiner becomes host, or copy them and use Become host.
+# 2. Copy only the link-free state with the Option B procedure. Strip identity
+#    links from visits; leave users, host, and votes empty so participants
+#    re-join and the first joiner becomes host.
 
 # 3. Make the fresh piece the shared one: update the "live pieces" block above.
 ```
@@ -544,18 +582,24 @@ pick a shared profile before joining the poll.
 
 ## Performance notes
 
-Cold-load cost is dominated by graph/runtime instantiation, which measures
-~linear at ~12ms/option. `main.tsx` makes no network calls of its own: no
-web-search, no homepage verification, no model call.
+Cold-load and vote latency are dominated by the rendered reactive graph, not the
+vote write. On the 14-option/1-viewer reproduction, the former UI built about
+1,454 nodes and 3,504 edges. Paging the composed controls to seven cards,
+passing each card one derived vote color, and sharing the editor surfaces cut
+the measured graph after option creation to about 636 nodes and 1,492 edges.
+Vote rounds stayed converged with no conflicts or reverts; recent settle maxima
+were roughly 77–107 ms in the final local diagnostic. Run the same workload
+with:
 
-Per-option cuisine art is generated in the browser, and only on the **host's**
-client: `generated-art.tsx` requests `/api/ai/img` via `fetchBinary` under a 30s
-mutex, and skips the request entirely for any option that already carries a
-stored image. The host keeps a thumbnail with the card's keep action, which
-fires `setOptionImage` to persist the data URL onto that option's `imageUrl`;
-every other viewer reads the stored value rather than generating its own. Art
-therefore costs at most one request per option across the whole poll, not one
-per option per viewer.
+```bash
+deno run -A packages/patterns/tools/lunch-poll-diagnose.ts --production
+```
+
+Cuisine art is generated only after the host clicks **generate art** for an
+option. One shared `generated-art.tsx` editor then requests `/api/ai/img` via
+`fetchBinary`; cards with stored art render that value directly and instantiate
+no generator. **Keep art** fires `setOptionImage` to persist the data URL onto
+the selected option, and every viewer then reads the stored image.
 
 For the deeper aggregate + write-conflict findings that still apply to a poll
 with many options and voters, see willkelly's perf investigation in

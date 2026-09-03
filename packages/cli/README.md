@@ -177,6 +177,36 @@ validates only that path, which makes the two different operations on the same
 cell: reach for `apply` when the new input is a whole document, and for `set`
 when it is one value in a document that is otherwise correct.
 
+`cf set --piece <id> --input <path>` resolves that path through the piece's
+input contract and currently revalidates the complete input document. A write
+can therefore be refused over an unrelated allocated field. Addressing the raw
+argument cell by id avoids that whole-document check, but it is an unsafe
+recovery tool: it can erase link-bearing data that a later `cf set` will refuse
+to restore because the serialized link has no durable source contract.
+
+## Updating piece source
+
+Run `cf piece setsrc --check` before every source update to a piece whose state
+matters. It compiles the complete candidate package, compares it with the exact
+piece named on the command line, writes nothing, and exits nonzero on refusal.
+The target, entry, root, export, test, data-file, and repository flags on the
+check must match the apply.
+
+```bash
+cf piece setsrc --cell fid1:piece --root packages/patterns \
+  --check packages/patterns/example/main.tsx
+cf piece setsrc --cell fid1:piece --root packages/patterns \
+  packages/patterns/example/main.tsx
+cf piece render --cell fid1:piece >/dev/null
+```
+
+The source commit and refresh of the running piece are separate operations. If
+the commit lands but refresh fails, `setsrc` prints the commit receipt on
+stdout, prints the failure and recovery checks on stderr, and exits nonzero.
+That status means “source changed, running deploy unverified,” not rollback: use
+`piece render`, `piece inspect`, and `piece getsrc` to determine the live state.
+A receipt alone is never proof that the updated piece starts.
+
 ## Piece discovery
 
 `cf piece ls` lists the pieces in the selected space's piece registry. It reads

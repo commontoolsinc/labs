@@ -1,45 +1,20 @@
 import {
   computed,
-  equals,
   lift,
   NAME,
   pattern,
   type Stream,
   UI,
   type VNode,
-  Writable,
 } from "commonfabric";
 import type {
   CastVoteEvent,
   LogVisitEvent,
-  LunchProfileCell,
   Option,
-  RemoveOptionEvent,
-  SetOptionImageEvent,
-  Vote,
+  OptionTargetEvent,
   VoteColor,
 } from "./main.tsx";
-import GeneratedArt, {
-  type GeneratedArtFetchState,
-  safeImageUrl,
-} from "./generated-art.tsx";
-
-/** Admin-side generated-art persistence state for one option row. */
-export type PollOptionArtSyncState = GeneratedArtFetchState;
-
-/** Shared per-session target cell used for one open option editor at a time. */
-export type PollOptionLinkTargetCell = Writable<string | null | undefined>;
-
-const myVoteFor = (
-  votes: readonly Vote[],
-  viewerProfile: LunchProfileCell | undefined,
-  optionId: string,
-): VoteColor | undefined => {
-  if (!viewerProfile) return undefined;
-  return votes.find(
-    (v) => v.optionId === optionId && equals(v.voter, viewerProfile),
-  )?.voteType;
-};
+import { safeImageUrl } from "./generated-art.tsx";
 
 const formatRank = lift<{ rank: number | undefined }, string>(({ rank }) =>
   rank === undefined || rank <= 0 ? "—" : `#${rank}`
@@ -58,10 +33,8 @@ const formatRank = lift<{ rank: number | undefined }, string>(({ rank }) =>
  * Inputs for one rendered ranked option row.
  *
  * The parent owns all durable and shared UI state. This pattern receives one
- * option, current viewer/admin facts, shared per-session editor state, and the
- * streams it should emit for mutations. When rendering inside `options.map()`,
- * pass the resolved `viewerProfile` value from the parent, not the raw name
- * cell.
+ * option, narrow current-viewer/admin facts, and the streams it should emit for
+ * mutations or selection in the parent's shared editor surfaces.
  */
 export interface PollOptionCardInput {
   /** Option record to render. */
@@ -70,8 +43,8 @@ export interface PollOptionCardInput {
   /** One-based display rank, or undefined while the parent ranking settles. */
   rank: number | undefined;
 
-  /** The viewer's profile cell — identity, compared with `equals()`. */
-  viewerProfile?: LunchProfileCell;
+  /** This viewer's vote for the option, or `undefined` when they have none. */
+  myVote?: VoteColor;
 
   /** Whether the current viewer is allowed to vote. */
   isJoined: boolean;
@@ -79,23 +52,17 @@ export interface PollOptionCardInput {
   /** Whether the current viewer owns admin-only actions. */
   isAdmin: boolean;
 
-  /** Shared vote list used to compute this viewer's selected vote. */
-  votes: readonly Vote[];
+  /** Parent-owned stream that opens this option's remove confirmation. */
+  requestRemove: Stream<OptionTargetEvent>;
 
-  /** Per-session option id awaiting admin remove confirmation. */
-  removeConfirmTarget: PollOptionLinkTargetCell;
+  /** Parent-owned stream that opens this option in the generated-art editor. */
+  requestArt: Stream<OptionTargetEvent>;
 
   /** Parent-owned stream that toggles or records this viewer's vote. */
   castVote: Stream<CastVoteEvent>;
 
-  /** Parent-owned admin stream that removes this option after confirmation. */
-  removeOption: Stream<RemoveOptionEvent>;
-
   /** Parent-owned admin stream that records this option in visit history. */
   logVisit: Stream<LogVisitEvent>;
-
-  /** Parent-owned admin stream persisting this option's generated art. */
-  setOptionImage: Stream<SetOptionImageEvent>;
 }
 
 /**
@@ -109,18 +76,6 @@ export interface PollOptionCardOutput {
 
   /** Static VNode rendering the complete option row. */
   [UI]: VNode;
-
-  /**
-   * Generated-art lifecycle for this row: `"stored"` once the option carries a
-   * persisted image (every viewer), the underlying fetch state while the host's
-   * client is generating, and `""` for non-hosts before anything is stored.
-   * Pure read — persistence happens only through the host's explicit keep
-   * action (→ `setOptionImage`). Optional for the same reason as
-   * `GeneratedArtOutput.fetchState`: it is fetch-derived on the generating
-   * path, and a required declaration would gate boundary readers of
-   * non-generating rows.
-   */
-  artSyncState?: PollOptionArtSyncState;
 }
 
 export default pattern<PollOptionCardInput, PollOptionCardOutput>(
@@ -128,43 +83,21 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
     {
       option,
       rank,
-      viewerProfile,
+      myVote,
       isJoined,
       isAdmin,
-      votes,
-      removeConfirmTarget,
+      requestRemove,
+      requestArt,
       castVote,
-      removeOption,
       logVisit,
-      setOptionImage,
     },
   ) => {
     const oid = option.id;
     const optionTitle = option.title;
     const displayRank = formatRank({ rank });
-    const myVote = computed(() => myVoteFor(votes, viewerProfile, oid));
-    const isRemoveConfirm = computed(() => removeConfirmTarget.get() === oid);
-
-    // Generated cuisine thumbnail. The stored option image is the shared
-    // truth every viewer renders; generation is gated to the host's client
-    // (`shouldGenerate`) and only while nothing is stored (GeneratedArt
-    // skips the request once `sourceUrl` is set). Persistence is the host's
-    // explicit keep action below: it reads the child's `imageDataUrl` output
-    // directly (fetch-derived child outputs materialize for parents since
-    // CT-1836) and sends it into the parent-owned stream; once the handler
-    // stores the data URL, `sourceUrl` flows back in and generation stops
-    // everywhere.
-    const art = GeneratedArt({
-      prompt: optionTitle,
-      sourceUrl: option.imageUrl,
-      shouldGenerate: isAdmin,
-    });
-
-    // Row-level art state: the stored option image wins; otherwise the live
-    // generation state read from the sub-pattern — `""` for non-hosts, whose
-    // instances never generate.
-    const artSyncState = computed<PollOptionArtSyncState>(() =>
-      safeImageUrl(option.imageUrl) ? "stored" : (art.fetchState ?? "")
+    const storedImageUrl = computed(() => safeImageUrl(option.imageUrl));
+    const canGenerateArt = computed(() =>
+      isAdmin && safeImageUrl(option.imageUrl) === ""
     );
 
     return {
@@ -183,12 +116,35 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
             gap: "10px",
           }}
         >
-          {
-            /* Generated-art thumbnail (call-form instance above): stored
-              option image for everyone; host-gated generation while empty,
-              persisted via the host's keep action → setOptionImage. */
-          }
-          {art[UI]}
+          <div
+            style={{
+              width: "96px",
+              height: "96px",
+              flexShrink: 0,
+              borderRadius: "8px",
+              overflow: "hidden",
+              backgroundColor: "#f9fafb",
+              border: "1px solid #eee",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "32px",
+            }}
+          >
+            {storedImageUrl
+              ? (
+                <img
+                  src={storedImageUrl}
+                  alt=""
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                  }}
+                />
+              )
+              : <span aria-hidden="true">🍽️</span>}
+          </div>
           <span
             style={{
               minWidth: "28px",
@@ -246,7 +202,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
                         textDecoration: "underline",
                         cursor: "pointer",
                       }}
-                      onClick={() => removeConfirmTarget.set(oid)}
+                      onClick={() => requestRemove.send({ optionId: oid })}
                     >
                       remove
                     </button>
@@ -274,11 +230,11 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
                   </button>
                 )
                 : null}
-              {artSyncState === "generated"
+              {canGenerateArt
                 ? (
                   <button
                     type="button"
-                    aria-label="Keep this art (host)"
+                    aria-label="Generate art (host)"
                     style={{
                       background: "#eef2ff",
                       border: "1px solid #c7d2fe",
@@ -289,57 +245,13 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
                       fontWeight: 600,
                       cursor: "pointer",
                     }}
-                    onClick={() =>
-                      setOptionImage.send({
-                        optionId: oid,
-                        imageUrl: art.imageDataUrl ?? "",
-                      })}
+                    onClick={() => requestArt.send({ optionId: oid })}
                   >
-                    ✦ keep this art
+                    ✦ generate art
                   </button>
                 )
                 : null}
             </div>
-            {isRemoveConfirm
-              ? (
-                <div
-                  style={{
-                    marginTop: "8px",
-                    padding: "8px 10px",
-                    backgroundColor: "#fef2f2",
-                    border: "1px solid #fecaca",
-                    borderRadius: "6px",
-                    fontSize: "12px",
-                    color: "#991b1b",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <span>
-                    Remove "{optionTitle}" and discard its votes?
-                  </span>
-                  <cf-button
-                    size="sm"
-                    variant="primary"
-                    onClick={() => {
-                      removeOption.send({ optionId: oid });
-                      removeConfirmTarget.set(null);
-                    }}
-                  >
-                    Yes, remove
-                  </cf-button>
-                  <cf-button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => removeConfirmTarget.set(null)}
-                  >
-                    Cancel
-                  </cf-button>
-                </div>
-              )
-              : null}
           </div>
           {isJoined
             ? (
@@ -407,7 +319,6 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
             : null}
         </div>
       ),
-      artSyncState,
     };
   },
 );

@@ -1,3 +1,12 @@
+/**
+ * Headless lunch-poll scaling probe.
+ *
+ * Use `--production` for the current 14-option single-viewer shape, `--quick`
+ * for a smoke check, or `--cases=<options>x<users>,...` for an explicit
+ * matrix. Diagnostics go to stderr and the machine-readable result is the one
+ * JSON document written to stdout.
+ */
+
 import { parseLink } from "@commonfabric/runner";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
@@ -895,10 +904,18 @@ function validateUserCount(userCount: number, source: string): void {
 
 function matrixConfigFromArgs(): MatrixConfig {
   const quick = Deno.args.includes("--quick");
+  const production = Deno.args.includes("--production");
   return {
     program: stringArg("program", "main.tsx"),
-    optionCounts: numberListArg("options", quick ? [1, 3] : [1, 3, 10]),
-    userCounts: numberListArg("users", quick ? [2] : [2, 5], 1),
+    optionCounts: numberListArg(
+      "options",
+      production ? [14] : quick ? [1, 3] : [1, 3, 10],
+    ),
+    userCounts: numberListArg(
+      "users",
+      production ? [1] : quick ? [2] : [2, 5],
+      1,
+    ),
     voteRounds: numberArg("rounds", quick ? 1 : 3),
   };
 }

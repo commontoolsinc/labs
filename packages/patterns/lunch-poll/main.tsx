@@ -68,6 +68,7 @@
  */
 
 import {
+  action,
   type Cell,
   computed,
   Default,
@@ -85,9 +86,9 @@ import {
   wish,
   Writable,
 } from "commonfabric";
+import GeneratedArt, { safeImageUrl } from "./generated-art.tsx";
 import PollOptionCard from "./poll-option-card.tsx";
 import ParticipantIdentityCard from "./participant-identity-card.tsx";
-import { safeImageUrl } from "./generated-art.tsx";
 
 /**
  * The minimal profile shape this pattern reads: the stable identity cell for
@@ -226,6 +227,11 @@ export interface RemoveOptionEvent {
   optionId: string;
 }
 
+/** Selects an option for a per-session editor or confirmation surface. */
+export interface OptionTargetEvent {
+  optionId: string;
+}
+
 export interface CastVoteEvent {
   optionId: string;
   voteType: VoteColor;
@@ -233,9 +239,9 @@ export interface CastVoteEvent {
 
 /**
  * Art persistence event: the host keeps a generated thumbnail by storing its
- * data URL onto the option. Sent by the option card's host-only keep action,
- * which reads the GeneratedArt sub-pattern's `imageDataUrl` output directly
- * (fetch-derived child outputs materialize for parents since CT-1836).
+ * data URL onto the option. Sent by the parent-owned editor's host-only keep
+ * action, which reads the one GeneratedArt sub-pattern's `imageDataUrl` output
+ * directly (fetch-derived child outputs materialize for parents since CT-1836).
  */
 export interface SetOptionImageEvent {
   optionId: string;
@@ -652,6 +658,7 @@ const parseVisitDate = (
 // fabric array lives in one cell, so an unbounded log would grow every computed
 // that reads it; 200 is generous for a lunch poll.
 const MAX_HISTORY = 200;
+const OPTION_PAGE_SIZE = 7;
 
 // Label for a visit derived purely from its own timestamp — never from the
 // current clock, so it stays idempotent inside reactive computations (timestamps
@@ -697,6 +704,10 @@ const overrideViewer = handler<ViewerOverride, {
   });
 });
 
+const selectOptionTarget = handler<OptionTargetEvent, {
+  target: Writable<string | null | undefined>;
+}>(({ optionId }, { target }) => target.set(optionId));
+
 const addOption = handler<AddOptionEvent, {
   options: OptionsCell;
   votes: VotesCell;
@@ -730,7 +741,7 @@ const addOption = handler<AddOptionEvent, {
 );
 
 // Host persists the generated cuisine thumbnail (a data URL read from the
-// GeneratedArt sub-pattern by the card's keep action) onto its option.
+// shared GeneratedArt editor by its keep action) onto the selected option.
 // Idempotent on the stored value, keyed-collection addressed, and admin-gated
 // like every other mutation — only the host's client generates, but the gate
 // holds regardless.
@@ -1001,6 +1012,7 @@ interface OptionTally {
   green: number;
   yellow: number;
   red: number;
+  myVote?: VoteColor;
   voters: Array<{
     name: string;
     voteType: VoteColor;
@@ -1036,23 +1048,25 @@ const tallyOptions = (
       : users.find((u) => equals(u.profile, voter));
   const tallies = options.map((option): OptionTally => {
     const optionVotes = votes.filter((v) => v.optionId === option.id);
+    const voters = optionVotes.map((v) => {
+      const entry = rosterOf(v.voter);
+      const name = entry?.name ?? "";
+      return {
+        name,
+        voteType: v.voteType,
+        color: entry?.color ?? "#888",
+        initials: initialsByName.get(name) ??
+          getInitials(name, participantNames),
+        isSelf: viewer !== undefined && equals(v.voter, viewer),
+      };
+    });
     return {
       option,
       green: optionVotes.filter((v) => v.voteType === "green").length,
       yellow: optionVotes.filter((v) => v.voteType === "yellow").length,
       red: optionVotes.filter((v) => v.voteType === "red").length,
-      voters: optionVotes.map((v) => {
-        const entry = rosterOf(v.voter);
-        const name = entry?.name ?? "";
-        return {
-          name,
-          voteType: v.voteType,
-          color: entry?.color ?? "#888",
-          initials: initialsByName.get(name) ??
-            getInitials(name, participantNames),
-          isSelf: viewer !== undefined && equals(v.voter, viewer),
-        };
-      }),
+      myVote: voters.find((voter) => voter.isSelf)?.voteType,
+      voters,
     };
   });
   return [...tallies].sort((a, b) => {
@@ -1181,6 +1195,12 @@ export interface CozyPollOutput {
 const EMPTY_OPTIONS: Option[] = [];
 const EMPTY_VOTES: Vote[] = [];
 const EMPTY_USERS: User[] = [];
+const EMPTY_OPTION_SELECTION: Option = {
+  id: "",
+  title: "",
+  addedByName: "",
+  imageUrl: "",
+};
 
 export default pattern<CozyPollInput, CozyPollOutput>(
   (
@@ -1198,6 +1218,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // not exposed as pattern inputs. Uses the scoped-constructor idiom
     // introduced by parking-coordinator (PR #3610).
     const optionDraft = Writable.perSession.of<string>("");
+    // The rendered page is shared because the composed card collection lives
+    // in the poll's space scope. Keeping it space-scoped avoids persisting
+    // session-scoped option links in that shared collection.
+    const optionPage = Writable.of<number>(0);
     // Host's backdate field for "we went here" — a "YYYY-MM-DD" draft, blank
     // means today. Per-session like the other form drafts.
     const visitDate = Writable.perSession.of<string>("");
@@ -1222,6 +1246,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     const removeConfirmTarget = Writable.perSession.of<
       string | null | undefined
     >(null);
+    const artTarget = Writable.perSession.of<string | null | undefined>(null);
     const resetConfirmPending = Writable.perSession.of<boolean>(false);
     const clearHistoryConfirmPending = Writable.perSession.of<boolean>(false);
     // Resolve the viewer's shared profile at the TOP LEVEL, per the
@@ -1308,6 +1333,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       myProfile: viewerProfileCell,
       host,
     });
+    const requestRemoveOption = selectOptionTarget({
+      target: removeConfirmTarget,
+    });
+    const requestArt = selectOptionTarget({ target: artTarget });
     const boundCastVote = castVote({
       votes,
       users,
@@ -1367,6 +1396,38 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       );
     });
     const todayVoteCount = computed(() => todaysVotes.length);
+    const currentOptionPage = computed(() => {
+      const lastPage = Math.max(
+        0,
+        Math.ceil(options.length / OPTION_PAGE_SIZE) - 1,
+      );
+      return Math.min(optionPage.get(), lastPage);
+    });
+    const visibleOptions = computed(() => {
+      const page = currentOptionPage;
+      const start = page * OPTION_PAGE_SIZE;
+      return options.slice(start, start + OPTION_PAGE_SIZE);
+    });
+    const hasMultipleOptionPages = computed(() =>
+      options.length > OPTION_PAGE_SIZE
+    );
+    const optionPageLabel = computed(() => {
+      const count = options.length;
+      if (count === 0) return "";
+      const start = currentOptionPage * OPTION_PAGE_SIZE + 1;
+      const end = Math.min(start + OPTION_PAGE_SIZE - 1, count);
+      return `Options ${start}–${end} of ${count} · shared view`;
+    });
+    const previousOptionPage = action(() => {
+      optionPage.set(Math.max(0, optionPage.get() - 1));
+    });
+    const nextOptionPage = action(() => {
+      const lastPage = Math.max(
+        0,
+        Math.ceil(options.length / OPTION_PAGE_SIZE) - 1,
+      );
+      optionPage.set(Math.min(lastPage, optionPage.get() + 1));
+    });
     // The "Recently eaten" card: the 8 most-recent visits (newest first),
     // derived straight from the `visits` array. An array-shaped computed (not a
     // lift-returned VNode) is what lets the card keep its plain-JSX `.map(...)`
@@ -1413,6 +1474,43 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // Rank from today's votes only — the tallies, swatches, and top choice all
     // reflect the current day.
     const ranked = tallyOptions(options, todaysVotes, users, viewerProfileCell);
+    const removeSelection = computed(() => {
+      const target = removeConfirmTarget.get();
+      return options.find((option) => option.id === target) ??
+        EMPTY_OPTION_SELECTION;
+    });
+    const showRemoveConfirm = computed(() => removeSelection.id !== "");
+    const confirmRemoveOption = action(() => {
+      const optionId = removeConfirmTarget.get() ?? "";
+      if (optionId === "") return;
+      boundRemoveOption.send({ optionId });
+      removeConfirmTarget.set(null);
+    });
+    const closeRemoveConfirm = action(() => removeConfirmTarget.set(null));
+    const artSelection = computed(() => {
+      const target = artTarget.get();
+      return options.find((option) => option.id === target) ??
+        EMPTY_OPTION_SELECTION;
+    });
+    // One editor serves every option. An empty prompt keeps its fetch dormant
+    // until the host explicitly selects an option from a card.
+    const generatedArt = GeneratedArt({
+      prompt: artSelection.title,
+      sourceUrl: artSelection.imageUrl,
+      shouldGenerate: isAdmin,
+    });
+    const showArtEditor = computed(() => artSelection.id !== "");
+    const generatedArtReady = computed(() =>
+      generatedArt.fetchState === "generated"
+    );
+    const keepGeneratedArt = action(() => {
+      const optionId = artTarget.get() ?? "";
+      const imageUrl = generatedArt.imageDataUrl ?? "";
+      if (optionId === "" || imageUrl === "") return;
+      boundSetOptionImage.send({ optionId, imageUrl });
+      artTarget.set(null);
+    });
+    const closeArtEditor = action(() => artTarget.set(null));
 
     const topChoice = todayVoteCount > 0 && ranked.length > 0
       ? ranked[0]
@@ -1833,11 +1931,107 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   );
                 })}
 
+                {showRemoveConfirm
+                  ? (
+                    <div
+                      data-remove-option-confirm
+                      style={{
+                        marginBottom: "12px",
+                        padding: "10px 12px",
+                        backgroundColor: "#fef2f2",
+                        border: "1px solid #fecaca",
+                        borderRadius: "8px",
+                        fontSize: "12px",
+                        color: "#991b1b",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <span>
+                        Remove "{removeSelection.title}" and discard its votes?
+                      </span>
+                      <cf-button
+                        size="sm"
+                        variant="primary"
+                        onClick={confirmRemoveOption}
+                      >
+                        Yes, remove
+                      </cf-button>
+                      <cf-button
+                        size="sm"
+                        variant="ghost"
+                        onClick={closeRemoveConfirm}
+                      >
+                        Cancel
+                      </cf-button>
+                    </div>
+                  )
+                  : null}
+
+                {showArtEditor
+                  ? (
+                    <div
+                      data-art-editor
+                      style={{
+                        marginBottom: "12px",
+                        padding: "12px",
+                        border: "1px solid #c7d2fe",
+                        borderRadius: "8px",
+                        backgroundColor: "#eef2ff",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "12px",
+                      }}
+                    >
+                      {generatedArt[UI]}
+                      <div style={{ flex: 1 }}>
+                        <div
+                          style={{
+                            fontSize: "13px",
+                            fontWeight: 600,
+                            color: "#312e81",
+                          }}
+                        >
+                          Generating art for {artSelection.title}
+                        </div>
+                        <div
+                          style={{
+                            marginTop: "8px",
+                            display: "flex",
+                            gap: "8px",
+                          }}
+                        >
+                          {generatedArtReady
+                            ? (
+                              <cf-button
+                                size="sm"
+                                variant="primary"
+                                aria-label="Keep this art (host)"
+                                onClick={keepGeneratedArt}
+                              >
+                                Keep art
+                              </cf-button>
+                            )
+                            : null}
+                          <cf-button
+                            size="sm"
+                            variant="ghost"
+                            aria-label="Close art editor"
+                            onClick={closeArtEditor}
+                          >
+                            Cancel
+                          </cf-button>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                  : null}
+
                 {/* Interactive options — vote per option */}
-                {options.map((option) => {
+                {visibleOptions.map((option) => {
                   const oid = option.id;
-                  // Touch the full option shape here so the mapWithPattern
-                  // element schema includes every field the child reads.
                   const cardOption: Option = {
                     id: option.id,
                     title: option.title,
@@ -1846,28 +2040,65 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       ? {}
                       : { imageUrl: option.imageUrl }),
                   };
-                  const rank = computed(() => {
+                  const cardState = computed(() => {
                     const idx = ranked.findIndex(
                       (t) => t.option.id === oid,
                     );
-                    return idx >= 0 ? idx + 1 : undefined;
+                    return {
+                      rank: idx >= 0 ? idx + 1 : undefined,
+                      myVote: idx >= 0 ? ranked[idx]?.myVote : undefined,
+                    };
                   });
                   return (
                     <PollOptionCard
                       option={cardOption}
-                      rank={rank}
-                      viewerProfile={viewerProfileCell}
+                      rank={cardState.rank}
+                      myVote={cardState.myVote}
                       isJoined={isJoined}
                       isAdmin={isAdmin}
-                      votes={todaysVotes}
-                      removeConfirmTarget={removeConfirmTarget}
+                      requestRemove={requestRemoveOption}
+                      requestArt={requestArt}
                       castVote={boundCastVote}
-                      removeOption={boundRemoveOption}
                       logVisit={boundLogVisit}
-                      setOptionImage={boundSetOptionImage}
                     />
                   );
                 })}
+
+                {hasMultipleOptionPages
+                  ? (
+                    <div
+                      data-option-pagination
+                      style={{
+                        margin: "4px 0 16px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "10px",
+                      }}
+                    >
+                      <cf-button
+                        size="sm"
+                        variant="ghost"
+                        disabled={currentOptionPage === 0}
+                        onClick={previousOptionPage}
+                      >
+                        Previous
+                      </cf-button>
+                      <span style={{ fontSize: "12px", color: "#6b7280" }}>
+                        {optionPageLabel}
+                      </span>
+                      <cf-button
+                        size="sm"
+                        variant="ghost"
+                        disabled={(currentOptionPage + 1) * OPTION_PAGE_SIZE >=
+                          optionCount}
+                        onClick={nextOptionPage}
+                      >
+                        Next
+                      </cf-button>
+                    </div>
+                  )
+                  : null}
 
                 {
                   /* Recently eaten — the visit log, shown below the options.

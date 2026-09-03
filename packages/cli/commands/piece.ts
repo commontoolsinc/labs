@@ -2509,6 +2509,10 @@ export const piece = targetOptions(
     cliText(`cf piece setsrc ${EX_ID} ${EX_URL} ./main.tsx`),
     `Update the source for "${EX_PIECE}" with ./main.tsx`,
   )
+  .example(
+    cliText(`cf piece setsrc ${EX_ID} ${EX_COMP_PIECE} --check ./main.tsx`),
+    `Check whether ./main.tsx can replace the source for "${EX_PIECE}" without writing.`,
+  )
   .option("-c,--cell, --piece <cell:string>", PIECE_OPTION_HELP)
   .option(
     "--main-export <export:string>",
@@ -4818,12 +4822,14 @@ export interface SetPieceSourceCommandDependencies {
   setPiecePattern?: typeof setPiecePattern;
 }
 
-/** Injectable effects for testing the successful `piece setsrc` action. */
+/** Injectable effects for testing the `piece setsrc` action. */
 export interface ApplyPieceSourceCommandDependencies {
   setPieceSourceFromCommand?: typeof setPieceSourceFromCommand;
   render?: (message: string) => void;
   warn?: (message: string) => void;
   hint?: (message: string) => void;
+  /** Exit-status seam for a committed source whose running refresh failed. */
+  setExitCode?: (code: number) => void;
 }
 
 /** Injectable dependencies for testing `piece setsrc --check`. */
@@ -4917,6 +4923,18 @@ export async function applyPieceSourceCommandAction(
   const refreshWarning = setsrcRefreshWarning(update);
   if (refreshWarning !== undefined) {
     (deps.warn ?? note)(refreshWarning);
+    (deps.hint ?? hint)(cliText(`RECOVERY CHECKS:
+  → Start the piece:  cf piece render --cell ${config.piece} ...
+  → Inspect state:    cf piece inspect --cell ${config.piece} ...
+  → Read saved source: cf piece getsrc --cell ${config.piece} <outpath> ...
+
+The source commit is durable, but this deploy is not healthy until the piece
+starts. The command exits non-zero so scripts cannot mistake the receipt for a
+successful refresh.`));
+    (deps.setExitCode ?? ((code: number) => {
+      Deno.exitCode = code;
+    }))(1);
+    return;
   }
   (deps.hint ?? hint)(cliText(`NEXT STEPS:
   → Test in browser: ${config.apiUrl}/${config.space}/${config.piece}

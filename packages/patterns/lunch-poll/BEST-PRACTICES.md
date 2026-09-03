@@ -31,6 +31,15 @@ shared pattern documentation.
 
 ## Mapped Children
 
+- Bound the number of composed children, not only the number visible in CSS.
+  Every dormant child still contributes graph nodes and invalidation work. Page
+  a large mapped collection before composition when interaction latency grows
+  with row count.
+- Pass the smallest derived value a row needs. For example, pass one viewer's
+  vote color instead of the viewer profile and the complete vote list.
+- Instantiate expensive editors once at the owning boundary and select the row
+  they edit. A generated-art or confirmation pattern per row costs graph work
+  even while every editor is closed.
 - When instantiating a sub-pattern inside `array.map(...)`, make every child
   field read explicit in the map body. Passing a reactive item object through
   without touching its fields can produce a narrowed element schema that omits
@@ -68,9 +77,13 @@ shared pattern documentation.
 - Validate against populated existing state before deploying over a live piece.
   Fresh local state can miss regressions involving existing votes, joined
   identities, and stored history.
-- After `setsrc`, verify the piece's state reads back as expected. Browser
-  console probes are useful when CLI reads do not subscribe or a remote
-  websocket is unreliable.
+- Run `cf piece setsrc --check` with the exact target and packaging flags before
+  every live apply. After `setsrc`, require both a zero exit status and a
+  successful `cf piece render`; the commit receipt only proves that source was
+  saved. Verify the piece's input state separately.
+- A link serialized by `cf get` is not a backup that `cf set` can necessarily
+  restore. Prove link-bearing copy and recovery procedures on a disposable piece
+  before clearing the original cell.
 
 ## Documentation
 
