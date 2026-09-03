@@ -5,7 +5,10 @@
  * into concise summaries suitable for LLMs to help humans debug software behavior.
  */
 
-import { toCompactDebugString } from "@commonfabric/data-model";
+import {
+  type CompactDebugStringOptions,
+  toCompactDebugString,
+} from "@commonfabric/data-model";
 
 import { entityUriSchemePrefix } from "../entity-kind.ts";
 import type { MemorySpace } from "../runtime.ts";
@@ -17,6 +20,17 @@ import {
   getDirectTransactionReactivityLog,
   getTransactionWriteDetails,
 } from "./transaction-inspection.ts";
+
+/**
+ * Rendering options for a written value in a summary line: a glimpse of the
+ * value, bounded on every axis, since a line names what changed rather than
+ * carrying it.
+ */
+const SUMMARY_VALUE_OPTIONS: CompactDebugStringOptions = {
+  maxLength: 100,
+  maxArrayLength: 2,
+  maxStringLength: 50,
+};
 
 /**
  * Condensed summary of a transaction suitable for LLM consumption
@@ -154,11 +168,14 @@ function formatWrite(write: WriteDetail): string {
     return `${write.path}: deleted`;
   }
 
-  const newVal = formatValueForSummary(write.value);
+  const newVal = toCompactDebugString(write.value, SUMMARY_VALUE_OPTIONS);
 
   // If we have previous value, show before → after
   if (write.previousValue !== undefined) {
-    const oldVal = formatValueForSummary(write.previousValue);
+    const oldVal = toCompactDebugString(
+      write.previousValue,
+      SUMMARY_VALUE_OPTIONS,
+    );
     return `${write.path}: ${oldVal} → ${newVal}`;
   }
 
@@ -262,37 +279,13 @@ function extractWrites(
       objectId: shortenId(fullObjectId),
       fullObjectId,
       path,
-      value: truncateValue(value, 100),
-      previousValue: truncateValue(detail.previousValue, 100),
+      value,
+      previousValue: detail.previousValue,
       isDeleted,
     });
   }
 
   return writes;
-}
-
-/**
- * Truncate a value for display
- */
-function truncateValue(value: unknown, maxLength: number): unknown {
-  if (value === undefined) return undefined;
-  if (value === null) return null;
-
-  if (typeof value === "string") {
-    return value.length > maxLength
-      ? value.substring(0, maxLength) + "..."
-      : value;
-  }
-
-  if (Array.isArray(value)) {
-    return `[Array: ${value.length} items]`;
-  }
-
-  if (typeof value === "object") {
-    return toCompactDebugString(value, { maxLength: maxLength });
-  }
-
-  return value;
 }
 
 /**
@@ -326,7 +319,7 @@ function generateSummary(
     if (write.isDeleted) {
       parts.push(`Deleted ${write.path}`);
     } else {
-      const valueStr = formatValueForSummary(write.value);
+      const valueStr = toCompactDebugString(write.value, SUMMARY_VALUE_OPTIONS);
       parts.push(`${write.path} = ${valueStr}`);
     }
   }
@@ -336,24 +329,6 @@ function generateSummary(
   }
 
   return parts.join("; ");
-}
-
-/**
- * Format a value for the summary line
- */
-function formatValueForSummary(value: unknown): string {
-  if (value === undefined) return "undefined";
-  if (value === null) return "null";
-  if (typeof value === "string") {
-    const truncated = value.length > 50
-      ? value.substring(0, 50) + "..."
-      : value;
-    return `"${truncated}"`;
-  }
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  return toCompactDebugString(value);
 }
 
 /**
