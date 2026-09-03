@@ -25,13 +25,6 @@ import type { Logger, LoggerBreakdown } from "@commonfabric/utils/logger";
  * metadata as enumerable properties on the function, which is what the
  * replacer keeps of one.
  */
-/**
- * Longest text an expanded marker's detail shows. The indented rendering has
- * no length option of its own, and a marker with many keys at every level
- * within the depth limit still runs long, so the display bounds itself.
- */
-const MAX_MARKER_DETAIL_LENGTH = 10000;
-
 const DEBUGGER_VALUE_OPTIONS: DebugValueOptions = {
   maxDepth: 3,
   maxArrayLength: 5,
@@ -41,6 +34,13 @@ const DEBUGGER_VALUE_OPTIONS: DebugValueOptions = {
       ? { name: value.name || "[anonymous]", ...value }
       : value,
 };
+
+/**
+ * Longest text an expanded marker's detail shows. The indented rendering has
+ * no length option of its own, and a marker with many keys at every level
+ * within the depth limit still runs long, so the display bounds itself.
+ */
+const MAX_MARKER_DETAIL_LENGTH = 10000;
 
 /**
  * Hierarchical topic definitions for filtering telemetry events.
