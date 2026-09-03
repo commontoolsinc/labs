@@ -387,11 +387,16 @@ export class Client {
 
   /**
    * The state this client is in now, decided in the branch order
-   * `#ensureConnected()` uses so that `connected` here means what
-   * `isConnected()` means. The order is what makes them agree across the
+   * `#ensureConnected()` uses. Reading `#connected` before falling through to
+   * `reconnecting` is what makes this agree with `isConnected()` across the
    * window a successful reconnect opens, where the handshake has already
    * marked the client connected while the reconnect it belongs to is still in
-   * flight: both read `#connected` first, and so both call the transport up.
+   * flight.
+   *
+   * The agreement stops there rather than holding in general. A `close()`
+   * landing while a handshake continuation is queued leaves `#connected` true
+   * under `#closed`, and this reports `closed` where `isConnected()` reports
+   * `true`. Where they differ, this is the accurate one.
    */
   get connectionState(): ConnectionState {
     if (this.#closed) return "closed";
@@ -662,9 +667,11 @@ export class Client {
             // Redundant today: the notification at the top of this catch
             // has already woken every waiter, and none of them resumes
             // until this block finishes, so each reads the state this
-            // line settles. It stays because every write to a state
-            // field notifies for its own write, which is what lets the
-            // set of those writes be checked rather than reasoned about.
+            // line settles. It stays because no write to a field
+            // `.connectionState` reads leaves its block without a
+            // notification covering it, and that rule is what lets the
+            // write sites be checked rather than reasoned about one by
+            // one.
             this.#noteStateChange();
             this.#rejectPending(err);
             return;

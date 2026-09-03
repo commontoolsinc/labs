@@ -9,12 +9,14 @@
  * socket takes. Each transition is therefore observed as it happens rather
  * than waited out: nothing polls and nothing sleeps.
  *
- * What that costs is worth knowing before reading a failure here. A
+ * How a failure here reads is worth knowing before debugging one. A
  * transition the client makes without notifying leaves a case awaiting a
- * promise that never resolves, so the suite hangs rather than failing an
- * assertion. With no timeout in the wait there is nothing to cut it short and
- * call it a miss, which makes the hang the honest signal: it is evidence of a
- * missing notification, not a flake.
+ * promise nothing will resolve, and Deno fails the run on the drained event
+ * loop with `Promise resolution is still pending but the event loop has
+ * already resolved`, the transcript's last unfinished line naming the case.
+ * Where a later transition resolves that waiter instead, the case fails on
+ * the state it then reads, as an ordinary value diff. Both land immediately:
+ * nothing here waits out a timeout, so neither reads as a flake.
  */
 
 import { describe, it } from "@std/testing/bdd";

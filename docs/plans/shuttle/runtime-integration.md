@@ -101,16 +101,21 @@ the storage layer reports it:
   state a consumer can read, and it is a per-space poll for permanent
   denial. Its own documentation records a hole: a denial that arrives during
   reconnect is visible only as the session's `closeError`.
-- Nothing exposes "reconnecting" at all. `Client.#reconnecting`,
-  `#connected`, and `#fatalError` are private with no accessor, and
-  `#onClose` swallows the reconnect promise, so a consumer cannot tell quiet
-  because nothing changed from quiet because the socket is down and backoff
-  has reached its thirty-second cap.
+- The memory client reports its own connection state.
+  `Client.connectionState` names which state it is in, and
+  `Client.whenStateChanged()` resolves on the next transition, so a consumer
+  of the client waits on a change rather than polling for one. That surface
+  stops where `isConnected()` does: the storage layer reads neither member,
+  so a consumer above it still cannot tell quiet because nothing changed
+  from quiet because the socket is down and backoff has reached its
+  thirty-second cap.
 
-So the liveness work is an **observation seam**, added where the state
-already lives, reporting live, reconnecting, and permanently failed. That is
-what B1 owes, and the three states are what the prompt and the view markers
-render.
+So the liveness work is a **relay**: carrying the state the memory client
+already reports up through the storage layer to a consumer, as live,
+reconnecting, and permanently failed. That is what B1 owes, and those three
+are what the prompt and the view markers render. The client's own vocabulary
+is wider — it separates a closed client from a failed one — so the relay
+decides what to collapse.
 
 ## Watch mechanics
 
