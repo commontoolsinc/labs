@@ -35,7 +35,7 @@ was last checked against the code.
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
 | [`readerSchemaPrecedence`](#readerschemaprecedence)                         | `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` env, or `RuntimeOptions.experimental`                                                                   | on                                                                                   | Robin McCollum (#6338)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
-| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **off** (`SERVER_EXECUTION_DEFAULT_ENABLED = false`; explicit `true` selects the other arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | re-flip ON (the same two-surface change back), soak on main, then delete the flag and OFF path | Phases 1–7 landed; the default rolled back to OFF 2026-09-03 (its section); stable `default`/`opposite` CI roles keep both postures guarded and make a default flip data-only |
+| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **off** (`SERVER_EXECUTION_DEFAULT_ENABLED = false`; explicit `true` selects the other arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | soak on main at the ON default, then delete the flag and OFF path | Phases 1–7 landed; the section's dated entries carry each flip; stable `default`/`opposite` CI roles keep both postures guarded and make a default flip data-only |
 | [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-explicit`                                                                   | Bernhard Seefeld (#3263)                              | tighten default toward `enforce-strict`                                                                                                                                                                                           | active; ladder is permanent                                                     |
 | [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4011)                              | move toward `persist`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcWriteFloor`](#cfcwritefloor)                                           | `RuntimeOptions.cfcWriteFloor`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4479)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
@@ -362,15 +362,14 @@ server](#clients-that-are-not-built-alongside-their-server).
     F10 interim — is DELETED). Later stages add their surfaces under
     this same flag; both halves of any coupled behavior move together
     on it.
-- **Current default and planned end state.** **OFF by default** — the ONE
-  first-party default is `SERVER_EXECUTION_DEFAULT_ENABLED` in
-  [`packages/memory/v2/server-execution-default.ts`](../../packages/memory/v2/server-execution-default.ts),
-  value `false` again since the rollback PR (2026-09-03), which returned it
-  from the `true` the flip PR set (2026-08-28, after the plan's Phase-7
-  ordered gates were met: the ON-skip registry EMPTY, OW31's ruled
-  posture built, OW45–OW53 closed, the OW38(ii) benchmark bar ruled met
-  — "topics numbers are fine"; landed flip-READY DARK at `false`
-  2026-08-16 by owner ruling), read by every deployed-topology entry
+- **Current default and planned end state.** The summary table's cell
+  states the current value of the ONE first-party default,
+  `SERVER_EXECUTION_DEFAULT_ENABLED` in
+  [`packages/memory/v2/server-execution-default.ts`](../../packages/memory/v2/server-execution-default.ts)
+  (a test pins the cell to the constant); the dated status entries below
+  carry its history (landed flip-ready dark at `false` 2026-08-16; flipped
+  ON 2026-08-28 after the plan's Phase-7 ordered gates; each later flip has
+  its own entry). It is read by every deployed-topology entry
   point — the `productionServer` / `remoteClient` construction presets
   (toolshed's operator runtime, the background piece service, the CLI,
   every pieces controller and integration harness against a toolshed),
@@ -385,10 +384,11 @@ server](#clients-that-are-not-built-alongside-their-server).
   default is ON). CI resolves stable `default` and `opposite`
   roles through `tasks/server-execution-ci.ts`: `default` leaves the flag
   unset, while `opposite` explicitly selects the inverse and bakes that same
-  value into its toolshed shell. Therefore changing the default requires only
-  changing `SERVER_EXECUTION_DEFAULT_ENABLED` and the current-status prose;
-  workflow job topology, probes, skip placement, coverage ownership, and test
-  record variants follow automatically.
+  value into its toolshed shell. Therefore changing the default is exactly:
+  `SERVER_EXECUTION_DEFAULT_ENABLED`, the summary cell above, a dated status
+  entry here, and a delta in the plan's live coordination block; workflow
+  job topology, probes, skip placement, coverage ownership, test record
+  variants, and every other document follow automatically.
   Single-process harnesses do not
   read the constant: a bare `new Runtime` and the `patternTest` /
   `localDev` / `unitTest` presets have no serving host, so they resolve the
@@ -398,9 +398,9 @@ server](#clients-that-are-not-built-alongside-their-server).
   the lane-posture item the topics measurement report recorded for the
   flip decision); the ON posture's unit coverage sets the
   flag explicitly (the `executor-*` suites) and its integration coverage
-  is the `opposite` CI lanes while the default is rolled back. In CI
-  (testing.md §2), `default` is currently OFF and `opposite` is currently
-  ON. Both are probed through the shared role
+  is whichever CI role resolves ON. In CI (testing.md §2), `default`
+  follows the constant and `opposite` is its explicit inverse; both are
+  probed through the shared role
   resolver; the opposite lane uses `build-toolshed-opposite`, whose shell
   define is baked from the resolved inverse. The
   `deployed-topology-gate` job exercises the real `bg-piece-service`
@@ -409,8 +409,8 @@ server](#clients-that-are-not-built-alongside-their-server).
   with ON-arm skips and OFF-arm authored coverage following the resolved arm.
   Skips are only through `tasks/server-execution-on-skips.ts`, printed loudly
   (EMPTY at the flip, its stated precondition). End
-  state: re-flip ON (the same two-surface change back), soak on main, and
-  then the flag retires and the OFF code path is removed — a separate post-soak
+  state: after a soak on main at the ON default, the flag retires and the
+  OFF code path is removed — a separate post-soak
   PR (the plan's Phase 7 task 2; it also removes the opposite guard lanes and
   `build-toolshed-opposite`).
 - **Status on 2026-09-03 (the ROLLBACK).** The rollback PR (#6840)
@@ -475,9 +475,7 @@ server](#clients-that-are-not-built-alongside-their-server).
   still dark: OFF by default and byte-identical to today; the ON arm now
   actually serves (with the documented two-deriver interim). Stage G
   (effects + outbox) remains.
-- **Path to removal.** Re-flip (the constant → `true` with this registry's
-  status) once the rollback's reason is settled; soak the default on main;
-  then the post-soak PR
+- **Path to removal.** Soak on main at the ON default; then the post-soak PR
   retires the flag, removes the OFF path (and the opposite regression-guard
   lanes + `build-toolshed-opposite`), and closes out this entry.
 

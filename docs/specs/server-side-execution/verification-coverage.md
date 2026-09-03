@@ -3510,6 +3510,10 @@ personally; the soak starts at ITS merge.** What it carries:
   the corrected call; under OFF the same id executes. The step's ON
   comment points at this row.
 
+Delta 2026-09-03 — flip records: from here, a flip's record is the
+registry's dated status entry and the plan's coordination delta; this
+register does not repeat it.
+
 Delta 2026-09-03 — the rollback (#6840):
 
 - The first-party default returned to OFF by the first data-only flip:
