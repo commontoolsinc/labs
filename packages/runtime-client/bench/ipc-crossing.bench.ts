@@ -10,13 +10,12 @@
  * overstates what the connection as a whole pays.
  *
  * The subject is a cell update travelling worker to client, which is the
- * connection's highest-volume message. Both arms run the same four steps and
+ * connection's highest-volume message. Both arms run the same three steps and
  * differ only in the two the envelope added:
  *
  * | | status quo | envelope |
  * | --- | --- | --- |
  * | worker: convert cells to links | yes | yes |
- * | worker: redact carried label views | yes | yes |
  * | worker: encode | -- | yes |
  * | `postMessage()` | yes | yes |
  * | client: decode | -- | yes |

@@ -367,8 +367,10 @@ function sqliteParamForRuntime(
 /**
  * Converts a runtime cell value into the client wire domain. Each link it
  * mints for a cell carries the display form of that cell's CFC label view,
- * with every caveat's source redacted, which is the only form a view crosses
- * in.
+ * with every caveat's source redacted. A sigil link already in the value is
+ * rebuilt as the container it is, view and all; stored data carries no view
+ * on a link, the persist seam having stripped it, so the minted links are
+ * where a view crosses.
  */
 function cellValueForClient(value: unknown): FabricValue {
   return convertCellsToLinks(

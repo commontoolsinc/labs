@@ -66,14 +66,17 @@ describe("convert-cells-to-links-label-views", () => {
       "convert cells to links label views",
     );
     const storageManager = StorageManager.emulate({ as: signer });
-    const runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
     try {
-      body(runtime, signer.did());
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      try {
+        body(runtime, signer.did());
+      } finally {
+        await runtime.dispose();
+      }
     } finally {
-      await runtime.dispose();
       await storageManager.close();
     }
   }
