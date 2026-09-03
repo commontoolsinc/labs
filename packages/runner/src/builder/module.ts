@@ -1,4 +1,7 @@
-import { toCompactDebugString } from "@commonfabric/data-model";
+import {
+  type DebugValueOptions,
+  toCompactDebugString,
+} from "@commonfabric/data-model";
 
 import { defineAuthoredDebugAccessors } from "../harness/authored-debug-source.ts";
 import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
@@ -352,20 +355,19 @@ export const assertCapture = <T>(
 };
 
 /**
- * Nesting depth a failing assertion's operand renders to: as deep as the
- * conversion allows. A view tree costs two levels per node and a nested cell
- * three, so the renderer's default depth elides an operand after a handful
- * of nodes, and a diagnostic wants the whole of it.
+ * Rendering options for a failing assertion's operands: as deep, as many
+ * array elements, and as long a string as the conversion allows. A view tree
+ * costs two levels per node and a nested cell three, so the renderer's
+ * default depth elides an operand after a handful of nodes; a list or a
+ * string differs from what was expected at whatever index it does, and the
+ * renderer's default lengths would elide exactly that. A diagnostic wants
+ * the whole of it.
  */
-const ASSERT_RENDER_MAX_DEPTH = Infinity;
-
-/**
- * Number of array elements a failing assertion's operand renders: as many as
- * the conversion allows. A list operand differs from what was expected at
- * whatever index it does, and the renderer's default length would elide the
- * element the assertion turned on.
- */
-const ASSERT_RENDER_MAX_ARRAY_LENGTH = Infinity;
+const ASSERT_RENDER_OPTIONS: DebugValueOptions = {
+  maxDepth: Infinity,
+  maxArrayLength: Infinity,
+  maxStringLength: Infinity,
+};
 
 /**
  * Renders the operands captured by `assertCapture` into the record's `parts`.
@@ -373,8 +375,7 @@ const ASSERT_RENDER_MAX_ARRAY_LENGTH = Infinity;
  * A passing assertion (`ok === true`) returns an empty list without touching
  * the values, so the common case pays nothing to render diagnostics it will
  * never show. Only a failing assertion renders each captured value with
- * `toCompactDebugString`, to `ASSERT_RENDER_MAX_DEPTH` and
- * `ASSERT_RENDER_MAX_ARRAY_LENGTH`.
+ * `toCompactDebugString` with `ASSERT_RENDER_OPTIONS`.
  */
 export const assertRenderParts = (
   ok: boolean,
@@ -382,10 +383,7 @@ export const assertRenderParts = (
 ): AssertPart[] =>
   ok ? [] : parts.map(({ src, value }) => ({
     src,
-    rendered: toCompactDebugString(value, {
-      maxDepth: ASSERT_RENDER_MAX_DEPTH,
-      maxArrayLength: ASSERT_RENDER_MAX_ARRAY_LENGTH,
-    }),
+    rendered: toCompactDebugString(value, ASSERT_RENDER_OPTIONS),
   }));
 
 /**

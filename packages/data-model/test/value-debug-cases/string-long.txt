@@ -1,0 +1,11 @@
+(() => {
+  // A string longer than the default limit of 200 renders as an excerpt of
+  // that length, and then its actual length.
+  return { text: "abcdefghij".repeat(30) };
+})()
+
+{
+  text: "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij" + ... length: 300
+}
+
+{text:"abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij...

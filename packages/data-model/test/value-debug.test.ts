@@ -153,6 +153,31 @@ describe("value-debug", () => {
       });
     });
 
+    describe("with `maxStringLength`", () => {
+      it("renders an excerpt of the string, and the string's length after it", () => {
+        expect(toCompactDebugString("abcdefgh", { maxStringLength: 5 }))
+          .toBe('"abcde" + ... length: 8');
+        expect(toCompactDebugString({ s: "abcdefgh" }, { maxStringLength: 5 }))
+          .toBe('{s:"abcde" + ... length: 8}');
+      });
+
+      it("renders a string whose length is the limit whole", () => {
+        expect(toCompactDebugString("abcde", { maxStringLength: 5 }))
+          .toBe('"abcde"');
+      });
+
+      it("renders no more than 200 characters when the limit is not given", () => {
+        expect(toCompactDebugString("x".repeat(250)))
+          .toMatch(/^"x{200}" \+ \.\.\. length: 250$/);
+      });
+
+      it("throws given a `maxStringLength` that is not a positive integer", () => {
+        expect(() => toCompactDebugString("", { maxStringLength: 0 })).toThrow(
+          "`maxStringLength` must be a positive integer, `Infinity`, or",
+        );
+      });
+    });
+
     describe("with a `replacer`", () => {
       it("renders the replacement in place of the original value", () => {
         const options: CompactDebugStringOptions = {
@@ -201,6 +226,11 @@ describe("value-debug", () => {
     it("renders the array's length on its own line in place of the elements past the limit", () => {
       expect(toIndentedDebugString([1, , , 4, 5], { maxArrayLength: 3 }))
         .toBe("[\n  1,\n  <2 holes>,\n  ... length: 5\n]");
+    });
+
+    it("renders a string's excerpt and length in the string's place", () => {
+      expect(toIndentedDebugString({ s: "abcdefgh" }, { maxStringLength: 5 }))
+        .toBe('{\n  s: "abcde" + ... length: 8\n}');
     });
 
     it("renders the replacement in place of the original value", () => {
