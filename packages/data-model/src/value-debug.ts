@@ -417,8 +417,7 @@ class DebugStringifier {
       return DebugStringifier.#renderElidedInstance(classNameOf(value));
     }
 
-    // Trim off the encoding version number.
-    const open = `/${tag.replace(/@.*$/, "")}(`;
+    const open = `/${DebugStringifier.#typeNameOf(tag)}(`;
     const realm = (v: PrimitiveState, i: string) =>
       this.#renderRealmState(v, i);
 
@@ -612,9 +611,12 @@ class DebugStringifier {
 
     if (isCodecTypeTag(tag)) {
       // A `FabricInstance`, carried as its encoding under its codec type tag,
-      // laid out the way a class instance is; the encoding version is left
-      // out of the name.
-      return this.#renderInstance(tag.replace(/@.*$/, ""), payload, indent);
+      // laid out the way a class instance is.
+      return this.#renderInstance(
+        DebugStringifier.#typeNameOf(tag),
+        payload,
+        indent,
+      );
     }
 
     switch (tag) {
@@ -691,6 +693,14 @@ class DebugStringifier {
    */
   static #renderElidedInstance(name: string): string {
     return `/${name}(...)`;
+  }
+
+  /**
+   * Returns the type name of a codec type tag: the tag less its encoding
+   * version, which a rendering leaves out.
+   */
+  static #typeNameOf(tag: string): string {
+    return tag.replace(/@.*$/, "");
   }
 
   /**
