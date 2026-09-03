@@ -43,7 +43,9 @@ Deno.test("health routes", async (t) => {
         assertEquals(response.status, 200);
         const json = await response.json();
         assertEquals(json.documentCaches, server.documentCachesDiagnostics());
-        assertEquals(json.documentCaches, { spaces: {} });
+        assertEquals(typeof json.documentCaches.processBudgetBytes, "number");
+        assertEquals(json.documentCaches.bytes, 0);
+        assertEquals(json.documentCaches.spaces, {});
         // The declared response schema admits the live response.
         const declared = (statsRoute.responses as Record<
           number,

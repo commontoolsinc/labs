@@ -237,6 +237,10 @@ export const EnvSchema = z.object({
     .optional(),
   MEMORY_DOCUMENT_CACHE_MAX_ENTRIES: z.coerce.number().int().positive()
     .optional(),
+  // Process-wide bound across every open space's document cache (default
+  // DOCUMENT_CACHE_PROCESS_BUDGET_BYTES in packages/memory/v2/server.ts).
+  MEMORY_DOCUMENT_CACHE_PROCESS_BUDGET_BYTES: z.coerce.number().int()
+    .positive().optional(),
 
   // Set ONLY when a trusted reverse proxy sits in front of this process and
   // overwrites X-Forwarded-For. Rate limiting keys on the real TCP peer by

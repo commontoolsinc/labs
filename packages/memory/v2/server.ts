@@ -388,10 +388,22 @@ let pushPriorityStatsProvider: (() => PushPriorityStats) | undefined;
 export const getPushPriorityStats = (): PushPriorityStats | undefined =>
   pushPriorityStatsProvider?.();
 
-/** Every open engine's decoded-document cache, keyed by space. */
+/** Every open engine's decoded-document cache, keyed by space, under the
+ * process-wide budget the Server enforces across them. */
 export type DocumentCachesDiagnostics = {
+  processBudgetBytes: number;
+  bytes: number;
   spaces: Record<string, Engine.DocumentCacheDiagnostics>;
 };
+
+/**
+ * Default process-wide bound on decoded documents retained across every open
+ * space's cache: two corpora the size of the Topics board's page load (98 MB
+ * measured; see DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES). Enforced least
+ * recently used space first, oldest entries first within it, on every
+ * request that reaches an engine.
+ */
+export const DOCUMENT_CACHE_PROCESS_BUDGET_BYTES = 256 * 1024 * 1024;
 
 /** Live servers' providers in construction order; a server removes its own
  * on close(), so the newest LIVE server is always the one reported. */
@@ -1366,6 +1378,11 @@ export class Server {
   // The resolved-engine index for the SYNC cross-engine lease lookup
   // (server-execution v2 Phase 5; see openEngine / #liveCoHostedLeaseSpaceFor).
   #resolvedEngines = new Map<string, Engine.Engine>();
+
+  /** Per-space use stamps, bumped on every request that reaches an engine:
+   * the order the cross-space document-cache budget drains spaces in. */
+  #engineUse = new Map<string, number>();
+  #engineUseClock = 0;
   // Synthesized session state for direct out-of-band document writes, such as blob uploads.
   #directSessionId = `server:${crypto.randomUUID()}`;
   #directLocalSeq = 0;
@@ -1478,6 +1495,11 @@ export class Server {
       documentCacheBudgetBytes?: number;
       documentCacheMaxEntries?: number;
 
+      /** Process-wide bound on decoded documents retained across all open
+       * spaces (default DOCUMENT_CACHE_PROCESS_BUDGET_BYTES); enforced
+       * least-recently-used space first. */
+      documentCacheProcessBudgetBytes?: number;
+
       authorizeSessionOpen: (
         message: SessionOpenRequest,
         context: SessionOpenAuthContext,
@@ -1556,9 +1578,39 @@ export class Server {
     // health route, same last-registration-wins posture as the runner's
     // serving-loop stats registry (one co-hosted server per process).
     pushPriorityStatsProvider = () => this.pushPriorityStats();
+    const processBudget = options.documentCacheProcessBudgetBytes;
+    if (
+      processBudget !== undefined &&
+      (!Number.isSafeInteger(processBudget) || processBudget <= 0)
+    ) {
+      throw new TypeError(
+        "documentCacheProcessBudgetBytes must be a positive safe integer",
+      );
+    }
     documentCachesDiagnosticsProviders.push(
       this.#documentCachesDiagnosticsProvider,
     );
+  }
+
+  /** Evict, least recently used space first and oldest entries first
+   * within it, until the decoded documents retained across every open
+   * space fit the process-wide budget. Cheap enough to run per request:
+   * a sum over the open engines, and no work at all while under budget. */
+  #enforceDocumentCacheBudget(): void {
+    const budget = this.options.documentCacheProcessBudgetBytes ??
+      DOCUMENT_CACHE_PROCESS_BUDGET_BYTES;
+    let total = 0;
+    for (const engine of this.#resolvedEngines.values()) {
+      total += engine.documentCacheBytes;
+    }
+    if (total <= budget) return;
+    const byUse = [...this.#resolvedEngines].sort(([a], [b]) =>
+      (this.#engineUse.get(a) ?? 0) - (this.#engineUse.get(b) ?? 0)
+    );
+    for (const [, engine] of byUse) {
+      if (total <= budget) return;
+      total -= Engine.evictDocumentCacheEntries(engine, total - budget);
+    }
   }
 
   /** This server's health-route provider, kept so close() can withdraw
@@ -1569,10 +1621,17 @@ export class Server {
    * nothing is opened by asking. */
   documentCachesDiagnostics(): DocumentCachesDiagnostics {
     const spaces: Record<string, Engine.DocumentCacheDiagnostics> = {};
+    let bytes = 0;
     for (const [space, engine] of this.#resolvedEngines) {
       spaces[space] = Engine.documentCacheDiagnostics(engine);
+      bytes += engine.documentCacheBytes;
     }
-    return { spaces };
+    return {
+      processBudgetBytes: this.options.documentCacheProcessBudgetBytes ??
+        DOCUMENT_CACHE_PROCESS_BUDGET_BYTES,
+      bytes,
+      spaces,
+    };
   }
 
   memoryProtocolFlags(): MemoryProtocolFlags {
@@ -4474,6 +4533,7 @@ export class Server {
           // failure (or a failing operation-field attachment) must not
           // leave an already-inserted entry over budget.
           this.#enforceEvaluationCacheBudget();
+          this.#enforceDocumentCacheBudget();
           graphs.set(branch, tracked.state);
           for (const [docKey, entity] of tracked.state.entities) {
             recordUpdate(docKey, entity);
@@ -4703,6 +4763,7 @@ export class Server {
       // cover the throw path too.
       if (cacheEligible) {
         this.#enforceEvaluationCacheBudget();
+        this.#enforceDocumentCacheBudget();
       }
     }
   }
@@ -4741,6 +4802,7 @@ export class Server {
       foldRootAttribution(attribution, result.stats);
       serverSeq = result.serverSeq;
       this.#enforceEvaluationCacheBudget();
+      this.#enforceDocumentCacheBudget();
       graphs.set(branch, result.state);
       for (const [docKey, entity] of result.state.entities) {
         const { scopeKey } = fromDocKey(docKey);
@@ -6735,6 +6797,10 @@ export class Server {
    * it out of reach.
    */
   private openEngine(space: string): Promise<Engine.Engine> {
+    // Every request that reaches an engine passes here: stamp the space's
+    // use and hold the cross-space document-cache budget before it grows.
+    this.#engineUse.set(space, ++this.#engineUseClock);
+    this.#enforceDocumentCacheBudget();
     const existing = this.#engines.get(space);
     if (existing !== undefined) {
       return existing;

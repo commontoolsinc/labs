@@ -1355,28 +1355,29 @@ export const DEFAULT_OPERATION_CHECKPOINT_INTERVAL = 100;
  * Defaults for the decoded-document cache ({@link Engine.documentCache}).
  *
  * Sized to keep one active corpus's working set resident, measured on a copy
- * of the production Topics board (129 topics, 2026-09-02): reading the
- * board's argument under its demand touches 1,465 documents whose retained
- * encoded size is 18.7 MB — 135 topic piece docs at ~66 KB each and ~800
- * computed cells at ~10 KB — and a page load reads more on top. Under the
- * earlier bound (256 entries, cleared wholesale when full) no walk over that
- * set ever found a document cached, and every walk paid decode plus
- * deep-freeze for every document: about a second of server time per walk,
- * most of it in the freeze. With the set resident the same walk is under
- * 100 ms and a board load's server time fell from 4.1 s to 0.8 s.
+ * of the production Topics board (129 topics, 2026-09-02): a full board page
+ * load reads 13,371 documents whose retained encoded size is 98 MB (135
+ * topic piece docs at ~66 KB, thousands of computed cells at ~10 KB, every
+ * topic's internals), costing about 250 MB of heap. Under the earlier bound
+ * (256 entries, cleared wholesale when full) no walk over that set ever found
+ * a document cached, and every walk paid decode plus deep-freeze for every
+ * document: about a second of server time per walk, most of it in the
+ * freeze. With the set resident the same walk is under 100 ms and a board
+ * load's server time fell from 4.1 s to 0.8 s.
  *
- * The byte budget is the retention bound — encoded bytes, a proxy for the
- * decoded graphs kept alive (expect a few times that in heap) — and the
- * entry cap is the cardinality backstop. Least-recently-read eviction under a
- * budget SMALLER than a corpus's working set serves nothing (each miss
- * displaces what the next read wants), so the budget errs on the side of
- * fitting; a host that cannot afford it lowers it through the toolshed's
- * MEMORY_DOCUMENT_CACHE_BUDGET_BYTES, and `documentCaches` on
- * /api/health/stats shows `evictions` when a space does not fit. Superseded
- * revisions, read once more at most, age out on their own, which is what the
- * old bound existed for.
+ * The byte budget is the retention bound — encoded UTF-8 bytes of the
+ * document as stored, a proxy for the decoded graph kept alive (expect a few
+ * times that in heap) — and the entry cap is the cardinality backstop.
+ * Least-recently-read eviction under a budget SMALLER than a corpus's working
+ * set serves nothing (each miss displaces what the next read wants), so the
+ * per-space default errs on the side of fitting; the Server bounds the total
+ * across spaces (its `documentCacheProcessBudgetBytes`), and a host lowers
+ * either through the toolshed's MEMORY_DOCUMENT_CACHE_* variables.
+ * `documentCaches` on /api/health/stats shows `evictions` when a space does
+ * not fit. Superseded revisions, read once more at most, age out on their
+ * own, which is what the old bound existed for.
  */
-export const DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES = 64 * 1024 * 1024;
+export const DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES = 128 * 1024 * 1024;
 export const DEFAULT_DOCUMENT_CACHE_MAX_ENTRIES = 8192;
 
 const prepareStatements = (database: Database): PreparedStatements => ({
@@ -1896,6 +1897,36 @@ export const documentCacheDiagnostics = (
   maxEntries: engine.documentCacheMaxEntries,
 });
 
+/**
+ * Evict the least recently read entries until at least `bytes` have been
+ * freed or the cache is empty; returns what was freed. The Server's
+ * cross-space budget drains engines through this, least recently used
+ * engine first.
+ */
+export const evictDocumentCacheEntries = (
+  engine: Engine,
+  bytes: number,
+): number => {
+  let freed = 0;
+  while (freed < bytes && engine.documentCache.size > 0) {
+    const oldestKey = engine.documentCache.keys().next().value!;
+    const oldest = engine.documentCache.get(oldestKey)!;
+    engine.documentCache.delete(oldestKey);
+    engine.documentCacheBytes -= oldest.weight;
+    engine.documentCacheStats.evictions++;
+    freed += oldest.weight;
+  }
+  return freed;
+};
+
+const utf8Encoder = new TextEncoder();
+
+/** Encoded UTF-8 bytes of stored text — the unit every document-cache bound
+ * is stated in. `String.length` counts UTF-16 code units, which undercounts
+ * anything outside ASCII. */
+const storedByteLength = (text: string | null | undefined): number =>
+  text ? utf8Encoder.encode(text).byteLength : 0;
+
 export const close = (engine: Engine): void => {
   engine.database.close();
 };
@@ -2295,7 +2326,7 @@ const readStateForScopeKey = (
     document = cached.document;
   } else {
     engine.documentCacheStats.misses++;
-    let weight = row.data?.length ?? 0;
+    let weight = storedByteLength(row.data);
     switch (row.op) {
       case "set":
         document = decodeStoredDocument(row.data);
@@ -3461,10 +3492,15 @@ export const applyCommit = (
   try {
     const applied = engine.database.transaction(applyCommitTransaction)
       .immediate(engine, options);
-    // Durable now, so what was read from those rows can be remembered.
+    // Durable now, so what was read from those rows can be remembered. A
+    // revision the cache already holds was served from it rather than
+    // staged, so a present key here is not expected; skipping it keeps the
+    // byte accounting exact if that ever changes.
     engine.stagedDocumentCache = undefined;
     for (const [key, entry] of staged) {
-      cacheDocumentForRevision(engine, key, entry);
+      if (!engine.documentCache.has(key)) {
+        cacheDocumentForRevision(engine, key, entry);
+      }
     }
     return applied;
   } finally {
@@ -6630,24 +6666,15 @@ const reconstructPatchedDocument = (
   let baseSeq = 0;
   let baseOpIndex = -1;
   let document = emptyEntityDocument();
-  // What the document cache weighs the result by: the encoded size of the
-  // largest row the reconstruction read. A patch that rewrites most of a
-  // document is about the document's size, and a small patch on a large
-  // base leaves the base the measure — so the larger of the two tracks the
-  // retained document rather than the replay work (a Topics piece replayed
-  // from a base and five near-whole patches decodes ~300 KB to retain ~55).
-  let encodedBytes = 0;
   if (snapshotRow && (!baseRow || snapshotRow.seq >= baseRow.seq)) {
     baseSeq = snapshotRow.seq;
     baseOpIndex = Number.MAX_SAFE_INTEGER;
     document = decodeStoredDocument(snapshotRow.value);
-    encodedBytes = snapshotRow.value?.length ?? 0;
   } else if (baseRow) {
     baseSeq = baseRow.seq;
     baseOpIndex = baseRow.op_index;
     if (baseRow.op === "set") {
       document = decodeStoredDocument(baseRow.data);
-      encodedBytes = baseRow.data?.length ?? 0;
     }
   }
 
@@ -6666,10 +6693,18 @@ const reconstructPatchedDocument = (
       document,
       decodeStoredPatchList(patch.data),
     );
-    encodedBytes = Math.max(encodedBytes, patch.data?.length ?? 0);
   }
 
-  return { document, encodedBytes };
+  // What the document cache weighs the result by: the result itself, as it
+  // would be stored. No row the reconstruction read bounds it — additive
+  // patches accumulate past any one of them — and a replay-cost sum
+  // overstates it several times over (a Topics piece replayed from a base
+  // and five near-whole patches decodes ~300 KB to retain ~55). Encoding
+  // the result is exact and costs a fraction of the replay it follows.
+  return {
+    document,
+    encodedBytes: storedByteLength(encodeMemoryBoundary(document)),
+  };
 };
 
 const readRowForBranch = (
@@ -6836,11 +6871,6 @@ const cacheDocumentForRevision = (
   // A weight of at least one keeps the byte budget a real bound even for
   // rows with no data (a delete).
   const weight = Math.max(entry.weight, 1);
-  const previous = engine.documentCache.get(key);
-  if (previous !== undefined) {
-    engine.documentCache.delete(key);
-    engine.documentCacheBytes -= previous.weight;
-  }
   if (weight > engine.documentCacheBudgetBytes) {
     return;
   }

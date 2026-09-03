@@ -357,9 +357,10 @@ process:
   a `transact` whose `lockWaitMs` dominates its elapsed time was queued
   behind fan-out, not expensive itself.
 - `documentCaches` — the memory server's decoded-document cache, one entry
-  per open space (`Engine.documentCache` in `packages/memory/v2/engine.ts`):
-  `entries` and `bytes` against `budgetBytes` and `maxEntries`, and the
-  lifetime `hits`, `misses` and `evictions`. A corpus is read again by every
+  per open space (`Engine.documentCache` in `packages/memory/v2/engine.ts`)
+  under the process-wide `processBudgetBytes` (total `bytes` beside it):
+  per space, `entries` and `bytes` against `budgetBytes` and `maxEntries`,
+  and the lifetime `hits`, `misses` and `evictions`. A corpus is read again by every
   load and every refresh, so a space in good shape shows `hits` climbing
   across loads and `misses` rising only with commits. `evictions` climbing
   while a corpus is being walked means its working set does not fit the
