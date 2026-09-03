@@ -312,6 +312,7 @@ The same run is on disk:
     ├── <runId>/               # the turn's root run
     │   ├── run-state.json     # status, lineage, postures, input cells, failures
     │   ├── transcript.json    # what the model saw: handles and denials, never payloads
+    │   ├── transcript-omissions.json # rules and full-artifact locations, never withheld values
     │   ├── run-report.json    # model attempts, usage, timeline
     │   ├── policy-snapshot.json
     │   ├── policy-trace.json  # every CFC decision
@@ -327,6 +328,14 @@ every tool result is a record keyed by `outputId`, and the pattern source the
 model wrote is in `tool-outputs/`, not in the transcript. `run-state.json` reads
 `status: "running"` until one terminal write turns it `completed` or `failed`,
 and that same write records `cell-labels.json`.
+
+For a retrospective, use the Timeline. It joins `transcript-omissions.json` to
+the full `tool-outputs/*.json` result and places each withheld location beside
+what the model saw, labeled by the rule that omitted it. CFC-denied content
+stays a redaction marker, and scrubbed Fabric identifiers stay `[fabric-id]`;
+the console does not reveal either value. The join is display-only and never
+changes resume or replay. A run predating the omission artifact says **no
+record** rather than guessing what was withheld.
 
 The **Index** view, at `?view=index`, reads the pattern index through the server
 with your identity; with no index configured it says so.

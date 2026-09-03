@@ -11,7 +11,10 @@ import { normalize } from "@std/path/posix";
 
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 
-import type { HarnessArtifactStore } from "../src/artifacts.ts";
+import {
+  createFileSystemHarnessArtifactStore,
+  type HarnessArtifactStore,
+} from "../src/artifacts.ts";
 import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
 import { OpenAICodexCredentialResolver } from "../src/auth/openai-codex.ts";
 import {
@@ -20,6 +23,7 @@ import {
 } from "../src/contracts/prompt-slot.ts";
 import type { HarnessSkillActivations } from "../src/contracts/skill.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
+import type { HarnessTranscriptOmissions } from "../src/contracts/transcript-omissions.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import {
@@ -1004,6 +1008,8 @@ const observedCfcResult = (
     stdoutLabel?: CfcSandboxResult["stdout"]["label"];
     stderrLabel?: CfcSandboxResult["stderr"]["label"];
     exitCodeLabel?: CfcSandboxResult["exitCode"]["label"];
+    stdoutTruncated?: boolean;
+    stderrTruncated?: boolean;
   } = {},
 ): CfcSandboxResult => ({
   version: 1,
@@ -1015,6 +1021,7 @@ const observedCfcResult = (
       text: stdout,
       label: options.stdoutLabel ?? { confidentiality: ["public"] },
     }],
+    ...(options.stdoutTruncated === true ? { truncated: true } : {}),
   },
   stderr: options.stderrPolicy === "denied"
     ? {
@@ -1031,6 +1038,7 @@ const observedCfcResult = (
         text: options.stderr ?? "",
         label: options.stderrLabel ?? { confidentiality: ["public"] },
       }],
+      ...(options.stderrTruncated === true ? { truncated: true } : {}),
     },
   exitCode: {
     policy: "observed",
@@ -5490,6 +5498,113 @@ Deno.test("CfHarnessPromptLoop truncates large model-facing bash output in obser
   assertEquals(content.exitCode, 0);
 });
 
+Deno.test("CfHarnessPromptLoop retains omission records across provider compaction", async () => {
+  const artifactRoot = await Deno.makeTempDir();
+  const runId = "run-omission-compaction";
+  const hugeStdout = "private".repeat(20_000);
+  const requestBodies: Array<Record<string, unknown>> = [];
+  let turns = 0;
+  try {
+    const artifactStore = createFileSystemHarnessArtifactStore({
+      artifactRoot,
+      runId,
+    });
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime([
+          { stdout: hugeStdout, stderr: "", exitCode: 0 },
+          { stdout: "second\n", stderr: "", exitCode: 0 },
+        ]),
+        artifactStore,
+        runId,
+        model: "gpt-5.4",
+        cfcEnforcementMode: "disabled",
+      }),
+      fetchFn: (_input, init) => {
+        turns += 1;
+        requestBodies.push(JSON.parse(String(init?.body)));
+        const output = turns === 1
+          ? [{
+            type: "function_call",
+            id: "fc-first",
+            call_id: "call-first",
+            name: "bash",
+            arguments: JSON.stringify({ command: "first" }),
+          }]
+          : turns === 2
+          ? [{
+            type: "compaction",
+            id: "cmp-after-first",
+            encrypted_content: "encrypted-compaction",
+          }, {
+            type: "function_call",
+            id: "fc-second",
+            call_id: "call-second",
+            name: "bash",
+            arguments: JSON.stringify({ command: "second" }),
+          }]
+          : [{
+            type: "message",
+            id: "msg-done",
+            role: "assistant",
+            status: "completed",
+            content: [{
+              type: "output_text",
+              text: "Done.",
+              annotations: [],
+            }],
+          }];
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              object: "response",
+              status: "completed",
+              output,
+            }),
+            { status: 200 },
+          ),
+        );
+      },
+    });
+
+    await loop.runPrompt({
+      prompt: "Run both commands.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
+
+    const thirdInput = requestBodies[2].input as Array<Record<string, unknown>>;
+    assertEquals(thirdInput[0]?.type, "compaction");
+    assertEquals(
+      JSON.stringify(thirdInput).includes(
+        createToolOutputId(runId, "bash", 1),
+      ),
+      false,
+    );
+    const omissions = JSON.parse(
+      await Deno.readTextFile(
+        join(artifactStore.runRoot, "transcript-omissions.json"),
+      ),
+    ) as HarnessTranscriptOmissions;
+    const first = omissions.results.find((result) =>
+      result.outputId === createToolOutputId(runId, "bash", 1)
+    );
+    assertEquals(first?.rules, [{
+      rule: "model-context-truncation",
+      locations: [{
+        artifactPath: join(
+          artifactStore.runRoot,
+          "tool-outputs",
+          `${runId}_bash_1-bash.json`,
+        ),
+        jsonPointer: "/stdout",
+      }],
+    }]);
+  } finally {
+    await Deno.remove(artifactRoot, { recursive: true });
+  }
+});
+
 Deno.test("CfHarnessPromptLoop bounds a large model-facing read_file result more tightly than bash output", async () => {
   const fetchCalls: RequestInit[] = [];
   const document = `${"a".repeat(20_000)}MIDDLE${"z".repeat(20_000)}`;
@@ -6011,6 +6126,84 @@ Deno.test("CfHarnessPromptLoop exposes mediated bash output instead of raw stdou
   assertEquals(content.exitCode, 0);
   assertEquals(content.cfc.stdout.policy, "observed");
   assertEquals(content.cfc.stderr.policy, "denied");
+});
+
+Deno.test("CfHarnessPromptLoop records CFC-side stream truncation as a model omission", async () => {
+  const artifactRoot = await Deno.makeTempDir();
+  const runId = "run-mediated-cfc-truncation";
+  try {
+    const artifactStore = createFileSystemHarnessArtifactStore({
+      artifactRoot,
+      runId,
+    });
+    let turn = 0;
+    const loop = new CfHarnessPromptLoop({
+      apiKey: "test-key",
+      engine: new CfHarnessEngine({
+        artifactStore,
+        sandboxRuntime: new FakeSandboxRuntime([{
+          stdout: "raw stdout\n",
+          stderr: "raw stderr\n",
+          exitCode: 0,
+          cfcResult: observedCfcResult("released stdout\n", {
+            stderr: "released stderr\n",
+            stdoutTruncated: true,
+            stderrTruncated: true,
+          }),
+        }]),
+        runId,
+        model: "gpt-5.4",
+        cfcEnforcementMode: "enforce-explicit",
+      }),
+      fetchFn: () => {
+        turn += 1;
+        const message = turn === 1
+          ? {
+            role: "assistant",
+            content: "",
+            tool_calls: [{
+              id: "call-truncated-cfc-result",
+              type: "function",
+              function: {
+                name: "bash",
+                arguments: JSON.stringify({ command: "show partial output" }),
+              },
+            }],
+          }
+          : { role: "assistant", content: "Done." };
+        return Promise.resolve(
+          new Response(JSON.stringify(
+            responsesBodyFromChatFixture({ choices: [{ index: 0, message }] }),
+          )),
+        );
+      },
+    });
+
+    await loop.runPrompt({
+      prompt: "Run a direct command.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
+
+    const omissions = JSON.parse(
+      await Deno.readTextFile(
+        join(artifactStore.runRoot, "transcript-omissions.json"),
+      ),
+    ) as HarnessTranscriptOmissions;
+    assertEquals(omissions.results.length, 1);
+    assertEquals(omissions.results[0].rules, [{
+      rule: "model-context-truncation",
+      locations: ["/stdout", "/stderr"].map((jsonPointer) => ({
+        artifactPath: join(
+          artifactStore.runRoot,
+          "tool-outputs",
+          `${runId}_bash_1-bash.json`,
+        ),
+        jsonPointer,
+      })),
+    }]);
+  } finally {
+    await Deno.remove(artifactRoot, { recursive: true });
+  }
 });
 
 const labelHasConfidentialityValue = (

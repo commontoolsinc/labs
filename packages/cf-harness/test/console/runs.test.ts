@@ -11,6 +11,7 @@ import {
 } from "../../console/run-store.ts";
 import { createHarnessRunState } from "../../src/run-state.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
+import { createToolOutputId } from "../../src/contracts/tool-result.ts";
 import {
   HARNESS_CELL_LABELS_TYPE,
   type HarnessCellLabels,
@@ -326,6 +327,120 @@ describe("console/runs", () => {
           "r1_run_pattern_2-run_pattern.json",
           "r1_run_pattern_10-run_pattern.json",
         ]);
+      });
+    });
+
+    it("joins an omission record to the full tool output", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeRun(root, "r1", "2026-01-01T00:00:01.000Z");
+        const runRoot = join(root, "r1");
+        const outputName = toolOutputName("r1", "run_pattern", 2);
+        const artifactPath = join(runRoot, "tool-outputs", outputName);
+        const outputId = createToolOutputId("r1", "run_pattern", 2);
+        await Deno.writeTextFile(
+          join(runRoot, "transcript.json"),
+          JSON.stringify([
+            call("c1", "run_pattern", { sourceText: "x" }),
+            {
+              role: "tool",
+              toolCallId: "c1",
+              toolName: "run_pattern",
+              content: JSON.stringify({ status: "ok" }),
+              resultRef: {
+                type: "cf-harness.tool-result-ref",
+                outputId,
+                toolId: "run_pattern",
+                runId: "r1",
+                artifactPath,
+              },
+            },
+          ]),
+        );
+        await Deno.writeTextFile(
+          artifactPath,
+          JSON.stringify({ status: "ok", rawValue: "retained" }),
+        );
+        await Deno.writeTextFile(
+          join(runRoot, "transcript-omissions.json"),
+          JSON.stringify({
+            type: "cf-harness.transcript-omissions",
+            version: 1,
+            results: [{
+              transcriptIndex: 1,
+              toolCallId: "c1",
+              toolId: "run_pattern",
+              outputId,
+              rules: [{
+                rule: "artifact-only",
+                locations: [{ artifactPath, jsonPointer: "/rawValue" }],
+              }],
+            }],
+          }),
+        );
+
+        const detail = await readConsoleRun(root, "r1");
+        expect(detail?.steps[0].withheld.locations[0].value).toBe("retained");
+        expect(detail?.artifactNames).toContain("transcript-omissions.json");
+      });
+    });
+
+    it("does not label a malformed omission record as legacy", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeRun(root, "r1", "2026-01-01T00:00:01.000Z");
+        const runRoot = join(root, "r1");
+        await Deno.writeTextFile(
+          join(runRoot, "transcript.json"),
+          JSON.stringify([
+            call("c1", "bash", { command: "pwd" }),
+            result("c1", "bash", { status: "ok" }),
+          ]),
+        );
+        await Deno.writeTextFile(
+          join(runRoot, "transcript-omissions.json"),
+          "{not-json",
+        );
+
+        const detail = await readConsoleRun(root, "r1");
+        expect(detail?.steps[0].withheld.status).toBe("record-unreadable");
+      });
+    });
+
+    it("does not label a wrong-shape omission record as legacy", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeRun(root, "r1", "2026-01-01T00:00:01.000Z");
+        const runRoot = join(root, "r1");
+        await Deno.writeTextFile(
+          join(runRoot, "transcript.json"),
+          JSON.stringify([
+            call("c1", "bash", { command: "pwd" }),
+            result("c1", "bash", { status: "ok" }),
+          ]),
+        );
+        await Deno.writeTextFile(
+          join(runRoot, "transcript-omissions.json"),
+          '{"version":999}',
+        );
+
+        const detail = await readConsoleRun(root, "r1");
+        expect(detail?.steps[0].withheld.status).toBe("record-unreadable");
+      });
+    });
+
+    it("does not label an unreadable omission path as legacy", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeRun(root, "r1", "2026-01-01T00:00:01.000Z");
+        const runRoot = join(root, "r1");
+        await Deno.writeTextFile(
+          join(runRoot, "transcript.json"),
+          JSON.stringify([
+            call("c1", "bash", { command: "pwd" }),
+            result("c1", "bash", { status: "ok" }),
+          ]),
+        );
+        await Deno.mkdir(join(runRoot, "transcript-omissions.json"));
+
+        const detail = await readConsoleRun(root, "r1");
+        expect(detail?.steps[0].withheld.status).toBe("record-unreadable");
       });
     });
 

@@ -175,9 +175,9 @@ What works today:
 - optional schema-validated subagent structured returns, with raw child return
   artifacts retained in the child run and open-ended strings linkified before
   the parent sees them
-- persisted run state, transcript, run reports, Loom run manifests, capability
-  snapshots, and tool outputs, plus explicit skill registry and activation
-  artifacts
+- persisted run state, model-facing transcript, transcript omission records, run
+  reports, Loom run manifests, capability snapshots, and tool outputs, plus
+  explicit skill registry and activation artifacts
 - provider-neutral run-report model-attempt diagnostics, one record per attempt,
   naming the provider and the API operation that served it, and timing it twice
   — `durationMs` to the response headers, `responseCompleteDurationMs` to the
@@ -284,21 +284,22 @@ What is not done yet:
 - [src/sqlite-session-store.ts](src/sqlite-session-store.ts)
   - SQLite-backed interactive chat session, turn, and event persistence
 - [src/artifacts.ts](src/artifacts.ts)
-  - persisted run state, run manifest, transcript, run report, capability
-    snapshot, and tool output storage
+  - persisted run state, run manifest, transcript and its omission record, run
+    report, capability snapshot, and tool output storage
 - [src/skills/](src/skills/)
   - Agent Skills registry scanning, validation, and explicit preload context
 - [src/contracts/](src/contracts/)
   - prompt-slot, run-manifest, observation, policy, run-report, subagent, skill,
-    transcript, tool-result, and handle-table contracts
+    transcript, transcript-omission, tool-result, and handle-table contracts
 - [audit/](audit/)
   - the CFC audit: a read-only checker that reads a run family's artifacts and
     reports, per clause of the agent-harness CFC profile, what they establish.
     See [The CFC audit](#the-cfc-audit)
 - [console/](console/)
   - the console: a localhost page that starts a session, watches it live, and
-    reads any run back as a map of its cells, calls and CFC verdicts. See
-    [console/README.md](console/README.md)
+    reads any run back as a map of its cells, calls and CFC verdicts. Its
+    Timeline places the model-facing result beside the full fields withheld from
+    it, labeled by omission rule. See [console/README.md](console/README.md)
 - [integration/](integration/)
   - environment-gated real `runsc-cfc` integration tests
 - [docs/SKILLS_SUPPORT_SPEC.md](docs/SKILLS_SUPPORT_SPEC.md)
@@ -1454,6 +1455,25 @@ dropped and naming the tool output that holds the whole text, the result carries
 the original length beside the truncated field, and the artifact is written
 before the bound is applied.
 
+Every persisted tool result also has an entry in `transcript-omissions.json`.
+That sibling record names the transcript step, output id, omission rule, full
+tool-output artifact path, and JSON pointer; it never copies the withheld
+content. The rule vocabulary is `artifact-only`, `bare-fabric-identifier-scrub`,
+`model-context-truncation`, `observation-denied`, and
+`superseded-run-pattern-diagnostic-collapse`. The console joins those locations
+to the full `tool-outputs/*.json` files only for retrospective display. CFC
+denials remain fixed redaction markers and scrubbed bare Fabric identifiers
+remain `[fabric-id]`, never their withheld values. This reader-side join does
+not change `transcript.json`, provider requests, resume, or replay. Runs created
+before the sibling record existed are labeled as unrecorded rather than
+reconstructed by guesswork.
+
+Superseded `run_pattern` source collapse is not a tool-result omission and is
+therefore outside this record: it replaces an earlier assistant tool-call
+argument. Its transcript marker says which run-pattern-source sidecar retains
+the draft, and the Timeline labels the marker “source replaced by a later
+attempt” rather than presenting it as the original input.
+
 Interactive chat stdio transport:
 
 ```bash
@@ -1911,6 +1931,7 @@ declared it was doing), one per clause family:
 | AUD-14  | under a claimed enforcement posture, every sink releasing with no confidentiality ceiling is named with its recorded reason; a record publishing no deviation while a sink is ungated fails                                                                                                                                                                 | AH-CFC-14, AH-CFC-15                       |
 | AUD-15  | a run whose enforcement **mode** came from a default and landed weaker than the mode its session claims — a silent fallback from an enforcing mode                                                                                                                                                                                                          | AH-CFC-15                                  |
 | AUD-15a | a run whose **flow-label dial** came from a default and landed weaker than the named posture bundle it claims asserts. Ours: no clause names the dial                                                                                                                                                                                                       |                                            |
+| AUD-20  | counts each model-boundary omission by its recorded rule and rejects duplicated or transcript-mismatched results, duplicated rules, and rules with no artifact location. Ours: AH-CFC-16 motivates retained evidence but does not require this accounting artifact                                                                                          |                                            |
 
 Five verdicts, and the distinctions between them are the point. `inconclusive`
 is a check whose evidence was absent or unreadable — it is never `pass`, and
@@ -2014,12 +2035,13 @@ not state the requirement lends specification authority to a check the
 specification never asked for — the same divergence the citation table exists to
 prevent, pointed inward.
 
-Today AUD-1 through AUD-9 and AUD-13 rest on clauses that state what they
-enforce. AUD-14 through AUD-19 are ours: no clause requires that an ungated sink
-be published as a deviation, that a deployment answer on `/api/meta`, that a
-corpus hold one posture, or that the render ceiling be published. They are worth
-checking anyway, and the report says whose requirement they are.
-[audit/citations.ts](audit/citations.ts) holds that table and
+Today AUD-1 through AUD-9, AUD-13, and AUD-15 rest on clauses that state what
+they enforce. AUD-14, AUD-15a, and AUD-16 through AUD-20 are ours: no clause
+requires that an ungated sink be published as a deviation, that a deployment
+answer on `/api/meta`, that a corpus hold one posture, that the render ceiling
+be published, or that model-boundary omissions have their own accounting
+artifact. They are worth checking anyway, and the report says whose requirement
+they are. [audit/citations.ts](audit/citations.ts) holds that table and
 `audit/test/citation-drift.test.ts` reads every cited document and requires each
 quote to still be in it, so a specification edit that invalidates a check breaks
 the suite rather than leaving the check quietly wrong.

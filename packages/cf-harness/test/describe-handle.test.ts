@@ -15,6 +15,8 @@ import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { normalize } from "@std/path/posix";
+import { join } from "@std/path";
+import { createFileSystemHarnessArtifactStore } from "../src/artifacts.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
@@ -880,102 +882,146 @@ describe("describe_handle", () => {
       // down, so a scrub that reached only the reply's top-level strings
       // would leave them standing.
       const runId = "run-describe-scrub";
-      const minted = await mintAddressHandle(
-        createHarnessHandleTable(runId),
-        REF_A,
-        {
-          schema: {
-            type: "object",
-            properties: {
-              rows: {
-                type: "array",
-                items: {
-                  type: "object",
-                  properties: { [HOSTILE_DID_NAME]: { type: "string" } },
+      const artifactRoot = await Deno.makeTempDir();
+      const artifactStore = createFileSystemHarnessArtifactStore({
+        artifactRoot,
+        runId,
+      });
+      try {
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable(runId),
+          REF_A,
+          {
+            schema: {
+              type: "object",
+              properties: {
+                rows: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: { [HOSTILE_DID_NAME]: { type: "string" } },
+                  },
                 },
-              },
-              report: {
-                type: "object",
-                properties: { [HOSTILE_HASH_NAME]: { type: "number" } },
+                report: {
+                  type: "object",
+                  properties: { [HOSTILE_HASH_NAME]: { type: "number" } },
+                },
               },
             },
           },
-        },
-      );
-      let calls = 0;
-      const fetchFn: typeof fetch = () => {
-        calls += 1;
-        const payload = calls === 1
-          ? {
-            choices: [{
-              index: 0,
-              message: {
-                role: "assistant",
-                content: "",
-                tool_calls: [{
-                  id: "call-1",
-                  type: "function",
-                  function: {
-                    name: "describe_handle",
-                    arguments: JSON.stringify({ token: minted.token }),
-                  },
-                }],
-              },
-            }],
-          }
-          : {
-            choices: [{
-              index: 0,
-              message: { role: "assistant", content: "Done." },
-            }],
-          };
-        return Promise.resolve(
-          new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
-            status: 200,
-          }),
         );
-      };
-      const loop = new CfHarnessPromptLoop({
-        apiKey: "test-key",
-        engine: new CfHarnessEngine({
-          sandboxRuntime: new FakeSandboxRuntime(),
-          runState: createHarnessRunState({
-            runId,
-            cfcEnforcementMode: "disabled",
-            currentDir: "/workspace",
-            model: "gpt-5.4",
-            handleTable: minted.table,
+        let calls = 0;
+        const fetchFn: typeof fetch = () => {
+          calls += 1;
+          const payload = calls === 1
+            ? {
+              choices: [{
+                index: 0,
+                message: {
+                  role: "assistant",
+                  content: "",
+                  tool_calls: [{
+                    id: "call-1",
+                    type: "function",
+                    function: {
+                      name: "describe_handle",
+                      arguments: JSON.stringify({ token: minted.token }),
+                    },
+                  }],
+                },
+              }],
+            }
+            : {
+              choices: [{
+                index: 0,
+                message: { role: "assistant", content: "Done." },
+              }],
+            };
+          return Promise.resolve(
+            new Response(
+              JSON.stringify(responsesBodyFromChatFixture(payload)),
+              {
+                status: 200,
+              },
+            ),
+          );
+        };
+        const loop = new CfHarnessPromptLoop({
+          apiKey: "test-key",
+          engine: new CfHarnessEngine({
+            sandboxRuntime: new FakeSandboxRuntime(),
+            artifactStore,
+            runState: createHarnessRunState({
+              runId,
+              cfcEnforcementMode: "disabled",
+              currentDir: "/workspace",
+              model: "gpt-5.4",
+              handleTable: minted.table,
+            }),
           }),
-        }),
-        fetchFn,
-      });
+          fetchFn,
+        });
 
-      const result = await loop.runTranscript({
-        transcript: [{ role: "user", content: "Describe the handle." }],
-        model: "gpt-5.4",
-      });
+        const result = await loop.runTranscript({
+          transcript: [{ role: "user", content: "Describe the handle." }],
+          model: "gpt-5.4",
+        });
 
-      const toolMessage = result.transcript.find(
-        (message) => message.role === "tool",
-      );
-      expect(toolMessage?.content).toBeDefined();
-      const content = toolMessage!.content!;
-      const parsed = JSON.parse(content) as {
-        schema: {
-          properties: {
-            rows: { items: { properties: Record<string, unknown> } };
-            report: { properties: Record<string, unknown> };
+        const toolMessage = result.transcript.find(
+          (message) => message.role === "tool",
+        );
+        expect(toolMessage?.content).toBeDefined();
+        const content = toolMessage!.content!;
+        const parsed = JSON.parse(content) as {
+          schema: {
+            properties: {
+              rows: { items: { properties: Record<string, unknown> } };
+              report: { properties: Record<string, unknown> };
+            };
           };
         };
-      };
-      expect(Object.keys(parsed.schema.properties.rows.items.properties))
-        .toEqual(["[fabric-id]"]);
-      expect(Object.keys(parsed.schema.properties.report.properties))
-        .toEqual(["[fabric-id]"]);
-      // Stated again over the whole reply, so an identifier that escapes into
-      // some other field fails this too.
-      expect(content).not.toContain("did:key:");
-      expect(content).not.toContain(SCRUB_HASH);
+        expect(Object.keys(parsed.schema.properties.rows.items.properties))
+          .toEqual(["[fabric-id]"]);
+        expect(Object.keys(parsed.schema.properties.report.properties))
+          .toEqual(["[fabric-id]"]);
+        // Stated again over the whole reply, so an identifier that escapes into
+        // some other field fails this too.
+        expect(content).not.toContain("did:key:");
+        expect(content).not.toContain(SCRUB_HASH);
+        const omissionText = await Deno.readTextFile(
+          join(artifactStore.runRoot, "transcript-omissions.json"),
+        );
+        expect(omissionText).not.toContain(HOSTILE_DID_NAME);
+        expect(omissionText).not.toContain(HOSTILE_HASH_NAME);
+        const omissionRecord = JSON.parse(omissionText) as {
+          results: Array<{
+            rules: Array<{
+              rule: string;
+              locations: Array<{ jsonPointer: string }>;
+            }>;
+          }>;
+        };
+        expect(omissionRecord.results[0].rules).toEqual([{
+          rule: "bare-fabric-identifier-scrub",
+          locations: [{
+            artifactPath: join(
+              artifactStore.runRoot,
+              "tool-outputs",
+              `${runId}_describe_handle_1-describe_handle.json`,
+            ),
+            jsonPointer: "/schema/properties/rows/items/properties",
+          }, {
+            artifactPath: join(
+              artifactStore.runRoot,
+              "tool-outputs",
+              `${runId}_describe_handle_1-describe_handle.json`,
+            ),
+            jsonPointer: "/schema/properties/report/properties",
+          }],
+        }]);
+      } finally {
+        await Deno.remove(artifactRoot, { recursive: true });
+      }
     });
 
     it("swaps a disclosed property name that is a link for a handle token", async () => {

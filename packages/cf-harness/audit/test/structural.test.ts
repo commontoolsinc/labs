@@ -26,6 +26,7 @@ import type {
   HarnessToolActivity,
 } from "../../src/contracts/run-report.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
+import type { HarnessTranscriptOmissions } from "../../src/contracts/transcript-omissions.ts";
 import type { HarnessRunState } from "../../src/run-state.ts";
 import {
   type AuditCheck,
@@ -144,6 +145,7 @@ const runReport = (
 interface BuiltRun {
   runState?: HarnessRunState;
   transcript?: readonly HarnessTranscriptMessage[];
+  transcriptOmissions?: HarnessTranscriptOmissions;
   runReport?: HarnessRunReport;
   policyTrace?: HarnessPolicyTrace;
   policySnapshot?: Record<string, unknown>;
@@ -159,6 +161,9 @@ const evidenceOf = (built: BuiltRun): RunEvidence => ({
   transcript: built.transcript === undefined
     ? absent()
     : present(built.transcript),
+  transcriptOmissions: built.transcriptOmissions === undefined
+    ? absent()
+    : present(built.transcriptOmissions),
   runReport: built.runReport === undefined
     ? absent()
     : present(built.runReport),
@@ -891,6 +896,268 @@ describe("structural", () => {
       expect(detailsOf(outcome)).toContain(
         "which the result records as `denied`",
       );
+    });
+  });
+
+  describe("AUD-20 omission accounting", () => {
+    it("counts each recorded omission rule", () => {
+      const outcome = inspect("AUD-20", {
+        transcript: [{ role: "user", content: "Run it." }, {
+          role: "assistant",
+          content: "",
+          toolCalls: [{
+            id: "call-1",
+            type: "function",
+            function: { name: "run_pattern", arguments: "{}" },
+          }],
+        }, {
+          role: "tool",
+          toolCallId: "call-1",
+          toolName: "run_pattern",
+          content: "model-facing",
+          resultRef: {
+            type: "cf-harness.tool-result-ref",
+            outputId: `${RUN_ID}:run_pattern:1` as never,
+            toolId: "run_pattern",
+            runId: RUN_ID,
+          },
+        }],
+        transcriptOmissions: {
+          type: "cf-harness.transcript-omissions",
+          version: 1,
+          results: [{
+            transcriptIndex: 2,
+            toolCallId: "call-1",
+            toolId: "run_pattern",
+            outputId: `${RUN_ID}:run_pattern:1`,
+            rules: [
+              {
+                rule: "artifact-only",
+                locations: [{
+                  artifactPath: "tool-outputs/result.json",
+                  jsonPointer: "/rawValue",
+                }],
+              },
+              {
+                rule: "bare-fabric-identifier-scrub",
+                locations: [{
+                  artifactPath: "tool-outputs/result.json",
+                  jsonPointer: "/message",
+                }],
+              },
+            ],
+          }],
+        },
+      });
+
+      expect(outcome.verdict).toBe("pass");
+      expect(outcome.message).toContain("`artifact-only` 1");
+      expect(outcome.message).toContain("`model-context-truncation` 0");
+      expect(detailsOf(outcome)).toContain(
+        "bare-fabric-identifier-scrub: 1",
+      );
+    });
+
+    it("returns `inconclusive` when the run predates omission records", () => {
+      const outcome = inspect("AUD-20", {});
+
+      expect(outcome.verdict).toBe("inconclusive");
+      expect(outcome.message).toContain("predates");
+    });
+
+    it("returns `inconclusive` when a current omission record has no transcript", () => {
+      const outcome = inspect("AUD-20", {
+        transcriptOmissions: {
+          type: "cf-harness.transcript-omissions",
+          version: 1,
+          results: [],
+        },
+      });
+
+      expect(outcome.verdict).toBe("inconclusive");
+      expect(outcome.message).toContain("`transcript.json` is absent");
+    });
+
+    it("returns `inconclusive` when a current omission record has an unreadable transcript", () => {
+      const root = evidenceOf({
+        transcriptOmissions: {
+          type: "cf-harness.transcript-omissions",
+          version: 1,
+          results: [],
+        },
+      });
+      root.transcript = {
+        status: "unparseable",
+        path: "built",
+        detail: "did not parse",
+      };
+
+      const outcome = checkNamed("AUD-20").inspect(root, {
+        root,
+        children: [],
+      });
+
+      expect(outcome.verdict).toBe("inconclusive");
+      expect(outcome.message).toContain("did not parse");
+    });
+
+    it("fails duplicate rules and rules without a location", () => {
+      const outcome = inspect("AUD-20", {
+        transcript: [{
+          role: "tool",
+          toolCallId: "call-1",
+          toolName: "run_pattern",
+          content: "model-facing",
+          resultRef: {
+            type: "cf-harness.tool-result-ref",
+            outputId: `${RUN_ID}:run_pattern:1` as never,
+            toolId: "run_pattern",
+            runId: RUN_ID,
+          },
+        }],
+        transcriptOmissions: {
+          type: "cf-harness.transcript-omissions",
+          version: 1,
+          results: [{
+            transcriptIndex: 0,
+            toolCallId: "call-1",
+            toolId: "run_pattern",
+            outputId: `${RUN_ID}:run_pattern:1`,
+            rules: [{
+              rule: "artifact-only",
+              locations: [{
+                artifactPath: "tool-outputs/result.json",
+                jsonPointer: "/rawValue",
+              }],
+            }, {
+              rule: "artifact-only",
+              locations: [],
+            }],
+          }],
+        },
+      });
+
+      expect(outcome.verdict).toBe("fail");
+      expect(outcome.message).toBe("2 omission-accounting errors found");
+      expect(detailsOf(outcome)).toContain("recorded more than once");
+      expect(detailsOf(outcome)).toContain("names no withheld location");
+    });
+
+    it("fails duplicate results and transcript identity mismatches", () => {
+      const result = {
+        transcriptIndex: 1,
+        toolCallId: "call-1",
+        toolId: "bash",
+        outputId: `${RUN_ID}:bash:1`,
+        rules: [{
+          rule: "artifact-only" as const,
+          locations: [{
+            artifactPath: "tool-outputs/result.json",
+            jsonPointer: "/stdout",
+          }],
+        }],
+      };
+      const outcome = inspect("AUD-20", {
+        transcript: [{ role: "user", content: "Run it." }, {
+          role: "tool",
+          toolCallId: "another-call",
+          toolName: "bash",
+          content: "model-facing",
+        }],
+        transcriptOmissions: {
+          type: "cf-harness.transcript-omissions",
+          version: 1,
+          results: [result, result],
+        },
+      });
+
+      expect(outcome.verdict).toBe("fail");
+      expect(detailsOf(outcome)).toContain("recorded more than once");
+      expect(detailsOf(outcome)).toContain("does not match");
+    });
+
+    it("fails when the omission record covers only part of the transcript", () => {
+      const firstOutputId = `${RUN_ID}:bash:1` as never;
+      const secondOutputId = `${RUN_ID}:bash:2` as never;
+      const toolResult = (
+        toolCallId: string,
+        outputId: typeof firstOutputId,
+      ) => ({
+        role: "tool" as const,
+        toolCallId,
+        toolName: "bash",
+        content: "model-facing",
+        resultRef: {
+          type: "cf-harness.tool-result-ref" as const,
+          outputId,
+          toolId: "bash",
+          runId: RUN_ID,
+        },
+      });
+      const outcome = inspect("AUD-20", {
+        transcript: [
+          toolResult("call-1", firstOutputId),
+          toolResult("call-2", secondOutputId),
+        ],
+        transcriptOmissions: {
+          type: "cf-harness.transcript-omissions",
+          version: 1,
+          results: [{
+            transcriptIndex: 0,
+            toolCallId: "call-1",
+            toolId: "bash",
+            outputId: firstOutputId,
+            rules: [],
+          }],
+        },
+      });
+
+      expect(outcome.verdict).toBe("fail");
+      expect(outcome.evidence).toContainEqual({
+        artifact: "transcript.json",
+        pointer: "[1].resultRef",
+        detail:
+          `tool result \`${secondOutputId}\` maps to 0 omission entries; exactly one is required`,
+      });
+    });
+
+    it("fails a withheld location with an empty artifact path", () => {
+      const outputId = `${RUN_ID}:bash:1` as never;
+      const outcome = inspect("AUD-20", {
+        transcript: [{
+          role: "tool",
+          toolCallId: "call-1",
+          toolName: "bash",
+          content: "model-facing",
+          resultRef: {
+            type: "cf-harness.tool-result-ref",
+            outputId,
+            toolId: "bash",
+            runId: RUN_ID,
+          },
+        }],
+        transcriptOmissions: {
+          type: "cf-harness.transcript-omissions",
+          version: 1,
+          results: [{
+            transcriptIndex: 0,
+            toolCallId: "call-1",
+            toolId: "bash",
+            outputId,
+            rules: [{
+              rule: "model-context-truncation",
+              locations: [{ artifactPath: "", jsonPointer: "/stdout" }],
+            }],
+          }],
+        },
+      });
+
+      expect(outcome.verdict).toBe("fail");
+      expect(outcome.evidence).toContainEqual({
+        artifact: "transcript-omissions.json",
+        pointer: "results[0].rules[0].locations[0].artifactPath",
+        detail: "rule `model-context-truncation` names an empty artifact path",
+      });
     });
   });
 

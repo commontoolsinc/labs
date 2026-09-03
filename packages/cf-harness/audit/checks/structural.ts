@@ -33,6 +33,10 @@ import type {
   HarnessTranscriptMessage,
 } from "../../src/contracts/transcript.ts";
 import { inspectHarnessTranscriptPairing } from "../../src/contracts/transcript.ts";
+import {
+  HARNESS_TRANSCRIPT_OMISSION_RULES,
+  type HarnessTranscriptOmissionRule,
+} from "../../src/contracts/transcript-omissions.ts";
 import { assertValidHarnessHandleTable } from "../../src/handle-table.ts";
 import type { HarnessRunState } from "../../src/run-state.ts";
 import { type CheckCitation, extendsClause, requiredBy } from "../citations.ts";
@@ -1413,6 +1417,160 @@ const evidenceRetention: AuditCheck = {
 };
 
 //
+// AUD-20 omission accounting
+//
+
+/**
+ * AUD-20, which accounts for every model-boundary omission without copying
+ * the withheld value into the accounting artifact.
+ */
+const omissionAccounting: AuditCheck = {
+  id: "AUD-20",
+  title: "omission accounting",
+  // OURS: AH-CFC-16 requires enough evidence to explain exposure and denial,
+  // but it does not require a per-rule omission accounting artifact.
+  citations: extendsClause("AH-CFC-16"),
+  falsifiedBy:
+    "a duplicated or transcript-mismatched result, a result recording one omission rule more than once, or a rule carrying no withheld location; an absent or unreadable omission artifact is inconclusive",
+  inspect(run) {
+    if (run.transcriptOmissions.status !== "present") {
+      if (run.transcriptOmissions.status === "absent") {
+        return {
+          verdict: "inconclusive",
+          message:
+            "this run predates `transcript-omissions.json`, so no per-rule omission count is available",
+          evidence: [{
+            artifact: "transcript-omissions.json",
+            detail: "legacy run",
+          }],
+        };
+      }
+      return notReadable(
+        "transcript-omissions.json",
+        run.transcriptOmissions,
+      );
+    }
+    if (run.transcript.status !== "present") {
+      return notReadable("transcript.json", run.transcript);
+    }
+
+    const errors: CheckEvidence[] = [];
+    const counts = Object.fromEntries(
+      HARNESS_TRANSCRIPT_OMISSION_RULES.map((rule) => [rule, 0]),
+    ) as Record<HarnessTranscriptOmissionRule, number>;
+    const outputIds = new Set<string>();
+    const recordsByTranscriptResult = new Map<string, number>();
+
+    for (
+      const [resultIndex, result] of run.transcriptOmissions.value.results
+        .entries()
+    ) {
+      const pointer = `results[${resultIndex}]`;
+      const transcriptResultKey =
+        `${result.transcriptIndex}\u0000${result.outputId}`;
+      recordsByTranscriptResult.set(
+        transcriptResultKey,
+        (recordsByTranscriptResult.get(transcriptResultKey) ?? 0) + 1,
+      );
+      if (outputIds.has(result.outputId)) {
+        errors.push({
+          artifact: "transcript-omissions.json",
+          pointer: `${pointer}.outputId`,
+          detail: `output id \`${result.outputId}\` is recorded more than once`,
+        });
+      }
+      outputIds.add(result.outputId);
+      const message = run.transcript.value[result.transcriptIndex];
+      if (
+        message?.role !== "tool" ||
+        message.toolCallId !== result.toolCallId ||
+        message.toolName !== result.toolId ||
+        String(message.resultRef?.outputId) !== result.outputId
+      ) {
+        errors.push({
+          artifact: "transcript-omissions.json",
+          pointer,
+          detail: "result identity does not match its transcript tool message",
+        });
+      }
+      const rules = new Set<HarnessTranscriptOmissionRule>();
+      for (const [ruleIndex, rule] of result.rules.entries()) {
+        counts[rule.rule] += 1;
+        if (rules.has(rule.rule)) {
+          errors.push({
+            artifact: "transcript-omissions.json",
+            pointer: `${pointer}.rules[${ruleIndex}]`,
+            detail: `rule \`${rule.rule}\` is recorded more than once`,
+          });
+        }
+        rules.add(rule.rule);
+        if (rule.locations.length === 0) {
+          errors.push({
+            artifact: "transcript-omissions.json",
+            pointer: `${pointer}.rules[${ruleIndex}].locations`,
+            detail: `rule \`${rule.rule}\` names no withheld location`,
+          });
+        }
+        for (const [locationIndex, location] of rule.locations.entries()) {
+          if (location.artifactPath.length === 0) {
+            errors.push({
+              artifact: "transcript-omissions.json",
+              pointer:
+                `${pointer}.rules[${ruleIndex}].locations[${locationIndex}].artifactPath`,
+              detail: `rule \`${rule.rule}\` names an empty artifact path`,
+            });
+          }
+        }
+      }
+    }
+    for (const [transcriptIndex, message] of run.transcript.value.entries()) {
+      if (message.role !== "tool" || message.resultRef === undefined) {
+        continue;
+      }
+      const outputId = String(message.resultRef.outputId);
+      const matches = recordsByTranscriptResult.get(
+        `${transcriptIndex}\u0000${outputId}`,
+      ) ?? 0;
+      if (matches !== 1) {
+        errors.push({
+          artifact: "transcript.json",
+          pointer: `[${transcriptIndex}].resultRef`,
+          detail: `tool result \`${outputId}\` maps to ${
+            count(matches, "omission entry", "omission entries")
+          }; exactly one is required`,
+        });
+      }
+    }
+    if (errors.length > 0) {
+      return {
+        verdict: "fail",
+        message: `${
+          count(
+            errors.length,
+            "omission-accounting error",
+            "omission-accounting errors",
+          )
+        } found`,
+        evidence: errors,
+      };
+    }
+    const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
+    return {
+      verdict: "pass",
+      message: `${count(total, "omission", "omissions")} recorded: ${
+        HARNESS_TRANSCRIPT_OMISSION_RULES.map((rule) =>
+          `\`${rule}\` ${counts[rule]}`
+        ).join("; ")
+      }`,
+      evidence: HARNESS_TRANSCRIPT_OMISSION_RULES.map((rule) => ({
+        artifact: "transcript-omissions.json",
+        detail: `${rule}: ${counts[rule]}`,
+      })),
+    };
+  },
+};
+
+//
 // The registry
 //
 
@@ -1427,6 +1585,7 @@ export const STRUCTURAL_CHECKS: readonly AuditCheck[] = [
   observeDisclosure,
   influenceAccumulation,
   evidenceRetention,
+  omissionAccounting,
 ];
 
 /**

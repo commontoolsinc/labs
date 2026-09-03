@@ -398,7 +398,11 @@ describe("seeded violations", () => {
       turnsOnly("AUD-6", "fail", (root) => {
         const transcript = transcriptOf(root);
         const last = transcript.findLast((message) => message.role === "tool")!;
-        transcript.push(structuredClone(last));
+        const orphan = structuredClone(last);
+        if (orphan.role === "tool") {
+          delete orphan.resultRef;
+        }
+        transcript.push(orphan);
       });
     });
   });
@@ -568,6 +572,17 @@ describe("seeded violations", () => {
         ...CLEAN,
         [at("AUD-2")]: "warn",
         [at("AUD-9")]: "warn",
+      });
+    });
+  });
+
+  describe("AUD-20 omission accounting", () => {
+    it("is inconclusive when the run predates omission records", () => {
+      turnsOnly("AUD-20", "inconclusive", (root) => {
+        root.transcriptOmissions = {
+          status: "absent",
+          path: root.transcriptOmissions.path,
+        };
       });
     });
   });

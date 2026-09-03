@@ -786,25 +786,6 @@ export const policyRefusalMessage = (
 };
 
 /**
- * Replaces bare fabric identifiers in model-facing diagnostic text with a
- * fixed placeholder. Compiler diagnostics can embed compiler-generated bare
- * tagged hashes (e.g. the `/fid1:.../` virtual module roots), DIDs, and
- * `data:` URIs — none of which the handle boundary swaps, since it only
- * handles the `of:`/`computed:` schemed link forms. A negative lookbehind
- * leaves those schemed forms (and `cfh:` handle tokens) alone: their embedded
- * hash is always preceded by a colon. Raw text stays in the persisted
- * artifact; only the model-facing rendering is scrubbed.
- */
-export const scrubBareFabricIdentifiers = (text: string): string =>
-  text
-    .replaceAll(/\bdata:[^\s"'`)\]}]+/g, "[fabric-id]")
-    .replaceAll(/\bdid:[a-z0-9]+:[A-Za-z0-9._%-]+/g, "[fabric-id]")
-    .replaceAll(
-      /(?<![A-Za-z0-9:])[A-Za-z0-9]+:[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])/g,
-      "[fabric-id]",
-    );
-
-/**
  * A raw result may hold values `JSON.stringify` cannot carry into the
  * tool-output artifact (a cycle through the reactive graph, say), so the
  * round trip both proves serializability and normalizes cells to their

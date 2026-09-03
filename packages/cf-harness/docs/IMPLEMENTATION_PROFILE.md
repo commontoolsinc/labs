@@ -196,7 +196,11 @@ readiness.
   reserved from normal workspace discovery when the roots overlap. Run-start
   image inputs are integrity-locked. In-run `view_image` observations use
   content-addressed snapshots when an artifact store is present, so regenerating
-  the source file does not change an earlier observation.
+  the source file does not change an earlier observation. Each persisted tool
+  result has a sibling transcript-omission entry naming the omission rule and
+  the full artifact's JSON pointer without copying the withheld value. The
+  console may join those records for retrospective display; resume and replay
+  continue to read only the model-facing transcript.
 
 ## Parent and child surfaces
 

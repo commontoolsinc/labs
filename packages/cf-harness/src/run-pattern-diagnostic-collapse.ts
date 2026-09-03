@@ -4,6 +4,10 @@ import type {
   HarnessToolTranscriptMessage,
   HarnessTranscriptMessage,
 } from "./contracts/transcript.ts";
+import {
+  annotateHarnessToolResultOmissions,
+  createHarnessTranscriptOmissionRuleRecord,
+} from "./contracts/transcript-omissions.ts";
 
 /** Statuses whose `message` carries a diagnostic the model writes against. */
 const COLLAPSIBLE_STATUSES = new Set(["compile-error", "error"]);
@@ -102,7 +106,7 @@ const collapsedMessage = (
 ): HarnessToolTranscriptMessage | undefined => {
   const summary = summarize(failure, attempt);
   if (summary.length >= failure.message.length) return undefined;
-  return {
+  const collapsed: HarnessToolTranscriptMessage = {
     ...message,
     content: JSON.stringify({
       ...failure.output,
@@ -111,6 +115,16 @@ const collapsedMessage = (
       messageOriginalLength: failure.message.length,
     }),
   };
+  const omission = message.resultRef === undefined
+    ? undefined
+    : createHarnessTranscriptOmissionRuleRecord(
+      "superseded-run-pattern-diagnostic-collapse",
+      message.resultRef,
+      ["/message"],
+    );
+  return omission === undefined
+    ? collapsed
+    : annotateHarnessToolResultOmissions(collapsed, [omission], message);
 };
 
 /**

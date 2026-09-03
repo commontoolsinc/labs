@@ -20,6 +20,10 @@ import type { HarnessCfcPolicySnapshot } from "../src/contracts/cfc-policy-snaps
 import type { HarnessPolicyTrace } from "../src/contracts/policy-trace.ts";
 import type { HarnessRunReport } from "../src/contracts/run-report.ts";
 import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
+import {
+  type HarnessTranscriptOmissions,
+  isHarnessTranscriptOmissions,
+} from "../src/contracts/transcript-omissions.ts";
 import type { HarnessRunState } from "../src/run-state.ts";
 
 /**
@@ -73,6 +77,7 @@ export interface RunEvidence {
 
   runState: ArtifactState<HarnessRunState>;
   transcript: ArtifactState<readonly HarnessTranscriptMessage[]>;
+  transcriptOmissions: ArtifactState<HarnessTranscriptOmissions>;
   runReport: ArtifactState<HarnessRunReport>;
   policyTrace: ArtifactState<HarnessPolicyTrace>;
   policySnapshot: ArtifactState<HarnessCfcPolicySnapshot>;
@@ -213,6 +218,11 @@ export const loadRunEvidence = async (input: string): Promise<RunEvidence> => {
       join(runDir, "transcript.json"),
       Array.isArray,
       "an array of transcript messages",
+    ),
+    transcriptOmissions: await loadArtifact<HarnessTranscriptOmissions>(
+      join(runDir, "transcript-omissions.json"),
+      isHarnessTranscriptOmissions,
+      "a transcript-omissions artifact",
     ),
     runReport: await loadArtifact<HarnessRunReport>(
       join(runDir, "run-report.json"),

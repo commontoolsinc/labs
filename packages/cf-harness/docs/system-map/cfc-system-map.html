@@ -669,7 +669,7 @@
     // ------------------------------------------------------------------ layout data
     // The state of this repository the map describes. Bump both when the
     // map is re-verified; the stamp is drawn in the canvas's top-left corner.
-    const SNAPSHOT = { date: "2026-09-04", sha: "8c01de6ceb" };
+    const SNAPSHOT = { date: "2026-09-03", sha: "884a99f898" };
     const W = 2760, H = 1840;
     const bands = [
       {
@@ -1050,7 +1050,7 @@
         w: 300,
         h: 100,
         t: "Run artifacts",
-        s: "transcript · run-state · labels · tool outputs",
+        s: "transcript · omissions · labels · tool outputs",
       },
       {
         id: "audit",
@@ -1061,7 +1061,7 @@
         w: 250,
         h: 100,
         t: "CFC audit checker",
-        s: "AUD-1…9 · 13…19, spec-anchored",
+        s: "AUD-1…9 · 13…20, rule-accounted",
       },
     ];
     const extraLines = {
@@ -1424,7 +1424,7 @@
         to: "artifacts",
         k: "evidence",
         pts: [[800, 640], [775, 640], [775, 1650], [800, 1650]],
-        label: "transcript · run-state · policy snapshot",
+        label: "transcript · omission record · run-state",
         lp: [765, 1330, "end"],
       },
       {
@@ -1701,10 +1701,10 @@
       {
         id: "t20",
         n: 20,
-        c: "upcoming",
+        c: "guarded",
         x: 750,
         y: 1640,
-        t: "The retrospective transcript hides omissions",
+        t: "Retrospective display preserves omission boundaries",
       },
     ];
     const threatClass = {
@@ -1994,14 +1994,13 @@
         kind: "Evidence",
         band: "evidence",
         body:
-          `<p>Every run writes its transcript, run-state, policy snapshot, tool outputs, child references, skill provenance, and, since today, the per-cell labels its space holds for the cells it touched, in the same write as the run's outcome. The one artifact a run does not write from its own knowledge.</p>`,
+          `<p>Every run writes its model-facing transcript and a sibling omission record in the same transcript write. The sibling names rules and full-artifact JSON pointers without copying withheld content. Runs also retain run-state, policy snapshot, full tool outputs, child references, skill provenance, and the per-cell labels their space holds for touched cells.</p>`,
         threats: ["t6", "t8", "t12", "t20"],
         links: [[
           "cell labels recorded in the write that ends the run",
           6757,
         ]],
         close: [
-          "The retrospective transcript does not show what the prompt loop withheld or compressed (CT-2198).",
           "The artifact root is readable from the sandbox (CT-2117).",
         ],
       },
@@ -2009,7 +2008,7 @@
         kind: "Evidence · verifier",
         band: "evidence",
         body:
-          `<p>Runs over any recorded run and grades AUD-1 to AUD-9, AUD-13 to AUD-15a, and deployment checks AUD-16 to AUD-19 as pass, fail, warn or inconclusive against quoted spec clauses; inconclusive is never pass. It reads the shared posture record every surface publishes, checks its total sink registry, and evaluates dial tuples against the enforcement rules in <code>audit/matrix.ts</code>. For AUD-3, files under <code>tool-outputs/</code> stamped <code>cf-harness.subagent-raw-return</code> or <code>cf-harness.run-pattern-source</code> are not tool effects; AUD-9 requires an invocation context only for a side effect that reached the substrate under AUD-2's classifier, and warns when a run recorded no context at all because its artifacts cannot distinguish host-side effects from lost evidence. AUD-16 counts the refusals among the release decisions <code>policy-trace.json</code> carries — the ones that denied — and reports the releases the same boundary measured and admitted or merely observed beside them, which is what tells a gate that passed from a gate that never ran.</p><p>It verifies; it never enforces. Missing evidence is a finding, not proof that a gate ran.</p>`,
+          `<p>Runs over any recorded run and grades AUD-1 to AUD-9, AUD-13 to AUD-15a, and AUD-20, plus deployment checks AUD-16 to AUD-19, as pass, fail, warn or inconclusive against quoted spec clauses; inconclusive is never pass. It reads the shared posture record every surface publishes, checks its total sink registry, and evaluates dial tuples against the enforcement rules in <code>audit/matrix.ts</code>. For AUD-3, files under <code>tool-outputs/</code> stamped <code>cf-harness.subagent-raw-return</code> or <code>cf-harness.run-pattern-source</code> are not tool effects; AUD-9 requires an invocation context only for a side effect that reached the substrate under AUD-2's classifier, and warns when a run recorded no context at all because its artifacts cannot distinguish host-side effects from lost evidence. AUD-20 counts every model-boundary omission by the durable rule record; it extends AH-CFC-16 as our requirement rather than claiming the clause requires that artifact. AUD-16 counts the refusals among the release decisions <code>policy-trace.json</code> carries — the ones that denied — and reports the releases the same boundary measured and admitted or merely observed beside them, which is what tells a gate that passed from a gate that never ran.</p><p>It verifies; it never enforces. Missing evidence is a finding, not proof that a gate ran.</p>`,
         links: [["spec-anchored CFC checker", 6749], [
           "shared posture record, total sink registry, matrix-backed audit checks",
           6755,
@@ -2262,10 +2261,8 @@
         where: ["child_pa", "runner", "g_release", "g_return"],
       },
       t20: {
-        plan:
-          "CT-2198 joins the model-facing transcript to the retained artifact fields and records which omission rule applied.",
         body:
-          `<p>The durable transcript is the rendering the model saw. Full tool outputs remain in artifacts, but the retrospective does not show which fields were withheld, which identifiers were scrubbed, or which earlier diagnostics were collapsed. That hides omissions from an operator reviewing the run later.</p>`,
+          `<p>The durable transcript remains exactly the rendering the model saw. A sibling record names which omission rule applied and where the withheld field remains in the full tool output. The Timeline joins them only for retrospective display: CFC-denied values stay redaction markers, scrubbed identifiers stay placeholders, and neither resume nor replay reads the joined view. Legacy runs are labeled unrecorded rather than reconstructed.</p>`,
         where: ["artifacts", "console"],
       },
       t11: {
@@ -2302,7 +2299,7 @@
       e_runner_artifacts:
         `<p>Labels, decisions, commit refusals and, since today, the cell-label snapshot for touched cells, written in the same write as the run's outcome.</p>`,
       e_parent_artifacts:
-        `<p>The run retains its transcript, state, policy snapshot, and full tool outputs. The transcript is only the model-facing rendering; it does not identify fields withheld or diagnostics compressed from that rendering (CT-2198).</p>`,
+        `<p>The run retains its model-facing transcript, state, policy snapshot, and full tool outputs. In the same transcript write, a sibling record names every omission rule with its artifact path and JSON pointer, but never copies withheld content.</p>`,
       e_audit_operator:
         `<p>Findings for a person to act on. Operator access to raw artifacts is the intended gate that has no code yet.</p>`,
       e_operator_policy:
@@ -2399,7 +2396,7 @@
             ],
             sel: "g_release",
             h: "8 · Where the circuit is still open",
-            t: "Policy discharge at the release gate and a door for records (CT-2175). The prose delegation brief. Web and browser tools without label input, and bridge networking in the sandbox. A pattern's llm calls uncapped. The sandbox reading the run's own artifacts (CT-2117). Connector rows unlabeled (CT-2189). Projected posture, store identity, console concurrency, stale session policy, and substrate liveness remain tracked. Program diagnostics and retrospective omissions are unlabeled boundaries (CT-2199, CT-2198). The display ceiling is off. Operator access is unaudited.",
+            t: "Policy discharge at the release gate and a door for records (CT-2175). The prose delegation brief. Web and browser tools without label input, and bridge networking in the sandbox. A pattern's llm calls uncapped. The sandbox reading the run's own artifacts (CT-2117). Connector rows unlabeled (CT-2189). Projected posture, store identity, console concurrency, stale session policy, and substrate liveness remain tracked. Program diagnostics remain an unlabeled boundary (CT-2199); retrospective omissions now retain their rule and location without crossing back into model context. The display ceiling is off. Operator access is unaudited.",
           },
         ],
       },

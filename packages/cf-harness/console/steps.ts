@@ -24,6 +24,13 @@ import type { ToolResultRef } from "../src/contracts/tool-result.ts";
 import type { HarnessPolicyEvent } from "../src/contracts/policy.ts";
 import type { HarnessPolicyDecisionRecord } from "../src/contracts/policy-trace.ts";
 import type { HarnessCfcInvocationContext } from "../src/contracts/cfc-invocation-context.ts";
+import type {
+  HarnessTranscriptOmissionRule,
+  HarnessTranscriptOmissions,
+} from "../src/contracts/transcript-omissions.ts";
+import {
+  scrubBareFabricIdentifiersDeep,
+} from "../src/fabric-identifier-scrub.ts";
 import {
   cellLabelsAt,
   type ConsoleCellLabelIndex,
@@ -168,6 +175,44 @@ export interface ConsoleDisclosure {
   longestNumericRun: number;
 }
 
+/** One full tool-output artifact available to the retrospective reader. */
+export interface ConsoleToolOutputArtifact {
+  artifactPath: string;
+  value: unknown;
+}
+
+/** One artifact position withheld from a model-facing tool result. */
+export interface ConsoleWithheldLocation {
+  rule: HarnessTranscriptOmissionRule;
+  artifactPath: string;
+  jsonPointer: string;
+
+  /** Full operator value, absent where CFC requires a redaction marker. */
+  value?: unknown;
+
+  /** Fixed marker shown instead of a value CFC withheld. */
+  redaction?: string;
+
+  /** Whether the recorded artifact and pointer were available to this read. */
+  available: boolean;
+}
+
+/** What the omission record says about one tool result. */
+export interface ConsoleWithheldResult {
+  status:
+    | "recorded"
+    | "unrecorded"
+    | "record-unreadable"
+    | "record-entry-missing";
+  locations: readonly ConsoleWithheldLocation[];
+}
+
+/** What the console could establish about the run's omission artifact. */
+export type ConsoleTranscriptOmissionsState =
+  | { status: "absent" }
+  | { status: "unreadable" }
+  | { status: "present"; value: HarnessTranscriptOmissions };
+
 /** One step of a run. */
 export interface ConsoleStep {
   index: number;
@@ -186,6 +231,9 @@ export interface ConsoleStep {
   input?: unknown;
 
   inputText?: string;
+
+  /** The call's source was replaced by the superseded-source marker. */
+  sourceReplacedByLaterAttempt?: true;
 
   /** The result the model read, parsed on the same terms as the input. */
   output?: unknown;
@@ -219,6 +267,9 @@ export interface ConsoleStep {
 
   /** What the result let across as value, for a step whose result carries one. */
   disclosure?: ConsoleDisclosure;
+
+  /** Retrospective join from the model-facing result to withheld positions. */
+  withheld: ConsoleWithheldResult;
 
   /**
    * The CFC invocation context recorded for this call. Under a posture that
@@ -260,6 +311,13 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 
 const asString = (value: unknown): string | undefined =>
   typeof value === "string" && value !== "" ? value : undefined;
+
+const sourceWasReplaced = (value: unknown): boolean => {
+  const sourceText = asRecord(value).sourceText;
+  return typeof sourceText === "string" && sourceText.startsWith(
+    "[cf-harness: superseded run_pattern source collapsed",
+  );
+};
 
 /** The tool calls an assistant made, by call id. */
 const toolCallsById = (
@@ -406,6 +464,126 @@ const childRunIdOf = (output: unknown): string | undefined => {
   return typeof childRunId === "string" ? childRunId : undefined;
 };
 
+const artifactName = (path: string): string =>
+  path.split(/[\\/]/).at(-1) ?? path;
+
+const valueAtJsonPointer = (
+  value: unknown,
+  pointer: string,
+): { available: boolean; value?: unknown } => {
+  if (pointer === "") {
+    return { available: true, value };
+  }
+  if (!pointer.startsWith("/")) {
+    return { available: false };
+  }
+  let current = value;
+  for (const encoded of pointer.slice(1).split("/")) {
+    const segment = encoded.replaceAll("~1", "/").replaceAll("~0", "~");
+    if (Array.isArray(current)) {
+      if (!/^\d+$/.test(segment) || Number(segment) >= current.length) {
+        return { available: false };
+      }
+      current = current[Number(segment)];
+      continue;
+    }
+    if (
+      typeof current !== "object" || current === null ||
+      !Object.hasOwn(current, segment)
+    ) {
+      return { available: false };
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return { available: true, value: current };
+};
+
+const withheldFor = (
+  message: HarnessTranscriptMessage & { role: "tool" },
+  transcriptIndex: number,
+  omissionState:
+    | ConsoleTranscriptOmissionsState
+    | HarnessTranscriptOmissions
+    | undefined,
+  toolOutputs: readonly ConsoleToolOutputArtifact[],
+): ConsoleWithheldResult => {
+  const omissions = omissionState === undefined
+    ? undefined
+    : "status" in omissionState
+    ? omissionState.status === "present" ? omissionState.value : undefined
+    : omissionState;
+  if (omissionState !== undefined && "status" in omissionState) {
+    if (omissionState.status === "unreadable") {
+      return { status: "record-unreadable", locations: [] };
+    }
+  }
+  const outputId = message.resultRef?.outputId;
+  const result = outputId === undefined
+    ? undefined
+    : omissions?.results.find((entry) =>
+      entry.outputId === String(outputId) &&
+      entry.transcriptIndex === transcriptIndex &&
+      entry.toolCallId === message.toolCallId &&
+      entry.toolId === message.toolName
+    );
+  if (result === undefined) {
+    return {
+      status: omissions === undefined ? "unrecorded" : "record-entry-missing",
+      locations: [],
+    };
+  }
+  const rulesAtLocation = new Map<string, Set<HarnessTranscriptOmissionRule>>();
+  for (const rule of result.rules) {
+    for (const location of rule.locations) {
+      const key = `${location.artifactPath}\u0000${location.jsonPointer}`;
+      const rules = rulesAtLocation.get(key) ?? new Set();
+      rules.add(rule.rule);
+      rulesAtLocation.set(key, rules);
+    }
+  }
+  const locations = result.rules.flatMap((rule) =>
+    rule.locations.map((location): ConsoleWithheldLocation => {
+      const artifact = toolOutputs.find((candidate) =>
+        candidate.artifactPath === location.artifactPath ||
+        artifactName(candidate.artifactPath) === artifactName(
+            location.artifactPath,
+          )
+      );
+      const held = artifact === undefined
+        ? { available: false as const }
+        : valueAtJsonPointer(artifact.value, location.jsonPointer);
+      const locationRules = rulesAtLocation.get(
+        `${location.artifactPath}\u0000${location.jsonPointer}`,
+      );
+      const bareIdentifierScrub = locationRules?.has(
+        "bare-fabric-identifier-scrub",
+      ) === true;
+      const scrubbed = held.available && bareIdentifierScrub
+        ? scrubBareFabricIdentifiersDeep(held.value)
+        : held.value;
+      const redaction = locationRules?.has("observation-denied") === true
+        ? "[redacted by CFC]"
+        : bareIdentifierScrub && !held.available
+        ? "[fabric-id]"
+        : bareIdentifierScrub && typeof scrubbed === "string"
+        ? scrubbed
+        : undefined;
+      return {
+        rule: rule.rule,
+        artifactPath: location.artifactPath,
+        jsonPointer: location.jsonPointer,
+        available: held.available,
+        ...(redaction !== undefined
+          ? { redaction }
+          : held.available
+          ? { value: scrubbed }
+          : {}),
+      };
+    })
+  );
+  return { status: "recorded", locations };
+};
+
 /**
  * The steps of a run. A tool call and the result answering it are one step
  * rather than two: what went in and what came back are the pair a person reads
@@ -417,6 +595,8 @@ export const consoleRunSteps = (
   policyDecisions: readonly HarnessPolicyDecisionRecord[] = [],
   policyEvents: readonly HarnessPolicyEvent[] = [],
   invocationContexts: readonly HarnessCfcInvocationContext[] = [],
+  omissions?: ConsoleTranscriptOmissionsState | HarnessTranscriptOmissions,
+  toolOutputs: readonly ConsoleToolOutputArtifact[] = [],
 ): readonly ConsoleStep[] => {
   // An invocation context names the output it was recorded for, which is the
   // same id the transcript's tool message carries as its result reference.
@@ -485,7 +665,7 @@ export const consoleRunSteps = (
     return introduced;
   };
 
-  for (const message of transcript) {
+  for (const [transcriptIndex, message] of transcript.entries()) {
     // An assistant message that only carries tool calls is the call's own
     // step, folded into the tool result below.
     if (
@@ -519,6 +699,10 @@ export const consoleRunSteps = (
           : call !== undefined
           ? { inputText: call.function.arguments }
           : {}),
+        ...(message.toolName === "run_pattern" && parsedInput.ok &&
+            sourceWasReplaced(parsedInput.value)
+          ? { sourceReplacedByLaterAttempt: true as const }
+          : {}),
         ...(parsedOutput.ok
           ? { output: parsedOutput.value }
           : { outputText: message.content }),
@@ -548,6 +732,12 @@ export const consoleRunSteps = (
           : {}),
         policyEvents: events,
         ...(disclosure !== undefined ? { disclosure } : {}),
+        withheld: withheldFor(
+          message,
+          transcriptIndex,
+          omissions,
+          toolOutputs,
+        ),
         ...(() => {
           const invocation = invocationFor(
             message.toolName,
@@ -567,6 +757,7 @@ export const consoleRunSteps = (
       handlesInScope: [...inScope],
       status: "none",
       policyEvents: [],
+      withheld: { status: "recorded", locations: [] },
     });
   }
   return steps;
