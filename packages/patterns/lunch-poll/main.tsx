@@ -817,7 +817,14 @@ const castVote = handler<CastVoteEvent, {
     return;
   }
   myVote.set({ voter, optionId, voteType, castAt: now });
-  votes.addUnique(myVote);
+  // Membership is the entity's presence: every path that drops a vote's link
+  // clears its entity too, so a vote that reads as present is already in the
+  // list. Recasting one therefore writes only that vote's own document, and
+  // touches the list on the cast that first puts the vote there. The read of
+  // this voter's own entity above stays a dependency, so a removal racing this
+  // recast still refuses the commit, and the retry sees an absent vote and
+  // adds the membership back.
+  if (existing === undefined) votes.addUnique(myVote);
 });
 
 const resetVotes = handler<ResetVotesEvent, {
