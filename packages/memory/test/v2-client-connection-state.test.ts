@@ -1,3 +1,22 @@
+/**
+ * Covers the connection state `Client` reports and the promise it hands a
+ * caller waiting for that state to move. The states are the branches
+ * `#ensureConnected()` takes, and the getter is held here both to that order
+ * and to agreement with `isConnected()`.
+ *
+ * The transport these cases run on can be severed on demand by firing the
+ * close receiver the client registered, which is the entry point a lost
+ * socket takes. Each transition is therefore observed as it happens rather
+ * than waited out: nothing polls and nothing sleeps.
+ *
+ * What that costs is worth knowing before reading a failure here. A
+ * transition the client makes without notifying leaves a case awaiting a
+ * promise that never resolves, so the suite hangs rather than failing an
+ * assertion. With no timeout in the wait there is nothing to cut it short and
+ * call it a miss, which makes the hang the honest signal: it is evidence of a
+ * missing notification, not a flake.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/data-model";

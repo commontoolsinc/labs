@@ -659,6 +659,12 @@ export class Client {
             // protocol-flag mismatch). Stop looping and remember the failure so
             // every present and future request fails fast with it.
             this.#fatalError = err;
+            // Redundant today: the notification at the top of this catch
+            // has already woken every waiter, and none of them resumes
+            // until this block finishes, so each reads the state this
+            // line settles. It stays because every write to a state
+            // field notifies for its own write, which is what lets the
+            // set of those writes be checked rather than reasoned about.
             this.#noteStateChange();
             this.#rejectPending(err);
             return;
