@@ -2,6 +2,7 @@ import { expect } from "@std/expect/expect";
 import { join } from "@std/path";
 
 import { decode, encode } from "@commonfabric/utils/encoding";
+import { isPerfDiagnosticWarnKey } from "../lib/perf-diagnostic-logs.ts";
 
 // Decodes a `Uint8Array` into an array of strings for each line.
 export function bytesToLines(stream: Uint8Array): string[] {
@@ -15,7 +16,25 @@ export function stripAnsi(text: string): string {
   return text.replace(ANSI_RE, "");
 }
 
-export function isIgnorableDenoWarningLine(line: string): boolean {
+// A tagged logger writes `[WARN][<logger>::<HH:MM:SS.mmm>] <key> <message…>`,
+// straight to stderr under LOG_TO_STDERR and through `console.warn` otherwise,
+// which Deno also sends to stderr.
+const TAGGED_WARN_LINE = /^\[WARN\]\[(.+)::\d\d:\d\d:\d\d\.\d\d\d\] (.*)$/;
+
+// True when `line` is one a logger wrote at warn level for a perf diagnostic.
+function isPerfDiagnosticLogLine(line: string): boolean {
+  const match = TAGGED_WARN_LINE.exec(line);
+  if (match === null) return false;
+  const [, loggerName, keyAndMessage] = match;
+  return isPerfDiagnosticWarnKey(loggerName, keyAndMessage);
+}
+
+// True when `line` opens a record a test has no business asserting on: noise
+// Deno itself writes, and the runtime's perf diagnostics. Neither says
+// anything about the command that ran — Deno's lines report the state of the
+// module cache, and a perf diagnostic reports how loaded the machine was — so
+// a test counting them would pass or fail on a fact about the machine.
+function isIgnorableStderrLine(line: string): boolean {
   const trimmed = stripAnsi(line).trimStart();
   return trimmed.startsWith(
     "Warning The following peer dependency issues were found:",
@@ -27,11 +46,45 @@ export function isIgnorableDenoWarningLine(line: string): boolean {
     // is cold, which happens on a fresh machine and after any change that
     // invalidates the cache, such as a Deno version bump.
     trimmed.startsWith("Download ") ||
-    /^[└├]/u.test(trimmed);
+    /^[└├]/u.test(trimmed) ||
+    isPerfDiagnosticLogLine(trimmed);
 }
 
+// True when `line` continues the record above it rather than opening one of
+// its own. A logger hands the console the values it reports, and a console
+// inspects one too wide for a line across several: the lines after the first
+// are indented, and the bracket the first opened closes alone on the last.
+const CONTINUATION_LINE = /^\s|^[\]})]+,?$/;
+
+/**
+ * The lines of `stderr` a test has business asserting on: everything left
+ * once the ignorable records are dropped.
+ *
+ * A record rather than a line, so that an ignorable line takes the
+ * continuations beneath it along with it. A budget over lines alone would
+ * count the tail of an inspected value as though the command had written it.
+ */
+export function relevantStderr(stderr: string[]): string[] {
+  const relevant: string[] = [];
+  let ignoring = false;
+  for (const line of stderr) {
+    if (isIgnorableStderrLine(line)) {
+      ignoring = true;
+      continue;
+    }
+    if (ignoring && CONTINUATION_LINE.test(stripAnsi(line))) continue;
+    ignoring = false;
+    relevant.push(line);
+  }
+  return relevant;
+}
+
+/**
+ * Asserts that the only thing the command wrote to stderr is the line
+ * `deno task` echoes naming what it ran.
+ */
 export function checkStderr(stderr: string[]) {
-  const relevant = stderr.filter((line) => !isIgnorableDenoWarningLine(line));
+  const relevant = relevantStderr(stderr);
   try {
     expect(relevant.length).toBe(1);
   } catch (e) {
