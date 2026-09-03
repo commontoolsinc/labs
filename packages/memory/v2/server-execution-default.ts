@@ -39,4 +39,4 @@
  * serving host, so they resolve the ambient baseline (OFF) by construction
  * (see the ambient flag in `../v2.ts`).
  */
-export const SERVER_EXECUTION_DEFAULT_ENABLED = false;
+export const SERVER_EXECUTION_DEFAULT_ENABLED = true;
