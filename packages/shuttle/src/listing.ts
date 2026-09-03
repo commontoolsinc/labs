@@ -134,7 +134,8 @@ export async function listPlace(
  * A row is one line, and lines are separated by a newline, so nothing written
  * on a line may put one inside it: a message and a bound each have their
  * newlines written as spaces, and a name carrying one is described rather than
- * written. Every other control character is written as it stands. Rewriting
+ * written. That is the only rewrite there is, so every other control
+ * character is written as it stands. Rewriting
  * one inside a name would leave a token `cd` no longer takes back to the row,
  * which is the guarantee the name is printed for, so what a terminal makes of
  * it is not something this can spend that on.
@@ -236,7 +237,8 @@ function lineFor(row: ListingRow): string {
  *
  * It says no operand rather than that nothing reaches the row, which is the
  * wider claim and a false one: a key whose first character is `#` is reached
- * by a multi-segment operand, `#` being data in every segment but the first.
+ * by a multi-segment operand, `#` being data in a segment that names a data
+ * key.
  * What holds of every row this is written for is that neither the name nor the
  * reference names it, and a name is what a listing prints. The name is shown
  * as it is written and not as something to type — it sits inside a marker,

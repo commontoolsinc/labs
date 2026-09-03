@@ -1506,12 +1506,14 @@ describe("place", () => {
           // argument suffix.
           //
           // One case per character, not one per character per door. The rule
-          // is a single loop inside `unnameablePiece`, which every door
-          // calls, so a character dropped from it is refused nowhere and
-          // reds wherever that character is driven. `#` is driven at this
-          // door because a walk refuses a `#` earlier, naming the suffix,
-          // and so never reaches the rule holding one; `@` is driven through
-          // a walk. That each door calls the rule at all is a separate axis
+          // is a single loop inside `unnameablePiece` that every door calls,
+          // and each character is driven at a door with no earlier check of
+          // its own — `#` here, `@` through a walk — so dropping either from
+          // the loop reds its case. `#` is driven at this door rather than
+          // at a walk because a walk refuses a `#` before the rule runs,
+          // naming the suffix; dropping `#` from the loop therefore leaves
+          // that door refusing it still, which is why the case for it is
+          // here. That each door calls the rule at all is a separate axis
           // with cases of its own, and each frames the one `Fault` it gets
           // back in its own sentence.
 

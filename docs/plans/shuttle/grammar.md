@@ -211,11 +211,12 @@ is the canonical parse's own — `validatePieceSegment`
 (`packages/cli/lib/llm-friendly-ref.ts`), called rather than copied, so that a
 name in neither vocabulary is refused with one sentence whichever door read
 it. The doors are the reference, a walk into a piece, a target the fabric
-resolved, and a settled move, which is every way a piece reaches a place:
+resolved, and a settled move, which is every door a piece reaches a place
+through:
 `cd slugs/Board` is refused, and the reason it gives is the reason `cd /Board`
 gives. That is what makes a listing's job possible: a name printed as an
-operand is one every door takes, and a name no door takes is one nothing
-prints an operand for.
+operand is one `cd` takes, and a name the rule refuses is one nothing offers
+an operand for.
 
 The vocabulary rule still buys no guarantee that every rendering is
 followable, and it and the rendering rules above catch different names. A
@@ -243,8 +244,8 @@ Those two readings between them leave one key with no **direct** spelling. A
 key whose *first* character is `#` is a wish target when it is the whole
 operand, and a reference carrying a `#` anywhere is refused, so neither door
 names it on its own. Some multi-segment operand still reaches it — `#` is data
-in every segment but the first, and `slugs/board/#key` names it from the space
-root — and which routes reach it from where is not characterized here. That is
+in a segment that names a data key, and `slugs/board/#key` names it from the
+space root — and which routes reach it from where is not characterized here. That is
 what the quoting ruling above costs: the key is reachable by a route rather
 than by a name, and a listing prints no name for such a row, a row's name
 being what it is called and not how to get to it.
@@ -326,8 +327,8 @@ delimiting for a reader and not for a parser. Nothing parses a listed line.
 
 A row is one line, and the lines are separated by a newline, so a name holding
 one is described rather than written and a message holding one has it written
-as a space. Nothing else is rewritten. A carriage return, the Unicode line and
-paragraph separators and every other control character are printed as they
+as a space. The newline's is the only rewrite there is, so a carriage
+return and the Unicode line and paragraph separators are printed as they
 stand, because a name is printed to be typed back and a rewritten one no
 longer names its row — a carriage return returns a terminal's cursor to the
 start of the line, and that is a thing a terminal does rather than a thing the

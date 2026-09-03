@@ -1,8 +1,9 @@
 /**
  * Unit tests for what `ls` finds at a place and how it writes each row back.
  *
- * Every read a listing makes is `packages/cli`'s, and every case here stands
- * its own in through the deps bag, so what is under test is the composing —
+ * Every read a listing makes is `packages/cli`'s, and every case that makes
+ * one stands its own in through the deps bag, so what is under test is the
+ * composing —
  * which read a position takes, what a row carries, and how a row prints — with
  * no socket, no server and no piece behind any of it. What those reads do once
  * called is not this file's subject; that a listing hands each of them the
@@ -671,10 +672,10 @@ describe("listing", () => {
       // holds of every line, named or not, so a row that prints an error it
       // does not carry, or drops one it does, reds it in either arm. What the
       // counts add is that both arms are reached and that an error reaches
-      // each of them — `named` and `unnamed` for the arms, `reported` for an
-      // error anywhere, and `reportedWithoutOperand` for the combination that
-      // reaches the marker arm, which is the shape this case twice computed
-      // and did not read.
+      // each — `named` and `unnamed` for the arms, `reported` for an error
+      // anywhere, and one guard per arm for an error inside it, since the
+      // arms are where a row and its error are printed together and the
+      // marker arm is the one this case twice computed and did not read.
       expect(named).toBeGreaterThan(0);
       expect(unnamed).toBeGreaterThan(0);
       expect(reported).toBeGreaterThan(0);
