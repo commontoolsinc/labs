@@ -6,25 +6,20 @@
 // engine-v3/<did>.sqlite`. The engine-v3 segment is sometimes doubled, so we
 // walk a bounded depth under each cache base rather than assume a fixed path.
 
-import { Identity } from "@commonfabric/identity";
+import { spaceIdentityForName } from "@commonfabric/identity";
 
 import { openSpace } from "./db.ts";
 import { rootCacheDir } from "./remote.ts";
 
-// A named space's DID is reproducibly derived by the runtime from its name:
-// `Identity.fromPassphrase("common user").derive(<name>)` (see
-// `packages/identity/src/session.ts` `createSession`). The shell addresses a
-// space by name (`/<space-name>/…`); we mirror that derivation so
-// `cf inspect <name>` resolves the same DB the runtime would, without anyone
-// copying a DID around.
-const SPACE_ROOT_PASSPHRASE = "common user";
-let spaceRoot: Promise<Identity> | undefined;
-
-/** Derive the DID of a NAMED space, the same way the runtime does. */
+/**
+ * The DID of a NAMED space, through the derivation a session uses
+ * (`spaceIdentityForName`, `packages/identity`). The shell addresses a space
+ * by name (`/<space-name>/…`), so calling that derivation rather than
+ * repeating it is what makes `cf inspect <name>` resolve the same DB the
+ * runtime would, without anyone copying a DID around.
+ */
 export async function deriveSpaceDid(name: string): Promise<string> {
-  spaceRoot ??= Identity.fromPassphrase(SPACE_ROOT_PASSPHRASE);
-  const space = await (await spaceRoot).derive(name);
-  return space.did();
+  return (await spaceIdentityForName(name)).did();
 }
 
 export interface DiscoveredSpace {

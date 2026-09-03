@@ -1612,7 +1612,8 @@ describe("place", () => {
             reason:
               "`#profile` resolves in space `did:key:z6MkOtherSpace`, and " +
               "this shuttle is connected to `did:key:z6MkConnectedSpace`. " +
-              "One connection serves one space.",
+              "One connection serves one space, so reaching that cell means " +
+              "a shuttle started against that space.",
           });
         });
 
@@ -1664,7 +1665,8 @@ describe("place", () => {
             reason: "`estuary` resolves to space `did:key:z6MkOtherSpace`, " +
               "and this shuttle is connected to " +
               "`did:key:z6MkConnectedSpace`. One connection serves one " +
-              "space.",
+              "space, so reaching that cell means a shuttle started against " +
+              "that space.",
           });
           expect(place.place).toEqual(placeAtSpaceRoot(SPACE));
         });

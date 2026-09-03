@@ -10,4 +10,8 @@ export {
 } from "./key-pair-transport.ts";
 export { KeyStore } from "./key-store.ts";
 export * from "./interface.ts";
-export { createSession, type Session } from "./session.ts";
+export {
+  createSession,
+  type Session,
+  spaceIdentityForName,
+} from "./session.ts";

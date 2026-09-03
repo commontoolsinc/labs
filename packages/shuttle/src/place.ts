@@ -252,7 +252,8 @@ function renderPlace(place: Place): string {
 /**
  * The one owner of a shuttle's place: it holds where shuttle stands, where it
  * stood before, and the levels it walked through to get there, moves between
- * them, and refuses what the design refuses.
+ * them, answers where an operand names without moving there, and refuses what
+ * the design refuses.
  *
  * Per instance rather than per process, so that several places — tabs, split
  * views, an agent holding more than one — stay reachable.
@@ -298,6 +299,19 @@ export class CurrentPlace {
   }
 
   /**
+   * Like {@link CurrentPlace.cd}, except that it moves nothing: what comes
+   * back is where `operand` names, and shuttle stays where it stood.
+   *
+   * One door reads an operand, because a read asks it the question a move
+   * asks. Reading it from here rather than from a standing built for the
+   * occasion is what makes the two agree about `..`, which walks the trail
+   * shuttle actually took and not the levels a position happens to name.
+   */
+  resolve(operand: string): Move {
+    return outcomeOf(movePlace(this.#here, operand, this.#previous));
+  }
+
+  /**
    * Moves into a target the fabric resolved, `operand` being the spelling that
    * named it. A target that resolved in another space is refused: one
    * connection serves one space.
@@ -316,24 +330,61 @@ export class CurrentPlace {
    * space by name.
    */
   settle(move: SpaceNamedMove, confirmed: MemorySpace): Move {
+    return this.#commit(this.#settled(move, confirmed));
+  }
+
+  /**
+   * Like {@link CurrentPlace.settle}, except that it moves nothing: what comes
+   * back is where the settled move names, and shuttle stays where it stood.
+   */
+  resolveNamedSpace(move: SpaceNamedMove, confirmed: MemorySpace): Move {
+    return outcomeOf(this.#settled(move, confirmed));
+  }
+
+  /** What `pwd` prints for this place. */
+  render(): string {
+    return renderPlace(this.#here.place);
+  }
+
+  /**
+   * Helper for the movers, which adopts a step that landed and reduces every
+   * step to the outcome a caller sees. The trail is navigation history rather
+   * than part of the place, so it stops here.
+   */
+  #commit(step: Step): Move {
+    if (step.kind === "moved") {
+      this.#previous = this.#here;
+      this.#here = step.to;
+    }
+    return outcomeOf(step);
+  }
+
+  /**
+   * Helper for {@link CurrentPlace.settle} and
+   * {@link CurrentPlace.resolveNamedSpace}, which is where `move` lands once
+   * `confirmed` is known. The comparison the reference deferred is made here
+   * rather than left to the caller, so a name that resolved to any space but
+   * the connected one is refused whichever of the two asked.
+   */
+  #settled(move: SpaceNamedMove, confirmed: MemorySpace): Step {
     const connected = this.#here.place.position.space;
     if (confirmed !== connected) {
-      return this.#commit(refuseOtherSpace(
+      return refuseOtherSpace(
         `\`${move.name}\` resolves to space \`${confirmed}\``,
         connected,
-      ));
+      );
     }
     const fault = unnameablePiece(move.piece) ??
       firstUnnameableSegment(move.path);
     if (fault !== undefined) {
-      return this.#commit(refuse(
+      return refuse(
         `The reference naming space \`${move.name}\` has ${fault.what}, ` +
           `so ${fault.so}.`,
-      ));
+      );
     }
     const outside = outsideVocabulary(move.piece);
-    if (outside !== undefined) return this.#commit(outside);
-    return this.#commit(land({
+    if (outside !== undefined) return outside;
+    return land({
       position: {
         kind: "piece",
         space: connected,
@@ -350,24 +401,7 @@ export class CurrentPlace {
         ),
       },
       scope: move.scope,
-    }, []));
-  }
-
-  /** What `pwd` prints for this place. */
-  render(): string {
-    return renderPlace(this.#here.place);
-  }
-
-  /**
-   * Helper for the movers, which adopts a step that landed and reduces every
-   * step to the outcome a caller sees. The trail is navigation history rather
-   * than part of the place, so it stops here.
-   */
-  #commit(step: Step): Move {
-    if (step.kind !== "moved") return step;
-    this.#previous = this.#here;
-    this.#here = step.to;
-    return { kind: "moved", place: step.to.place };
+    }, []);
   }
 }
 
@@ -805,7 +839,8 @@ function refuseArgumentSuffix(): Step {
 function refuseOtherSpace(clause: string, connected: MemorySpace): Step {
   return refuse(
     `${clause}, and this shuttle is connected to \`${connected}\`. One ` +
-      `connection serves one space.`,
+      `connection serves one space, so reaching that cell means a shuttle ` +
+      `started against that space.`,
   );
 }
 
@@ -985,6 +1020,15 @@ function refuse(reason: string): Step {
 /** Helper for the movers, which builds a step landing on `place`. */
 function land(place: Place, trail: Trail): Step {
   return { kind: "moved", to: { place, trail } };
+}
+
+/**
+ * Helper for the movers, which is what a caller sees of `step`. The trail is
+ * navigation history rather than part of a place, so it stops here whether or
+ * not the step was adopted.
+ */
+function outcomeOf(step: Step): Move {
+  return step.kind === "moved" ? { kind: "moved", place: step.to.place } : step;
 }
 
 /** Helper for the movers, which reads the message off a thrown value. */

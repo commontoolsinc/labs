@@ -16,6 +16,7 @@
     ".": "./mod.ts",
     "./commands/piece": "./commands/piece.ts",
     "./lib/cell-listing": "./lib/cell-listing.ts",
+    "./lib/cell-selection": "./lib/cell-selection.ts",
     "./lib/llm-friendly-ref": "./lib/llm-friendly-ref.ts",
     "./lib/piece": "./lib/piece.ts",
     "./lib/piece-render": "./lib/piece-render.ts",

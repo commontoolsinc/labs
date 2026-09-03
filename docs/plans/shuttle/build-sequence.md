@@ -62,7 +62,7 @@ well before it.
 override in its place, each with an `exit` typed `never` beside the sinks
 its own report needs — `printError` and `printHint` for the data error,
 `printError` and `render` for the call failure, whose expiry writes
-Invocation JSON to the machine surface. Every seam a v1 verb reaches
+Invocation JSON to the machine surface. Each seam that reports through one
 forwards the caller's own:
 `getCellValueFromCommand`, and `callFromCommand` at each of its three
 exits, the payload rejection reported from inside the dispatch's promise
@@ -195,9 +195,9 @@ Landed:
 
   The slice settles the two questions held for it, both of them recorded in
   [`grammar.md`](grammar.md). A quote reaches no reading, so a name whose own
-  characters are readings prints as the reference that names it rather than as
-  a quoted spelling of itself — which is what makes every name a listing prints
-  one `cd` takes back to that row, and leaves the split returning plain
+  characters are readings prints as the reference that names it rather than
+  as a quoted spelling of itself — which is what makes every name a listing
+  prints one `cd` takes back to that row, and leaves the split returning plain
   strings. And every door holds a piece to the slug and handle vocabularies,
   `validatePieceSegment` being called rather than copied, so a walk, a resolved
   target and a settled move hold a piece to what a reference holds one to, and
@@ -212,15 +212,41 @@ Landed:
   `packages/shuttle/test/place.test.ts`, so the record moves when the behavior
   does and not otherwise.
 
+- **B1b (slice 4) — the verbs** (`packages/shuttle/src/verbs.ts`). A line
+  splits, its first token names a verb, and the tokens after it are that
+  verb's operands: `cd`, `ls`, `pwd`, `get` and `wish`, over the one held
+  connection and over the listing above. Nothing writes. A verb returns what
+  it did — a place that moved, text shuttle wrote, a value the fabric holds,
+  or a refusal carrying its reason — so where any of it lands is the prompt's
+  decision, and every case drives the whole surface with no terminal behind
+  it. A read that failed is the one thing that is not an outcome: it raises,
+  so a server that cannot be reached is told apart from a line that was
+  wrong.
+
+  The slice settles the two `Move` arms B1a left for the connection. A
+  `#name` target resolves through `readWish` asked for the target's
+  *address* rather than its value, which is what `--select` spells `@`: the
+  space a target resolved in rides in the answer, so a home-anchored one is
+  refused with the reason decision 5 gives and nothing has to know which
+  targets are anchored where. A space written as a name is derived through
+  `spaceIdentityForName` (`@commonfabric/identity`), the derivation
+  `createSession` performs, named there so that the function that opens a
+  named space and the one that asks whether a name is the space already open
+  are one function — `packages/state-inspector` reaches it too. The
+  `./lib/cell-selection` export entry lands with this slice, `--select`'s own
+  parser being what `cd` asks a wish through.
+
+  `get`'s operand goes through the door `cd`'s goes through, read from where
+  shuttle stands rather than from a standing built for the occasion, which is
+  what makes the two agree about `..`; `CurrentPlace` carries the two
+  non-moving twins that needs. The one spelling `get` does not take is a
+  `#name` target: `cf cell get` takes none and `cf wish` does, and a data
+  verb here means what it means there, so the refusal names `wish`.
+
 Still to come:
 
-- **The prompt, a readline loop, and the verbs** (B1b for the verbs and
-  the connection, B1c for the prompt) — `cd` / `ls` / `pwd` / `get` read off
-  a line and dispatched, over one held `PiecesController` and over the
-  listing above, with `#name` wish targets
-  navigable within the connected space (`cd #favorites`, and the `wish`
-  verb, over the `./lib/wish` export entry A1 adds; a home-anchored target
-  from elsewhere is refused with the reason — decision 5).
+- **The prompt and a readline loop** (B1c) — a prompt carrying the place, and
+  a line read off it and handed to the dispatch above.
 
   The line editor is the view substrate's rather than `node:readline`'s.
   `EditBuffer` (`packages/cli/lib/view/editbuffer.ts`) holds the motions and
