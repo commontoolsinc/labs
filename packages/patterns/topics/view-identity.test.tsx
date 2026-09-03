@@ -36,21 +36,51 @@ import Topic from "./topic.tsx";
 export default pattern(() => {
   const topic = Topic({ title: "View identity" });
 
-  const add_comments = action(() => {
+  // One append per action, rather than three in one. The harness settles
+  // between actions, so each record lands before the next is sent and arrival
+  // order stops being an assumption about how a run of `send()` calls is
+  // drained.
+  //
+  // What it does NOT buy is distinct `sentAt` stamps. A settle is faster than
+  // the clock's millisecond, so the three still tie — measured here, not
+  // assumed: the assertion below reads them non-decreasing and goes red on
+  // strictly increasing. So the view's comparator ties on every pair, and the
+  // order the rows appear in is the stored array's order under a stable sort.
+  // That is exactly what addressing a row by index relies on, which is why the
+  // assertion pins it rather than trusting it.
+  const add_first = action(() => {
     topic.addComment.send({ body: "first", agentName: "Sol" });
+  });
+  const add_second = action(() => {
     topic.addComment.send({ body: "second", agentName: "Sol" });
+  });
+  const add_third = action(() => {
     topic.addComment.send({ body: "third", agentName: "Sol" });
   });
 
-  const add_links = action(() => {
-    for (const url of ["one", "two", "three"]) {
-      topic.addLink.send({
-        kind: "web",
-        url: `https://example.com/${url}`,
-        label: url,
-        agentName: "Sol",
-      });
-    }
+  const add_link_one = action(() => {
+    topic.addLink.send({
+      kind: "web",
+      url: "https://example.com/one",
+      label: "one",
+      agentName: "Sol",
+    });
+  });
+  const add_link_two = action(() => {
+    topic.addLink.send({
+      kind: "web",
+      url: "https://example.com/two",
+      label: "two",
+      agentName: "Sol",
+    });
+  });
+  const add_link_three = action(() => {
+    topic.addLink.send({
+      kind: "web",
+      url: "https://example.com/three",
+      label: "three",
+      agentName: "Sol",
+    });
   });
 
   const commentsView = computed(() =>
@@ -95,6 +125,22 @@ export default pattern(() => {
   });
 
   const assert_three_comments = assert(() => topic.comments.length === 3);
+
+  /** The thread is in the order it was filed, and `sentAt` never goes
+   * backwards along it. Both are relied on below, because every row here is
+   * addressed by its index in the view. Non-decreasing rather than increasing
+   * is the honest bound: these records tie, and a comparator that ties leaves
+   * the stable sort returning the array's own order. */
+  const assert_thread_in_filed_order = assert(() => {
+    const stored = topic.comments;
+    const bodies = stored.map((c) => c.body);
+    const ordered = bodies[0] === "first" && bodies[1] === "second" &&
+      bodies[2] === "third";
+    const nonDecreasing = stored.every((c, i) =>
+      i === 0 || stored[i - 1]!.sentAt <= c.sentAt
+    );
+    return ordered && nonDecreasing;
+  });
 
   /** The drift guard named in the header: the local view and the shipped
    * `commentCount` must agree about what is present. They are separate copies
@@ -142,9 +188,14 @@ export default pattern(() => {
 
   return {
     [TESTS]: [
-      { action: add_comments },
-      { action: add_links },
+      { action: add_first },
+      { action: add_second },
+      { action: add_third },
+      { action: add_link_one },
+      { action: add_link_two },
+      { action: add_link_three },
       { assertion: assert_three_comments },
+      { assertion: assert_thread_in_filed_order },
       { assertion: assert_view_agrees_with_shipped_count },
       { action: retract_view_index_1 },
       { assertion: assert_second_stamped },
