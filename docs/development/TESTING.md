@@ -282,6 +282,33 @@ Deno.exit(0);
 
 When adding runtime features, consider adding integration tests to `packages/runner/integration/` that verify the feature works end-to-end. See existing tests like `basic-persistence.test.ts` or `array_push.test.ts` for examples.
 
+### Diagnostics a test must not fail on
+
+Some of the runtime's warnings report wall time rather than behavior: the
+slow-traversal report in `packages/runner/src/traverse.ts`, above 100ms, and
+the slow-`Cell.get` report in `packages/runner/src/cell.ts`, above 50ms. A busy
+machine crosses those thresholds and an idle one does not, so a test that
+counted such a warning would pass or fail on how loaded the machine was.
+
+`packages/cli/lib/perf-diagnostic-logs.ts` holds the one list of them, by
+logger name and key prefix, and both places that hold a run's warnings to
+account read it: the pattern test runner, which fails a test on a logger
+warning the pattern did not allow, and the stderr budget the CLI tests assert
+in `packages/cli/test/utils.ts`. A new timing-triggered warning belongs on that
+list. A warning about behavior does not, and must keep failing tests.
+
+The budget drops records rather than lines. A logger hands the console the
+values it is reporting, and a console inspects one too wide for a line across
+several, so a dropped warning whose line ends by opening a bracket takes the
+indented lines beneath it and the bracket closing them. One a console fitted on
+a single line takes nothing, and whatever follows it is held to the budget as
+usual.
+
+Writing such a diagnostic so that its own coverage does not move with the clock
+is a separate obligation, and
+[`COVERAGE.md`](COVERAGE.md#diagnostics-that-fire-on-wall-clock-time) carries
+it.
+
 ### Recording browser integration tests as video demos
 
 Selected `patterns` and `shell` browser integration tests can be recorded with

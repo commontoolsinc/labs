@@ -13,6 +13,8 @@
  * globals, so each captures its own deltas.
  */
 
+import { isPerfDiagnosticWarnKey } from "./perf-diagnostic-logs.ts";
+
 interface LevelCounts {
   error: number;
   warn: number;
@@ -25,27 +27,6 @@ interface LoggerGlobal {
 
 /** Per-(logger, key) snapshot of error/warn counts at a point in time. */
 export type LoggerErrorWarnSnapshot = Map<string, LevelCounts>;
-
-/**
- * Warn-level logger keys that are PERF DIAGNOSTICS: they fire based on wall
- * time (machine speed, load), not program behavior, so failing a test on them
- * would be pure flake. They stay visible in the console; they just don't fail
- * tests. Keep this list to timing-triggered diagnostics only — behavioral
- * warnings must keep failing tests.
- */
-const PERF_DIAGNOSTIC_WARN_KEYS: ReadonlyArray<
-  { logger: string; keyPrefix: string }
-> = [
-  // cell.ts: logger.warn(`get >NNNms`, ...) — slow Cell.get, 10ms buckets.
-  { logger: "cell", keyPrefix: "get >" },
-  // traverse.ts: logger.warn("slow-traverse", ...) — slow traversal report.
-  { logger: "traverse", keyPrefix: "slow-traverse" },
-];
-
-const isPerfDiagnosticWarnKey = (loggerName: string, key: string): boolean =>
-  PERF_DIAGNOSTIC_WARN_KEYS.some((entry) =>
-    entry.logger === loggerName && key.startsWith(entry.keyPrefix)
-  );
 
 const loggerGlobals = (): Record<string, LoggerGlobal> => {
   const global = globalThis as unknown as {
@@ -79,8 +60,8 @@ export function snapshotLoggerErrorWarnCounts(): LoggerErrorWarnSnapshot {
 /**
  * Diff current logger counts against the pre-run snapshot and append a
  * `[logger:<name>] <n> error(s)/warning(s) (key: <key>)` line per (logger,
- * key) that logged during the run. Perf-diagnostic warn keys (see above) are
- * skipped.
+ * key) that logged during the run. A warn key that
+ * `perf-diagnostic-logs.ts` names a perf diagnostic is skipped.
  */
 export function appendLoggerDeltaMessages(
   snapshot: LoggerErrorWarnSnapshot,

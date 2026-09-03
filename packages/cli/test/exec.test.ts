@@ -21,7 +21,7 @@ import {
 import { writeMountState } from "../lib/fuse.ts";
 import { CF_RUNTIME_ERROR_LOG } from "../lib/callable.ts";
 import type { SpaceConfig } from "../lib/piece.ts";
-import { cf, isIgnorableDenoWarningLine } from "./utils.ts";
+import { cf, relevantStderr } from "./utils.ts";
 
 function makeSpec(
   callableKind: "handler" | "tool",
@@ -1975,15 +1975,15 @@ describe("exec command user-facing errors", () => {
     expect(code).toBe(1);
     expect(stdout).toEqual([]);
 
-    const relevantStderr = stderr.filter((line) =>
-      !line.includes("deno run ") && !isIgnorableDenoWarningLine(line)
+    const relevant = relevantStderr(stderr).filter((line) =>
+      !line.includes("deno run ")
     );
 
-    expect(relevantStderr).toEqual([
+    expect(relevant).toEqual([
       `Path is not within a mounted cf fuse filesystem: ${missingPath}`,
     ]);
-    expect(relevantStderr.join("\n")).not.toMatch(/\n\s*at\s+/);
-    expect(relevantStderr.join("\n")).not.toMatch(
+    expect(relevant.join("\n")).not.toMatch(/\n\s*at\s+/);
+    expect(relevant.join("\n")).not.toMatch(
       /executeMountedCallableFile|resolveMountedCallableFile/,
     );
   });
