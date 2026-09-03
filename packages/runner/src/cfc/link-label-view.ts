@@ -18,6 +18,7 @@ import {
   linkRefFrom,
   linkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
+import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { refuseFabricInstance } from "../fabric-special-object.ts";
 import type { CellLinkRefPayload, SigilLink } from "../sigil-types.ts";
@@ -60,18 +61,33 @@ export function setLinkCfcLabelView(
  * Copy-on-write: unchanged subtrees are returned by reference, so a value
  * holding no view comes back as the same instance.
  *
- * It terminates only because what it is given is `convertCellsToLinks` output,
- * where a cycle has already become a back-link. That is a coupling between two
- * files and nothing enforces it.
+ * A value that contains itself is refused, with the path at which the cycle
+ * closes. A subtree reachable from two positions is shared rather than
+ * cyclic, and is walked at each.
  *
  * A `FabricPrimitive` comes back as the same instance, correctly: a leaf holds
  * no sigil link for this to rewrite. A `FabricInstance` is refused, since
  * passing one through would leave a view riding a link inside it untouched.
+ *
+ * @throws If the value contains a cycle, or a `FabricInstance`.
  */
 export function stripSigilCfcLabelViews(value: unknown): unknown {
-  // TODO(danfuzz): track ancestors here, so this stands on its own rather than
-  // on what its callers happen to pass.
+  return stripOne(value, [], new IndexTrackingStack<object>());
+}
 
+/**
+ * Recursive worker for {@link stripSigilCfcLabelViews}, carrying the state of
+ * the walk in progress. `path` is the way from the root to `value`, held as
+ * one array the walk pushes to and pops from. `ancestors` holds the containers
+ * the walk is inside, so that what it recognizes is a cycle: an entry sits
+ * there only while the walk is inside it, and a container reached again by a
+ * different path is not there any more.
+ */
+function stripOne(
+  value: unknown,
+  path: string[],
+  ancestors: IndexTrackingStack<object>,
+): unknown {
   if (isLinkRef(value)) {
     const payload = linkRefPayload(
       value as SigilLink,
@@ -81,15 +97,6 @@ export function stripSigilCfcLabelViews(value: unknown): unknown {
     }
     const { cfcLabelView: _cfcLabelView, ...clean } = payload;
     return linkRefFrom<CfcCellLinkRefPayload>(clean);
-  }
-  if (Array.isArray(value)) {
-    let changed = false;
-    const out = value.map((item) => {
-      const next = stripSigilCfcLabelViews(item);
-      if (next !== item) changed = true;
-      return next;
-    });
-    return changed ? out : value;
   }
   // A `FabricPrimitive` is `isObjectOrArray` and leaves ahead of the record
   // branch. It holds no sigil link, so returning it whole is the answer.
@@ -112,15 +119,44 @@ export function stripSigilCfcLabelViews(value: unknown): unknown {
     refuseFabricInstance(value, "when stripping sigil CFC label views");
   }
 
-  if (isObjectOrArray(value)) {
+  if (!isObjectOrArray(value)) {
+    return value;
+  }
+
+  // A container. It goes onto `ancestors` for as long as the walk is inside
+  // it, and every way out below clears it again.
+  if (ancestors.has(value)) {
+    throw new Error(
+      "Cannot strip sigil CFC label views from a value with a cycle; " +
+        `the cycle closes at path \`${path.join(".")}\`.`,
+    );
+  }
+  ancestors.push(value);
+
+  try {
+    if (Array.isArray(value)) {
+      let changed = false;
+      const out = value.map((item, index) => {
+        path.push(String(index));
+        const next = stripOne(item, path, ancestors);
+        path.pop();
+        if (next !== item) changed = true;
+        return next;
+      });
+      return changed ? out : value;
+    }
+
     let changed = false;
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {
-      const next = stripSigilCfcLabelViews(item);
+      path.push(key);
+      const next = stripOne(item, path, ancestors);
+      path.pop();
       if (next !== item) changed = true;
       out[key] = next;
     }
     return changed ? out : value;
+  } finally {
+    ancestors.popExpect(value);
   }
-  return value;
 }
