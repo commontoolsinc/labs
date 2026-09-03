@@ -77,10 +77,13 @@ export const UnsupportedMediaTypeError = (
 /**
  * Reads requested `address` from the provided `source` attestation and either
  * succeeds with derived {@link IAttestation} with the given `address` or fails
- * with inconsistency error if resolving an `address` encounters a non-object
- * along the path. Note it will succeed with `undefined` if last component of
- * the path does not exist on the object. Below are some examples illustrating
- * read behavior
+ * with inconsistency error if resolving an `address` encounters a value it
+ * cannot address by key along the path. A non-object is one such value; so is
+ * a `FabricSpecialObject`, which holds its state behind no property name, and
+ * which therefore stops a resolution the way a scalar does rather than
+ * reporting the slot beneath it as absent. Note it will succeed with
+ * `undefined` if last component of the path does not exist on the object.
+ * Below are some examples illustrating read behavior
  *
  * ```ts
  * const address = {
@@ -178,7 +181,9 @@ export const claim = (
  * Attempts to resolve given `address` from the `source` attestation. Function
  * succeeds with derived attestation that will have provided `address` or fails
  * with a not found error if the path doesn't exist, or a type mismatch error if
- * resolving an address encounters non-object along the resolution path.
+ * resolving an address encounters a value it cannot address by key along the
+ * resolution path -- a non-object, or a `FabricSpecialObject`, whose state
+ * sits behind no property name.
  */
 export const resolve = (
   source: IAttestation,

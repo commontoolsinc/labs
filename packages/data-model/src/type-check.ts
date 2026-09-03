@@ -10,10 +10,18 @@
  * Frozen-ness is a separate question and deliberately not asked here, so a
  * structurally-valid unfrozen value is a member.
  *
- * The narrowings are looser than membership on purpose. They are asked of a
+ * The narrowings are looser than membership on purpose. Most are asked of a
  * value whose type already claims to be a `FabricValue`, and answer only
  * whether it may be read by name; where one accepts something membership
  * refuses, the difference is stated on that narrowing rather than here.
+ *
+ * The `isWalkable*` pair is the exception, and takes `unknown`. A structural
+ * walk holds whatever its caller passed -- a schema node, a pattern binding, a
+ * builder artifact -- and asking it to prove membership first would be asking
+ * a different question than the one it needs answered. So that pair subtracts
+ * the fabric special objects and nothing else: a `Date`, a `Map`, a `Cell`, a
+ * query-result proxy over one all still answer `true`, which is what leaves a
+ * walk's treatment of everything outside the type where it found it.
  */
 
 import { backtickQuote } from "@commonfabric/utils/markdown";
