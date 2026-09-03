@@ -30,8 +30,12 @@ contents.
 ## 2. Prompt authority
 
 **AH-CFC-3.** Direct-command authority MUST depend on trusted `PromptSlotBound`
-evidence for the relevant kernel, subject, slot role, and value or snapshot
-digest.
+evidence binding the kernel name, the authenticated subject, the named surface,
+the slot role, and a digest of the exact value carrying the authority. A
+UI-backed surface binds that value through render evidence. A non-UI surface,
+such as a CLI or API route, MUST supply an equivalent trusted input-capture
+record binding the same fields. A surface that cannot supply one MUST NOT mint
+direct-command authority.
 
 **AH-CFC-4.** Context, quoted text, retrieved documents, skills, browser
 observations, child summaries, and previous model output MUST NOT mint
@@ -74,6 +78,15 @@ the model only through the profile's typed deny/recovery channel.
 **AH-CFC-12.** Delegation is a policy transition. A child receives only the
 authority, labels, skills, and capabilities explicitly bound to the child
 profile.
+
+**AH-CFC-12a.** A child profile SHOULD carry a confidentiality ceiling bounding
+what the child may observe, through inherited handles, arguments, mounted files,
+and any other labeled channel. Where a ceiling is in force, a read that would
+observe a value above it MUST be denied even if the parent could have observed
+that value, and resolving an inherited handle into a child input MUST be
+rejected if the resolved value exceeds the ceiling. A deployment MUST state how
+ceilings and observation policies are applied before inherited handles are
+resolved.
 
 **AH-CFC-13.** Child artifacts and raw browser/network observations remain under
 the child boundary. A structured or summarized return is a new observation and

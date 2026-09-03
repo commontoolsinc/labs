@@ -136,8 +136,8 @@ The four §18.2.7 obligations that are this package's:
 
 The obligation-by-obligation working, with the code each answer rests on, is in
 [`docs/history/packages/cf-harness/cfc-profile-conformance-gap-2026-09-03.md`](../../../docs/history/packages/cf-harness/cfc-profile-conformance-gap-2026-09-03.md).
-How the `AH-CFC-*` clauses relate to the CFC sections above — including the two
-that are narrower than their counterpart — is in
+How the `AH-CFC-*` clauses relate to the CFC sections above, and which CFC
+obligations no clause carries, is in
 [`docs/specs/agent-harness/04-cfc-spec-correspondence.md`](../../../docs/specs/agent-harness/04-cfc-spec-correspondence.md).
 
 ## Capability discovery

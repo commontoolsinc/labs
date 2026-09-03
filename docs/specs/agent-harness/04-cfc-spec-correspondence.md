@@ -7,7 +7,7 @@ derivation. The authority they derive from is the Common Fabric Contextual Flow
 Control specification, `commontoolsinc/specs`, and in particular
 `cfc/18-runtime-implementation-profiles.md` §18.2-18.4. This document is the
 derivation itself: which CFC section each `AH-CFC` clause rests on, which
-clauses go beyond the authority, which are narrower than it, and which CFC
+clauses go beyond the authority, which if any are narrower than it, and which CFC
 obligations no `AH-CFC` clause carries.
 
 It exists because the audit in `packages/cf-harness/audit` cites `AH-CFC`
@@ -28,9 +28,11 @@ is:
 | `beyond`   | The clause has no CFC counterpart and imposes an obligation the CFC specification does not.                 |
 | `fused`    | The clause draws on more than one CFC section and states them as a single harness obligation.                |
 
-No `AH-CFC` clause **contradicts** the CFC specification. Two are `narrow`, and
-those two are where a conformance claim resting on `AH-CFC` alone would
-overstate what is enforced.
+No `AH-CFC` clause **contradicts** or is narrower than the CFC specification, so
+a conformance claim resting on an `AH-CFC` clause does not overstate what the
+authority requires. What `AH-CFC` does not carry at all is listed under "CFC
+obligations no clause carries" below; a claim resting on `AH-CFC` alone is
+silent there rather than wrong.
 
 ## The pin
 
@@ -52,7 +54,7 @@ was read against.
 
 | Clause     | CFC section | Relation | Notes                                                                                                                                                                                                                                                                                                                 |
 | ---------- | ----------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AH-CFC-3` | §18.3.1     | `narrow` | **See "Where the derivation is narrow" below.** §18.3.1 requires a UI mint to replay the render reference and requires a non-UI mint to supply "an equivalent trusted input-capture record such as `UserSurfaceInput`" binding subject, surface, value digest, role, and kernel name. `AH-CFC-3` asks for "value or snapshot digest" and does not require the capture record or the subject. |
+| `AH-CFC-3` | §18.3.1     | `faithful` | §18.3.1 requires a UI mint to replay the render reference and a non-UI mint to supply "an equivalent trusted input-capture record such as `UserSurfaceInput`" binding subject, surface, value digest, role, and kernel name. `AH-CFC-3` requires the same five fields, distinguishes the UI path from the non-UI path, and refuses a surface that can supply neither. |
 | `AH-CFC-4` | §18.3.1     | `faithful` | §18.3.1: "Application code and model output may request that a value be displayed or submitted, but they cannot assign the load-bearing prompt role themselves", and "a README or webpage containing "ignore previous instructions" remains `quote` or ordinary labeled content, even if it is imperatively phrased."     |
 | `AH-CFC-5` | §18.3.1     | `faithful` | §18.3.1's fail-closed list covers a stale target path and a changed source value. `AH-CFC-5` states the same rule for the non-render cases — copying, summarizing, resuming — which §18.3.1 does not enumerate but whose principle it fixes.                                                                             |
 
@@ -76,7 +78,8 @@ was read against.
 
 | Clause      | CFC section          | Relation   | Notes                                                                                                                                                                                                          |
 | ----------- | -------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `AH-CFC-12` | §18.2.4.3, §18.3.3   | `narrow`   | **See "Where the derivation is narrow" below.** §18.2.4.3 asks for a confidentiality ceiling that is "an **upper bound** on what the callee is allowed to *observe*", with reads above it denied. `AH-CFC-12` asks only that a child receive what is explicitly bound to its profile, which is capability attenuation and not observation attenuation. |
+| `AH-CFC-12` | §18.2.4.3, §18.3.3   | `faithful` | §18.2.4.3 attenuates a delegation in two dimensions. `AH-CFC-12` carries the capability half: a child receives only what its profile explicitly binds. |
+| `AH-CFC-12a` | §18.2.4.3, §18.2.4.2, §18.3.3 | `faithful` | The observation half. §18.2.4.3 asks for a ceiling that is "an **upper bound** on what the callee is allowed to *observe*", with a read above it denied "even if the parent node could have observed it", and §18.2.4.2 requires handle substitution to respect it. `AH-CFC-12a` states both, and carries §18.3.3's obligation to say how ceilings apply before inherited handles resolve. It follows the CFC section's own modality: the ceiling is a `SHOULD`, and the denial and substitution rules are `MUST` wherever one is in force. |
 | `AH-CFC-13` | §18.2.4, §18.2.4.2   | `faithful` | §18.2.4: schema-based `InjectionSafe` sanitization "is also a trusted-runtime transition, not a sandbox claim", and the runtime may add it "only after it validates the candidate against that trusted schema". §18.2.4.2's sanitizer sub-agent flow is the same shape from the caller's side. |
 
 ### 6. Enforcement modes
@@ -101,63 +104,43 @@ was read against.
 | `AH-CFC-18` | §18.2.4.2, §18.2.4.3, §8.13   | `faithful` | §18.2.4.2: handle substitution "is itself an information flow and MUST be enforced as a read". §18.2.4.3: substitution "MUST respect ceilings". The converse — that minting or returning a handle is not a release — is §18.2.4.2's transfer rule: "a caller may pass the token as an opaque capability, but doing so does not reveal the payload." |
 | `AH-CFC-19` | §18.2.4.2                     | `faithful` | §18.2.4.2 requires handles to be non-enumerable by sandboxed code and resolvable only by the trusted runtime, and labels their metadata separately.                                                                                     |
 
-## Where the derivation is narrow
+## Where the derivation carries weight
 
-Two clauses require less than their CFC counterpart. Both are places where an
-implementation could satisfy `AH-CFC` and still not satisfy
-`CfcAgentHarnessProfile`, which makes them the load-bearing rows of this
-document.
+Two clauses do work that a reader may not expect from their length, because
+each is the whole of what `AH-CFC` says about a mechanism the CFC specification
+develops at length.
 
-### `AH-CFC-3` does not require an input-capture record
+### `AH-CFC-3` carries the whole of prompt-slot binding
 
-§18.3.1 splits prompt-slot minting into two paths. A UI-backed slot binds by
-replaying a render reference: retrieve `renderRef.rootRef` at `renderRef.seq`,
-recompute `snapshotDigest`, resolve `targetPath`, verify the DOM event target
-maps to that node, verify the authenticated `subject` and named `surface`,
-compute `valueDigest`, and mint over all of it. A non-UI surface — a CLI or an
-API route — may mint without `renderRef` "only if they provide an equivalent
-trusted input-capture record such as `UserSurfaceInput` and bind the same
-subject, surface, value digest, role, and kernel name." §18.3.1 then says these
-routes "are implementation profiles with explicit evidence, not fallbacks to
-text-shaped authority."
+§18.3.1 splits minting into two paths. A UI-backed slot binds by replaying a
+render reference: retrieve `renderRef.rootRef` at `renderRef.seq`, recompute
+`snapshotDigest`, resolve `targetPath`, verify the DOM event target maps to that
+node, verify the authenticated `subject` and named `surface`, compute
+`valueDigest`, and mint over all of it. A non-UI surface may mint without
+`renderRef` "only if they provide an equivalent trusted input-capture record
+such as `UserSurfaceInput` and bind the same subject, surface, value digest,
+role, and kernel name" — routes that "are implementation profiles with explicit
+evidence, not fallbacks to text-shaped authority."
 
-`AH-CFC-3` asks for evidence "for the relevant kernel, subject, slot role, and
-value or snapshot digest." Three differences follow from that phrasing:
+`AH-CFC-3` compresses that into one clause and keeps what makes it load-bearing:
+the five bound fields, the split between the two paths, and the refusal for a
+surface that can supply neither. The render-replay steps themselves stay in
+§18.3.1; a harness implementing a UI surface reads them there.
 
-- The disjunction "value **or** snapshot digest" admits a binding with neither
-  a submitted value bound nor a render replayed.
-- No input-capture record is required, so a non-UI mint has nothing standing in
-  for the render replay.
-- `subject` is named but the clause does not require it to be authenticated.
+### `AH-CFC-12` and `AH-CFC-12a` split attenuation in two
 
-The consequence for a conformance claim: a harness whose surfaces mint
-`direct-command` from constants satisfies `AH-CFC-3` and does not satisfy
-§18.3.1. Anything relying on `AH-CFC-3` to establish that direct-command
-authority is bound to a real user's real submission is relying on the wrong
-clause.
+§18.2.4.3 attenuates a delegation along two axes at once, and separating them
+is what makes each checkable. `AH-CFC-12` governs what a child is *given*.
+`AH-CFC-12a` governs what a child may *observe* through what it was given —
+the ceiling as "an **upper bound** on what the callee is allowed to *observe*
+from the filesystem, CLI args, inherited opaque handles, and any other labeled
+channels", the denial of a read above it "even if the parent node could have
+observed it", and §18.2.4.2's rule that handle substitution respects it.
 
-### `AH-CFC-12` binds capabilities, not observation
-
-§18.2.4.3 is explicit that a delegation's attenuation is about reads: the
-ceiling "is an **upper bound** on what the callee is allowed to *observe* from
-the filesystem, CLI args, inherited opaque handles, and any other labeled
-channels", and "If a read would require observing a value above this ceiling,
-the runtime MUST deny the read (fail closed), even if the parent node could
-have observed it." The mechanism it offers is principal attenuation —
-`principal_callee.principals` a subset of `principal_caller.principals` — and
-§18.2.4.2's handle substitution is required to respect it.
-
-`AH-CFC-12` says a child "receives only the authority, labels, skills, and
-capabilities explicitly bound to the child profile." That governs what the
-child is *given*. It does not bound what the child may *observe* through the
-capabilities it was given. A child handed a read tool and a handle to a cell
-above the parent's intended scope satisfies `AH-CFC-12` and violates
-§18.2.4.3.
-
-`AH-CFC-13` closes the return direction — a child's summary is a new
-observation that must pass mediation — so the gap is one-way: outbound
-containment is derived faithfully, and inbound attenuation is not derived at
-all.
+The two are not interchangeable: a child handed a read tool and a handle to a
+cell above the parent's intended scope satisfies `AH-CFC-12` on its own.
+`AH-CFC-13` closes the return direction, so the three together cover what a
+child receives, what it may observe, and what it may hand back.
 
 ## Where the derivation goes beyond
 
@@ -187,7 +170,7 @@ useful and not derived.
 
 Three parts of the CFC specification's harness surface have no counterpart in
 `02-cfc-integration.md` at all. An implementation could satisfy every
-`AH-CFC-*` clause and be silent on all three.
+`AH-CFC-*` clause and be silent on both.
 
 - **§18.3.2, dynamic tool discovery and labeled tool descriptions.** The whole
   section: descriptor digests, registry snapshot digests, snapshot pinning and
@@ -201,10 +184,8 @@ Three parts of the CFC specification's harness surface have no counterpart in
   prohibition on relabeling by parsing is the negative half; the positive half —
   how a runtime *may* mint structured output from a measured invocation — is
   absent.
-- **§18.2.4.3's ceiling mechanism,** for the reason given above.
-
 A harness conformance statement that claims `CfcAgentHarnessProfile` has to
-answer all three regardless of what `AH-CFC` asks, because §18.3.3 asks.
+answer both regardless of what `AH-CFC` asks, because §18.3.3 asks.
 
 ## How the audit should cite
 
