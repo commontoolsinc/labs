@@ -76,7 +76,14 @@ describe("linkSqliteDiskSource handle seeding", () => {
 
   afterEach(async () => {
     console.warn = originalWarn;
-    await runtime.dispose();
+    // The emulated storage manager holds a loopback server, so it is closed
+    // whether or not disposing the runtime rejected — otherwise one failing
+    // teardown leaks a server into every test that follows it.
+    try {
+      await runtime?.dispose();
+    } finally {
+      await storageManager?.close();
+    }
   });
 
   const link = () =>

@@ -22,20 +22,30 @@ const signer = await Identity.fromPassphrase("runner-cfc-label-view-resolved");
 describe("cfcLabelViewForResolvedCellWithStatus", () => {
   const space = signer.did();
 
+  /**
+   * The storage manager is closed in the OUTER `finally`, so it is released
+   * whether the runtime was ever constructed and whether disposing it rejected
+   * — an emulated manager holds a loopback server, and one left open outlives
+   * the test that opened it.
+   */
   const withRuntime = async (
     body: (runtime: Runtime) => Promise<void>,
   ) => {
     const storageManager = StorageManager.emulate({ as: signer });
-    const runtime = new Runtime({
-      apiUrl: new URL("https://example.com"),
-      storageManager,
-      cfcEnforcementMode: "enforce-explicit",
-      cfcDeclaredMonotonicity: "enforce",
-    });
     try {
-      await body(runtime);
+      const runtime = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+        cfcEnforcementMode: "enforce-explicit",
+        cfcDeclaredMonotonicity: "enforce",
+      });
+      try {
+        await body(runtime);
+      } finally {
+        await runtime.dispose();
+      }
     } finally {
-      await runtime.dispose();
+      await storageManager.close();
     }
   };
 
