@@ -59,6 +59,11 @@ import {
 } from "./contracts/subagent.ts";
 import { type BuiltinToolId } from "./contracts/tool-descriptor.ts";
 import { renderCfcPostureReport } from "./cfc-posture.ts";
+import {
+  describeHarnessDocsCorpus,
+  type HarnessDocsCorpusRecord,
+  harnessDocsCorpusRecordsEqual,
+} from "./contracts/docs-corpus.ts";
 import type {
   HarnessTranscriptEvent,
   HarnessTranscriptMessage,
@@ -172,6 +177,7 @@ const CLI_STRING_FLAGS = [
   "compact-threshold",
   "prompt-cache-mode",
   "skills-root",
+  "docs-corpus-root",
   "skills-registry-url",
   "skill",
   "skill-script-execution-target",
@@ -212,10 +218,12 @@ const CLI_BOOLEAN_FLAGS = [
   "print-transcript",
   "stream-events",
   "no-skill-catalog",
+  "no-docs-corpus",
   "no-pattern-index-publish",
 ] as const;
 const CLI_COLLECT_FLAGS = [
   "allow-tool",
+  "docs-corpus-root",
   "allow-skill-script",
   "allow-subagent-profile",
   "skill",
@@ -472,10 +480,11 @@ Options:
   --workspace <path>            Workspace host path (defaults to current directory)
   --cwd <path>                  Initial working directory inside the workspace
   --focus-root <path>           Narrow exploration to a workspace subpath when possible
-  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback | search_skills | acquire_skill);
+  --allow-tool <tool>           Restrict available tools (repeatable: bash | read_file | view_image | web_fetch | read_skill_resource | run_skill_script | edit_file | write_file | delegate_task | describe_handle | run_pattern | assign_slug | search_patterns | record_feedback | search_skills | acquire_skill | query_docs);
                                 run_pattern, assign_slug, and acquire_skill additionally require the three --fabric-* session flags,
                                 search_patterns and record_feedback require --pattern-index-url,
-                                and search_skills and acquire_skill require --skills-registry-url
+                                search_skills and acquire_skill require --skills-registry-url,
+                                and query_docs requires a resolved documentation corpus
   --allow-skill-script <spec>   Allow exact skill script execution (repeatable: skill:scripts/path)
   --allow-subagent-profile <p>  Authorize delegate_task to spawn a profile (repeatable: default | browser | web_fetch | web_search)
   --output-mode <mode>          operator | batch (default: operator)
@@ -487,11 +496,13 @@ Options:
   --resume-run <path>           Resume from a run root or run-state.json path
   --system-prompt <text>        Optional system prompt
   --skills-root <path>          Skill root containing <name>/SKILL.md
+  --docs-corpus-root <path>     Reference tree query_docs answers out of (repeatable)
   --skills-registry-url <url>  Registry origin enabling search_skills discovery and pinned acquire_skill
   --skill <name>                Preload a skill for this run (repeatable)
   --skill-script-execution-target <target>
                                 Execute skill scripts in sandbox or host (default: sandbox)
   --no-skill-catalog            Disable automatic skill catalog disclosure
+  --no-docs-corpus              Resolve no documentation corpus, so query_docs is absent
   --model <name>                Model name (default: ${DEFAULT_MODEL})
   --model-provider <provider>   openai-compatible-gateway | openai-codex
                                 (no default; select one here, through
@@ -635,6 +646,7 @@ const CLI_PARENT_TOOL_IDS = [
   "record_feedback",
   "search_skills",
   "acquire_skill",
+  "query_docs",
 ] as const satisfies readonly BuiltinToolId[];
 
 const uniqueStrings = <T extends string>(
@@ -947,7 +959,8 @@ const parseBrowserAccessLease = (
   };
 };
 
-const parseSkillNames = (
+/** The distinct non-empty values of a repeatable option. */
+const parseRepeatedValues = (
   input: string | readonly string[] | undefined,
 ): readonly string[] => {
   if (input === undefined) {
@@ -1260,7 +1273,31 @@ export const parseCfHarnessCliArgs = async (
       "--skills-root",
     ).sandboxPath
     : undefined;
-  const skillNames = parseSkillNames(
+  // Naming no root is not the same as wanting none: the default comes from the
+  // checkout the harness runs out of, applied where every surface resolves its
+  // configuration, so a console started with no documentation flag is not
+  // documentation-blind.
+  const configuredDocsCorpusRoots = parseRepeatedValues(
+    args["docs-corpus-root"] as string | readonly string[] | undefined,
+  ).map((root) => resolve(workspace, root));
+  // `--no-docs-corpus` wins over a named root: an operator who asked for no
+  // corpus and also named one has said two things, and the safe reading of the
+  // pair is the one that reaches for less documentation rather than more.
+  const docsCorpus: HarnessDocsCorpusRecord | undefined =
+    args["no-docs-corpus"] === true
+      ? {
+        type: "cf-harness.docs-corpus-record",
+        source: "configured",
+        roots: [],
+      }
+      : configuredDocsCorpusRoots.length === 0
+      ? undefined
+      : {
+        type: "cf-harness.docs-corpus-record",
+        source: "configured",
+        roots: configuredDocsCorpusRoots,
+      };
+  const skillNames = parseRepeatedValues(
     args.skill as string | readonly string[] | undefined,
   );
   if (skillNames.length > 0 && skillsRoot === undefined) {
@@ -1821,6 +1858,7 @@ export const parseCfHarnessCliArgs = async (
       ? { systemPrompt: args["system-prompt"] }
       : {}),
     ...(skillsRoot !== undefined ? { skillsRoot } : {}),
+    ...(docsCorpus !== undefined ? { docsCorpus } : {}),
     ...(skillsRootSandboxPath !== undefined ? { skillsRootSandboxPath } : {}),
     skillNames,
     allowedSkillScripts,
@@ -2470,6 +2508,10 @@ const summarizeToolCallArguments = (
         return typeof parsed.id === "string"
           ? `id=${JSON.stringify(parsed.id)}`
           : undefined;
+      case "query_docs":
+        return typeof parsed.question === "string"
+          ? `question=${JSON.stringify(parsed.question)}`
+          : undefined;
       case "record_feedback": {
         // The note is the model's prose about a run and can quote what the
         // pattern produced, so the line names the verdict and the pattern
@@ -2569,6 +2611,12 @@ export const formatCfHarnessCliResult = (
       lines.push(...renderCfcPostureReport(posture.record));
     }
   }
+  const docsCorpus = result.runState.docsCorpus;
+  lines.push(
+    docsCorpus === undefined || docsCorpus.roots.length === 0
+      ? "docsCorpus: none — query_docs is absent and children cannot look documentation up"
+      : `docsCorpus: ${docsCorpus.source} ${docsCorpus.roots.join(", ")}`,
+  );
   if (
     result.runState.wellKnownGrants !== undefined &&
     result.runState.wellKnownGrants.length > 0
@@ -3180,6 +3228,22 @@ export const runCfHarnessCli = async (
       ) {
         throw new Error(
           "no API key configured; set CF_HARNESS_API_KEY or OPENAI_API_KEY",
+        );
+      }
+      // The documentation a run answered out of is part of what it is. An
+      // operator repeating the flags with different roots is asking for a
+      // different run, so the resume is refused rather than quietly answering
+      // later questions from another tree; omitting them keeps the record.
+      const recordedDocsCorpus = artifacts.runState.docsCorpus;
+      if (
+        parsed.docsCorpus !== undefined && recordedDocsCorpus !== undefined &&
+        !harnessDocsCorpusRecordsEqual(parsed.docsCorpus, recordedDocsCorpus)
+      ) {
+        throw new HarnessControlError(
+          "provider-mismatch",
+          `resume docs corpus mismatch: run uses ${
+            describeHarnessDocsCorpus(recordedDocsCorpus)
+          }, requested ${describeHarnessDocsCorpus(parsed.docsCorpus)}`,
         );
       }
       const recordedRunManifest = artifacts.runState.runManifest;

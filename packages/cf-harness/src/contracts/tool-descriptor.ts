@@ -17,7 +17,8 @@ export type BuiltinToolId =
   | "search_patterns"
   | "record_feedback"
   | "search_skills"
-  | "acquire_skill";
+  | "acquire_skill"
+  | "query_docs";
 
 export const DEFAULT_PARENT_TOOL_IDS = [
   "bash",
@@ -45,6 +46,16 @@ const FABRIC_SESSION_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
  */
 const PATTERN_INDEX_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
   ["search_patterns", "record_feedback"] as const,
+);
+
+/**
+ * The tool gated on a configured documentation corpus. A run given no corpus
+ * root has nothing for an explore child to answer out of, so the tool is
+ * absent rather than present and answering every question with the same
+ * refusal.
+ */
+const DOCS_CORPUS_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+  ["query_docs"] as const,
 );
 
 /** The metadata-only tool gated on configured skills.sh discovery. */
@@ -75,6 +86,7 @@ export interface HarnessToolBackingAvailability {
   skillsShSearchAvailable: boolean;
   skillsShAcquisitionAvailable: boolean;
   skillRegistryAvailable: boolean;
+  docsCorpusAvailable: boolean;
 }
 
 /** The gated tools this run cannot back, and so does not offer. */
@@ -89,6 +101,7 @@ export const withheldToolIds = (
       ? []
       : SKILLS_SH_ACQUISITION_TOOL_IDS),
     ...(availability.skillRegistryAvailable ? [] : SKILL_REGISTRY_TOOL_IDS),
+    ...(availability.docsCorpusAvailable ? [] : DOCS_CORPUS_TOOL_IDS),
   ]);
 
 /**
@@ -113,6 +126,7 @@ export const parentToolIdsForBacking = (
     ...(availability.skillsShAcquisitionAvailable
       ? SKILLS_SH_ACQUISITION_TOOL_IDS
       : []),
+    ...(availability.docsCorpusAvailable ? DOCS_CORPUS_TOOL_IDS : []),
   ].filter((toolId, index, ids) =>
     !withheld.has(toolId) && ids.indexOf(toolId) === index
   );

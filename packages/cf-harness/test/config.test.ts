@@ -1,3 +1,4 @@
+import { checkoutDocsCorpusRoots } from "../src/docs-corpus/corpus.ts";
 import { assertEquals, assertThrows } from "@std/assert";
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
@@ -200,6 +201,11 @@ Deno.test("resolveHarnessConfig preserves legacy gateway fields for openai-codex
     skillScriptExecutionTarget: "sandbox",
     cfcEnforcementMode: "enforce-explicit",
     cfcEnforcementModeSource: "default",
+    docsCorpus: {
+      type: "cf-harness.docs-corpus-record",
+      source: "checkout-default",
+      roots: checkoutDocsCorpusRoots(),
+    },
   });
   assertThrows(
     () =>

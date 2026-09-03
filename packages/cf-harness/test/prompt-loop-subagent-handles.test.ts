@@ -628,6 +628,7 @@ describe("prompt-loop cross-agent address handles", () => {
       "read_file",
       "read_skill_resource",
       "describe_handle",
+      "query_docs",
     ]);
     const runRef = result.runState.subagentRuns?.[0];
     expect(runRef?.manifest.allowedToolIds).not.toContain("run_pattern");

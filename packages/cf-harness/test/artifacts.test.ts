@@ -1,3 +1,4 @@
+import { checkoutDocsCorpusRoots } from "../src/docs-corpus/corpus.ts";
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
@@ -262,6 +263,11 @@ Deno.test({
           },
         }],
         currentDir: "/workspace",
+        docsCorpus: {
+          type: "cf-harness.docs-corpus-record",
+          source: "checkout-default",
+          roots: checkoutDocsCorpusRoots(),
+        },
         artifactRoot: runRoot,
         capabilitySnapshot: {
           type: "cf-harness.capability-snapshot",
@@ -557,6 +563,7 @@ Deno.test({
           "write_file",
           "delegate_task",
           "describe_handle",
+          "query_docs",
         ],
       });
       assertEquals(persistedPolicySnapshot.subagents.allowedProfiles, [
@@ -702,7 +709,7 @@ Deno.test({
         {
           model: "gpt-5.4",
           messageCount: 1,
-          toolCount: 8,
+          toolCount: 9,
         },
       );
       assert(

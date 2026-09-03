@@ -143,6 +143,10 @@ What works today:
     registry and a Fabric session are configured; resolves a discovery id to a
     full GitHub commit, checks the complete recursive tree, and returns a handle
     or a first-class refusal, never skill text)
+  - `query_docs` (present when the run resolves a documentation corpus; asks one
+    question of operator-provisioned reference material and returns a bounded
+    answer plus inert citations, never the documents; see
+    [Querying the documentation corpus](#querying-the-documentation-corpus))
 - composing published patterns: source the model authors may
   `import Sub from "cf:pattern:<patternId>"`, and `run_pattern` fetches and
   compiles each named pattern into the space before compiling the source that
@@ -166,7 +170,8 @@ What works today:
   event persistence
 - single-child subagent delegation with fresh child prompt context, explicit
   default/browser/web_fetch/web_search/pattern-author child profiles, retained
-  child run references, and a sanitized summary/state return channel
+  child run references, and a sanitized summary/state return channel, plus the
+  internal `explore` profile `query_docs` runs, which a delegation cannot name
 - optional schema-validated subagent structured returns, with raw child return
   artifacts retained in the child run and open-ended strings linkified before
   the parent sees them
@@ -1107,6 +1112,52 @@ channels of one conceptual kind: an id names hashed information stored
 somewhere, attached metadata accompanies it, and trusted-side code resolves it.
 They deliberately remain separate until experience supplies a concrete reason to
 unify them.
+
+### Querying the documentation corpus
+
+`query_docs` takes one question and returns a short answer with the sections it
+came from. It is on the parent surface and on the `pattern-author` child's,
+which is where it matters: that child has no `delegate_task` and the subagent
+manifest pins the depth at one, so an explore agent is a tool on its surface or
+it is unreachable from the one context that needs it.
+
+The corpus is Markdown split at headings into sections, read on the host from
+the roots the run resolved and never through the sandbox mount. Configure them
+with a repeatable `--docs-corpus-root <path>`. A run that names none and is
+running out of a labs checkout defaults to that checkout's `docs/common`,
+`docs/development`, and `skills`, so a console started with no documentation
+configuration is not documentation-blind. Either way the resolved roots and
+where they came from are recorded in `run-state.json` under `docsCorpus` and
+printed in operator output as a `docsCorpus:` line; a run that resolved none
+says so on that line, and `query_docs` is absent from its tool surface.
+
+Every section the loader admits carries an integrity endorsement — a `Resource`
+atom of class `CommonFabricHarnessOperatorProvisionedReference` whose subject is
+the root it was read under, minted from the operator's own configuration and
+never from the read bytes. Only an endorsed section is eligible for an answer,
+so text written into the workspace by an earlier child is not corpus and cannot
+reach one. Operator-provisioned documentation is trusted for confidentiality —
+we mount it, and it carries no secret — and endorsed for integrity provenance,
+which is what lets a reader of a run tell reference material apart from
+workspace text rather than trusting the mount.
+
+The answer is produced by the `explore` profile: a cheap model with no tools at
+all, one turn, handed the selected sections and nothing else. It is one model
+call rather than a child run, so no subagent is spawned and the depth-one
+invariant is untouched; the call is recorded like every other, as a model
+attempt in the run report and with its tokens in the run's descendant usage.
+What was sent — the model, the question, each section by path and heading with
+the endorsement atoms it carries, and the two messages verbatim — is kept on the
+tool-output artifact under the call's output id as `exploreRecord`, and stripped
+before the answer reaches the caller.
+
+A citation is a path and a heading. It carries no text and no handle, so
+following one is a separate `read_file`. A citation naming a section the corpus
+does not hold is dropped rather than returned.
+
+Not built yet: the optional `fullTextRef`, a capability-scoped handle over the
+retrieved text minted by the route `acquire_skill` uses, and any policy that
+would declassify it.
 
 ### Running patterns against a Fabric space
 

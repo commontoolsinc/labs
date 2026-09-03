@@ -49,7 +49,27 @@ The current package provides:
 - sandboxed shell, file, image, web-fetch, skills, edit/write, and delegation
   tools;
 - one child at a time through `default`, `browser`, `web_fetch`, `web_search`,
-  and `pattern-author` profiles;
+  and `pattern-author` profiles, beside the internal `explore` profile that
+  `query_docs` runs and no delegation may name;
+- documentation a child can look something up in: `query_docs` takes one
+  question, selects the matching sections of the operator-provisioned corpus on
+  the host, and returns a bounded answer with inert path-and-heading citations.
+  A run configures the corpus with a repeatable `--docs-corpus-root`, and a run
+  out of a labs checkout that names none defaults to that checkout's
+  `docs/common`, `docs/development`, and `skills`; the resolved roots and their
+  source are recorded in run state and printed in operator output, and a run
+  that resolves none does not offer the tool. Every admitted section carries a
+  `Resource` integrity endorsement of class
+  `CommonFabricHarnessOperatorProvisionedReference` naming the root it was read
+  under, and only an endorsed section is eligible for an answer, so workspace
+  text cannot reach one. The answer comes from one model call under a profile
+  with no tools, recorded as a model attempt with its tokens in descendant
+  usage, and what was sent is kept on the tool-output artifact and stripped
+  before the caller sees it. That call carries no declaration ceiling and runs
+  no boundary policy evaluation, so it sits outside the posture's caveat policy:
+  the corpus is trusted for confidentiality, which is what makes a sink with no
+  ceiling the right shape for it and also the whole of what holds it — the
+  endorsement is an integrity claim and gates nothing on the way out;
 - schema-validated, sanitized child returns with raw child evidence retained
   outside the ordinary parent return channel;
 - image inputs and structured top-level batch results;

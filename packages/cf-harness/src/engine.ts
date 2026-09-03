@@ -24,6 +24,12 @@ import {
 } from "./config.ts";
 import { harnessFabricSessionPosture } from "./cfc-posture.ts";
 import {
+  type HarnessDocsCorpus,
+  loadHarnessDocsCorpus,
+} from "./docs-corpus/corpus.ts";
+import type { HarnessExploreQueryRunner } from "./docs-corpus/explore.ts";
+import type { HarnessDocsCorpusRecord } from "./contracts/docs-corpus.ts";
+import {
   createHarnessCfcInvocationContext,
   type HarnessCfcInvocationContext,
   type HarnessCfcInvocationInputLabelPath,
@@ -194,6 +200,10 @@ import type {
   SearchSkillsToolOutput,
 } from "./tools/search-skills.ts";
 import {
+  type QueryDocsToolInput,
+  type QueryDocsToolOutput,
+} from "./tools/query-docs.ts";
+import {
   type ViewImageToolInput,
   type ViewImageToolOutput,
 } from "./tools/view-image.ts";
@@ -224,6 +234,7 @@ export interface BuiltinToolInputMap {
   record_feedback: RecordFeedbackToolInput;
   search_skills: SearchSkillsToolInput;
   acquire_skill: AcquireSkillToolInput;
+  query_docs: QueryDocsToolInput;
 }
 
 export interface BuiltinToolOutputMap {
@@ -244,6 +255,7 @@ export interface BuiltinToolOutputMap {
   record_feedback: RecordFeedbackToolOutput;
   search_skills: SearchSkillsToolOutput;
   acquire_skill: AcquireSkillToolOutput;
+  query_docs: QueryDocsToolOutput;
 }
 
 interface ToolOutputWithId {
@@ -460,6 +472,8 @@ export class CfHarnessEngine {
   readonly #skillsShSearchClientFactory?: HarnessSkillsShSearchClientFactory;
   readonly #skillsShAcquisitionClientFactory?:
     HarnessSkillsShAcquisitionClientFactory;
+  #docsCorpus?: Promise<HarnessDocsCorpus>;
+  #exploreQueryRunner?: HarnessExploreQueryRunner;
   #patternIndexPublications?: PatternIndexPublicationLedger;
   readonly #taskText?: string;
   readonly #inputCells: readonly HarnessInputCellSpec[];
@@ -825,6 +839,7 @@ export class CfHarnessEngine {
         artifactRoot: this.artifactStore?.runRoot,
         runManifest: this.config.runManifest,
         runManifestPath: this.config.runManifestPath,
+        docsCorpus: this.config.docsCorpus,
         lineage: options.lineage,
         now: this.#now(),
       });
@@ -940,6 +955,43 @@ export class CfHarnessEngine {
     | HarnessSkillsShSearchClientFactory
     | undefined {
     return this.#skillsShSearchClientFactory;
+  }
+
+  /** Whether this run configures a documentation corpus for `query_docs`. */
+  get docsCorpusAvailable(): boolean {
+    return (this.docsCorpus?.roots ?? []).length > 0;
+  }
+
+  /**
+   * The corpus this run answers out of. A resumed run keeps the corpus it was
+   * created with, whatever this process was configured with: the run recorded
+   * which documentation shaped it, and answering later questions out of a
+   * different tree — or offering the tool on a run that disabled it — would
+   * make that record a lie. Configuration answers only for a state that
+   * carries no record of its own.
+   */
+  get docsCorpus(): HarnessDocsCorpusRecord | undefined {
+    return this.#runState.docsCorpus ?? this.config.docsCorpus;
+  }
+
+  /**
+   * The run's documentation corpus, loaded once. The load walks the operator's
+   * roots on the host, so it is held for the run rather than repeated per
+   * question: the roots are read-only reference material, and a query that
+   * reloaded them would pay a filesystem walk to learn the same thing.
+   */
+  getDocsCorpus(): Promise<HarnessDocsCorpus> {
+    this.#docsCorpus ??= loadHarnessDocsCorpus(this.docsCorpus?.roots ?? []);
+    return this.#docsCorpus;
+  }
+
+  /**
+   * Gives this run a way to answer a documentation question. The model belongs
+   * to the prompt loop, so the loop supplies the runner and the engine carries
+   * it to the tool.
+   */
+  setExploreQueryRunner(runner: HarnessExploreQueryRunner): void {
+    this.#exploreQueryRunner = runner;
   }
 
   /** Whether this run can acquire a pinned external skill. */
@@ -1996,6 +2048,12 @@ export class CfHarnessEngine {
           patternIndexPublishDiscoverable: this.patternIndexPublishDiscoverable,
           patternIndexPublications: this.patternIndexPublications,
         }
+        : {}),
+      ...(this.docsCorpusAvailable
+        ? { getDocsCorpus: () => this.getDocsCorpus() }
+        : {}),
+      ...(this.#exploreQueryRunner !== undefined
+        ? { runExploreQuery: this.#exploreQueryRunner }
         : {}),
       ...(this.#skillsShSearchClientFactory !== undefined
         ? { getSkillsShSearchClient: this.#skillsShSearchClientFactory }
