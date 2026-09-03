@@ -2058,6 +2058,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       isAdmin={isAdmin}
                       requestRemove={requestRemoveOption}
                       requestArt={requestArt}
+                      usesSharedArtEditor={true}
                       castVote={boundCastVote}
                       logVisit={boundLogVisit}
                     />

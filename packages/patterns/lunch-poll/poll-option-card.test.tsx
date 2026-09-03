@@ -76,6 +76,7 @@ export default pattern(() => {
     isAdmin: true,
     requestRemove,
     requestArt,
+    usesSharedArtEditor: true,
     castVote,
     logVisit,
   });
@@ -181,6 +182,10 @@ export default pattern(() => {
       ) === undefined
   );
 
+  const assert_stored_art_compatibility_state = assert(() =>
+    readValue(card.artSyncState) === "stored"
+  );
+
   // An empty card opens the one parent-owned generator rather than
   // materializing a generator of its own.
   const generatingCard = PollOptionCard({
@@ -191,6 +196,7 @@ export default pattern(() => {
     isAdmin: true,
     requestRemove,
     requestArt,
+    usesSharedArtEditor: true,
     castVote,
     logVisit,
   });
@@ -201,6 +207,27 @@ export default pattern(() => {
       "aria-label",
       "Generate art (host)",
     ) !== undefined
+  );
+
+  const assert_empty_art_compatibility_state = assert(() =>
+    readValue(generatingCard.artSyncState) === ""
+  );
+
+  // A card instantiated under the previous argument contract has neither of
+  // the new parent-editor streams. Its historical generated marker remains
+  // readable, but the card still creates no per-row GeneratedArt instance.
+  const legacyGeneratingCard = PollOptionCard({
+    option: GENERATING_OPTION,
+    rank: 2,
+    myVote: undefined,
+    isJoined: true,
+    isAdmin: true,
+    castVote,
+    logVisit,
+  });
+
+  const assert_legacy_generated_art_state_survives = assert(() =>
+    readValue(legacyGeneratingCard.artSyncState) === "generated"
   );
 
   const action_open_generated_art = action(() => {
@@ -234,7 +261,10 @@ export default pattern(() => {
       { assertion: assert_remove_separator_is_plain },
       { assertion: assert_log_visit_control_renders },
       { assertion: assert_stored_image_renders_without_generator },
+      { assertion: assert_stored_art_compatibility_state },
       { assertion: assert_generate_button_when_image_missing },
+      { assertion: assert_empty_art_compatibility_state },
+      { assertion: assert_legacy_generated_art_state_survives },
       { action: action_open_generated_art },
       { assertion: assert_generate_targets_option },
     ],

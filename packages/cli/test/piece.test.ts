@@ -2750,9 +2750,11 @@ describe("cli piece parsing", () => {
     // injected one, since the default is the thing that can regress.
     const errors: string[] = [];
     const originalError = console.error;
+    const originalExitCode = Deno.exitCode;
     console.error = (...args: unknown[]) => {
       errors.push(args.join(" "));
     };
+    Deno.exitCode = 0;
 
     try {
       await applyPieceSourceCommandAction(
@@ -2785,11 +2787,12 @@ describe("cli piece parsing", () => {
             }),
           render: () => {},
           hint: () => {},
-          setExitCode: () => {},
         },
       );
+      expect(Deno.exitCode).toBe(1);
     } finally {
       console.error = originalError;
+      Deno.exitCode = originalExitCode;
     }
 
     expect(errors.filter((line) => line.includes("refreshing the running")))

@@ -1,5 +1,6 @@
 import {
   computed,
+  Default,
   lift,
   NAME,
   pattern,
@@ -14,7 +15,10 @@ import type {
   OptionTargetEvent,
   VoteColor,
 } from "./main.tsx";
-import { safeImageUrl } from "./generated-art.tsx";
+import { type GeneratedArtFetchState, safeImageUrl } from "./generated-art.tsx";
+
+/** Kept in the result contract for already-deployed card instances. */
+export type PollOptionArtSyncState = GeneratedArtFetchState;
 
 const formatRank = lift<{ rank: number | undefined }, string>(({ rank }) =>
   rank === undefined || rank <= 0 ? "—" : `#${rank}`
@@ -53,10 +57,16 @@ export interface PollOptionCardInput {
   isAdmin: boolean;
 
   /** Parent-owned stream that opens this option's remove confirmation. */
-  requestRemove: Stream<OptionTargetEvent>;
+  requestRemove?: Stream<OptionTargetEvent>;
 
   /** Parent-owned stream that opens this option in the generated-art editor. */
-  requestArt: Stream<OptionTargetEvent>;
+  requestArt?: Stream<OptionTargetEvent>;
+
+  /**
+   * Explicit scalar discriminator for the parent-owned art editor. Optional
+   * with a false default so pre-editor card instances retain legacy state.
+   */
+  usesSharedArtEditor?: boolean | Default<false>;
 
   /** Parent-owned stream that toggles or records this viewer's vote. */
   castVote: Stream<CastVoteEvent>;
@@ -76,6 +86,13 @@ export interface PollOptionCardOutput {
 
   /** Static VNode rendering the complete option row. */
   [UI]: VNode;
+
+  /**
+   * Compatibility result for card instances deployed before art generation
+   * moved to the single parent-owned editor. New cards only report durable
+   * stored state here; live generation state belongs to that shared editor.
+   */
+  artSyncState?: PollOptionArtSyncState;
 }
 
 export default pattern<PollOptionCardInput, PollOptionCardOutput>(
@@ -88,6 +105,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
       isAdmin,
       requestRemove,
       requestArt,
+      usesSharedArtEditor,
       castVote,
       logVisit,
     },
@@ -96,6 +114,13 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
     const optionTitle = option.title;
     const displayRank = formatRank({ rank });
     const storedImageUrl = computed(() => safeImageUrl(option.imageUrl));
+    const artSyncState = computed<PollOptionArtSyncState>(() => {
+      if (safeImageUrl(option.imageUrl)) return "stored";
+      // Old deployed cards have no scalar editor discriminator and may already
+      // hold the generated marker in their result document. Keep that marker
+      // reachable without reinstating one GeneratedArt/fetch graph per option.
+      return usesSharedArtEditor === true ? "" : "generated";
+    });
     const canGenerateArt = computed(() =>
       isAdmin && safeImageUrl(option.imageUrl) === ""
     );
@@ -202,7 +227,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
                         textDecoration: "underline",
                         cursor: "pointer",
                       }}
-                      onClick={() => requestRemove.send({ optionId: oid })}
+                      onClick={() => requestRemove?.send({ optionId: oid })}
                     >
                       remove
                     </button>
@@ -245,7 +270,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
                       fontWeight: 600,
                       cursor: "pointer",
                     }}
-                    onClick={() => requestArt.send({ optionId: oid })}
+                    onClick={() => requestArt?.send({ optionId: oid })}
                   >
                     ✦ generate art
                   </button>
@@ -319,6 +344,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
             : null}
         </div>
       ),
+      artSyncState,
     };
   },
 );

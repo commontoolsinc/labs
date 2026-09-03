@@ -1,0 +1,179 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "CastVoteEvent": {
+        "properties": {
+          "optionId": {
+            "type": "string"
+          },
+          "voteType": {
+            "$ref": "#/$defs/VoteColor"
+          }
+        },
+        "required": [
+          "optionId",
+          "voteType"
+        ],
+        "type": "object"
+      },
+      "LogVisitEvent": {
+        "properties": {
+          "optionId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "wentAt": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "Option": {
+        "properties": {
+          "addedByName": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "imageUrl": {
+            "description": "Persisted generated-art data URL (`\"\"` until the host's client generates\nand syncs it). Every viewer renders this stored value; generation only\nruns on the host's client for options where it is still empty.",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "addedByName"
+        ],
+        "type": "object"
+      },
+      "OptionTargetEvent": {
+        "properties": {
+          "optionId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "optionId"
+        ],
+        "type": "object"
+      },
+      "VoteColor": {
+        "enum": [
+          "green",
+          "yellow",
+          "red"
+        ]
+      }
+    },
+    "description": "Inputs for one rendered ranked option row.\n\nThe parent owns all durable and shared UI state. This pattern receives one\noption, narrow current-viewer/admin facts, and the streams it should emit for\nmutations or selection in the parent's shared editor surfaces.",
+    "properties": {
+      "castVote": {
+        "$ref": "#/$defs/CastVoteEvent",
+        "asCell": [
+          "stream"
+        ],
+        "description": "Parent-owned stream that toggles or records this viewer's vote."
+      },
+      "isAdmin": {
+        "description": "Whether the current viewer owns admin-only actions.",
+        "type": "boolean"
+      },
+      "isJoined": {
+        "description": "Whether the current viewer is allowed to vote.",
+        "type": "boolean"
+      },
+      "logVisit": {
+        "$ref": "#/$defs/LogVisitEvent",
+        "asCell": [
+          "stream"
+        ],
+        "description": "Parent-owned admin stream that records this option in visit history."
+      },
+      "myVote": {
+        "$ref": "#/$defs/VoteColor",
+        "description": "This viewer's vote for the option, or `undefined` when they have none."
+      },
+      "option": {
+        "$ref": "#/$defs/Option",
+        "description": "Option record to render."
+      },
+      "rank": {
+        "description": "One-based display rank, or undefined while the parent ranking settles.",
+        "type": [
+          "number",
+          "undefined"
+        ]
+      },
+      "requestArt": {
+        "$ref": "#/$defs/OptionTargetEvent",
+        "asCell": [
+          "stream"
+        ],
+        "description": "Parent-owned stream that opens this option in the generated-art editor."
+      },
+      "requestRemove": {
+        "$ref": "#/$defs/OptionTargetEvent",
+        "asCell": [
+          "stream"
+        ],
+        "description": "Parent-owned stream that opens this option's remove confirmation."
+      },
+      "usesSharedArtEditor": {
+        "default": false,
+        "description": "Explicit scalar discriminator for the parent-owned art editor. Optional\nwith a false default so pre-editor card instances retain legacy state.",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "option",
+      "rank",
+      "isJoined",
+      "isAdmin",
+      "castVote",
+      "logVisit"
+    ],
+    "type": "object"
+  },
+  "pattern": "lunch-poll/poll-option-card.tsx",
+  "resultSchema": {
+    "$defs": {
+      "GeneratedArtFetchState": {
+        "enum": [
+          "",
+          "stored",
+          "generated",
+          "pending",
+          "error",
+          "requested"
+        ]
+      }
+    },
+    "description": "Outputs for one rendered ranked option row.\n\nParents normally embed this sub-pattern with JSX.",
+    "properties": {
+      "$NAME": {
+        "description": "Human-readable pattern name, matching the option title.",
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json",
+        "description": "Static VNode rendering the complete option row."
+      },
+      "artSyncState": {
+        "$ref": "#/$defs/GeneratedArtFetchState",
+        "description": "Compatibility result for card instances deployed before art generation\nmoved to the single parent-owned editor. New cards only report durable\nstored state here; live generation state belongs to that shared editor."
+      }
+    },
+    "required": [
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}
