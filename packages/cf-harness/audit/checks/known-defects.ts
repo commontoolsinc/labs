@@ -86,6 +86,62 @@ export const KNOWN_DEFECT_REGISTRATIONS = {
 } as const satisfies Record<string, KnownDefectRegistration>;
 
 /**
+ * The side effects of a run that produced no result, and so crossed no release
+ * boundary.
+ *
+ * A call the harness admitted and that then failed before producing a value —
+ * a pattern that did not compile is the ordinary case — never reached the
+ * boundary that measures what a result would release. Its allow-side decision
+ * is the only one it can have, and reading that absence as an ungated path
+ * reports a compile error as a missing gate.
+ *
+ * A failure that carries a `releaseDecision` is the exception, and is NOT
+ * resultless: `errorOutput` attaches the decision where the boundary already
+ * decided, so such a call reached it and belongs in the measured set.
+ *
+ * Read from the call's own recorded output rather than from its execution
+ * status, which is `completed` for a call that ran and answered with a
+ * failure.
+ */
+const resultlessCalls = (run: RunEvidence): ReadonlySet<string> | undefined => {
+  // Unreadable outputs cannot say which calls produced a result, and reading
+  // that silence as "all of them did" is how an absent artifact becomes a
+  // finding about a run. The caller reports it as unread instead.
+  if (run.toolOutputs.status !== "present") return undefined;
+  const resultless = new Set<string>();
+  const failed = new Set<string>();
+  for (const entry of run.toolOutputs.entries) {
+    // An entry the loader could not parse says nothing about the call it
+    // belongs to, and a directory that lists one cannot answer which calls
+    // produced a result. One unreadable file makes the whole reading unread
+    // rather than silently narrowing it.
+    if (entry.value === undefined) return undefined;
+    const value = entry.value as
+      | { outputId?: unknown; status?: unknown }
+      | undefined;
+    if (typeof value?.outputId !== "string") continue;
+    // A failed output that carries a `releaseDecision` reached the boundary
+    // before it failed — `errorOutput` attaches the decision precisely so an
+    // exit below the fit still states what the boundary decided. Excluding it
+    // would drop a call the boundary DID measure out of the measured set.
+    const decided = (value as { releaseDecision?: unknown }).releaseDecision !==
+      undefined;
+    if (
+      typeof value.status === "string" && value.status !== "ok" && !decided
+    ) {
+      failed.add(value.outputId);
+    }
+  }
+  for (const activity of activitiesOf(run)) {
+    const outputId = activity.resultRef?.outputId;
+    if (outputId !== undefined && failed.has(outputId)) {
+      resultless.add(activity.toolCallId);
+    }
+  }
+  return resultless;
+};
+
+/**
  * Whether any decision recorded for `toolCallId` consulted a label.
  *
  * The predicate is the `release` record, and it is chosen because it is the
@@ -153,16 +209,39 @@ const labelConsultingAdmission: AuditCheck = {
           `this run claims \`${mode}\`, which admits a side effect without claiming to have decided about it`,
       };
     }
+    const resultless = resultlessCalls(run);
+    if (resultless === undefined) {
+      return {
+        verdict: "inconclusive",
+        message:
+          "`tool-outputs/` did not load, so which of this run's side effects produced a result is not established, and whether any reached a boundary cannot be read",
+        evidence: [{
+          artifact: "tool-outputs/",
+          detail: run.toolOutputs.status,
+        }],
+      };
+    }
+    const measured = effects.filter((activity) =>
+      !resultless.has(activity.toolCallId)
+    );
+    if (measured.length === 0) {
+      return {
+        verdict: "not-applicable",
+        message: `none of this run's ${
+          count(effects.length, "side effect", "side effects")
+        } produced a result, so none reached a boundary that measures one`,
+      };
+    }
     const consulted = labelConsultingDecisions(run);
-    const unconsulted = effects.filter((activity) =>
+    const unconsulted = measured.filter((activity) =>
       !consulted.has(activity.toolCallId)
     );
     if (unconsulted.length === 0) {
       return {
         verdict: "pass",
         message: `every one of this run's ${
-          count(effects.length, "side effect", "side effects")
-        } was admitted by a decision that consulted a label`,
+          count(measured.length, "side effect", "side effects")
+        } that produced a result was admitted by a decision that consulted a label`,
       };
     }
     const byTool = new Map<string, number>();
@@ -182,7 +261,7 @@ const labelConsultingAdmission: AuditCheck = {
       verdict: "fail",
       message: `${
         count(unconsulted.length, "side effect", "side effects")
-      } of ${effects.length} were admitted on authority alone, with no decision that could have consulted a label`,
+      } of ${measured.length} that produced a result were admitted on authority alone, with no decision that could have consulted a label`,
       evidence,
       knownDefect: KNOWN_DEFECT_REGISTRATIONS["AUD-21"],
     };

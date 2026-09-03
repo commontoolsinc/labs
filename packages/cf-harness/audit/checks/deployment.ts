@@ -14,6 +14,11 @@
 import type { CfcPostureReport } from "@commonfabric/runner/cfc";
 
 import type { HarnessCfcPolicySnapshot } from "../../src/contracts/cfc-policy-snapshot.ts";
+import {
+  HARNESS_RELEASE_BOUNDARIES,
+  HARNESS_RELEASE_DECISION_REASON_CODES,
+  type HarnessReleaseDecisionReasonCode,
+} from "../../src/contracts/policy-refusal.ts";
 import type { HarnessPolicyDecisionRecord } from "../../src/contracts/policy-trace.ts";
 import { type CheckCitation, extendsClause } from "../citations.ts";
 import { familyRuns, type RunEvidence, type RunFamily } from "../evidence.ts";
@@ -153,6 +158,41 @@ interface ReleaseRefusal {
 }
 
 /**
+ * The reason a release entry records, or `undefined` where a decision carries
+ * no release at all.
+ *
+ * A release entry is written whenever the boundary measured a result, and its
+ * `reasonCode` is the fact: `cfc_release_withheld` where values were held back,
+ * `cfc_release_allowed` or `cfc_release_observed` where they were not. The
+ * decision's own outcome word is a presentation of that fact and has changed
+ * before, so a counter that keys on the word counts nothing the day it moves.
+ * The reason code is what these checks read.
+ */
+const releaseReasonOf = (
+  decision: HarnessPolicyDecisionRecord,
+): HarnessReleaseDecisionReasonCode | undefined => {
+  const release = decision.release as
+    | { reasonCode?: unknown; boundary?: unknown }
+    | null
+    | undefined;
+  // `null` as well as absent: a decision persisted with an empty release is a
+  // record this cannot read, and dereferencing it would throw before the check
+  // could reach a verdict about the run.
+  if (release === null || release === undefined) return undefined;
+  // Both discriminants are checked against the sets the contract exports for
+  // the purpose, rather than against literals repeated here: a closed union
+  // that gains a member should widen what this reads, not silently stop
+  // matching a record the contract calls valid.
+  const boundary = HARNESS_RELEASE_BOUNDARIES.find((known) =>
+    known === release.boundary
+  );
+  if (boundary === undefined) return undefined;
+  return HARNESS_RELEASE_DECISION_REASON_CODES.find((known) =>
+    known === release.reasonCode
+  );
+};
+
+/**
  * Every release refusal one run's decisions record.
  *
  * A decision that measured the boundary and released, and one an observe-stage
@@ -163,9 +203,7 @@ const releaseRefusalsOf = (
   run: RunEvidence,
 ): readonly ReleaseRefusal[] =>
   (decisionsOf(run) ?? [])
-    .filter((decision) =>
-      decision.release !== undefined && decision.decision === "denied"
-    )
+    .filter((decision) => releaseReasonOf(decision) === "cfc_release_withheld")
     .map((decision) => ({
       runId: run.runId,
       source: sourceOf(run),
@@ -200,9 +238,15 @@ const releasesMeasured = (audit: DeploymentAudit): number =>
   everyRun(audit).reduce(
     (total, run) =>
       total +
-      (decisionsOf(run) ?? []).filter((decision) =>
-        decision.release !== undefined && decision.decision !== "denied"
-      ).length,
+      (decisionsOf(run) ?? []).filter((decision) => {
+        const reason = releaseReasonOf(decision);
+        // Only the two non-rejecting codes. `cfc_commit_refused` names a
+        // boundary that refused at the pattern's own sink requests, so
+        // counting it beside the allowed ones would report a refusal as a
+        // measurement that let the values out.
+        return reason === "cfc_release_allowed" ||
+          reason === "cfc_release_observed";
+      }).length,
     0,
   );
 

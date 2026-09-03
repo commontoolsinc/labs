@@ -501,6 +501,20 @@ describe("seeded violations", () => {
       expect(outcome.evidence?.length).toBe(2);
     });
 
+    it("reconciles a trace declaring a `withheld` count this build cannot spell", () => {
+      // CT-2232 adds `withheld` beside `allowed`, `warned`, `denied` and
+      // `invalid`. An audit that could only read the outcomes it was built
+      // with would fail every run written by a newer harness — so the count is
+      // read when present, and absent still reads as zero for a trace written
+      // before it existed. Neither direction is a disagreement here.
+      turnsOnly("AUD-3", "pass", (root) => {
+        const trace = traceOf(root) as unknown as {
+          decisionCounts: Record<string, number>;
+        };
+        trace.decisionCounts.withheld = 0;
+      });
+    });
+
     it("does not count an invalid-argument rejection as a denial", () => {
       const invalidated = (root: RunEvidence): void => {
         const trace = traceOf(root);
@@ -714,6 +728,113 @@ describe("seeded violations", () => {
             sink: "sandbox.command",
             ceiling: [],
           };
+        }
+      });
+    });
+
+    it("reports unreadable tool outputs rather than assuming every call produced a result", () => {
+      // The absence-as-evidence case, in the check written to catch it. An
+      // audit that cannot read which calls produced a result cannot say any
+      // of them reached a boundary, and saying so is the honest verdict where
+      // a fail would be a finding manufactured out of a missing artifact.
+      turnsOnly("AUD-21", "inconclusive", (root) => {
+        root.toolOutputs = {
+          status: "absent",
+          path: root.toolOutputs.path,
+        };
+      });
+    });
+
+    it("reports an unreadable output file rather than narrowing what it read", () => {
+      // A file the loader could not parse says nothing about the call it
+      // belongs to, so a directory listing one cannot answer which calls
+      // produced a result. Reading the rest and calling that the answer is the
+      // same silent narrowing an absent directory would be.
+      turnsOnly("AUD-21", "inconclusive", (root) => {
+        const outputs = root.toolOutputs;
+        if (outputs.status !== "present") throw new Error("no outputs");
+        delete (outputs.entries[0] as { value?: unknown }).value;
+      });
+    });
+
+    it("skips an output entry that names no call", () => {
+      // A file under `tool-outputs/` that parsed but carries no `outputId`
+      // belongs to no call, so it says nothing about whether one produced a
+      // result: AUD-21 drops it rather than reading it as a failed call, and
+      // its verdict is unchanged. AUD-3 flags the same file, and correctly —
+      // an output no activity accounts for is exactly what that check is for,
+      // so the honest expectation names both rather than seeding around one.
+      turnsInto({ "AUD-3": "fail", "AUD-21": "fail" }, (root) => {
+        const outputs = root.toolOutputs;
+        if (outputs.status !== "present") throw new Error("no outputs");
+        (outputs.entries as unknown[]).push({
+          fileName: "orphan.json",
+          path: `${outputs.path}/orphan.json`,
+          value: { status: "compile-error" },
+        });
+      });
+    });
+
+    it("still measures a failed call whose output records a boundary decision", () => {
+      // `errorOutput` attaches the release decision when the boundary already
+      // decided, so an exit below the fit still states what it decided. Such a
+      // call reached the boundary and belongs in the measured set; dropping it
+      // for having failed would hide a decision that was actually made.
+      turnsOnly("AUD-21", "fail", (root) => {
+        const outputs = root.toolOutputs;
+        if (outputs.status !== "present") throw new Error("no outputs");
+        for (const entry of outputs.entries) {
+          const value = entry.value as
+            | { outputId?: string; status?: string; releaseDecision?: unknown }
+            | undefined;
+          if (value?.outputId === undefined) continue;
+          value.status = "error";
+          value.releaseDecision = {
+            reasonCode: "cfc_release_allowed",
+            boundary: "release",
+          };
+        }
+      });
+    });
+
+    it("reports a trace whose `withheld` count is present and not a number", () => {
+      // Absent is legacy and reads as zero; present-and-malformed is neither,
+      // and letting it read as absence would let a trace declare anything at
+      // all and reconcile.
+      turnsOnly("AUD-3", "fail", (root) => {
+        const trace = traceOf(root) as unknown as {
+          decisionCounts: Record<string, unknown>;
+        };
+        trace.decisionCounts.withheld = "two";
+      });
+    });
+
+    it("does not count a call that produced no result as an ungated path", () => {
+      // A call that failed before producing a value crossed no release
+      // boundary, so its allow-side decision is the only one it can have.
+      // Reading that absence as a missing gate reports a compile error as a
+      // CFC defect — which is what this check did until it read the output.
+      turnsOnly("AUD-21", "not-applicable", (root) => {
+        const outputs = root.toolOutputs;
+        if (outputs.status !== "present") {
+          throw new Error("fixture records no tool outputs");
+        }
+        const failed = new Set<string>();
+        for (const activity of reportOf(root).toolActivity) {
+          if (
+            activity.effectClass !== "side-effect" ||
+            activity.executionStatus !== "completed"
+          ) continue;
+          const outputId = activity.resultRef?.outputId;
+          if (outputId !== undefined) failed.add(outputId);
+        }
+        for (const entry of outputs.entries) {
+          const value = entry.value as
+            | { outputId?: string; status?: string }
+            | undefined;
+          if (value?.outputId !== undefined && failed.has(value.outputId)) {
+            (value as { status?: string }).status = "compile-error";
+          }
         }
       });
     });

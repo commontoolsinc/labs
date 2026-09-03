@@ -664,6 +664,36 @@ const isHostAuthoredOutputFile = (fileName: string): boolean => {
   return false;
 };
 
+/** The three readings of a `withheld` count that differ. */
+type WithheldCount =
+  | { kind: "absent" }
+  | { kind: "number"; value: number }
+  | { kind: "malformed" };
+
+/**
+ * What a counts object says about `withheld`.
+ *
+ * A trace written before the outcome existed declares nothing, a trace written
+ * after declares a number, and a field that is present and is not a number is
+ * neither — which is why the three are told apart rather than collapsed into
+ * an optional number.
+ *
+ * Read through an index rather than a field because the count is written by a
+ * harness that may be newer than the contract this audit compiles against — an
+ * audit that could only read the fields it was built with would go quiet on
+ * exactly the runs worth reading.
+ */
+const withheldIn = (
+  counts: HarnessPolicyDecisionCounts | Record<string, unknown> | undefined,
+): WithheldCount => {
+  if (counts === undefined) return { kind: "absent" };
+  const value = (counts as Record<string, unknown>).withheld;
+  if (value === undefined) return { kind: "absent" };
+  return typeof value === "number"
+    ? { kind: "number", value }
+    : { kind: "malformed" };
+};
+
 const countsAgree = (
   declared: HarnessPolicyDecisionCounts | undefined,
   computed: HarnessPolicyDecisionCounts,
@@ -681,11 +711,43 @@ const countsAgree = (
   // whatever it holds.
   (declared.invalid === undefined
     ? computed.invalid === 0
-    : declared.invalid === computed.invalid);
+    : declared.invalid === computed.invalid) &&
+  // `withheld` is the outcome of a release entry whose values were held back.
+  // Unlike `invalid`, the counter this audit computes with may not know the
+  // outcome at all: a trace can be written by a harness newer than the build
+  // reading it. So the reconciliation is conditional on THIS build being able
+  // to count the outcome — where it cannot, there is nothing to reconcile and
+  // saying so is honest, where inventing a zero would manufacture a
+  // disagreement out of a version gap. Once the counter emits `withheld`, a
+  // declared count that is not the number beside it is a disagreement like any
+  // other, and an absent declaration still reads as zero.
+  ((): boolean => {
+    const theirs = withheldIn(declared);
+    // A field that is present and is not a number equals no count, so it
+    // disagrees whether or not this build can compute one. Deciding that
+    // first is what keeps a malformed declaration from hiding behind a
+    // version gap.
+    if (theirs.kind === "malformed") return false;
+    // `computed` is this build's own count, so it is a number or nothing; only
+    // the declared side can be malformed, which is decided above.
+    const mine = withheldIn(computed);
+    // Anything but a number on this side means this build did not count the
+    // outcome, so there is nothing to reconcile; inventing a zero here would
+    // manufacture a disagreement out of a trace written by a newer harness.
+    if (mine.kind !== "number") return true;
+    return (theirs.kind === "absent" ? 0 : theirs.value) === mine.value;
+  })();
 
 const describeCounts = (counts: HarnessPolicyDecisionCounts): string =>
   `total ${counts.total}, allowed ${counts.allowed}, warned ${counts.warned}, denied ${counts.denied}, invalid ${
     counts.invalid ?? 0
+  }, withheld ${
+    ((held) =>
+      held.kind === "number"
+        ? held.value
+        : held.kind === "absent"
+        ? 0
+        : "malformed")(withheldIn(counts))
   }`;
 
 const decisionCoverage: AuditCheck = {
