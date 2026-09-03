@@ -1,3 +1,16 @@
+/**
+ * The provider abstraction for language models: the model catalog, the
+ * aliases, the capability records, the provider clients, and the chain that
+ * decides what `default` means. A request names a model; this is where that
+ * name becomes a provider to call.
+ *
+ * Which models a deployment has depends on the credentials it was configured
+ * with and, for the gateway's, on what the gateway answers when asked. Both
+ * are known only to this process, which is what keeps the catalog here rather
+ * than in the caller's package. `docs/features/llm-provider-boundary.md` sets
+ * out the boundary, and `packages/llm/README.md` redirects a reader who looked
+ * in the caller's package first.
+ */
 import { anthropic, createAnthropic } from "@ai-sdk/anthropic";
 import { createVertex, vertex } from "@ai-sdk/google-vertex";
 import { createGroq, groq } from "@ai-sdk/groq";

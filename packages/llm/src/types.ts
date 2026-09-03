@@ -7,9 +7,16 @@ import type {
 import { isPureJson } from "@commonfabric/pure-json";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
-// Resolved by the toolshed at startup: prefers gateway:claude-sonnet-4-6 when
-// available, falls back to anthropic:claude-sonnet-4-5 otherwise. See
-// `registerDefaultModel` in packages/toolshed/routes/ai/llm/models.ts.
+/**
+ * The alias a request names to get whichever model the deployment considers
+ * its default. The toolshed picks that model as it starts up, by walking
+ * `DEFAULT_MODEL_CANDIDATES` in `packages/toolshed/routes/ai/llm/models.ts`
+ * and taking the first candidate a provider registered.
+ *
+ * Which models exist is decided there and not here. `README.md` in this
+ * package says why, and `docs/features/llm-provider-boundary.md` describes the
+ * boundary in full.
+ */
 export const DEFAULT_MODEL_NAME: ModelName = "default";
 
 // NOTE(ja): This should be an array of models, the first model will be tried, if it

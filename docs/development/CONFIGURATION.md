@@ -43,7 +43,9 @@ Required only if you're running the toolshed.
 
 A provider's models are **only registered when its env var is set**. See
 [`packages/toolshed/routes/ai/llm/models.ts`](../../packages/toolshed/routes/ai/llm/models.ts)
-for the registration logic.
+for the registration logic — that file is the whole provider abstraction, and
+[`docs/features/llm-provider-boundary.md`](../features/llm-provider-boundary.md)
+explains why it lives in the toolshed rather than in `@commonfabric/llm`.
 
 | Var | Provider |
 |---|---|
