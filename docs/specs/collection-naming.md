@@ -490,7 +490,7 @@ Each step is usable on its own, and the order is load-bearing.
 
 **1. Restructure the reverse map.** A piece carries one single-valued `slug`
 entry in its metadata, written by `setSlugLink` (`packages/piece/src/slugs.ts`)
-and read by `handlePageGetSlug`
+and read by `handlePieceGetSlug`
 (`packages/runtime-client/backends/runtime-processor.ts`); the shell rewrites a
 visited identity URL to that name. One slot cannot hold both a member name and a
 space-level name, so the canonical URL becomes whichever was written last. Two

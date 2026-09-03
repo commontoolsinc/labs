@@ -10,7 +10,7 @@ const space = "did:key:test-space" as DID;
 
 interface StubOptions {
   schema?: JSONSchema; // schema carried on the resolved piece ref
-  getPageThrows?: boolean; // make getPage reject (derivation error path)
+  getPieceThrows?: boolean; // make getPiece reject (derivation error path)
   favorites?: unknown; // value returned by the favorites cell
   ensureThrows?: boolean; // make ensureHomePatternRunning reject
   ensureDisposed?: boolean; // abort the runtime signal during setup
@@ -18,13 +18,13 @@ interface StubOptions {
 
 // A single flexible RuntimeClient stub covering everything FavoritesManager
 // touches: the home-pattern handle chain (ensureHomePatternRunning → asSchema →
-// key → handler / favorites cell) and getPage (whose resolved ref carries the
+// key → handler / favorites cell) and getPiece (whose resolved ref carries the
 // piece schema).
 function makeStub(opts: StubOptions = {}) {
   const sent: Array<Record<string, unknown>> = [];
   let subscribeCb: ((v: unknown) => void) | undefined;
   let unsubscribed = false;
-  let getPageCalls = 0;
+  let getPieceCalls = 0;
 
   const handler = { send: (p: Record<string, unknown>) => sent.push(p) };
   const favoritesCell: Record<string, unknown> = {
@@ -51,10 +51,10 @@ function makeStub(opts: StubOptions = {}) {
         : opts.ensureThrows
         ? Promise.reject(new Error("ensure failed"))
         : Promise.resolve(homeHandle),
-    getPage: () => {
-      getPageCalls++;
-      return opts.getPageThrows
-        ? Promise.reject(new Error("getPage failed"))
+    getPiece: () => {
+      getPieceCalls++;
+      return opts.getPieceThrows
+        ? Promise.reject(new Error("getPiece failed"))
         : Promise.resolve({
           cell: () => ({ ref: () => ({ schema: opts.schema }) }),
         });
@@ -67,7 +67,7 @@ function makeStub(opts: StubOptions = {}) {
     invokeSubscribe: (v: unknown) => subscribeCb?.(v),
     hasSubscriber: () => subscribeCb !== undefined,
     wasUnsubscribed: () => unsubscribed,
-    getPageCalls: () => getPageCalls,
+    getPieceCalls: () => getPieceCalls,
   };
 }
 
@@ -103,7 +103,7 @@ describe("FavoritesManager", () => {
         "#Custom-Tag",
       );
       expect(stub.sent[0].tags).toEqual(["custom-tag"]);
-      expect(stub.getPageCalls()).toBe(0);
+      expect(stub.getPieceCalls()).toBe(0);
     });
 
     it("stores no tags when the piece has no readable schema", async () => {
@@ -113,7 +113,7 @@ describe("FavoritesManager", () => {
     });
 
     it("stores no tags when the schema read fails", async () => {
-      const stub = makeStub({ getPageThrows: true });
+      const stub = makeStub({ getPieceThrows: true });
       await new FavoritesManager(stub.rt).addFavorite(space, "p");
       expect(stub.sent[0].tags).toEqual([]);
     });

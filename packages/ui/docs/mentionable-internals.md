@@ -54,7 +54,7 @@ const stableId = resolved.ref().id; // e.g., "of:fid1:abc123"
 **Important:** `CellHandle.id()` returns the FULL schemed URI (`of:fid1:...`) —
 the URI scheme is part of the identity (a `computed:` cell is not its `of:`
 sibling), so programmatic surfaces keep it. The bare, `of:`-stripped form is a
-ROUTING/EMBED convenience produced at the edges: `PageHandle.id()` for routing
+ROUTING/EMBED convenience produced at the edges: `PieceHandle.id()` for routing
 pieceIds, and `mentionIdFromCellId` (`src/v2/utils/mention-id.ts`) for wiki-link
 embeds — the latter throws on `computed:` ids, which the bare embed format
 cannot represent.

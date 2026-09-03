@@ -73,13 +73,13 @@ export class FavoritesManager {
   ): Promise<string[]> {
     if (explicitTag) return [explicitTag.toLowerCase().replace(/^#/, "")];
     try {
-      // `getPage` resolves the piece's cell ref, which the backend serializes
+      // `getPiece` resolves the piece's cell ref, which the backend serializes
       // with its result schema (`getAsLink({ includeSchema: true })`). It does
       // not start the piece (runIt defaults to false), so a piece that is not
       // already running may resolve without a schema and yield no tags — a
       // tagless favorite that later code can heal.
-      const page = await this.#rt.getPage(pieceId, space);
-      const schema = page?.cell().ref().schema;
+      const piece = await this.#rt.getPiece(pieceId, space);
+      const schema = piece?.cell().ref().schema;
       return schema ? tagsFromSchema(schema) : [];
     } catch {
       // A missing or unreadable piece schema yields no tags, not a failure.

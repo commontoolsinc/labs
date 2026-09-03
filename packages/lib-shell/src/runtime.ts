@@ -9,7 +9,7 @@ import {
   attachOptionsFrom,
   CellHandle,
   FavoritesManager,
-  PageHandle,
+  PieceHandle,
   type PieceSourceView,
   Program,
   RuntimeClient,
@@ -391,11 +391,11 @@ export class RuntimeInternals extends EventTarget {
    * running. */
   #spaceRootPatterns: Map<
     DID,
-    { pattern: Promise<PageHandle<NameSchema>>; started: boolean }
+    { pattern: Promise<PieceHandle<NameSchema>>; started: boolean }
   > = new Map();
   #patternCache: Map<
     string,
-    { promise: Promise<PageHandle<NameSchema>>; started: boolean }
+    { promise: Promise<PieceHandle<NameSchema>>; started: boolean }
   > = new Map();
   // TODO(runtime-worker-refactor)
   #telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
@@ -439,13 +439,13 @@ export class RuntimeInternals extends EventTarget {
     space: DID,
     source: URL | Program | string,
     options?: { argument?: FabricPlainObject; run?: boolean },
-  ): Promise<PageHandle<T>> {
+  ): Promise<PieceHandle<T>> {
     this.#check();
-    const page = await this.#client.createPage<T>(source, space, options);
-    if (!page) {
+    const piece = await this.#client.createPiece<T>(source, space, options);
+    if (!piece) {
       throw new Error("Could not create piece");
     }
-    return page;
+    return piece;
   }
 
   /**
@@ -470,7 +470,7 @@ export class RuntimeInternals extends EventTarget {
   getSpaceRootPattern(
     space: DID,
     options: { start?: boolean } = {},
-  ): Promise<PageHandle<NameSchema>> {
+  ): Promise<PieceHandle<NameSchema>> {
     this.#check();
     const start = options.start ?? true;
     const cached = this.#spaceRootPatterns.get(space);
@@ -493,7 +493,7 @@ export class RuntimeInternals extends EventTarget {
     return this.#client.resolveSpaceName(name);
   }
 
-  async recreateSpaceRootPattern(space: DID): Promise<PageHandle<NameSchema>> {
+  async recreateSpaceRootPattern(space: DID): Promise<PieceHandle<NameSchema>> {
     this.#check();
     // Clear cached pattern since we're recreating it
     this.#spaceRootPatterns.delete(space);
@@ -506,7 +506,7 @@ export class RuntimeInternals extends EventTarget {
   }
 
   /**
-   * Get a piece's page handle. By default this also STARTS the piece
+   * Get a piece's handle. By default this also STARTS the piece
    * (instantiates its pattern in the worker) — appropriate for the piece
    * about to be displayed. Pass `start: false` for read-only consumers
    * (e.g. listing piece names): the persisted result cell is synced and
@@ -522,7 +522,7 @@ export class RuntimeInternals extends EventTarget {
     space: DID,
     id: string,
     options?: { start?: boolean },
-  ): Promise<PageHandle<NameSchema>> {
+  ): Promise<PieceHandle<NameSchema>> {
     this.#check();
     const start = options?.start ?? true;
     const key = `${space}:${id}`;
@@ -531,11 +531,11 @@ export class RuntimeInternals extends EventTarget {
       return cached.promise;
     }
     const promise = (async () => {
-      const page = await this.#client.getPage<NameSchema>(id, space, start);
-      if (!page) {
+      const piece = await this.#client.getPiece<NameSchema>(id, space, start);
+      if (!piece) {
         throw new Error(`Pattern not found: ${id}`);
       }
-      return page;
+      return piece;
     })();
     const entry = { promise, started: start };
     this.#patternCache.set(key, entry);
@@ -555,7 +555,7 @@ export class RuntimeInternals extends EventTarget {
   async refreshPattern(
     space: DID,
     id: string,
-  ): Promise<PageHandle<NameSchema>> {
+  ): Promise<PieceHandle<NameSchema>> {
     this.invalidatePattern(space, id);
     return await this.getPattern(space, id);
   }
@@ -570,12 +570,12 @@ export class RuntimeInternals extends EventTarget {
 
   async getSlug(space: DID, id: string): Promise<string | undefined> {
     this.#check();
-    return await this.#client.getPageSlug(id, space);
+    return await this.#client.getPieceSlug(id, space);
   }
 
-  async removePage(space: DID, id: string): Promise<boolean> {
+  async removePiece(space: DID, id: string): Promise<boolean> {
     this.#check();
-    return await this.#client.removePage(id, space);
+    return await this.#client.removePiece(id, space);
   }
 
   async synced(space: DID): Promise<void> {
@@ -659,7 +659,7 @@ export class RuntimeInternals extends EventTarget {
   ): Promise<void> {
     const { cell } = e;
     // `CellHandle.id()` is the full schemed URI; routing pieceIds are bare
-    // (the `PageHandle.id()` convention) — URLs and the pageId protocol
+    // (the `PieceHandle.id()` convention) — URLs and the pieceId protocol
     // fields expect the `of:`-stripped form.
     const pieceId = cell.id().replace(/^of:/, "");
     logger.log("navigate", `Navigating to piece: ${pieceId}`);

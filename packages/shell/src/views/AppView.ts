@@ -11,7 +11,7 @@ import {
   type Cancel,
   type ErrorNotification,
   NAME,
-  PageHandle,
+  PieceHandle,
 } from "@commonfabric/runtime-client";
 import { Task, TaskStatus } from "@lit/task";
 import { css, html, nothing } from "lit";
@@ -99,7 +99,7 @@ export class XAppView extends BaseView {
     task: async (
       [app, rt, space],
     ): Promise<
-      | PageHandle<NameSchema>
+      | PieceHandle<NameSchema>
       | undefined
     > => {
       if (!rt || !space) return;
@@ -133,7 +133,7 @@ export class XAppView extends BaseView {
    * viewer). Pieces without the stream are untouched — the field simply
    * goes undelivered. Fire-and-forget; a failed send must never affect
    * pattern loading. */
-  #maybeDeliverOpenPath(pattern: PageHandle<NameSchema>): void {
+  #maybeDeliverOpenPath(pattern: PieceHandle<NameSchema>): void {
     if (this.#openPathDelivered) return;
     const view = this.app?.view;
     if (!view || !("openPath" in view) || !view.openPath) return;
@@ -152,7 +152,7 @@ export class XAppView extends BaseView {
       [app, rt, space],
       { signal },
     ): Promise<
-      | PageHandle<NameSchema>
+      | PieceHandle<NameSchema>
       | undefined
     > => {
       if (!rt || !space) return;
@@ -206,7 +206,7 @@ export class XAppView extends BaseView {
         selectedPatternStatus,
       ],
     ): {
-      activePattern: PageHandle<NameSchema> | undefined;
+      activePattern: PieceHandle<NameSchema> | undefined;
     } {
       const spaceRootPattern = spaceRootPatternStatus === TaskStatus.COMPLETE
         ? spaceRootPatternValue
@@ -358,7 +358,7 @@ export class XAppView extends BaseView {
     this._slugRevision++;
   }
 
-  #setTitleSubscription(activePiece?: PageHandle<NameSchema>) {
+  #setTitleSubscription(activePiece?: PieceHandle<NameSchema>) {
     if (!activePiece) {
       if (this.titleSubscription) {
         this.titleSubscription.removeEventListener(

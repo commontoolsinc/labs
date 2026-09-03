@@ -540,7 +540,7 @@ describe("cell-handle", () => {
       );
 
       // CellHandle.id() is the FULL schemed id — a true identity accessor.
-      // The routing/display strip lives on PageHandle.id().
+      // The routing/display strip lives on PieceHandle.id().
       expect(new CellHandle(runtime, refFor("of:fid1:abc")).id())
         .toBe("of:fid1:abc");
       expect(new CellHandle(runtime, refFor("computed:fid1:abc")).id())

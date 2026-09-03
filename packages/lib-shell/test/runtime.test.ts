@@ -28,7 +28,7 @@ class MockRuntimeClient {
   readonly signal: AbortSignal = new AbortController().signal;
   idleCalls = 0;
   syncedCalls = 0;
-  slugByPageId = new Map<string, string | undefined>();
+  slugByPieceId = new Map<string, string | undefined>();
   #handlers = new Map<
     keyof MockRuntimeClientEvents,
     Array<(...args: unknown[]) => void>
@@ -69,8 +69,8 @@ class MockRuntimeClient {
     return Promise.resolve(`did:key:z6Mk-${name}` as DID);
   }
 
-  getPageSlug(pageId: string): Promise<string | undefined> {
-    return Promise.resolve(this.slugByPageId.get(pageId));
+  getPieceSlug(pieceId: string): Promise<string | undefined> {
+    return Promise.resolve(this.slugByPieceId.get(pieceId));
   }
 
   /** Records the (pieceId, space) argument order source reads arrive in. */
@@ -89,20 +89,20 @@ class MockRuntimeClient {
     return Promise.reject(new Error("no root pattern in mock"));
   }
 
-  /** Records every (pageId, runIt, space) so tests can assert which calls
+  /** Records every (pieceId, runIt, space) so tests can assert which calls
    * START the piece (CT-1623: name listings must not start every piece) and
    * which space each call targets. */
-  getPageCalls: Array<
-    { pageId: string; runIt: boolean | undefined; space: DID }
+  getPieceCalls: Array<
+    { pieceId: string; runIt: boolean | undefined; space: DID }
   > = [];
 
-  getPage(
-    pageId: string,
+  getPiece(
+    pieceId: string,
     space: DID,
     runIt?: boolean,
   ): Promise<{ id: () => string }> {
-    this.getPageCalls.push({ pageId, runIt, space });
-    return Promise.resolve({ id: () => pageId });
+    this.getPieceCalls.push({ pieceId, runIt, space });
+    return Promise.resolve({ id: () => pieceId });
   }
 
   dispose(): Promise<void> {
@@ -272,10 +272,10 @@ describe("RuntimeInternals", () => {
     }
   });
 
-  it("exposes page slug metadata", async () => {
+  it("exposes piece slug metadata", async () => {
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav" as DID;
     const client = new MockRuntimeClient();
-    client.slugByPageId.set("piece-789", "demo");
+    client.slugByPieceId.set("piece-789", "demo");
     const runtime = new RuntimeInternals(client as any);
 
     try {
@@ -287,14 +287,14 @@ describe("RuntimeInternals", () => {
     }
   });
 
-  it("guards removePage after dispose", async () => {
+  it("guards removePiece after dispose", async () => {
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-nav" as DID;
     const client = new MockRuntimeClient();
     const runtime = new RuntimeInternals(client as any);
 
     await runtime.dispose();
 
-    await expect(runtime.removePage(spaceDid, "piece-789")).rejects.toThrow(
+    await expect(runtime.removePiece(spaceDid, "piece-789")).rejects.toThrow(
       "RuntimeInternals disposed.",
     );
   });
@@ -796,7 +796,7 @@ describe("RuntimeInternals", () => {
   describe("getPattern start semantics", () => {
     // CT-1623: starting a piece is expensive (pattern instantiation + eager
     // dependency collection in the worker). Read-only consumers like the header
-    // pieces menu must be able to resolve page handles WITHOUT starting, and a
+    // pieces menu must be able to resolve piece handles WITHOUT starting, and a
     // non-started cache entry must not block a later display-path start.
 
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-pattern" as DID;
@@ -811,8 +811,8 @@ describe("RuntimeInternals", () => {
       const { client, runtime } = makeRuntime();
       try {
         await runtime.getPattern(spaceDid, "piece-1");
-        expect(client.getPageCalls).toEqual([
-          { pageId: "piece-1", runIt: true, space: spaceDid },
+        expect(client.getPieceCalls).toEqual([
+          { pieceId: "piece-1", runIt: true, space: spaceDid },
         ]);
       } finally {
         await runtime.dispose();
@@ -823,8 +823,8 @@ describe("RuntimeInternals", () => {
       const { client, runtime } = makeRuntime();
       try {
         await runtime.getPattern(spaceDid, "piece-1", { start: false });
-        expect(client.getPageCalls).toEqual([
-          { pageId: "piece-1", runIt: false, space: spaceDid },
+        expect(client.getPieceCalls).toEqual([
+          { pieceId: "piece-1", runIt: false, space: spaceDid },
         ]);
       } finally {
         await runtime.dispose();
@@ -836,9 +836,9 @@ describe("RuntimeInternals", () => {
       try {
         await runtime.getPattern(spaceDid, "piece-1", { start: false });
         await runtime.getPattern(spaceDid, "piece-1");
-        expect(client.getPageCalls).toEqual([
-          { pageId: "piece-1", runIt: false, space: spaceDid },
-          { pageId: "piece-1", runIt: true, space: spaceDid },
+        expect(client.getPieceCalls).toEqual([
+          { pieceId: "piece-1", runIt: false, space: spaceDid },
+          { pieceId: "piece-1", runIt: true, space: spaceDid },
         ]);
       } finally {
         await runtime.dispose();
@@ -851,8 +851,8 @@ describe("RuntimeInternals", () => {
         await runtime.getPattern(spaceDid, "piece-1");
         await runtime.getPattern(spaceDid, "piece-1");
         await runtime.getPattern(spaceDid, "piece-1", { start: false });
-        expect(client.getPageCalls).toEqual([
-          { pageId: "piece-1", runIt: true, space: spaceDid },
+        expect(client.getPieceCalls).toEqual([
+          { pieceId: "piece-1", runIt: true, space: spaceDid },
         ]);
       } finally {
         await runtime.dispose();
@@ -864,8 +864,8 @@ describe("RuntimeInternals", () => {
       try {
         await runtime.getPattern(spaceDid, "piece-1", { start: false });
         await runtime.getPattern(spaceDid, "piece-1", { start: false });
-        expect(client.getPageCalls).toEqual([
-          { pageId: "piece-1", runIt: false, space: spaceDid },
+        expect(client.getPieceCalls).toEqual([
+          { pieceId: "piece-1", runIt: false, space: spaceDid },
         ]);
       } finally {
         await runtime.dispose();
@@ -902,8 +902,8 @@ describe("RuntimeInternals", () => {
       const { client, runtime } = makeRuntime();
       try {
         await runtime.getPattern(otherDid, "piece-1");
-        expect(client.getPageCalls).toEqual([
-          { pageId: "piece-1", runIt: true, space: otherDid },
+        expect(client.getPieceCalls).toEqual([
+          { pieceId: "piece-1", runIt: true, space: otherDid },
         ]);
       } finally {
         await runtime.dispose();
@@ -916,9 +916,9 @@ describe("RuntimeInternals", () => {
         await runtime.getPattern(homeDid, "piece-1");
         await runtime.getPattern(otherDid, "piece-1");
         await runtime.getPattern(otherDid, "piece-1");
-        expect(client.getPageCalls).toEqual([
-          { pageId: "piece-1", runIt: true, space: homeDid },
-          { pageId: "piece-1", runIt: true, space: otherDid },
+        expect(client.getPieceCalls).toEqual([
+          { pieceId: "piece-1", runIt: true, space: homeDid },
+          { pieceId: "piece-1", runIt: true, space: otherDid },
         ]);
       } finally {
         await runtime.dispose();
@@ -933,10 +933,10 @@ describe("RuntimeInternals", () => {
         runtime.invalidatePattern(otherDid, "piece-1");
         await runtime.getPattern(homeDid, "piece-1"); // still cached
         await runtime.getPattern(otherDid, "piece-1"); // re-fetched
-        expect(client.getPageCalls).toEqual([
-          { pageId: "piece-1", runIt: true, space: homeDid },
-          { pageId: "piece-1", runIt: true, space: otherDid },
-          { pageId: "piece-1", runIt: true, space: otherDid },
+        expect(client.getPieceCalls).toEqual([
+          { pieceId: "piece-1", runIt: true, space: homeDid },
+          { pieceId: "piece-1", runIt: true, space: otherDid },
+          { pieceId: "piece-1", runIt: true, space: otherDid },
         ]);
       } finally {
         await runtime.dispose();

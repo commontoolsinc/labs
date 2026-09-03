@@ -9,7 +9,7 @@ import "../components/OmniLayout.ts";
 
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import type { JSONSchema } from "@commonfabric/runner/shared";
-import { CellHandle, PageHandle, VNode } from "@commonfabric/runtime-client";
+import { CellHandle, PieceHandle, VNode } from "@commonfabric/runtime-client";
 import type { DID } from "@commonfabric/identity";
 import { openPieceMenu } from "@commonfabric/ui";
 
@@ -141,7 +141,7 @@ export class XBodyView extends BaseView {
   accessor space: DID | undefined = undefined;
 
   @property({ attribute: false })
-  accessor activePattern: PageHandle | undefined = undefined;
+  accessor activePattern: PieceHandle | undefined = undefined;
 
   @property()
   accessor showShellPieceListView = false;

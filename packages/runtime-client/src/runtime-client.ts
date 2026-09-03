@@ -39,7 +39,7 @@ import {
 } from "./client/connection.ts";
 import { EventEmitter } from "./client/emitter.ts";
 import { RuntimeTransport } from "./client/transport.ts";
-import { PageHandle } from "./page-handle.ts";
+import { PieceHandle } from "./piece-handle.ts";
 import {
   type CellRef,
   ConsoleMessage,
@@ -521,11 +521,11 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * `options.argument` is the piece's input, which is a record: a piece is
    * created with named inputs or with none.
    */
-  async createPage<T = unknown>(
+  async createPiece<T = unknown>(
     input: string | URL | Program,
     space: DID,
     options?: { argument?: FabricPlainObject; run?: boolean },
-  ): Promise<PageHandle<T>> {
+  ): Promise<PieceHandle<T>> {
     const source = input instanceof URL
       ? { url: input.href }
       : typeof input === "string"
@@ -541,19 +541,19 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       : { program: input };
 
     const response = await this.#conn.request<
-      RequestType.PageCreate
+      RequestType.PieceCreate
     >({
-      type: RequestType.PageCreate,
+      type: RequestType.PieceCreate,
       space,
       source,
       argument: options?.argument,
       run: options?.run,
     });
 
-    return new PageHandle<T>(this, response.page);
+    return new PieceHandle<T>(this, response.piece);
   }
 
-  // Page operations name their space explicitly — there is no
+  // Piece operations name their space explicitly — there is no
   // implicit/default space at this layer. The worker resolves each
   // operation against that space's piece context over the same
   // connection.
@@ -569,7 +569,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   async getSpaceRootPattern(
     space: DID,
     options: { start?: boolean } = {},
-  ): Promise<PageHandle<NameSchema>> {
+  ): Promise<PieceHandle<NameSchema>> {
     const response = await this.#conn.request<
       RequestType.GetSpaceRootPattern
     >({
@@ -577,7 +577,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       space,
       ...(options.start === undefined ? {} : { start: options.start }),
     });
-    return new PageHandle<NameSchema>(this, response.page);
+    return new PieceHandle<NameSchema>(this, response.piece);
   }
 
   async resolveSpaceName(name: string): Promise<DID> {
@@ -590,31 +590,31 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   async recreateSpaceRootPattern(
     space: DID,
-  ): Promise<PageHandle<NameSchema>> {
+  ): Promise<PieceHandle<NameSchema>> {
     const response = await this.#conn.request<
       RequestType.RecreateSpaceRootPattern
     >({
       type: RequestType.RecreateSpaceRootPattern,
       space,
     });
-    return new PageHandle<NameSchema>(this, response.page);
+    return new PieceHandle<NameSchema>(this, response.piece);
   }
 
-  async getPage<T = unknown>(
-    pageId: string,
+  async getPiece<T = unknown>(
+    pieceId: string,
     space: DID,
     runIt?: boolean,
-  ): Promise<PageHandle<T> | null> {
-    const response = await this.#conn.request<RequestType.PageGet>({
-      type: RequestType.PageGet,
-      pageId: pageId,
+  ): Promise<PieceHandle<T> | null> {
+    const response = await this.#conn.request<RequestType.PieceGet>({
+      type: RequestType.PieceGet,
+      pieceId: pieceId,
       runIt,
       space,
     });
 
     if (!response) return null;
 
-    return new PageHandle<T>(this, response.page);
+    return new PieceHandle<T>(this, response.piece);
   }
 
   /**
@@ -656,7 +656,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     sourceSpace: DID,
     destinationSpace: DID,
     options: { copyData?: boolean } = {},
-  ): Promise<PageHandle> {
+  ): Promise<PieceHandle> {
     const response = await this.#conn.request<RequestType.PieceClone>({
       type: RequestType.PieceClone,
       pieceId,
@@ -664,7 +664,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       destinationSpace,
       ...(options.copyData === true ? { copyData: true } : {}),
     });
-    return new PageHandle(this, response.page);
+    return new PieceHandle(this, response.piece);
   }
 
   /**
@@ -725,19 +725,19 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return response.access;
   }
 
-  async getPageSlug(pageId: string, space: DID): Promise<string | undefined> {
-    const response = await this.#conn.request<RequestType.PageGetSlug>({
-      type: RequestType.PageGetSlug,
-      pageId,
+  async getPieceSlug(pieceId: string, space: DID): Promise<string | undefined> {
+    const response = await this.#conn.request<RequestType.PieceGetSlug>({
+      type: RequestType.PieceGetSlug,
+      pieceId,
       space,
     });
     return response.slug;
   }
 
-  async removePage(pageId: string, space: DID): Promise<boolean> {
-    const res = await this.#conn.request<RequestType.PageRemove>({
-      type: RequestType.PageRemove,
-      pageId: pageId,
+  async removePiece(pieceId: string, space: DID): Promise<boolean> {
+    const res = await this.#conn.request<RequestType.PieceRemove>({
+      type: RequestType.PieceRemove,
+      pieceId: pieceId,
       space,
     });
     return res.value;
@@ -749,8 +749,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * space. This is not a storage-wide piece listing.
    */
   async getPiecesListCell<T>(space: DID): Promise<CellHandle<T[]>> {
-    const response = await this.#conn.request<RequestType.PageGetAll>({
-      type: RequestType.PageGetAll,
+    const response = await this.#conn.request<RequestType.PieceGetAll>({
+      type: RequestType.PieceGetAll,
       space,
     });
 
@@ -766,8 +766,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * is the first operation to touch the space.
    */
   async synced(space: DID): Promise<void> {
-    await this.#conn.request<RequestType.PageSynced>({
-      type: RequestType.PageSynced,
+    await this.#conn.request<RequestType.PieceSynced>({
+      type: RequestType.PieceSynced,
       space,
     });
   }

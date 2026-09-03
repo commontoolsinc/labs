@@ -27,7 +27,7 @@ class MockRuntimeClient extends EventEmitter<MockRuntimeClientEvents> {
   syncedCalls = 0;
   spaceRootPatternCalls = 0;
   registryWriteCalls = 0;
-  slugByPageId = new Map<string, string | undefined>();
+  slugByPieceId = new Map<string, string | undefined>();
 
   idle(): Promise<void> {
     this.idleCalls += 1;
@@ -39,8 +39,8 @@ class MockRuntimeClient extends EventEmitter<MockRuntimeClientEvents> {
     return Promise.resolve();
   }
 
-  getPageSlug(pageId: string): Promise<string | undefined> {
-    return Promise.resolve(this.slugByPageId.get(pageId));
+  getPieceSlug(pieceId: string): Promise<string | undefined> {
+    return Promise.resolve(this.slugByPieceId.get(pieceId));
   }
 
   getSpaceRootPattern() {
@@ -85,10 +85,10 @@ type NavigationDetail = {
 };
 
 describe("RuntimeInternals navigation", () => {
-  it("exposes page slug metadata", async () => {
+  it("exposes piece slug metadata", async () => {
     const spaceDid = "did:key:z6Mk-shell-runtime-did-nav" as DID;
     const client = new MockRuntimeClient();
-    client.slugByPageId.set("piece-789", "demo");
+    client.slugByPieceId.set("piece-789", "demo");
     const runtime = new (RuntimeInternals as any)(client);
 
     try {

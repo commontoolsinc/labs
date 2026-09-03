@@ -150,7 +150,7 @@ function homeSpaceCtx(this: { cc?: unknown }) {
   return this.cc;
 }
 
-// A valid `fid1:` page id from a readable seed (handlers parse pageId via
+// A valid `fid1:` piece id from a readable seed (handlers parse pieceId via
 // `entityIdFrom`, which requires a real tagged-hash string).
 const fid = (seed: string) => taggedHashStringOf(seed);
 
@@ -651,7 +651,7 @@ describe("runtime-processor", () => {
           await (RuntimeProcessor.prototype as any).handlePieceCreate.call(
             processor,
             {
-              type: RequestType.PageCreate,
+              type: RequestType.PieceCreate,
               space,
               source: { program: { main: "/main.tsx", files: [] } },
               argument,
@@ -684,7 +684,7 @@ describe("runtime-processor", () => {
       await expect(
         // deno-lint-ignore no-explicit-any
         (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
-          type: RequestType.PageCreate,
+          type: RequestType.PieceCreate,
           space,
           source: { program: { main: "/main.tsx", files: [] } },
           argument: new FabricBytes(new Uint8Array([1, 2, 3])),
@@ -696,7 +696,7 @@ describe("runtime-processor", () => {
       await expect(
         // deno-lint-ignore no-explicit-any
         (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
-          type: RequestType.PageCreate,
+          type: RequestType.PieceCreate,
           space,
           source: { program: { main: "/main.tsx", files: [] } },
           argument: new FabricError({
@@ -728,7 +728,7 @@ describe("runtime-processor", () => {
       await expect(
         // deno-lint-ignore no-explicit-any
         (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
-          type: RequestType.PageCreate,
+          type: RequestType.PieceCreate,
           space,
           source: { program: { main: "/main.tsx", files: [] } },
           argument: { image: bytes },
@@ -912,8 +912,8 @@ describe("runtime-processor", () => {
     });
   });
 
-  describe("page slug metadata", () => {
-    it("reads slug metadata from the page document root", async () => {
+  describe("piece slug metadata", () => {
+    it("reads slug metadata from the piece document root", async () => {
       const reads: unknown[] = [];
       const processor = {
         getSpaceCtx: homeSpaceCtx,
@@ -936,10 +936,11 @@ describe("runtime-processor", () => {
         },
       };
 
-      const result = await (RuntimeProcessor.prototype as any).handlePageGetSlug
+      const result = await (RuntimeProcessor.prototype as any)
+        .handlePieceGetSlug
         .call(processor, {
-          type: RequestType.PageGetSlug,
-          pageId: fid("slugged-piece"),
+          type: RequestType.PieceGetSlug,
+          pieceId: fid("slugged-piece"),
         });
 
       expect(result).toEqual({ slug: "demo" });
@@ -966,18 +967,19 @@ describe("runtime-processor", () => {
         },
       };
 
-      const result = await (RuntimeProcessor.prototype as any).handlePageGetSlug
+      const result = await (RuntimeProcessor.prototype as any)
+        .handlePieceGetSlug
         .call(processor, {
-          type: RequestType.PageGetSlug,
-          pageId: fid("slugged-piece"),
+          type: RequestType.PieceGetSlug,
+          pieceId: fid("slugged-piece"),
         });
 
       expect(result).toEqual({ slug: undefined });
     });
 
-    it("accepts bare and of:-schemed pageIds as the same entity", async () => {
-      // CellHandle.id() emits the full schemed URI while PageHandle.id() emits
-      // the bare routing form; the pageId intake must resolve both to the SAME
+    it("accepts bare and of:-schemed pieceIds as the same entity", async () => {
+      // CellHandle.id() emits the full schemed URI while PieceHandle.id() emits
+      // the bare routing form; the pieceId intake must resolve both to the SAME
       // entity. Without normalization, "of:fid1:H" parses as a hash whose tag
       // is "of:fid1" and silently addresses the nonexistent of:of:fid1:H.
 
@@ -999,20 +1001,20 @@ describe("runtime-processor", () => {
       };
 
       const bare = fid("schemed-piece");
-      for (const pageId of [bare, `of:${bare}`]) {
-        await (RuntimeProcessor.prototype as any).handlePageGetSlug
-          .call(processor, { type: RequestType.PageGetSlug, pageId });
+      for (const pieceId of [bare, `of:${bare}`]) {
+        await (RuntimeProcessor.prototype as any).handlePieceGetSlug
+          .call(processor, { type: RequestType.PieceGetSlug, pieceId });
       }
 
       expect(received).toEqual([bare, bare]);
     });
 
-    it("throws for a `computed:` page id, naming the address", async () => {
+    it("throws for a `computed:` piece id, naming the address", async () => {
       const processor = {
         getSpaceCtx: homeSpaceCtx,
         runtime: {
           getCellFromEntityId: () => {
-            throw new Error("computed page id reached the runtime lookup");
+            throw new Error("computed piece id reached the runtime lookup");
           },
         },
         cc: {
@@ -1020,18 +1022,18 @@ describe("runtime-processor", () => {
         },
       };
 
-      const computed = `computed:${fid("not-a-page")}`;
+      const computed = `computed:${fid("not-a-piece")}`;
       await expect(
-        (RuntimeProcessor.prototype as any).handlePageGetSlug.call(processor, {
-          type: RequestType.PageGetSlug,
-          pageId: computed,
+        (RuntimeProcessor.prototype as any).handlePieceGetSlug.call(processor, {
+          type: RequestType.PieceGetSlug,
+          pieceId: computed,
         }),
       ).rejects.toThrow(`Kinded entity id \`${computed}\``);
     });
   });
 
-  describe("page slug redirects", () => {
-    const space = "did:key:z6Mk-runtime-processor-page-redirect" as CellRef[
+  describe("piece slug redirects", () => {
+    const space = "did:key:z6Mk-runtime-processor-piece-redirect" as CellRef[
       "space"
     ];
 
@@ -1076,8 +1078,8 @@ describe("runtime-processor", () => {
       };
     }
 
-    it("carries either spelling of a pageId to the same entity", async () => {
-      const bare = fid("ordinary-page");
+    it("carries either spelling of a pieceId to the same entity", async () => {
+      const bare = fid("ordinary-piece");
       const requestedRef: CellRef = {
         id: `of:${bare}` as CellRef["id"],
         space,
@@ -1085,7 +1087,7 @@ describe("runtime-processor", () => {
         path: [],
       };
       const resultRef: CellRef = {
-        id: `of:${fid("ordinary-page-result")}` as CellRef["id"],
+        id: `of:${fid("ordinary-piece-result")}` as CellRef["id"],
         space,
         scope: "space",
         path: [],
@@ -1110,12 +1112,12 @@ describe("runtime-processor", () => {
         },
       };
 
-      for (const pageId of [bare, `of:${bare}`]) {
-        await (RuntimeProcessor.prototype as any).handlePageGet.call(
+      for (const pieceId of [bare, `of:${bare}`]) {
+        await (RuntimeProcessor.prototype as any).handlePieceGet.call(
           processor,
           {
-            type: RequestType.PageGet,
-            pageId,
+            type: RequestType.PieceGet,
+            pieceId,
             runIt: true,
             space,
           },
@@ -1133,7 +1135,7 @@ describe("runtime-processor", () => {
 
     it("renders slug redirects to output cells directly", async () => {
       const targetRef: CellRef = {
-        id: "of:fid1-sub-page" as CellRef["id"],
+        id: "of:fid1-sub-piece" as CellRef["id"],
         space,
         scope: "space",
         path: ["capture"],
@@ -1168,20 +1170,20 @@ describe("runtime-processor", () => {
         cc: pieces,
       };
 
-      const result = await (RuntimeProcessor.prototype as any).handlePageGet
+      const result = await (RuntimeProcessor.prototype as any).handlePieceGet
         .call(processor, {
-          type: RequestType.PageGet,
-          pageId: fid("slug-doc"),
+          type: RequestType.PieceGet,
+          pieceId: fid("slug-doc"),
           runIt: true,
         });
 
       expect(targetSynced).toBe(true);
-      expect(result.page.cell).toMatchObject(targetRef);
+      expect(result.piece.cell).toMatchObject(targetRef);
     });
 
     it("renders slug redirects to nested output cells directly", async () => {
       const targetRef: CellRef = {
-        id: "of:fid1-parent-page" as CellRef["id"],
+        id: "of:fid1-parent-piece" as CellRef["id"],
         space,
         scope: "space",
         path: ["activityTab"],
@@ -1241,16 +1243,16 @@ describe("runtime-processor", () => {
         cc: pieces,
       };
 
-      const result = await (RuntimeProcessor.prototype as any).handlePageGet
+      const result = await (RuntimeProcessor.prototype as any).handlePieceGet
         .call(processor, {
-          type: RequestType.PageGet,
-          pageId: fid("slug-doc"),
+          type: RequestType.PieceGet,
+          pieceId: fid("slug-doc"),
           runIt: true,
         });
 
       expect(targetSynced).toBe(true);
       expect(schemaPulled).toBe(true);
-      expect(result.page.cell).toMatchObject(schemaRef);
+      expect(result.piece.cell).toMatchObject(schemaRef);
     });
 
     it("loads slug redirects to piece cells through the pieces controller", async () => {
@@ -1297,15 +1299,15 @@ describe("runtime-processor", () => {
         cc: pieces,
       };
 
-      const result = await (RuntimeProcessor.prototype as any).handlePageGet
+      const result = await (RuntimeProcessor.prototype as any).handlePieceGet
         .call(processor, {
-          type: RequestType.PageGet,
-          pageId: fid("slug-doc"),
+          type: RequestType.PieceGet,
+          pieceId: fid("slug-doc"),
           runIt: true,
         });
 
       expect(calls).toEqual([[pieceCell, true]]);
-      expect(result.page.cell).toMatchObject(resultRef);
+      expect(result.piece.cell).toMatchObject(resultRef);
     });
   });
 
@@ -2152,7 +2154,7 @@ describe("runtime-processor", () => {
             type: RequestType.GetSpaceRootPattern,
             space: "did:key:test-space",
           });
-        expect(result.page.cell).toEqual(ref);
+        expect(result.piece.cell).toEqual(ref);
       });
 
       it("resolves the stored root without starting it when start is false", async () => {
@@ -2187,7 +2189,7 @@ describe("runtime-processor", () => {
             start: false,
           });
 
-        expect(result.page.cell).toEqual(ref);
+        expect(result.piece.cell).toEqual(ref);
         // Reconciled but not started: a read of what the root exported still
         // heals a stale root, and never boots it.
         expect(calls).toEqual([
@@ -2228,7 +2230,7 @@ describe("runtime-processor", () => {
             start: false,
           });
 
-        expect(result.page.cell).toEqual(ref);
+        expect(result.piece.cell).toEqual(ref);
         expect(calls).toEqual(["getDefaultPattern", "ensureDefaultPattern"]);
       });
     });
@@ -4965,7 +4967,7 @@ describe("runtime-processor", () => {
   });
 
   describe("RuntimeProcessor per-space piece contexts", () => {
-    // Federation PR2: one worker serves page operations for many spaces.
+    // Federation PR2: one worker serves piece operations for many spaces.
     // getSpaceCtx resolves the per-space PiecesController, lazily for
     // foreign spaces, over the shared runtime/storage.
 
@@ -5022,28 +5024,29 @@ describe("runtime-processor", () => {
       }
     });
 
-    describe("handlePageGet()", () => {
-      it("resolves the page in the space it is given", async () => {
+    describe("handlePieceGet()", () => {
+      it("resolves the piece in the space it is given", async () => {
         const { processor, runtime, homeSpace } = makeProcessorState();
         const spaceB = (await Identity.fromPassphrase(
           "runtime-processor-space-b",
         )).did();
-        const handlePageGet = (RuntimeProcessor.prototype as any).handlePageGet;
+        const handlePieceGet =
+          (RuntimeProcessor.prototype as any).handlePieceGet;
         try {
-          const resHome = await handlePageGet.call(processor, {
-            type: RequestType.PageGet,
-            pageId: fid("cross-space-probe"),
+          const resHome = await handlePieceGet.call(processor, {
+            type: RequestType.PieceGet,
+            pieceId: fid("cross-space-probe"),
             runIt: false,
             space: homeSpace,
           });
-          const resB = await handlePageGet.call(processor, {
-            type: RequestType.PageGet,
-            pageId: fid("cross-space-probe"),
+          const resB = await handlePieceGet.call(processor, {
+            type: RequestType.PieceGet,
+            pieceId: fid("cross-space-probe"),
             runIt: false,
             space: spaceB,
           });
-          expect(resHome.page.cell.space).toBe(homeSpace);
-          expect(resB.page.cell.space).toBe(spaceB);
+          expect(resHome.piece.cell.space).toBe(homeSpace);
+          expect(resB.piece.cell.space).toBe(spaceB);
         } finally {
           await runtime.dispose();
         }
