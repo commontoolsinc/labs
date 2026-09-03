@@ -1,7 +1,8 @@
 import { assertEquals, assertRejects } from "@std/assert";
 
-import type { Browser as AstralBrowser, LaunchOptions } from "@astral/astral";
+import type { LaunchOptions } from "@astral/astral";
 
+import type { BrowserProcess } from "../browser-process.ts";
 import { isRetryableAstralLaunchError, launchWithRetry } from "../browser.ts";
 
 Deno.test("isRetryableAstralLaunchError matches transient browser-launch failures", () => {
@@ -34,7 +35,7 @@ Deno.test("isRetryableAstralLaunchError matches transient browser-launch failure
 Deno.test("launchWithRetry retries retryable ETXTBSY launch failures", async () => {
   const launchCalls: LaunchOptions[] = [];
   const sleepCalls: number[] = [];
-  const browser = { close: async () => {} } as AstralBrowser;
+  const browser = {} as BrowserProcess;
   let attempts = 0;
 
   const launched = await launchWithRetry(
