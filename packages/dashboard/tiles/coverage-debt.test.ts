@@ -1,0 +1,202 @@
+/**
+ * coverage-debt: the median day's move over a run of daily measurements, and
+ * the view it produces. The samples are supplied directly, so nothing here
+ * reaches GitHub or the filesystem; the tile's own collection is covered by
+ * coverage-debt-history.test.ts.
+ */
+
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+
+import type { Ctx } from "../types.ts";
+import type { CoverageDebtSample } from "../coverage-debt-history.ts";
+import {
+  COVERAGE_MIN_DAYS,
+  COVERAGE_TREND_DAYS,
+  coverageDebt,
+  coverageDebtView,
+  dailyChangeLabel,
+  groupDigits,
+  medianDailyChange,
+  trendWindow,
+} from "./coverage-debt.ts";
+
+const DAY_MS = 86_400_000;
+const NOW = Date.UTC(2026, 8, 2, 13, 30);
+
+const context: Ctx = {
+  runs: () => Promise.resolve([]),
+  runsFor: () => Promise.resolve([]),
+  env: () => undefined,
+};
+
+const dayAt = (back: number) =>
+  new Date(NOW - back * DAY_MS).toISOString().slice(0, 10);
+
+/** Daily samples ending today, oldest first, one per day. */
+function samplesOf(lines: number[]): CoverageDebtSample[] {
+  return lines.map((uncoveredLines, index) => ({
+    day: dayAt(lines.length - 1 - index),
+    uncoveredLines,
+    runId: 1000 + index,
+  }));
+}
+
+/** A run of `days` measurements starting at `from` and moving by `perDay`. */
+const drift = (from: number, perDay: number, days: number) =>
+  samplesOf(Array.from({ length: days }, (_, day) => from + day * perDay));
+
+describe("coverage-debt", () => {
+  describe("groupDigits()", () => {
+    it("returns the integer with its thousands separated", () => {
+      expect(groupDigits(78101)).toBe("78,101");
+      expect(groupDigits(999)).toBe("999");
+      expect(groupDigits(1000)).toBe("1,000");
+      expect(groupDigits(1234567)).toBe("1,234,567");
+      expect(groupDigits(0)).toBe("0");
+      expect(groupDigits(30.6)).toBe("31");
+    });
+  });
+
+  describe("trendWindow()", () => {
+    it("returns the samples inside the trend window", () => {
+      const samples = samplesOf(Array(COVERAGE_TREND_DAYS + 10).fill(100));
+      expect(trendWindow(samples, NOW).length).toBe(COVERAGE_TREND_DAYS);
+    });
+
+    it("returns every sample when the history is shorter than the window", () => {
+      const samples = samplesOf([1, 2, 3]);
+      expect(trendWindow(samples, NOW)).toEqual(samples);
+    });
+  });
+
+  describe("medianDailyChange()", () => {
+    it("returns the median of the day-to-day changes", () => {
+      expect(medianDailyChange(samplesOf([100, 110, 130, 135]))).toBe(10);
+    });
+
+    it("returns a rate one big step does not stand for", () => {
+      // The shape a change in what the metric counts leaves behind: one
+      // enormous fall among days that each drifted up a little.
+      expect(medianDailyChange(samplesOf([1000, 1010, 300, 320, 340, 360])))
+        .toBe(20);
+    });
+
+    it("spreads a change across the days between two measurements", () => {
+      // The two-day gap moved 40 lines, which is 20 a day, matching the step
+      // beside it rather than reading as twice the move.
+      const samples: CoverageDebtSample[] = [
+        { day: dayAt(4), uncoveredLines: 100, runId: 1 },
+        { day: dayAt(2), uncoveredLines: 140, runId: 2 },
+        { day: dayAt(1), uncoveredLines: 160, runId: 3 },
+      ];
+      expect(medianDailyChange(samples)).toBe(20);
+    });
+
+    it("returns zero for fewer than two measurements", () => {
+      expect(medianDailyChange([])).toBe(0);
+      expect(medianDailyChange(samplesOf([100]))).toBe(0);
+    });
+  });
+
+  describe("dailyChangeLabel()", () => {
+    it("returns a signed rate for a fall", () => {
+      expect(dailyChangeLabel(-1234, 20)).toBe("-1,234 per day");
+    });
+
+    it("returns a signed rate for a rise", () => {
+      expect(dailyChangeLabel(45, 20)).toBe("+45 per day");
+    });
+
+    it("returns `flat` for a move inside the band, in either direction", () => {
+      expect(dailyChangeLabel(20, 20)).toBe("flat");
+      expect(dailyChangeLabel(-19, 20)).toBe("flat");
+      expect(dailyChangeLabel(0, 20)).toBe("flat");
+    });
+  });
+
+  describe("coverageDebtView()", () => {
+    it("returns the current uncovered-line count, with its unit, as the headline", () => {
+      const view = coverageDebtView(drift(80000, -100, 30), NOW);
+      expect(view.value).toBe("77,100 lines");
+      expect(view.valueLabel).toBe("77,100 lines");
+    });
+
+    it("returns a green tile and a falling rate for debt coming down", () => {
+      const view = coverageDebtView(drift(80000, -100, 30), NOW);
+      expect(view.status).toBe("good");
+      expect(view.sub).toBe("-100 per day (median) · last 21 days");
+    });
+
+    it("returns an amber tile and a rising rate for debt going up", () => {
+      const view = coverageDebtView(drift(70000, 100, 30), NOW);
+      expect(view.status).toBe("warn");
+      expect(view.sub).toBe("+100 per day (median) · last 21 days");
+    });
+
+    it("stays green and flat for a move the measurement cannot resolve", () => {
+      const view = coverageDebtView(drift(80000, 5, 30), NOW);
+      expect(view.status).toBe("good");
+      expect(view.sub).toBe("flat (median) · last 21 days");
+    });
+
+    it("stays green when one day added debt among days that did not", () => {
+      const steady = Array(29).fill(80000);
+      steady[20] = 90000;
+      const view = coverageDebtView(samplesOf(steady), NOW);
+      expect(view.status).toBe("good");
+    });
+
+    it("counts only the days inside the window toward the median", () => {
+      const view = coverageDebtView(drift(80000, -100, 40), NOW);
+      expect(view.sub).toContain(`· last ${COVERAGE_TREND_DAYS} days`);
+    });
+
+    it("returns a chart whose highlight covers the days the median rests on", () => {
+      const view = coverageDebtView(drift(80000, -100, 40), NOW);
+      // Two polylines: the whole window, then the highlighted recent days.
+      expect([...(view.extra ?? "").matchAll(/<polyline/g)].length).toBe(2);
+      expect(view.extra).toContain("var(--chart-highlight)");
+      expect(view.duration).toBe(40 * DAY_MS);
+    });
+
+    it("returns no pop-out link", () => {
+      const view = coverageDebtView(drift(80000, -100, 30), NOW);
+      expect(view.href).toBeUndefined();
+      expect(view.hint).toBeUndefined();
+    });
+
+    it("returns gray with no history at all", () => {
+      const view = coverageDebtView([], NOW);
+      expect(view.status).toBe("unknown");
+      expect(view.value).toBe("—");
+      expect(view.sub).toContain("no main run");
+    });
+
+    it("returns gray with too few days to state a rate", () => {
+      const short = drift(80000, -100, COVERAGE_MIN_DAYS - 1);
+      const view = coverageDebtView(short, NOW);
+      expect(view.status).toBe("unknown");
+      expect(view.sub).toContain("not enough history");
+    });
+
+    it("returns gray when nothing has measured for days", () => {
+      // Standing still on a stale number would read as a repository that had
+      // stopped adding debt, which is not what a silent CI says.
+      const stale = drift(80000, -100, 30).filter((sample) =>
+        Date.parse(`${sample.day}T00:00:00Z`) < NOW - 6 * DAY_MS
+      );
+      const view = coverageDebtView(stale, NOW);
+      expect(view.status).toBe("unknown");
+      expect(view.sub).toContain("no measurement since");
+    });
+  });
+
+  describe("collect()", () => {
+    it("returns gray without a GitHub token, having asked GitHub nothing", async () => {
+      const view = await coverageDebt.collect(context);
+      expect(view.status).toBe("unknown");
+      expect(view.sub).toContain("GH_TOKEN");
+    });
+  });
+});

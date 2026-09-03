@@ -2458,14 +2458,21 @@ red build for one uncovered line would make `main`'s color mean nothing.
 One narrower measurement does still gate pull requests, and it is the
 subject of [the next section](#the-one-coverage-gate-that-survives).
 
-It becomes a dashboard tile instead, and the tile follows [the wall's
+It is a dashboard tile instead, and the tile follows [the wall's
 rules](../../packages/dashboard/README.md#philosophy-and-values). It shows
-the direction over weeks rather than a number, because a coverage
-percentage is exactly the kind of figure that stops meaning anything the
-moment somebody optimizes for it. It goes amber when debt has risen
-steadily for several weeks, not when it rose once. And it reports on the
+the count of uncovered lines and, under it, what a median day does to that
+count, which is the part somebody can act on. It is not a percentage:
+a coverage percentage is exactly the kind of figure that stops meaning
+anything the moment somebody optimizes for it. It goes amber when the
+median day over the last three weeks is a rise, which takes more than half
+the days in the window and so cannot be one bad day. And it reports on the
 system: no per-person anything, no ranking, nothing that could be read as
 a scoreboard.
+
+That tile is live, ahead of the rest of this plan. It reads the
+repository-wide `coverage-debt: workspace uncovered lines` figure out of
+each `main` run's `perf-metrics` artifact, which the full run on `main`
+produces today and goes on producing under selection.
 
 The `ACCEPT_COVERAGE_DEBT` markers stay. They are how somebody says "yes,
 knowingly", and they remain the right escape hatch whether or not anything
@@ -3308,8 +3315,9 @@ answers somewhere people can see them.
       runs, which makes it the baseline everything after is judged
       against.
   - [x] The flake list, and what the newest manifest would select.
-  - [ ] The coverage debt trend, which needs the per-package figures the
-        full run produces in part two.
+  - [x] The coverage debt trend. It reads the repository-wide figure each
+        `main` run's `perf-metrics` artifact already carries, so it needed
+        nothing from the rest of this work.
   - [ ] The escape rate. Every manifest carries each identity's `main`
         catches, but over unbounded history, so a rate needs the state to
         keep those per day as well as in total.

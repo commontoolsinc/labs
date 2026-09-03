@@ -25,7 +25,7 @@ describe("registry", () => {
       "loom-metric-placeholder",
       "test-flakes",
       "test-selection",
-      "testing-metric-placeholder",
+      "coverage-debt",
       "prod-errors",
       "dau",
       "discord-online",
@@ -47,7 +47,7 @@ describe("registry", () => {
       placeholders.map((tile) => tile.collect(context)),
     );
 
-    expect(views).toEqual(Array(3).fill({
+    expect(views).toEqual(Array(2).fill({
       label: "YOUR METRIC HERE",
       status: "good",
       value: "–",

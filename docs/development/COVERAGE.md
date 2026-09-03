@@ -729,6 +729,15 @@ was removed reads as a valid baseline unchanged. The file records each metric's
 uncovered-line count under a `durationSeconds` key, for the same reason the
 artifact keeps its name.
 
+That artifact is also where the repository's coverage debt over time is read
+from. The dashboard's coverage debt tile
+(`packages/dashboard/coverage-debt-history.ts`) reads the
+`coverage-debt: workspace uncovered lines` record out of one `main` run a day,
+shows the newest of those figures, and charts the run of them. It skips a run
+whose compile cache states say it was cold, for the reason the ratchet does. So
+the metric name, the `durationSeconds` key and the `compileCacheStates` tag have
+a reader outside the gate, and a change to any of them is a change to the tile.
+
 A later PR run reads its ratchet baseline from the `perf-metrics` artifact of the
 `main` run for the base-branch commit it merged, or of the nearest ancestor of
 that commit which has one; there is no separate history store. It finds that run
