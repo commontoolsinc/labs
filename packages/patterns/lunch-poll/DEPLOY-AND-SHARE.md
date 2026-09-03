@@ -196,7 +196,8 @@ mints a fresh, empty instance. Run the exact update once with `--check`; only a
 clean, zero-exit preflight authorizes the apply:
 
 ```bash
-# Runs all seven tests and the dry-run compatibility check; writes nothing.
+# Runs all seven tests and the dry-run compatibility check;
+# leaves the piece unchanged.
 packages/patterns/lunch-poll/deploy-safe.sh
 
 # Repeats the same gates, applies, then requires a successful render.
@@ -205,6 +206,9 @@ packages/patterns/lunch-poll/deploy-safe.sh --apply
 
 The helper requires the `CF_API_URL`, `CF_IDENTITY`, `SPACE`, and `PIECE`
 variables from Environment setup. Its default is deliberately preflight-only.
+The check compiles and stores unattached, content-addressed candidate artifacts
+in the space, but it does not move the piece's source pointer, restage its
+arguments, or create a source revision.
 The equivalent commands are:
 
 ```bash

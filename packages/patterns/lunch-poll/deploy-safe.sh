@@ -6,6 +6,10 @@
 set -euo pipefail
 
 apply=false
+if [[ $# -gt 1 ]]; then
+  echo "usage: $0 [--apply]" >&2
+  exit 2
+fi
 case "${1:-}" in
   "") ;;
   --apply) apply=true ;;

@@ -33,6 +33,9 @@ describe("lunch-poll-diagnose", () => {
       voteRounds: 3,
     });
 
+    expect(() => matrixConfigFromArgs(["--production", "--quick"]))
+      .toThrow("--quick and --production cannot be combined");
+
     expect(matrixConfigFromArgs([
       "--production",
       "--program=previous.tsx",

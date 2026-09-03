@@ -85,9 +85,9 @@ shared pattern documentation.
   every live apply. After `setsrc`, require both a zero exit status and a
   successful `cf piece render`; the commit receipt only proves that source was
   saved. Verify the piece's input state separately.
-- A link serialized by `cf get` is not a backup that `cf set` can necessarily
-  restore. Prove link-bearing copy and recovery procedures on a disposable piece
-  before clearing the original cell.
+- A link serialized by `cf cell get` is not a backup that `cf cell set` can
+  necessarily restore. Prove link-bearing copy and recovery procedures on a
+  disposable piece before clearing the original cell.
 
 ## Documentation
 

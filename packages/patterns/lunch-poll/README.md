@@ -44,7 +44,8 @@ deno run -A packages/patterns/tools/lunch-poll-diagnose.ts \
 ```
 
 `--quick` is the smoke-sized default matrix — options `1,3` against `2` users
-for one round — for checking that the probe itself still runs:
+for one round — for checking that the probe itself still runs. It and
+`--production` are mutually exclusive:
 
 ```bash
 deno run -A packages/patterns/tools/lunch-poll-diagnose.ts --quick

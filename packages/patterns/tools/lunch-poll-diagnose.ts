@@ -921,6 +921,9 @@ export function matrixConfigFromArgs(
 ): MatrixConfig {
   const quick = args.includes("--quick");
   const production = args.includes("--production");
+  if (quick && production) {
+    throw new Error("--quick and --production cannot be combined");
+  }
   return {
     program: stringArg("program", "main.tsx", args),
     optionCounts: numberListArg(
