@@ -852,6 +852,22 @@ describe("seeded violations", () => {
       });
     });
 
+    it("fails two artifacts that each lost a context the other kept", () => {
+      // The union's own blind spot. Read together, `[1]` and `[2]` union back
+      // to a complete sequence and nothing looks lost; read either alone, a
+      // context is missing. Containment is what tells this from an
+      // interrupted write, where the trace is a subset of the live record.
+
+      turnsOnly("AUD-9", "fail", (root) => {
+        const trace = traceOf(root);
+        trace.cfcInvocationContexts = (trace.cfcInvocationContexts ?? [])
+          .filter((context) => context.sequence !== 2);
+        const state = stateOf(root);
+        state.cfcInvocationContexts = (state.cfcInvocationContexts ?? [])
+          .filter((context) => context.sequence !== 1);
+      });
+    });
+
     it("recovers a context dropped from one artifact and left in the other", () => {
       // Two artifacts carry the list, and the reader takes their union, so
       // deleting a copy from one of them recovers rather than hides. Reading

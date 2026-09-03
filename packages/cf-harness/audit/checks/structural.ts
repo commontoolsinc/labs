@@ -628,13 +628,23 @@ const modeBehaviorAttestation: AuditCheck = {
  * unrecorded effect.
  *
  * These are writing paths rather than contents. `persistToolOutput` names its
- * file `<outputId>-<writer>.json`, and both halves are the harness's own
- * strings: the output id is a host counter, and a writer name here is not a
- * `BuiltinToolId`, so no tool a model can call lands on one. An exemption
- * keyed on a field inside the file would be keyed on the artifact being
- * judged — a model-authored output carries a `type` of its choosing as easily
- * as a host-written one does, and the check would then be asking the subject
- * whether to look at it.
+ * file `<outputId>-<writer>.json`, and neither half is a string a tool
+ * invocation supplies: the output id is a host counter, and a writer name here
+ * is not a `BuiltinToolId`, so no tool the model calls is persisted under one.
+ * An exemption keyed on a field inside the file would be keyed on the artifact
+ * being judged — a model-authored output carries a `type` of its choosing as
+ * easily as a host-written one does, and the check would then be asking the
+ * subject whether to look at it.
+ *
+ * What this does NOT establish, and a reader should not take from it: that the
+ * name is beyond a model's reach altogether. The artifact root defaults inside
+ * the workspace, and `bash` does not consult the reserved-artifact guard that
+ * `write_file`, `edit_file`, `read_file` and `view_image` share, so a run that
+ * can execute a shell can create a file under any name it likes — including
+ * one of these. The type-keyed exemption this replaced was evadable by exactly
+ * the same capability, so nothing here is weaker; what closes it is the other
+ * discriminator, a host-side record of which outputs the harness authored,
+ * which is a change to what a run writes rather than to what the audit reads.
  */
 export const HOST_AUTHORED_OUTPUT_WRITERS: ReadonlySet<string> = new Set([
   "subagent-return",
@@ -1418,6 +1428,40 @@ const cellLabelsRetentionDetail = (run: RunEvidence): string => {
  * that stopped there. A run that retained no context at all is that case at
  * its limit, and AUD-9 warns on it for the same reason.
  */
+/**
+ * Whether the two artifacts carrying the context list have diverged, as
+ * opposed to one of them lagging the other.
+ *
+ * The union {@link invocationContextsOf} reads is fail-closed for coverage —
+ * a context held anywhere is one the run must account for — and it has one
+ * blind spot on its own: two artifacts that each lost a DIFFERENT context
+ * union back to a complete sequence, so a loss either artifact alone would
+ * expose is masked. A trace holding `[1]` beside a run state holding `[2]` is
+ * that shape.
+ *
+ * The test is containment rather than equality, and that is the whole
+ * distinction. The trace is written from the run state at each report, so an
+ * interrupted run leaves the trace a subset of the live record — a write that
+ * did not finish, not evidence that went missing, and failing on it would fire
+ * on every killed run. Neither list containing the other is divergence, which
+ * no ordinary write order produces.
+ */
+const invocationContextsDiverge = (run: RunEvidence): boolean => {
+  const artifacts = invocationContextArtifacts(run);
+  if (artifacts.length < 2) {
+    return false;
+  }
+  const sequencesOf = (index: number): ReadonlySet<number> =>
+    new Set(artifacts[index]!.contexts.map((context) => context.sequence));
+  const left = sequencesOf(0);
+  const right = sequencesOf(1);
+  const contains = (
+    bigger: ReadonlySet<number>,
+    smaller: ReadonlySet<number>,
+  ): boolean => [...smaller].every((sequence) => bigger.has(sequence));
+  return !contains(left, right) && !contains(right, left);
+};
+
 const missingInvocationContexts = (run: RunEvidence): readonly number[] => {
   const retained = invocationContextsOf(run);
   const held = new Set(retained.map((context) => context.sequence));
@@ -1479,6 +1523,7 @@ const evidenceRetention: AuditCheck = {
     const effects = executedSideEffects(run);
     const unexplained = substrateEffectsMissingContext(run);
     const lostContexts = missingInvocationContexts(run);
+    const diverged = invocationContextsDiverge(run);
     const requirements: readonly RetentionRequirement[] = [
       {
         name: "policy-trace.json",
@@ -1504,8 +1549,10 @@ const evidenceRetention: AuditCheck = {
       },
       {
         name: "the invocation contexts it minted",
-        held: lostContexts.length === 0,
-        detail: lostContexts.length === 0
+        held: lostContexts.length === 0 && !diverged,
+        detail: diverged
+          ? "the two artifacts carrying the context list have diverged: neither holds everything the other does, so each has lost something the other kept"
+          : lostContexts.length === 0
           ? `${contexts.length} retained, numbered without a gap`
           : `${
             count(lostContexts.length, "context", "contexts")

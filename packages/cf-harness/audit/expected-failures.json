@@ -10,7 +10,7 @@
     "entry names one check on one run shape, so a check that starts failing on a",
     "shape nobody enumerated is still a red run.",
     "Each entry names the runs it speaks for as an anchored regular expression over the run id. `runShape` is prose for a reader; `runs` is what matching uses, so an entry written for one shape cannot suppress the same message on a run nobody considered.",
-    "The AUD-9 cell-labels entry is the one to read before trusting today's retention headline: when CT-2210 splits that check, 113 of the 239 historic runs that fail AUD-9 fail only on its cell-labels component and will pass the spec-backed check. The gap against the specification is narrower than the current number says."
+    "The cell-labels entry is now AUD-24's, not AUD-9's: AH-CFC-16 enumerates six artifacts to retain and a cell-labels read is not among them, so AUD-9 was split and the finding moved to a check citing the clause as `extends`. AUD-9's retention headline is therefore already the spec-backed number; the historic count of runs that fell only on the cell-labels component wants re-measuring against the split rather than carrying forward."
   ],
   "expected": [
     {
