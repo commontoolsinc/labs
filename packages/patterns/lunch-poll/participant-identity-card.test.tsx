@@ -195,15 +195,19 @@ export default pattern(() => {
     docLateCard.isJoined === false &&
     docLateCard.joinMessage === JOIN_NEEDS_PROFILE
   );
-  // Once the document reads present the button enables and the stale
-  // complaint clears — with no further join sent.
-  const assert_doc_late_heals_without_a_click = assert(() => {
+  // Once the document reads present the button enables and the on-screen
+  // complaint goes away — with no further join sent. The EXPORTED verdict
+  // does not: the earlier attempt was refused and nothing has joined, so a
+  // headless caller reading `joinMessage` must not be told otherwise.
+  const assert_doc_late_heals_on_screen_only = assert(() => {
     const ui = docLateCard[UI];
     const button = findByProp(ui, "id", "lp-join-button");
     return button !== undefined &&
       readValue(propsOf(button)?.disabled) !== true &&
       hasText(ui, "Join as Doc") &&
-      docLateCard.joinMessage === "" &&
+      findByProp(ui, "data-join-message", true) === undefined &&
+      docLateCard.joinMessage === JOIN_NEEDS_PROFILE &&
+      docLateCard.isJoined === false &&
       (docLateUsers.get() ?? []).length === 0;
   });
   const assert_doc_late_joined = assert(() =>
@@ -277,7 +281,7 @@ export default pattern(() => {
       { action: action_doc_late_join_too_early },
       { assertion: assert_doc_late_join_refused },
       { action: action_doc_late_document_arrives },
-      { assertion: assert_doc_late_heals_without_a_click },
+      { assertion: assert_doc_late_heals_on_screen_only },
       { action: action_doc_late_join },
       { assertion: assert_doc_late_joined },
       { assertion: assert_offers_join_with_profile },

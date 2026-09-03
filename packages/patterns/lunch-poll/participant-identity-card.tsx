@@ -244,10 +244,15 @@ export default pattern<
       profile !== undefined && profile.get() !== undefined
     );
     const canJoin = computed(() => hasProfile && profileLoaded);
-    // Derived, not just stored: a complaint left by a join that raced the
-    // profile document is stale the moment a join would succeed, which is
-    // when the name and the document both read present.
-    const joinNotice = computed(() => canJoin ? "" : (joinMessage.get() ?? ""));
+    // The exported verdict is the handler's, unchanged: a headless caller
+    // (the deploy doc's CLI smoke test) reads it to learn whether its join
+    // landed, and a refusal that raced the profile document is still a
+    // refusal — that caller has not joined, and `isJoined` says so too. The
+    // rendered notice is the derived one: on screen, a complaint left by such
+    // a race is stale the moment a join would succeed, which is when the
+    // name and the document both read present and the button is live.
+    const joinVerdict = computed(() => joinMessage.get() ?? "");
+    const joinNotice = computed(() => canJoin ? "" : joinVerdict);
     const canonicalProfileName = computed(() => trimmedName(profileName));
     const hostName = computed(() => {
       const current = (host?.get() ?? {}).profile;
@@ -381,7 +386,7 @@ export default pattern<
       ),
       isJoined,
       isAdmin,
-      joinMessage: joinNotice,
+      joinMessage: joinVerdict,
       joinAs: boundJoin,
       claimHost: boundClaimHost,
     };
