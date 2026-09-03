@@ -54,13 +54,12 @@ interface StubController {
 
 /**
  * Helper for the cases below, which stands in for the controller a connection
- * carries. Nothing here reads a controller, so it reports one thing only —
- * how many times it was closed — which is what every ownership case turns on.
- *
- * A `closeError` makes its close fail, which is the second observable a case
- * has of the closing: a failure only reaches a caller of `dispose()` through
- * an `await`, so it separates a close that is awaited from one that is
- * merely started, where the count alone cannot.
+ * carries. Nothing here reads a controller, so what it reports is the two
+ * things a close can be observed by: how many times it ran, which is what the
+ * ownership cases turn on, and whether it failed, where a case hands it a
+ * `closeError`. The failure is what separates a close that is awaited from
+ * one merely started, which the count cannot, since a failure reaches a
+ * caller of `dispose()` only through an `await`.
  */
 function stubController(closeError?: Error): StubController {
   let closed = 0;
@@ -247,6 +246,29 @@ describe("connection", () => {
           expect(await asked).toBe(controller.pieces);
           await second;
           expect(controller.closed()).toBe(1);
+        });
+
+        it("settles a second disposal only once the close they share has finished", async () => {
+          // A gate inside the close, and a ledger either side of it. The
+          // order the two entries land in is the whole assertion, so nothing
+          // here counts microtasks or waits on a clock.
+
+          const order: string[] = [];
+          const closing = Promise.withResolvers<void>();
+          const pieces = {
+            dispose: () => closing.promise.then(() => order.push("closed")),
+          } as unknown as PiecesController;
+          const connection = new HeldConnection(
+            owning(() => Promise.resolve(pieces)),
+          );
+          await connection.pieces();
+          const first = connection.dispose();
+          const second = connection.dispose().then(() => {
+            order.push("second disposal settled");
+          });
+          closing.resolve();
+          await Promise.all([first, second]);
+          expect(order).toEqual(["closed", "second disposal settled"]);
         });
 
         it("returns the failure a close raises", async () => {

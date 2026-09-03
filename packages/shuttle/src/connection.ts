@@ -117,11 +117,13 @@ export class HeldConnection implements AsyncDisposable {
    * a terminal failure for the rest of the run. That covers the connection
    * that never opened, which is the whole of what it covers.
    *
-   * Throws once this instance is disposed, and throws where every other
-   * failure here rejects: asking a disposed holder is a mistake in the
-   * caller rather than a connection that would not open, and the two are
-   * worth telling apart at the call. A caller that wants them together
-   * catches around the call and not only on the promise.
+   * Throws once a disposal has begun — which refuses a call made from
+   * inside the connection's own close, and not only one made after that
+   * close finished — and throws where every other failure here rejects:
+   * asking a disposed holder is a mistake in the caller rather than a
+   * connection that would not open, and the two are worth telling apart at
+   * the call. A caller that wants them together catches around the call and
+   * not only on the promise.
    */
   pieces(): Promise<PiecesController> {
     if (this.#disposal !== undefined) {
@@ -149,6 +151,12 @@ export class HeldConnection implements AsyncDisposable {
    * closes twice nor reports done while the first is still closing, and a
    * close that failed reports the same failure to each of them.
    *
+   * A close that fails is terminal. The disposal stays rejected, so every
+   * later call reports that same failure, nothing retries the close, and
+   * this instance serves nothing again — over a connection that may be
+   * part-way torn down. That is the bound on it: what suits a disposal which
+   * is process shutdown does not suit one a run carries on past.
+   *
    * A construction still in flight is awaited and its connection closed, so
    * that a disposal crossing a connect strands nothing; the ask that started
    * it still resolves with that connection. `loadPieces` takes no signal to
@@ -173,9 +181,14 @@ export class HeldConnection implements AsyncDisposable {
 
   /**
    * Helper for {@link HeldConnection.dispose}, which does the closing that
-   * every call to it shares. Nothing between here and its first `await`
-   * re-enters this instance, which is what lets `dispose()` hold the promise
-   * this returns rather than having to hold a flag before calling it.
+   * every call to it shares. Nothing before its first `await` runs code a
+   * caller supplied: two `#private` field reads, which no getter can
+   * intercept, and `catch` on a native promise. So the window before
+   * `dispose()` holds what this returns cannot be re-entered, rather than
+   * merely happening not to be — and an `async` function never throws
+   * synchronously, so that hold always happens. Which is what lets
+   * `dispose()` memoize the result instead of setting a flag ahead of the
+   * call.
    */
   async #disposeOnce(): Promise<void> {
     const held = this.#pieces;

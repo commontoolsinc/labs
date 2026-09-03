@@ -150,8 +150,13 @@ Landed:
   that never opened and says nothing about one that later drops. Ownership is
   named by the source rather than inferred from an overridden collaborator —
   a connection opened here is closed here, one handed over is left to whoever
-  opened it — so either can be driven with no socket behind it. No verb
-  reaches the connection yet, and the place is untouched.
+  opened it — so either can be driven with no socket behind it. A close that
+  fails is terminal: the disposal stays rejected and the holder serves nothing
+  after it, which is what a disposal that is process shutdown wants. A
+  `disconnect` verb makes a run carry on past one, and then a single transient
+  teardown error kills the holder for the rest of the run — so that verb
+  revisits this trade rather than inheriting it. No verb reaches the
+  connection yet, and the place is untouched.
 
 Still to come:
 
