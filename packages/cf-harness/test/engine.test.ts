@@ -1,3 +1,4 @@
+import { checkoutDocsCorpusRoots } from "../src/docs-corpus/corpus.ts";
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { normalize } from "@std/path/posix";
 import type { HarnessArtifactStore } from "../src/artifacts.ts";
@@ -136,6 +137,11 @@ Deno.test("CfHarnessEngine builds a default docker-runsc sandbox when given a wo
     updatedAt: "2026-04-15T19:00:00.000Z",
     cfcEnforcementMode: "enforce-explicit",
     currentDir: "/workspace",
+    docsCorpus: {
+      type: "cf-harness.docs-corpus-record",
+      source: "checkout-default",
+      roots: checkoutDocsCorpusRoots(),
+    },
     modelProvider: "openai-compatible-gateway",
     modelAuthSource: "api-key",
     policyEvents: [],

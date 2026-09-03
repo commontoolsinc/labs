@@ -1170,6 +1170,7 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
       "write_file",
       "delegate_task",
       "describe_handle",
+      "query_docs",
     ],
   );
   assertEquals(
@@ -2014,6 +2015,7 @@ Deno.test("CfHarnessPromptLoop advertises run_pattern in the default tool surfac
       "run_pattern",
       "assign_slug",
       "describe_handle",
+      "query_docs",
     ],
   );
 });
@@ -2162,6 +2164,7 @@ Deno.test("CfHarnessPromptLoop advertises the pattern-index tools in the default
       "describe_handle",
       "search_patterns",
       "record_feedback",
+      "query_docs",
     ],
   );
 });
@@ -2317,6 +2320,7 @@ Deno.test("CfHarnessPromptLoop withholds the pattern-index tools from the patter
     "read_skill_resource",
     "describe_handle",
     "run_pattern",
+    "query_docs",
   ]);
 });
 
@@ -2616,6 +2620,7 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
       "write_file",
       "delegate_task",
       "describe_handle",
+      "query_docs",
     ],
   );
   assertEquals(
@@ -3505,6 +3510,7 @@ Deno.test("CfHarnessPromptLoop keeps browser unavailable to the parent by defaul
       "write_file",
       "delegate_task",
       "describe_handle",
+      "query_docs",
     ],
   );
   assertEquals(denied.detail, "browser is not allowed in this run");

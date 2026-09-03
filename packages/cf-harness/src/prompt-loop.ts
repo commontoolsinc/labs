@@ -149,6 +149,7 @@ import {
   parseSubagentReturnSchema,
   validateAndSanitizeSubagentReturn,
 } from "./subagent-return.ts";
+import { createExploreQueryRunner } from "./docs-corpus/explore.ts";
 import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
 import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
 import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
@@ -1813,11 +1814,21 @@ const cfcResultFromOutput = (
     ? output.cfcResult as CfcSandboxResult
     : undefined;
 
-const stripInternalCfcFields = (output: unknown): unknown => {
+/**
+ * The fields a tool result keeps on its artifact and does not put in front of
+ * the model: the sandbox's own CFC result, and the record of what a
+ * `query_docs` explore turn sent the provider. Both exist for a reader of the
+ * run, and both would cost the model context it asked a tool to save it.
+ */
+const stripInternalToolFields = (output: unknown): unknown => {
   if (!isObjectNotArray(output)) {
     return output;
   }
-  const { cfcResult: _cfcResult, ...publicOutput } = output as
+  const {
+    cfcResult: _cfcResult,
+    exploreRecord: _exploreRecord,
+    ...publicOutput
+  } = output as
     & CfcSandboxResultCarrier
     & Record<string, unknown>;
   return publicOutput;
@@ -2304,7 +2315,7 @@ const renderMediatedRunSkillScriptOutput = (
   ].filter((observation) =>
     observation !== undefined
   ) as HarnessCfcModelContextObservationInput[];
-  const publicOutput = stripInternalCfcFields(output) as Record<
+  const publicOutput = stripInternalToolFields(output) as Record<
     string,
     unknown
   >;
@@ -2383,7 +2394,7 @@ const renderMediatedEditFileOutput = (
     resultRef,
     toolCallId,
   );
-  const publicOutput = stripInternalCfcFields(output) as Record<
+  const publicOutput = stripInternalToolFields(output) as Record<
     string,
     unknown
   >;
@@ -2648,6 +2659,7 @@ export class CfHarnessPromptLoop {
       // has yet to scan still knows it will, and one that never will offers
       // neither tool.
       skillRegistryAvailable: this.engine.config.skillsRoot !== undefined,
+      docsCorpusAvailable: this.engine.docsCorpusAvailable,
     };
   }
 
@@ -2859,6 +2871,18 @@ export class CfHarnessPromptLoop {
         modelTurn: modelTurns,
       });
     };
+    // `query_docs` spends a model turn, and the model client is this loop's.
+    // Installing the runner here rather than at construction is what puts that
+    // turn in the same two records every other model call lands in: an attempt
+    // in the run report, and its tokens beside a delegation's.
+    this.engine.setExploreQueryRunner(
+      createExploreQueryRunner({
+        modelClient: this.modelClient,
+        runId: this.engine.getRunState().runId,
+        onAttempt: recordModelAttempt,
+        onUsage: (usage) => descendantUsage.push(usage),
+      }),
+    );
     await this.engine.ensureDiagnosticsInitialized();
     this.engine.startRun();
     if (options.promptSlotBinding !== undefined) {
@@ -3928,7 +3952,7 @@ export class CfHarnessPromptLoop {
     }
     if (toolId === "read_file" && isReadFileStatusObservationError(output)) {
       if (mode === "disabled") {
-        return { output: stripInternalCfcFields(output) };
+        return { output: stripInternalToolFields(output) };
       }
       if (mode === "observe") {
         await writePolicyEvent({
@@ -3939,7 +3963,7 @@ export class CfHarnessPromptLoop {
           detail:
             `${READ_FILE_STATUS_OBSERVATION_DETAIL}; raw error was exposed because CFC is in observe mode`,
         });
-        return { output: stripInternalCfcFields(output) };
+        return { output: stripInternalToolFields(output) };
       }
       const denial = makeObservationDenied("not-observable", {
         detail: READ_FILE_STATUS_OBSERVATION_DETAIL,
@@ -3960,7 +3984,7 @@ export class CfHarnessPromptLoop {
     }
     if (toolId === "edit_file" && isStructuredFileToolErrorOutput(output)) {
       if (mode === "disabled") {
-        return { output: stripInternalCfcFields(output) };
+        return { output: stripInternalToolFields(output) };
       }
       if (mode === "observe") {
         await writePolicyEvent({
@@ -3971,7 +3995,7 @@ export class CfHarnessPromptLoop {
           detail:
             `${EDIT_FILE_STATUS_OBSERVATION_DETAIL}; raw error was exposed because CFC is in observe mode`,
         });
-        return { output: stripInternalCfcFields(output) };
+        return { output: stripInternalToolFields(output) };
       }
       const denial = makeObservationDenied("not-observable", {
         detail: EDIT_FILE_STATUS_OBSERVATION_DETAIL,
@@ -4024,7 +4048,7 @@ export class CfHarnessPromptLoop {
           scrubbed[field] = scrubBareFabricIdentifiers(text);
         }
       }
-      return { output: stripInternalCfcFields(scrubbed) };
+      return { output: stripInternalToolFields(scrubbed) };
     }
     if (toolId === "assign_slug" && isObjectNotArray(output)) {
       // The slug is the model's own word and the URL is composed from the
@@ -4034,7 +4058,7 @@ export class CfHarnessPromptLoop {
       if (typeof scrubbed.message === "string") {
         scrubbed.message = scrubBareFabricIdentifiers(scrubbed.message);
       }
-      return { output: stripInternalCfcFields(scrubbed) };
+      return { output: stripInternalToolFields(scrubbed) };
     }
     if (toolId === "describe_handle") {
       // A disclosed schema's property names are whoever authored the schema's
@@ -4044,11 +4068,11 @@ export class CfHarnessPromptLoop {
       // context, at any depth of the schema, so the whole reply is scrubbed
       // keys and all rather than field by field.
       return {
-        output: scrubBareFabricIdentifiersDeep(stripInternalCfcFields(output)),
+        output: scrubBareFabricIdentifiersDeep(stripInternalToolFields(output)),
       };
     }
     if (!toolOutputNeedsSandboxMediation(toolId, output)) {
-      return { output: stripInternalCfcFields(output) };
+      return { output: stripInternalToolFields(output) };
     }
     if (cfcResult === undefined) {
       const detail =
@@ -4057,15 +4081,15 @@ export class CfHarnessPromptLoop {
         return {
           output: toolId === "bash" || toolId === "run_skill_script"
             ? truncateModelFacingBashOutput(
-              stripInternalCfcFields(output),
+              stripInternalToolFields(output),
               resultRef,
             )
             : toolId === "read_file"
             ? truncateModelFacingReadFileOutput(
-              stripInternalCfcFields(output),
+              stripInternalToolFields(output),
               resultRef,
             )
-            : stripInternalCfcFields(output),
+            : stripInternalToolFields(output),
         };
       }
       if (mode === "observe") {
@@ -4080,15 +4104,15 @@ export class CfHarnessPromptLoop {
         return {
           output: toolId === "bash" || toolId === "run_skill_script"
             ? truncateModelFacingBashOutput(
-              stripInternalCfcFields(output),
+              stripInternalToolFields(output),
               resultRef,
             )
             : toolId === "read_file"
             ? truncateModelFacingReadFileOutput(
-              stripInternalCfcFields(output),
+              stripInternalToolFields(output),
               resultRef,
             )
-            : stripInternalCfcFields(output),
+            : stripInternalToolFields(output),
         };
       }
       const denial = makeObservationDenied("not-observable", {
@@ -4134,7 +4158,7 @@ export class CfHarnessPromptLoop {
         toolCallId,
       );
     }
-    return { output: stripInternalCfcFields(output) };
+    return { output: stripInternalToolFields(output) };
   }
 
   async #invokeBuiltinTool<TToolId extends BuiltinToolId>(
@@ -4249,6 +4273,11 @@ export class CfHarnessPromptLoop {
         : parentRunState.currentDir,
       ...(this.engine.config.skillsRoot !== undefined
         ? { skillsRoot: this.engine.config.skillsRoot }
+        : {}),
+      // The child asks the same corpus the parent does: documentation a run is
+      // provisioned with is the run's, not one context's within it.
+      ...(this.engine.docsCorpus !== undefined
+        ? { docsCorpus: this.engine.docsCorpus }
         : {}),
       ...(profileConfig.allowedSkillScripts !== undefined
         ? { allowedSkillScripts: profileConfig.allowedSkillScripts }

@@ -35,6 +35,8 @@ import type {
   HarnessAllowedSkillScript,
   HarnessSkillScriptExecutionTarget,
 } from "./contracts/skill.ts";
+import type { HarnessDocsCorpusRecord } from "./contracts/docs-corpus.ts";
+import { resolveHarnessDocsCorpus } from "./docs-corpus/corpus.ts";
 import type { HarnessSubagentProfile } from "./contracts/subagent.ts";
 import {
   type BuiltinToolId,
@@ -87,6 +89,9 @@ export interface HarnessSessionConfig {
 
   /** Skills preloaded into the run's opening context, by name. */
   skillNames: readonly string[];
+
+  /** Reference trees `query_docs` answers out of, and where they came from. */
+  docsCorpus?: HarnessDocsCorpusRecord;
 
   allowedSkillScripts: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
@@ -145,6 +150,8 @@ export const harnessSessionToolBacking = (
   skillsShSearchAvailable: config.skillsSh !== undefined,
   skillsShAcquisitionAvailable: config.skillsSh !== undefined,
   skillRegistryAvailable: config.skillsRoot !== undefined,
+  docsCorpusAvailable:
+    (resolveHarnessDocsCorpus(config.docsCorpus)?.roots ?? []).length > 0,
 });
 
 /**
@@ -220,6 +227,9 @@ export const harnessSessionEngineOptions = (
       : {}),
     ...(config.skillsRoot !== undefined
       ? { skillsRoot: config.skillsRoot }
+      : {}),
+    ...(config.docsCorpus !== undefined
+      ? { docsCorpus: config.docsCorpus }
       : {}),
     ...(config.allowedSkillScripts.length > 0
       ? { allowedSkillScripts: config.allowedSkillScripts }

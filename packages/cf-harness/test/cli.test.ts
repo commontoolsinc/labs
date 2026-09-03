@@ -116,6 +116,56 @@ Deno.test("parseCfHarnessCliArgs resolves defaults from cwd and positional promp
   assertEquals(parsed.imageAttachments, []);
 });
 
+Deno.test("parseCfHarnessCliArgs collects every --docs-corpus-root", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--docs-corpus-root",
+      "reference/one",
+      "--docs-corpus-root",
+      "reference/two",
+      "Ask",
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.docsCorpus, {
+    type: "cf-harness.docs-corpus-record",
+    source: "configured",
+    roots: ["/tmp/project/reference/one", "/tmp/project/reference/two"],
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs lets --no-docs-corpus override a named root", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    ["--docs-corpus-root", "reference", "--no-docs-corpus", "Ask"],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.docsCorpus, {
+    type: "cf-harness.docs-corpus-record",
+    source: "configured",
+    roots: [],
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs leaves the corpus unset when no docs flag is given", async () => {
+  const parsed = await parseCfHarnessCliArgs(["Ask"], {
+    cwd: "/tmp/project",
+    env: {},
+  });
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.docsCorpus, undefined);
+});
+
 Deno.test("parseCfHarnessCliArgs resolves image attachments within the workspace", async () => {
   const workspace = await Deno.makeTempDir();
   const launcherCwd = await Deno.makeTempDir();
@@ -4821,6 +4871,7 @@ Deno.test("formatCfHarnessCliResult includes policy event summaries", () => {
       "status: completed",
       "modelTurns: 1",
       "cfcMode: observe (harness)",
+      "docsCorpus: none — query_docs is absent and children cannot look documentation up",
       "policyEvents: 1",
       "- warning bash: bash would require direct-command authorization in enforce modes",
       "",
@@ -6380,6 +6431,84 @@ Deno.test("resume preserves the recorded Codex provider and continuation", async
   );
   assertEquals(mismatchIo.stderr, [
     "resume provider mismatch: run uses openai-codex, requested openai-compatible-gateway\n",
+  ]);
+});
+
+Deno.test("CLI resume keeps the corpus the run recorded and refuses a differing one", async () => {
+  const transcript = [{ role: "user" as const, content: "Ask" }];
+  const readRunArtifacts = () =>
+    Promise.resolve({
+      runRoot: "/tmp/project/.cf-harness-artifacts/run-docs-resume",
+      runStatePath:
+        "/tmp/project/.cf-harness-artifacts/run-docs-resume/run-state.json",
+      transcriptPath:
+        "/tmp/project/.cf-harness-artifacts/run-docs-resume/transcript.json",
+      runState: {
+        runId: "run-docs-resume",
+        status: "failed" as const,
+        createdAt: "2026-09-04T12:00:00.000Z",
+        updatedAt: "2026-09-04T12:00:01.000Z",
+        cfcEnforcementMode: "disabled" as const,
+        currentDir: "/workspace",
+        model: "gpt-5.4",
+        modelProvider: "openai-compatible-gateway" as const,
+        docsCorpus: {
+          type: "cf-harness.docs-corpus-record" as const,
+          source: "configured" as const,
+          roots: ["/tmp/project/recorded-reference"],
+        },
+        policyEvents: [],
+        toolOutputs: [],
+      },
+      transcript,
+    });
+
+  const { io, stderr } = createIoBuffers();
+  let resumedCorpus: unknown;
+  assertEquals(
+    await runCfHarnessCli(
+      ["--resume-run", "/tmp/project/.cf-harness-artifacts/run-docs-resume"],
+      {
+        io,
+        cwd: "/tmp/project",
+        env: { CF_HARNESS_API_KEY: "gateway-key" },
+        readRunArtifacts,
+        createPromptLoop: (options) => {
+          resumedCorpus = options.engine?.docsCorpus;
+          return {
+            runPrompt: () => Promise.reject(new Error("unexpected prompt")),
+            runTranscript: () =>
+              Promise.resolve(completedCliResult("run-docs-resume")),
+          };
+        },
+      },
+    ),
+    0,
+  );
+  assertEquals(stderr, []);
+  assertEquals(resumedCorpus, {
+    type: "cf-harness.docs-corpus-record",
+    source: "configured",
+    roots: ["/tmp/project/recorded-reference"],
+  });
+
+  const mismatchIo = createIoBuffers();
+  assertEquals(
+    await runCfHarnessCli([
+      "--resume-run",
+      "/tmp/project/.cf-harness-artifacts/run-docs-resume",
+      "--docs-corpus-root",
+      "other-reference",
+    ], {
+      io: mismatchIo.io,
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_API_KEY: "gateway-key" },
+      readRunArtifacts,
+    }),
+    1,
+  );
+  assertEquals(mismatchIo.stderr, [
+    "resume docs corpus mismatch: run uses configured /tmp/project/recorded-reference, requested configured /tmp/project/other-reference\n",
   ]);
 });
 

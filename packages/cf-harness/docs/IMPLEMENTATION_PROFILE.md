@@ -203,19 +203,20 @@ readiness.
 Current selectable parent tools are `bash`, `read_file`, `view_image`,
 `web_fetch`, `read_skill_resource`, `run_skill_script`, `edit_file`,
 `write_file`, `delegate_task`, `describe_handle`, `run_pattern`, `assign_slug`,
-`search_patterns`, `record_feedback`, `search_skills`, and `acquire_skill`.
-Individual runs receive only their configured subset; `web_fetch` and
-`run_skill_script` are not in the ordinary default surface. The last five are
-gated on the backing a run can supply — a fabric session for `run_pattern`,
+`search_patterns`, `record_feedback`, `search_skills`, `acquire_skill`, and
+`query_docs`. Individual runs receive only their configured subset; `web_fetch`
+and `run_skill_script` are not in the ordinary default surface. The last seven
+are gated on the backing a run can supply — a fabric session for `run_pattern`,
 `assign_slug`, and `acquire_skill`, the pattern index for `search_patterns` and
-`record_feedback`, and configured skills.sh discovery for `search_skills` — and
-a tool the run cannot back is absent from the surface rather than present and
-failing, so an explicit allowlist naming it does not conjure it. `run_pattern`
-additionally requires the three `--fabric-*` session flags. `browser` exists
-only as a built-in used by the authorized browser child profile and cannot be
-selected as a parent CLI tool; it drives the host `agent-browser` CLI through a
-typed action vocabulary, with the Browser Access CDP endpoint attached by the
-harness rather than written by the model.
+`record_feedback`, configured skills.sh discovery for `search_skills`, and a
+resolved documentation corpus for `query_docs` — and a tool the run cannot back
+is absent from the surface rather than present and failing, so an explicit
+allowlist naming it does not conjure it. `run_pattern` additionally requires the
+three `--fabric-*` session flags. `browser` exists only as a built-in used by
+the authorized browser child profile and cannot be selected as a parent CLI
+tool; it drives the host `agent-browser` CLI through a typed action vocabulary,
+with the Browser Access CDP endpoint attached by the harness rather than written
+by the model.
 
 `describe_handle` reports the referent's structural schema and path segments,
 never its value. It prefers the session Fabric's declared shape when available
@@ -237,16 +238,24 @@ separately records its Fabric CFC enforcement and flow-label posture.
 
 Current child profiles are `default`, `browser`, `web_fetch`, `web_search`, and
 `pattern-author`. Each profile supplies an exact tool/network/skill policy.
-Parent skills and authority do not transfer implicitly.
+Parent skills and authority do not transfer implicitly. Beside them sits one
+internal profile, `explore`: no tools, one turn, a cheap model override, and a
+bounded answer-and-citations return contract it holds authority over. Its call
+declares no ceiling and evaluates no boundary policy, so it is outside the
+posture's caveat policy — admissible because the corpus it reads is trusted for
+confidentiality by ruling, and no wider. No delegation may name it — it is what
+`query_docs` runs, on a corpus the harness supplies, and a delegation naming it
+would put a model with no documentation in front of a schema asking for
+citations.
 
-The `pattern-author` profile combines `run_pattern`, `read_file`, `bash`, and
-`read_skill_resource` without workspace writes. It preloads the available
-`pattern-dev` and `pattern-schema` skills, receives a 24-turn budget for
-compile-and-repair loops, and defaults to a discriminated success/failure return
-contract whose success arm carries the result reference. Sandboxed children
-inherit the parent's working directory within their host-backed mounts;
-host-command children begin at the engine workspace rather than inheriting a
-parent directory they cannot resolve.
+The `pattern-author` profile combines `run_pattern`, `read_file`, `bash`,
+`read_skill_resource`, and `query_docs` without workspace writes. It preloads
+the available `pattern-dev` and `pattern-schema` skills, receives a 24-turn
+budget for compile-and-repair loops, and defaults to a discriminated
+success/failure return contract whose success arm carries the result reference.
+Sandboxed children inherit the parent's working directory within their
+host-backed mounts; host-command children begin at the engine workspace rather
+than inheriting a parent directory they cannot resolve.
 
 ## Lifecycle and evidence
 

@@ -9,6 +9,7 @@ import {
   type HarnessCfcModelContextObservationInput,
 } from "./contracts/cfc-model-context.ts";
 import type { HarnessCellLabels } from "./contracts/cell-labels.ts";
+import type { HarnessDocsCorpusRecord } from "./contracts/docs-corpus.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessHandleTable } from "./contracts/handle-table.ts";
 import type { HarnessWellKnownGrant } from "./contracts/well-known-grants.ts";
@@ -170,6 +171,7 @@ export interface HarnessRunState {
 
   cellLabelsPath?: string;
   handleTable?: HarnessHandleTable;
+  docsCorpus?: HarnessDocsCorpusRecord;
   wellKnownGrants?: HarnessWellKnownGrant[];
   inputCells?: HarnessInputCell[];
   policyEvents: HarnessPolicyEvent[];
@@ -220,6 +222,7 @@ export interface CreateHarnessRunStateOptions {
   cellLabels?: HarnessCellLabels;
   cellLabelsPath?: string;
   handleTable?: HarnessHandleTable;
+  docsCorpus?: HarnessDocsCorpusRecord;
   wellKnownGrants?: HarnessWellKnownGrant[];
   inputCells?: HarnessInputCell[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
@@ -336,6 +339,9 @@ export const createHarnessRunState = (
       : {}),
     ...(options.handleTable !== undefined
       ? { handleTable: structuredClone(options.handleTable) }
+      : {}),
+    ...(options.docsCorpus !== undefined
+      ? { docsCorpus: structuredClone(options.docsCorpus) }
       : {}),
     ...(options.wellKnownGrants !== undefined
       ? { wellKnownGrants: structuredClone(options.wellKnownGrants) }

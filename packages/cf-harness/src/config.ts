@@ -15,6 +15,8 @@ import type {
   HarnessSkillScriptExecutionTarget,
 } from "./contracts/skill.ts";
 import type { HarnessBrowserAccessLease } from "./contracts/browser-access.ts";
+import type { HarnessDocsCorpusRecord } from "./contracts/docs-corpus.ts";
+import { resolveHarnessDocsCorpus } from "./docs-corpus/corpus.ts";
 import type { DockerRunscSandboxConfig } from "./sandbox/types.ts";
 
 export const DEFAULT_GATEWAY_BASE_URL = "https://llm.stage.commontools.dev/";
@@ -109,6 +111,15 @@ interface HarnessCommonConfig {
   credentialOwner?: HarnessCredentialOwnerRef;
   harnessHomeIdentity?: string;
   skillsRoot?: string;
+
+  /**
+   * Host directories of operator-provisioned reference material `query_docs`
+   * answers out of, and where they came from. Read-only by use: the harness
+   * reads them and never writes to them, and no other path admits a document
+   * into the corpus. A run naming none does not offer the tool.
+   */
+  docsCorpus?: HarnessDocsCorpusRecord;
+
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget: HarnessSkillScriptExecutionTarget;
   browserAccess?: HarnessBrowserAccessLease;
@@ -173,6 +184,7 @@ export interface ResolveHarnessConfigOptions {
   cwd?: string;
   model?: string;
   skillsRoot?: string;
+  docsCorpus?: HarnessDocsCorpusRecord;
   allowedSkillScripts?: readonly HarnessAllowedSkillScript[];
   skillScriptExecutionTarget?: HarnessSkillScriptExecutionTarget;
   browserAccess?: HarnessBrowserAccessLease;
@@ -333,6 +345,10 @@ export const resolveHarnessConfig = (
       "gateway URL/auth configuration cannot be combined with openai-codex",
     );
   }
+  // Naming no corpus root is not the same as wanting no corpus: the default
+  // is the checkout the harness runs out of, resolved here so that every
+  // surface — the CLI, the console, a child engine — reaches the same answer.
+  const docsCorpus = resolveHarnessDocsCorpus(options.docsCorpus);
   const common: HarnessCommonConfig = {
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
     ...(options.model !== undefined ? { model: options.model } : {}),
@@ -342,6 +358,7 @@ export const resolveHarnessConfig = (
     ...(options.skillsRoot !== undefined
       ? { skillsRoot: options.skillsRoot }
       : {}),
+    ...(docsCorpus !== undefined ? { docsCorpus } : {}),
     ...(options.allowedSkillScripts !== undefined
       ? { allowedSkillScripts: options.allowedSkillScripts }
       : {}),

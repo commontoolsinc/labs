@@ -669,7 +669,7 @@
     // ------------------------------------------------------------------ layout data
     // The state of this repository the map describes. Bump both when the
     // map is re-verified; the stamp is drawn in the canvas's top-left corner.
-    const SNAPSHOT = { date: "2026-09-03", sha: "890911a59b" };
+    const SNAPSHOT = { date: "2026-09-04", sha: "8c01de6ceb" };
     const W = 2760, H = 1840;
     const bands = [
       {
@@ -1245,6 +1245,16 @@
         to: "mount",
         k: "control",
         pts: [[1880, 740], [1800, 740]],
+      },
+      {
+        id: "e_query_docs",
+        from: "child_pa",
+        to: "docs",
+        k: "value",
+        bi: true,
+        pts: [[1500, 600], [1560, 600], [1560, 880], [2005, 880], [2005, 780]],
+        label: "query_docs",
+        lp: [1700, 872],
       },
       {
         id: "e_web_www",
@@ -1903,7 +1913,7 @@
         kind: "Trusted text",
         band: "agent",
         body:
-          `<p>Repository documentation the pattern-author child reads to write patterns. Ruled (CT-2173): trusted for confidentiality, labeled for integrity; context, never command authority. Not yet built: a workspace doc read releases into context with an empty label (CT-2165). <code>PromptSlotBound</code> authority is a separate thing from a CFC label and is drawn as one.</p>`,
+          `<p>Repository documentation the pattern-author child reads to write patterns, and the corpus <code>query_docs</code> answers out of: trusted for confidentiality, endorsed for integrity; context, never command authority. Each section the harness reads under a resolved <code>--docs-corpus-root</code> carries a <code>Resource</code> integrity atom naming that root, and only an endorsed section is eligible for an answer, so text written into the workspace cannot reach one. Still open: an ordinary <code>read_file</code> of a workspace doc releases into context with an empty label (CT-2165). <code>PromptSlotBound</code> authority is a separate thing from a CFC label and is drawn as one.</p>`,
       },
       apps: {
         kind: "Fabric app",
@@ -2283,6 +2293,8 @@
         `<p>Delegation seeds the child's handle table with the parent entries the brief names, and nothing else. The brief itself is prose.</p>`,
       e_child_parent:
         `<p>Return is validated, sanitized and re-minted through the parent's boundary. Raw child evidence is retained outside the parent's return channel. CT-2036 tracks inert numeric fields that can encode sealed strings; CT-2199 tracks program text and diagnostics crossing in the summary.</p>`,
+      e_query_docs:
+        `<p><code>query_docs</code> is how a pattern-author child reaches documentation it has no path to: the child has no <code>delegate_task</code> and the subagent manifest pins the depth at one, so an explore agent is a tool on this surface or it is unreachable. The harness selects the matching sections on the host, an <code>explore</code> profile with no tools at all answers out of them in one model call, and the child receives a bounded answer plus inert citations — a path and a heading, never the text. What was sent is kept on the tool-output artifact and stripped before the child sees it.</p><p>Not yet built: the optional <code>fullTextRef</code>, a capability-scoped handle over the retrieved text by the <code>acquire_skill</code> route, and any policy that would declassify it.</p>`,
       e_skillssh:
         `<p><code>acquire_skill</code>: fetch a skill from skills.sh, pin it by digest, stamp ExternalIngest, return a capability-typed handle.</p>`,
       e_web_www:
