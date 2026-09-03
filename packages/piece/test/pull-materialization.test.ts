@@ -1789,8 +1789,13 @@ describe("piece pull materialization", () => {
       return originalAsSchema(schema as never);
     }) as typeof piece.asSchema;
 
-    expect(await new PieceController(pieces, piece).getPattern()).toBe(pattern);
+    const controller = new PieceController(pieces, piece);
+    expect(await controller.getPattern({ projectResult: false })).toBe(pattern);
     expect(schemas).toEqual([undefined]);
+    // The default keeps the projection: no schema-less sibling is synced.
+    schemas.length = 0;
+    expect(await controller.getPattern()).toBe(pattern);
+    expect(schemas).toEqual([]);
   });
 
   it("keeps pattern content refs useful when source programs are unavailable", async () => {

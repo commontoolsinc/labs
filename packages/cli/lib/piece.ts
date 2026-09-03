@@ -3128,7 +3128,9 @@ async function listCallablesForLoadedPiece(piece: any): Promise<{
   const compiledRead = typeof piece.getPattern === "function"
     ? timeCliPhase(
       "listPieceCallables.pattern",
-      () => piece.getPattern(),
+      // Discovery wants the pattern alone; the default projection would
+      // load every document the result schema reaches (a board's index).
+      () => piece.getPattern({ projectResult: false }),
     ).then((value) => value ?? null).catch(() => null)
     : Promise.resolve(null);
   const [pattern, compiledPattern] = await Promise.all([

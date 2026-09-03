@@ -3738,18 +3738,30 @@ export class PieceController<T = unknown> {
     });
   }
 
-  async getPattern(): Promise<Pattern> {
-    return (await this.#loadCurrentPattern()).pattern;
+  /**
+   * The compiled pattern this piece is pinned to.
+   *
+   * By default the read also projects the result schema, loading every
+   * document it reaches: the source-change and compatibility paths read
+   * through that projection next and rely on it being local. A caller that
+   * wants only the pattern — callable discovery — passes
+   * `projectResult: false`, and the sync is bounded to the result document
+   * that carries the pattern pointer.
+   */
+  async getPattern(
+    options: { projectResult?: boolean } = {},
+  ): Promise<Pattern> {
+    return (await this.#loadCurrentPattern(options)).pattern;
   }
 
-  async #loadCurrentPattern(): Promise<{
+  async #loadCurrentPattern(
+    { projectResult = true }: { projectResult?: boolean } = {},
+  ): Promise<{
     pattern: Pattern;
     ref: { identity: string; symbol: string };
   }> {
-    // The pattern pointer lives on the result document's metadata. Do not
-    // project the result schema here: a caller asking which pattern a piece
-    // uses does not need every document reachable from that result.
-    await this.#cell.asSchema(undefined).sync();
+    if (projectResult) await this.#cell.sync();
+    else await this.#cell.asSchema(undefined).sync();
     const ref = this.#patternPointer();
     if (!ref) throw new Error("piece missing pattern identity");
     const runtime = this.#pieces.runtime;
