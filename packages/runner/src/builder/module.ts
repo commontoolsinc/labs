@@ -360,12 +360,21 @@ export const assertCapture = <T>(
 const ASSERT_RENDER_MAX_DEPTH = Infinity;
 
 /**
+ * Number of array elements a failing assertion's operand renders: as many as
+ * the conversion allows. A list operand differs from what was expected at
+ * whatever index it does, and the renderer's default length would elide the
+ * element the assertion turned on.
+ */
+const ASSERT_RENDER_MAX_ARRAY_LENGTH = Infinity;
+
+/**
  * Renders the operands captured by `assertCapture` into the record's `parts`.
  *
  * A passing assertion (`ok === true`) returns an empty list without touching
  * the values, so the common case pays nothing to render diagnostics it will
  * never show. Only a failing assertion renders each captured value with
- * `toCompactDebugString`, to `ASSERT_RENDER_MAX_DEPTH`.
+ * `toCompactDebugString`, to `ASSERT_RENDER_MAX_DEPTH` and
+ * `ASSERT_RENDER_MAX_ARRAY_LENGTH`.
  */
 export const assertRenderParts = (
   ok: boolean,
@@ -375,6 +384,7 @@ export const assertRenderParts = (
     src,
     rendered: toCompactDebugString(value, {
       maxDepth: ASSERT_RENDER_MAX_DEPTH,
+      maxArrayLength: ASSERT_RENDER_MAX_ARRAY_LENGTH,
     }),
   }));
 
