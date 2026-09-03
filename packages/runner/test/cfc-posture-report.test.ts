@@ -16,6 +16,7 @@ import { expect } from "@std/expect";
 
 import {
   cfcPostureReport,
+  inheritedCfcPostureReport,
   KNOWN_SINKS,
   projectedCfcPostureReport,
   RUNTIME_CFC_DIAL_DEFAULTS,
@@ -51,6 +52,44 @@ describe("the CFC posture record", () => {
       });
       expect(record.policyEvaluation.diagnosticOnly).toBe(false);
       expect(record.policyEvaluation.decidesOn).toContain("rewritten label");
+    });
+  });
+
+  describe("inheritance", () => {
+    it("carries every value of the parent's record across, and only restamps it", () => {
+      // A host running on another host's runtime publishes that runtime's
+      // posture. Recomputing the values would be a second reading that can
+      // disagree with the first, which is what the one record exists to rule
+      // out.
+      const parent = projectedCfcPostureReport(
+        presetCfcOptions({ cfcPosture: "max-enforcement" }),
+      );
+      const inherited = inheritedCfcPostureReport(parent);
+      expect(inherited.provenance).toBe("inherited");
+      expect(inherited).toEqual({ ...parent, provenance: "inherited" });
+    });
+
+    it("stamps a resolved parent's record the same way", async () => {
+      // What CT-2195 lands on: the parent's record becomes an attestation,
+      // and the inheriting host carries the attested values without this
+      // code changing.
+      const options = runtimePresets.remoteClient({
+        apiUrl: new URL(import.meta.url),
+        storageManager: StorageManager.emulate({ as: signer }),
+        experimental: {},
+        cfcPosture: "max-enforcement",
+      });
+      const runtime = new Runtime(options);
+      try {
+        const parent = cfcPostureReport(runtime);
+        expect(inheritedCfcPostureReport(parent)).toEqual({
+          ...parent,
+          provenance: "inherited",
+        });
+      } finally {
+        await runtime.dispose();
+        await options.storageManager.close();
+      }
     });
   });
 

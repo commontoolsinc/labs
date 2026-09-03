@@ -49,9 +49,12 @@ export const MetaResponseSchema = z.object({
   cfc: z.object({
     // `resolved` here always: the route publishes what a constructed Runtime
     // is at. A surface that publishes before its runtime exists says
-    // `projected`, and the field is what keeps a reader from taking one for
-    // the other.
-    provenance: z.enum(["resolved", "projected"]),
+    // `projected`, and one running on another host's runtime says
+    // `inherited`; the field is what keeps a reader from taking one for
+    // another. The enum states the shared record's whole vocabulary rather
+    // than the one value this route emits, so a client reading the schema
+    // reads the record's shape.
+    provenance: z.enum(["resolved", "projected", "inherited"]),
     enforcementMode: CfcDialSchema,
     flowLabels: CfcDialSchema,
     writeFloor: CfcDialSchema,

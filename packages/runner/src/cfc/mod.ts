@@ -269,6 +269,7 @@ export {
 } from "./external-ingest.ts";
 export {
   cfcPostureReport,
+  inheritedCfcPostureReport,
   projectedCfcPostureReport,
   resolveCfcDials,
   RUNTIME_CFC_DIAL_DEFAULTS,

@@ -6,7 +6,11 @@ import {
 } from "@std/path";
 import { normalize as normalizeSandboxPath } from "@std/path/posix";
 
-import type { CfcLabelView } from "@commonfabric/runner/cfc";
+import {
+  type CfcLabelView,
+  type CfcPostureReport,
+  inheritedCfcPostureReport,
+} from "@commonfabric/runner/cfc";
 
 import {
   createFileSystemHarnessArtifactStore,
@@ -270,6 +274,19 @@ export interface CreateHarnessEngineOptions
    * of the parent tool surface.
    */
   fabricSessionFactory?: HarnessFabricSessionFactory;
+
+  /**
+   * The posture record of the run whose fabric session `fabricSessionFactory`
+   * hands this one — a delegating parent's, for the child that shares it.
+   *
+   * Only a caller that knows the injected factory returns a session it
+   * already published a record for can supply this; a host injecting a
+   * session this engine knows nothing about has no record to pass and its run
+   * publishes none. Ignored when no factory is injected, because the config
+   * then describes the session this engine builds and the record comes from
+   * it.
+   */
+  inheritedFabricSessionPosture?: CfcPostureReport;
 
   /**
    * Injection seam for the pattern-index client, mirroring
@@ -702,8 +719,21 @@ export class CfHarnessEngine {
     // exists to make visible — so the record is omitted and the two itemized
     // dials stand alone, which is what the config still truthfully says was
     // asked for.
+    // Unless the caller says whose runtime it handed over. A delegating
+    // parent passes the record it published for the session it shares, and
+    // the child republishes it as `inherited`: the posture of a run executing
+    // on a runtime someone else built is not unknown, it is that runtime's,
+    // and a child recording nothing is what leaves the run that actually
+    // exercises the sinks unauditable (CT-2205).
     const sessionFactoryOverridesConfig = options.fabricSessionFactory !==
       undefined;
+    const sessionRecord = sessionFactoryOverridesConfig
+      ? (options.inheritedFabricSessionPosture === undefined
+        ? undefined
+        : inheritedCfcPostureReport(options.inheritedFabricSessionPosture))
+      : this.config.fabricSession === undefined
+      ? undefined
+      : harnessFabricSessionPosture(this.config.fabricSession);
     const fabricSessionCfc = this.config.fabricSession !== undefined
       ? {
         enforcementMode: this.config.fabricSession.cfcEnforcementMode ??
@@ -724,9 +754,7 @@ export class CfHarnessEngine {
         ...(this.config.fabricSession.cfcPosture !== undefined
           ? { posture: this.config.fabricSession.cfcPosture }
           : {}),
-        ...(sessionFactoryOverridesConfig
-          ? {}
-          : { record: harnessFabricSessionPosture(this.config.fabricSession) }),
+        ...(sessionRecord !== undefined ? { record: sessionRecord } : {}),
       }
       : undefined;
     // A resumed run keeps its recorded fabric-session posture, so a session
@@ -756,16 +784,16 @@ export class CfHarnessEngine {
         recorded.enforcementMode !== fabricSessionCfc.enforcementMode ||
         recorded.flowLabels !== fabricSessionCfc.flowLabels ||
         recorded.posture !== fabricSessionCfc.posture ||
-        // A resume whose session comes from an injected factory publishes no
-        // record, so a recorded one cannot be current: it describes a runtime
-        // this resume is not building.
-        (sessionFactoryOverridesConfig && recorded.record !== undefined) ||
         // The whole record too, where the run recorded one. The two dials
         // above can agree while a dial neither of them names has moved under
         // the run — a changed runtime default, a changed posture bundle — and
         // a resume that kept the recorded record would attest a posture the
         // executing runtime is not at. A run that recorded no record predates
-        // one and is compared on the dials alone.
+        // one and is compared on the dials alone. This is also what refuses a
+        // resume that drops the session the record came from: a run that
+        // recorded an inherited record and is resumed without the parent
+        // session behind it resolves a different record, or none, and either
+        // way the artifacts would stop describing what executes.
         (recorded.record !== undefined &&
           JSON.stringify(recorded.record) !==
             JSON.stringify(fabricSessionCfc.record))

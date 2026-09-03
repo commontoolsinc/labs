@@ -16,6 +16,8 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
 
+import { inheritedCfcPostureReport } from "@commonfabric/runner/cfc";
+
 import type { HarnessCfcInvocationContext } from "../../src/contracts/cfc-invocation-context.ts";
 import type { HarnessHandleEntry } from "../../src/contracts/handle-table.ts";
 import type {
@@ -203,6 +205,26 @@ const withSessionPosture = (
 
 /** Every verdict of the family once a conforming session posture is installed. */
 const SESSION_CLEAN = verdicts(withSessionPosture(() => {}));
+
+/**
+ * The family with the conforming posture on its root and the same posture,
+ * stamped `inherited`, on every child — a delegation as the harness records
+ * one, where the child runs on the session its parent built.
+ */
+const withInheritedChildPosture = (): RunFamily => {
+  const audited = withSessionPosture(() => {});
+  const parentRecord = CONFORMING_SESSION_POSTURE.record!;
+  for (const child of audited.children) {
+    stateOf(child).fabricSessionCfc = {
+      ...structuredClone(CONFORMING_SESSION_POSTURE),
+      record: inheritedCfcPostureReport(parentRecord),
+    };
+  }
+  return audited;
+};
+
+/** The key a check's verdict on `run` is held under. */
+const on = (checkId: string, runId: string): string => `${checkId}@${runId}`;
 
 /**
  * Asserts that seeding `mutate` into the session posture turns exactly
@@ -450,6 +472,39 @@ describe("seeded violations", () => {
       expect(SESSION_CLEAN[at("AUD-14")]).toBe("warn");
       expect(SESSION_CLEAN[at("AUD-15")]).toBe("not-applicable");
       expect(SESSION_CLEAN[at("AUD-15a")]).toBe("pass");
+    });
+  });
+
+  describe("a delegated child's inherited posture", () => {
+    it("evaluates the two record-reading checks on the child rather than leaving them inconclusive", () => {
+      // The child is where `run_pattern` runs, so a child recording no
+      // posture record leaves the run that exercises the sinks as the one
+      // whose sink registry the audit cannot establish. Inheriting the
+      // parent's record is what gives these two checks something to read.
+      const inherited = verdicts(withInheritedChildPosture());
+      const childIds = family.children.map((child) => child.runId);
+      expect(childIds.length).toBeGreaterThan(0);
+      expect(inherited).toEqual({
+        ...SESSION_CLEAN,
+        ...Object.fromEntries(childIds.flatMap((runId) => [
+          [on("AUD-13", runId), "pass"],
+          [on("AUD-14", runId), "warn"],
+          [on("AUD-15", runId), "not-applicable"],
+          [on("AUD-15a", runId), "pass"],
+        ])),
+      });
+    });
+
+    it("leaves both inconclusive on a child that recorded the dials without the record", () => {
+      const withoutRecord = withInheritedChildPosture();
+      for (const child of withoutRecord.children) {
+        delete stateOf(child).fabricSessionCfc!.record;
+      }
+      const verdictMap = verdicts(withoutRecord);
+      for (const child of withoutRecord.children) {
+        expect(verdictMap[on("AUD-13", child.runId)]).toBe("inconclusive");
+        expect(verdictMap[on("AUD-14", child.runId)]).toBe("inconclusive");
+      }
     });
   });
 

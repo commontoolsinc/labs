@@ -113,7 +113,10 @@ export interface HarnessFabricSessionCfcPosture {
    * Absent too when a host supplied its own session factory. That factory
    * overrides the configuration this record is projected from, so the
    * configuration no longer describes the runtime that will execute, and a
-   * record from it would assert a posture nothing honors.
+   * record from it would assert a posture nothing honors. The exception is a
+   * host that says whose session it handed over: a delegated child runs on
+   * its parent's session, so it carries the parent's record stamped
+   * `inherited` rather than none.
    */
   record?: CfcPostureReport;
 }

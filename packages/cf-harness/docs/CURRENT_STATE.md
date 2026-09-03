@@ -188,7 +188,9 @@ The current package provides:
   dials, independent of the harness's own `--cfc-enforcement-mode`, and the
   resolved posture (each dial's value and whether the operator, the named
   bundle, or the default supplied it) is recorded as `fabricSessionCfc` in run
-  state and the run report, and printed in the operator summary;
+  state and the run report, and printed in the operator summary — the whole
+  posture record with it, which a delegated child carries from its parent
+  stamped `inherited` because it runs on that parent's session;
 - an opt-in pattern index (`--pattern-index-url`, or its
   `CF_HARNESS_PATTERN_INDEX_URL` environment fallback), which needs the fabric
   session configuration: index requests are signed with the session identity

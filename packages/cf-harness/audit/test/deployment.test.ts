@@ -14,6 +14,7 @@ import { join } from "@std/path";
 
 import {
   cfcPostureReport,
+  inheritedCfcPostureReport,
   RUNTIME_CFC_DIAL_DEFAULTS,
 } from "@commonfabric/runner/cfc";
 import { MAX_ENFORCEMENT_SINK_CEILINGS } from "@commonfabric/runner";
@@ -509,6 +510,23 @@ describe("Group D deployment checks", () => {
       expect(parity?.verdict).toBe("pass");
       // One record, both runs named under it: two entries here would be two
       // postures the corpus never had.
+      expect(parity?.evidence.length).toBe(1);
+      expect(parity?.evidence[0]?.detail).toContain("2 run(s)");
+    });
+
+    it("reads a delegated child's inherited record as its parent's posture", () => {
+      const results = auditDeployment({
+        families: [
+          familyRecording(MAX_ENFORCEMENT_RECORD),
+          familyRecording(inheritedCfcPostureReport(MAX_ENFORCEMENT_RECORD)),
+        ],
+        paths: [FIXTURE_RUNS_DIR],
+        expectRefusals: false,
+      });
+      // One session, one posture: the stamp says how the second run came by
+      // the record, not that the corpus holds two of them.
+      const parity = results.find((result) => result.checkId === "AUD-18");
+      expect(parity?.verdict).toBe("pass");
       expect(parity?.evidence.length).toBe(1);
       expect(parity?.evidence[0]?.detail).toContain("2 run(s)");
     });
