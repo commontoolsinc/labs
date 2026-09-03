@@ -755,12 +755,17 @@ function samePlace(one: Place, other: Place): boolean {
 }
 
 /**
- * Helper for {@link samePlace}, which is whether two positions are the same
- * cell. It is {@link Position}'s own promise read as a comparison: the levels
- * a position names and nothing about how either was reached.
+ * Helper for {@link samePlace}, which is whether two positions of one space
+ * are the same cell. It is {@link Position}'s own promise read as a
+ * comparison: the levels a position names and nothing about how either was
+ * reached.
+ *
+ * The space is not among the levels it compares. One connection fixes the
+ * space for a shuttle's whole run and every door refuses a position outside
+ * it, so the pair this is handed carries one space and a comparison of it
+ * could only ever hold.
  */
 function samePosition(one: Position, other: Position): boolean {
-  if (one.space !== other.space) return false;
   switch (one.kind) {
     case "root":
       return other.kind === "root";

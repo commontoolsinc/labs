@@ -106,14 +106,16 @@ describe("place", () => {
     // are is reached by the reference the child renders as, which reads none of
     // them; and a child no rendering names back is reached by neither.
     //
-    // No case here tells the scope half of the comparison apart from nothing.
-    // Both spellings tried fix the scope at the place's own: the reference is
-    // rendered carrying it, and the one reading that moves a scope takes a
-    // piece segment's suffix with it, which moves the piece too and so fails
-    // the position half first. The comparison is over the pair because a place
-    // is one, and an operand landing on the child at another scope would land
-    // on another cell; this paragraph is read again if a spelling ever moves
-    // the scope while descending.
+    // Two clauses of the comparison behind it have no case, and both are
+    // unreachable from this door rather than untested. Neither spelling tried
+    // moves the scope: the reference is rendered carrying the place's own, and
+    // the one reading that moves a scope takes a piece segment's suffix with
+    // it, which moves the piece too and fails the position clause first. And a
+    // space root's children are a closed set, checked before a candidate is
+    // tried, so a candidate that lands on a facet lands on the facet named.
+    // The comparison is over the whole place because a place is one, and an
+    // operand landing anywhere else would name another cell; this paragraph is
+    // read again if either clause becomes reachable.
 
     it("returns the name itself for a key the name's own reading names", () => {
       expect(operandForChild(atReferencedPiece().place, "title")).toBe("title");
