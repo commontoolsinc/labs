@@ -883,9 +883,10 @@ function stringArg(
 
 function explicitCasesArg(
   config: MatrixConfig,
+  args: readonly string[],
 ): CaseConfig[] | undefined {
   const prefix = "--cases=";
-  const arg = Deno.args.find((entry) => entry.startsWith(prefix));
+  const arg = args.find((entry) => entry.startsWith(prefix));
   if (!arg) return undefined;
   const cases = arg.slice(prefix.length).split(",").flatMap((entry) => {
     const match = entry.trim().match(/^(\d+)x(\d+)$/);
@@ -934,8 +935,11 @@ export function matrixConfigFromArgs(
   };
 }
 
-function casesFromConfig(config: MatrixConfig): CaseConfig[] {
-  const explicit = explicitCasesArg(config);
+export function casesFromConfig(
+  config: MatrixConfig,
+  args: readonly string[] = Deno.args,
+): CaseConfig[] {
+  const explicit = explicitCasesArg(config, args);
   if (explicit) return explicit;
   const cases: CaseConfig[] = [];
   for (const optionCount of config.optionCounts) {
@@ -952,9 +956,9 @@ function casesFromConfig(config: MatrixConfig): CaseConfig[] {
 }
 
 async function run(): Promise<void> {
-  const config = matrixConfigFromArgs();
+  const config = matrixConfigFromArgs(Deno.args);
   matrixProgram = config.program;
-  const cases = casesFromConfig(config);
+  const cases = casesFromConfig(config, Deno.args);
   const startedAt = performance.now();
   const results: ({ ok: true; result: CaseResult } | {
     ok: false;

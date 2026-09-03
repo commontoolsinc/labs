@@ -230,6 +230,19 @@ export default pattern(() => {
     readValue(legacyGeneratingCard.artSyncState) === "generated"
   );
 
+  const assert_legacy_card_hides_unwired_controls = assert(() =>
+    findNodeByProp(
+        legacyGeneratingCard[UI],
+        "aria-label",
+        "Remove option (host)",
+      ) === undefined &&
+    findNodeByProp(
+        legacyGeneratingCard[UI],
+        "aria-label",
+        "Generate art (host)",
+      ) === undefined
+  );
+
   const action_open_generated_art = action(() => {
     const button = findNodeByProp(
       generatingCard[UI],
@@ -265,6 +278,7 @@ export default pattern(() => {
       { assertion: assert_generate_button_when_image_missing },
       { assertion: assert_empty_art_compatibility_state },
       { assertion: assert_legacy_generated_art_state_survives },
+      { assertion: assert_legacy_card_hides_unwired_controls },
       { action: action_open_generated_art },
       { assertion: assert_generate_targets_option },
     ],

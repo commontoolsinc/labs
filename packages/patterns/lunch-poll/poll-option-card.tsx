@@ -63,8 +63,9 @@ export interface PollOptionCardInput {
   requestArt?: Stream<OptionTargetEvent>;
 
   /**
-   * Explicit scalar discriminator for the parent-owned art editor. Optional
-   * with a false default so pre-editor card instances retain legacy state.
+   * Explicit scalar discriminator for the parent-owned request controls and
+   * art editor. Optional with a false default so pre-editor card instances
+   * retain legacy state without rendering controls they cannot dispatch.
    */
   usesSharedArtEditor?: boolean | Default<false>;
 
@@ -121,8 +122,16 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
       // reachable without reinstating one GeneratedArt/fetch graph per option.
       return usesSharedArtEditor === true ? "" : "generated";
     });
+    // Optional stream inputs materialize as unresolved handles when absent, so
+    // their JavaScript presence cannot distinguish a vintage instance. The
+    // scalar discriminator defaults false for those instances and is true only
+    // when the current parent wires both request streams.
+    const canRequestRemove = computed(() =>
+      isAdmin && usesSharedArtEditor === true
+    );
     const canGenerateArt = computed(() =>
-      isAdmin && safeImageUrl(option.imageUrl) === ""
+      isAdmin && usesSharedArtEditor === true &&
+      safeImageUrl(option.imageUrl) === ""
     );
 
     return {
@@ -206,7 +215,7 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
               }}
             >
               <span>added by {option.addedByName}</span>
-              {isAdmin
+              {canRequestRemove
                 ? (
                   <>
                     <span

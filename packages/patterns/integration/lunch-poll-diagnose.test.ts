@@ -17,6 +17,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import {
+  casesFromConfig,
   compactActionSite,
   matrixConfigFromArgs,
   runCase,
@@ -44,6 +45,14 @@ describe("lunch-poll-diagnose", () => {
       userCounts: [3],
       voteRounds: 5,
     });
+
+    const explicitArgs = ["--production", "--rounds=2", "--cases=2x3,4x5"];
+    expect(
+      casesFromConfig(matrixConfigFromArgs(explicitArgs), explicitArgs),
+    ).toEqual([
+      { optionCount: 2, userCount: 3, voteRounds: 2 },
+      { optionCount: 4, userCount: 5, voteRounds: 2 },
+    ]);
   });
 
   it("measures a poll two voters joined, filled, and voted in", async () => {
