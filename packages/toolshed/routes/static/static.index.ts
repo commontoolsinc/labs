@@ -26,7 +26,7 @@ router.get("/static/*", async (c) => {
   const ifNoneMatch = c.req.header("If-None-Match");
 
   // Get the asset with its ETag
-  const { buffer, etag } = await cache.getWithETag(reqPath);
+  const { blob, etag } = await cache.getWithETag(reqPath);
 
   // Check if client has matching ETag
   if (ifNoneMatch && compareETags(etag, ifNoneMatch)) {
@@ -43,10 +43,13 @@ router.get("/static/*", async (c) => {
   // Simple caching: always validate with ETag
   const cacheHeaders = createCacheHeaders(etag);
 
-  return new Response(buffer as BodyInit, {
+  return new Response(blob, {
     status: 200,
     headers: {
       "Content-Type": mimeType,
+      // Without this a `Blob` body goes out chunked, which leaves the client
+      // with no length to show progress against.
+      "Content-Length": String(blob.size),
       ...cacheHeaders,
     },
   });
