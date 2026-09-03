@@ -34,7 +34,11 @@ cd "$here"
 FABRIC_API_URL="${FABRIC_API_URL:-http://127.0.0.1:8063}"
 FABRIC_SPACE="${FABRIC_SPACE:-weaver-demo}"
 INPUT_CELL_REF="${INPUT_CELL_REF:-/of:fid1:9F5eTYl_xvLRDZsPmZelXaqefyuUXfQyDmDM7nYctM8/account}"
-SPACE_DB="${SPACE_DB:-/Users/ben/.bb/worktrees/env_m69fg39nps/labs/packages/toolshed/cache/memory/engine-v3/engine-v3/did:key:z6Mkq2h6AVsvrGEZyuBhKA8Ag7eArmZY6peZdT237HcVta3K.sqlite}"
+# The absolute path to the toolshed's SQLite file for the target space, which
+# the terminal label reader reads for Receipt 3. It is deployment-specific — the
+# toolshed's MEMORY_DIR joined with the space DID — so there is no honest
+# default; a wrong path yields a `space-not-found` label snapshot, not an error.
+SPACE_DB="${SPACE_DB:?set SPACE_DB to the toolshed absolute SQLite path for FABRIC_SPACE, i.e. MEMORY_DIR/engine-v3/engine-v3/<space-did>.sqlite}"
 SKILLS_REGISTRY_URL="${SKILLS_REGISTRY_URL:-https://skills.sh}"
 ACQUIRE_SKILL_ID="${ACQUIRE_SKILL_ID:-zubair-trabzada/ai-finance-claude/finance-budget}"
 ARTIFACT_ROOT="${ARTIFACT_ROOT:-$here/.cf-harness-hostile-demo}"
@@ -47,6 +51,9 @@ export CF_HARNESS_RUNSC_CFC_RESULT_DIR CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_D
 
 mkdir -p "$ARTIFACT_ROOT" "$WORKSPACE"
 RESULT_JSON="$ARTIFACT_ROOT/result.json"
+# A reused artifact root must not let a previous run's metadata masquerade as
+# this run's, so clear the sidecar before starting.
+rm -f "$RESULT_JSON"
 
 # --skills-root must resolve inside the mounted workspace. Stage it as a copy of
 # the checkout's real skills/ tree — so the pattern-author children keep their
@@ -193,3 +200,7 @@ echo "(resolve any slug the run produced and read its label from the store)"
 echo
 echo "receipts written under $RECEIPTS"
 echo "audit with: deno task cfc-audit \"$ARTIFACT_ROOT\""
+
+# Propagate the harness's own exit status: emitting receipts does not turn a
+# failed run into a successful script.
+exit "$RUN_STATUS"
