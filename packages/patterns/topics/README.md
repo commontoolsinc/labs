@@ -146,13 +146,13 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   as the identity there is nothing to key a map by, and at board scale it is a
   few hundred comparisons of resolved links.
 
-  Each topic then does a lookup rather than the join: find yourself among the
-  siblings, take the row at that position. It searches `mentionable` rather than
-  the table itself because **a link survives being read as an element of an
-  array a parameter declares at its top level, and does not survive being read
-  as a field nested inside one** — the nested read resolves it to a plain object
-  and leaves `equals` nothing to follow. Rows align with the topics array by
-  construction, since the pivot maps over it.
+  Each topic then does a lookup rather than the join: `backlinksOf` scans the
+  pivot for the row whose topic is itself, and takes that row's `mentionedBy`.
+  The scan compares a field nested inside a row, and what lets it is that row's
+  declaration — the field is declared a `ComparableCell`, the annotation that
+  makes it arrive as something `equals` can follow rather than a value to look
+  at. The published row declares both sides `unknown` instead, so a consumer
+  that only carries the graph onward expands neither.
 
   Every row is addressed by the topic it describes (`Writable.for(topic)`), so a
   row keeps its identity however the board is reordered, and a lookup re-run by
