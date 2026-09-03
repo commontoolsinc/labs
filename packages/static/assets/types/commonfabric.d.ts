@@ -68,12 +68,12 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
  * sandbox is served inlines this text rather than following a specifier out of
  * it, so a specifier named here would reach a compiler that resolves none.
  *
- * Two modules import this one: `interface.ts`, which re-exports these
+ * Apart from the drift guards, which each compare an implementation against
+ * the declaration here by name and so import it from here under an `Api`
+ * alias, two modules import this one: `interface.ts`, which re-exports these
  * declarations to the rest of this package, and `@commonfabric/api`, which
  * re-exports them to patterns. Every other module in this package takes them
- * from `interface.ts`. The one exception is a drift guard, which compares an
- * implementation against the declaration here by name, and so imports it from
- * here under an `Api` alias.
+ * from `interface.ts`.
  */
 
 /**

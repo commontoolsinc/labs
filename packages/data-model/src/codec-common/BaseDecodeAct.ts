@@ -4,6 +4,7 @@ import type {
   NonterminalCodec,
   TerminalCodec,
 } from "@/codec-interface/interface.ts";
+import { toCompactDebugString } from "@/value-debug.ts";
 import { isCodecTypeTag } from "./isCodecTypeTag.ts";
 import { UnknownValue } from "./UnknownValue.ts";
 import type { FabricValue } from "@/interface.ts";
@@ -109,7 +110,7 @@ export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
     if (!this.enter(value)) {
       return this.reportMalformed(
         "",
-        value,
+        toCompactDebugString(value, { maxLength: 50 }),
         "circular reference in decoded data",
       );
     }
