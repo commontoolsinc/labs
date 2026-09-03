@@ -1940,16 +1940,17 @@ type UnclearedObservationDisposition =
  * kept in step by hand.
  *
  * Derived from the published descriptor rather than from the mode, so the
- * behavior a run takes is the behavior its artifacts say it takes. It carries
- * no fallthrough of its own: `cfcAbsenceBehaviorForMode` already answers a
- * mode it does not recognize with the closed one, so a second default here
- * would be unreachable, and a switch left total is what makes a new descriptor
- * value fail to compile rather than quietly pick a branch. That
- * couples the status-error cases to the dial named for absence: a mode that
- * became permissive about absent metadata would become permissive about
- * unredacted status too. That is the intended reading — both are the boundary
- * declining to clear an observation — and it is written down here because the
- * dial's name does not say it.
+ * behavior a run takes is the behavior its artifacts say it takes. Deriving it
+ * that way couples the status-error cases to the dial named for absence: a
+ * mode that became permissive about absent metadata would become permissive
+ * about unredacted status too. That is the intended reading — both are the
+ * boundary declining to clear an observation — and it is written down here
+ * because the dial's name does not say it.
+ *
+ * It carries no fallthrough of its own. `cfcAbsenceBehaviorForMode` already
+ * answers a mode it does not recognize with the closed one, so a second
+ * default here would be unreachable, and a switch left total is what makes a
+ * new descriptor value fail to compile rather than quietly pick a branch.
  */
 const unclearedObservationDisposition = (
   mode: CfcEnforcementMode,
@@ -4347,6 +4348,20 @@ export class CfHarnessPromptLoop {
               `${detail}; raw output was exposed because CFC is in observe mode`,
           });
         }
+        // Rendered here rather than above the branch: this is where each of
+        // the two exposing modes rendered it before they were collapsed, and
+        // the denying path never renders an output it is about to withhold.
+        const rendered = toolId === "bash" || toolId === "run_skill_script"
+          ? truncateModelFacingBashOutput(
+            stripInternalToolFields(output),
+            resultRef,
+          )
+          : toolId === "read_file"
+          ? truncateModelFacingReadFileOutput(
+            stripInternalToolFields(output),
+            resultRef,
+          )
+          : stripInternalToolFields(output);
         return {
           output: rendered,
           omissionRules: omissionRules(

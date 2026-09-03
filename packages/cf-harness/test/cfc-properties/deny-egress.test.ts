@@ -27,6 +27,7 @@ import type { RunPatternToolSuccessOutput } from "../../src/tools/run-pattern.ts
 
 import {
   auditArtifacts,
+  checkThatRan,
   createLabeledFabric,
   directPromptSlotBinding,
   InertSandboxRuntime,
@@ -130,7 +131,7 @@ const runEpisode = async (
 
 describe("cfc property: egress of a labeled flow", () => {
   describe("P-deny-egress — a ceilinged sink refuses a labeled answer", () => {
-    it("records a policyRefusal artifact that AUD-16 counts as a release refusal", async () => {
+    it("records a release refusal in both channels, and AUD-16 counts the trace", async () => {
       const episode = await runEpisode({ withSource: true });
 
       // The refusal happened, and it is a refusal a label decided rather than
@@ -139,14 +140,25 @@ describe("cfc property: egress of a labeled flow", () => {
       expect(episode.output.value).toBeUndefined();
       expect(episode.output.policyRefusal?.gates).toEqual(["sink-ceiling"]);
 
-      // The checker is the assertion library. AUD-16 counts the artifact
-      // channel, so a refusal the transcript shows but no artifact records
-      // fails here.
+      // The checker is the assertion library, and the channel it reads is the
+      // release decision in `policy-trace.json`, not the `policyRefusal` on
+      // the output above. The two are the same refusal written down twice:
+      // the output carries it to the model as data, the trace records that
+      // policy said no. A refusal the model can see but the trace does not
+      // record fails here.
       const audit = await auditArtifacts(episode.runDir, {
         expectRefusals: true,
       });
-      const aud16 = audit.findings("AUD-16");
+      const aud16 = checkThatRan(audit, "AUD-16");
       expect(aud16).toHaveLength(1);
+      expect(
+        aud16[0].evidence.some((
+          item: { artifact?: string; pointer?: string },
+        ) =>
+          item.artifact === "policy-trace.json" &&
+          (item.pointer ?? "").includes("release")
+        ),
+      ).toBe(true);
       expect(aud16[0].verdict).not.toBe("fail");
       expect(aud16[0].message).toContain("1 release refusal");
       expect(aud16[0].message).toContain("sink-ceiling");
