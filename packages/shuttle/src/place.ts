@@ -184,14 +184,11 @@ export function placeAtSpaceRoot(space: MemorySpace): Place {
  * above takes it instead, the reference the child renders as reaches it
  * anyway: a reference reads none of them, and it escapes the separator where a
  * relative operand cannot. An absent answer means neither of these reaches
- * the child, which is narrower than nothing reaching it: a multi-segment
+ * the child, which is narrower than nothing reaching it: some multi-segment
  * operand can reach one that neither does, since a walk splits on the
- * separator and reads a head reading only on the whole operand, so `#` is data
- * in every segment but the first. None is looked for. Such an operand is a
- * route rather than a name, and a route through `..` reads the trail, so it
- * would reach the child from a place reached one way and not from a place
- * reached another — which is the guarantee below, read as a rule about what
- * may be offered rather than only about `-`.
+ * separator and reads a head reading only on the whole operand. None is looked
+ * for, and which would work is not a question this answers — what it returns
+ * is a name for the child, and a route is not one.
  *
  * Each spelling is answered by making the move rather than by a second copy of
  * the readings, so what comes back is an operand `cd` took. The move is made

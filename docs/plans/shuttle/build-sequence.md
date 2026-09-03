@@ -202,11 +202,11 @@ Landed:
   target and a settled move hold a piece to what a reference holds one to, and
   give its reason. What the first ruling costs is one shape: a key whose first
   character is `#` has no direct spelling — neither the name on its own nor a
-  reference names it — and a listing prints no name for it. A multi-segment
-  operand does reach it, `#` being data in every segment but the first, but
-  that is a route rather than a name, and a route through `..` reads the trail,
-  so it holds from a place reached one way and not from a place reached
-  another. Which keys are spelled through one door and
+  reference names it — and a listing prints no name for it. Some multi-segment
+  operand does reach it, `#` being data in every segment but the first, but a
+  route is not a name; [`grammar.md`](grammar.md) carries the ruling and
+  characterizes the routes no further. Which keys are spelled through one door
+  and
   not the other is pinned case by case in
   `packages/shuttle/test/place.test.ts`, each case under a mutation, so the
   record moves when the behavior does and not otherwise.
