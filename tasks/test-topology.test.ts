@@ -72,23 +72,36 @@ describe("the test topology", () => {
     }
   });
 
-  it("claims a recorded identity for at most one suite", () => {
+  it("claims a recorded identity for exactly one suite", () => {
+    // Every name here is one some suite claims, which is what the count
+    // being one says. A name nothing claims satisfies "at most one" as
+    // well, so a list holding one says nothing about the topology.
+
     const records = [
       { test: { k: "format", s: "repo", n: "deno-fmt" } },
       { test: { k: "gate", s: "repo", n: "check-deno-pins" } },
-      { test: { k: "gate", s: "repo", n: "pattern-compat home/notes" } },
+      { test: { k: "gate", s: "repo", n: "pattern-compat address.tsx" } },
       { test: { k: "gate", s: "repo", n: "pattern-vintage a b c" } },
       { test: { k: "typecheck", s: "repo", n: "cfcheck a.tsx" } },
       { test: { k: "typecheck", s: "memory", n: "deno-check" } },
-      { test: { k: "integration", s: "cli", n: "integration.sh verbs" } },
-      { test: { k: "integration", s: "cli", n: "fuse-exec.sh mounts" } },
+      {
+        test: {
+          k: "integration",
+          s: "cli",
+          n: "integration.sh verbs-walkthrough",
+        },
+      },
+      {
+        test: {
+          k: "integration",
+          s: "cli",
+          n: "fuse-exec.sh .status reads as a whole JSON document",
+        },
+      },
     ];
     for (const record of records) {
       const claims = claimsFor(suites, record);
-      expect([record.test.n, claims.length <= 1]).toEqual([
-        record.test.n,
-        true,
-      ]);
+      expect([record.test.n, claims.length]).toEqual([record.test.n, 1]);
     }
   });
 
