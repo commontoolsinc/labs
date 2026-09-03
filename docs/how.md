@@ -283,12 +283,94 @@ The boundary is the interesting part, and the file states it plainly:
 > load-bearing for cross-space integrity: carry the link, not the
 > extracted bytes.
 
+## Release is a decision, not a write
+
+Labels only tighten. Combine the mail with the calendar and the result
+is as restricted as both, and a system that could only do that would
+soon be unable to send anything anywhere — the summary of your mail
+could not go to your accountant, because the mail could not. So the
+runtime has one way to relax a rule, and it is not an edit to stored
+data. From `packages/patterns/cfc-exchange-rules/direct-release.tsx`,
+the rule, and the field that names it as its own release path:
+
+```tsx
+export const releaseToSpaceReader = exchangeRule({
+  appliesTo: THIS_POLICY,
+  pre: {
+    integrity: [
+      cfcPattern.hasRole(v("reader"), THIS_POLICY.subject, "reader"),
+    ],
+  },
+  post: {
+    addAlternatives: [cfcPattern.user(v("reader"))],
+  },
+});
+```
+
+```tsx
+message: Confidential<
+  string,
+  readonly [PolicyOf<typeof directReleaseRules>]
+>;
+```
+
+The release path travels with the value rather than with the program
+reading it. The rule may rewrite only the clause that names it; sibling
+clauses, and anything derived from other inputs, stay conjunctive and
+untouched (the pattern's `README.md`). And it fires on evidence — a
+membership fact the runtime minted, not a string the pattern supplied —
+which is the same integrity axis the mint gate above protects.
+
+The stored label never moves. Under `cfcDeclaredMonotonicity: "enforce"`
+a re-mint that drops a clause is refused, naming the document, the path
+and the direction
+(`packages/runner/test/cfc-declared-monotonicity.test.ts`):
+
+```ts
+expect(message).toContain("declared-monotonicity confidentiality");
+expect(message).toContain(result.docId);
+expect(message).toContain("at /out");
+```
+
+The one seam that can widen a stored label requires a builtin identity;
+the same file shows pattern and handler code failing closed against it,
+with or without a verified identity of its own. That dial is off by
+default and pinned to `enforce` in the `MAX_ENFORCEMENT_CFC_OPTIONS`
+bundle (`packages/runner/src/runtime-presets.ts`).
+
+A durable release — this value, to that person, until revoked — is a
+grant: a content-addressed record at a reserved address, written only
+through `writeCfcGrant` and consulted when a rule is evaluated, so
+revoking it is an edit to the grant rather than to the data. An
+unprivileged write into that namespace fails closed at prepare
+(`packages/runner/src/storage/interface.ts`). A grant can be single-use,
+in which case the release and its receipt commit together
+(`packages/runner/test/cfc-single-use-grants.test.ts`):
+
+```ts
+// The receipt write is staged in the SAME transaction (atomic).
+expect(stagedReceiptWrite(first.tx, receiptId)).toBe(true);
+...
+// Second evaluation: the receipt exists → the rule no longer fires →
+// fail closed, exactly like revoked/expired.
+```
+
+Single-use consumption sits behind an experimental flag; with it off, a
+single-use grant is unsatisfiable rather than silently multi-use (same
+file). So every relaxation is either a rule the data itself named, or a
+record. Who may write the rule, and at which boundary, is where the real
+design difficulty lives, and it is the part of this system most worth
+arguing with.
+
 ## The exits
 
 A pattern runs in a compartment whose globals are installed deliberately
-(`packages/runner/src/sandbox/compartment-globals.ts`). Covert channels
-that do not leave through a named exit are handled elsewhere and this
-document does not cover them: `packages/utils/src/sandbox-contract.ts`
+(`packages/runner/src/sandbox/compartment-globals.ts`), because the
+checker only sees writes: a clock, a source of randomness, a timer, or
+shared memory is a channel through which a program can signal what it
+knows without ever writing it down. Covert channels that do not leave
+through a named exit are handled elsewhere and this document does not
+cover them: `packages/utils/src/sandbox-contract.ts`
 withholds globals with the channel each one closes recorded beside it,
 and `docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md` tables every
 real-time-correlated signal a pattern can reach with its status, its
@@ -334,7 +416,10 @@ the model chose. The claim is not that the model resists injection — the
 model is the attacker's to choose, and here it does exactly what the
 attacker asked. The claim is that the routing field is refused anyway,
 and the refusal returns to the model as a tool error rather than being
-silently swallowed.
+silently swallowed. The design never bets that models are untrustworthy,
+and never bets that they are trustworthy either; it needs only that a
+model's output is data carrying a record of where it came from.
+Indifference is more durable than either bet.
 
 That test drives a recorded model fixture rather than a live endpoint,
 and it isolates the integrity axis; confidentiality is out of its scope.
@@ -373,6 +458,8 @@ above is exercised by tests and by patterns that opt in rather than
 gating egress in a default deployment. The render ceiling is off too, and
 that boundary is held by the label and contract layer rather than by DOM
 sanitization, which has an open gap.
+The monotonicity gate and single-use grant receipts above are off by
+default in the same way.
 `docs/development/EXPERIMENTAL_OPTIONS.md` carries every dial and where
 it is headed. Turning them on without wedging the patterns already
 running on them is the work.
