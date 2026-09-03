@@ -13,18 +13,20 @@
  * settling either needs a connection to resolve against. Their cases pin what
  * gets handed on, and that the place did not move.
  *
- * A refusal's text is pinned whole, and three of them are somebody else's
+ * A refusal's text is pinned whole, and four of them are somebody else's
  * words. Shuttle consumes the reference grammar rather than forking it, so a
  * rooted operand's diagnostics come from that layer and reach the reader
  * unaltered — the space-mismatch sentence and the unknown-suffix sentence from
- * `normalizeLLMFriendlyRef` and `splitArgumentSuffix`, and the no-piece-handle
- * sentence from `parseReferenceParts`. Each is marked at its case as relayed.
+ * `normalizeLLMFriendlyRef` and `splitArgumentSuffix`, the no-piece-handle
+ * sentence from `parseReferenceParts`, and the not-a-slug sentence from
+ * `validatePieceSegment`, which every door relays and not the reference alone.
+ * Each is marked at its case as relayed.
  * When one moves upstream, the fix is to copy the new sentence here, never to
  * match a fragment of it: the whole sentence is what pins that the diagnostic
  * arrives intact, and a substring would let a rewording through that says
  * something else. Other diagnostics from that layer reach a reader without a
- * case here — a bad space segment, a piece segment that is neither slug nor
- * handle, a bad scope suffix on a reference — and pinning three of them is
+ * case here — a bad space segment, a piece segment that is no handle and holds
+ * a colon, a bad scope suffix on a reference — and pinning four of them is
  * enough to hold the relay itself, since all of them travel the same path.
  *
  * Every other refusal in this file is shuttle's own, and two of those
@@ -42,6 +44,7 @@ import {
   CurrentPlace,
   FACETS,
   type Move,
+  operandForChild,
   placeAtSpaceRoot,
 } from "../src/place.ts";
 
@@ -93,6 +96,77 @@ describe("place", () => {
       expect(placeAtSpaceRoot(SPACE)).toEqual({
         position: { kind: "root", space: SPACE },
         scope: "space",
+      });
+    });
+  });
+
+  describe("operandForChild()", () => {
+    // The readings `cd()` applies, asked in the other direction. A name whose
+    // own characters are not readings is its own operand; one whose characters
+    // are is reached by the reference the child renders as, which reads none of
+    // them; and a child no rendering names back is reached by neither.
+    //
+    // Two clauses of the comparison behind it have no case, and both are
+    // unreachable from this door rather than untested. Neither spelling tried
+    // moves the scope: the reference is rendered carrying the place's own, and
+    // the one reading that moves a scope takes a piece segment's suffix with
+    // it, which moves the piece too and fails the position clause first. And a
+    // space root's children are a closed set, checked before a candidate is
+    // tried, so a candidate that lands on a facet lands on the facet named.
+    // The comparison is over the whole place because a place is one, and an
+    // operand landing anywhere else would name another cell; this paragraph is
+    // read again if either clause becomes reachable.
+
+    it("returns the name itself for a key the name's own reading names", () => {
+      expect(operandForChild(atReferencedPiece().place, "title")).toBe("title");
+    });
+
+    it("returns a facet's own name at a space root", () => {
+      expect(operandForChild(placeAtSpaceRoot(SPACE), "slugs")).toBe("slugs");
+    });
+
+    it("returns nothing at a space root for a name it lists no facet under", () => {
+      expect(operandForChild(placeAtSpaceRoot(SPACE), "fuse")).toBeUndefined();
+    });
+
+    it("returns a piece's own name inside a facet", () => {
+      expect(operandForChild(inSlugs().place, "board")).toBe("board");
+    });
+
+    it("returns a reference for a key called `..`", () => {
+      expect(operandForChild(atReferencedPiece().place, "..")).toBe(
+        `/@${SPACE}/${HANDLE}@space/..`,
+      );
+    });
+
+    it("returns a reference escaping a key that holds the separator", () => {
+      expect(operandForChild(atReferencedPiece().place, "a/b")).toBe(
+        `/@${SPACE}/${HANDLE}@space/a~1b`,
+      );
+    });
+
+    it("returns nothing for a key no rendering names back", () => {
+      expect(operandForChild(atReferencedPiece().place, "a ")).toBeUndefined();
+    });
+
+    it("returns nothing for a key whose first character opens a wish target", () => {
+      expect(operandForChild(atReferencedPiece().place, "#b")).toBeUndefined();
+    });
+
+    it("returns nothing for a piece name in neither vocabulary", () => {
+      expect(operandForChild(inSlugs().place, "Board")).toBeUndefined();
+    });
+
+    it("returns an operand `cd` moves to the child by", () => {
+      const place = atReferencedPiece();
+      const operand = operandForChild(place.place, "..");
+      expect(operand).toBeDefined();
+      place.cd(operand as string);
+      expect(place.place.position).toEqual({
+        kind: "piece",
+        space: SPACE,
+        piece: HANDLE,
+        path: [".."],
       });
     });
   });
@@ -939,6 +1013,25 @@ describe("place", () => {
             });
           });
 
+          it("refuses a piece segment that is in neither vocabulary", () => {
+            // Relayed: `validatePieceSegment`'s own sentence, which the walk
+            // calls rather than copies.
+
+            expect(inSlugs().cd("Board")).toEqual({
+              kind: "refused",
+              reason: '"Board" is not a slug: a slug is lowercase letters, ' +
+                "numbers, and single hyphens between words.",
+            });
+          });
+
+          it("gives a piece segment the reason a reference's gets", () => {
+            // Which is the whole of the ruling: a piece is held to the two
+            // vocabularies whichever door reached it, so a name a listing
+            // cannot print as an operand is one no door takes.
+
+            expect(inSlugs().cd("Board")).toEqual(atSpaceRoot().cd("/Board"));
+          });
+
           it("reads a canonical index inside a piece as a number", () => {
             const place = atPiece();
             place.cd("topics/3");
@@ -1050,14 +1143,12 @@ describe("place", () => {
             // A relative operand is not a reference, so the reference
             // grammar's `~1` escaping does not reach it: `~1` is literal
             // here where a reference reads it as a literal `/` inside the
-            // key. The case
-            // below is the consequence — a key holding a `/` has no
-            // relative spelling at all, since neither candidate reaches it
-            // — and both are pinned so that teaching the walk to unescape
-            // reds a case rather than arriving unremarked. Which vocabulary
-            // a relative segment speaks is settled where `ls` decides how
-            // such a key prints, the render and the read wanting to be
-            // decided together.
+            // key. The case below is the consequence — a key holding a `/`
+            // has no relative spelling, the walk splitting on the separator
+            // it holds — and both are pinned so that teaching the walk to
+            // unescape reds a case rather than arriving unremarked. Such a
+            // key is named by a reference instead, which unescapes `~1`, and
+            // that is the spelling `operandForChild` offers for it.
 
             const place = atReferencedPiece();
             place.cd("a~1b");
@@ -1407,6 +1498,54 @@ describe("place", () => {
           });
         });
 
+        it("refuses a target whose piece holds `#` though its length passes for a handle", () => {
+          // `isPieceHandle` is a length rule, so a piece long enough to
+          // pass for a handle carries either character of
+          // `READ_INSIDE_AN_ID` past the vocabulary check — and a `#` then
+          // costs the place its own rendering, which `cd` refuses as an
+          // argument suffix.
+          //
+          // One case per character, not one per character per door. The rule
+          // is a single loop inside `unnameablePiece` that every door calls,
+          // and each character is driven at a door with no earlier check of
+          // its own — `#` here, `@` through a walk — so dropping either from
+          // the loop reds its case. `#` is driven at this door rather than
+          // at a walk because a walk refuses a `#` before the rule runs,
+          // naming the suffix; dropping `#` from the loop therefore leaves
+          // that door refusing it still, which is why the case for it is
+          // here. That each door calls the rule at all is a separate axis
+          // with cases of its own, and each frames the one `Fault` it gets
+          // back in its own sentence.
+
+          expect(
+            atSpaceRoot().enter(
+              { space: SPACE, piece: "of:fid1:abcdefghij#k", path: [] },
+              "#favorites",
+            ),
+          ).toEqual({
+            kind: "refused",
+            reason: "`#favorites` resolves to a piece holding `#`, so no " +
+              "piece carries that name: a slug is lowercase letters, " +
+              "numbers, and single hyphens between words, and a handle is " +
+              "`of:fid1:` and unpadded base64url.",
+          });
+        });
+
+        it("refuses a target whose piece is in neither vocabulary", () => {
+          // Relayed: `validatePieceSegment`'s own sentence.
+
+          expect(
+            atSpaceRoot().enter(
+              { space: SPACE, piece: "Board", path: [] },
+              "#favorites",
+            ),
+          ).toEqual({
+            kind: "refused",
+            reason: '"Board" is not a slug: a slug is lowercase letters, ' +
+              "numbers, and single hyphens between words.",
+          });
+        });
+
         it("refuses a target whose piece holds a line break", () => {
           expect(
             atSpaceRoot().enter(
@@ -1589,6 +1728,27 @@ describe("place", () => {
             kind: "refused",
             reason: `The reference naming space \`estuary\` has a segment ` +
               `ending in whitespace, so a rendering of the place would name a different cell.`,
+          });
+          expect(place.place).toEqual(placeAtSpaceRoot(SPACE));
+        });
+
+        it("refuses a move whose piece is in neither vocabulary", () => {
+          // Relayed: `validatePieceSegment`'s own sentence. A move `cd` minted
+          // carries a piece the reference grammar already held to the two
+          // vocabularies; one a caller assembled carries whatever it was
+          // given, and this door holds that to them too.
+
+          const place = atSpaceRoot();
+          expect(place.settle({
+            kind: "space-by-name",
+            name: "estuary",
+            piece: "Board",
+            path: [],
+            scope: "space",
+          }, SPACE)).toEqual({
+            kind: "refused",
+            reason: '"Board" is not a slug: a slug is lowercase letters, ' +
+              "numbers, and single hyphens between words.",
           });
           expect(place.place).toEqual(placeAtSpaceRoot(SPACE));
         });

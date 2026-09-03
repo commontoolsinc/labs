@@ -95,15 +95,17 @@ an operand, or as the whole of one, rather than by the split, which is what
 puts them with the address characters rather than with the reserved ones.
 
 The two halves are one decision: what the printer writes, the split reads
-back as the one value it was given. That is the whole of the guarantee. What
-a reading then makes of that token is decided where the operand is read, and
-whether a quote should reach that decision — so that a key named `..`, or
-one beginning with `#`, has a spelling that names it — is part of the
-relative-segment question `ls` settles
-([`build-sequence.md`](build-sequence.md)). Ruling that it should has a
-known shape and a known cost: the split would start carrying which parts of
-a token were quoted, which grows the value it returns rather than adding a
-layer over it, and every reading that consults quoting reads that value.
+back as the one value it was given. That is the whole of the guarantee, and
+it stops there: **a quote reaches no reading**. The split returns plain
+strings, so a reading sees the characters a token holds and never how they
+were delivered, and `cd '..'` and `cd ..` are one operand. What names a key
+whose own characters a reading would take is therefore a different spelling
+rather than a different quoting — the reference below, which reads none of
+the relative readings — and that is what a listing prints for such a row.
+Ruling the other way has a known shape and a known cost: the split would
+start carrying which parts of a token were quoted, which grows the value it
+returns rather than adding a layer over it, and every reading that consults
+quoting reads that value.
 
 ## Place resolution
 
@@ -202,11 +204,27 @@ moves the refusal earlier and names the vocabulary where the parse names
 only the failure.
 
 One rule rather than three is a choice about wording, not about safety: the
-redundant cases cost nothing, and the rule buys no guarantee that every
-rendering is followable — a piece like `Not_A_Slug!!` passes it and the
-parse refuses that afterwards. Which pieces are held to the vocabulary at
-all is B1b's question, recorded with the other validation work in
-[`build-sequence.md`](build-sequence.md).
+redundant cases cost nothing.
+
+**Every door holds the piece to the two vocabularies** besides, and the check
+is the canonical parse's own — `validatePieceSegment`
+(`packages/cli/lib/llm-friendly-ref.ts`), called rather than copied, so that a
+name in neither vocabulary is refused with one sentence whichever door read
+it. The doors are the reference, a walk into a piece, a target the fabric
+resolved, and a settled move, which is every door a piece reaches a place
+through:
+`cd slugs/Board` is refused, and the reason it gives is the reason `cd /Board`
+gives. That is what makes a listing's job possible: a name printed as an
+operand is one `cd` takes, and a name the rule refuses is one nothing offers
+an operand for.
+
+The vocabulary rule still buys no guarantee that every rendering is
+followable, and it and the rendering rules above catch different names. A
+handle-shaped piece holding an `@` or ending in whitespace is caught by the
+rendering rules above rather than by the vocabulary, `isPieceHandle` being a
+length rule that takes either; and a path segment holding a `#` reaches a
+place under the readings below and renders as a reference the parse then
+refuses.
 
 A segment lifted out of a rendering is an operand in its own right, so
 these readings decide it rather than the key it was printed from.
@@ -221,6 +239,16 @@ suffix off before anything parses what it followed, and refuses every other
 fragment. And inside a piece `#` is an ordinary character of a data key,
 under the rule above: the wish reading is decided on the whole operand, so
 it governs the head and nothing else.
+
+Those two readings between them leave one key with no **direct** spelling. A
+key whose *first* character is `#` is a wish target when it is the whole
+operand, and a reference carrying a `#` anywhere is refused, so neither door
+names it on its own. Some multi-segment operand still reaches it — `#` is data
+in a segment that names a data key, and `slugs/board/#key` names it from the
+space root — and which routes reach it from where is not characterized here. That is
+what the quoting ruling above costs: the key is reachable by a route rather
+than by a name, and a listing prints no name for such a row, a row's name
+being what it is called and not how to get to it.
 
 A container renders without the leading `/` that marks a reference, so a
 space root and a facet cannot be read back as a piece whose slug happens to
@@ -260,6 +288,51 @@ The facet set stays deliberately small; growing it is a design decision,
 not a convenience.
 
 ## Listings, pagination, search
+
+`ls` lists what stands at the place: a space root's facets, the slugs the
+space's index records, the space's pieces, or the keys directly under the
+cell the place names. A row that failed on its own account is still a row —
+a slug the index names and nothing resolves is a name the space has — so it
+carries what went wrong rather than being dropped, and one failed row never
+takes the listing down with it. A read that failed outright is no listing at
+all and raises.
+
+A listing says what it is a listing of wherever its rows are not everything
+standing there. `slugs/` is the case that has such a bound: the index names
+slugs assigned since it existed, so a slug it never recorded still resolves
+and is not listed (`listSlugs`, `packages/piece/src/slugs.ts`), and a listing
+that implied completeness would be false.
+
+**Every name a listing prints is one `cd` takes back to that row**, and a row
+it has no name for prints none at all. Most rows print their own name,
+written as a token by the rule above — a slug, a handle and an ordinary key
+each print as themselves. A row whose name's own characters are readings —
+a key called `..` or `-`, one holding the separator, one beginning with `@` —
+prints the reference that names it instead, which reads none of them and
+unescapes `~1`.
+
+The name is the first thing on its line, and the whole of it where the row
+has nothing else to report. What a reader copies off the front is therefore
+what `cd` takes, and that is the claim rather than anything about the whole
+line: an error written after a name is text the fabric produced, and an odd
+quote in it leaves the line as a whole refusing to split.
+
+A row with no name prints a marker in its place, and says no more than that:
+a key whose first character is `#` is reached by a route, as above, and a
+listing prints names rather than routes. Everything on a listed line that is
+not a name is written between angle brackets. A name holding an angle bracket
+is printed quoted, the grammar reserving it, so a line opening with `<` carries
+no name — while a marker's own payload is not escaped, those brackets
+delimiting for a reader and not for a parser. Nothing parses a listed line.
+
+A row is one line, and the lines are separated by a newline, so a name holding
+one is described rather than written and a message holding one has it written
+as a space. The newline's is the only rewrite there is, so a carriage
+return and the Unicode line and paragraph separators are printed as they
+stand, because a name is printed to be typed back and a rewritten one no
+longer names its row — a carriage return returns a terminal's cursor to the
+start of the line, and that is a thing a terminal does rather than a thing the
+name says, the same bound the rendering of a place is held to.
 
 Large collections appear everywhere (a space's pieces, an array of
 thousands). `ls` prints one height-fit page — what the terminal shows

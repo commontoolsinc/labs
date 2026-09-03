@@ -173,16 +173,51 @@ Landed:
   it is whitespace, either quote, the backslash, and the characters the
   grammar spends on structure, collected in one constant rather than counted
   in prose. The characters an operand writes an address with stay out of that
-  set, which is what leaves the relative-segment question below intact: what
-  the pair guarantees is that a printed value splits back into that one
-  value, and whether a quote should also reach the reading of a token is
-  still `ls`'s to settle. No verb reads a line yet.
+  set: what the pair guarantees is that a printed value splits back into that
+  one value, and a quote reaches no further than that. No verb reads a line
+  yet.
+
+- **B1b (slice 3) — `ls`, and the vocabulary a segment speaks**
+  (`packages/shuttle/src/listing.ts`). What stands at a place — a space root's
+  facets, the slugs the index records, the space's pieces, the keys directly
+  under the cell a place names — read over the held connection through
+  `listSpaceSlugs`, `listPieces` and `listCellKeys`, each of which takes that
+  connection as `deps.loadPieces`. A row that failed on its own account is
+  still a row and carries what went wrong; a read that failed outright raises.
+  `slugs/` says what it is a listing of. Its index records the names assigned
+  since it existed, which is not the set of slugs that resolve: one assigned
+  before the index is not listed, and one that is listed may no longer resolve,
+  nothing removing an entry once made. So `ls slugs/` does not enumerate what
+  resolves, and a row carries its own error where the name it lists reaches
+  nothing. A slug stands in a place unresolved and the read resolves
+  it the way `--cell` does, which is what makes a slug typed back off a listing
+  reach its piece.
+
+  The slice settles the two questions held for it, both of them recorded in
+  [`grammar.md`](grammar.md). A quote reaches no reading, so a name whose own
+  characters are readings prints as the reference that names it rather than as
+  a quoted spelling of itself — which is what makes every name a listing prints
+  one `cd` takes back to that row, and leaves the split returning plain
+  strings. And every door holds a piece to the slug and handle vocabularies,
+  `validatePieceSegment` being called rather than copied, so a walk, a resolved
+  target and a settled move hold a piece to what a reference holds one to, and
+  give its reason. What the first ruling costs is one shape: a key whose first
+  character is `#` has no direct spelling — neither the name on its own nor a
+  reference names it — and a listing prints no name for it. Some multi-segment
+  operand does reach it, `#` being data in a segment that names a data key,
+  but a route is not a name; [`grammar.md`](grammar.md) carries the ruling and
+  characterizes the routes no further. Which keys are spelled through one door
+  and
+  not the other is pinned case by case in
+  `packages/shuttle/test/place.test.ts`, so the record moves when the behavior
+  does and not otherwise.
 
 Still to come:
 
 - **The prompt, a readline loop, and the verbs** (B1b for the verbs and
-  the connection, B1c for the prompt) — `cd` / `ls` / `pwd` / `get` over
-  one held `PiecesController`, with `#name` wish targets
+  the connection, B1c for the prompt) — `cd` / `ls` / `pwd` / `get` read off
+  a line and dispatched, over one held `PiecesController` and over the
+  listing above, with `#name` wish targets
   navigable within the connected space (`cd #favorites`, and the `wish`
   verb, over the `./lib/wish` export entry A1 adds; a home-anchored target
   from elsewhere is refused with the reason — decision 5).
@@ -197,36 +232,6 @@ Still to come:
   view substrate's export entries with the prompt: the line editor calls
   those modules, and an entry lands with the milestone that first calls one.
 
-- **Slug and name resolution** (B1b), riding the machinery `--cell` already
-  uses
-  (`resolveStoredPieceAddress`, `listSpaceSlugs`), so no CLI-surface arc
-  step gates B1.
-- **The vocabulary a relative segment speaks.** The walk and a reference
-  read a segment by different rules — the reserved readings
-  [`grammar.md`](grammar.md) states, against a reference's own unescaping
-  and fragment rule — so some keys are spelled through one and not the
-  other, and a segment lifted out of a rendering is an operand in its own
-  right rather than the key it was printed from. Which keys those are, and
-  what each lifted segment does instead of naming its key, is pinned case
-  by case in `packages/shuttle/test/place.test.ts`, each case under a
-  mutation, so the record moves when the behavior does and not otherwise.
-  `ls` settles it, in B1b: how such a key prints and how it is typed back
-  want deciding together.
-
-  Whether a piece is held to the slug and handle vocabularies is the same
-  question, and its answer is a rule rather than a count: a piece is held
-  where it passes through the canonical parse, and nowhere else. A reference
-  is held that way, and a settled move inherits it, the arm being minted
-  from a parsed reference; every other way in admits a piece the fabric
-  would not name, an arm a caller assembles rather than receives included.
-  What is settled is narrower, and in two parts. A path segment that is
-  empty, ends in whitespace, or holds a line break is refused at every door,
-  because a rendering of it would name a different cell. A piece is held to
-  more than that: one holding a line break is refused for the same reason,
-  and one that is empty, ends in whitespace, or holds an `@` is refused
-  because no slug or handle carries such a name.
-  [`grammar.md`](grammar.md) carries why that reason holds, and which of
-  those the canonical parse would take anyway.
 - **`where`** (B1c), the printing surface for the ambient record; later
   milestones add their dimensions to it as they add the dimensions themselves.
   It prints the record `pwd` prints, so it chooses the format for both — a

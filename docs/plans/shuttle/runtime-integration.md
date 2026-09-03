@@ -199,16 +199,27 @@ Not every v1 verb lands on a `*FromCommand` action, and which ones do not
 is what decides whether a bare `Deno.exit` in some Cliffy action is
 shuttle's problem. `get`, `set`, `call` and `describe` go through the
 named exports (`getCellValueFromCommand`, `setCellValueFromCommand`,
-`callFromCommand`, `describePieceFromCommand`); `ls` goes through
-`listPiecesFromCommand` and `listSlugsFromCommand`; `wish` through
-`readWish`. The two that do not are composed from the library instead:
+`callFromCommand`, `describePieceFromCommand`); `wish` goes through
+`readWish`. Three are composed from the library instead:
 **`link` calls `linkPieces` (`lib/piece.ts`) directly**, which is the seam
 A2 gave it and which raises `LinkValidationError` as a value, so the
 inline action behind `cf piece link` — exit and all — is not on shuttle's
-path; and **`verbs` composes `listPieceCallables` (`lib/piece.ts`) with
+path; **`verbs` composes `listPieceCallables` (`lib/piece.ts`) with
 the exported `verbListingLines` / `verbListingJson` / `verbListingNotes`
 and `partitionVerbListing`**, rendering the rows itself rather than
-running that command's inline action.
+running that command's inline action; and **`ls` composes `listSpaceSlugs`
+and `listPieces` (`lib/piece.ts`) with `listCellKeys`
+(`lib/cell-listing.ts`)**, handing each the held connection as
+`deps.loadPieces`. `listSlugsFromCommand` and `listPiecesFromCommand` are
+not that seam, and not because they refuse a connection: each takes a `deps`
+with its lister and its renderer both injectable, so a caller can substitute
+a lister bound to a held one. It is what is left after that. The default
+lister is called with a config and no `deps`, so threading a connection means
+substituting the lister; the default renderer writes to the process's own
+stdout, so a caller drawing its own screen substitutes that too; and what the
+wrapper then contributes is `parseSpaceOptions` over a Cliffy options object
+and a `--json` flag. Shuttle builds its own `SpaceConfig` and has no such
+object, so nothing of the wrapper is left to call.
 
 ## Prerequisite work in `packages/cli`
 

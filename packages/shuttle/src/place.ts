@@ -7,14 +7,16 @@
  * nothing read. The address grammar belongs to the fabric
  * (`normalizeLLMFriendlyRef` over the runner's `parseReferenceParts`) and this
  * module consumes it; what it adds is the navigation spellings that grammar
- * has no room for — `..`, `-`, `/`, and a scope-only `@scope` — and the
- * refusals a place is subject to.
+ * has no room for — `..`, `-`, `/`, and a scope-only `@scope` — the refusals a
+ * place is subject to, and the operand that reaches a child, which is those
+ * same readings asked in the other direction.
  */
 
 import type { CellScope } from "@commonfabric/api";
 import {
   type NormalizedLLMFriendlyRef,
   normalizeLLMFriendlyRef,
+  validatePieceSegment,
 } from "@commonfabric/cli/lib/llm-friendly-ref";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import {
@@ -174,6 +176,45 @@ export function placeAtSpaceRoot(space: MemorySpace): Place {
 }
 
 /**
+ * The operand `cd` takes from `place` to the child of its position called
+ * `child`, and nothing where neither spelling it offers reaches that child.
+ *
+ * Two spellings are offered, the shorter first. The name on its own is what
+ * `cd` takes wherever `cd` reads that name as data. Where one of the readings
+ * above takes it instead, the reference the child renders as reaches it
+ * anyway: a reference reads none of them, and it escapes the separator where a
+ * relative operand cannot. An absent answer means neither of these reaches
+ * the child, which is narrower than nothing reaching it: some multi-segment
+ * operand can reach one that neither does, since a walk splits on the
+ * separator and reads a head reading only on the whole operand. None is looked
+ * for, and which would work is not a question this answers — what it returns
+ * is a name for the child, and a route is not one.
+ *
+ * Each spelling is answered by making the move rather than by a second copy of
+ * the readings, so what comes back is an operand `cd` took. The move is made
+ * from a standing with no trail and no previous place, which bounds the answer
+ * in one direction only: `-` is never offered, even where shuttle's own
+ * history would make it reach the child, and what is offered reaches the child
+ * whatever that history holds.
+ */
+export function operandForChild(
+  place: Place,
+  child: string,
+): string | undefined {
+  const position = childPosition(place.position, child);
+  if (position === undefined) return undefined;
+  const goal: Place = { ...place, position };
+  const from: Standing = { place, trail: [] };
+  for (const candidate of [child, renderPosition(goal)]) {
+    const step = movePlace(from, candidate);
+    if (step.kind === "moved" && samePlace(step.to.place, goal)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+/**
  * What `pwd` prints: both halves of the place, each on its own line.
  *
  * A leading `/` is what makes a string a reference, so it marks the one
@@ -183,13 +224,12 @@ export function placeAtSpaceRoot(space: MemorySpace): Place {
  * facet are containers and render without one, which is what keeps a
  * container's own rendering from resolving as a piece whose slug happens to
  * match. What holds of a rendering is one property and not a list: `cd` may
- * refuse it, but it never reads one as some other cell. Several things reach
- * the first half — a `#` anywhere, which the reference grammar reserves, and
- * a piece outside the slug and handle vocabularies — and enumerating them
- * here would be a claim that goes stale as the vocabularies move. A piece or
- * segment holding a newline would reach the second half, by splitting the
- * position line into a shorter reference, which is why one is refused before
- * it can reach a place rather than handled here.
+ * refuse it, but it never reads one as some other cell. A `#` reaches the
+ * first half wherever it sits, the reference grammar reserving that character
+ * for the `#argument` suffix. A piece or segment holding a newline would reach
+ * the second half, by splitting the position line into a shorter reference,
+ * which is why one is refused before it can reach a place rather than handled
+ * here.
  *
  * The scope is written on the piece even when it is the base, which is what
  * makes "read from anywhere" true rather than nearly so. Scope is part of a
@@ -291,6 +331,8 @@ export class CurrentPlace {
           `so ${fault.so}.`,
       ));
     }
+    const outside = outsideVocabulary(move.piece);
+    if (outside !== undefined) return this.#commit(outside);
     return this.#commit(land({
       position: {
         kind: "piece",
@@ -612,6 +654,8 @@ function moveIntoPiece(
   }
   const fault = unnameablePiece(scoped.id);
   if (fault !== undefined) return refuseUnnameable(operand, fault);
+  const outside = outsideVocabulary(scoped.id);
+  if (outside !== undefined) return outside;
   return land({
     position: {
       kind: "piece",
@@ -657,6 +701,8 @@ function enterTarget(
         `${badSegment.so}.`,
     );
   }
+  const outside = outsideVocabulary(target.piece);
+  if (outside !== undefined) return outside;
   return land({
     ...place,
     position: {
@@ -671,6 +717,69 @@ function enterTarget(
 /** Whether `segment` names one of the facets a space root lists. */
 function isFacet(segment: string): segment is Facet {
   return (FACETS as readonly string[]).includes(segment);
+}
+
+/**
+ * Helper for {@link operandForChild}, which is the position one level inside
+ * `position` called `child`, and nothing where that level has no child of
+ * that name.
+ *
+ * A root's children are its facets and are a closed set, so a name outside it
+ * denotes nothing. A facet's and a piece's are whatever the space holds, so
+ * this builds the position and leaves whether an operand reaches it to the
+ * move that tries one.
+ */
+function childPosition(
+  position: Position,
+  child: string,
+): Position | undefined {
+  switch (position.kind) {
+    case "root":
+      return isFacet(child)
+        ? { kind: "facet", space: position.space, facet: child }
+        : undefined;
+    case "facet":
+      return { kind: "piece", space: position.space, piece: child, path: [] };
+    case "piece":
+      return {
+        ...position,
+        path: [...position.path, linkPathSegmentToCellPathSegment(child)],
+      };
+  }
+}
+
+/**
+ * Helper for {@link operandForChild}, which is whether two places are the same
+ * place: both halves of the pair, since a scope is half of what a place is and
+ * two scopes select two cells at one position.
+ */
+function samePlace(one: Place, other: Place): boolean {
+  return one.scope === other.scope &&
+    samePosition(one.position, other.position);
+}
+
+/**
+ * Helper for {@link samePlace}, which is whether two positions of one space
+ * are the same cell. It is {@link Position}'s own promise read as a
+ * comparison: the levels a position names and nothing about how either was
+ * reached.
+ *
+ * The space is not among the levels it compares. One connection fixes the
+ * space for a shuttle's whole run and every door refuses a position outside
+ * it, so the pair this is handed carries one space and a comparison of it
+ * could only ever hold.
+ */
+function samePosition(one: Position, other: Position): boolean {
+  switch (one.kind) {
+    case "root":
+      return other.kind === "root";
+    case "facet":
+      return other.kind === "facet" && one.facet === other.facet;
+    case "piece":
+      return other.kind === "piece" && one.piece === other.piece &&
+        one.path.length === other.path.length &&
+        one.path.every((segment, index) => segment === other.path[index]);
+  }
 }
 
 /**
@@ -774,6 +883,21 @@ function unnameableSegment(segment: PathSegment): Fault | undefined {
 }
 
 /**
+ * The characters the reference grammar reads inside an id segment: the `@` a
+ * scope suffix rides on (`parseScopedIdSegment`), and the `#` an argument
+ * suffix does (`splitArgumentSuffix`). Neither vocabulary holds one — a slug
+ * is lowercase letters, numbers and hyphens, and a handle is base64url — but
+ * `isPieceHandle` is a length rule rather than an alphabet one, so a long
+ * enough piece carries either past the vocabulary check.
+ *
+ * The separator and the escape are deliberately not here. A rendering escapes
+ * both, `/` becoming `~1` and `~` becoming `~0`, so a piece holding one is
+ * read back whole; refusing it would be an alphabet this module does not own,
+ * against a canonical check that owns one and declines to apply it.
+ */
+const READ_INSIDE_AN_ID = ["@", "#"];
+
+/**
  * Helper for the movers, which names what stops a piece from being one a place
  * may stand on, and returns nothing when nothing does.
  *
@@ -785,12 +909,16 @@ function unnameableSegment(segment: PathSegment): Fault | undefined {
  * segment is the suffix and nothing else, so the split finds no id in front of
  * it and the parse refuses the whole reference.
  *
- * The rules that are not the newline answer to {@link NO_SUCH_NAME}
- * instead, which is a
- * weaker claim than the segment rules make and the honest one. This door is
- * the only check for a handle-shaped piece; for an empty one and for anything
- * slug-shaped the parse refuses already, so refusing here moves the refusal
- * earlier and names the vocabulary where the parse names only the failure.
+ * The rules that are not the newline answer to {@link NO_SUCH_NAME} instead,
+ * which is a weaker claim than the segment rules make and the honest one.
+ * {@link outsideVocabulary} runs after this door and refuses an empty piece
+ * and every colon-less name that is no slug on its own account. What this door
+ * adds is the handle-shaped piece: `isPieceHandle` is a length rule, so a
+ * trailing space and either of {@link READ_INSIDE_AN_ID} ride past it and are
+ * refused here. Other characters no vocabulary holds ride past it too — a `.`
+ * or an escaped separator — and are admitted, their renderings reading back
+ * whole; what is refused here is what a rendering would lose or a reading
+ * would take.
  */
 function unnameablePiece(piece: string): Fault | undefined {
   if (piece.includes("\n")) {
@@ -800,8 +928,10 @@ function unnameablePiece(piece: string): Fault | undefined {
   if (piece !== piece.trimEnd()) {
     return { what: "a piece ending in whitespace", so: NO_SUCH_NAME };
   }
-  if (piece.includes("@")) {
-    return { what: "a piece holding `@`", so: NO_SUCH_NAME };
+  for (const character of READ_INSIDE_AN_ID) {
+    if (piece.includes(character)) {
+      return { what: `a piece holding \`${character}\``, so: NO_SUCH_NAME };
+    }
   }
   return undefined;
 }
@@ -823,6 +953,28 @@ function firstUnnameableSegment(
  */
 function refuseUnnameable(operand: string, fault: Fault): Step {
   return refuse(`\`${operand}\` has ${fault.what}, so ${fault.so}.`);
+}
+
+/**
+ * Helper for the movers, which refuses `piece` where it is in neither
+ * vocabulary a piece is named by, and returns nothing where it is in one of
+ * them. Every door runs it after its own rendering rules, so a part no
+ * rendering names back is reported as that rather than as a name outside a
+ * vocabulary.
+ *
+ * The rule is `validatePieceSegment`'s
+ * (`packages/cli/lib/llm-friendly-ref.ts`), called rather than copied, so that
+ * a piece is held to the same two vocabularies whichever door admits it and
+ * one name gets one reason whichever door refused it. Its sentence reaches the
+ * reader unaltered.
+ */
+function outsideVocabulary(piece: string): Step | undefined {
+  try {
+    validatePieceSegment(piece);
+  } catch (error) {
+    return refuse(messageOf(error));
+  }
+  return undefined;
 }
 
 /** Helper for the movers, which builds a refusal carrying `reason`. */
