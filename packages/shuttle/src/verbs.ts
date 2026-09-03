@@ -15,10 +15,10 @@
  *
  * Two spellings come back off a `cd` or a `get` unsettled, because settling
  * them is a read: a `#name` target, which the fabric resolves to an address,
- * and a space written as a name, whose DID only the derivation a session uses
- * can supply. Settling each and asking the place again is what this module
- * adds to `place.ts`, which decides everything about a place that a value can
- * decide and stops exactly there.
+ * and a space written as a name, which the connection is asked about. Settling
+ * each and asking the place again is what this module adds to `place.ts`,
+ * which decides everything about a place that a value can decide and stops
+ * exactly there.
  */
 
 import {
@@ -32,7 +32,7 @@ import {
   type SpaceConfig,
 } from "@commonfabric/cli/lib/piece";
 import { projectWishValue, readWish } from "@commonfabric/cli/lib/wish";
-import { isDID, spaceIdentityForName } from "@commonfabric/identity";
+import { isDID } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 
 import type { HeldConnection } from "./connection.ts";
@@ -94,9 +94,6 @@ export interface VerbDeps {
   /** Resolves a named entry point, for `wish` and for `cd` into one. */
   readonly readWish?: typeof readWish;
 
-  /** The space a name denotes, for a reference that named its space. */
-  readonly spaceNamed?: (name: string) => Promise<MemorySpace>;
-
   /** The reads `ls` composes. */
   readonly listing?: ListingDeps;
 }
@@ -148,8 +145,8 @@ type Verb = (
  *
  * The operand is `place.ts`'s to read, and the two spellings it hands back
  * unsettled are settled here: a `#name` target resolves against the fabric,
- * and a space written as a name is derived into the DID the place is compared
- * against.
+ * and a space written as a name is held against the name the connection was
+ * opened under.
  */
 async function cd(
   shuttle: Shuttle,
@@ -297,12 +294,14 @@ async function landing(
         deps,
       );
     }
-    case "space-by-name":
-      return await landing(
+    case "space-by-name": {
+      const named = await connectedSpace(shuttle, move.name);
+      return named.kind === "refused" ? named : await landing(
         shuttle,
-        shuttle.place.settle(move, await spaceNamed(move.name, deps)),
+        shuttle.place.settle(move, named.space),
         deps,
       );
+    }
   }
 }
 
@@ -356,15 +355,14 @@ async function reading(
           `under this place. \`wish ${move.target}\` reads what it resolves ` +
           `to.`,
       };
-    case "space-by-name":
-      return await reading(
+    case "space-by-name": {
+      const named = await connectedSpace(shuttle, move.name);
+      return named.kind === "refused" ? named : await reading(
         shuttle,
-        shuttle.place.resolveNamedSpace(
-          move,
-          await spaceNamed(move.name, deps),
-        ),
+        shuttle.place.resolveNamedSpace(move, named.space),
         deps,
       );
+    }
   }
 }
 
@@ -500,22 +498,56 @@ function addressIn(result: unknown): string | undefined {
   return typeof address === "string" ? address : undefined;
 }
 
-/**
- * Helper for the verbs, which is the space `name` denotes.
- *
- * The derivation is the one a session uses (`spaceIdentityForName`,
- * `@commonfabric/identity`), called rather than repeated, so that a name
- * shuttle compares against its connected space is the space that name would
- * have opened. It reads the name and nothing else, so no session is needed to
- * ask it and the answer does not depend on who is asking.
- */
-function spaceNamed(name: string, deps: VerbDeps): Promise<MemorySpace> {
-  return (deps.spaceNamed ?? derivedSpace)(name);
-}
+/** What asking the connection about a space name produced. */
+type Named =
+  /** The name is this shuttle's own, and `space` is the space it holds. */
+  | { readonly kind: "connected"; readonly space: MemorySpace }
+  | Refusal;
 
-/** Helper for {@link spaceNamed}, which derives the space `name` denotes. */
-async function derivedSpace(name: string): Promise<MemorySpace> {
-  return (await spaceIdentityForName(name)).did();
+/**
+ * Helper for {@link landing} and {@link reading}, which is whether `name` is
+ * the space this shuttle holds a connection to.
+ *
+ * The connection is asked rather than the name derived. A session opened by
+ * name records it (`PiecesController.getSpaceName`), and one connection serves
+ * one space, so the only thing a reference naming a space can want to know is
+ * whether it names this one — for which the recorded name is the answer and a
+ * key derivation on a navigation keystroke is a longer way round to it.
+ *
+ * The comparison is exact, and that is not an approximation of the derivation
+ * but its own answer. A named space's key hangs off the name's bytes and
+ * nothing else, so two names denote one space when they are one string; and
+ * the reference reading has already put the operand's name in the form the
+ * connection recorded, `decodeJsonPointer` having read back the `~1` a name
+ * holding the separator is written with.
+ *
+ * A session opened by a DID recorded no name, and then there is no answer to
+ * give: what the name denotes would take the derivation, and whether it
+ * denotes this space is exactly what was asked. The refusal says so and says
+ * what would answer it.
+ */
+async function connectedSpace(
+  shuttle: Shuttle,
+  name: string,
+): Promise<Named> {
+  const pieces = await shuttle.connection.pieces();
+  const connected = pieces.getSpaceName();
+  if (connected === undefined) {
+    return refuse(
+      `This shuttle names its space by DID, so it cannot say whether ` +
+        `\`${name}\` is that space. One connection serves one space, and a ` +
+        `shuttle started against \`${name}\` by name is what reaches that ` +
+        `cell.`,
+    );
+  }
+  if (connected !== name) {
+    return refuse(
+      `\`${name}\` is not the space this shuttle is connected to, which is ` +
+        `\`${connected}\`. One connection serves one space, so reaching ` +
+        `that cell means a shuttle started against \`${name}\`.`,
+    );
+  }
+  return { kind: "connected", space: pieces.getSpace() };
 }
 
 /**

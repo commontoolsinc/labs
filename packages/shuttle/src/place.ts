@@ -109,10 +109,10 @@ export interface Place {
 }
 
 /**
- * A move whose reference named its space by name rather than by DID, which
- * needs a session to derive the one from the other. Resolving that name —
- * `validateEmbeddedSpaces` does it — and handing this back to
- * {@link CurrentPlace.settle} with the space it resolved to is what lands it.
+ * A move whose reference named its space by name rather than by DID, which no
+ * value can tell apart from the space this place holds. Settling that name
+ * against a connection and handing this back to {@link CurrentPlace.settle}
+ * with the space it stands for is what lands it.
  *
  * It carries what the reference determined and no space, because whether the
  * name denotes the connected space is the one thing not yet known: an arm

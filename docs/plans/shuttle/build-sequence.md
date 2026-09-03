@@ -228,13 +228,19 @@ Landed:
   *address* rather than its value, which is what `--select` spells `@`: the
   space a target resolved in rides in the answer, so a home-anchored one is
   refused with the reason decision 5 gives and nothing has to know which
-  targets are anchored where. A space written as a name is derived through
-  `spaceIdentityForName` (`@commonfabric/identity`), the derivation
-  `createSession` performs, named there so that the function that opens a
-  named space and the one that asks whether a name is the space already open
-  are one function — `packages/state-inspector` reaches it too. The
-  `./lib/cell-selection` export entry lands with this slice, `--select`'s own
-  parser being what `cd` asks a wish through.
+  targets are anchored where. A space written as a name is held against the name
+  the connection was opened under (`PiecesController.getSpaceName`). One
+  connection serves one space, so all such a reference can want to know is
+  whether it names this one, and the recorded name answers that — the
+  comparison being exact is not an approximation of the key derivation but its
+  own answer, since a named space's key hangs off the name's bytes and the
+  reference reading has already read back the `~1` a name holding the
+  separator is written with. A session opened by a DID recorded no name and is
+  refused, which is the honest arm rather than an error path: whether a name
+  denotes that space is exactly what it cannot say, and the refusal names
+  starting against that name as what would. The `./lib/cell-selection` export
+  entry lands with this slice, `--select`'s own parser being what `cd` asks a
+  wish through.
 
   `get`'s operand goes through the door `cd`'s goes through *plus the
   `#argument` suffix that door turns down*, read from where shuttle stands

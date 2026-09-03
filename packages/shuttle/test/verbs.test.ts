@@ -29,7 +29,6 @@ import type {
   SpaceConfig,
 } from "@commonfabric/cli/lib/piece";
 import type { WishReadConfig } from "@commonfabric/cli/lib/wish";
-import { createSession, Identity } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { PiecesController } from "@commonfabric/piece/ops";
 
@@ -52,14 +51,32 @@ const CONFIG: SpaceConfig = {
   identity: "/keys/shuttle.pkcs8",
 };
 
+/** The space name every shuttle here is opened under unless a case says so. */
+const SPACE_NAME = "board";
+
 /**
- * Helper for the cases below, which is the controller every shuttle here
- * borrows. Nothing calls anything on it: what a case can see is which read was
- * handed it.
+ * Helper for the cases below, which is a controller that answers for the space
+ * it was opened over and nothing else. `name` is what a session opened by name
+ * recorded, and its absence is what one opened by a DID recorded instead;
+ * `space` is the DID that session settled on, which every case but one leaves
+ * agreeing with the place.
+ *
+ * `name` takes no default, because an explicit `undefined` runs one — and the
+ * arm with no name is the one a default would quietly hide.
  */
-const PIECES = {
-  dispose: () => Promise.resolve(),
-} as unknown as PiecesController;
+function controller(
+  name: string | undefined,
+  space: MemorySpace = SPACE,
+): PiecesController {
+  return {
+    dispose: () => Promise.resolve(),
+    getSpace: () => space,
+    getSpaceName: () => name,
+  } as unknown as PiecesController;
+}
+
+/** Helper for the cases below, which is the controller a shuttle borrows. */
+const PIECES = controller(SPACE_NAME);
 
 /** Helper for the cases below, which fails whichever read a case reaches. */
 const READS_NOTHING: VerbDeps = {
@@ -68,9 +85,6 @@ const READS_NOTHING: VerbDeps = {
   },
   readWish: () => {
     throw new Error("A wish was resolved.");
-  },
-  spaceNamed: () => {
-    throw new Error("A space name was derived.");
   },
   listing: {
     listSpaceSlugs: () => {
@@ -85,12 +99,15 @@ const READS_NOTHING: VerbDeps = {
   },
 };
 
-/** Helper for the cases below, which is a shuttle standing at `space`'s root. */
-function shuttleIn(space: MemorySpace = SPACE): Shuttle {
+/**
+ * Helper for the cases below, which is a shuttle standing at the space root,
+ * over a connection opened as `pieces` says it was.
+ */
+function shuttleIn(pieces: PiecesController = PIECES): Shuttle {
   return {
-    config: { ...CONFIG, space },
-    place: new CurrentPlace(space),
-    connection: new HeldConnection({ kind: "borrowed", pieces: PIECES }),
+    config: CONFIG,
+    place: new CurrentPlace(SPACE),
+    connection: new HeldConnection({ kind: "borrowed", pieces }),
   };
 }
 
@@ -226,7 +243,6 @@ describe("verbs", () => {
         const answers: VerbDeps = {
           getCellValue: () => Promise.resolve("a"),
           readWish: () => Promise.resolve({ result: "b" }),
-          spaceNamed: () => Promise.resolve(SPACE),
           listing: { listCellKeys: () => Promise.resolve(["title"]) },
         };
         const shuttle = atPiece();
@@ -440,13 +456,19 @@ describe("verbs", () => {
     });
 
     describe("a space written as a name", () => {
-      it("lands where the reference names once the name resolved to the connected space", async () => {
+      // One connection serves one space, so all a reference naming a space can
+      // want to know is whether it names this one. The connection records the
+      // name it was opened under, which answers that; nothing here derives a
+      // DID from a name, and the cases stand a controller in rather than a
+      // derivation.
+
+      it("lands where the reference names once the name is this shuttle's own", async () => {
         const shuttle = shuttleIn();
-        const outcome = await runLine(`cd /@estuary/${HANDLE}/title`, shuttle, {
-          ...READS_NOTHING,
-          spaceNamed: (name) =>
-            Promise.resolve(name === "estuary" ? SPACE : OTHER_SPACE),
-        });
+        const outcome = await runLine(
+          `cd /@${SPACE_NAME}/${HANDLE}/title`,
+          shuttle,
+          READS_NOTHING,
+        );
         expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
         expect(shuttle.place.place.position).toEqual({
           kind: "piece",
@@ -456,46 +478,106 @@ describe("verbs", () => {
         });
       });
 
-      it("refuses a name that resolved to another space", async () => {
+      it("refuses a name that is not the one this shuttle was opened under", async () => {
         const shuttle = shuttleIn();
-        const outcome = await runLine(`cd /@estuary/${HANDLE}`, shuttle, {
-          ...READS_NOTHING,
-          spaceNamed: () => Promise.resolve(OTHER_SPACE),
-        });
+        const outcome = await runLine(
+          `cd /@estuary/${HANDLE}`,
+          shuttle,
+          READS_NOTHING,
+        );
         expect(reasonOf(outcome)).toBe(
-          "`estuary` resolves to space `did:key:z6MkHomeSpace`, and this " +
-            "shuttle is connected to `did:key:z6MkConnectedSpace`. One " +
-            "connection serves one space, so reaching that cell means a " +
-            "shuttle started against that space.",
+          "`estuary` is not the space this shuttle is connected to, which " +
+            "is `board`. One connection serves one space, so reaching that " +
+            "cell means a shuttle started against `estuary`.",
         );
         expect(shuttle.place.place.position.kind).toBe("root");
       });
 
-      it("derives the space a name denotes the way a session derives it", async () => {
-        // The one case here with no stub under it. Which space a name denotes
-        // is a fact two callers have to agree about — the session that opens
-        // one, and shuttle asking whether a name is the space it already
-        // holds — so the case asks the session for the answer and the verb for
-        // its own. A second derivation living here would agree with itself and
-        // say nothing.
-
-        const session = await createSession({
-          identity: await Identity.generate(),
-          spaceName: "estuary",
-        });
-        const shuttle = shuttleIn(session.space);
+      it("refuses any name where the connection recorded none, and says what would answer", async () => {
+        // A session opened by a DID recorded no name, so whether one names
+        // this space is a question the connection cannot answer and the
+        // refusal is the honest arm rather than an error path.
         const outcome = await runLine(
-          `cd /@estuary/${HANDLE}`,
+          `cd /@${SPACE_NAME}/${HANDLE}`,
+          shuttleIn(controller(undefined)),
+          READS_NOTHING,
+        );
+        expect(reasonOf(outcome)).toBe(
+          "This shuttle names its space by DID, so it cannot say whether " +
+            "`board` is that space. One connection serves one space, and a " +
+            "shuttle started against `board` by name is what reaches that " +
+            "cell.",
+        );
+      });
+
+      it("compares the name the reference carried, not the piece it named", async () => {
+        const shuttle = shuttleIn(controller(HANDLE));
+        expect(
+          reasonOf(
+            await runLine(
+              `cd /@${SPACE_NAME}/${HANDLE}`,
+              shuttle,
+              READS_NOTHING,
+            ),
+          ),
+        )
+          .toBe(
+            "`board` is not the space this shuttle is connected to, which " +
+              `is \`${HANDLE}\`. One connection serves one space, so ` +
+              "reaching that cell means a shuttle started against `board`.",
+          );
+      });
+
+      it("compares a name whose separator the reference wrote as `~1` against the one it stands for", async () => {
+        // The reference reading unescapes before this comparison sees the
+        // name, so a name holding the separator arrives in the form the
+        // connection recorded rather than in the form it was written.
+        const shuttle = shuttleIn(controller("east/west"));
+        const outcome = await runLine(
+          `cd /@east~1west/${HANDLE}`,
           shuttle,
-          { ...READS_NOTHING, spaceNamed: undefined },
+          READS_NOTHING,
         );
         expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
-        expect(shuttle.place.place.position).toEqual({
-          kind: "piece",
-          space: session.space,
-          piece: HANDLE,
-          path: [],
-        });
+      });
+
+      it("refuses a name differing from this shuttle's only in case", async () => {
+        // Exact, because the key a named space hangs off is derived from the
+        // name's bytes: two spellings that differ at all are two spaces.
+        const shuttle = shuttleIn(controller("Board"));
+        expect(
+          reasonOf(
+            await runLine(`cd /@board/${HANDLE}`, shuttle, READS_NOTHING),
+          ),
+        ).toBe(
+          "`board` is not the space this shuttle is connected to, which is " +
+            "`Board`. One connection serves one space, so reaching that cell " +
+            "means a shuttle started against `board`.",
+        );
+      });
+
+      it("lands the space the connection settled on, which the place then checks", async () => {
+        // What the name is held against is the connection's record, and what
+        // the place is landed with is the connection's own space — so a
+        // connection whose session settled somewhere other than where shuttle
+        // stands is refused by the place rather than followed. Nothing puts
+        // the two out of step today; the check is the place's own, and this is
+        // the door it is reachable through.
+        const shuttle = shuttleIn(controller(SPACE_NAME, OTHER_SPACE));
+        expect(
+          reasonOf(
+            await runLine(
+              `cd /@${SPACE_NAME}/${HANDLE}`,
+              shuttle,
+              READS_NOTHING,
+            ),
+          ),
+        ).toBe(
+          "`board` resolves to space `did:key:z6MkHomeSpace`, and this " +
+            "shuttle is connected to `did:key:z6MkConnectedSpace`. One " +
+            "connection serves one space, so reaching that cell means a " +
+            "shuttle started against that space.",
+        );
       });
     });
   });
@@ -707,12 +789,10 @@ describe("verbs", () => {
     it("settles a space written as a name, and reads where it names", async () => {
       let config: PieceConfig | undefined;
       const outcome = await runLine(
-        `get /@estuary/${HANDLE}/title`,
+        `get /@${SPACE_NAME}/${HANDLE}/title`,
         shuttleIn(),
         {
           ...READS_NOTHING,
-          spaceNamed: (name) =>
-            Promise.resolve(name === "estuary" ? SPACE : OTHER_SPACE),
           getCellValue: (given) => {
             config = given;
             return Promise.resolve("read");
@@ -726,10 +806,7 @@ describe("verbs", () => {
     it("moves nowhere settling a space written as a name", async () => {
       const shuttle = shuttleIn();
       const before = shuttle.place.place;
-      await runLine(`get /@estuary/${HANDLE}`, shuttle, {
-        ...cellValue(null),
-        spaceNamed: () => Promise.resolve(SPACE),
-      });
+      await runLine(`get /@${SPACE_NAME}/${HANDLE}`, shuttle, cellValue(null));
       expect(shuttle.place.place).toBe(before);
     });
 
@@ -808,17 +885,16 @@ describe("verbs", () => {
       });
     });
 
-    it("refuses a space written as a name that resolved to another space", async () => {
-      const shuttle = shuttleIn();
-      const outcome = await runLine(`get /@estuary/${HANDLE}`, shuttle, {
-        ...READS_NOTHING,
-        spaceNamed: () => Promise.resolve(OTHER_SPACE),
-      });
+    it("refuses a space written as a name that is not this shuttle's own", async () => {
+      const outcome = await runLine(
+        `get /@estuary/${HANDLE}`,
+        shuttleIn(),
+        READS_NOTHING,
+      );
       expect(reasonOf(outcome)).toBe(
-        "`estuary` resolves to space `did:key:z6MkHomeSpace`, and this " +
-          "shuttle is connected to `did:key:z6MkConnectedSpace`. One " +
-          "connection serves one space, so reaching that cell means a " +
-          "shuttle started against that space.",
+        "`estuary` is not the space this shuttle is connected to, which is " +
+          "`board`. One connection serves one space, so reaching that cell " +
+          "means a shuttle started against `estuary`.",
       );
     });
 
