@@ -47,6 +47,13 @@ is shuttle's, and it is POSIX's:
   escape, are refused with the reason. Nothing else refuses a line: one
   that splits says only that, and whether its tokens name anything is
   every later reading's question.
+- **A line is one line**, and a terminator on it is whoever read it to
+  strip. Line terminators are in the separator class, so text carrying one
+  splits across the break into a single run of tokens: a pasted second line
+  arrives as more operands of the first command rather than as a command of
+  its own. A line break cannot refuse instead, because a value holding one
+  prints between single quotes and reading that back is the round trip
+  below.
 
 Quoting is what makes a value holding whitespace one operand, which is what
 the write surface below needs. `set draft '{"title": "a b"}'` is three
@@ -77,6 +84,14 @@ resolution below rather than by the split, so quoting on them would buy the
 split nothing and would cost the bare printing of every handle, every slug,
 every path and every flag — which is to say nearly everything shuttle
 prints, leaving nothing conditional about conditional quoting.
+
+The `:` is the one character this grammar spends on structure that the set
+still leaves out. It marks a scheme and the `x:` base, which by the rule
+above would reserve it; but it is also in every handle — `of:fid1:…` — so
+quoting on it would quote every reference that prints, which is the cost
+the exclusion exists to avoid. A scheme is read at the head of an operand
+rather than by the split, which is what puts `:` with the address
+characters and not with the structural ones.
 
 The two halves are one decision: what the printer writes, the split reads
 back as the one value it was given. That is the whole of the guarantee. What
