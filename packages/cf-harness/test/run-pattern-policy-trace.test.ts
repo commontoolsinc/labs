@@ -29,6 +29,7 @@ import {
   harnessReleaseDecisionOutcome,
 } from "../src/contracts/policy-refusal.ts";
 import type { HarnessPolicyTrace } from "../src/contracts/policy-trace.ts";
+import type { HarnessTranscriptOmissions } from "../src/contracts/transcript-omissions.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
@@ -264,6 +265,29 @@ describe("run_pattern release decisions in the policy trace", () => {
       expect(release.resultRef?.toolId).toBe("run_pattern");
       expect(release.resultRef?.artifactPath).toContain("tool-outputs");
       expect(trace.decisionCounts.denied).toBe(1);
+      const releaseRef = release.resultRef;
+      if (releaseRef?.artifactPath === undefined) {
+        throw new Error("expected release decision artifact reference");
+      }
+      const omissions = JSON.parse(
+        await Deno.readTextFile(
+          join(
+            artifactRoot,
+            "run-release-decision",
+            "transcript-omissions.json",
+          ),
+        ),
+      ) as HarnessTranscriptOmissions;
+      const resultOmissions = omissions.results.find((result) =>
+        result.outputId === releaseRef.outputId
+      );
+      expect(
+        resultOmissions?.rules.find((rule) => rule.rule === "artifact-only")
+          ?.locations,
+      ).toContainEqual({
+        artifactPath: releaseRef.artifactPath,
+        jsonPointer: "/releaseDecision",
+      });
     } finally {
       await dispose();
       await Deno.remove(artifactRoot, { recursive: true });

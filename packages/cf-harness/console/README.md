@@ -508,8 +508,20 @@ record of what the run recorded rather than a cell with nothing to hide.
     never seals a number, so an array of them carries whatever its author chose
     to encode.
 
-  Then the call's input and output as formatted JSON, untruncated, with long
-  lines scrolling inside their block rather than widening the page.
+  Then the call's input and model-facing output as formatted JSON, with long
+  lines scrolling inside their block rather than widening the page. Beside the
+  output, **withheld from the model** expands to the full artifact positions
+  named by `transcript-omissions.json`, each labeled by its omission rule. CFC
+  denials render a redaction marker. Scrubbed Fabric identifiers are shown with
+  `[fabric-id]` in place of their values when the artifact position is
+  available; that fixed marker stands in alone when it is not. A legacy result
+  with no omission record says so instead of inferring omissions from the full
+  result.
+
+  Superseded `run_pattern` source is an assistant argument rather than a tool
+  result, so it is outside the omission record. Where its marker appears, the
+  Timeline says **source replaced by a later attempt** and directs the reader to
+  the run-pattern-source sidecar named by that marker.
 
   A `delegate_task` step names the child it started; opening that child in the
   rail reads its own timeline.
@@ -518,11 +530,12 @@ record of what the run recorded rather than a cell with nothing to hide.
   — so the compile-error and fix rounds are legible rather than lost. Alongside
   them: what `search_patterns` matched and with what score, what
   `record_feedback` reported, and every address `assign_slug` named.
-- **Tool outputs** — each tool result as the model read it, untruncated.
+- **Tool outputs** — the full persisted tool-result artifacts, including fields
+  the model-facing rendering omitted.
 - **Artifacts** — the run's own records: `run-state.json`, `transcript.json`,
-  `run-report.json`, the policy snapshot and trace, the capability snapshot, the
-  cell labels read back from the space, and the skill registry and activations,
-  whichever the run wrote.
+  `transcript-omissions.json`, `run-report.json`, the policy snapshot and trace,
+  the capability snapshot, the cell labels read back from the space, and the
+  skill registry and activations, whichever the run wrote.
 
 Handle scope is reconstructed rather than recorded. A run keeps one handle
 table, its last, so the timeline takes a handle to be in scope from the step its

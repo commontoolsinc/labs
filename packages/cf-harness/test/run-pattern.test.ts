@@ -23,6 +23,7 @@ import {
   type FabricPatternInstantiations,
 } from "../src/fabric-instantiations.ts";
 import { comparableEntityHash } from "../src/fabric-observations.ts";
+import { scrubBareFabricIdentifiers } from "../src/fabric-identifier-scrub.ts";
 import { resolveWellKnownGrantRefs } from "../src/well-known-grants.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import {
@@ -33,7 +34,6 @@ import {
   type RunPatternToolErrorOutput,
   type RunPatternToolInput,
   type RunPatternToolSuccessOutput,
-  scrubBareFabricIdentifiers,
 } from "../src/tools/run-pattern.ts";
 import type {
   CfcAddress,

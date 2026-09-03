@@ -15,4 +15,6 @@ import { type AuditCheck, STRUCTURAL_CHECKS } from "./structural.ts";
 export const RUN_CHECKS: readonly AuditCheck[] = [
   ...STRUCTURAL_CHECKS,
   ...POSTURE_CHECKS,
-];
+].sort((left, right) =>
+  left.id.localeCompare(right.id, undefined, { numeric: true })
+);

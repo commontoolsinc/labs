@@ -100,6 +100,11 @@ import {
   withheldToolIds,
 } from "./contracts/tool-descriptor.ts";
 import type { ToolOutputId, ToolResultRef } from "./contracts/tool-result.ts";
+import {
+  annotateHarnessToolResultOmissions,
+  createHarnessTranscriptOmissionRuleRecord,
+  type HarnessTranscriptOmissionRuleRecord,
+} from "./contracts/transcript-omissions.ts";
 import type {
   HarnessToolCall,
   HarnessToolTranscriptMessage,
@@ -153,15 +158,16 @@ import { createExploreQueryRunner } from "./docs-corpus/explore.ts";
 import { isEditFileToolSuccessOutput } from "./tools/edit-file.ts";
 import { isStructuredFileToolErrorOutput } from "./tools/file-errors.ts";
 import { isReadFileToolSuccessOutput } from "./tools/read-file.ts";
+import {
+  scrubBareFabricIdentifiers,
+  scrubBareFabricIdentifiersDeep,
+} from "./fabric-identifier-scrub.ts";
 import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
 import {
   isSearchPatternsToolSuccessOutput,
   type SearchPatternsToolResult,
 } from "./tools/search-patterns.ts";
-import {
-  isRunPatternToolSuccessOutput,
-  scrubBareFabricIdentifiers,
-} from "./tools/run-pattern.ts";
+import { isRunPatternToolSuccessOutput } from "./tools/run-pattern.ts";
 import {
   isRunSkillScriptToolSuccessOutput,
   type RunSkillScriptToolOutput,
@@ -1798,6 +1804,7 @@ interface ModelFacingToolOutputResult {
   output: ModelFacingToolOutput;
   cfcModelContextObservations?:
     readonly HarnessCfcModelContextObservationInput[];
+  omissionRules?: readonly HarnessTranscriptOmissionRuleRecord[];
 }
 
 interface CfcSandboxResultCarrier {
@@ -1834,45 +1841,84 @@ const stripInternalToolFields = (output: unknown): unknown => {
   return publicOutput;
 };
 
-/**
- * Applies the model-boundary scrub to every string a value carries at every
- * depth, its object KEYS included.
- *
- * Scrubbing the free-text fields a tool declares is enough only for a tool
- * whose author-controlled text sits in named fields. It is not enough for one
- * whose output is a structure whose own shape is author-controlled — a
- * disclosed JSON Schema most of all, where the property names are the point of
- * the disclosure and are arbitrary text whoever wrote the schema chose. So the
- * walk reaches keys as well as values.
- *
- * The scrub itself is {@link scrubBareFabricIdentifiers}; this decides only
- * where it lands. A key that scrubs to the same text as a sibling collapses
- * into it, which is the honest outcome: two names differing only in an
- * identifier this boundary refuses to disclose are not distinguishable on the
- * model's side of it either.
- */
-const scrubBareFabricIdentifiersDeep = (value: unknown): unknown => {
+const omissionRules = (
+  ...records: Array<HarnessTranscriptOmissionRuleRecord | undefined>
+): HarnessTranscriptOmissionRuleRecord[] =>
+  records.filter((record) => record !== undefined);
+
+const presentFieldPointers = (
+  output: ReadonlyRecord,
+  fields: readonly string[],
+): string[] =>
+  fields.filter((field) => Object.hasOwn(output, field)).map((field) =>
+    `/${field}`
+  );
+
+const escapeJsonPointerSegment = (segment: string): string =>
+  segment.replaceAll("~", "~0").replaceAll("/", "~1");
+
+/** Positions whose strings or member names carry a bare fabric identifier. */
+const bareFabricIdentifierPointers = (
+  value: unknown,
+  pointer = "",
+): string[] => {
   if (typeof value === "string") {
-    return scrubBareFabricIdentifiers(value);
+    return scrubBareFabricIdentifiers(value) === value ? [] : [pointer];
   }
   if (Array.isArray(value)) {
-    return value.map((entry) => scrubBareFabricIdentifiersDeep(entry));
+    return value.flatMap((entry, index) =>
+      bareFabricIdentifierPointers(entry, `${pointer}/${index}`)
+    );
   }
-  if (isObjectNotArray(value)) {
-    const scrubbed: Record<string, unknown> = {};
-    for (const [key, entry] of Object.entries(value)) {
-      // `defineProperty` rather than assignment, so a scrubbed key of
-      // `__proto__` becomes an own property instead of reaching the prototype.
-      Object.defineProperty(scrubbed, scrubBareFabricIdentifiers(key), {
-        value: scrubBareFabricIdentifiersDeep(entry),
-        writable: true,
-        enumerable: true,
-        configurable: true,
-      });
+  if (!isObjectNotArray(value)) {
+    return [];
+  }
+  return Object.entries(value).flatMap(([key, entry]) => {
+    const childPointer = `${pointer}/${escapeJsonPointerSegment(key)}`;
+    if (scrubBareFabricIdentifiers(key) !== key) {
+      // A JSON Pointer spelling the key would itself copy the identifier into
+      // the omission record. Point at the containing object; the reader
+      // applies the same deep scrub before displaying it.
+      return [pointer];
     }
-    return scrubbed;
+    return [
+      ...bareFabricIdentifierPointers(entry, childPointer),
+    ];
+  });
+};
+
+const truncationPointers = (output: unknown): string[] => {
+  if (!isObjectNotArray(output)) {
+    return [];
   }
-  return value;
+  return [
+    ...(output.stdoutTruncated === true ? ["/stdout"] : []),
+    ...(output.stderrTruncated === true ? ["/stderr"] : []),
+    ...(output.contentTruncated === true ? ["/content"] : []),
+  ];
+};
+
+const deniedObservationPointers = (
+  toolId: BuiltinToolId,
+  result: CfcSandboxResult,
+): string[] => {
+  const streamPointer = (channel: "stdout" | "stderr"): string =>
+    toolId === "read_file"
+      ? "/content"
+      : toolId === "edit_file"
+      ? "/diff"
+      : `/${channel}`;
+  return [
+    ...(result.stdout.policy === "observed" ? [] : [streamPointer("stdout")]),
+    ...(result.stderr.policy === "observed" || toolId === "read_file" ||
+        toolId === "edit_file"
+      ? []
+      : [streamPointer("stderr")]),
+    ...(result.exitCode.policy === "observed" || toolId === "read_file" ||
+        toolId === "edit_file"
+      ? []
+      : ["/exitCode"]),
+  ];
 };
 
 const toolOutputNeedsSandboxMediation = (
@@ -2211,6 +2257,20 @@ const modelContextObservationForExitCode = (
   };
 };
 
+const modelContextTruncationPointers = (
+  streams: readonly {
+    observation: CfcStreamObservation;
+    jsonPointer: string;
+    modelTruncated?: boolean;
+  }[],
+): string[] =>
+  streams.flatMap(({ observation, jsonPointer, modelTruncated }) =>
+    (observation.policy !== "denied" && observation.truncated === true) ||
+      modelTruncated === true
+      ? [jsonPointer]
+      : []
+  );
+
 const renderMediatedBashOutput = (
   output: ReadonlyRecord,
   cfcResult: CfcSandboxResult,
@@ -2275,6 +2335,29 @@ const renderMediatedBashOutput = (
     ...(observations.length > 0
       ? { cfcModelContextObservations: observations }
       : {}),
+    omissionRules: omissionRules(
+      createHarnessTranscriptOmissionRuleRecord(
+        "model-context-truncation",
+        resultRef,
+        modelContextTruncationPointers([
+          {
+            observation: cfcResult.stdout,
+            jsonPointer: "/stdout",
+            modelTruncated: stdout.truncated,
+          },
+          {
+            observation: cfcResult.stderr,
+            jsonPointer: "/stderr",
+            modelTruncated: stderr.truncated,
+          },
+        ]),
+      ),
+      createHarnessTranscriptOmissionRuleRecord(
+        "observation-denied",
+        resultRef,
+        deniedObservationPointers("bash", cfcResult),
+      ),
+    ),
   };
 };
 
@@ -2342,6 +2425,29 @@ const renderMediatedRunSkillScriptOutput = (
     ...(observations.length > 0
       ? { cfcModelContextObservations: observations }
       : {}),
+    omissionRules: omissionRules(
+      createHarnessTranscriptOmissionRuleRecord(
+        "model-context-truncation",
+        resultRef,
+        modelContextTruncationPointers([
+          {
+            observation: cfcResult.stdout,
+            jsonPointer: "/stdout",
+            modelTruncated: stdout.truncated,
+          },
+          {
+            observation: cfcResult.stderr,
+            jsonPointer: "/stderr",
+            modelTruncated: stderr.truncated,
+          },
+        ]),
+      ),
+      createHarnessTranscriptOmissionRuleRecord(
+        "observation-denied",
+        resultRef,
+        deniedObservationPointers("run_skill_script", cfcResult),
+      ),
+    ),
   };
 };
 
@@ -2379,6 +2485,22 @@ const renderMediatedReadFileOutput = (
     ...(observation !== undefined
       ? { cfcModelContextObservations: [observation] }
       : {}),
+    omissionRules: omissionRules(
+      createHarnessTranscriptOmissionRuleRecord(
+        "model-context-truncation",
+        resultRef,
+        modelContextTruncationPointers([{
+          observation: cfcResult.stdout,
+          jsonPointer: "/content",
+          modelTruncated: content.truncated,
+        }]),
+      ),
+      createHarnessTranscriptOmissionRuleRecord(
+        "observation-denied",
+        resultRef,
+        deniedObservationPointers("read_file", cfcResult),
+      ),
+    ),
   };
 };
 
@@ -2407,6 +2529,21 @@ const renderMediatedEditFileOutput = (
     ...(observation !== undefined
       ? { cfcModelContextObservations: [observation] }
       : {}),
+    omissionRules: omissionRules(
+      createHarnessTranscriptOmissionRuleRecord(
+        "model-context-truncation",
+        resultRef,
+        modelContextTruncationPointers([{
+          observation: cfcResult.stdout,
+          jsonPointer: "/diff",
+        }]),
+      ),
+      createHarnessTranscriptOmissionRuleRecord(
+        "observation-denied",
+        resultRef,
+        deniedObservationPointers("edit_file", cfcResult),
+      ),
+    ),
   };
 };
 
@@ -3894,13 +4031,13 @@ export class CfHarnessPromptLoop {
       ...optionalPolicyEventIndexes(policyEventIndexes),
       resultRef: result.resultRef,
     });
-    const toolMessage: HarnessToolTranscriptMessage = {
+    const toolMessage = annotateHarnessToolResultOmissions({
       role: "tool",
       toolCallId: toolCall.id,
       toolName: toolId,
       content: JSON.stringify(modelOutput),
       resultRef: result.resultRef,
-    };
+    }, modelOutputResult.omissionRules ?? []);
     if (isViewImageToolSuccessOutput(result.output)) {
       // The raw path may embed an address a token resolved to, so the
       // followup goes through the same outbound swap as the tool message.
@@ -3980,6 +4117,13 @@ export class CfHarnessPromptLoop {
       });
       return {
         output: redactReadFileStatusObservationError(output, resultRef),
+        omissionRules: omissionRules(
+          createHarnessTranscriptOmissionRuleRecord(
+            "observation-denied",
+            resultRef,
+            ["/path", "/error"],
+          ),
+        ),
       };
     }
     if (toolId === "edit_file" && isStructuredFileToolErrorOutput(output)) {
@@ -4012,11 +4156,27 @@ export class CfHarnessPromptLoop {
       });
       return {
         output: redactEditFileStatusObservationError(output, resultRef),
+        omissionRules: omissionRules(
+          createHarnessTranscriptOmissionRuleRecord(
+            "observation-denied",
+            resultRef,
+            ["/path", "/error"],
+          ),
+        ),
       };
     }
     if (toolId === "web_fetch") {
       return {
         output: toModelFacingWebFetchOutput(output as WebFetchToolOutput),
+        omissionRules: omissionRules(
+          createHarnessTranscriptOmissionRuleRecord(
+            "artifact-only",
+            resultRef,
+            isObjectNotArray(output) && Object.hasOwn(output, "rawContent")
+              ? ["/rawContent"]
+              : [],
+          ),
+        ),
       };
     }
     if (toolId === "run_pattern" && isObjectNotArray(output)) {
@@ -4048,7 +4208,34 @@ export class CfHarnessPromptLoop {
           scrubbed[field] = scrubBareFabricIdentifiers(text);
         }
       }
-      return { output: stripInternalToolFields(scrubbed) };
+      return {
+        output: stripInternalToolFields(scrubbed),
+        omissionRules: omissionRules(
+          createHarnessTranscriptOmissionRuleRecord(
+            "artifact-only",
+            resultRef,
+            presentFieldPointers(output, [
+              "rawValue",
+              "rawCauseMessage",
+              "pieceId",
+              "resultRefSchema",
+              "releaseObservation",
+              "releaseDecision",
+            ]),
+          ),
+          createHarnessTranscriptOmissionRuleRecord(
+            "bare-fabric-identifier-scrub",
+            resultRef,
+            ["message", "valueError"].flatMap((field) => {
+              const text = output[field];
+              return typeof text === "string" &&
+                  scrubBareFabricIdentifiers(text) !== text
+                ? [`/${field}`]
+                : [];
+            }),
+          ),
+        ),
+      };
     }
     if (toolId === "assign_slug" && isObjectNotArray(output)) {
       // The slug is the model's own word and the URL is composed from the
@@ -4058,7 +4245,16 @@ export class CfHarnessPromptLoop {
       if (typeof scrubbed.message === "string") {
         scrubbed.message = scrubBareFabricIdentifiers(scrubbed.message);
       }
-      return { output: stripInternalToolFields(scrubbed) };
+      return {
+        output: stripInternalToolFields(scrubbed),
+        omissionRules: omissionRules(
+          createHarnessTranscriptOmissionRuleRecord(
+            "bare-fabric-identifier-scrub",
+            resultRef,
+            bareFabricIdentifierPointers(output.message, "/message"),
+          ),
+        ),
+      };
     }
     if (toolId === "describe_handle") {
       // A disclosed schema's property names are whoever authored the schema's
@@ -4069,27 +4265,53 @@ export class CfHarnessPromptLoop {
       // keys and all rather than field by field.
       return {
         output: scrubBareFabricIdentifiersDeep(stripInternalToolFields(output)),
+        omissionRules: omissionRules(
+          createHarnessTranscriptOmissionRuleRecord(
+            "bare-fabric-identifier-scrub",
+            resultRef,
+            bareFabricIdentifierPointers(stripInternalToolFields(output)),
+          ),
+        ),
       };
     }
     if (!toolOutputNeedsSandboxMediation(toolId, output)) {
-      return { output: stripInternalToolFields(output) };
+      return {
+        output: stripInternalToolFields(output),
+        omissionRules: omissionRules(
+          createHarnessTranscriptOmissionRuleRecord(
+            "artifact-only",
+            resultRef,
+            isObjectNotArray(output) && Object.hasOwn(output, "exploreRecord")
+              ? ["/exploreRecord"]
+              : [],
+          ),
+        ),
+      };
     }
     if (cfcResult === undefined) {
       const detail =
         `${toolId} output did not include trusted CFC mediation metadata`;
       if (mode === "disabled") {
+        const rendered = toolId === "bash" || toolId === "run_skill_script"
+          ? truncateModelFacingBashOutput(
+            stripInternalToolFields(output),
+            resultRef,
+          )
+          : toolId === "read_file"
+          ? truncateModelFacingReadFileOutput(
+            stripInternalToolFields(output),
+            resultRef,
+          )
+          : stripInternalToolFields(output);
         return {
-          output: toolId === "bash" || toolId === "run_skill_script"
-            ? truncateModelFacingBashOutput(
-              stripInternalToolFields(output),
+          output: rendered,
+          omissionRules: omissionRules(
+            createHarnessTranscriptOmissionRuleRecord(
+              "model-context-truncation",
               resultRef,
-            )
-            : toolId === "read_file"
-            ? truncateModelFacingReadFileOutput(
-              stripInternalToolFields(output),
-              resultRef,
-            )
-            : stripInternalToolFields(output),
+              truncationPointers(rendered),
+            ),
+          ),
         };
       }
       if (mode === "observe") {
@@ -4101,18 +4323,26 @@ export class CfHarnessPromptLoop {
           detail:
             `${detail}; raw output was exposed because CFC is in observe mode`,
         });
+        const rendered = toolId === "bash" || toolId === "run_skill_script"
+          ? truncateModelFacingBashOutput(
+            stripInternalToolFields(output),
+            resultRef,
+          )
+          : toolId === "read_file"
+          ? truncateModelFacingReadFileOutput(
+            stripInternalToolFields(output),
+            resultRef,
+          )
+          : stripInternalToolFields(output);
         return {
-          output: toolId === "bash" || toolId === "run_skill_script"
-            ? truncateModelFacingBashOutput(
-              stripInternalToolFields(output),
+          output: rendered,
+          omissionRules: omissionRules(
+            createHarnessTranscriptOmissionRuleRecord(
+              "model-context-truncation",
               resultRef,
-            )
-            : toolId === "read_file"
-            ? truncateModelFacingReadFileOutput(
-              stripInternalToolFields(output),
-              resultRef,
-            )
-            : stripInternalToolFields(output),
+              truncationPointers(rendered),
+            ),
+          ),
         };
       }
       const denial = makeObservationDenied("not-observable", {
@@ -4127,7 +4357,16 @@ export class CfHarnessPromptLoop {
         detail,
         observationDenied: denial,
       });
-      return { output: denial };
+      return {
+        output: denial,
+        omissionRules: omissionRules(
+          createHarnessTranscriptOmissionRuleRecord(
+            "observation-denied",
+            resultRef,
+            [""],
+          ),
+        ),
+      };
     }
     if (toolId === "bash" && isObjectNotArray(output)) {
       return renderMediatedBashOutput(output, cfcResult, resultRef, toolCallId);

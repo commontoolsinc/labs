@@ -16,7 +16,11 @@ import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import type { HarnessArtifactStore } from "../src/artifacts.ts";
+import {
+  FileSystemHarnessArtifactStore,
+  type HarnessArtifactStore,
+} from "../src/artifacts.ts";
+import type { HarnessTranscriptOmissions } from "../src/contracts/transcript-omissions.ts";
 import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
@@ -28,7 +32,7 @@ import type {
   SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
-import { scrubBareFabricIdentifiers } from "../src/tools/run-pattern.ts";
+import { scrubBareFabricIdentifiers } from "../src/fabric-identifier-scrub.ts";
 import { responsesBodyFromChatFixture } from "./support/responses-fixture.ts";
 
 class FakeSandboxRuntime implements SandboxRuntime {
@@ -124,6 +128,19 @@ class RecordingArtifactStore implements HarnessArtifactStore {
   }
 }
 
+/** Filesystem store that also snapshots each transcript after its real write. */
+class RecordingFileArtifactStore extends FileSystemHarnessArtifactStore {
+  readonly transcripts: HarnessTranscriptMessage[][] = [];
+
+  override async persistTranscript(
+    transcript: readonly HarnessTranscriptMessage[],
+  ): Promise<string> {
+    const path = await super.persistTranscript(transcript);
+    this.transcripts.push(structuredClone([...transcript]));
+    return path;
+  }
+}
+
 describe("prompt-loop run_pattern model boundary", () => {
   describe("scrubBareFabricIdentifiers()", () => {
     it("replaces bare tagged hashes, DIDs, and data URIs with the placeholder", () => {
@@ -134,6 +151,8 @@ describe("prompt-loop run_pattern model boundary", () => {
       expect(scrubBareFabricIdentifiers("space did:key:z6MkfffTest denied"))
         .toBe("space [fabric-id] denied");
       expect(scrubBareFabricIdentifiers("at data:application/json;base64,AAAA"))
+        .toBe("at [fabric-id]");
+      expect(scrubBareFabricIdentifiers("at DATA:text/plain;base64,AAAA"))
         .toBe("at [fabric-id]");
     });
 
@@ -549,6 +568,7 @@ describe("prompt-loop run_pattern model boundary", () => {
   });
 
   it("collapses the superseded compile diagnostic when a second run_pattern failure arrives", async () => {
+    const artifactRoot = await Deno.makeTempDir();
     const signer = await Identity.fromPassphrase("run-pattern collapse");
     const storageManager = StorageManager.emulate({ as: signer });
     const fabricRuntime = new Runtime({
@@ -565,10 +585,16 @@ describe("prompt-loop run_pattern model boundary", () => {
     await pieces.synced();
     try {
       const runId = "run-pattern-collapse";
-      const artifactStore = new RecordingArtifactStore(runId);
+      const artifactStore = new RecordingFileArtifactStore({
+        artifactRoot,
+        runId,
+      });
+      // The long missing-module name keeps the raw diagnostic larger than its
+      // collapse marker while contributing a Fabric id for the prior scrub.
       const brokenSource = (missing: string) =>
         [
           "import { computed, pattern } from 'commonfabric';",
+          `import { helper } from './${missing}-${"x".repeat(2_000)}.ts';`,
           "export default pattern<{ n: number }, { doubled: number }>(",
           `  ({ n }) => ({ doubled: computed(() => ${missing}(n)) }),`,
           ");",
@@ -640,7 +666,7 @@ describe("prompt-loop run_pattern model boundary", () => {
         "superseded run_pattern diagnostic collapsed",
       );
       expect(contents[0].message).toContain(
-        "attempt 1, compile-error, 2 errors:",
+        "attempt 1, compile-error, first line:",
       );
       expect(contents[0].messageOriginalLength).toBeGreaterThan(
         contents[0].message.length,
@@ -665,15 +691,50 @@ describe("prompt-loop run_pattern model boundary", () => {
         "superseded run_pattern diagnostic collapsed",
       );
       // Both diagnostics stay whole in the tool-output artifacts.
-      const outputs = artifactStore.toolOutputs
-        .filter((entry) => entry.toolId === "run_pattern")
-        .map((entry) => (entry.output as { message: string }).message);
+      const outputs = await Promise.all(
+        result.runState.toolOutputs
+          .filter((entry) => entry.toolId === "run_pattern")
+          .map(async (entry) =>
+            (JSON.parse(await Deno.readTextFile(entry.artifactPath!)) as {
+              message: string;
+            }).message
+          ),
+      );
       expect(outputs.length).toBe(2);
       expect(outputs[0]).toContain("missing-1");
       expect(outputs[1]).toContain("missing-2");
+
+      const omissions = JSON.parse(
+        await Deno.readTextFile(
+          `${artifactStore.runRoot}/transcript-omissions.json`,
+        ),
+      ) as HarnessTranscriptOmissions;
+      const firstResult = omissions.results.find((entry) =>
+        entry.outputId === result.runState.toolOutputs[0].outputId
+      );
+      expect(firstResult).toEqual({
+        transcriptIndex: 2,
+        toolCallId: "call-1",
+        toolId: "run_pattern",
+        outputId: result.runState.toolOutputs[0].outputId,
+        rules: [{
+          rule: "bare-fabric-identifier-scrub",
+          locations: [{
+            artifactPath: result.runState.toolOutputs[0].artifactPath,
+            jsonPointer: "/message",
+          }],
+        }, {
+          rule: "superseded-run-pattern-diagnostic-collapse",
+          locations: [{
+            artifactPath: result.runState.toolOutputs[0].artifactPath,
+            jsonPointer: "/message",
+          }],
+        }],
+      });
     } finally {
       await fabricRuntime.dispose();
       await storageManager.close();
+      await Deno.remove(artifactRoot, { recursive: true });
     }
   });
 

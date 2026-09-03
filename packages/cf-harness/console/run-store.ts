@@ -11,6 +11,9 @@ import type { HarnessRunState } from "../src/run-state.ts";
 import type { HarnessHandleTable } from "../src/contracts/handle-table.ts";
 import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
 import {
+  isHarnessTranscriptOmissions,
+} from "../src/contracts/transcript-omissions.ts";
+import {
   type ConsoleRunLens,
   consoleRunLens,
   type ConsoleRunSummary,
@@ -22,6 +25,8 @@ import {
   consoleRunHandles,
   consoleRunSteps,
   type ConsoleStep,
+  type ConsoleToolOutputArtifact,
+  type ConsoleTranscriptOmissionsState,
 } from "./steps.ts";
 import {
   type ConsoleGraph,
@@ -66,6 +71,28 @@ const readJson = async <Value>(path: string): Promise<Value | undefined> => {
     // A run still being written, or one whose optional artifact was never
     // produced, is a run to describe from what it does have.
     return undefined;
+  }
+};
+
+/** Reads omission evidence without confusing a bad record with no record. */
+const readTranscriptOmissions = async (
+  path: string,
+): Promise<ConsoleTranscriptOmissionsState> => {
+  let text: string;
+  try {
+    text = await Deno.readTextFile(path);
+  } catch (error) {
+    return error instanceof Deno.errors.NotFound
+      ? { status: "absent" }
+      : { status: "unreadable" };
+  }
+  try {
+    const value: unknown = JSON.parse(text);
+    return isHarnessTranscriptOmissions(value)
+      ? { status: "present", value }
+      : { status: "unreadable" };
+  } catch {
+    return { status: "unreadable" };
   }
 };
 
@@ -121,6 +148,7 @@ export interface ConsoleRunDetail {
 const RUN_ARTIFACT_NAMES = [
   "run-state.json",
   "transcript.json",
+  "transcript-omissions.json",
   "run-report.json",
   "run-manifest.json",
   "policy-snapshot.json",
@@ -241,11 +269,25 @@ export const readConsoleRun = async (
   const transcript =
     await readJson<HarnessTranscriptMessage[]>(join(root, "transcript.json")) ??
       [];
+  const omissions = await readTranscriptOmissions(
+    join(root, "transcript-omissions.json"),
+  );
+  const outputNames = await toolOutputNames(root);
+  const toolOutputs: ConsoleToolOutputArtifact[] = [];
+  for (const name of outputNames) {
+    const artifactPath = join(root, "tool-outputs", name);
+    const value = await readJson<unknown>(artifactPath);
+    if (value !== undefined) {
+      toolOutputs.push({ artifactPath, value });
+    }
+  }
   const steps = consoleRunSteps(
     transcript,
     runState.policyDecisions ?? [],
     runState.policyEvents,
     runState.cfcInvocationContexts ?? [],
+    omissions,
+    toolOutputs,
   );
   // A token minted in an earlier turn resolves to nothing in this run's own
   // table, and an argument naming that cell by link would then read as coming
@@ -281,7 +323,7 @@ export const readConsoleRun = async (
     handles: consoleRunHandles(steps, table, labels),
     cellLabels: consoleCellLabelsSummary(labels),
     artifactNames: await namesPresent(root, RUN_ARTIFACT_NAMES),
-    toolOutputNames: await toolOutputNames(root),
+    toolOutputNames: outputNames,
   };
 };
 

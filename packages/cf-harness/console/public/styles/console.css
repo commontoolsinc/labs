@@ -499,6 +499,55 @@ button[disabled] {
   text-transform: none;
 }
 
+.result-pair {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.withheld-pane {
+  border-left: 3px solid #b54708;
+  padding-left: 0.8rem;
+}
+
+.withheld-pane summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.withheld-location {
+  border-top: 1px solid var(--line);
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+}
+
+.withheld-rule,
+.withheld-pointer {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-wrap: anywhere;
+}
+
+.withheld-rule {
+  color: #b54708;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.withheld-pointer {
+  color: var(--muted);
+  font-size: 0.72rem;
+  margin-top: 0.2rem;
+}
+
+@media (max-width: 900px) {
+  .result-pair {
+    grid-template-columns: 1fr;
+  }
+}
+
 .handles {
   border-collapse: collapse;
   font-size: 0.8rem;

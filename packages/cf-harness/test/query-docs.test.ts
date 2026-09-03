@@ -8,6 +8,8 @@ import { expect } from "@std/expect";
 import { join, normalize } from "@std/path/posix";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import { createFileSystemHarnessArtifactStore } from "../src/artifacts.ts";
+import type { HarnessTranscriptOmissions } from "../src/contracts/transcript-omissions.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import { checkoutDocsCorpusRoots } from "../src/docs-corpus/corpus.ts";
 import { parentToolIdsForBacking } from "../src/contracts/tool-descriptor.ts";
@@ -34,8 +36,10 @@ import {
 } from "../src/docs-corpus/explore.ts";
 import type {
   HarnessModelAttemptDiagnostic,
+  HarnessModelClient,
   HarnessModelUsage,
 } from "../src/model/client.ts";
+import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
 import { queryDocsToolDescriptor } from "../src/tools/query-docs.ts";
 import type {
   QueryDocsToolAnswerOutput,
@@ -318,6 +322,105 @@ describe("query-docs", () => {
       const output = result.output as QueryDocsToolAnswerOutput;
 
       expect(output.exploreRecord).toBeUndefined();
+    });
+
+    it("keeps the explore turn in the artifact and records its model-boundary omission", async () => {
+      const runId = "query-docs-omission-test";
+      const artifactStore = createFileSystemHarnessArtifactStore({
+        artifactRoot: `${root}/artifacts`,
+        runId,
+      });
+      let turn = 0;
+      const modelClient: HarnessModelClient = {
+        providerId: "test-provider",
+        complete: () => {
+          turn += 1;
+          if (turn === 1) {
+            return Promise.resolve({
+              assistant: {
+                role: "assistant" as const,
+                content: "",
+                toolCalls: [{
+                  id: "call-query-docs",
+                  type: "function" as const,
+                  function: {
+                    name: "query_docs",
+                    arguments: JSON.stringify({ question: "glazing" }),
+                  },
+                }],
+              },
+            });
+          }
+          return Promise.resolve({
+            assistant: {
+              role: "assistant" as const,
+              content: turn === 2
+                ? JSON.stringify({ answer: "Dip once.", citations: [] })
+                : "Done.",
+            },
+          });
+        },
+      };
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        artifactStore,
+        runId,
+        model: "test-model",
+        cfcEnforcementMode: "disabled",
+        docsCorpus: {
+          type: "cf-harness.docs-corpus-record",
+          source: "configured",
+          roots: [root],
+        },
+      });
+      const loop = new CfHarnessPromptLoop({
+        engine,
+        modelClient,
+        allowedToolIds: ["query_docs"],
+      });
+
+      const result = await loop.runPrompt({ prompt: "Look up glazing." });
+      const toolMessage = result.transcript.find((message) =>
+        message.role === "tool"
+      );
+      if (toolMessage?.role !== "tool") {
+        throw new Error("expected query_docs tool message");
+      }
+      const modelFacing = JSON.parse(toolMessage.content) as Record<
+        string,
+        unknown
+      >;
+      expect(modelFacing.exploreRecord).toBeUndefined();
+
+      const outputRef = result.runState.toolOutputs[0];
+      if (outputRef?.artifactPath === undefined) {
+        throw new Error("expected persisted query_docs output");
+      }
+      const fullOutput = JSON.parse(
+        await Deno.readTextFile(outputRef.artifactPath),
+      ) as QueryDocsToolAnswerOutput;
+      expect(fullOutput.exploreRecord?.messages).toHaveLength(2);
+      expect(fullOutput.exploreRecord?.messages[1].content).toContain(
+        "Dip the donut once and let it drain.",
+      );
+      const omissions = JSON.parse(
+        await Deno.readTextFile(
+          `${artifactStore.runRoot}/transcript-omissions.json`,
+        ),
+      ) as HarnessTranscriptOmissions;
+      expect(omissions.results).toEqual([{
+        transcriptIndex: 2,
+        toolCallId: "call-query-docs",
+        toolId: "query_docs",
+        outputId: outputRef.outputId,
+        rules: [{
+          rule: "artifact-only",
+          locations: [{
+            artifactPath: outputRef.artifactPath,
+            jsonPointer: "/exploreRecord",
+          }],
+        }],
+      }]);
     });
 
     it("refuses when the run configures no corpus root", async () => {

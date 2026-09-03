@@ -1,7 +1,7 @@
 # cf-harness Current State
 
 Status: current implementation reference\
-Last verified: 2026-08-26
+Last verified: 2026-09-03
 
 The [system map](system-map/README.md) moves in lockstep with this current-state
 reference.
@@ -25,11 +25,14 @@ The runtime has four main boundaries:
    The optional `run_pattern` tool is a distinct trusted-host path whose Fabric
    identity stays outside Docker and whose authority is constrained to one
    configured space.
-4. The artifact store records run state, transcript, reports, capability and
-   policy snapshots, tool outputs, child references, skills provenance, and
-   optional product run manifests. It also records the per-cell CFC labels the
-   run's space holds for the cells the run touched — the one artifact a run does
-   not write out of its own knowledge, read back from the space so a reader
+4. The artifact store records run state, the model-facing transcript, a sibling
+   record of the omission rules and full-artifact locations applied to each tool
+   result, reports, capability and policy snapshots, tool outputs, child
+   references, skills provenance, and optional product run manifests. The
+   omission record carries no withheld values and is read only for retrospective
+   display and audit accounting. The store also records the per-cell CFC labels
+   the run's space holds for the cells the run touched — the one artifact a run
+   does not write out of its own knowledge, read back from the space so a reader
    working from the tree alone can see what a cell is labelled.
 
 The Common Fabric runner or another trusted mediator owns authoritative CFC
@@ -83,7 +86,8 @@ The current package provides:
   tool activity, and an `invalid_tool_call` failure record. Only what the model
   cannot correct — transport, engine invariants, artifact persistence,
   cancellation, the turn cap — ends the run;
-- transcript-based resume and durable run artifacts;
+- transcript-based resume and durable run artifacts, with retrospective omission
+  joins kept outside the transcript and provider context;
 - server-side Responses context compaction with a default threshold derived from
   the model's input budget, an explicit override/disable control, retained
   compaction evidence, and tool-call/result-safe transcript pruning;

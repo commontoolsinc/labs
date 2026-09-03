@@ -20,6 +20,11 @@ import type {
   HarnessSkillResourceReads,
   HarnessSkillScriptExecutions,
 } from "./contracts/skill.ts";
+import {
+  createHarnessTranscriptOmissions,
+  type HarnessTranscriptOmissions,
+  isHarnessTranscriptOmissions,
+} from "./contracts/transcript-omissions.ts";
 import type { HarnessTranscriptMessage } from "./contracts/transcript.ts";
 import type { ToolOutputId } from "./contracts/tool-result.ts";
 import type { HarnessCapabilitySnapshot } from "./diagnostics.ts";
@@ -163,6 +168,30 @@ export class FileSystemHarnessArtifactStore implements HarnessArtifactStore {
   ): Promise<string> {
     await ensureDir(this.runRoot);
     const path = join(this.runRoot, "transcript.json");
+    const omissionsPath = join(this.runRoot, "transcript-omissions.json");
+    let previous: HarnessTranscriptOmissions | undefined;
+    try {
+      const parsed: unknown = JSON.parse(
+        await Deno.readTextFile(omissionsPath),
+      );
+      if (!isHarnessTranscriptOmissions(parsed)) {
+        throw new TypeError(
+          `unsupported transcript omission artifact: ${omissionsPath}`,
+        );
+      }
+      previous = parsed;
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        throw error;
+      }
+    }
+    const omissions = createHarnessTranscriptOmissions(transcript, previous);
+    const hasToolResult = transcript.some((message) => message.role === "tool");
+    if (
+      previous !== undefined || omissions.results.length > 0 || !hasToolResult
+    ) {
+      await writeJsonFile(omissionsPath, omissions);
+    }
     await writeJsonFile(path, transcript);
     return path;
   }
