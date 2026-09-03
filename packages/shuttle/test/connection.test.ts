@@ -171,6 +171,20 @@ describe("connection", () => {
           expect(calls).toBe(2);
         });
 
+        it("hands one failing construction to every ask waiting on it", async () => {
+          let calls = 0;
+          const connection = new HeldConnection(owning(() => {
+            calls += 1;
+            return Promise.reject(new Error("no route to the deployment"));
+          }));
+          const first = connection.pieces();
+          const second = connection.pieces();
+          expect(second).toBe(first);
+          await expect(first).rejects.toThrow("no route to the deployment");
+          await expect(second).rejects.toThrow("no route to the deployment");
+          expect(calls).toBe(1);
+        });
+
         it("returns a rejection where the opener throws rather than throwing at the ask", async () => {
           const connection = new HeldConnection(owning(() => {
             throw new Error("no identity at that path");
@@ -345,6 +359,22 @@ describe("connection", () => {
             "socket teardown failed",
           );
           expect(controller.closed()).toBe(1);
+        });
+
+        it("throws from `pieces()` once a close has failed", async () => {
+          const controller = stubController(
+            new Error("socket teardown failed"),
+          );
+          const connection = new HeldConnection(
+            owning(() => Promise.resolve(controller.pieces)),
+          );
+          await connection.pieces();
+          await expect(connection.dispose()).rejects.toThrow(
+            "socket teardown failed",
+          );
+          expect(() => connection.pieces()).toThrow(
+            "This connection is disposed.",
+          );
         });
 
         it("closes a construction that was still in flight when disposal began", async () => {
