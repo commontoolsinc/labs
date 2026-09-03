@@ -1,13 +1,10 @@
 /**
- * Deployed-topology posture gate for the `bg-piece-service` BINARY
- * (server-execution v2 Phase 7's flip PR — the plan's own obligation, and
- * the P7 independent review's finding 8: the deployed-topology binaries the
- * presets flip were built by CI but exercised ON by no gate).
+ * Deployed-topology posture gate for the `bg-piece-service` binary.
  *
  * What it proves, on the real compiled binary against a real serving
  * toolshed: the binary STARTS, initializes its service (a genuine flow —
  * identity, session open, and the BG-pieces read/watch against the
- * toolshed), and RESOLVES the first-party server-execution default ON (the
+ * toolshed), and resolves the first-party server-execution default (the
  * `productionServer` preset's env-else-`SERVER_EXECUTION_DEFAULT_ENABLED`
  * resolution — exactly the path the flip changes, which explicit-env lanes
  * never exercise). The binary has no HTTP surface, so its startup posture
@@ -25,6 +22,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { defer } from "@commonfabric/utils/defer";
+import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 
 const BIN = Deno.env.get("BG_PIECE_SERVICE_BIN");
 const API_URL = Deno.env.get("API_URL");
@@ -73,7 +71,7 @@ describe(
   "bg-piece-service deployed-topology posture gate",
   { ignore: !BIN || !API_URL },
   () => {
-    it("the binary starts against the serving toolshed, resolves the default posture ON, and stops cleanly", async () => {
+    it("starts against toolshed, resolves the default posture, and stops cleanly", async () => {
       // The gate exercises the DEFAULT resolution (unset flag → the
       // first-party constant). An inherited explicit value would make it
       // vacuously test the env path instead — refuse to run that way.
@@ -145,7 +143,7 @@ describe(
         expect(
           postures,
           `expected exactly one posture line in:\n${lines.join("\n")}`,
-        ).toEqual(["ON"]);
+        ).toEqual([SERVER_EXECUTION_DEFAULT_ENABLED ? "ON" : "OFF"]);
       } finally {
         // Clean shutdown is part of the gate: the SIGTERM handler stops the
         // service and exits 0.

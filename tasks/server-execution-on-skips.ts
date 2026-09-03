@@ -2,19 +2,13 @@
 
 // The EXPLICIT per-phase skip lists of the server-execution v2 ON arm
 // (docs/specs/server-side-execution/testing.md §2): in CI the integration
-// suites run twice — the DEFAULT lanes (flag unset = the first-party
-// default, ON since the Phase 7 flip: these lanes ARE the ON arm and
-// carry this list) and the explicit-`EXPERIMENTAL_SERVER_EXECUTION=false`
-// OFF regression-guard lanes (the toolshed server OFF, the test processes
-// OFF, AND the binary's baked browser shell OFF-built —
-// `build-toolshed-off`; kept until the post-soak removal PR). The ON arm
-// may skip a test only by listing it here, with the plan phase whose
-// not-yet-landed surface it exercises and a reason. Never by silent
+// suites run twice — a default role (flag unset = the first-party default)
+// and an opposite role (the inverse explicitly selected in the server, test
+// processes, and baked browser shell). Whichever role resolves ON carries
+// this list. The ON arm may skip a test only by listing it here, with the plan
+// phase whose not-yet-landed surface it exercises and a reason. Never by silent
 // filtering: the CI step prints every skip from this file, and an empty
-// list means the ON arm runs the full suite — the OFF guard never skips.
-// The flip PR landed with this list EMPTY (its stated precondition);
-// before it the roles were inverted (default = OFF, explicit-`true` = the
-// ON arm on `build-toolshed-on`).
+// list means the ON arm runs the full suite — the OFF arm never skips.
 //
 // An entry retires when its phase lands (docs/plans/server-execution-v2.md);
 // a file listed here that no longer exists fails the run, so the lists

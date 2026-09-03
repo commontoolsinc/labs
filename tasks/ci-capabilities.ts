@@ -6,10 +6,10 @@
  * once, and runs the batches inside it. Naming them is what lets two ways
  * of providing the same thing coexist: `toolshed` runs the default posture
  * from source, which is cheap enough for a pull request, while
- * `toolshed-baked-off` restores or builds a binary because the explicit-OFF
- * server-execution posture is baked into the browser shell inside it and a
- * source run cannot reproduce that. A suite says which it needs and neither
- * the workflow nor the other suites know the difference.
+ * `toolshed-baked-opposite` restores or builds a binary because the posture
+ * opposite the first-party default is baked into the browser shell inside it
+ * and a source run cannot reproduce that. A suite says which it needs and
+ * neither the workflow nor the other suites know the difference.
  *
  * Every capability is idempotent: opening one that is already open is the
  * same as not opening it. The lane runner relies on that when a batch it
@@ -17,6 +17,7 @@
  */
 
 import * as path from "@std/path";
+import { serverExecutionCiLane } from "./server-execution-ci.ts";
 
 /** Every piece of setup a suite may ask for. */
 export type CapabilityId =
@@ -26,7 +27,7 @@ export type CapabilityId =
   | "browser"
   | "git-history"
   | "toolshed"
-  | "toolshed-baked-off"
+  | "toolshed-baked-opposite"
   | "bg-piece-service-binary"
   | "cf"
   | "local-dev-servers"
@@ -379,18 +380,24 @@ const toolshed: Capability = {
 };
 
 /**
- * The same server with server execution explicitly off, from a compiled
- * binary. The OFF posture is a compile-time define baked into the browser
- * shell inside the binary, so a source run cannot reproduce it. The lane's
- * workflow restores the binary from the Actions cache before the runner starts;
- * building it here is what happens when that cache missed.
+ * The same server with the posture opposite the first-party default, from a
+ * compiled binary. The posture is a compile-time define baked into the browser
+ * shell, so a source run cannot reproduce it. The lane's workflow restores the
+ * binary from the Actions cache before the runner starts; building it here is
+ * what happens when that cache missed.
  */
-const toolshedBakedOff: Capability = {
-  id: "toolshed-baked-off",
-  description: "a Toolshed server with server execution OFF in its baked shell",
+const toolshedBakedOpposite: Capability = {
+  id: "toolshed-baked-opposite",
+  description: "a Toolshed server with the opposite posture in its baked shell",
   needs: ["deno"],
   async open(context) {
-    const binary = path.join(context.root, BINARY_CACHE_DIR, "toolshed-off");
+    const opposite = serverExecutionCiLane("opposite");
+    const experimentalValue = String(opposite.enabled);
+    const binary = path.join(
+      context.root,
+      BINARY_CACHE_DIR,
+      `toolshed-baked-${experimentalValue}`,
+    );
     if (!context.dryRun) {
       let present = true;
       try {
@@ -410,7 +417,7 @@ const toolshedBakedOff: Capability = {
             cwd: context.root,
             env: {
               ...Deno.env.toObject(),
-              EXPERIMENTAL_SERVER_EXECUTION: "false",
+              EXPERIMENTAL_SERVER_EXECUTION: experimentalValue,
             },
           },
         );
@@ -425,7 +432,7 @@ const toolshedBakedOff: Capability = {
     return await startToolshed(context, {
       command: [binary],
       cwd: context.root,
-      env: { EXPERIMENTAL_SERVER_EXECUTION: "false" },
+      env: { EXPERIMENTAL_SERVER_EXECUTION: experimentalValue },
     });
   },
 };
@@ -532,7 +539,7 @@ export const CAPABILITIES: ReadonlyMap<CapabilityId, Capability> = new Map(
     browser,
     gitHistory,
     toolshed,
-    toolshedBakedOff,
+    toolshedBakedOpposite,
     bgPieceServiceBinary,
     cf,
     localDevServers,

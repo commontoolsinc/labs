@@ -21,7 +21,7 @@ in the same change.
 flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-08-28. Each flag's section carries the date its status
+**Last reviewed:** 2026-09-02. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -35,7 +35,7 @@ was last checked against the code.
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
 | [`readerSchemaPrecedence`](#readerschemaprecedence)                         | `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` env, or `RuntimeOptions.experimental`                                                                   | on                                                                                   | Robin McCollum (#6338)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
-| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **on** (`SERVER_EXECUTION_DEFAULT_ENABLED = true` — the ONE first-party default, FLIPPED by the flip PR 2026-08-28; explicit `false` = the OFF arm / rollback lever) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | soak on main (started at the flip PR's merge), then delete the flag and the OFF path (the split-out post-soak PR, which also removes the OFF guard lanes) | Phases 1–7 landed; the flip PR made ON the default everywhere the deployed-topology presets reach; OFF stays fully selectable through the soak and is CI-guarded on an OFF-built binary |
+| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **on** (`SERVER_EXECUTION_DEFAULT_ENABLED = true`; explicit `false` = rollback) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | soak on main, then delete the flag and OFF path | Phases 1–7 landed; stable `default`/`opposite` CI roles keep both postures guarded and make a default flip data-only |
 | [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-explicit`                                                                   | Bernhard Seefeld (#3263)                              | tighten default toward `enforce-strict`                                                                                                                                                                                           | active; ladder is permanent                                                     |
 | [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4011)                              | move toward `persist`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcWriteFloor`](#cfcwritefloor)                                           | `RuntimeOptions.cfcWriteFloor`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4479)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
@@ -380,10 +380,13 @@ server](#clients-that-are-not-built-alongside-their-server).
   `EXPERIMENTAL_SERVER_EXECUTION=false` (or `experimental.serverExecution:
   false`, or the shell define `"false"`) selects the OFF arm — THE
   ROLLBACK LEVER through the soak — and an explicit `true` the ON arm,
-  regardless of the constant. Un-flipping the default is reverting the
-  flip PR (repo convention: a flip is reverted by reverting the PR that
-  only flips — it carries the constant, the absolute pin, the CI lane
-  roles + probes, the deployed-topology gates, and this entry together).
+  regardless of the constant. CI resolves stable `default` and `opposite`
+  roles through `tasks/server-execution-ci.ts`: `default` leaves the flag
+  unset, while `opposite` explicitly selects the inverse and bakes that same
+  value into its toolshed shell. Therefore changing the default requires only
+  changing `SERVER_EXECUTION_DEFAULT_ENABLED` and the current-status prose;
+  workflow job topology, probes, skip placement, coverage ownership, and test
+  record variants follow automatically.
   Single-process harnesses do not
   read the constant: a bare `new Runtime` and the `patternTest` /
   `localDev` / `unitTest` presets have no serving host, so they resolve the
@@ -393,20 +396,25 @@ server](#clients-that-are-not-built-alongside-their-server).
   the lane-posture item the topics measurement report recorded for the
   flip decision); the ON posture's unit coverage sets the
   flag explicitly (the `executor-*` suites) and its integration coverage
-  is the DEFAULT CI lanes. In CI (testing.md §2) the DEFAULT lanes are
-  the ON posture (probed: serving loop present, shell define unset), the
-  explicit-`false` lanes on an OFF-BUILT binary (`build-toolshed-off`;
-  the shell define is baked at build) are the OFF regression guard, the
+  is the DEFAULT CI lanes. In CI (testing.md §2), `default` is currently ON
+  and `opposite` is currently OFF. Both are probed through the shared role
+  resolver; the opposite lane uses `build-toolshed-opposite`, whose shell
+  define is baked from the resolved inverse. The
   `deployed-topology-gate` job exercises the real `bg-piece-service`
   binary and cf-harness's fabric session at the default resolution, and
   the CLI lanes probe the server their `cf` adopts its posture from —
-  with ON-arm skips only through `tasks/server-execution-on-skips.ts`,
-  printed loudly (EMPTY at the flip, its stated precondition). End
+  with ON-arm skips and OFF-arm authored coverage following the resolved arm.
+  Skips are only through `tasks/server-execution-on-skips.ts`, printed loudly
+  (EMPTY at the flip, its stated precondition). End
   state: after a soak on main (which started at the flip PR's merge) the
   flag retires and the OFF code path is removed — a separate post-soak
-  PR (the plan's Phase 7 task 2, split from the flip because stacked PRs
-  cannot soak; it also removes the OFF guard lanes and
-  `build-toolshed-off`).
+  PR (the plan's Phase 7 task 2; it also removes the opposite guard lanes and
+  `build-toolshed-opposite`).
+- **Status on 2026-09-02 (toggle hygiene).** The default remains ON and runtime
+  behavior is unchanged. CI now expresses the two postures as stable roles
+  derived from the one default constant. A rollback-default PR can therefore
+  be a constant change plus its status documentation; it does not duplicate or
+  mechanically invert the workflow.
 - **Status on 2026-08-28 (the FLIP).** The flip PR set the constant `true`
   after every ordered gate was met on main (the ON-skip registry EMPTY
   across all four suites — the ruled-3b-close lift #6528; OW31's ruled
@@ -414,7 +422,7 @@ server](#clients-that-are-not-built-alongside-their-server).
   OW45–OW53 CLOSED; the OW38(ii) performance bar RULED met by the owner
   on the topics measurement). It carried the lane-role swap (default
   lanes = the ON arm, probed; explicit-`false` lanes = the OFF guard on
-  `build-toolshed-off`), the deployed-topology gates (the
+  the then-named `build-toolshed-off`), the deployed-topology gates (the
   `bg-piece-service` binary and cf-harness's fabric session at the
   default resolution; the CLI lanes probed as `cf`'s gate;
   `PiecesController` hosts riding the default lanes), and the
@@ -456,9 +464,8 @@ server](#clients-that-are-not-built-alongside-their-server).
   (effects + outbox) remains.
 - **Path to removal.** The flip PR (the constant → `true`) after the
   ordered gates above; soak the default on main; then the post-soak PR
-  retires the flag, removes the OFF path (and the OFF regression-guard CI
-  lanes + the OFF-built binary the flip PR introduces by inverting
-  `build-toolshed-on`), and closes out this entry.
+  retires the flag, removes the OFF path (and the opposite regression-guard
+  lanes + `build-toolshed-opposite`), and closes out this entry.
 
 ---
 

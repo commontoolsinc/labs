@@ -1,6 +1,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import { SKIP_LIST_VARIABLE } from "@commonfabric/test-support/records";
+import { serverExecutionCiLane } from "../server-execution-ci.ts";
 import { loadPatternSuites } from "./patterns.ts";
 import { loadPackageIntegrationSuites } from "./package-integration.ts";
 import type { Suite } from "./suite.ts";
@@ -29,14 +30,42 @@ describe("the pattern and package suites", () => {
     expect(invocation!.junit?.[0]?.scope).toBe("patterns");
   });
 
-  it("runs the server-execution OFF arm with the define set", async () => {
-    const suite = byId("pattern-integration-off");
+  it("runs the opposite arm with an explicit define and history", async () => {
+    const opposite = serverExecutionCiLane("opposite");
+    const suite = byId("pattern-integration-opposite");
     const [invocation] = await suite.command(
       [{ unit: suite.units[0]!, skip: [] }],
       { root, outputDir: await outputDir() },
     );
-    expect(invocation!.env?.EXPERIMENTAL_SERVER_EXECUTION).toBe("false");
-    expect(suite.variant).toBe("server-execution-off");
+    expect(invocation!.env?.EXPERIMENTAL_SERVER_EXECUTION).toBe(
+      String(opposite.enabled),
+    );
+    expect(suite.variant).toBe(opposite.recordVariant);
+  });
+
+  it("moves the test surfaces with the roles after a default flip", async () => {
+    const defaultEnabled = !serverExecutionCiLane("default").enabled;
+    const opposite = serverExecutionCiLane("opposite", defaultEnabled);
+    const flipped = [
+      ...await loadPatternSuites(root, defaultEnabled),
+      ...await loadPackageIntegrationSuites(root, defaultEnabled),
+    ];
+    for (
+      const id of [
+        "pattern-integration-opposite",
+        "package-integration-opposite",
+      ]
+    ) {
+      const suite = flipped.find((candidate) => candidate.id === id)!;
+      expect(suite.variant).toBe(opposite.recordVariant);
+      const [invocation] = await suite.command(
+        [{ unit: suite.units[0]!, skip: [] }],
+        { root, outputDir: await outputDir() },
+      );
+      expect(invocation!.env?.EXPERIMENTAL_SERVER_EXECUTION).toBe(
+        String(opposite.enabled),
+      );
+    }
   });
 
   it("names a skip list only where a leaf inside a unit is skipped", async () => {
@@ -185,10 +214,19 @@ describe("enumerating a tree that cannot be read", () => {
     // Passing over a missing directory is right; passing over one that
     // cannot be read would take tests out of the topology without a
     // word, and the drift guard would then report success over a
-    // shorter list than the tree holds.
-    const root = await obstructed("packages/patterns/integration");
-    await expect(loadPatternSuites(root)).rejects.toThrow();
-    await Deno.remove(root, { recursive: true });
+    // shorter list than the tree holds. Both readers are held to it: the
+    // integration directory is read flat and the pattern trees are
+    // walked, and each has its own rethrow.
+    for (
+      const directory of [
+        "packages/patterns/integration",
+        "packages/connectors/agents/debug-view",
+      ]
+    ) {
+      const root = await obstructed(directory);
+      await expect(loadPatternSuites(root)).rejects.toThrow();
+      await Deno.remove(root, { recursive: true });
+    }
   });
 
   it("raises for a package integration directory it cannot read", async () => {
