@@ -2516,7 +2516,12 @@ export function wish(
             return;
           }
           if (disposition === "retry") continue;
-          await commitPatternErrorUI(resultCell, toCompactDebugString(error));
+          // The error's message can be an inconsistency report whose tail is
+          // the difference it reports, so a string is rendered whole.
+          await commitPatternErrorUI(
+            resultCell,
+            toCompactDebugString(error, { maxStringLength: Infinity }),
+          );
           return;
         }
         // Under a serving wave, commit() resolving ok is not durability:

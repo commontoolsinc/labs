@@ -623,13 +623,16 @@ function newConsoleDebugReplacer(): (value: any) => any {
 
 /**
  * Converts one of a pattern's `console.*` arguments into the value that crosses
- * to the main thread.
+ * to the main thread. A string crosses as whole as the conversion allows:
+ * what a pattern logs is often a stack, a fetched body, or a model's output,
+ * whose tail is the point.
  *
  * Exported for testing.
  */
 export function toConsoleDebugValue(value: unknown): FabricValue {
   return toStructuredDebugValue(value, {
     maxDepth: MAX_CONSOLE_DEBUG_DEPTH,
+    maxStringLength: Infinity,
     replacer: newConsoleDebugReplacer(),
   });
 }
