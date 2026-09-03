@@ -15,13 +15,18 @@
  * What a recorded posture IS, is the other thing to hold on to. The harness
  * writes its record before the session's runtime exists, so the record is a
  * projection — what the run expected to be at — and it says so
- * (`provenance`). A finding here therefore reports on a declaration, and every
- * message says which it read: a projected record establishes nothing about
- * what a runtime honored, and an audit that let one read as an attestation
- * would be the very confusion it exists to catch.
+ * (`provenance`); a delegated child, which runs on the session its parent
+ * built, carries that parent's record and says that instead. A finding here
+ * therefore reports on a declaration, and every message says which it read: a
+ * projected record establishes nothing about what a runtime honored, and an
+ * audit that let one read as an attestation would be the very confusion it
+ * exists to catch.
  */
 
-import type { CfcPostureReport } from "@commonfabric/runner/cfc";
+import type {
+  CfcPostureProvenance,
+  CfcPostureReport,
+} from "@commonfabric/runner/cfc";
 
 import type { HarnessCfcPolicySnapshot } from "../../src/contracts/cfc-policy-snapshot.ts";
 import type { HarnessFabricSessionCfcPosture } from "../../src/run-state.ts";
@@ -114,13 +119,21 @@ const tupleOf = (
  *
  * A projected record is the run's claim about a runtime that had not been
  * constructed when the claim was written; a resolved one is a reading of a
- * runtime that had. The words go in every message rather than in a footnote,
- * because a reader acting on the finding is deciding what the run establishes.
+ * runtime that had; an inherited one is the record of the run whose session
+ * this one shares, and establishes what that run's record establishes. The
+ * words go in every message rather than in a footnote, because a reader
+ * acting on the finding is deciding what the run establishes.
  */
-const readAs = (record: CfcPostureReport): string =>
-  record.provenance === "projected"
-    ? "recorded posture (projected before the session runtime was constructed)"
-    : "resolved posture";
+const READ_AS: Record<CfcPostureProvenance, string> = {
+  projected:
+    "recorded posture (projected before the session runtime was constructed)",
+  inherited:
+    "inherited posture (the record of the run whose fabric session this run shares)",
+  resolved: "resolved posture",
+};
+
+/** How a finding names the record it read. */
+const readAs = (record: CfcPostureReport): string => READ_AS[record.provenance];
 
 const renderTuple = (tuple: MatrixDialTuple): string =>
   `${tuple.enforcementMode} / flow ${tuple.flowLabels} / floor ${tuple.writeFloor} / trigger ${tuple.triggerReadGating} / policy ${tuple.policyEvaluation}`;

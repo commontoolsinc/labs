@@ -1904,15 +1904,20 @@ unreadable channel is not an empty one.
 
 A posture record carries its own `provenance`. `resolved` was read off a
 constructed Runtime — an attestation. `projected` was computed from the options
-a runtime will be built with, before it exists — a prediction. The harness
-records `projected`: its fabric session's runtime is built lazily on the first
-`run_pattern`, may never be built at all, and a host may supply its own session
-factory. So AUD-13, AUD-14 and AUD-15 over harness artifacts report on what a
-run **declared it would be at**, and every one of their messages says so. Only
-AUD-17, reading `/api/meta`, weighs an attestation. Re-stamping the run state's
-record from the real runtime once one exists is what would make the harness's
-records attestations too; until then the field is what stops the audit reading
-one for the other.
+a runtime will be built with, before it exists — a prediction. `inherited` is
+the record of the run whose fabric session this run shares, and establishes what
+that run's record establishes. A parent run records `projected`: its fabric
+session's runtime is built lazily on the first `run_pattern` and may never be
+built at all. A delegated child runs on the session its parent built, so it
+records that parent's record as `inherited` — which is what gives AUD-13 and
+AUD-14 something to read on the run where `run_pattern` actually runs. A host
+that injects a session the harness knows nothing else about supplies no record,
+and its run publishes none. So AUD-13, AUD-14 and AUD-15 over harness artifacts
+report on what a run **declared it would be at**, and every one of their
+messages says so. Only AUD-17, reading `/api/meta`, weighs an attestation.
+Re-stamping the run state's record from the real runtime once one exists is what
+would make the harness's records attestations too; until then the field is what
+stops the audit reading one for the other.
 
 The matrix itself is data: [audit/matrix.ts](audit/matrix.ts) holds the
 conforming states and the ordering rules of

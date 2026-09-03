@@ -25,9 +25,11 @@
  * two are not interchangeable. A projection is a claim about a path that has
  * not run, and an artifact asserting a posture the path did not honor is
  * exactly what an audit of these records exists to catch, so the record must
- * not be able to pass one off as the other. The two entry points below are the
- * only ways this code builds one, and each stamps its own provenance from how
- * it was called rather than from an argument.
+ * not be able to pass one off as the other. The three entry points below are
+ * the only ways this code builds one, and each stamps its own provenance from
+ * how it was called rather than from an argument. The third is a host that
+ * runs on another host's runtime and republishes that host's record, which is
+ * a third thing again: it neither read a runtime nor predicted one.
  *
  * What that buys and what it does not: no production path can mislabel a
  * record, and a reader of one built here can trust the stamp. It is NOT an
@@ -69,8 +71,12 @@ import type {
  * - `projected` — computed from the options a runtime WILL be constructed
  *   with, before it exists. A prediction: this is what the surface expects,
  *   and nothing has yet honored it.
+ * - `inherited` — the record of the host whose runtime this one is also
+ *   running on. Neither an attestation nor a prediction of its own: the
+ *   values are that host's, and what they establish is what its own record
+ *   establishes, which a reader gets by reading that record's provenance.
  */
-export type CfcPostureProvenance = "resolved" | "projected";
+export type CfcPostureProvenance = "resolved" | "projected" | "inherited";
 
 /**
  * One dial's resolved rung, with what that rung decides on.
@@ -118,7 +124,10 @@ export interface CfcPostureDeviation {
 
 /** What a runtime is enforcing, as one record. */
 export interface CfcPostureReport {
-  /** Whether this record attests a constructed runtime or predicts one. */
+  /**
+   * Whether this record attests a constructed runtime, predicts one, or
+   * carries the record of the host whose runtime this one runs on.
+   */
   readonly provenance: CfcPostureProvenance;
 
   readonly enforcementMode: CfcDialReport;
@@ -417,3 +426,25 @@ export const projectedCfcPostureReport = (
     cfcSinkMaxConfidentiality: options.cfcSinkMaxConfidentiality ??
       DEFAULT_SINK_MAX_CONFIDENTIALITY,
   });
+
+/**
+ * The record for a host executing on another host's runtime: `parent`'s
+ * record, restamped `inherited`.
+ *
+ * A host that neither constructed a runtime nor holds the options one will be
+ * constructed from has a third relationship to the posture — it is running on
+ * someone else's runtime, and that runtime's posture is its own. Recomputing
+ * the values from the parent's configuration would be a second reading that
+ * can disagree with the first; publishing nothing would leave a run whose
+ * posture is known reading as one whose posture is not.
+ *
+ * The values are carried across whatever `parent`'s own provenance is, so a
+ * parent record that becomes an attestation makes the inherited record carry
+ * an attested runtime's values without this code changing. What the stamp
+ * says is where the values came from, never how strong they are: an inherited
+ * record establishes exactly what the parent's record establishes, and a
+ * reader who needs to know which reads that record.
+ */
+export const inheritedCfcPostureReport = (
+  parent: CfcPostureReport,
+): CfcPostureReport => ({ ...parent, provenance: "inherited" });

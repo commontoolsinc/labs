@@ -4248,7 +4248,20 @@ export class CfHarnessPromptLoop {
       // factory alone reads as a run with an index and no space to run what
       // the index returns, which is a combination the config layer refuses.
       ...(this.engine.fabricSessionFactory !== undefined
-        ? { fabricSessionFactory: this.engine.fabricSessionFactory }
+        ? {
+          fabricSessionFactory: this.engine.fabricSessionFactory,
+          // And the posture record of that session, which the child publishes
+          // as inherited. The child is where `run_pattern` runs, so it is the
+          // run whose sink registry an audit most needs; recording nothing
+          // there leaves the two posture checks inconclusive on the run that
+          // actually exercises the sinks (CT-2205).
+          ...(parentRunState.fabricSessionCfc?.record !== undefined
+            ? {
+              inheritedFabricSessionPosture:
+                parentRunState.fabricSessionCfc.record,
+            }
+            : {}),
+        }
         : {}),
       ...(this.engine.config.fabricSession !== undefined
         ? { fabricSession: this.engine.config.fabricSession }

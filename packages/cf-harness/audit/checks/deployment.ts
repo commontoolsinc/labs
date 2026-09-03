@@ -331,18 +331,19 @@ const toolshedPosture = (audit: DeploymentAudit): CheckResult | undefined => {
     );
   }
   if (meta.cfc.provenance !== "resolved") {
-    // A deployment publishing a projection has published what it expects to
-    // be at rather than what it is at, and a client adopting it would be
-    // adopting a prediction. `/api/meta` is served from a constructed
-    // Runtime, so this cannot be a shape the route produces — it is a
-    // deployment answering the question with the wrong kind of record.
+    // A deployment publishing anything but an attestation has published what
+    // it expects to be at, or what some other host is at, rather than what it
+    // is at, and a client adopting it would be adopting one of those.
+    // `/api/meta` is served from a constructed Runtime, so this cannot be a
+    // shape the route produces — it is a deployment answering the question
+    // with the wrong kind of record.
     return corpusResult(
       audit,
       "AUD-17",
       "toolshed posture",
       citations,
       "fail",
-      `\`${meta.url}\` publishes a projected posture, which is what a runtime is expected to resolve rather than what one attested`,
+      `\`${meta.url}\` publishes a \`${meta.cfc.provenance}\` posture, which is what a runtime is expected to resolve or what another host resolved, rather than what this one attested`,
       [{
         artifact: "/api/meta",
         pointer: "cfc.provenance",
@@ -407,28 +408,41 @@ const toolshedPosture = (audit: DeploymentAudit): CheckResult | undefined => {
 // artifacts do not yet carry.
 //
 
-/** The distinct posture records the corpus recorded, keyed by their JSON. */
-const distinctRecords = (
+/**
+ * The distinct postures the corpus recorded, each with the runs that recorded
+ * it, keyed by the posture's JSON.
+ *
+ * The key leaves out the provenance, which says how a run came by its record
+ * rather than what the posture is. A delegated child runs on its parent's
+ * session and republishes its parent's record as `inherited`, so keying on
+ * the stamp would count one posture as two and report a divergence where one
+ * runtime served both.
+ */
+const distinctPostures = (
   audit: DeploymentAudit,
-): ReadonlyMap<string, readonly string[]> => {
-  const byRecord = new Map<string, string[]>();
+): ReadonlyMap<string, { record: CfcPostureReport; runIds: string[] }> => {
+  const byPosture = new Map<
+    string,
+    { record: CfcPostureReport; runIds: string[] }
+  >();
   for (const run of everyRun(audit)) {
     const record = recordOf(run);
     if (record === undefined) continue;
-    const key = JSON.stringify(record);
-    const held = byRecord.get(key);
+    const { provenance: _provenance, ...posture } = record;
+    const key = JSON.stringify(posture);
+    const held = byPosture.get(key);
     if (held === undefined) {
-      byRecord.set(key, [run.runId]);
+      byPosture.set(key, { record, runIds: [run.runId] });
     } else {
-      held.push(run.runId);
+      held.runIds.push(run.runId);
     }
   }
-  return byRecord;
+  return byPosture;
 };
 
 const postureUniformity = (audit: DeploymentAudit): CheckResult => {
   const citations = extendsClause("AH-CFC-14", "AH-CFC-15");
-  const records = distinctRecords(audit);
+  const records = distinctPostures(audit);
   if (records.size === 0) {
     return corpusResult(
       audit,
@@ -439,17 +453,21 @@ const postureUniformity = (audit: DeploymentAudit): CheckResult => {
       "no run of this corpus recorded a posture record, so there was nothing to compare",
     );
   }
-  const evidence: CheckEvidence[] = [...records].map(([key, runIds]) => ({
-    detail: `${runIds.length} run(s) — ${runIds.join(", ")} — at ${
-      (JSON.parse(key) as CfcPostureReport).enforcementMode.rung
-    } / flow ${(JSON.parse(key) as CfcPostureReport).flowLabels.rung}`,
+  const evidence: CheckEvidence[] = [...records.values()].map((
+    { record, runIds },
+  ) => ({
+    detail: `${runIds.length} run(s) — ${
+      runIds.join(", ")
+    } — at ${record.enforcementMode.rung} / flow ${record.flowLabels.rung}`,
   }));
-  const mismatched = audit.expected === undefined ? [] : [...records].flatMap((
-    [key, runIds],
-  ) =>
-    postureMismatches(audit.expected!, JSON.parse(key) as CfcPostureReport)
-      .map((mismatch) => ({ runIds, mismatch }))
-  );
+  const mismatched = audit.expected === undefined
+    ? []
+    : [...records.values()].flatMap(({ record, runIds }) =>
+      postureMismatches(audit.expected!, record).map((mismatch) => ({
+        runIds,
+        mismatch,
+      }))
+    );
   if (mismatched.length > 0) {
     return corpusResult(
       audit,

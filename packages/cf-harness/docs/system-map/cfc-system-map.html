@@ -669,7 +669,7 @@
     // ------------------------------------------------------------------ layout data
     // The state of this repository the map describes. Bump both when the
     // map is re-verified; the stamp is drawn in the canvas's top-left corner.
-    const SNAPSHOT = { date: "2026-09-03", sha: "871c7cc7ed" };
+    const SNAPSHOT = { date: "2026-09-03", sha: "c5a138a11b" };
     const W = 2760, H = 1840;
     const bands = [
       {
@@ -2008,9 +2008,6 @@
           "what the audit found",
           6754,
         ]],
-        close: [
-          "Record the Fabric-session posture in child run state so AUD-13 and AUD-14 can reach a conclusive verdict (CT-2205).",
-        ],
       },
     };
     const GD = {
@@ -2220,7 +2217,7 @@
         plan:
           "CT-2195 re-stamps the harness's projected posture from the real Runtime once the Fabric session exists.",
         body:
-          `<p>The harness records its Fabric-session posture before the lazy Runtime exists. The record says <code>provenance: projected</code>, so it is an honest prediction rather than an attestation, and an injected session factory suppresses it entirely. <b>Open:</b> a run that constructs the session still never replaces that prediction with the resolved Runtime's posture.</p>`,
+          `<p>The harness records its Fabric-session posture before the lazy Runtime exists. The record says <code>provenance: projected</code>, so it is an honest prediction rather than an attestation, a delegated child, which runs on its parent's session, carries the parent's record stamped <code>inherited</code>, and an injected session the harness was given no record for suppresses it entirely. <b>Open:</b> a run that constructs the session still never replaces that prediction with the resolved Runtime's posture.</p>`,
         where: ["policy", "console", "artifacts"],
       },
       t15: {
@@ -2474,7 +2471,7 @@
             f: ["g_render", "e_render", "weaver", "person"],
             sel: "g_render",
             h: "The person sees values",
-            t: "Display is a release. The render ceiling decides what the panel shows to the person who owns the data. Acceptance: over the root and child, the checker reports FAIL 0 WARN 3 INCONCLUSIVE 2. On the root, AUD-2 warns that no tool side effect reached the substrate, AUD-9 warns that no invocation context was retained, and AUD-14 warns that its LLM-class sinks are ungated (threat t13). AUD-13 and AUD-14 are inconclusive on the child because its run state records no Fabric-session posture record; CT-2205 is what stands between this run and a conclusive audit.",
+            t: "Display is a release. The render ceiling decides what the panel shows to the person who owns the data. On the root, AUD-2 warns that no tool side effect reached the substrate, AUD-9 warns that no invocation context was retained, and AUD-14 warns that its LLM-class sinks are ungated (threat t13). The child carries the parent's posture record, stamped <code>inherited</code> because it runs on the parent's session, so AUD-13 grades its dials and AUD-14 warns on the same LLM-class gap.",
           },
         ],
       },

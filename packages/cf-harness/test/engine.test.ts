@@ -278,6 +278,35 @@ Deno.test("CfHarnessEngine publishes no posture record when a session factory ov
   });
 });
 
+Deno.test("CfHarnessEngine records an inherited posture record when the injected session is one it was given the record for", () => {
+  // The delegating parent's shape: the child runs on the session its parent
+  // built, so its posture is that session's rather than unknown, and the
+  // record says where it came from.
+  const posturedSession = {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+    cfcPosture: "max-enforcement",
+  } as const;
+  const parentRecord = recordFor(posturedSession);
+  const child = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: posturedSession,
+    fabricSessionFactory: () =>
+      Promise.reject(new Error("never built in this test")),
+    inheritedFabricSessionPosture: parentRecord,
+  });
+
+  assertEquals(child.getRunState().fabricSessionCfc, {
+    enforcementMode: "enforce-explicit",
+    enforcementModeSource: "preset-pin",
+    flowLabels: "persist",
+    flowLabelsSource: "posture",
+    posture: "max-enforcement",
+    record: { ...parentRecord, provenance: "inherited" },
+  });
+});
+
 Deno.test("CfHarnessEngine refuses to resume a recorded record under an overriding session factory", () => {
   // The recorded record describes a runtime this resume is not building, so
   // carrying it forward would publish a posture the executing session may not
