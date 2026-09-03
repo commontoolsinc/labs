@@ -29,7 +29,7 @@
  * position would have left the character ordinary, and is the price of a
  * printer that needs to know nothing about where its output lands.
  *
- * The characters an operand spells an address with are not here. Those are
+ * The characters an operand writes an address with are not here. Those are
  * read inside a token by the reference grammar rather than by the split, and
  * which of them a printed value has to carry is the question `ls` settles
  * (`docs/plans/shuttle/build-sequence.md`).
