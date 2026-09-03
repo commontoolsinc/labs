@@ -43,7 +43,7 @@ went through CI at all.)
 
 *Phase 7's flip mechanism (landed dark 2026-08-16, flipped ON 2026-08-28,
 rolled back 2026-09-03 — the registry's `serverExecution` entry in
-[EXPERIMENTAL_OPTIONS.md](../development/EXPERIMENTAL_OPTIONS.md#serverexecution) carries the dated
+[EXPERIMENTAL_OPTIONS.md](../../development/EXPERIMENTAL_OPTIONS.md#serverexecution) carries the dated
 history and its summary table states the current value of
 `SERVER_EXECUTION_DEFAULT_ENABLED`). CI names the two exercised postures by
 stable role rather than by the current value:
