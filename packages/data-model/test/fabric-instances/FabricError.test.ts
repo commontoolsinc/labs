@@ -31,6 +31,7 @@ import { CODEC } from "@/codec-interface/interface.ts";
 import { CODEC_TYPE_TAGS } from "@/codec-interface/codec-type-tags.ts";
 import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
+import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import {
   deepFreeze,
@@ -629,6 +630,46 @@ describe("FabricError", () => {
   });
 
   describe("static members", () => {
+    describe("fromNativeError()", () => {
+      it("returns an instance whose `cause` and extras are converted", () => {
+        const inner = new Error("inner");
+        const outer = Object.assign(new Error("outer", { cause: inner }), {
+          when: new Date(0),
+        });
+        const fe = FabricError.fromNativeError(outer);
+        expect(fe.cause).toBeInstanceOf(FabricError);
+        expect((fe.cause as FabricError).message).toBe("inner");
+        expect(fe.getExtra("when")).toBeInstanceOf(FabricEpochNsec);
+      });
+
+      it("returns an unfrozen instance", () => {
+        const fe = FabricError.fromNativeError(new Error("mutable"));
+        expect(Object.isFrozen(fe)).toBe(false);
+      });
+
+      it("returns `cause` and the extras as `options.convert` returns them", () => {
+        const cause = new Error("kept");
+        const error = Object.assign(new Error("outer", { cause }), { n: 1 });
+        const fe = FabricError.fromNativeError(error, {
+          convert: (value) => (value === cause) ? "was cause" : "was extra",
+        });
+        expect(fe.cause).toBe("was cause");
+        expect(fe.getExtra("n")).toBe("was extra");
+      });
+
+      it("throws given an extra that cannot be converted", () => {
+        const error = Object.assign(new Error("bad"), { fn: () => 1 });
+        expect(() => FabricError.fromNativeError(error)).toThrow();
+      });
+
+      it("throws given a cycle through `cause`", () => {
+        const error = new Error("loop") as Error & { cause: unknown };
+        error.cause = { back: error };
+        expect(() => FabricError.fromNativeError(error))
+          .toThrow("circular reference");
+      });
+    });
+
     describe("[CODEC]", () => {
       const codec = FabricError[CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Error;

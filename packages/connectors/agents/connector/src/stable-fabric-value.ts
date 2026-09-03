@@ -82,7 +82,12 @@ function replaceCellsWithLinks(
     const error = value as Error;
     const existing = seen.get(error);
     if (existing) return existing;
-    const converted = FabricError.fromNativeError(error);
+    // Converted shallowly on purpose: the walk below converts `cause` and the
+    // extras itself, and registers `converted` first so that a reference back
+    // to `error` resolves to it.
+    const converted = FabricError.fromNativeError(error, {
+      convert: (nested) => nested as FabricValue,
+    });
     seen.set(error, converted);
     if (error.cause !== undefined) {
       converted.cause = replaceCellsWithLinks(
