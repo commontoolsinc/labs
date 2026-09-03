@@ -123,6 +123,24 @@ describe("line", () => {
       });
     });
 
+    it("returns a reserved character between double quotes as a character of the token", () => {
+      // The construction at the end of this file cannot reach this: a value
+      // takes the double-quoted form only where it holds a `\'`, and no value
+      // that construction builds pairs one with a reserved character. So the
+      // grouping half of the double-quote rule is driven here or nowhere.
+
+      for (const character of RESERVED_CHARACTERS) {
+        expect(splitLine(`"a${character}b"`)).toEqual({
+          kind: "split",
+          tokens: [`a${character}b`],
+        });
+      }
+      expect(splitLine('a"b#c"d')).toEqual({
+        kind: "split",
+        tokens: ["ab#cd"],
+      });
+    });
+
     it("returns the character after a backslash outside quotes, and not the backslash", () => {
       expect(splitLine("a\\ b")).toEqual({ kind: "split", tokens: ["a b"] });
     });
@@ -265,6 +283,11 @@ describe("line", () => {
       // What the two halves owe each other, held over a construction rather
       // than over a list: a listed set is a slice of the class, and the
       // values nobody lists are the ones that break a printer.
+      //
+      // One crossing it cannot reach, however long it runs: a value takes
+      // the double-quoted form only where it holds a `'`, and no mark here
+      // pairs one with a reserved character. The splitting case above
+      // drives that crossing directly.
 
       const marks = [
         "",
