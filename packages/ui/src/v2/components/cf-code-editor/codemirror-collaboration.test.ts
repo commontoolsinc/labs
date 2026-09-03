@@ -921,6 +921,55 @@ describe("CodeMirror operation collaboration", () => {
     await controller.stop();
   });
 
+  it("submits edits recorded during an in-flight submission in the next one", async () => {
+    // Only `localDocChanged()` drives the controller here. `stop()` and
+    // `prepareExternalChange()` ask for a complete drain themselves; what this
+    // pins is that ordinary typing during a round trip gets one too.
+
+    const first = Promise.withResolvers<void>();
+    const firstCaptured = Promise.withResolvers<void>();
+    const applies: ApplyRequest[] = [];
+    const { controller, view, errors } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followups: [
+        activeSnapshotAt("abc1", 1),
+        activeSnapshotAt("abc1234567", 7),
+      ],
+      apply: async (request) => {
+        applies.push(request);
+        if (applies.length === 1) {
+          firstCaptured.resolve();
+          await first.promise;
+        }
+        return resolutionFor(request);
+      },
+    });
+
+    await controller.start();
+    view.dispatch({ changes: { from: 3, insert: "1" } });
+    const sends = [controller.localDocChanged()];
+    await firstCaptured.promise;
+    for (const character of "234567") {
+      view.dispatch({
+        changes: { from: view.state.doc.length, insert: character },
+      });
+      sends.push(controller.localDocChanged());
+    }
+    first.resolve();
+    await Promise.all(sends);
+
+    expect(errors).toEqual([]);
+    expect(
+      applies.map((request) => [
+        request.base?.version ?? null,
+        (request.payload as { updates: unknown[] }).updates.length,
+      ]),
+    ).toEqual([[null, 1], [1, 6]]);
+    expect(view.state.doc.toString()).toBe("abc1234567");
+    expect(sendableUpdates(view.state)).toHaveLength(0);
+    await controller.stop();
+  });
+
   it("isolates synchronization observers from the Memory operation path", async () => {
     const accepted = acceptedResolution("abc", 1, "X");
     const { controller, view, errors } = controllerHarness({
@@ -1027,11 +1076,61 @@ function activeSnapshot(
   };
 }
 
+type ApplyRequest = Parameters<RuntimeClient["applyOperation"]>[1];
+
+function activeSnapshotAt(
+  materialized: string,
+  version: number,
+): OperationFieldSnapshot {
+  return {
+    branch: "",
+    id: "of:editor",
+    scopeKey: "space",
+    path,
+    active: true,
+    codec: "codemirror-changeset@1",
+    cursor: { epoch: 1, version },
+    baselineHash: "baseline:abc",
+    materialized,
+    operations: [],
+  };
+}
+
+/**
+ * Resolves `request` the way Memory's changeset codec does with nothing
+ * intervening: every submitted update becomes one integrated operation at the
+ * next version.
+ */
+function resolutionFor(request: ApplyRequest): ApplyOpResolution {
+  const from = request.base ?? { epoch: 1, version: 0 };
+  const updates = (request.payload as { updates: unknown[] }).updates;
+  const operations = updates.map((update, index) => ({
+    opId: `op:${request.submissionId}:${index}`,
+    cursor: { epoch: from.epoch, version: from.version + index + 1 },
+    submissionId: request.submissionId,
+    payload: { updates: [update] } as ApplyOpResolution["operations"][number][
+      "payload"
+    ],
+  }));
+  return {
+    operationIndex: 0,
+    address: { branch: "", id: "of:editor", scopeKey: "space", path },
+    codec: "codemirror-changeset@1",
+    submissionId: request.submissionId,
+    from,
+    to: { epoch: from.epoch, version: from.version + updates.length },
+    operations,
+    duplicate: false,
+  };
+}
+
 function controllerHarness(options: {
   initial: OperationFieldSnapshot;
   followup?: OperationFieldSnapshot;
   followups?: OperationFieldSnapshot[];
-  apply: () => ApplyOpResolution | Promise<ApplyOpResolution>;
+  apply: (
+    request: ApplyRequest,
+  ) => ApplyOpResolution | Promise<ApplyOpResolution>;
   codecs?: string[];
   subscribe?: (callback: (snapshot: OperationFieldSnapshot) => void) => void;
   subscription?: Promise<() => void>;
@@ -1073,7 +1172,8 @@ function controllerHarness(options: {
       return options.subscription ??
         Promise.resolve(() => options.cancel?.());
     },
-    applyOperation: () => Promise.resolve(options.apply()),
+    applyOperation: (_cell: CellHandle<string>, request: ApplyRequest) =>
+      Promise.resolve(options.apply(request)),
     releaseOperationField: () => Promise.resolve(options.release?.()),
     closeOperationSession: () => {
       options.close?.();
