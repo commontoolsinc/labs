@@ -690,6 +690,39 @@ describe("seeded violations", () => {
       expect(CLEAN[at("AUD-23")]).toBe("warn");
     });
 
+    it("still sees the delegation when the run state loses it", () => {
+      // The union's point. `subagentRuns` is carried by both artifacts, and
+      // reading only the run state would report a run that delegated as one
+      // that did not — turning a known gap into `not-applicable`, which is a
+      // silence that reads like a clean bill.
+
+      expect(verdicts(seeded((root) => {
+        delete stateOf(root).subagentRuns;
+      }))).toEqual(CLEAN);
+    });
+
+    it("weakens a clean answer when the two artifacts disagree about children", () => {
+      // Containment, not equality: an interrupted write leaves one artifact a
+      // subset of the other and passes. Each holding a child the other lost is
+      // divergence, and then "every delegation bound a ceiling" is not a claim
+      // these artifacts support — so a ceiling on every child they still hold
+      // warns rather than passes.
+
+      turnsOnly("AUD-23", "warn", (root) => {
+        const state = stateOf(root);
+        const report = reportOf(root);
+        for (const delegation of state.subagentRuns ?? []) {
+          (delegation.manifest as unknown as Record<string, unknown>)
+            .confidentialityCeiling = ["Confidential(did:key:zSeeded)"];
+        }
+        const orphan = structuredClone(report.subagentRuns![0]!);
+        orphan.childRunId = `${FIXTURE_RUN_ID}.subagent.2`;
+        (orphan.manifest as unknown as Record<string, unknown>)
+          .confidentialityCeiling = ["Confidential(did:key:zSeeded)"];
+        report.subagentRuns = [orphan];
+      });
+    });
+
     it("passes a delegation whose manifest records a ceiling", () => {
       // Written onto the record rather than through the type, because the
       // type has no such field — which is the defect. The check reads what a

@@ -131,7 +131,7 @@ export const CFC_HARNESS_OBLIGATIONS: readonly ConformanceObligation[] = [
       "console/server.ts",
     ],
     coveredBy: ["AUD-22"],
-    issue: "CT-2178",
+    issue: "CT-2216",
   },
   {
     id: "H3",
@@ -209,7 +209,7 @@ export const CFC_HARNESS_OBLIGATIONS: readonly ConformanceObligation[] = [
       "A child profile binds tools, host tools, a model override, native model tools, skills, allowed scripts, a script target, a turn budget and a return contract. It binds no confidentiality ceiling and attenuates no principal. What is built is capability attenuation, which is a different property: a child inheriting a handle to a cell the parent could read can read it, whatever tools it was given.",
     evidence: ["src/contracts/subagent.ts"],
     coveredBy: ["AUD-23"],
-    issue: "CT-2178",
+    issue: "CT-2217",
   },
   {
     id: "H9",

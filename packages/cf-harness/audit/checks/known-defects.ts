@@ -23,7 +23,13 @@
  * a status nothing tests cannot be asserted.
  */
 
-import type { HarnessSubagentRunManifest } from "../../src/contracts/subagent.ts";
+import type {
+  HarnessSubagentRunManifest,
+  HarnessSubagentRunRef,
+} from "../../src/contracts/subagent.ts";
+
+import { isDID } from "@commonfabric/identity";
+
 import type { PromptSlotBinding } from "../../src/contracts/prompt-slot.ts";
 import { extendsClause, requiredBy } from "../citations.ts";
 import type { RunEvidence } from "../evidence.ts";
@@ -253,7 +259,7 @@ const missingBindingFields = (
   if (!present(binding.surface)) missing.push("a named surface");
   if (!present(binding.subject)) {
     missing.push("an authenticated subject");
-  } else if (!binding.subject!.startsWith("did:")) {
+  } else if (!isDID(binding.subject)) {
     missing.push(
       `an authenticated subject (\`${binding.subject}\` names no principal)`,
     );
@@ -340,33 +346,121 @@ const recordsCeiling = (manifest: HarnessSubagentRunManifest): boolean => {
   return value !== undefined && value !== null;
 };
 
+/**
+ * Every delegation this run's artifacts record, and where each was read.
+ *
+ * `subagentRuns` is carried by both the run state and the run report, and a
+ * tree can lose either. Reading one artifact would report a run that delegated
+ * as one that did not, which is the shape AUD-9's context union already had to
+ * close: an absence in one place is not an absence.
+ *
+ * Keyed by `childRunId`, so the same delegation recorded twice counts once.
+ */
+const delegationsOf = (
+  run: RunEvidence,
+): readonly { artifact: string; delegation: HarnessSubagentRunRef }[] => {
+  const byChild = new Map<
+    string,
+    { artifact: string; delegation: HarnessSubagentRunRef }
+  >();
+  const sources: [string, readonly HarnessSubagentRunRef[]][] = [
+    ["run-state.json", runStateOf(run)?.subagentRuns ?? []],
+    [
+      "run-report.json",
+      run.runReport.status === "present"
+        ? run.runReport.value.subagentRuns ?? []
+        : [],
+    ],
+  ];
+  for (const [artifact, delegations] of sources) {
+    for (const delegation of delegations) {
+      if (!byChild.has(delegation.childRunId)) {
+        byChild.set(delegation.childRunId, { artifact, delegation });
+      }
+    }
+  }
+  return [...byChild.values()];
+};
+
+/**
+ * Whether the two artifacts recording delegations have diverged, as opposed to
+ * one of them lagging the other.
+ *
+ * Containment rather than equality, and the distinction is the same one AUD-9's
+ * context union turns on. Both artifacts are written from the same run state,
+ * so an interrupted run leaves one a subset of the other — a write that did not
+ * finish. Neither containing the other is divergence: each holds a delegation
+ * the other lost, which no ordinary write order produces.
+ *
+ * It does not change what {@link delegationsOf} returns. The union is already
+ * fail-closed for this check's own question — it can only add children whose
+ * ceiling must be accounted for — so divergence is reported rather than
+ * enumerated around, and its cost is that "every delegation" stops being a
+ * claim this run's artifacts support.
+ */
+const delegationsDiverge = (run: RunEvidence): boolean => {
+  if (run.runReport.status !== "present") {
+    return false;
+  }
+  const childrenOf = (
+    delegations: readonly HarnessSubagentRunRef[] | undefined,
+  ): ReadonlySet<string> =>
+    new Set((delegations ?? []).map((delegation) => delegation.childRunId));
+  const state = childrenOf(runStateOf(run)?.subagentRuns);
+  const report = childrenOf(run.runReport.value.subagentRuns);
+  const contains = (
+    bigger: ReadonlySet<string>,
+    smaller: ReadonlySet<string>,
+  ): boolean => [...smaller].every((child) => bigger.has(child));
+  return !contains(state, report) && !contains(report, state);
+};
+
 const delegationCeiling: AuditCheck = {
   id: "AUD-23",
   title: "delegation ceiling",
   citations: requiredBy("AH-CFC-12a"),
   falsifiedBy:
-    "a delegation whose recorded manifest carries no confidentiality ceiling — which is every delegation today, because nothing in the subagent profile represents one",
+    "a delegation whose recorded manifest carries no confidentiality ceiling — which is every delegation today, because nothing in the subagent profile represents one — and, as a warning that weakens a clean answer, two artifacts that have each lost a delegation the other kept",
   inspect(run) {
     if (run.runState.status !== "present") {
       return notReadable("run-state.json", run.runState);
     }
-    const delegations = runStateOf(run)?.subagentRuns ?? [];
+    const delegations = delegationsOf(run);
+    const diverged = delegationsDiverge(run);
+    const divergence: readonly CheckEvidence[] = diverged
+      ? [{
+        artifact: "run-state.json",
+        pointer: "subagentRuns",
+        detail:
+          "`run-report.json` records a delegation this does not, and the reverse — each artifact has lost a child the other kept, so this may not be every delegation",
+      }]
+      : [];
     if (delegations.length === 0) {
       return {
         verdict: "not-applicable",
         message: "this run delegated nothing, so no child profile arises",
       };
     }
-    const uncapped = delegations.filter((delegation) =>
+    const uncapped = delegations.filter(({ delegation }) =>
       !recordsCeiling(delegation.manifest)
     );
     if (uncapped.length === 0) {
-      return {
-        verdict: "pass",
-        message: `every one of this run's ${
-          count(delegations.length, "delegation", "delegations")
-        } bound its child a confidentiality ceiling`,
-      };
+      // A bare `pass` would claim every delegation bound a ceiling. Where the
+      // artifacts have diverged this run cannot say what every delegation was,
+      // so the claim is weakened rather than made.
+      return diverged
+        ? {
+          verdict: "warn",
+          message:
+            `every delegation these artifacts still record bound its child a confidentiality ceiling, but they have diverged about which delegations happened, so that is not a claim about all of them`,
+          evidence: divergence,
+        }
+        : {
+          verdict: "pass",
+          message: `every one of this run's ${
+            count(delegations.length, "delegation", "delegations")
+          } bound its child a confidentiality ceiling`,
+        };
     }
     // AH-CFC-12a states the ceiling as a SHOULD, so the finding carries the
     // clause's own weight rather than one chosen to look urgent. The nightly
@@ -378,12 +472,15 @@ const delegationCeiling: AuditCheck = {
         count(uncapped.length, "delegation records", "delegations record")
       } no confidentiality ceiling, so nothing bounds what the child may observe through the handles and arguments it inherits`,
       knownDefect: KNOWN_DEFECT_REGISTRATIONS["AUD-23"],
-      evidence: uncapped.map((delegation) => ({
-        artifact: "run-state.json",
-        pointer: `subagentRuns[${delegation.childRunId}].manifest`,
-        detail:
-          `the \`${delegation.manifest.profile}\` profile binds tools, skills and a turn budget, and no \`${CEILING_FIELD}\``,
-      })),
+      evidence: [
+        ...uncapped.map(({ artifact, delegation }) => ({
+          artifact,
+          pointer: `subagentRuns[${delegation.childRunId}].manifest`,
+          detail:
+            `the \`${delegation.manifest.profile}\` profile binds tools, skills and a turn budget, and no \`${CEILING_FIELD}\``,
+        })),
+        ...divergence,
+      ],
     };
   },
 };
