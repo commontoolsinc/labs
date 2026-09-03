@@ -85,11 +85,12 @@ hold the ones only a reviewer will catch.
 
 ## The rules
 
-| Rule                     | Covers                                          |
-| ------------------------ | ----------------------------------------------- |
-| `source-code.md`         | every `.ts` and `.tsx` file                     |
-| `tests.md`               | test, bench, and integration files              |
-| `workspace-packages.md`  | `deno.jsonc`, at the root and in every package  |
-| `documentation.md`       | everything under `docs/`                        |
-| `github-workflows.md`    | `.github/workflows/`                            |
-| `skills.md`              | `skills/`                                       |
+| Rule                              | Covers                                         |
+| --------------------------------- | ---------------------------------------------- |
+| `source-code.md`                  | every `.ts` and `.tsx` file                    |
+| `tests.md`                        | test, bench, and integration files             |
+| `workspace-packages.md`           | `deno.jsonc`, at the root and in every package |
+| `documentation.md`                | everything under `docs/`                       |
+| `github-workflows.md`             | `.github/workflows/`                           |
+| `skills.md`                       | `skills/`                                      |
+| `pattern-visible-declarations.md` | `packages/api`, and what mirrors it            |

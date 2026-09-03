@@ -3151,7 +3151,16 @@ export type CellFromUrlFunction = (
     url: string;
     hosts?: string[];
   }>,
-) => Reactive<{ pending: boolean; cell?: ReadonlyCell<{ [NAME]: string }> }>;
+) => Reactive<{
+  pending: boolean;
+
+  /**
+   * The cell the URL named, once resolved, and absent when it named none. Its
+   * value is unconstrained: a URL addresses any cell, and resolution neither
+   * requires a piece nor supplies one's `[NAME]`.
+   */
+  cell?: ReadonlyCell<unknown>;
+}>;
 
 export type FetchProgramFunction = (
   params: FactoryInput<{ url: string }>,
@@ -3351,8 +3360,24 @@ export type SqliteQueryFunction = <Row = Record<string, unknown>>(
 // folds a `sqlite` op into the caller's commit (atomic with cell writes). There
 // is no standalone reactive sqliteExecute builder.
 
+/**
+ * An explicitly declared column: a JSON Schema type, plus the verbatim SQLite
+ * column type and constraints used to generate the `CREATE TABLE` statement.
+ */
+export interface SqliteColumnSchema {
+  type: JSONSchemaTypes;
+  /** Verbatim SQLite column type/constraints, e.g. `"integer primary key"`.
+   *  Defaults to `"text"` when a column is declared without one. */
+  sqlType?: string;
+  /** Marks a `_cf_link` column: stored as TEXT, surfaced as a `Cell`. */
+  cfLink?: true;
+  /** A column carries the rest of the JSON Schema vocabulary too, and a table
+   *  schema is stored as fabric data, so every member is a fabric value. */
+  [keyword: string]: FabricValue;
+}
+
 /** Column spec for `table()`: a shorthand SQL type string or a column schema. */
-export type SqliteColumnSpec = string | JSONSchema;
+export type SqliteColumnSpec = string | SqliteColumnSchema;
 
 /** A reference to a declared column, handed to a row-label rule as `f.<col>`
  *  (CFC Phase 3; see `@commonfabric/memory/sqlite/row-label`). */
@@ -3420,8 +3445,7 @@ export interface CfSqliteHelpers {
   /** A literal atom (escape hatch). */
   constant(atom: unknown): unknown;
 }
-
-export type SqliteCfLinkFunction = <_T = unknown>() => JSONSchema;
+export type SqliteCfLinkFunction = <_T = unknown>() => SqliteColumnSchema;
 
 export type WishTag = `/${string}` | `#${string}`;
 
@@ -3460,7 +3484,7 @@ export type NavigateToFunction = (cell: Reactive<any>) => Reactive<boolean>;
 export interface WishFunction {
   <T = unknown>(
     target: FactoryInput<WishParams>,
-  ): Reactive<WishState<T> & UIRenderable>;
+  ): Reactive<WishState<T>>;
 }
 
 /**
@@ -3530,10 +3554,6 @@ export type InspectConfLabelFunction = (
   targetPath: FactoryInput<string>,
   query: FactoryInput<ConfLabelQuery>,
 ) => Reactive<InspectConfLabelResult>;
-
-export type CreateNodeFactoryFunction = <T = any, R = any>(
-  moduleSpec: Module,
-) => ModuleFactory<T, R>;
 
 // Symbol used to brand Default<T,V> types so RequireDefaults<T> can detect them.
 // This is a compile-time-only brand; at runtime Default<> is just T.
@@ -3851,9 +3871,6 @@ export declare const wish: WishFunction;
 export declare const multiUserTest: <T extends MultiUserTestDescriptor>(
   descriptor: T,
 ) => T;
-
-export declare const createNodeFactory: CreateNodeFactoryFunction;
-
 /** @deprecated Use Cell.of(defaultValue?) instead */
 export declare const cell: CellTypeConstructor<AsCell>["of"];
 

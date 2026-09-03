@@ -53,6 +53,7 @@
     "IAnyCell",
     "IReadable",
     "JSONSchema",
+    "JSONSchemaTypes",
     "JSONValue",
     "LinkScope",
     "Pattern",

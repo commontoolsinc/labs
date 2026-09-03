@@ -374,11 +374,17 @@ records the op through the storage seam `recordSqliteWrite` → `getNativeCommit
 
 ```ts
 // Shown at module scope.
-export type SqliteColumnSpec = string | JSONSchema;
+export interface SqliteColumnSchema {
+  type: JSONSchemaTypes;
+  sqlType?: string;
+  cfLink?: true;
+  [keyword: string]: FabricValue;
+}
+export type SqliteColumnSpec = string | SqliteColumnSchema;
 export type SqliteTableFunction = (
   columns: Record<string, SqliteColumnSpec>,
 ) => JSONSchema;
-export type SqliteCfLinkFunction = <_T = unknown>() => JSONSchema;
+export type SqliteCfLinkFunction = <_T = unknown>() => SqliteColumnSchema;
 ```
 
 `table(...)` and `cfLink<T>()` compile to plain JSON Schema; `cfLink<T>()` emits

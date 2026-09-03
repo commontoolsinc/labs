@@ -24,7 +24,7 @@ const wishResult = wish<{ content: string }>({ query: "#note" });
 |--------------|---------|-------------------------------------------------------|
 | `result`     | `T`     | The resolved piece (auto-confirmed or user-selected)  |
 | `candidates` | `T[]`   | All matching pieces                                   |
-| `[UI]`       | `VNode` | Built-in UI: picker (multiple matches) or result cell |
+| `[UI]?`      | `VNode` | Built-in UI: picker (multiple matches) or result cell |
 | `error`      | `any`   | Error message if resolution failed                    |
 
 Access the resolved piece via `wishResult.result`:
@@ -60,11 +60,15 @@ user browses candidates and clicks "Confirm Selection". Until confirmed,
 > (CT-1829). Generalizing this "single-best by default; picker opt-in" shape to
 > all wishes is a future step.
 
-You can render the built-in UI directly:
+You can render the built-in UI directly. `[UI]` is optional — a wish that has
+resolved to nothing to show leaves it unset — so read the slot rather than
+rendering the whole state. Hand it over as the slot itself, rather than wrapping
+it: an element around it is still an element when the slot is unset, and shows
+as an empty box.
 
 ```tsx
 // Shown inside a pattern body.
-return { [UI]: <div>{wishResult}</div> };
+return { [UI]: wishResult[UI] };
 ```
 
 ## Wishing for a Specific Piece
