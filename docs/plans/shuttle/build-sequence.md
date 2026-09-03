@@ -199,10 +199,11 @@ Still to come:
   ([`runtime-integration.md`](runtime-integration.md)), so B1 proves that
   rather than rebuilding it — a test that drops the transport under a
   standing watch and shows the subscription still delivering afterwards.
-  What B1 does build is the relay that carries those up, reporting live,
-  reconnecting, and permanently failed, because the storage layer
-  publishes no connection state today and both the prompt and the view
-  markers consume it. No retry loop in shuttle on either half.
+  What B1 does build is the relay that carries the memory client's
+  connection state up, reporting it as live, reconnecting, and permanently
+  failed, because the storage layer publishes none today and both the
+  prompt and the view markers consume it. No retry loop in shuttle on
+  either half.
 
 **B2 — writes, calls, handles** (after A2, A3, and A4 — a failed call or
 write must surface as a value, never reach `Deno.exit`). `set` with

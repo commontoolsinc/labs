@@ -16,7 +16,7 @@
  * promise nothing will resolve, and Deno fails the run on the drained event
  * loop with `Promise resolution is still pending but the event loop has
  * already resolved`, the transcript's last unfinished line naming the case.
- * Where a later transition resolves that waiter instead, the case fails on
+ * Where a later notification resolves that waiter instead, the case fails on
  * the state it then reads, as an ordinary value diff. Both land immediately:
  * nothing here waits out a timeout, so neither reads as a flake.
  */
@@ -170,13 +170,21 @@ const connectSeverable = async (reconnectHello: ReconnectHello) => {
 describe("Client", () => {
   describe("instance members", () => {
     describe("connectionState and whenStateChanged()", () => {
-      // Each case drives one notification and reads it back through both
-      // members: `whenStateChanged()` says when to look, `.connectionState`
-      // says what is there. Usually that notification carries a transition;
-      // the closed-client case is here because one of them does not. Every
-      // wait resolves on an event the client raises — a severed socket, a
-      // refused handshake, a `close()` — so nothing polls and nothing
-      // sleeps.
+      // `whenStateChanged()` says when to look and `.connectionState` says
+      // what is there, and most cases here use both, driving the client
+      // through one to three notifications and waiting on each in turn. Two
+      // use the getter alone, where what is under test is what it returns
+      // rather than when.
+      //
+      // A notification need not carry a transition. A second `close()`
+      // raises one that does not, and so does the reconnect loop's catch on
+      // a refused handshake, where the client is `reconnecting` both before
+      // the notification and after it. So a case asserts the state it reads
+      // on waking, never that a wakeup means a change.
+      //
+      // Every wait resolves on an event the client raises: a severed
+      // socket, a refused handshake or reopen, a `close()`. Nothing polls
+      // and nothing sleeps.
       //
       // Each waiter is registered before the notification it observes. That
       // is how a caller uses it too: the loop in the doc comment reads the
@@ -327,8 +335,10 @@ describe("Client", () => {
 
         try {
           // The reopen runs after the reconnect's handshake has marked the
-          // client connected and before the reconnect itself has finished, so
-          // it is the one moment the two are true at once.
+          // client connected and before the reconnect itself has finished.
+          // The window stays open until the `finally` clears `#reconnecting`
+          // a microtask after the loop returns; this hook is where a
+          // synchronous reader can catch it.
           transport.onSessionOpen = () => {
             readings.push(client.connectionState);
           };

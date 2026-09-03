@@ -205,11 +205,11 @@ export class Client {
   #fatalError: Error | null = null;
 
   /**
-   * The promise handed to every current `whenStateChanged()` caller, or
-   * `null` when nobody is waiting. One promise is shared by all waiters, and
-   * clearing it as the client notifies is what makes a waiter that
-   * re-registers wait for the next notification rather than see again the
-   * one it has just observed.
+   * The resolvers for the promise `whenStateChanged()` hands out, or `null`
+   * when nobody has called since the last notification. One set serves every
+   * caller waiting on the same notification, and clearing it as the client
+   * notifies is what makes a caller that registers again wait for the next
+   * one rather than see the notification it has just observed.
    */
   #stateChanged: PromiseWithResolvers<void> | null = null;
 

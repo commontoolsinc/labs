@@ -127,7 +127,7 @@ first work item, made in `packages/cli` where the substrate lives.
   be scope-aware end to end before the raw path can serve an overlay.
 - Guard-plus-`idle()` settling, per `renderVDomToHtml`'s form.
 - The connection's state is visible in the frame (`● live`, cold banner,
-  or a reconnecting marker), read from the observation seam B1 builds —
+  or a reconnecting marker), read from the relay B1 builds —
   the storage layer publishes no connection state today
   ([`runtime-integration.md`](runtime-integration.md)). On reconnect the
   memory client re-arms the watch itself, so the view resyncs and repaints
