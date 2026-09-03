@@ -80,6 +80,22 @@ const LINK_MARKER_KEY = "$link";
  */
 const CONCISE_ADDRESS_SUFFIX = "@";
 
+const CLI_TRACE_TIMINGS = Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
+
+async function timeSelectionPhase<T>(
+  label: string,
+  run: () => T | Promise<T>,
+): Promise<T> {
+  if (!CLI_TRACE_TIMINGS) return await run();
+  const start = performance.now();
+  try {
+    return await run();
+  } finally {
+    const elapsed = Math.round(performance.now() - start);
+    console.error(`[cf-phase] ${elapsed}ms :: cellSelection.${label}`);
+  }
+}
+
 /**
  * The address a marked position accumulates as the walk descends, which is
  * serialized into the LLM-friendly reference it renders as. `id` keeps its
@@ -3388,7 +3404,7 @@ export async function deriveSelectedValue(
   const outputCell = result.key("value").asSchema(outputSchema);
   try {
     runtime.prepareTxForCommit(tx);
-    const committed = await tx.commit();
+    const committed = await timeSelectionPhase("commit", () => tx.commit());
     if (committed.error !== undefined) {
       throw new CellSelectionError(
         `Could not apply get transform: ${committed.error}`,
@@ -3405,11 +3421,14 @@ export async function deriveSelectedValue(
     // 2026-08-14; packages/cli/README.md names the shape-the-collect
     // alternative); scoping this wait to the transform's own computation is
     // the named follow-up.
-    await outputCell.pull();
-    await runtime.idle();
-    await runtime.storageManager.synced();
-    await outputCell.pull();
-    await runtime.idle();
+    await timeSelectionPhase("output.pull.beforeIdle", () => outputCell.pull());
+    await timeSelectionPhase("runtime.idle.beforeSync", () => runtime.idle());
+    await timeSelectionPhase(
+      "storage.synced",
+      () => runtime.storageManager.synced(),
+    );
+    await timeSelectionPhase("output.pull.afterSync", () => outputCell.pull());
+    await timeSelectionPhase("runtime.idle.afterSync", () => runtime.idle());
     const outputValue = outputCell.get();
     const recorded = errors.slice(errorCountBefore);
     if (recorded.length > 0) {

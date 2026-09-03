@@ -255,6 +255,50 @@ function compiledPattern(
 }
 
 describe("listPieceCallables", () => {
+  it("starts the addressed piece without starting the space root", async () => {
+    const resultRoot = cell(
+      { addTopic: { $stream: true } },
+      {
+        type: "object",
+        properties: { addTopic: ADD_TOPIC_EVENT },
+      },
+    );
+    const piece = {
+      result: { getCell: () => Promise.resolve(resultRoot) },
+      input: { getCell: () => Promise.resolve(cell(undefined, undefined)) },
+      getCell: () => resultRoot,
+    };
+    const getCalls: unknown[][] = [];
+    let ensureCalls = 0;
+    const manager = {
+      ensureDefaultPattern: () => {
+        ensureCalls++;
+        return Promise.resolve();
+      },
+      get: (...args: unknown[]) => {
+        getCalls.push(args);
+        return Promise.resolve(piece);
+      },
+      getSpace: () => "home",
+    };
+
+    const listing = await listPieceCallables(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-stored",
+        space: "home",
+      },
+      { loadPieces: () => Promise.resolve(manager as never) },
+    );
+
+    expect(ensureCalls).toBe(0);
+    expect(getCalls).toEqual([
+      ["fid1:piece-stored", true, undefined, undefined],
+    ]);
+    expect(listing.verbs.map((verb) => verb.name)).toEqual(["addTopic"]);
+  });
+
   it("lists handlers and tools with schemas; excludes data; result shadows input", async () => {
     const resultRoot = cell(
       {
