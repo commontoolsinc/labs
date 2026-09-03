@@ -199,16 +199,21 @@ Not every v1 verb lands on a `*FromCommand` action, and which ones do not
 is what decides whether a bare `Deno.exit` in some Cliffy action is
 shuttle's problem. `get`, `set`, `call` and `describe` go through the
 named exports (`getCellValueFromCommand`, `setCellValueFromCommand`,
-`callFromCommand`, `describePieceFromCommand`); `ls` goes through
-`listPiecesFromCommand` and `listSlugsFromCommand`; `wish` through
-`readWish`. The two that do not are composed from the library instead:
+`callFromCommand`, `describePieceFromCommand`); `wish` goes through
+`readWish`. Three are composed from the library instead:
 **`link` calls `linkPieces` (`lib/piece.ts`) directly**, which is the seam
 A2 gave it and which raises `LinkValidationError` as a value, so the
 inline action behind `cf piece link` — exit and all — is not on shuttle's
-path; and **`verbs` composes `listPieceCallables` (`lib/piece.ts`) with
+path; **`verbs` composes `listPieceCallables` (`lib/piece.ts`) with
 the exported `verbListingLines` / `verbListingJson` / `verbListingNotes`
 and `partitionVerbListing`**, rendering the rows itself rather than
-running that command's inline action.
+running that command's inline action; and **`ls` composes `listSpaceSlugs`
+and `listPieces` (`lib/piece.ts`) with `listCellKeys`
+(`lib/cell-listing.ts`)**, handing each the held connection as
+`deps.loadPieces`. `listSlugsFromCommand` and `listPiecesFromCommand` are
+not that seam: each parses Cliffy options into its config, renders its rows
+to the process's own stdout, and passes the read no connection at all, so a
+caller holding one would open a second.
 
 ## Prerequisite work in `packages/cli`
 
