@@ -558,6 +558,9 @@ export class FabricError extends FabricNativeWrapper<Error>
       ? className
       : "Error";
     const name = error.name === type ? null : error.name;
+    // Read once: a `cause` behind a getter is read for whether there is one
+    // and again for what it is, and the two reads need not agree.
+    const cause = error.cause;
     const extras: Array<[string, FabricValue]> = [];
     for (const key of Object.keys(error)) {
       if (isUnsafeObjectKey(key) || FABRIC_ERROR_RESERVED_KEYS.has(key)) {
@@ -576,7 +579,7 @@ export class FabricError extends FabricNativeWrapper<Error>
       // declares a `string`, and the empty string is what such an error means.
       message: (typeof error.message === "string") ? error.message : "",
       stack: error.stack,
-      cause: (error.cause === undefined) ? undefined : convert(error.cause),
+      cause: (cause === undefined) ? undefined : convert(cause),
       extras,
     });
   }
