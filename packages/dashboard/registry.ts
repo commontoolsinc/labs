@@ -10,6 +10,7 @@ import { benchmark } from "./tiles/benchmark.ts";
 import { labsCiDuration, loomCiDuration } from "./tiles/ci-duration.ts";
 import { labsCiTrust, loomCiTrust } from "./tiles/ci-trust.ts";
 import { coverageDebt } from "./tiles/coverage-debt.ts";
+import { cubicSpend } from "./tiles/cubic-spend.ts";
 import { dau } from "./tiles/dau.ts";
 import { discordOnline } from "./tiles/discord-online.ts";
 import { gcpSpend } from "./tiles/gcp-spend.ts";
@@ -46,10 +47,10 @@ export const TILES: Tile[] = [
   githubMembers,
   prodUptime,
 
-  gcpSpend,
+  cubicSpend,
   githubCiSpend,
   modelSpend,
-  makeMetricPlaceholder("spend-metric-placeholder"),
+  gcpSpend,
 
   recentRuns,
 ];
