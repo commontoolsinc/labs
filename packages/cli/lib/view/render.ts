@@ -210,7 +210,7 @@ export interface ViewState {
   /** The selected structure node (WASD navigation), or null. */
   selected: StructureNode | null;
 
-  /** All search matches, document-ordered; null when no active search. */
+  /** Visible search matches, display-ordered; null when no active search. */
   matches: readonly Match[] | null;
 
   /** Index into `matches` of the focused match. */

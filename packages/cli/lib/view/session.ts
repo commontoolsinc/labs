@@ -153,6 +153,11 @@ interface PeekOverlay {
 const HORIZONTAL_STEP = 8;
 const MOUSE_WHEEL_STEP = 3;
 
+/** Whether two search matches occupy the same displayed range. */
+function sameDisplayedMatch(a: Match, b: Match): boolean {
+  return a.line === b.line && a.start === b.start && a.end === b.end;
+}
+
 // Messages shown when a diff's edit policy refuses an edit.
 const NOT_EDITABLE_MSG =
   "This line isn't editable (a removed line or diff structure).";
@@ -849,22 +854,40 @@ export class Session {
     };
   }
 
-  /** The search matches with their line mapped into display rows. */
-  #displayMatches(): Match[] {
-    if (this.#collapsed.size === 0) return this.#matches;
+  /** Maps a source match into the folded display. */
+  #displayMatch(match: Match, fold: FoldPlan): Match {
+    const line = fold.docToDisplay(match.line);
+    if (fold.displayLines[line] === this.#currentDoc.lines[match.line]) {
+      return { ...match, line };
+    }
+    return {
+      ...match,
+      line,
+      start: 0,
+      end: codePointLength(fold.displayLines[line]?.text ?? ""),
+    };
+  }
+
+  /** The visible search matches and the focused index among them. */
+  #displaySearch(): { matches: Match[]; currentMatch: number } {
+    if (this.#collapsed.size === 0) {
+      return { matches: this.#matches, currentMatch: this.#currentMatch };
+    }
     const fold = this.#foldPlan();
-    return this.#matches.map((match) => {
-      const line = fold.docToDisplay(match.line);
-      if (fold.displayLines[line] === this.#currentDoc.lines[match.line]) {
-        return { ...match, line };
-      }
-      return {
-        ...match,
-        line,
-        start: 0,
-        end: codePointLength(fold.displayLines[line]?.text ?? ""),
-      };
-    });
+    const matches: Match[] = [];
+    let currentMatch = 0;
+    for (
+      let sourceIndex = 0;
+      sourceIndex < this.#matches.length;
+      sourceIndex++
+    ) {
+      const match = this.#displayMatch(this.#matches[sourceIndex], fold);
+      const previous = matches.at(-1);
+      const duplicate = previous && sameDisplayedMatch(previous, match);
+      if (!duplicate) matches.push(match);
+      if (sourceIndex === this.#currentMatch) currentMatch = matches.length - 1;
+    }
+    return { matches, currentMatch };
   }
 
   /** The file currently in view: the diff file or transformed-output section
@@ -946,6 +969,7 @@ export class Session {
   }
 
   view(): ViewState {
+    const search = this.#query.length > 0 ? this.#displaySearch() : null;
     const o = this.#overlay;
     const expand = this.#mode === "normal" && !this.#overlay &&
         !this.#cursorOn && this.#chord === null && this.#source?.expandContext
@@ -998,8 +1022,8 @@ export class Session {
         : this.#gutterNumbers(),
       displayMode: this.#displayMode,
       selected: this.#displaySelected(),
-      matches: this.#query.length > 0 ? this.#displayMatches() : null,
-      currentMatch: this.#currentMatch,
+      matches: search?.matches ?? null,
+      currentMatch: search?.currentMatch ?? this.#currentMatch,
       message: this.#message,
       inputLine: this.#mode === "search"
         ? `/${this.#input}`
@@ -1663,6 +1687,25 @@ export class Session {
     }
     const cur = this.#matches[this.#currentMatch];
     let idx = nextMatchIndex(this.#matches, cur.line, cur.start, forward);
+    if (!this.#searchAnchor && this.#collapsed.size > 0) {
+      const fold = this.#foldPlan();
+      const displayed = this.#displayMatch(cur, fold);
+      while (
+        idx !== this.#currentMatch &&
+        sameDisplayedMatch(
+          displayed,
+          this.#displayMatch(this.#matches[idx], fold),
+        )
+      ) {
+        const candidate = this.#matches[idx];
+        idx = nextMatchIndex(
+          this.#matches,
+          candidate.line,
+          candidate.start,
+          forward,
+        );
+      }
+    }
     // An edit-mode search (Ctrl-S) steps only between editable matches.
     if (this.#searchAnchor) idx = this.#firstEditableMatch(idx);
     this.#currentMatch = idx;
