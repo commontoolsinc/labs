@@ -34,6 +34,10 @@ deviation and reduced-assurance mode.
    enforcement profile for agent harnesses.
 3. [03-conformance.md](03-conformance.md) — conformance classes, evidence, and
    implementation-profile requirements.
+4. [04-cfc-spec-correspondence.md](04-cfc-spec-correspondence.md) — which
+   section of the CFC specification each `AH-CFC-*` clause derives from, the
+   two clauses that are narrower than their counterpart, and the CFC
+   obligations no clause here carries.
 
 ## Ownership boundary
 
