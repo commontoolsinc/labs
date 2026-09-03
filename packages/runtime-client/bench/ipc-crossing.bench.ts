@@ -44,7 +44,6 @@ import type { FabricValue } from "@commonfabric/data-model";
 import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { convertCellsToLinks, KeepAsCell } from "@commonfabric/runner";
-import { redactSigilCfcLabelViewsForDisplay } from "@commonfabric/runner/cfc";
 
 import type { CrossingRequest } from "./fixtures/ipc-far-side.ts";
 import { readRecordList } from "./fixtures/schema-read.ts";
@@ -114,11 +113,9 @@ const SUBJECTS: readonly (readonly [string, FabricValue])[] = [
 ];
 
 for (const [name, value] of SUBJECTS) {
-  /** The two worker-side walks both arms run before anything is sent. */
+  /** The worker-side conversion both arms run before anything is sent. */
   const converted = (): FabricValue =>
-    redactSigilCfcLabelViewsForDisplay(
-      convertCellsToLinks(value as never, CONVERT_OPTIONS),
-    ) as FabricValue;
+    convertCellsToLinks(value as never, CONVERT_OPTIONS);
 
   Deno.bench({
     name: `status quo — ${name}`,

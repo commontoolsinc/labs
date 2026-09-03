@@ -134,9 +134,10 @@ const redactCaveatSourceAtom = (atom: unknown): unknown => {
  *
  * Apply ONLY at main-thread-facing DISPLAY responses: the three IPC label
  * responses (`handleCellGet` includeCfcLabel, the subscribe sink,
- * `handleCellGetCfcLabel`), the sigil `cfcLabelView` copies inside response
- * values (`redactSigilCfcLabelViewsForDisplay`), and response cell refs
- * (`createCellRef`) — inv-12 Stage 0. Redacting every outbound copy is safe
+ * `handleCellGetCfcLabel`), the sigil `cfcLabelView` copies the conversion
+ * attaches inside response values (`convertCellsToLinks()` under
+ * `includeCfcLabelView`), and response cell refs (`createCellRef`) — inv-12
+ * Stage 0. Redacting every outbound copy is safe
  * because the worker no longer consumes inbound views: the persist seam
  * re-derives link-origin labels from stored source metadata, and the IPC
  * ingress (`cellRefToSigilLink` / `getCell`) drops ref-carried views. It is
