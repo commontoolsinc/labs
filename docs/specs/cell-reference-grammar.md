@@ -592,7 +592,7 @@ grammar take one: a reader fills a string's omitted parts from it, a writer
 omits the parts it supplies. The contract between them is one law:
 
 ```text
-read(write(link, C), C) = link      for every context C, â included
+read(write(link, C), C) = link      for every context C, ∅ included
 ```
 
 **Shape.** A context has two axes. Its _location_ is a prefix of
