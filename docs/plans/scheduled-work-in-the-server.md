@@ -1,7 +1,7 @@
 # Scheduled Work in the Server
 
 *A pattern declares the cadence it wants to wake on, the space's own serving
-runtime honours it, and the background piece service is deleted rather than
+runtime honors it, and the background piece service is deleted rather than
 carried forward.*
 
 **Status:** the replacement capability is proposed and exploratory; the
@@ -12,7 +12,7 @@ The same day D12 ruled the background piece service sunset, the owner also
 ruled that its work should *not* be migrated, on the grounds that "bgUpdater is
 not in practical use today and will come back in a simpler form". This is a
 shape for that simpler form: a way for a pattern to declare that it wants
-waking on an interval, honoured by the serving runtime the executor already
+waking on an interval, honored by the serving runtime the executor already
 hosts. One step of it needs a further ruling before it could be built.
 
 The document is in three parts and they are separable. Part 1 is the
@@ -35,18 +35,17 @@ The live spec carries this forward in its own statement of what is being built:
 toolshed routes its own pattern needs through the executor, and the background
 piece service stays sunset.
 
-The sequencing was ruled in the same place:
+The sequencing was ruled in the same place, in four steps: close the serving
+gap, then migrate the service's work onto the executor, then sunset the
+service, and flip the flag last.
 
-> close the serving gap → migrate the service's work onto the executor →
-> sunset the service → flip the flag
-
-Events have since overtaken two of those four steps, and §2.2 records what
-that leaves. The flip has landed: `SERVER_EXECUTION_DEFAULT_ENABLED` is now
+Events have since overtaken two of those steps, and §2.2 records what that
+leaves. The flip has landed: `SERVER_EXECUTION_DEFAULT_ENABLED` is now
 `true`, so the executor serves by default and the soak is running. It landed
 with the background piece service still in the tree, which is the opposite of
 the ruled order.
 
-The middle step reads as though the replacement gates the deletion. It does
+The second step reads as though the replacement gates the deletion. It does
 not, because a second ruling the same day removed it:
 
 > bgUpdater is not in practical use today and will come back in a simpler
@@ -61,7 +60,7 @@ no registrations have accrued, and nothing is relying on a background poll.
 Two further clauses constrain this document directly. The service must keep
 working until it is retired, and silencing it early does not count as the
 sunset. And it must not be given executor authority as a stopgap, because that
-would re-authorise a component already decided for deletion.
+would re-authorize a component already decided for deletion.
 
 The two parts are therefore genuinely independent. Everything the background
 service does is redundant once the executor serves spaces, with one exception:
@@ -84,7 +83,7 @@ design, and the laziness is precisely what leaves this gap.
 A space is active when it has at least one live client session or undelivered
 events. Otherwise it may be parked, with its runtime disposed and its lease
 released. Within an active space, derivations that nobody demands stay dirty
-and unmaterialised indefinitely. The loop computes what a client session is
+and unmaterialized indefinitely. The loop computes what a client session is
 tracking, and nothing else.
 
 A scheduled wake is, in those terms, demand with no demander. Nobody is
@@ -218,7 +217,7 @@ building.
 ### 1.4 Scoping the demand
 
 A scheduled wake should demand the subgraph its callbacks need and nothing
-else. It should not materialise the piece's whole display-facing derivation for
+else. It should not materialize the piece's whole display-facing derivation for
 an audience of nobody.
 
 The cheapest way to avoid paying for unwanted computation is not to perform it,
@@ -286,7 +285,7 @@ That makes one question live rather than hypothetical. A runtime under the flag
 that is not the serving runtime — which is what the background service's worker
 is — defaults to the speculation overlay and "thereby loses the
 derivation-commit path by construction"
-([`runtime.ts:529`](../../packages/runner/src/runtime.ts:529)). The service
+([`runtime.ts:538`](../../packages/runner/src/runtime.ts:538)). The service
 depends on that path when it starts a piece. It now resolves the default ON in
 any ordinary deployment, so whatever that costs it, it costs it today.
 
@@ -314,7 +313,7 @@ the registered set "is not derivable from this repo (it accrues as users
 connect accounts)". Nothing has accrued, so the set is empty and the concern is
 moot.
 
-What remains is source-level. Six patterns on main declare a `bgUpdater`
+What remains is source-level. Five patterns on main declare a `bgUpdater`
 stream: the Gmail importer, the Google calendar importer, Google auth, Airtable
 auth, and a test pattern. They are code referring to a mechanism being removed,
 not users depending on it.
@@ -333,7 +332,7 @@ workload would be a ready-made coverage list for the serving gap.
 That instruction assumes a running deployment with a workload. There is none,
 so the oracle has nothing in it and this step cannot be performed as written.
 
-The six patterns in §2.2 are the repository's own statement of what wanted
+The five patterns in §2.2 are the repository's own statement of what wanted
 background execution, so they are the coverage list by default, and a weaker
 one. What they cannot tell you is which of them anyone
 actually ran, or which ran successfully — a question the service could not have
@@ -492,7 +491,7 @@ toolshed restart; a wake demanding only the callback's subgraph, shown by the
 demand counters; and the transformer rejecting a sub-sixty-minute interval, a
 computed interval, and an over-long list.
 
-Part 2 would need the six declaring patterns shown to run under the executor,
+Part 2 would need the five declaring patterns shown to run under the executor,
 which is the whole of the coverage list now that the oracle is empty. It does
 not need Part 1, and it does not need the `bgUpdater` streams removed — v1 kept
 them, and one of them is a manual refresh button.

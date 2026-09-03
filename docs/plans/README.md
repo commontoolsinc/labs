@@ -88,7 +88,7 @@ a record: archive it to `docs/history/plans/` following the procedure in
   closeout when that build lands.
 - [Scheduled work in the server](scheduled-work-in-the-server.md) proposes the
   simpler form D12 said bgUpdater would come back as: a pattern declares the
-  cadence it wants to wake on, and the space's own serving runtime honours it,
+  cadence it wants to wake on, and the space's own serving runtime honors it,
   so background work stops needing a separate process anyone has to run and
   keep online. Waking a piece on a timer with nobody watching is the one thing
   the background piece service does that the executor does not, and the ruling
