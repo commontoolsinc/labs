@@ -557,9 +557,12 @@ export class FabricError extends FabricNativeWrapper<Error>
     const type = (typeof className === "string") && (className !== "")
       ? className
       : "Error";
-    const name = error.name === type ? null : error.name;
-    // Read once: a `cause` behind a getter is read for whether there is one
-    // and again for what it is, and the two reads need not agree.
+    // Each slot is read once. A slot behind a getter that were read for what
+    // kind of thing it holds and again for what it is could answer the two
+    // reads differently.
+    const rawName = error.name;
+    const name = (rawName === type) ? null : rawName;
+    const message = error.message;
     const cause = error.cause;
     const extras: Array<[string, FabricValue]> = [];
     for (const key of Object.keys(error)) {
@@ -577,7 +580,7 @@ export class FabricError extends FabricNativeWrapper<Error>
       // `message` is normally inherited from `Error.prototype`, so a severed
       // prototype leaves a message-less error without one at all. `FabricError`
       // declares a `string`, and the empty string is what such an error means.
-      message: (typeof error.message === "string") ? error.message : "",
+      message: (typeof message === "string") ? message : "",
       stack: error.stack,
       cause: (cause === undefined) ? undefined : convert(cause),
       extras,
