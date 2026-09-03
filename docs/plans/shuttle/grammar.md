@@ -422,7 +422,7 @@ rather than hypothetical. Shuttle cannot resolve it: decision 13 forbids
 inventing a spelling, and a second scope spelling would be worse than the
 ambiguity. Issue
 [#6775](https://github.com/commontoolsinc/labs/issues/6775) carries it, and
-[the reference grammar](../../specs/reference-grammar.md) proposes the
+[the cell reference grammar](../../specs/cell-reference-grammar.md) proposes the
 resolution. In v1 a space named by name is refused unless it resolves to the
 connected space, which is what keeps it dormant; multi-space sessions are
 where it wakes.
