@@ -669,7 +669,7 @@
     // ------------------------------------------------------------------ layout data
     // The state of this repository the map describes. Bump both when the
     // map is re-verified; the stamp is drawn in the canvas's top-left corner.
-    const SNAPSHOT = { date: "2026-09-03", sha: "d005a5c603" };
+    const SNAPSHOT = { date: "2026-09-03", sha: "871c7cc7ed" };
     const W = 2760, H = 1840;
     const bands = [
       {
@@ -2000,7 +2000,7 @@
         kind: "Evidence · verifier",
         band: "evidence",
         body:
-          `<p>Runs over any recorded run and grades AUD-1 to AUD-9, AUD-13 to AUD-15a, and deployment checks AUD-16 to AUD-19 as pass, fail, warn or inconclusive against quoted spec clauses; inconclusive is never pass. It reads the shared posture record every surface publishes, checks its total sink registry, and evaluates dial tuples against the enforcement rules in <code>audit/matrix.ts</code>. AUD-16 counts structured <code>policyRefusal</code> records in tool outputs; CT-2200 moves those release decisions into <code>policy-trace.json</code>.</p><p>It verifies; it never enforces. Missing evidence is a finding, not proof that a gate ran.</p>`,
+          `<p>Runs over any recorded run and grades AUD-1 to AUD-9, AUD-13 to AUD-15a, and deployment checks AUD-16 to AUD-19 as pass, fail, warn or inconclusive against quoted spec clauses; inconclusive is never pass. It reads the shared posture record every surface publishes, checks its total sink registry, and evaluates dial tuples against the enforcement rules in <code>audit/matrix.ts</code>. For AUD-3, files under <code>tool-outputs/</code> stamped <code>cf-harness.subagent-raw-return</code> or <code>cf-harness.run-pattern-source</code> are not tool effects; AUD-9 requires an invocation context only for a side effect that reached the substrate under AUD-2's classifier, and warns when a run recorded no context at all because its artifacts cannot distinguish host-side effects from lost evidence. AUD-16 counts structured <code>policyRefusal</code> records in tool outputs; CT-2200 moves those release decisions into <code>policy-trace.json</code>.</p><p>It verifies; it never enforces. Missing evidence is a finding, not proof that a gate ran.</p>`,
         links: [["spec-anchored CFC checker", 6749], [
           "shared posture record, total sink registry, matrix-backed audit checks",
           6755,
@@ -2008,6 +2008,9 @@
           "what the audit found",
           6754,
         ]],
+        close: [
+          "Record the Fabric-session posture in child run state so AUD-13 and AUD-14 can reach a conclusive verdict (CT-2205).",
+        ],
       },
     };
     const GD = {
@@ -2465,13 +2468,13 @@
             ],
             sel: "weaver",
             h: "Return a name, open a piece",
-            t: "The rerun answered the handle question: one POST, one child, 6m40s. The gate still refused the values to the model; the model shipped the bound dashboard anyway, by handle. It got slugged, opened, and reflowed when the transaction cell changed. Acceptance itself is not yet a pass: the audit still has two fails, both checker-side (CT-2187, CT-2191).",
+            t: "The rerun answered the handle question: one POST, one child, 6m40s. The gate still refused the values to the model; the model shipped the bound dashboard anyway, by handle. It got slugged, opened, and reflowed when the transaction cell changed. The acceptance audit has no failures.",
           },
           {
             f: ["g_render", "e_render", "weaver", "person"],
             sel: "g_render",
             h: "The person sees values",
-            t: "Display is a release. The render ceiling decides what the panel shows to the person who owns the data. Acceptance: the checker passes over the run.",
+            t: "Display is a release. The render ceiling decides what the panel shows to the person who owns the data. Acceptance: over the root and child, the checker reports FAIL 0 WARN 3 INCONCLUSIVE 2. On the root, AUD-2 warns that no tool side effect reached the substrate, AUD-9 warns that no invocation context was retained, and AUD-14 warns that its LLM-class sinks are ungated (threat t13). AUD-13 and AUD-14 are inconclusive on the child because its run state records no Fabric-session posture record; CT-2205 is what stands between this run and a conclusive audit.",
           },
         ],
       },
