@@ -3404,25 +3404,16 @@ export async function deriveSelectedValue(
         `Could not apply get transform: ${committed.error}`,
       );
     }
-    // This wait is GLOBAL: idle() drains the whole reactive graph and
-    // synced() the whole storage manager, not just this transform. On a
-    // plain `cf cell get` that is benign — nothing else runs in the CLI's
-    // runtime — but a shaped `cf piece call` readback arrives here right after
-    // its handler ran, so the selection waits on whatever derived
-    // recomputation that handler triggered elsewhere, a coupling the plain
-    // call's transaction-local acknowledgment deliberately avoids.
-    // Documented as a known cost of shaping at the call (decided
-    // 2026-08-14; packages/cli/README.md names the shape-the-collect
-    // alternative); scoping this wait to the transform's own computation is
-    // the named follow-up.
-    await timeSelectionPhase("output.pull.beforeIdle", () => outputCell.pull());
-    await timeSelectionPhase("runtime.idle.beforeSync", () => runtime.idle());
-    await timeSelectionPhase(
-      "storage.synced",
-      () => runtime.storageManager.synced(),
-    );
-    await timeSelectionPhase("output.pull.afterSync", () => outputCell.pull());
-    await timeSelectionPhase("runtime.idle.afterSync", () => runtime.idle());
+    // pull() is the narrowest existing readiness boundary for this output: it
+    // drives transitive computations, waits for linked documents those reads
+    // discover, and re-idles after each arrival. Keep the confirmation pull;
+    // besides being cheap once current, it preserves byte-identical projected
+    // object order across get, call, wish, and exec. Explicit runtime.idle()
+    // and storageManager.synced() calls between the pulls instead widen the
+    // boundary to unrelated reactive and storage work without strengthening
+    // the selected output's guarantee.
+    await timeSelectionPhase("output.pull", () => outputCell.pull());
+    await timeSelectionPhase("output.pull.confirm", () => outputCell.pull());
     const outputValue = outputCell.get();
     const recorded = errors.slice(errorCountBefore);
     if (recorded.length > 0) {
