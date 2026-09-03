@@ -2509,6 +2509,11 @@ export class Runtime {
    * the FIRST attempt, because re-running cannot change the outcome and each
    * doomed attempt costs a round-trip plus a subscriber revert notification.
    *
+   * Every retry invokes `fn` again with a fresh transaction. Aborting an
+   * attempt discards only the operations staged in that transaction; an effect
+   * `fn` commits through another channel survives and repeats on retry unless
+   * the caller gives it a stable identity or otherwise makes it idempotent.
+   *
    * A caller that decides inside the transaction whether to write at all — one
    * re-reading a precondition against the fresh state each retry sees — says so
    * through the value `fn` returns, which comes back as `ok`. An `ok` of

@@ -2928,10 +2928,14 @@ class PiecePropIo implements PieceCellIo {
   ): Promise<{ wrote: boolean }> {
     const pieces = this.#cc.pieces();
     let committedTargetCell: Cell<unknown> | undefined;
-    // A stream event is durable outside the transaction under server
-    // execution. Every transaction attempt for one Piece API call therefore
-    // carries the same invocation identity, so discarding an attempt after its
-    // send cannot turn the retry into a second event.
+    // Under server execution a stream send appends outside this transaction,
+    // so an aborted attempt can leave its event durable. Reusing one caller
+    // identity makes both guards converge on that event: admission rejects a
+    // duplicate above the dedupe horizon, and the serving drain skips one that
+    // reaches it past the horizon
+    // (`docs/specs/server-side-execution/events.md` §4, §5).
+    // Initialize both halves together: a session replacement between attempts
+    // must not bind this API call's stable event ID to a second session.
     let streamSendOptions:
       | { eventId: string; session: string }
       | undefined;
@@ -3108,9 +3112,12 @@ class PiecePropIo implements PieceCellIo {
           txCell.set(
             nextValue,
             undefined,
-            isStream(txCell)
+            isStream(txCell) &&
+              pieces.runtime.experimental.serverExecution === true
               ? streamSendOptions ??= {
                 eventId: crypto.randomUUID(),
+                // `ScopeKeyIdentity` permits a principal without a session;
+                // the runtime's `.id` still gives the caller event a namespace.
                 session: pieces.runtime.scopeKeyIdentity.sessionId ??
                   pieces.runtime.id,
               }
