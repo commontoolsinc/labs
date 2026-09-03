@@ -39,10 +39,12 @@ import {
   type RuntimeFetch,
   runtimePresets,
   RuntimeTelemetry,
+  type SigilLink,
 } from "@commonfabric/runner";
 import {
   atomsOutsideCeiling,
   cfcLabelViewForCell,
+  linkCfcLabelView,
   setLinkCfcLabelView,
 } from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -2303,6 +2305,19 @@ describe("runtime-processor", () => {
       return runtime.getCellFromLink(link);
     }
 
+    /**
+     * The one caveat of the view riding `link`, read through the link
+     * representation rather than by navigating the envelope by hand.
+     */
+    function sourcedCaveatOf(link: SigilLink): Record<string, unknown> {
+      const view = linkCfcLabelView(link);
+      expect(view).toBeDefined();
+      return view!.entries[0].label.confidentiality![0] as Record<
+        string,
+        unknown
+      >;
+    }
+
     it('fails closed on the raw meta:"cfc" seam (inv-12 Stage 0 / SC-25)', () => {
       const ref: CellRef = {
         id: "of:cfc-raw-meta-cell" as CellRef["id"],
@@ -2486,25 +2501,9 @@ describe("runtime-processor", () => {
             cell: ref,
           },
         );
-        const responseLink = (response.value as {
-          nested: {
-            "/": {
-              "link@1": {
-                cfcLabelView: {
-                  entries: Array<
-                    {
-                      label: {
-                        confidentiality: Array<Record<string, unknown>>;
-                      };
-                    }
-                  >;
-                };
-              };
-            };
-          };
-        }).nested["/"]["link@1"];
-        const atom =
-          responseLink.cfcLabelView.entries[0].label.confidentiality[0];
+        const atom = sourcedCaveatOf(
+          (response.value as { nested: SigilLink }).nested,
+        );
         expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
         expect(atom.kind).toBe("derived-from");
         expect("source" in atom).toBe(false);
@@ -2723,25 +2722,9 @@ describe("runtime-processor", () => {
         }
 
         expect(posted.length).toBe(1);
-        const notifiedLink = (posted[0].value as {
-          nested: {
-            "/": {
-              "link@1": {
-                cfcLabelView: {
-                  entries: Array<
-                    {
-                      label: {
-                        confidentiality: Array<Record<string, unknown>>;
-                      };
-                    }
-                  >;
-                };
-              };
-            };
-          };
-        }).nested["/"]["link@1"];
-        const atom =
-          notifiedLink.cfcLabelView.entries[0].label.confidentiality[0];
+        const atom = sourcedCaveatOf(
+          (posted[0].value as { nested: SigilLink }).nested,
+        );
         expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
         expect("source" in atom).toBe(false);
       } finally {
