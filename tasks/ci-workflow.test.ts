@@ -1070,6 +1070,11 @@ Deno.test("the CLI lane refuses a mixed server-execution posture", async () => {
   );
   assertStringIncludes(
     probe,
+    'if .experimental.serverExecution == null then "unpublished"',
+    "the CLI probe must preserve a published JSON false rather than treating it as jq fallback",
+  );
+  assertStringIncludes(
+    probe,
     'CLIENT_ARM="${EXPERIMENTAL_SERVER_EXECUTION:-$SERVER_ARM}"',
     "the CLI probe must resolve the client arm the way cf does: an explicit env wins, else the published posture",
   );

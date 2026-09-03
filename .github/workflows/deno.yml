@@ -1202,7 +1202,7 @@ jobs:
             echo "::error::the toolshed started the serving loop in the CLI lane; the first-party default is OFF (the flip-OFF lever rolled the Phase 7 flip back) — the CLI would exercise the ON arm while every default-arm assertion below expects OFF"
             exit 1
           }
-          SERVER_ARM=$(echo "$META" | jq -r '.experimental.serverExecution // "unpublished"')
+          SERVER_ARM=$(echo "$META" | jq -r 'if .experimental.serverExecution == null then "unpublished" else (.experimental.serverExecution | tostring) end')
           CLIENT_ARM="${EXPERIMENTAL_SERVER_EXECUTION:-$SERVER_ARM}"
           if [ "$SERVER_ARM" != "false" ]; then
             echo "::error::the toolshed is not serving but publishes serverExecution=$SERVER_ARM on /api/meta; cf adopts what is published, so this lane would run a MIXED posture (an ON client against a non-serving server)"
