@@ -26,10 +26,15 @@ import type {
   HarnessPolicyTrace,
 } from "../../src/contracts/policy-trace.ts";
 import type { HarnessRunReport } from "../../src/contracts/run-report.ts";
+import { createToolOutputId } from "../../src/contracts/tool-result.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
 import type { HarnessRunState } from "../../src/run-state.ts";
+import { BUILTIN_TOOL_REGISTRY } from "../../src/tools/registry.ts";
 import { RUN_CHECKS } from "../checks/registry.ts";
-import { auditRunFamily } from "../checks/structural.ts";
+import {
+  auditRunFamily,
+  HOST_AUTHORED_OUTPUT_WRITERS,
+} from "../checks/structural.ts";
 import { harnessFabricSessionPosture } from "../../src/cfc-posture.ts";
 import type { HarnessFabricSessionCfcPosture } from "../../src/run-state.ts";
 import {
@@ -141,6 +146,32 @@ const dropInvocationContexts = (
   trace.cfcInvocationContexts = (trace.cfcInvocationContexts ?? []).filter(
     (context) => !drop(context),
   );
+};
+
+/**
+ * Adds an invocation context to both artifacts that carry them, built from the
+ * fixture's own so it is the shape the mint site produces rather than one
+ * written to suit a check.
+ */
+const seedInvocationContext = (
+  run: RunEvidence,
+  overrides: Partial<HarnessCfcInvocationContext>,
+): void => {
+  const state = stateOf(run);
+  const template = (state.cfcInvocationContexts ?? [])[0];
+  if (template === undefined) {
+    throw new Error("the fixture recorded no invocation context to build on");
+  }
+  const context = { ...structuredClone(template), ...overrides };
+  state.cfcInvocationContexts = [
+    ...(state.cfcInvocationContexts ?? []),
+    context,
+  ];
+  const trace = traceOf(run);
+  trace.cfcInvocationContexts = [
+    ...(trace.cfcInvocationContexts ?? []),
+    context,
+  ];
 };
 
 /** Adds a file to the run's `tool-outputs/`, as a reader would have found it. */
@@ -351,6 +382,31 @@ describe("seeded violations", () => {
           },
         );
       }))).toEqual(CLEAN);
+    });
+
+    it("fails an unlisted tool output claiming a host writer's `type`", () => {
+      // The exemption is the writing path, which `persistToolOutput` composed
+      // and a model never reaches. This file took a `bash` call's path and
+      // says it took the sidecar's, which is the evasion an exemption keyed on
+      // a field inside the artifact would have admitted.
+
+      turnsOnly("AUD-3", "fail", (root) => {
+        seedToolOutput(root, `${FIXTURE_RUN_ID}_bash_4-bash.json`, {
+          type: "cf-harness.run-pattern-source",
+          outputId: `${FIXTURE_RUN_ID}:bash:4`,
+          stdout: "unrecorded\n",
+        });
+      });
+    });
+
+    it("names no builtin tool among the writers it exempts", () => {
+      // A writer name that were also a tool id would exempt every output of
+      // that tool, because the two share the one filename suffix.
+      expect(
+        [...BUILTIN_TOOL_REGISTRY.keys()].filter((toolId) =>
+          HOST_AUTHORED_OUTPUT_WRITERS.has(toolId)
+        ),
+      ).toEqual([]);
     });
   });
 
@@ -573,6 +629,50 @@ describe("seeded violations", () => {
         [at("AUD-2")]: "warn",
         [at("AUD-9")]: "warn",
       });
+    });
+
+    it("fails a run where one tool lost every context it recorded", () => {
+      // The blind spot this witness exists for. Which tools transport CFC
+      // evidence is read off the contexts that survived, so a tool whose
+      // contexts ALL vanished leaves that set and its calls read as
+      // host-side — a run that never went near the substrate rather than one
+      // whose evidence went missing. A surviving context for another tool is
+      // what hides it: the run holds contexts, so the warning for a run that
+      // holds none does not fire either.
+      //
+      // The numbering is what still says so. `bash` was numbered 1 and 2, and
+      // a run retaining only 3 is missing two contexts it minted.
+
+      expect(verdicts(seeded((root) => {
+        seedInvocationContext(root, {
+          sequence: 3,
+          toolId: "web_fetch",
+          toolOutputId: createToolOutputId(FIXTURE_RUN_ID, "web_fetch", 3),
+        });
+        dropInvocationContexts(root, (context) => context.toolId === "bash");
+      }))).toEqual({
+        ...CLEAN,
+        [at("AUD-9")]: "fail",
+      });
+    });
+
+    it("fails a context dropped from one artifact and left in the other", () => {
+      // Read from one artifact this is a run that minted one context; read
+      // from both it is a run whose copies disagree, which is retention
+      // failing rather than a run that recorded less. Nothing else turns:
+      // the union keeps the join over every context either artifact holds.
+
+      turnsOnly("AUD-9", "fail", (root) => {
+        const trace = traceOf(root);
+        trace.cfcInvocationContexts = (trace.cfcInvocationContexts ?? [])
+          .filter((context) => context.sequence !== 1);
+      });
+    });
+
+    it("passes a run holding every context it minted, in both artifacts", () => {
+      // The other direction: the same shape with nothing removed is the
+      // fixed shape, and the check has to be able to reach it.
+      expect(CLEAN[at("AUD-9")]).toBe("pass");
     });
   });
 

@@ -144,16 +144,62 @@ const policyEventsOf = (run: RunEvidence): readonly HarnessPolicyEvent[] =>
     ? run.runReport.value.policyEvents ?? []
     : runStateOf(run)?.policyEvents ?? [];
 
+/**
+ * The invocation contexts each artifact that carries them holds, separately.
+ *
+ * Two artifacts record the same list, and reading one of them is what makes a
+ * deletion from the other invisible. Keeping them apart is what lets AUD-9
+ * ask whether they still agree.
+ */
+const invocationContextArtifacts = (
+  run: RunEvidence,
+): readonly {
+  artifact: string;
+  contexts: readonly HarnessCfcInvocationContext[];
+}[] => {
+  const found: {
+    artifact: string;
+    contexts: readonly HarnessCfcInvocationContext[];
+  }[] = [];
+  if (run.policyTrace.status === "present") {
+    const contexts = run.policyTrace.value.cfcInvocationContexts;
+    if (contexts !== undefined) {
+      found.push({ artifact: "policy-trace.json", contexts });
+    }
+  }
+  const state = runStateOf(run);
+  if (state?.cfcInvocationContexts !== undefined) {
+    found.push({
+      artifact: "run-state.json",
+      contexts: state.cfcInvocationContexts,
+    });
+  }
+  return found;
+};
+
+/**
+ * Every invocation context this run retained anywhere, by sequence.
+ *
+ * The union rather than the first artifact that answered. A context is a
+ * record of a call reaching the CFC substrate, and one still held in either
+ * artifact was minted whatever became of the other copy — reading the union
+ * is the fail-closed direction, because it can only add calls the run must
+ * account for. Whether the two artifacts still agree is a retention question,
+ * and AUD-9 asks it there rather than here.
+ */
 const invocationContextsOf = (
   run: RunEvidence,
 ): readonly HarnessCfcInvocationContext[] => {
-  if (run.policyTrace.status === "present") {
-    const contexts = run.policyTrace.value.cfcInvocationContexts;
-    if (contexts !== undefined && contexts.length > 0) {
-      return contexts;
+  const bySequence = new Map<number, HarnessCfcInvocationContext>();
+  for (const { contexts } of invocationContextArtifacts(run)) {
+    for (const context of contexts) {
+      if (!bySequence.has(context.sequence)) {
+        bySequence.set(context.sequence, context);
+      }
     }
   }
-  return runStateOf(run)?.cfcInvocationContexts ?? [];
+  return [...bySequence.keys()].sort((left, right) => left - right)
+    .map((sequence) => bySequence.get(sequence)!);
 };
 
 const transcriptOf = (
@@ -557,21 +603,43 @@ const modeBehaviorAttestation: AuditCheck = {
 //
 
 /**
- * The artifacts a run writes into `tool-outputs/` that are not the output of
- * a tool the model called.
+ * The writers other than a tool the model called that persist a file into a
+ * run's `tool-outputs/` directory, named as each names itself to
+ * `persistToolOutput`.
  *
  * A delegation writes the child's final text there as the trusted side's own
  * validation evidence, and a `run_pattern` call writes the source text it
  * carried beside that call's own output, under the same output id. Neither is
  * a tool effect: each joins to no tool activity, no policy decision is
  * expected for it, and its absence from the report's `toolOutputs` is not an
- * unrecorded effect. Each is recognized by the `type` its writer stamps into
- * the file, which is the field that identifies it whatever the file is named.
+ * unrecorded effect.
+ *
+ * These are writing paths rather than contents. `persistToolOutput` names its
+ * file `<outputId>-<writer>.json`, and both halves are the harness's own
+ * strings: the output id is a host counter, and a writer name here is not a
+ * `BuiltinToolId`, so no tool a model can call lands on one. An exemption
+ * keyed on a field inside the file would be keyed on the artifact being
+ * judged — a model-authored output carries a `type` of its choosing as easily
+ * as a host-written one does, and the check would then be asking the subject
+ * whether to look at it.
  */
-const NON_EFFECT_OUTPUT_TYPES: ReadonlySet<string> = new Set([
-  "cf-harness.subagent-raw-return",
-  "cf-harness.run-pattern-source",
+export const HOST_AUTHORED_OUTPUT_WRITERS: ReadonlySet<string> = new Set([
+  "subagent-return",
+  "run-pattern-source",
 ]);
+
+/**
+ * Whether `fileName` is one a host writer produced, read off the name
+ * `persistToolOutput` composed rather than off anything inside the file.
+ */
+const isHostAuthoredOutputFile = (fileName: string): boolean => {
+  for (const writer of HOST_AUTHORED_OUTPUT_WRITERS) {
+    if (fileName.endsWith(`-${writer}.json`)) {
+      return true;
+    }
+  }
+  return false;
+};
 
 const countsAgree = (
   declared: HarnessPolicyDecisionCounts | undefined,
@@ -594,7 +662,7 @@ const decisionCoverage: AuditCheck = {
     ...extendsClause("AH-CFC-9", "AH-CFC-11"),
   ],
   falsifiedBy:
-    "a side-effect tool activity with no policy decision on its `toolCallId`, a declared decision count that does not match the decisions beside it, or a persisted tool output no activity accounts for",
+    "a side-effect tool activity with no policy decision on its `toolCallId`, a declared decision count that does not match the decisions beside it, or a persisted tool output no activity accounts for and no host writer named",
   inspect(run) {
     if (run.runReport.status !== "present") {
       return notReadable("run-report.json", run.runReport);
@@ -672,12 +740,7 @@ const decisionCoverage: AuditCheck = {
       );
       for (const entry of run.toolOutputs.entries) {
         if (listed.has(entry.fileName)) continue;
-        if (
-          isRecord(entry.value) && typeof entry.value.type === "string" &&
-          NON_EFFECT_OUTPUT_TYPES.has(entry.value.type)
-        ) {
-          continue;
-        }
+        if (isHostAuthoredOutputFile(entry.fileName)) continue;
         evidence.push({
           artifact: `tool-outputs/${entry.fileName}`,
           detail:
@@ -1315,6 +1378,74 @@ const cellLabelsRetentionDetail = (run: RunEvidence): string => {
 };
 
 /**
+ * What became of the invocation contexts a run minted, read from the numbering
+ * the mint site gave them and from whether the two artifacts still agree.
+ *
+ * The mint site numbers a context `contexts.length + 1`, so a run's retained
+ * contexts are `1..N` with nothing missing. A hole in that run is a context
+ * that was minted and is now gone — and it is the only artifact-side witness
+ * to a tool losing EVERY context it recorded. Without it, the set of tools
+ * that transport CFC evidence is read off the contexts that survived, so a
+ * tool whose contexts all vanished leaves that set and reads as host-side:
+ * the run looks like one that never went near the substrate rather than one
+ * whose evidence went missing.
+ *
+ * Neither witness is the model's to influence: the sequence is a host counter
+ * and the two artifacts are host writes.
+ *
+ * What this cannot see, and what nothing read from artifacts alone can: a
+ * deletion that takes the highest-numbered contexts from every artifact at
+ * once leaves `1..N` complete for a smaller N, and is indistinguishable from
+ * a run that stopped there. A run that retained no context at all is that
+ * case at its limit, and AUD-9 warns on it for the same reason.
+ */
+interface InvocationContextRetention {
+  /** Sequences the run minted and no artifact still holds. */
+  gaps: readonly number[];
+
+  /** Artifacts whose lists disagree, where two carry one. */
+  disagreement?: string;
+}
+
+const invocationContextRetention = (
+  run: RunEvidence,
+): InvocationContextRetention => {
+  const retained = invocationContextsOf(run);
+  const held = new Set(retained.map((context) => context.sequence));
+  const highest = retained.length === 0
+    ? 0
+    : Math.max(...retained.map((context) => context.sequence));
+  const gaps: number[] = [];
+  for (let sequence = 1; sequence <= highest; sequence += 1) {
+    if (!held.has(sequence)) {
+      gaps.push(sequence);
+    }
+  }
+  const artifacts = invocationContextArtifacts(run);
+  let disagreement: string | undefined;
+  if (artifacts.length === 2) {
+    const [first, second] = artifacts as [
+      { artifact: string; contexts: readonly HarnessCfcInvocationContext[] },
+      { artifact: string; contexts: readonly HarnessCfcInvocationContext[] },
+    ];
+    const sequencesOf = (
+      contexts: readonly HarnessCfcInvocationContext[],
+    ): string =>
+      [...contexts.map((context) => context.sequence)].sort((left, right) =>
+        left - right
+      ).join(",");
+    const left = sequencesOf(first.contexts);
+    const right = sequencesOf(second.contexts);
+    if (left !== right) {
+      disagreement = `\`${first.artifact}\` holds contexts ${
+        left === "" ? "none" : left
+      } and \`${second.artifact}\` holds ${right === "" ? "none" : right}`;
+    }
+  }
+  return { gaps, ...(disagreement !== undefined ? { disagreement } : {}) };
+};
+
+/**
  * AUD-9, which asks whether a run kept the artifacts that would explain why
  * each of its results was exposed or denied.
  *
@@ -1340,7 +1471,7 @@ const evidenceRetention: AuditCheck = {
   title: "evidence retention",
   citations: requiredBy("AH-CFC-16"),
   falsifiedBy:
-    "an enforcing run missing one of the artifacts that would explain why a result was exposed or denied: its policy trace, its policy snapshot or that snapshot's digest, an invocation context for a side effect that reached the CFC substrate, or any recorded attempt to read its space's cell labels; and, as a warning, a run whose side effects recorded no invocation context at all, which its artifacts cannot tell from evidence that was lost",
+    "an enforcing run missing one of the artifacts that would explain why a result was exposed or denied: its policy trace, its policy snapshot or that snapshot's digest, an invocation context for a side effect that reached the CFC substrate, a hole in the numbering of the contexts it retained or two artifacts disagreeing about them, or any recorded attempt to read its space's cell labels; and, as a warning, a run whose side effects recorded no invocation context at all, which its artifacts cannot tell from evidence that was lost",
   inspect(run) {
     if (run.runState.status !== "present") {
       return notReadable("run-state.json", run.runState);
@@ -1352,6 +1483,7 @@ const evidenceRetention: AuditCheck = {
     const contexts = invocationContextsOf(run);
     const effects = executedSideEffects(run);
     const unexplained = substrateEffectsMissingContext(run);
+    const retention = invocationContextRetention(run);
     const requirements: readonly RetentionRequirement[] = [
       {
         name: "policy-trace.json",
@@ -1374,6 +1506,19 @@ const evidenceRetention: AuditCheck = {
         detail: `${contexts.length} recorded beside ${
           count(effects.length, "executed side effect", "executed side effects")
         }, ${unexplained.length} of which reached the substrate carrying none`,
+      },
+      {
+        name: "the invocation contexts it minted",
+        held: retention.gaps.length === 0 &&
+          retention.disagreement === undefined,
+        detail: retention.disagreement ??
+          (retention.gaps.length === 0
+            ? `${contexts.length} retained, numbered without a gap`
+            : `${
+              count(retention.gaps.length, "context", "contexts")
+            } the run minted are held by no artifact: ${
+              retention.gaps.join(", ")
+            }`),
       },
       {
         name: "a recorded cell-labels read",
