@@ -982,9 +982,9 @@ in its tree. Two rules keep that layering honest:
 
 - A piece-relative reference with no piece in the context.
 - `..` that would leave the piece, unless the reader's own tree continues it.
-- A scope move written as a relative reference. `./items@user` is a key named
-  `items@user`, not a qualifier, and a reader that wants to move the scope does
-  that as an operation on its position, not through a reference.
+- A qualifier anywhere in a relative reference but on its `.` head.
+  `./items@user` is a key named `items@user`, `..@user` is refused, and the
+  scope move is written `.@user/items`.
 - A complete reference naming a space the connection does not serve. Denoting is
   not reaching, and following the reference silently into a space the reader
   cannot read would make the same string mean two things in two sessions.
