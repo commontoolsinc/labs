@@ -574,22 +574,19 @@ absent. `inconclusive` is never `pass`.
 
 What a console run audits to today, so you can tell your run from the checker:
 
-- **AUD-9 `fail` on the root run** (CT-2191): the checker requires an invocation
-  context for every side effect, and `delegate_task` and `assign_slug` run
-  host-side and record none. Every console run that delegates or names a piece
-  reports this.
-- **AUD-3 `fail` on a child that ran patterns** (CT-2187): the checker counts
-  each `run-pattern-source.json` sidecar in `tool-outputs/` as a tool effect
-  with no policy decision. Every run whose `run_pattern` submitted source
-  reports this, naming each attempt.
 - **AUD-2 `warn` on the root run**: a root that delegated all its substrate work
   exercised no enforcement itself, and the check says so rather than passing.
   This is the documented reading, not a defect.
+- **AUD-9 `warn` on the root run**: `delegate_task` and `assign_slug` run
+  host-side and mint no invocation context, and the artifacts do not say whether
+  an effect ran host-side or lost the context it minted, so retention is
+  unconfirmed rather than met. The two warns are one run read against two
+  clauses: AUD-2 against AH-CFC-15, AUD-9 against AH-CFC-16.
 
-So `FAIL 2 WARN 1` over a root and one child is the expected verdict line until
-those two issues close. A finding outside that set is about your run. Read AUD-4
-and AUD-5 first: a denial that reached the model with a payload, or a handle
-used before it was disclosed, is a real problem.
+So `FAIL 0 WARN 2` over a root and one child is the expected verdict line. A
+finding outside that set is about your run. Read AUD-4 and AUD-5 first: a denial
+that reached the model with a payload, or a handle used before it was disclosed,
+is a real problem.
 
 ## 8. Run the CLI path instead
 
