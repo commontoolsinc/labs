@@ -1391,38 +1391,30 @@ const cellLabelsRetentionDetail = (run: RunEvidence): string => {
 };
 
 /**
- * What became of the invocation contexts a run minted, read from the numbering
- * the mint site gave them and from whether the two artifacts still agree.
+ * The invocation contexts a run minted and no artifact still holds.
  *
  * The mint site numbers a context `contexts.length + 1`, so a run's retained
  * contexts are `1..N` with nothing missing. A hole in that run is a context
- * that was minted and is now gone — and it is the only artifact-side witness
- * to a tool losing EVERY context it recorded. Without it, the set of tools
- * that transport CFC evidence is read off the contexts that survived, so a
- * tool whose contexts all vanished leaves that set and reads as host-side:
- * the run looks like one that never went near the substrate rather than one
- * whose evidence went missing.
+ * that was minted and is gone — and it is the only artifact-side witness to a
+ * tool losing EVERY context it recorded. Without it, the set of tools that
+ * transport CFC evidence is read off the contexts that survived, so a tool
+ * whose contexts all vanished leaves that set and reads as host-side: the run
+ * looks like one that never went near the substrate rather than one whose
+ * evidence went missing. A surviving context for another tool is what hides
+ * it, because the run then holds contexts and the warning for a run holding
+ * none does not fire either.
  *
- * Neither witness is the model's to influence: the sequence is a host counter
- * and the two artifacts are host writes.
+ * The numbering is not the model's to influence: it is a host counter, and
+ * `invocationContextsOf` reads it across both artifacts that carry the list,
+ * so deleting a copy from one of them recovers rather than hides.
  *
  * What this cannot see, and what nothing read from artifacts alone can: a
- * deletion that takes the highest-numbered contexts from every artifact at
- * once leaves `1..N` complete for a smaller N, and is indistinguishable from
- * a run that stopped there. A run that retained no context at all is that
- * case at its limit, and AUD-9 warns on it for the same reason.
+ * deletion taking the highest-numbered contexts from every artifact at once
+ * leaves `1..N` complete for a smaller N, and is indistinguishable from a run
+ * that stopped there. A run that retained no context at all is that case at
+ * its limit, and AUD-9 warns on it for the same reason.
  */
-interface InvocationContextRetention {
-  /** Sequences the run minted and no artifact still holds. */
-  gaps: readonly number[];
-
-  /** Artifacts whose lists disagree, where two carry one. */
-  disagreement?: string;
-}
-
-const invocationContextRetention = (
-  run: RunEvidence,
-): InvocationContextRetention => {
+const missingInvocationContexts = (run: RunEvidence): readonly number[] => {
   const retained = invocationContextsOf(run);
   const held = new Set(retained.map((context) => context.sequence));
   const highest = retained.length === 0
@@ -1434,28 +1426,7 @@ const invocationContextRetention = (
       gaps.push(sequence);
     }
   }
-  const artifacts = invocationContextArtifacts(run);
-  let disagreement: string | undefined;
-  if (artifacts.length === 2) {
-    const [first, second] = artifacts as [
-      { artifact: string; contexts: readonly HarnessCfcInvocationContext[] },
-      { artifact: string; contexts: readonly HarnessCfcInvocationContext[] },
-    ];
-    const sequencesOf = (
-      contexts: readonly HarnessCfcInvocationContext[],
-    ): string =>
-      [...contexts.map((context) => context.sequence)].sort((left, right) =>
-        left - right
-      ).join(",");
-    const left = sequencesOf(first.contexts);
-    const right = sequencesOf(second.contexts);
-    if (left !== right) {
-      disagreement = `\`${first.artifact}\` holds contexts ${
-        left === "" ? "none" : left
-      } and \`${second.artifact}\` holds ${right === "" ? "none" : right}`;
-    }
-  }
-  return { gaps, ...(disagreement !== undefined ? { disagreement } : {}) };
+  return gaps;
 };
 
 /**
@@ -1484,7 +1455,7 @@ const evidenceRetention: AuditCheck = {
   title: "evidence retention",
   citations: requiredBy("AH-CFC-16"),
   falsifiedBy:
-    "an enforcing run missing one of the artifacts that would explain why a result was exposed or denied: its policy trace, its policy snapshot or that snapshot's digest, an invocation context for a side effect that reached the CFC substrate, a hole in the numbering of the contexts it retained or two artifacts disagreeing about them, or any recorded attempt to read its space's cell labels; and, as a warning, a run whose side effects recorded no invocation context at all, which its artifacts cannot tell from evidence that was lost",
+    "an enforcing run missing one of the artifacts that would explain why a result was exposed or denied: its policy trace, its policy snapshot or that snapshot's digest, an invocation context for a side effect that reached the CFC substrate, a hole in the numbering of the contexts it retained, or any recorded attempt to read its space's cell labels; and, as a warning, a run whose side effects recorded no invocation context at all, which its artifacts cannot tell from evidence that was lost",
   inspect(run) {
     if (run.runState.status !== "present") {
       return notReadable("run-state.json", run.runState);
@@ -1496,7 +1467,7 @@ const evidenceRetention: AuditCheck = {
     const contexts = invocationContextsOf(run);
     const effects = executedSideEffects(run);
     const unexplained = substrateEffectsMissingContext(run);
-    const retention = invocationContextRetention(run);
+    const lostContexts = missingInvocationContexts(run);
     const requirements: readonly RetentionRequirement[] = [
       {
         name: "policy-trace.json",
@@ -1522,16 +1493,12 @@ const evidenceRetention: AuditCheck = {
       },
       {
         name: "the invocation contexts it minted",
-        held: retention.gaps.length === 0 &&
-          retention.disagreement === undefined,
-        detail: retention.disagreement ??
-          (retention.gaps.length === 0
-            ? `${contexts.length} retained, numbered without a gap`
-            : `${
-              count(retention.gaps.length, "context", "contexts")
-            } the run minted are held by no artifact: ${
-              retention.gaps.join(", ")
-            }`),
+        held: lostContexts.length === 0,
+        detail: lostContexts.length === 0
+          ? `${contexts.length} retained, numbered without a gap`
+          : `${
+            count(lostContexts.length, "context", "contexts")
+          } the run minted are held by no artifact: ${lostContexts.join(", ")}`,
       },
       {
         name: "a recorded cell-labels read",

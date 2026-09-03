@@ -791,17 +791,18 @@ describe("seeded violations", () => {
       });
     });
 
-    it("fails a context dropped from one artifact and left in the other", () => {
-      // Read from one artifact this is a run that minted one context; read
-      // from both it is a run whose copies disagree, which is retention
-      // failing rather than a run that recorded less. Nothing else turns:
-      // the union keeps the join over every context either artifact holds.
+    it("recovers a context dropped from one artifact and left in the other", () => {
+      // Two artifacts carry the list, and the reader takes their union, so
+      // deleting a copy from one of them recovers rather than hides. Reading
+      // the first artifact that answered would have made this a run that
+      // minted one context, and the call the deleted one explained would have
+      // read as evidence gone missing.
 
-      turnsOnly("AUD-9", "fail", (root) => {
+      expect(verdicts(seeded((root) => {
         const trace = traceOf(root);
         trace.cfcInvocationContexts = (trace.cfcInvocationContexts ?? [])
           .filter((context) => context.sequence !== 1);
-      });
+      }))).toEqual(CLEAN);
     });
 
     it("passes a run holding every context it minted, in both artifacts", () => {
