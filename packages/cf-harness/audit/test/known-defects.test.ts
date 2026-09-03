@@ -225,6 +225,36 @@ describe("Group E readings off the clean path", () => {
     expect(said).toContain("an authenticated subject");
   });
 
+  it("reads delegations from the run state alone when the report is gone, and claims no divergence", () => {
+    // Divergence is a comparison, so an artifact that is absent is not an
+    // artifact that disagrees. The check still has the run state's
+    // delegations and still reports on their ceilings; what it must not do is
+    // read a missing second opinion as a conflicting one.
+    const fam = withoutArtifact("runReport");
+    const result = checkById("AUD-23").inspect(fam.root, fam);
+    expect(result.verdict).toBe("warn");
+    expect(JSON.stringify(result.evidence)).not.toContain("has lost a child");
+  });
+
+  it("skips an activity that carries no prompt slot rather than counting it", () => {
+    // An activity without a binding is not a binding without a subject. The
+    // adder drops it, so a run whose tools mostly carry no slot does not read
+    // as a run minting authority it never claimed.
+    const root = structuredClone(family.root);
+    const report = root.runReport;
+    if (report.status !== "present") throw new Error("fixture has no report");
+    const activities =
+      (report.value as { toolActivity?: { promptSlot?: unknown }[] })
+        .toolActivity ?? [];
+    for (const activity of activities) delete activity.promptSlot;
+    const fam: RunFamily = {
+      root,
+      children: structuredClone(family.children),
+    };
+    const result = checkById("AUD-22").inspect(fam.root, fam);
+    expect(["fail", "not-applicable"]).toContain(result.verdict);
+  });
+
   it("counts one binding once, however many artifacts carry it", () => {
     const root = structuredClone(family.root);
     const state = root.runState;
