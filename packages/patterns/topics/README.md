@@ -59,10 +59,27 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   current authored-content verb writes structured attribution; the public result
   and mutation contracts contain no mutable "current author" state or
   display-name mirrors.
-- **`mentionable` is a structural reference, not derived data.** The board
-  passes its own topics list at creation; the topic's body editor autocompletes
-  `@`-mentions over it. Backfillable as a one-time link-bind on pieces created
-  before the input existed.
+- **`mentionable` is a derived index, and its copies are the design.** Every
+  topic on the board reads the mention universe — each child's editor
+  autocompletes over it — so whatever `mentionable` is wired to is multiplied by
+  the board's own size. Pointed at the topics themselves, every topic's walk
+  crosses into every other topic, and document-granular delivery ships each
+  sibling whole to serve two strings. The index bounds that product:
+  `mentionableIndex` derives one small document of rows, each carrying a topic's
+  display name and title as COPIES plus the topic itself as a reference. One
+  derivation pays the board-wide walk, once per change, in place of every reader
+  paying it on every load.
+
+  The reference is what a picked completion stores, and it is deliberately
+  outside the demand a topic declares over the universe: a property that demand
+  does not select is invisible to the walks that warm and watch a topic's
+  argument, which is what keeps a topic's resume from reaching a sibling through
+  its mention universe. The editor reaches it through its own contract, at the
+  moment a completion is picked.
+
+  `addTopic` wires the index into each topic it creates. A piece created before
+  the index is rewired to it as a one-time link-bind; until then it reads the
+  raw topics list — correct, at the cost the index exists to remove.
 - **A declared schema is the only thing that bounds a read.** The transformer
   shrinks a derivation's input schema to the paths it can see the body reach,
   and gives up when it cannot: `topics.get().length` declares `items: unknown`
@@ -72,11 +89,12 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   space. So every derivation here is a module-scope `lift`, because a `lift`'s
   declared parameter type is a ceiling an opaque helper cannot widen.
 
-  Two derivations run over the whole board, and each declares only what it
+  Three derivations run over the whole board, and each declares only what it
   reads. `crossrefTable` takes one list of references per topic and builds the
   mention pivot from it; `cardsByActivity` takes a single timestamp per topic
-  and orders the cards by it. Neither expands a topic's title, prose, thread,
-  verbs, or rendered UI.
+  and orders the cards by it; `mentionableIndex` takes the two display strings
+  per topic and builds the mention universe. None expands a topic's prose,
+  thread, verbs, or rendered UI.
 
   A lift's parameter and its result look like one type, which seems to force a
   choice: narrow the parameter to bound the read, and what comes out narrows
@@ -128,13 +146,13 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   as the identity there is nothing to key a map by, and at board scale it is a
   few hundred comparisons of resolved links.
 
-  Each topic then does a lookup rather than the join: find yourself among the
-  siblings, take the row at that position. It searches `mentionable` rather than
-  the table itself because **a link survives being read as an element of an
-  array a parameter declares at its top level, and does not survive being read
-  as a field nested inside one** — the nested read resolves it to a plain object
-  and leaves `equals` nothing to follow. Rows align with the topics array by
-  construction, since the pivot maps over it.
+  Each topic then does a lookup rather than the join: `backlinksOf` scans the
+  pivot for the row whose topic is itself, and takes that row's `mentionedBy`.
+  The scan compares a field nested inside a row, and what lets it is that row's
+  declaration — the field is declared a `ComparableCell`, the annotation that
+  makes it arrive as something `equals` can follow rather than a value to look
+  at. The published row declares both sides `unknown` instead, so a consumer
+  that only carries the graph onward expands neither.
 
   Every row is addressed by the topic it describes (`Writable.for(topic)`), so a
   row keeps its identity however the board is reordered, and a lookup re-run by
