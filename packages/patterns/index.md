@@ -9,7 +9,7 @@ Prefix the URLs with
 
 This directory mixes exemplars, capability demos, regression fixtures, and
 legacy experiments. They do NOT carry equal authority. Before imitating any
-pattern, check its tier here (tracked in CT-1701):
+pattern, check its tier:
 
 - **primitive** — designed for embedding in other patterns (used as a JSX tag),
   headless-able. Exposes streams + cells + an optional default `[UI]`. Copy
@@ -26,6 +26,33 @@ pattern, check its tier here (tracked in CT-1701):
 
 Any pattern not listed below (newly added, or missed) should be treated as
 **demo** until triaged.
+
+## The tier is in the file
+
+The two tiers that mean "do not copy" — legacy and fixture — do not rely on this
+page being found. Every pattern source in them opens with a marker naming the
+tier, so the answer reaches a reader who arrived from a directory listing, a
+grep hit, or a link straight to the file:
+
+```ts
+// PATTERN TIER: fixture — scaffolding that pins a bug or drives the
+// runtime. Do not copy from this file. Tiers: packages/patterns/index.md
+```
+
+Membership is the table in `tasks/pattern-tiers.ts`, which tiers whole
+directories and individual files. `deno task check-pattern-tiers` holds the two
+to each other in both directions: a listed file without its marker fails, a
+marker on an unlisted file fails, and a table entry matching nothing fails. So a
+new fixture cannot arrive unmarked, and a marker cannot outlive its reason.
+`deno task fix-pattern-tiers` applies or corrects a marker.
+
+The sections below therefore do not re-list the members of those two tiers. The
+marker in the file is the answer; the table is where it comes from.
+
+The three copyable tiers carry no marker. Their instruction is to copy, or to
+copy the capability call and not the style, which is what a reader already
+assumes — and the several hundred remaining pattern sources would each need one
+to say it.
 
 ## primitive
 
@@ -55,10 +82,6 @@ benefited (see the contract doc's "Lessons" section).
 `catalog/` (type-checked component catalog + `catalog/stories/`), `counter/`,
 `do-list/`, `fair-share/`, `form-demo.tsx`, `notes/`, `reading-list/` (canonical
 list-detail example), `simple-list/`, `todo-list/`.
-
-Caveat: `simple-list/simple-list.tsx` exports `MODULE_METADATA` so it can embed
-in the legacy Record containers — do not copy that export (see the `record/`
-note under legacy).
 
 ## demo
 
@@ -98,39 +121,32 @@ not a style reference.
 
 ## fixture
 
-`gideon-tests/`, `integration/`, `test/`, `plain-array-callback-locals/`,
-`scope-bug-computed-vnode-blank/`, `scope-bug-ct1597-forward/`,
-`scope-bug-ct1597-reduce/`, `cell-link.tsx` (suggestion tester),
-`nested-map-ifelse-test.tsx`, `render-test.tsx`, `self-reference-test.tsx`, and
-every `*.test.ts(x)` file anywhere in this package. (The blanket `*.test.ts(x)`
-rule is about pattern-authoring idioms — test _style_ is governed by
-`docs/common/workflows/pattern-testing.md`, and the exemplars' own test files
-remain good references for it.)
+Every fixture pattern source carries the fixture marker, so the file says so
+itself. Two groups sit outside the marker's reach and are fixture anyway:
+
+- Every `*.test.ts(x)` file anywhere in this package. The blanket rule is about
+  pattern-authoring idioms — test _style_ is governed by
+  `docs/common/workflows/pattern-testing.md`, and the exemplars' own test files
+  remain good references for it.
+- `integration/`, the browser test harness. These are test drivers rather than
+  patterns, and nothing compiles them as pattern entries.
 
 ## legacy
 
-**`record/`, `record.tsx`, `record-backup.tsx`, `record-icon.tsx`, and
-`container-protocol.ts`** — the registry/`MODULE_METADATA` approach is a
-parallel composition system; do not copy it — compose patterns directly as JSX
-tags + wish discovery instead. Whether `record/` is retired outright or kept as
-a demo is an open question, deliberately deferred to the review of the CT-1701
-tiering PR.
+The remaining legacy patterns each carry the legacy marker:
 
-**Attribute/module clones feeding that registry** — their `MODULE_METADATA`
-ceremony exists only to register with Record containers and is not a model to
-follow: `address.tsx`, `age-category.tsx`, `birthday.tsx`, `custom-field.tsx`,
-`dietary-restrictions.tsx`, `email.tsx`, `emoji-picker.tsx`, `gender.tsx`,
-`giftprefs.tsx`, `link.tsx`, `location.tsx`, `location-track.tsx`,
-`nickname.tsx`, `occurrence-tracker.tsx`, `phone.tsx`, `photo.tsx`,
-`rating.tsx`, `relationship.tsx`, `social.tsx`, `status.tsx`, `tags.tsx`,
-`text-import.tsx`, `timeline.tsx`, `timing.tsx`, `type-picker.tsx`.
+- `factory-outputs/` and its support file `vehicles.ts` — machine-generated
+  pattern-factory outputs, kept with their eval scores and never intended as
+  style references. `parking-coordinator/main.tsx` is also a live integration
+  and capability-gate fixture, which is why it stays.
+- `google/WIP/` — parked work that never graduated into `google/core/`.
 
-**`factory-outputs/`** (+ its support files `vehicles.ts`, `vehicles.test.ts`) —
-machine-generated pattern-factory outputs kept with their eval scores; never
-intended as style references.
-
-**`google/WIP/`** — parked, unfinished work that never graduated into
-`google/core/`.
+The registry/`MODULE_METADATA` composition system — `record/`, `record.tsx`, its
+backup and icon companions, `container-protocol.ts`, and the two dozen attribute
+modules that existed only to register with it — has been removed. It was a
+parallel composition system with no callers outside itself. Compose patterns
+directly as JSX tags plus `wish` discovery instead;
+`docs/common/patterns/composition.md` covers how.
 
 Support files with no tier (not patterns): `deno.jsonc`, `mod.ts`, `index.md`,
 `README.md`, `DEPRECATED_IDIOMS.md`, `test/vnode-helpers.ts` (the shared
@@ -435,9 +451,8 @@ interface TodoListOutput {
 
 ## `simple-list/simple-list.tsx`
 
-A checklist with indent support. Works standalone (it also carries a legacy
-`MODULE_METADATA` export for Record containers — see the status-tier caveat
-above; don't copy that part).
+A checklist with indent support. Runs standalone, and embeds in another pattern
+as a JSX tag.
 
 **Keywords:** checklist, indentation, composable
 

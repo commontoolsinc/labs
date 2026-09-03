@@ -303,7 +303,10 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     // cells are called — so a role names the viewer's `#profile` cell, and the
     // stored shape of a role changed with it.
     pattern: "factory-outputs/parking-coordinator/main.tsx",
-    baselines: ["20260820T191154Z-Fah23u1z5LYk4qKk"],
+    baselines: [
+      "20260820T191154Z-Fah23u1z5LYk4qKk",
+      "20260825T211621Z-wEoO6wvf7g-fhtJd",
+    ],
     // The same change seen from the two roles a contract has: the subject is a
     // cell where it was an inline object, and the name inside it goes with it.
     paths: [

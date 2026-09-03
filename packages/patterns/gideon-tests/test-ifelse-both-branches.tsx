@@ -1,3 +1,5 @@
+// PATTERN TIER: fixture — scaffolding that pins a bug or drives the
+// runtime. Do not copy from this file. Tiers: packages/patterns/index.md
 /**
  * Test Pattern: ifElse Evaluates BOTH Branches
  *

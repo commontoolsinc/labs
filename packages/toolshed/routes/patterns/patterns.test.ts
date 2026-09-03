@@ -29,12 +29,13 @@ describe("Patterns API", () => {
       expect(text).toContain("export default pattern");
     });
 
-    it("serves record.tsx", async () => {
-      const response = await app.request("/api/patterns/record.tsx");
+    it("serves annotation.tsx", async () => {
+      const response = await app.request("/api/patterns/annotation.tsx");
       expect(response.status).toBe(200);
       const text = await response.text();
-      // record.tsx exports its pattern differently
-      expect(text).toContain("export default Record");
+      // annotation.tsx names its pattern and exports the binding, rather than
+      // exporting the `pattern(...)` call directly.
+      expect(text).toContain("export default Annotation");
     });
 
     it("serves connector-owned patterns at their stable routes", async () => {
@@ -72,7 +73,7 @@ describe("Patterns API", () => {
       expect(directory.status).toBe(404);
 
       const belowAFile = await app.request(
-        "/api/patterns/record.tsx/below.ts",
+        "/api/patterns/annotation.tsx/below.ts",
       );
       expect(belowAFile.status).toBe(404);
     });
@@ -83,42 +84,46 @@ describe("Patterns API", () => {
     // This was broken in PR #2314 when the patterns API blocked paths with '/'.
     // See PRs #2318 (revert) and #2319 (fix) for context.
 
-    it("serves record/registry.ts (subdirectory import)", async () => {
-      const response = await app.request("/api/patterns/record/registry.ts");
+    it("serves battleship/shared/game-logic.tsx (subdirectory import)", async () => {
+      const response = await app.request(
+        "/api/patterns/battleship/shared/game-logic.tsx",
+      );
       expect(response.status).toBe(200);
       const text = await response.text();
       expect(text.length).toBeGreaterThan(0);
     });
 
-    it("serves record/template-registry.ts", async () => {
+    it("serves battleship/shared/types.tsx", async () => {
       const response = await app.request(
-        "/api/patterns/record/template-registry.ts",
+        "/api/patterns/battleship/shared/types.tsx",
       );
       expect(response.status).toBe(200);
     });
 
-    it("serves record/types.ts", async () => {
-      const response = await app.request("/api/patterns/record/types.ts");
-      expect(response.status).toBe(200);
-    });
-
-    it("serves nested subdirectory record/extraction/extractor-module.tsx", async () => {
+    it("serves battleship/multiplayer/lobby.tsx", async () => {
       const response = await app.request(
-        "/api/patterns/record/extraction/extractor-module.tsx",
+        "/api/patterns/battleship/multiplayer/lobby.tsx",
       );
       expect(response.status).toBe(200);
     });
 
-    it("serves deeply nested record/extraction/schema-utils.ts", async () => {
+    it("serves nested subdirectory google/core/experimental/gmail-sender.tsx", async () => {
       const response = await app.request(
-        "/api/patterns/record/extraction/schema-utils.ts",
+        "/api/patterns/google/core/experimental/gmail-sender.tsx",
       );
       expect(response.status).toBe(200);
     });
 
-    it("serves record/extraction/schema-utils-pure.ts", async () => {
+    it("serves deeply nested google/core/util/google-docs-client.ts", async () => {
       const response = await app.request(
-        "/api/patterns/record/extraction/schema-utils-pure.ts",
+        "/api/patterns/google/core/util/google-docs-client.ts",
+      );
+      expect(response.status).toBe(200);
+    });
+
+    it("serves google/core/util/gmail-client.ts", async () => {
+      const response = await app.request(
+        "/api/patterns/google/core/util/gmail-client.ts",
       );
       expect(response.status).toBe(200);
     });
@@ -138,7 +143,7 @@ describe("Patterns API", () => {
 
     it("blocks .. in subdirectory path", async () => {
       // Even within a valid-looking path structure
-      const response = await app.request("/api/patterns/record/..trick.ts");
+      const response = await app.request("/api/patterns/battleship/..trick.ts");
       expect(response.status).toBe(400);
     });
 

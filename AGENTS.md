@@ -307,6 +307,11 @@ Each of these gates fails CI on its own, and none of them run as part of
   rather than added to
 - `deno task check-test-aliases` — a test-identity alias line that was edited or
   removed rather than appended, mapped an identity twice, or formed a cycle
+- `deno task check-pattern-tiers` — a legacy or fixture pattern that does not
+  open with the marker saying so. `packages/patterns` is example code of unequal
+  authority, and the marker is what stops the wrong example being copied by
+  someone who never found the index. Membership is `tasks/pattern-tiers.ts`, and
+  `deno task fix-pattern-tiers` applies or corrects a marker
 
 The detail behind each of these lives in `.claude/rules/`, one file per kind of
 file it governs. Claude Code loads the matching rule on its own when it reads a

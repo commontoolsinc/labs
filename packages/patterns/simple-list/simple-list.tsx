@@ -1,8 +1,8 @@
 /**
  * Simple List Module - A checklist with indent support
  *
- * A composable pattern that can be used standalone or embedded in containers
- * like Record. Provides rapid keyboard entry, checkboxes, and indent toggle.
+ * A composable pattern that runs standalone or embeds in another pattern as a
+ * JSX tag. Provides rapid keyboard entry, checkboxes, and indent toggle.
  */
 import {
   action,
@@ -15,33 +15,9 @@ import {
   type VNode,
   Writable,
 } from "commonfabric";
-import type { ModuleMetadata } from "../container-protocol.ts";
 
-// ===== Self-Describing Metadata =====
-export const MODULE_METADATA: ModuleMetadata = {
-  type: "simple-list",
-  label: "Simple List",
-  icon: "\u2611", // ballot box with check
-  allowMultiple: true,
-  schema: {
-    items: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          text: { type: "string", description: "Item text" },
-          indented: {
-            type: "boolean",
-            description: "Whether item is indented",
-          },
-          done: { type: "boolean", description: "Whether item is completed" },
-        },
-      },
-      description: "List items",
-    },
-  },
-  fieldMapping: ["items", "checklist", "list"],
-};
+/** Ballot box with check, shown ahead of the summary in [NAME]. */
+const LIST_ICON = "\u2611";
 
 // ===== Types =====
 export interface SimpleListItem {
@@ -124,7 +100,7 @@ export const SimpleListModule = pattern<
   });
 
   return {
-    [NAME]: computed(() => `${MODULE_METADATA.icon} List: ${displayText}`),
+    [NAME]: computed(() => `${LIST_ICON} List: ${displayText}`),
     [UI]: (
       <cf-vstack gap="2">
         {/* List items */}

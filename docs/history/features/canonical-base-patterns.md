@@ -1,3 +1,10 @@
+---
+status: historical
+created: 2026-01-27
+archived: 2026-08-13
+reason: "Abandoned design; the container/registry composition system it builds on was removed from packages/patterns."
+---
+
 # Canonical Base Patterns Design
 
 **Status:** Revised per Architect Feedback (v4 - Record-Level Upgrade)

@@ -20,8 +20,8 @@ Deno.test("selectPatternTestFiles assigns every file by stable FNV-1a hash", () 
   const files = [
     "packages/patterns/notes/note.test.tsx",
     "packages/patterns/notes/notebook.test.tsx",
-    "packages/patterns/record.test.tsx",
-    "packages/patterns/record-module-fields.test.tsx",
+    "packages/patterns/dice.test.tsx",
+    "packages/patterns/shopping-list.test.tsx",
     "packages/patterns/lunch-poll/main.test.tsx",
     "packages/patterns/lunch-poll/multi-user.test.tsx",
   ];
@@ -30,11 +30,13 @@ Deno.test("selectPatternTestFiles assigns every file by stable FNV-1a hash", () 
     [
       "packages/patterns/lunch-poll/multi-user.test.tsx",
       "packages/patterns/notes/note.test.tsx",
-      "packages/patterns/record-module-fields.test.tsx",
     ],
-    ["packages/patterns/record.test.tsx"],
+    ["packages/patterns/shopping-list.test.tsx"],
     ["packages/patterns/lunch-poll/main.test.tsx"],
-    ["packages/patterns/notes/notebook.test.tsx"],
+    [
+      "packages/patterns/dice.test.tsx",
+      "packages/patterns/notes/notebook.test.tsx",
+    ],
   ];
 
   for (

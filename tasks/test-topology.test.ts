@@ -80,7 +80,7 @@ describe("the test topology", () => {
     const records = [
       { test: { k: "format", s: "repo", n: "deno-fmt" } },
       { test: { k: "gate", s: "repo", n: "check-deno-pins" } },
-      { test: { k: "gate", s: "repo", n: "pattern-compat address.tsx" } },
+      { test: { k: "gate", s: "repo", n: "pattern-compat annotation.tsx" } },
       { test: { k: "gate", s: "repo", n: "pattern-vintage a b c" } },
       { test: { k: "typecheck", s: "repo", n: "cfcheck a.tsx" } },
       { test: { k: "typecheck", s: "memory", n: "deno-check" } },

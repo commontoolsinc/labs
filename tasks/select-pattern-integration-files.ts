@@ -38,7 +38,6 @@ export const PATTERN_INTEGRATION_SHARD_COUNT =
 export const PATTERN_INTEGRATION_TEST_WEIGHTS: Readonly<
   Record<string, number>
 > = {
-  "record-module-chrome.test.ts": 57.2,
   "cf-code-editor.test.ts": 40.7,
   "convergence-storm.test.ts": 30.0,
   "lunch-poll-vote.test.ts": 42.5,

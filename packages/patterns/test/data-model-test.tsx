@@ -1,3 +1,5 @@
+// PATTERN TIER: fixture — scaffolding that pins a bug or drives the
+// runtime. Do not copy from this file. Tiers: packages/patterns/index.md
 /**
  * This is a hand-driven probe for the data model, not an automated test,
  * despite the directory it sits in and the name it carries. It takes a

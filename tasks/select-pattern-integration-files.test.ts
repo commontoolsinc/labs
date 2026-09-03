@@ -149,7 +149,6 @@ Deno.test("pattern integration weights name real files", async () => {
 
 Deno.test("pattern integration assignments separate expensive files", async () => {
   const expensiveFiles = [
-    "record-module-chrome.test.ts",
     "cf-code-editor.test.ts",
     "lunch-poll-vote.test.ts",
     "parking-coordinator-admin-view.test.ts",

@@ -61,7 +61,6 @@ const DIRS = [
   "packages/patterns/google/core/util",
   "packages/patterns/integration",
   "packages/patterns/notes",
-  "packages/patterns/record",
   "packages/patterns/scrabble",
   "packages/patterns/system",
   "packages/patterns/test",

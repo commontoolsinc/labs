@@ -51,8 +51,8 @@ sightings.set([...sightings.get(), { image: light, /* … */ }]);
   in a **session** cell (`new Writable<ImageData[]>([])`), never a persisted
   `PerSpace`/input cell. `store-mapper.tsx` and `image-analysis.tsx` do exactly
   this: photos are processed-and-discarded; only the *extracted* data persists.
-- `photo.tsx` is the canonical persisted-image pattern: it omits `includeData`
-  and stores/renders only `url`.
+- `group-chat-room.tsx` is the canonical persisted-image pattern: it omits
+  `includeData`, and the message it stores carries only the image's `url`.
 - Common flow for "capture → extract → keep the photo": use `includeData` on the
   draft (so the LLM can read `data`), then persist a stripped `{ url, name }`
   into the durable record.
