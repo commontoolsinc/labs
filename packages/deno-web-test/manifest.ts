@@ -1,6 +1,7 @@
 import * as path from "@std/path";
 
 import { Config, getConfig } from "./config.ts";
+import { removeDirectory } from "./remove-directory.ts";
 
 // The name a run's directory carries. A directory a killed run leaves behind
 // has nothing but its name to say what made it.
@@ -57,15 +58,10 @@ export class Manifest {
   }
 
   // Removes everything the run wrote, both directories above included. The
-  // rename goes first: removing a tree walks it and then removes the root,
-  // and a process writing by the path the run handed it would put an entry
-  // back into a directory the walk had already been through. Under the new
-  // name it writes to a path that no longer resolves, and the walk sees a
-  // tree nothing can add to.
+  // browser has to be closed and the static server stopped first, so that
+  // nothing the run started is writing to either directory as it goes.
   async remove(): Promise<void> {
-    const removing = `${this.#runDir}.removing`;
-    await Deno.rename(this.#runDir, removing);
-    await Deno.remove(removing, { recursive: true });
+    await removeDirectory(this.#runDir);
   }
 
   static async create(projectDir: string, tests: string[]): Promise<Manifest> {
@@ -76,8 +72,15 @@ export class Manifest {
       await Deno.makeTempDir({ prefix: RUN_DIRECTORY_PREFIX }),
       config,
     );
-    await Deno.mkdir(manifest.serverDir);
-    await Deno.mkdir(manifest.profileDir);
+    try {
+      await Deno.mkdir(manifest.serverDir);
+      await Deno.mkdir(manifest.profileDir);
+    } catch (error) {
+      // The temporary directory is already there, and nobody holds the
+      // manifest to remove it with.
+      await manifest.remove();
+      throw error;
+    }
     return manifest;
   }
 }

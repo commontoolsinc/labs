@@ -54,6 +54,15 @@ describe("extractAstralConfig()", () => {
       .toEqual([`--user-data-dir=${PROFILE_DIR}`]);
   });
 
+  it('names it again in Firefox\'s spelling for `product: "firefox"`', () => {
+    // `--user-data-dir` is what astral reads to tell whether the launch names
+    // a profile, and Firefox reads `-profile`. Both name the run's own
+    // directory, which is the one the run removes when it ends.
+
+    expect(extractAstralConfig({ product: "firefox" }, PROFILE_DIR).args)
+      .toEqual([`--user-data-dir=${PROFILE_DIR}`, "-profile", PROFILE_DIR]);
+  });
+
   describe("the browser binary", () => {
     it("supplies one for an unstated product, which astral takes as Chrome", () => {
       withBinaryOverride(EXISTING_FILE, () => {

@@ -15,6 +15,7 @@
 import { describe, it } from "@std/testing/bdd";
 
 import { RUN_DIRECTORY_PREFIX } from "../manifest.ts";
+import { removeDirectory } from "../remove-directory.ts";
 import { runDenoWebTest } from "./utils.ts";
 
 describe("a harness run", () => {
@@ -27,12 +28,7 @@ describe("a harness run", () => {
     });
     const left = [...Deno.readDirSync(temporaryDirectory)];
 
-    // Renaming the directory before walking it takes it out from under
-    // anything writing to the path the run was given, so that nothing can
-    // appear inside it while the walk is under way.
-    const removing = `${temporaryDirectory}.removing`;
-    await Deno.rename(temporaryDirectory, removing);
-    await Deno.remove(removing, { recursive: true });
+    await removeDirectory(temporaryDirectory);
 
     run.assert(run.success, "the run passed");
     run.assert(

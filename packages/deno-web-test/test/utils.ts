@@ -5,6 +5,8 @@ import { parse as parseJsonc } from "@std/jsonc";
 import { decode } from "@commonfabric/utils/encoding";
 import { RECORDS_DIR_VARIABLE } from "@commonfabric/test-support/records";
 
+import { removeDirectory } from "../remove-directory.ts";
+
 const dirname = import.meta.dirname as string;
 const CLI_PATH = path.join(dirname, "..", "cli.ts");
 const DenoWebTestCache: Map<string, Promise<HarnessRun>> = new Map();
@@ -242,17 +244,20 @@ export const runDenoWebTest = async (
       [RECORDS_DIR_VARIABLE]: "",
       ...environment,
     },
-  }).output()
-    .then((output) =>
-      new HarnessRun(
-        projectDir,
-        sanitizeDenoWebTestOutput(output, stderrBoundary),
-      )
+  }).output().then((output) =>
+    new HarnessRun(
+      projectDir,
+      sanitizeDenoWebTestOutput(output, stderrBoundary),
     )
-    // The copy is the run's working directory, and a `HarnessRun` holds what
-    // the run printed rather than anything under it, so the copy goes once
-    // the run has ended.
-    .finally(() => Deno.remove(tmp, { recursive: true }));
+  );
   DenoWebTestCache.set(cacheKey, run);
+
+  // The copy is the run's working directory, and a `HarnessRun` holds what
+  // the run printed rather than anything under it, so the copy goes once the
+  // run has settled, whichever way it settled. What the cache holds is the
+  // run, so a removal that fails says so here without becoming what every
+  // later caller reads.
+  await Promise.allSettled([run]);
+  await removeDirectory(tmp);
   return run;
 };
