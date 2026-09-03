@@ -17,11 +17,20 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
 
-import { KNOWN_DEFECT_REGISTRATIONS } from "../checks/known-defects.ts";
+import {
+  KNOWN_DEFECT_CHECKS,
+  KNOWN_DEFECT_REGISTRATIONS,
+} from "../checks/known-defects.ts";
 import { RUN_CHECKS } from "../checks/registry.ts";
 import { auditRunFamily } from "../checks/structural.ts";
 import { loadRunFamily, type RunFamily } from "../evidence.ts";
 import type { CheckResult } from "../report.ts";
+import {
+  CFC_HARNESS_OBLIGATIONS,
+  reconcileConformanceManifest,
+  renderConformancePosition,
+  statusSatisfies,
+} from "../conformance-manifest.ts";
 import { FIXTURE_RUN_ID, FIXTURE_RUNS_DIR } from "./regenerate-fixtures.ts";
 
 const family = await loadRunFamily(join(FIXTURE_RUNS_DIR, FIXTURE_RUN_ID));
@@ -154,5 +163,128 @@ describe("known defects", () => {
     expect(
       registered().some((result) => result.checkId === "AUD-24"),
     ).toBe(true);
+  });
+});
+
+/**
+ * The readings a Group E check reaches when the run is not the clean one.
+ *
+ * Each case here is a branch that decides what a check says rather than
+ * whether it says it: an artifact the check needs and cannot read, a binding
+ * missing a field the strengthened `AH-CFC-3` requires, and a manifest whose
+ * status the covering checks contradict. None is reachable from the fixture,
+ * which is why they are built rather than recorded.
+ */
+describe("Group E readings off the clean path", () => {
+  const checkById = (id: string) => {
+    const check = KNOWN_DEFECT_CHECKS.find((one) => one.id === id);
+    if (check === undefined) throw new Error(`no check ${id}`);
+    return check;
+  };
+
+  const withoutArtifact = (
+    artifact: "runState" | "runReport",
+  ): RunFamily => {
+    const root = structuredClone(family.root);
+    root[artifact] = { status: "absent", path: root[artifact].path };
+    return { root, children: structuredClone(family.children) };
+  };
+
+  for (const id of ["AUD-21", "AUD-22", "AUD-23"]) {
+    it(`${id} reports the run state it could not read rather than a verdict about the run`, () => {
+      const fam = withoutArtifact("runState");
+      const result = checkById(id).inspect(fam.root, fam);
+      expect(result.verdict).toBe("inconclusive");
+      expect(result.message).toContain("run-state.json");
+    });
+  }
+
+  it("AUD-21 will not read a run's side effects out of a report it does not have", () => {
+    const fam = withoutArtifact("runReport");
+    const result = checkById("AUD-21").inspect(fam.root, fam);
+    expect(result.verdict).toBe("inconclusive");
+    expect(result.message).toContain("run-report.json");
+  });
+
+  it("AUD-22 names each field a binding is missing, not merely that one is", () => {
+    const root = structuredClone(family.root);
+    const state = root.runState;
+    if (state.status !== "present") throw new Error("fixture has no run state");
+    (state.value as { promptSlotBinding?: unknown }).promptSlotBinding = {
+      role: "direct-command",
+    };
+    const fam: RunFamily = {
+      root,
+      children: structuredClone(family.children),
+    };
+    const result = checkById("AUD-22").inspect(fam.root, fam);
+    expect(result.verdict).toBe("fail");
+    const said = JSON.stringify(result.evidence);
+    expect(said).toContain("a kernel name");
+    expect(said).toContain("a named surface");
+    expect(said).toContain("an authenticated subject");
+  });
+
+  it("counts one binding once, however many artifacts carry it", () => {
+    const root = structuredClone(family.root);
+    const state = root.runState;
+    const report = root.runReport;
+    if (state.status !== "present" || report.status !== "present") {
+      throw new Error("fixture is missing an artifact this case needs");
+    }
+    // The same binding, recorded in both places a run records one. A count
+    // that grew with the number of artifacts carrying a binding would report
+    // one run's single authority as several.
+    const binding = { role: "direct-command", kernelName: "seeded" };
+    (state.value as { promptSlotBinding?: unknown }).promptSlotBinding =
+      binding;
+    for (
+      const activity of (report.value as {
+        toolActivity?: { promptSlot?: unknown }[];
+      }).toolActivity ?? []
+    ) {
+      activity.promptSlot = structuredClone(binding);
+    }
+    const trace = root.policyTrace;
+    if (trace.status === "present") {
+      for (
+        const decision of (trace.value as unknown as {
+          decisions?: { promptSlot?: unknown }[];
+        }).decisions ?? []
+      ) {
+        decision.promptSlot = structuredClone(binding);
+      }
+    }
+    const fam: RunFamily = {
+      root,
+      children: structuredClone(family.children),
+    };
+    const result = checkById("AUD-22").inspect(fam.root, fam);
+    expect(result.verdict).toBe("fail");
+    expect(result.message).toContain("1 binding");
+  });
+
+  it("the position says the manifest and its checks disagree, and how many times", () => {
+    const obligation = CFC_HARNESS_OBLIGATIONS.find((one) =>
+      one.coveredBy.length > 0
+    );
+    if (obligation === undefined) {
+      throw new Error("no obligation names a covering check");
+    }
+    const contradicting: CheckResult[] = [{
+      checkId: obligation.coveredBy[0],
+      title: "contradicts the manifest",
+      verdict: statusSatisfies(obligation.status) ? "fail" : "pass",
+      message: "seeded to disagree",
+      citations: [],
+      evidence: [],
+      runId: FIXTURE_RUN_ID,
+      runDir: FIXTURE_RUNS_DIR,
+    }];
+    const reconciliation = reconcileConformanceManifest(contradicting);
+    expect(reconciliation.disagreements.length).toBeGreaterThan(0);
+    expect(renderConformancePosition(reconciliation)).toContain(
+      "disagree with the checks covering them",
+    );
   });
 });
