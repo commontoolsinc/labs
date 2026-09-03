@@ -62,22 +62,44 @@ function shell(
   return child;
 }
 
+// More than a pipe holds, so a stand-in that writes this much to its standard
+// output blocks there unless the launch is reading it.
+const OVERFLOWS_A_PIPE =
+  "awk 'BEGIN { for (i = 0; i < 4000; i++) print \"................\" }'";
+
 // Launch options naming a stand-in for a browser binary: a shell script that
-// writes `printed` to its standard error and exits with `code`, never naming
-// an endpoint. The directory holding it is registered for removal.
+// runs `first`, writes `printed` to its standard error, and exits with `code`,
+// never naming an endpoint. The directory holding it is registered for
+// removal.
 async function fakeBrowser(
   printed: string,
   code: number,
+  first = "true",
 ): Promise<{ path: string; args: string[] }> {
   const directory = await Deno.makeTempDir({ prefix: "deno-web-test-fake-" });
   madeByTest.push(() => Deno.remove(directory, { recursive: true }));
   const path = `${directory}/browser`;
   await Deno.writeTextFile(
     path,
-    `#!/bin/sh\nprintf '%s\\n' '${printed}' >&2\nexit ${code}\n`,
+    `#!/bin/sh\n${first}\nprintf '%s\\n' '${printed}' >&2\nexit ${code}\n`,
   );
   await Deno.chmod(path, 0o755);
   return { path, args: [`--user-data-dir=${directory}/profile`] };
+}
+
+// Sets `ASTRAL_BIN_PATH` to `value` for the rest of the test, and registers
+// putting back what was there.
+function astralBinaryPathIs(value: string): void {
+  const had = Deno.env.get("ASTRAL_BIN_PATH");
+  madeByTest.push(() => {
+    if (had === undefined) {
+      Deno.env.delete("ASTRAL_BIN_PATH");
+    } else {
+      Deno.env.set("ASTRAL_BIN_PATH", had);
+    }
+    return Promise.resolve();
+  });
+  Deno.env.set("ASTRAL_BIN_PATH", value);
 }
 
 // The port of a developer-tools endpoint that answers `/json/version` with
@@ -225,6 +247,24 @@ describe("browser-process", () => {
           await expect(BrowserProcess.start(options)).rejects.toThrow(
             "Differing protocol versions",
           );
+        });
+
+        it("reads a browser that writes more to its standard output than a pipe holds", async () => {
+          const options = await fakeBrowser("no endpoint", 1, OVERFLOWS_A_PIPE);
+
+          // A launch that left standard output unread would stop here, with
+          // the stand-in blocked on a pipe nobody is emptying.
+          await expect(BrowserProcess.start(options)).rejects.toThrow(
+            "Your binary refused to boot",
+          );
+        });
+
+        it("takes the browser astral resolves when the options name none", async () => {
+          const options = await fakeBrowser("no endpoint", 1);
+          astralBinaryPathIs(options.path);
+
+          await expect(BrowserProcess.start({ args: options.args })).rejects
+            .toThrow("Your binary refused to boot");
         });
 
         it("throws when the launch names no `--user-data-dir`", async () => {
