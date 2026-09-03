@@ -6,12 +6,10 @@
  * JavaScript expression typed into the UI, stores the result in a cell, and
  * renders back a description of what came out, so that the round trip through
  * storage can be inspected for values whose handling is hard to predict:
- * `undefined`, `null`, `NaN`, the infinities, a nested container.
- *
- * A signed zero is not among them, and the display is why: everything the
- * description does not special-case goes through
- * `JSON.stringify`, which renders `-0` as `0`. Reading this probe as evidence
- * about `-0` would therefore be reading the renderer, not the round trip.
+ * `undefined`, `null`, `NaN`, the infinities, a signed zero, a nested
+ * container. The description renders through the debug renderer, which
+ * writes each of those as itself, `-0` included, so what the display shows
+ * is the round trip and not the renderer.
  *
  * Nothing here asserts anything, so nothing here can fail. What it produces is
  * a display for a person to read, and the `VERSION` string exists so that a
@@ -25,6 +23,7 @@ import {
   NAME,
   pattern,
   Stream,
+  toIndentedDebugString,
   UI,
   type VNode,
   Writable,
@@ -33,21 +32,7 @@ import {
 const VERSION = "v26";
 
 function describeValue(val: any): string {
-  const type = typeof val;
-  let repr: string;
-  if (val === undefined) repr = "undefined";
-  else if (val === null) repr = "null";
-  else if (val !== val) repr = "NaN";
-  else if (val === Infinity) repr = "Infinity";
-  else if (val === -Infinity) repr = "-Infinity";
-  else {
-    try {
-      repr = JSON.stringify(val, null, 2);
-    } catch {
-      repr = String(val);
-    }
-  }
-  return `typeof: ${type}\n\nvalue:  ${repr}`;
+  return `typeof: ${typeof val}\n\nvalue:  ${toIndentedDebugString(val)}`;
 }
 
 function nowTimestamp(): string {
