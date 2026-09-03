@@ -501,6 +501,20 @@ describe("seeded violations", () => {
       expect(outcome.evidence?.length).toBe(2);
     });
 
+    it("reconciles a trace declaring a `withheld` count this build cannot spell", () => {
+      // CT-2232 adds `withheld` beside `allowed`, `warned`, `denied` and
+      // `invalid`. An audit that could only read the outcomes it was built
+      // with would fail every run written by a newer harness — so the count is
+      // read when present, and absent still reads as zero for a trace written
+      // before it existed. Neither direction is a disagreement here.
+      turnsOnly("AUD-3", "pass", (root) => {
+        const trace = traceOf(root) as unknown as {
+          decisionCounts: Record<string, number>;
+        };
+        trace.decisionCounts.withheld = 0;
+      });
+    });
+
     it("does not count an invalid-argument rejection as a denial", () => {
       const invalidated = (root: RunEvidence): void => {
         const trace = traceOf(root);
@@ -714,6 +728,36 @@ describe("seeded violations", () => {
             sink: "sandbox.command",
             ceiling: [],
           };
+        }
+      });
+    });
+
+    it("does not count a call that produced no result as an ungated path", () => {
+      // A call that failed before producing a value crossed no release
+      // boundary, so its allow-side decision is the only one it can have.
+      // Reading that absence as a missing gate reports a compile error as a
+      // CFC defect — which is what this check did until it read the output.
+      turnsOnly("AUD-21", "not-applicable", (root) => {
+        const outputs = root.toolOutputs;
+        if (outputs.status !== "present") {
+          throw new Error("fixture records no tool outputs");
+        }
+        const failed = new Set<string>();
+        for (const activity of reportOf(root).toolActivity) {
+          if (
+            activity.effectClass !== "side-effect" ||
+            activity.executionStatus !== "completed"
+          ) continue;
+          const outputId = activity.resultRef?.outputId;
+          if (outputId !== undefined) failed.add(outputId);
+        }
+        for (const entry of outputs.entries) {
+          const value = entry.value as
+            | { outputId?: string; status?: string }
+            | undefined;
+          if (value?.outputId !== undefined && failed.has(value.outputId)) {
+            (value as { status?: string }).status = "compile-error";
+          }
         }
       });
     });

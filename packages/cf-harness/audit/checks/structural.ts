@@ -664,6 +664,22 @@ const isHostAuthoredOutputFile = (fileName: string): boolean => {
   return false;
 };
 
+/**
+ * A counts object's `withheld` total, which a trace recorded before that
+ * outcome existed does not carry.
+ *
+ * Read through an index rather than a field because the count is written by a
+ * harness that may be newer than the contract this audit compiles against — an
+ * audit that could only read the fields it was built with would go quiet on
+ * exactly the runs worth reading.
+ */
+const withheldIn = (
+  counts: HarnessPolicyDecisionCounts | Record<string, unknown> | undefined,
+): number | undefined => {
+  const value = (counts as Record<string, unknown> | undefined)?.withheld;
+  return typeof value === "number" ? value : undefined;
+};
+
 const countsAgree = (
   declared: HarnessPolicyDecisionCounts | undefined,
   computed: HarnessPolicyDecisionCounts,
@@ -681,12 +697,24 @@ const countsAgree = (
   // whatever it holds.
   (declared.invalid === undefined
     ? computed.invalid === 0
-    : declared.invalid === computed.invalid);
+    : declared.invalid === computed.invalid) &&
+  // `withheld` is the outcome of a release entry whose values were held back.
+  // Unlike `invalid`, the counter this audit computes with may not know the
+  // outcome at all: a trace can be written by a harness newer than the build
+  // reading it. So the reconciliation is conditional on THIS build being able
+  // to count the outcome — where it cannot, there is nothing to reconcile and
+  // saying so is honest, where inventing a zero would manufacture a
+  // disagreement out of a version gap. Once the counter emits `withheld`, a
+  // declared count that is not the number beside it is a disagreement like any
+  // other, and an absent declaration still reads as zero.
+  (withheldIn(computed) === undefined
+    ? true
+    : (withheldIn(declared) ?? 0) === withheldIn(computed));
 
 const describeCounts = (counts: HarnessPolicyDecisionCounts): string =>
   `total ${counts.total}, allowed ${counts.allowed}, warned ${counts.warned}, denied ${counts.denied}, invalid ${
     counts.invalid ?? 0
-  }`;
+  }, withheld ${withheldIn(counts) ?? 0}`;
 
 const decisionCoverage: AuditCheck = {
   id: "AUD-3",

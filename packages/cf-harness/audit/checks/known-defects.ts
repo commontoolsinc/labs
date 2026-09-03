@@ -86,6 +86,42 @@ export const KNOWN_DEFECT_REGISTRATIONS = {
 } as const satisfies Record<string, KnownDefectRegistration>;
 
 /**
+ * The side effects of a run that produced no result, and so crossed no release
+ * boundary.
+ *
+ * A call the harness admitted and that then failed before producing a value —
+ * a pattern that did not compile is the ordinary case — never reached the
+ * boundary that measures what a result would release. Its allow-side decision
+ * is the only one it can have, and reading that absence as an ungated path
+ * reports a compile error as a missing gate.
+ *
+ * Read from the call's own recorded output rather than from its execution
+ * status, which is `completed` for a call that ran and answered with a
+ * failure.
+ */
+const resultlessCalls = (run: RunEvidence): ReadonlySet<string> => {
+  if (run.toolOutputs.status !== "present") return new Set();
+  const resultless = new Set<string>();
+  const failed = new Set<string>();
+  for (const entry of run.toolOutputs.entries) {
+    const value = entry.value as
+      | { outputId?: unknown; status?: unknown }
+      | undefined;
+    if (typeof value?.outputId !== "string") continue;
+    if (typeof value.status === "string" && value.status !== "ok") {
+      failed.add(value.outputId);
+    }
+  }
+  for (const activity of activitiesOf(run)) {
+    const outputId = activity.resultRef?.outputId;
+    if (outputId !== undefined && failed.has(outputId)) {
+      resultless.add(activity.toolCallId);
+    }
+  }
+  return resultless;
+};
+
+/**
  * Whether any decision recorded for `toolCallId` consulted a label.
  *
  * The predicate is the `release` record, and it is chosen because it is the
@@ -153,16 +189,28 @@ const labelConsultingAdmission: AuditCheck = {
           `this run claims \`${mode}\`, which admits a side effect without claiming to have decided about it`,
       };
     }
+    const resultless = resultlessCalls(run);
+    const measured = effects.filter((activity) =>
+      !resultless.has(activity.toolCallId)
+    );
+    if (measured.length === 0) {
+      return {
+        verdict: "not-applicable",
+        message: `none of this run's ${
+          count(effects.length, "side effect", "side effects")
+        } produced a result, so none reached a boundary that measures one`,
+      };
+    }
     const consulted = labelConsultingDecisions(run);
-    const unconsulted = effects.filter((activity) =>
+    const unconsulted = measured.filter((activity) =>
       !consulted.has(activity.toolCallId)
     );
     if (unconsulted.length === 0) {
       return {
         verdict: "pass",
         message: `every one of this run's ${
-          count(effects.length, "side effect", "side effects")
-        } was admitted by a decision that consulted a label`,
+          count(measured.length, "side effect", "side effects")
+        } that produced a result was admitted by a decision that consulted a label`,
       };
     }
     const byTool = new Map<string, number>();

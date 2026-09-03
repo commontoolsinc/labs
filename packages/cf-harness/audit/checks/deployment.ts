@@ -153,6 +153,26 @@ interface ReleaseRefusal {
 }
 
 /**
+ * The reason a release entry records, or `undefined` where a decision carries
+ * no release at all.
+ *
+ * A release entry is written whenever the boundary measured a result, and its
+ * `reasonCode` is the fact: `cfc_release_withheld` where values were held back,
+ * `cfc_release_allowed` or `cfc_release_observed` where they were not. The
+ * decision's own outcome word is a presentation of that fact and has changed
+ * before, so a counter that keys on the word counts nothing the day it moves.
+ * The reason code is what these checks read.
+ */
+const releaseReasonOf = (
+  decision: HarnessPolicyDecisionRecord,
+): string | undefined => {
+  const release = decision.release as { reasonCode?: unknown } | undefined;
+  return typeof release?.reasonCode === "string"
+    ? release.reasonCode
+    : undefined;
+};
+
+/**
  * Every release refusal one run's decisions record.
  *
  * A decision that measured the boundary and released, and one an observe-stage
@@ -163,9 +183,7 @@ const releaseRefusalsOf = (
   run: RunEvidence,
 ): readonly ReleaseRefusal[] =>
   (decisionsOf(run) ?? [])
-    .filter((decision) =>
-      decision.release !== undefined && decision.decision === "denied"
-    )
+    .filter((decision) => releaseReasonOf(decision) === "cfc_release_withheld")
     .map((decision) => ({
       runId: run.runId,
       source: sourceOf(run),
@@ -200,9 +218,10 @@ const releasesMeasured = (audit: DeploymentAudit): number =>
   everyRun(audit).reduce(
     (total, run) =>
       total +
-      (decisionsOf(run) ?? []).filter((decision) =>
-        decision.release !== undefined && decision.decision !== "denied"
-      ).length,
+      (decisionsOf(run) ?? []).filter((decision) => {
+        const reason = releaseReasonOf(decision);
+        return reason !== undefined && reason !== "cfc_release_withheld";
+      }).length,
     0,
   );
 
