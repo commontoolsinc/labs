@@ -466,7 +466,7 @@ describe("toStructuredDebugValue()", () => {
       expect(result[3]).toEqual({ "/...": { "/length": 500 } });
     });
 
-    it("returns no more than one hundred elements when the limit is not given", () => {
+    it("returns no more than 100 elements when the limit is not given", () => {
       const value = Array.from({ length: 150 }, (_, i) => i);
       const result = toStructuredDebugValue(value) as unknown[];
       expect(result.length).toBe(101);
@@ -474,7 +474,7 @@ describe("toStructuredDebugValue()", () => {
       expect(result[100]).toEqual({ "/...": { "/length": 150 } });
     });
 
-    it("returns no more than ten thousand elements given a larger limit", () => {
+    it("returns no more than 10000 elements given a larger limit", () => {
       const value = Array.from({ length: 20000 }, (_, i) => i);
       for (const limit of [50000, Infinity]) {
         const result = toStructuredDebugValue(

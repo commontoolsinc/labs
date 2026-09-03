@@ -139,7 +139,7 @@ describe("value-debug", () => {
           .toBe("[1,<hole>,3,<hole>,... length: 7]");
       });
 
-      it("renders no more than one hundred elements when the limit is not given", () => {
+      it("renders no more than 100 elements when the limit is not given", () => {
         const value = Array.from({ length: 101 }, (_, i) => i);
         expect(toCompactDebugString(value)).toMatch(
           /,99,\.\.\. length: 101\]$/,
