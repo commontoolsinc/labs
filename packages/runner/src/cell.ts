@@ -98,7 +98,10 @@ import {
   mergeCfcLabelViews,
   rebaseCfcLabelView,
 } from "./cfc/label-view-state.ts";
-import { cfcLabelViewForCell } from "./cfc/label-view.ts";
+import {
+  cfcLabelViewForCell,
+  redactCaveatSourcesForDisplay,
+} from "./cfc/label-view.ts";
 import { setLinkCfcLabelView } from "./cfc/link-label-view.ts";
 import {
   readStoredCfcMetadata,
@@ -4131,15 +4134,32 @@ export type CellLinkInput =
 
 /** The options by which a cell becomes the link that reaches it. */
 type CellLinkOptions = {
+  /** Whether the link carries the cell's schema. */
   includeSchema?: boolean;
+
+  /**
+   * Whether a query result is walked as the container it is, rather than
+   * becoming a link to its cell.
+   */
   doNotConvertCellResults?: boolean;
+
+  /**
+   * Whether the link carries the cell's CFC label view. What it carries is
+   * the view's display form, with each caveat's source redacted: a link
+   * minted under this option is bound for the main thread, where a view may
+   * be shown and the sources behind it may not. Enforcement reads a cell's
+   * view through the cell, never off a link.
+   */
   includeCfcLabelView?: boolean;
+
+  /** Which `asCell` entries survive in a carried schema; see `KeepAsCell`. */
   keepAsCell?: KeepAsCell;
 };
 
 /**
  * Helper for `convertCellsToLinks()`, which returns the frozen link that
- * reaches a cell, carrying the cell's CFC label view onto it when asked.
+ * reaches a cell, carrying the display form of the cell's CFC label view onto
+ * it when asked.
  */
 function linkToCell(cell: Cell<any>, options: CellLinkOptions): SigilLink {
   const link = cell.getAsLink(options);
@@ -4147,7 +4167,7 @@ function linkToCell(cell: Cell<any>, options: CellLinkOptions): SigilLink {
   if (options.includeCfcLabelView) {
     const cfcLabelView = getCarriedCfcLabelView(cell);
     if (cfcLabelView) {
-      setLinkCfcLabelView(link, cfcLabelView);
+      setLinkCfcLabelView(link, redactCaveatSourcesForDisplay(cfcLabelView));
     }
   }
 

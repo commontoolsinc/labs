@@ -6,7 +6,6 @@ export type {
 export {
   type CfcCellLinkRefPayload,
   linkCfcLabelView,
-  redactSigilCfcLabelViewsForDisplay,
   setLinkCfcLabelView,
   stripSigilCfcLabelViews,
 } from "./link-label-view.ts";

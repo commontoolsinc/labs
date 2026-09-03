@@ -2600,6 +2600,64 @@ describe("runtime-processor", () => {
       expect(response.value).toBe("plain value");
     });
 
+    it("leaves a view on a link the read handed it, which stored data never carries", () => {
+      // The response path redacts the views the conversion attaches from live
+      // cells and no others: a link already in the read is rebuilt as the
+      // container it is. Stored data holds no view on a link, the persist
+      // seam having stripped it, so this is the bound of what the redaction
+      // covers rather than a leak. A source failing to survive here says the
+      // bound moved; one surviving in production says a view reached stored
+      // data.
+
+      const ref: CellRef = {
+        id: "of:cfc-value-handed-view-cell" as CellRef["id"],
+        space: "did:key:test" as CellRef["space"],
+        scope: "space",
+        path: [],
+      };
+      const linkWithView = {
+        "/": {
+          "link@1": {
+            id: "of:cfc-value-handed-view-linked",
+            space: "did:key:test",
+            path: [],
+            cfcLabelView: {
+              version: 1,
+              entries: [{
+                path: [],
+                label: {
+                  confidentiality: [{
+                    type: CFC_ATOM_TYPE.Caveat,
+                    kind: "derived-from",
+                    source: "did:key:alice",
+                  }],
+                },
+              }],
+            },
+          },
+        },
+      };
+      const processor = {
+        runtime: {
+          getCellFromLink: () => ({
+            get: () => ({ nested: linkWithView }),
+          }),
+        },
+      } as unknown as RuntimeProcessor;
+
+      const response = RuntimeProcessor.prototype.handleCellGet.call(
+        processor,
+        {
+          type: RequestType.CellGet,
+          cell: ref,
+        },
+      );
+      const atom = sourcedCaveatOf(
+        (response.value as { nested: SigilLink }).nested,
+      );
+      expect(atom.source).toBe("did:key:alice");
+    });
+
     it("redacts Caveat.source in the label views carried by cells inside subscription updates", async () => {
       const storageManager = StorageManager.emulate({ as: cfcSigner });
       const runtime = new Runtime({

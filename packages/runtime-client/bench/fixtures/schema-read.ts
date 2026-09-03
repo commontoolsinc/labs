@@ -4,11 +4,17 @@
  * back-to-cell annotation and is deeply frozen, and each record's `source` is
  * a `Cell` where the synthetic lists beside this fixture hold a link already.
  * The conversion takes a different branch on each, so a benchmark over the
- * synthetic list alone measures the branch no read result takes.
+ * synthetic list alone measures the branch no read result takes. Beside the
+ * read sits a minter of cells carrying a CFC label view, for a subject shaped
+ * as a labeled read would be.
  */
 
 import { Identity } from "@commonfabric/identity";
-import { type JSONSchema, Runtime } from "@commonfabric/runner";
+import { type Cell, type JSONSchema, Runtime } from "@commonfabric/runner";
+import {
+  type CfcLabelView,
+  setLinkCfcLabelView,
+} from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 /** The list's schema, whose `source` reads back as a `Cell`. */
@@ -84,4 +90,18 @@ export async function readRecordList(items: number): Promise<unknown> {
   await tx.commit();
 
   return value;
+}
+
+/**
+ * A cell of this fixture's runtime carrying `view` as its CFC label view,
+ * which is what a labeled read hands the conversion: the conversion attaches
+ * the view's display form to the link it mints for the cell.
+ */
+export function cellCarryingLabelView(
+  id: string,
+  view: CfcLabelView,
+): Cell<unknown> {
+  const link = runtime.getCell(space, id).getAsLink();
+  setLinkCfcLabelView(link, view);
+  return runtime.getCellFromLink(link);
 }
