@@ -160,12 +160,15 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
     },
   },
   {
-    id: "testing-metric-placeholder",
+    id: "coverage-debt",
     view: {
-      label: "YOUR METRIC HERE",
-      status: "good",
-      value: "–",
-      sub: "no metric selected for this tile",
+      label: "coverage debt",
+      status: "warn",
+      value: "78,101 lines",
+      valueLabel: "78,101 lines",
+      sub: "+214 per day (median) · last 21 days",
+      extra: history(),
+      duration: 56 * DAY,
     },
   },
   {

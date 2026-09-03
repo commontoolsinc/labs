@@ -13,6 +13,7 @@ import { labsCiTrust, loomCiTrust } from "./tiles/ci-trust.ts";
 import { labsCiDuration, loomCiDuration } from "./tiles/ci-duration.ts";
 import { commitGanttHref, recentRuns } from "./tiles/recent-runs.ts";
 import { dau, foldSeries, parseExcludes } from "./tiles/dau.ts";
+import { coverageDebt } from "./tiles/coverage-debt.ts";
 import { githubMembers } from "./tiles/github-members.ts";
 import { buildSnapshot, discordOnline } from "./tiles/discord-online.ts";
 import { gcpSpend } from "./tiles/gcp-spend.ts";
@@ -491,6 +492,7 @@ Deno.test("gated tiles gray out cleanly without their env", async () => {
     [benchmark, "GH_TOKEN"],
     [dau, "SIGNOZ_URL"],
     [githubMembers, "GH_TOKEN"],
+    [coverageDebt, "GH_TOKEN"],
   ] as const;
   for (const [tile, needle] of cases) {
     const v = await tile.collect(ctx([]));

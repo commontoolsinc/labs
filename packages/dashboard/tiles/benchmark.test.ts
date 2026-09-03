@@ -35,7 +35,6 @@ import {
   benchPage,
   CALIBRATION_FILE,
   formatNs,
-  jsonFromZip,
   pointsForWindow,
   representativeBenchmarkCpu,
   sampleBenchmarkRuns,
@@ -48,6 +47,7 @@ import {
   ciHistoryBucketMs,
 } from "../ci-job-history.ts";
 import { PERFORMANCE_VIEW_STYLES } from "../performance-views.ts";
+import { artifactZip, bytes, makeZip } from "../test/artifact-zip.ts";
 
 // The history store falls back to the system temporary directory when no cache
 // directory is named. The package's test runner names a fresh one for each run.
@@ -83,89 +83,8 @@ function ctx(env: Record<string, string> = {}): Ctx {
 // zip building
 //
 
-function concat(parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
-  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let at = 0;
-  for (const p of parts) {
-    out.set(p, at);
-    at += p.length;
-  }
-  return out;
-}
-
-interface Member {
-  name: string;
-  method: number; // 0 = stored, 8 = deflate
-  data: Uint8Array; // the bytes as they sit on disk (already compressed for method 8)
-}
-
-// Assemble a zip: a local header plus payload per member, then the central
-// directory and the end-of-central-directory record. CRCs are left zero — the
-// reader takes its sizes and offsets from the central directory and checks
-// neither. `entryCount` overrides the count the EOCD advertises.
-function makeZip(
-  members: Member[],
-  entryCount = members.length,
-): Uint8Array<ArrayBuffer> {
-  const enc = new TextEncoder();
-  const local: Uint8Array[] = [];
-  const central: Uint8Array[] = [];
-  let offset = 0;
-  for (const m of members) {
-    const name = enc.encode(m.name);
-    const lh = new Uint8Array(30 + name.length);
-    const lv = new DataView(lh.buffer);
-    lv.setUint32(0, 0x04034b50, true);
-    lv.setUint16(8, m.method, true);
-    lv.setUint32(18, m.data.length, true);
-    lv.setUint32(22, m.data.length, true);
-    lv.setUint16(26, name.length, true);
-    lh.set(name, 30);
-
-    const cd = new Uint8Array(46 + name.length);
-    const cv = new DataView(cd.buffer);
-    cv.setUint32(0, 0x02014b50, true);
-    cv.setUint16(10, m.method, true);
-    cv.setUint32(20, m.data.length, true);
-    cv.setUint32(24, m.data.length, true);
-    cv.setUint16(28, name.length, true);
-    cv.setUint32(42, offset, true);
-    cd.set(name, 46);
-
-    local.push(lh, m.data);
-    central.push(cd);
-    offset += lh.length + m.data.length;
-  }
-  const cdBytes = concat(central);
-  const eocd = new Uint8Array(22);
-  const ev = new DataView(eocd.buffer);
-  ev.setUint32(0, 0x06054b50, true);
-  ev.setUint16(8, entryCount, true);
-  ev.setUint16(10, entryCount, true);
-  ev.setUint32(12, cdBytes.length, true);
-  ev.setUint32(16, offset, true);
-  return concat([...local, cdBytes, eocd]);
-}
-
-const bytes = (s: string) => new TextEncoder().encode(s);
-
-async function deflate(s: string): Promise<Uint8Array> {
-  const cs = new CompressionStream("deflate-raw");
-  const done = new Response(cs.readable).arrayBuffer();
-  const w = cs.writable.getWriter();
-  await w.write(bytes(s));
-  await w.close();
-  return new Uint8Array(await done);
-}
-
-// The shape CI uploads: a text member alongside the deno bench report, the report
-// deflated.
-async function benchZip(json: string): Promise<Uint8Array<ArrayBuffer>> {
-  return makeZip([
-    { name: "notes.txt", method: 0, data: bytes("ignore me") },
-    { name: "results.json", method: 8, data: await deflate(json) },
-  ]);
-}
+// The shape the benchmarks.yml artifact upload takes.
+const benchZip = (json: string) => artifactZip("results.json", json);
 
 //
 // the stub api
@@ -2131,59 +2050,6 @@ Deno.test("benchmark: a run's results are immutable, so a cached run is not refe
     assertEquals(v.status, "good");
     assertEquals(artifactCalls(calls), []);
   });
-});
-
-Deno.test("jsonFromZip: reads a stored json member, ignoring a text member beside it", async () => {
-  const zip = makeZip([
-    { name: "notes.txt", method: 0, data: bytes("not the report") },
-    { name: "results.json", method: 0, data: bytes(`{"benches":[]}`) },
-  ]);
-  assertEquals(await jsonFromZip(zip), `{"benches":[]}`);
-});
-
-Deno.test("jsonFromZip: inflates a deflated json member", async () => {
-  const json = report([
-    bench("packages/a/x.bench.ts", null, "tick", timings(5)),
-  ]);
-  assertEquals(await jsonFromZip(await benchZip(json)), json);
-});
-
-Deno.test("jsonFromZip: a zip with no json member -> null", async () => {
-  const zip = makeZip([{
-    name: "notes.txt",
-    method: 0,
-    data: bytes("nothing"),
-  }]);
-  assertEquals(await jsonFromZip(zip), null);
-});
-
-Deno.test("jsonFromZip: bytes with no end-of-central-directory record -> null", async () => {
-  assertEquals(await jsonFromZip(new Uint8Array(10)), null); // shorter than the record itself
-  assertEquals(await jsonFromZip(new Uint8Array(200)), null);
-});
-
-Deno.test("jsonFromZip: a central directory shorter than its own count stops instead of reading past it", async () => {
-  const zip = makeZip([{ name: "notes.txt", method: 0, data: bytes("x") }], 2);
-  assertEquals(await jsonFromZip(zip), null);
-});
-
-Deno.test("jsonFromZip: a member whose local header the central directory does not point at -> null", async () => {
-  const zip = makeZip([{
-    name: "results.json",
-    method: 0,
-    data: bytes(`{"benches":[]}`),
-  }]);
-  new DataView(zip.buffer).setUint32(0, 0xdeadbeef, true); // clobber the local file header signature
-  assertEquals(await jsonFromZip(zip), null);
-});
-
-Deno.test("jsonFromZip: a compression method we cannot read -> null, not garbage", async () => {
-  const zip = makeZip([{
-    name: "results.json",
-    method: 99,
-    data: bytes(`{"benches":[]}`),
-  }]);
-  assertEquals(await jsonFromZip(zip), null);
 });
 
 // A geometric series over twelve days: the Theil–Sen slope is exact, so the

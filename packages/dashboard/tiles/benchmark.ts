@@ -88,6 +88,7 @@ import {
   github,
   githubDownload,
   humanSpan,
+  jsonFromZip,
   multiSparkline,
   performanceGithub,
   performanceGithubDownload,
@@ -429,60 +430,6 @@ function parseBenchmarkReport(
     });
   }
   return { cpu, metrics: m };
-}
-
-// Inflate raw-deflate bytes (the compression zip uses) to their decompressed form.
-async function inflateRaw(data: Uint8Array<ArrayBuffer>): Promise<Uint8Array> {
-  const ds = new DecompressionStream("deflate-raw");
-  const collected = new Response(ds.readable).arrayBuffer(); // read as we write
-  const writer = ds.writable.getWriter();
-  await writer.write(data);
-  await writer.close();
-  return new Uint8Array(await collected);
-}
-
-// Extract the first *.json file from a zip via its central directory (which holds
-// the true sizes even when a streamed zip leaves them out of the local headers).
-export async function jsonFromZip(
-  buf: Uint8Array<ArrayBuffer>,
-): Promise<string | null> {
-  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-  const u16 = (o: number) => dv.getUint16(o, true);
-  const u32 = (o: number) => dv.getUint32(o, true);
-  let eocd = -1;
-  for (let i = buf.length - 22; i >= 0 && i >= buf.length - 22 - 0x10000; i--) {
-    if (u32(i) === 0x06054b50) {
-      eocd = i;
-      break;
-    }
-  }
-  if (eocd < 0) return null;
-  let p = u32(eocd + 16); // central directory offset
-  const count = u16(eocd + 10);
-  for (let n = 0; n < count; n++) {
-    if (u32(p) !== 0x02014b50) break; // central-directory file header signature
-    const method = u16(p + 10);
-    const compSize = u32(p + 20);
-    const nameLen = u16(p + 28),
-      extraLen = u16(p + 30),
-      commentLen = u16(p + 32);
-    const lho = u32(p + 42); // local header offset
-    const name = new TextDecoder().decode(
-      buf.subarray(p + 46, p + 46 + nameLen),
-    );
-    p += 46 + nameLen + extraLen + commentLen;
-    if (!name.endsWith(".json")) continue;
-    if (u32(lho) !== 0x04034b50) return null; // local file header signature
-    const dataStart = lho + 30 + u16(lho + 26) + u16(lho + 28);
-    const comp = buf.subarray(dataStart, dataStart + compSize);
-    const bytes = method === 0
-      ? comp
-      : method === 8
-      ? await inflateRaw(comp)
-      : null;
-    return bytes ? new TextDecoder().decode(bytes) : null;
-  }
-  return null;
 }
 
 async function fetchZip(

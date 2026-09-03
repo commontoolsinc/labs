@@ -3,7 +3,8 @@
  */
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
-import { budgetStatus, clampInt, concDot, daysLabel, durationTag, escapeHtml, friendlyError, humanDur, humanSpan, landingHref, lighten, multiSparkline, readBudget, sparkline, strip, thin, usd } from "./lib.ts";
+import { budgetStatus, clampInt, concDot, daysLabel, durationTag, escapeHtml, friendlyError, humanDur, humanSpan, jsonFromZip, landingHref, lighten, median, multiSparkline, readBudget, sparkline, strip, thin, usd } from "./lib.ts";
+import { artifactZip, bytes, makeZip } from "./test/artifact-zip.ts";
 
 Deno.test("landingHref: squash-merge trailing (#N) -> the PR", () => {
   assertEquals(
@@ -684,4 +685,74 @@ Deno.test("sparkline: no highlight is a single line; a short series is empty", (
   // A degenerate highlight (< 2 points) adds no second line.
   assertEquals([...sparkline([1, 2, 3], "#111", { count: 1, color: "#eee" }).matchAll(/<polyline/g)].length, 1);
   assertEquals(sparkline([5], "#111"), "");
+});
+
+Deno.test("median: an even count takes the mean of the two middle values", () => {
+  // The ci-duration window is 20 runs, so even is the normal case. Taking the
+  // upper middle alone reports a value no sample had, and always the higher of
+  // the pair.
+  assertEquals(median([2, 4, 6, 8]), 5);
+  assertEquals(median([2, 4, 6, 10]), 5);
+  assertEquals(median([1, 2, 3]), 2); // odd is the middle sample itself
+  assertEquals(median([7]), 7);
+  assertEquals(median([]), 0);
+  const twenty = Array.from({ length: 20 }, (_, i) => i + 1); // 1..20
+  assertEquals(median(twenty), 10.5); // not 11
+});
+
+Deno.test("median: sorts its input, and leaves the caller's array alone", () => {
+  const values = [9, 1, 5];
+  assertEquals(median(values), 5);
+  assertEquals(values, [9, 1, 5]);
+});
+
+Deno.test("jsonFromZip: reads a stored json member, ignoring a text member beside it", async () => {
+  const zip = makeZip([
+    { name: "notes.txt", method: 0, data: bytes("not the report") },
+    { name: "results.json", method: 0, data: bytes(`{"benches":[]}`) },
+  ]);
+  assertEquals(await jsonFromZip(zip), `{"benches":[]}`);
+});
+
+Deno.test("jsonFromZip: inflates a deflated json member", async () => {
+  const json = `{"metrics":[{"name":"coverage-debt: tasks uncovered lines"}]}`;
+  assertEquals(await jsonFromZip(await artifactZip("perf-metrics.json", json)), json);
+});
+
+Deno.test("jsonFromZip: a zip with no json member -> null", async () => {
+  const zip = makeZip([{
+    name: "notes.txt",
+    method: 0,
+    data: bytes("nothing"),
+  }]);
+  assertEquals(await jsonFromZip(zip), null);
+});
+
+Deno.test("jsonFromZip: bytes with no end-of-central-directory record -> null", async () => {
+  assertEquals(await jsonFromZip(new Uint8Array(10)), null); // shorter than the record itself
+  assertEquals(await jsonFromZip(new Uint8Array(200)), null);
+});
+
+Deno.test("jsonFromZip: a central directory shorter than its own count stops instead of reading past it", async () => {
+  const zip = makeZip([{ name: "notes.txt", method: 0, data: bytes("x") }], 2);
+  assertEquals(await jsonFromZip(zip), null);
+});
+
+Deno.test("jsonFromZip: a member whose local header the central directory does not point at -> null", async () => {
+  const zip = makeZip([{
+    name: "results.json",
+    method: 0,
+    data: bytes(`{"benches":[]}`),
+  }]);
+  new DataView(zip.buffer).setUint32(0, 0xdeadbeef, true); // clobber the local file header signature
+  assertEquals(await jsonFromZip(zip), null);
+});
+
+Deno.test("jsonFromZip: a compression method we cannot read -> null, not garbage", async () => {
+  const zip = makeZip([{
+    name: "results.json",
+    method: 99,
+    data: bytes(`{"benches":[]}`),
+  }]);
+  assertEquals(await jsonFromZip(zip), null);
 });
