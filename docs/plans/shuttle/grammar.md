@@ -421,11 +421,10 @@ both at once — and space names are unvalidated, so the collision is live
 rather than hypothetical. Shuttle cannot resolve it: decision 13 forbids
 inventing a spelling, and a second scope spelling would be worse than the
 ambiguity. Issue
-[#6775](https://github.com/commontoolsinc/labs/issues/6775) carries it, and
-[the cell reference grammar](../../specs/cell-reference-grammar.md) proposes the
-resolution. In v1 a space named by name is refused unless it resolves to the
-connected space, which is what keeps it dormant; multi-space sessions are
-where it wakes.
+[#6775](https://github.com/commontoolsinc/labs/issues/6775) carries it. In
+v1 a space named by name is refused unless it resolves to the connected
+space, which is what keeps it dormant; multi-space sessions are where it
+wakes.
 
 **A shortened id is not an address.** The prompt falls back to one where no
 slug is confirmed, and it is spelled exactly as a whole handle is, so
