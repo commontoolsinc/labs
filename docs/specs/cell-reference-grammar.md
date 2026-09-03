@@ -49,11 +49,11 @@ Seven nouns, each one thing, in the order a reference names them.
 - **Scope** — which instance of a document: `space`, `user`, or `session`. A
   stored link may also say `inherit`, the containing cell's scope.
 
-Two words for parts of the string: a **member** is one of a piece's other
-documents (`#argument`), and a **qualifier** is which instance or version of a
-piece (`@user`, `@pin=`). A **context** is a cell address with parts missing,
-supplying what a reference omits; its cell is the **position** a relative
-reference is written against.
+Two words for parts of the string: a **member** is one of a piece's documents,
+named on the piece segment (`#argument`; `#result` to say the default), and a
+**qualifier** is which instance or version of a piece (`@user`, `@pin=`). A
+**context** is a cell address with parts missing, supplying what a reference
+omits; its cell is the **position** a relative reference is written against.
 
 ## Summary
 
@@ -82,8 +82,9 @@ Three characters carry structure, and each carries exactly one meaning:
   version of it. A qualifier is written `@name=value`; the scope, the one
   qualifier people type, has the abbreviation `@user`.
 - `#` introduces a **member** on the piece: one of its other documents.
-  `#argument` is the one member — the piece's inputs — and the result is what
-  the piece segment names on its own.
+  `#argument` names the piece's inputs; `#result` names what the piece segment
+  names on its own, and is written only to return there from inside the
+  arguments document.
 
 Read from the outside in: the space says where to resolve, the piece says what,
 the member says which of its documents, the qualifiers say which instance and
@@ -433,15 +434,16 @@ A relative reference takes a member or a qualifier only on the `.` that stands
 for the context's piece: `.@user/items` is the context's piece at scope `user`,
 then `items`; `.@user` alone is the position at that scope; and
 `.#argument/items` is the context's piece's arguments document, from its root,
-since switching documents leaves the position's path nothing to be inside of.
-Everywhere else in a relative reference `@` and `#` are ordinary characters of a
-key — `items@user` is a key named `items@user`, `issue#12` a key named
-`issue#12` — and `..` takes neither, so a move that also climbs is written
-`.@user/../title`, one spelling rather than two. Unless `.#argument` switches
-it, the document is the context's, since the path is inside it. The `./` form
-exists so that a relative reference can be written where a bare word is read as
-something else — a slug on `--cell` — and means exactly what the bare form
-means.
+since switching documents leaves the position's path nothing to be inside of;
+`.#result/items` returns to the result from inside the arguments document, the
+member's counterpart of `.@space`. Everywhere else in a relative reference `@`
+and `#` are ordinary characters of a key — `items@user` is a key named
+`items@user`, `issue#12` a key named `issue#12` — and `..` takes neither, so a
+move that also climbs is written `.@user/../title`, one spelling rather than
+two. Unless `.#argument` switches it, the document is the context's, since the
+path is inside it. The `./` form exists so that a relative reference can be
+written where a bare word is read as something else — a slug on `--cell` — and
+means exactly what the bare form means.
 
 Serves R4, R6, R7, R9, R11. Taking `@` off the space is what gives `@` one
 meaning ([D2](#d2--is-the-qualifier-introducer-and-nothing-else)); it also ends
@@ -605,9 +607,19 @@ points at and other pieces link to. Its inputs live in a second document, the
 and argument cells are linked to by the result cell"). The arguments document is
 a member of the piece, not a variant of it, and is written as one: `#argument`
 on the piece segment, before the path, so the string reads in the order the
-address is resolved — which piece, which of its documents, where inside it. The
-result is the default and is never written. `#argument` is the one member; any
-other is refused, and `--input` remains the flag that writes the same selection.
+address is resolved — which piece, which of its documents, where inside it. Two
+members are registered, and any other is refused:
+
+| Member     | Document           | Written                                                                                                                                                                                                                                                                |
+| ---------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `argument` | the piece's inputs | wherever it is meant; `--input` remains the flag that writes the same selection                                                                                                                                                                                        |
+| `result`   | the default        | only in a relative reference whose context is inside the arguments document, to return: `.#result/items`. In a form that names a piece an omitted member is the result in every context, so a writer never writes `#result` there — not even against the empty context |
+
+That last asymmetry with `@space` is the two axes of
+[D10](#d10-reader-and-writer-share-one-context): the scope is not cut off when a
+piece is written, so an omitted scope means the context's and the empty context
+must write `@space`; the member is a location part, cut off with the piece, so
+nothing is left to disambiguate.
 
 The piece segment is `name[#member][@qualifier…]`, one spelling: what, then
 which. It is read by splitting at `/`, then at `@`, then its head at `#`.
@@ -628,9 +640,10 @@ Serves R2 (a key holding `#` has a written form at every level), R6 (`#` means
 one thing, in one place), R11, and R8 under the exception it states.
 
 **Confirms.** The `#argument` token and its meaning, the `--input` flag, and the
-one-member rule of `splitArgumentSuffix` in
-`packages/cli/lib/llm-friendly-ref.ts`. The `Owner#member` notation of Javadoc
-and Ruby documentation is the precedent: the member of a named thing.
+`#argument`-only rule of `splitArgumentSuffix` in
+`packages/cli/lib/llm-friendly-ref.ts`; `#result` is an addition, the default's
+spelling. The `Owner#member` notation of Javadoc and Ruby documentation is the
+precedent: the member of a named thing.
 
 **Replaces.** The trailing slot — `/glaze-tracker/items#argument` — and with it
 the whole-string scan that made every `#` structural. No writer has rendered the
@@ -661,8 +674,9 @@ The consequences, in the order they arise:
   one.
 - **A context that knows the piece and its scope** → piece-relative when the
   cell is in that piece: `items/0` or `../1/title` at the context's scope, and
-  `.@session/items/0` when only the scope differs; a different piece is the next
-  level up. On inequality a writer falls back a level and never refuses: a
+  `.@session/items/0` when only the scope differs, and `.#result/items/0` or
+  `.#argument/items/0` when only the document does; a different piece is the
+  next level up. On inequality a writer falls back a level and never refuses: a
   more-qualified form is always correct in the same context, and a listing that
   mixes levels is fine because the head of each string says its level (R3).
 - **A relative reference whose path has a segment written `.` or `..`** is not
@@ -771,10 +785,13 @@ string against `@space` is `X@space/items`.
 and the result names the same cell in every reader's context. For a reader, an
 omitted scope with no context is `space`, the base; an omitted space is left for
 the base cell that resolves the link, as the runner's `parseLinkPrimitive` does
-today; an omitted piece is refused. The law never leans on the reader's
-defaults: under ∅ the writer wrote everything out. They fire only when a string
-written against a richer context is read against none — the requester's case
-under [D7](#d7-what-a-writer-writes) — and then they are the canonical reading.
+today; an omitted piece is refused. An omitted member needs no default: in a
+form that names a piece it is cut off with the piece and means the result in
+every context, and in a relative form it is the context's, with `#result` the
+way back. The law never leans on the reader's defaults: under ∅ the writer wrote
+everything out. They fire only when a string written against a richer context is
+read against none — the requester's case under [D7](#d7-what-a-writer-writes) —
+and then they are the canonical reading.
 
 **Worked.** Context `//S/Y@user/items/0`; the cell to write is
 `//S/X@user/items`.
@@ -835,34 +852,35 @@ session takes from the string; a session-holding reader resolves the names to
 the same cells. The relative rows at the end need a context, and theirs is
 `//bakery/glaze-tracker@user/items/0`.
 
-| Written                                          | Space                  | Piece         | Scope         | Path                                        | Cell                                                                                                                                 |
-| ------------------------------------------------ | ---------------------- | ------------- | ------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `/of:fid1:Glz…`                                  | the reader's           | handle        | `space`       | root                                        | the piece's result                                                                                                                   |
-| `/glaze-tracker`                                 | the reader's           | slug          | `space`       | root                                        | the same, by name                                                                                                                    |
-| `/glaze-tracker/items/0/title`                   | the reader's           | slug          | `space`       | `items/0/title`                             | one field                                                                                                                            |
-| `/glaze-tracker@user`                            | the reader's           | slug          | `user`        | root                                        | the reading user's instance                                                                                                          |
-| `/glaze-tracker@scope=user`                      | the reader's           | slug          | `user`        | root                                        | the same, written in full                                                                                                            |
-| `/glaze-tracker@session/items`                   | the reader's           | slug          | `session`     | `items`                                     | this session's instance                                                                                                              |
-| `/glaze-tracker@inherit`                         | the reader's           | slug          | the context's | root                                        | refused by a reader with no context                                                                                                  |
-| `//bakery/glaze-tracker`                         | `bakery`               | slug          | `space`       | root                                        | needs a session to resolve both names                                                                                                |
-| `//did:key:z6MkBakery/of:fid1:Glz…`              | the DID                | handle        | `space`       | root                                        | resolvable from the string alone                                                                                                     |
-| `//did:key:z6MkBakery/of:fid1:Glz…@user/items/0` | the DID                | handle        | `user`        | `items/0`                                   | fully qualified: the same cell from anywhere                                                                                         |
-| `//user/glaze-tracker@user`                      | a space _named_ `user` | slug          | `user`        | root                                        | no ambiguity: the space slot is not `@`-introduced                                                                                   |
-| `/glaze-tracker@pin=Avcny…rC1c`                  | the reader's           | slug          | `space`       | root                                        | pinned to one module identity; the runner ignores the pin                                                                            |
-| `/glaze-tracker@user@pin=Avcny…rC1c`             | the reader's           | slug          | `user`        | root                                        | two qualifiers; order is free                                                                                                        |
-| `/glaze-tracker#argument`                        | the reader's           | slug          | `space`       | root                                        | the arguments document                                                                                                               |
-| `/glaze-tracker#argument@user/items`             | the reader's           | slug          | `user`        | `items`                                     | inside the user instance's arguments document                                                                                        |
-| `/glaze-tracker/issue#12`                        | the reader's           | slug          | `space`       | `issue#12`                                  | a key named `issue#12`: `#` in a path is data                                                                                        |
-| `/glaze-tracker/items/0#argument`                | the reader's           | slug          | `space`       | `items/0#argument`                          | a key named `0#argument` — not the child's arguments; the child at `items/0` has its own id, and `/of:fid1:Dnt…#argument` names them |
-| `title`                                          | the context's          | the context's | the context's | `title` against the position                | `//bakery/glaze-tracker@user/items/0/title`                                                                                          |
-| `./title`                                        | the context's          | the context's | the context's | `title` against the position                | the same as `title`; `./` forces the reading where a bare word is a slug                                                             |
-| `.`                                              | the context's          | the context's | the context's | the position                                | the context's own cell                                                                                                               |
-| `./items@user`                                   | the context's          | the context's | the context's | `items@user` against the position           | a key named `items@user`: `@` is data everywhere but on the `.` head                                                                 |
-| `../1/title`                                     | the context's          | the context's | the context's | the parent, then `1/title`                  | `//bakery/glaze-tracker@user/items/1/title`                                                                                          |
-| `.@session/title`                                | the context's          | the context's | `session`     | `title` against the position                | `//bakery/glaze-tracker@session/items/0/title`: the scope moves, the position holds                                                  |
-| `.@space`                                        | the context's          | the context's | `space`       | the position                                | `//bakery/glaze-tracker@space/items/0`                                                                                               |
-| `.@user/../title`                                | the context's          | the context's | `user`        | the parent, then `title`                    | `//bakery/glaze-tracker@user/items/title`; the one spelling for a scope move that climbs                                             |
-| `.#argument/items`                               | the context's          | the context's | the context's | `items`, from the arguments document's root | `//bakery/glaze-tracker#argument@user/items`: a member switch resets the path                                                        |
+| Written                                                                       | Space                  | Piece         | Scope         | Path                                        | Cell                                                                                                                                 |
+| ----------------------------------------------------------------------------- | ---------------------- | ------------- | ------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `/of:fid1:Glz…`                                                               | the reader's           | handle        | `space`       | root                                        | the piece's result                                                                                                                   |
+| `/glaze-tracker`                                                              | the reader's           | slug          | `space`       | root                                        | the same, by name                                                                                                                    |
+| `/glaze-tracker/items/0/title`                                                | the reader's           | slug          | `space`       | `items/0/title`                             | one field                                                                                                                            |
+| `/glaze-tracker@user`                                                         | the reader's           | slug          | `user`        | root                                        | the reading user's instance                                                                                                          |
+| `/glaze-tracker@scope=user`                                                   | the reader's           | slug          | `user`        | root                                        | the same, written in full                                                                                                            |
+| `/glaze-tracker@session/items`                                                | the reader's           | slug          | `session`     | `items`                                     | this session's instance                                                                                                              |
+| `/glaze-tracker@inherit`                                                      | the reader's           | slug          | the context's | root                                        | refused by a reader with no context                                                                                                  |
+| `//bakery/glaze-tracker`                                                      | `bakery`               | slug          | `space`       | root                                        | needs a session to resolve both names                                                                                                |
+| `//did:key:z6MkBakery/of:fid1:Glz…`                                           | the DID                | handle        | `space`       | root                                        | resolvable from the string alone                                                                                                     |
+| `//did:key:z6MkBakery/of:fid1:Glz…@user/items/0`                              | the DID                | handle        | `user`        | `items/0`                                   | fully qualified: the same cell from anywhere                                                                                         |
+| `//user/glaze-tracker@user`                                                   | a space _named_ `user` | slug          | `user`        | root                                        | no ambiguity: the space slot is not `@`-introduced                                                                                   |
+| `/glaze-tracker@pin=Avcny…rC1c`                                               | the reader's           | slug          | `space`       | root                                        | pinned to one module identity; the runner ignores the pin                                                                            |
+| `/glaze-tracker@user@pin=Avcny…rC1c`                                          | the reader's           | slug          | `user`        | root                                        | two qualifiers; order is free                                                                                                        |
+| `/glaze-tracker#argument`                                                     | the reader's           | slug          | `space`       | root                                        | the arguments document                                                                                                               |
+| `/glaze-tracker#argument@user/items`                                          | the reader's           | slug          | `user`        | `items`                                     | inside the user instance's arguments document                                                                                        |
+| `/glaze-tracker/issue#12`                                                     | the reader's           | slug          | `space`       | `issue#12`                                  | a key named `issue#12`: `#` in a path is data                                                                                        |
+| `/glaze-tracker/items/0#argument`                                             | the reader's           | slug          | `space`       | `items/0#argument`                          | a key named `0#argument` — not the child's arguments; the child at `items/0` has its own id, and `/of:fid1:Dnt…#argument` names them |
+| `title`                                                                       | the context's          | the context's | the context's | `title` against the position                | `//bakery/glaze-tracker@user/items/0/title`                                                                                          |
+| `./title`                                                                     | the context's          | the context's | the context's | `title` against the position                | the same as `title`; `./` forces the reading where a bare word is a slug                                                             |
+| `.`                                                                           | the context's          | the context's | the context's | the position                                | the context's own cell                                                                                                               |
+| `./items@user`                                                                | the context's          | the context's | the context's | `items@user` against the position           | a key named `items@user`: `@` is data everywhere but on the `.` head                                                                 |
+| `../1/title`                                                                  | the context's          | the context's | the context's | the parent, then `1/title`                  | `//bakery/glaze-tracker@user/items/1/title`                                                                                          |
+| `.@session/title`                                                             | the context's          | the context's | `session`     | `title` against the position                | `//bakery/glaze-tracker@session/items/0/title`: the scope moves, the position holds                                                  |
+| `.@space`                                                                     | the context's          | the context's | `space`       | the position                                | `//bakery/glaze-tracker@space/items/0`                                                                                               |
+| `.@user/../title`                                                             | the context's          | the context's | `user`        | the parent, then `title`                    | `//bakery/glaze-tracker@user/items/title`; the one spelling for a scope move that climbs                                             |
+| `.#argument/items`                                                            | the context's          | the context's | the context's | `items`, from the arguments document's root | `//bakery/glaze-tracker#argument@user/items`: a member switch resets the path                                                        |
+| `.#result/title`, read where the context's document is the arguments document | the context's          | the context's | the context's | `title`, from the result document's root    | the result document; the member's counterpart of `.`                                                                                 |
 
 Refused, and why:
 
@@ -873,7 +891,7 @@ Refused, and why:
 | `/glaze-tracker@user@user`            | a name written twice                                                                                                        |
 | `/glaze-tracker@color=pink`           | a name not on the table                                                                                                     |
 | `//bakery`                            | a space and no piece — refused as a cell reference; accepted as a context ([D10](#d10-reader-and-writer-share-one-context)) |
-| `/glaze-tracker#items`                | not a member of a piece: the message names `#argument`                                                                      |
+| `/glaze-tracker#items`                | not a member of a piece: the message names `#argument` and `#result`                                                        |
 | `/glaze-tracker@user#argument`        | `user#argument` is not a scope value; the one spelling is `#argument@user`                                                  |
 | `items/0`, read with no context piece | a relative reference and nothing to resolve it against                                                                      |
 | `..@user/title`                       | a qualifier on `..`; the scope move is written `.@user/../title`                                                            |
@@ -911,8 +929,8 @@ source. Then it is placed by asking, in order:
    a qualifier: register a name in [D5](#d5-registered-qualifiers), state its
    value alphabet, and say which readers read it. No character is spent.
 2. **Does it select a different document that belongs to the piece?** It is a
-   member beside `#argument`. Today there is one; a second is a row, not a
-   character.
+   member beside `#argument` and `#result`. Today there are two; a third is a
+   row, not a character.
 3. **Does it change where the reference resolves** — a host, a different
    authority than a space? It belongs in the `//` slot, where a URL puts an
    authority, and the [open question](#open-questions) on hosts is where that
@@ -1005,20 +1023,20 @@ exit (R12):
 
 ## Relationship to existing decisions
 
-| Decision                                                                                                                 | Where                                                                   | This document                                                                                                                           |
-| ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| The reference is the one syntax; the bare form is an alias that never leads                                              | `packages/cli/README.md`; `llm-friendly-ref.ts` doc comment             | confirms (R1)                                                                                                                           |
-| Space by slash depth; leading `@` namespace rejected                                                                     | [Pattern imports](pattern-imports/README.md#alternatives-considered)    | confirms and extends to the reference (D1)                                                                                              |
-| `@` reserved for the trailing qualifier; the pin lives there                                                             | [Pattern imports](pattern-imports/README.md#specifier-syntax)           | confirms (D2); asks the pin to take a name (D5, migration step 4)                                                                       |
-| Scope is expressible in every layer, on a `space < user < session` lattice                                               | [Scoped cell instances](scoped-cell-instances.md)                       | confirms, and gives `inherit` its written form (D3)                                                                                     |
-| The space rides in front only when it differs; the scope only when not the base                                          | `createLLMFriendlyLink`; `packages/cli/README.md`                       | confirms, as the case of a context that knows the space and holds scope `space` (D7, D10)                                               |
-| The positional path is a path against the target cell and never begins with `/`                                          | `packages/cli/README.md`, "Writing the target"                          | confirms as the piece-relative form (R4, D1)                                                                                            |
-| A stored link with no `id` is the base cell's document, path from its root                                               | `parseLinkPrimitive` in `packages/runner/src/link-types.ts`             | confirms as a reader with a one-part context: the base cell (D10)                                                                       |
-| A link's space is embedded only when it differs from the context, so a caller with no context passes a placeholder space | `HANDLE_REF_CONTEXT_SPACE` in `packages/cf-harness/src/handle-table.ts` | **replaces**: the empty context writes every part, and the placeholder retires (D7)                                                     |
-| `#argument` is the one suffix, split off before anything else parses                                                     | `splitArgumentSuffix`                                                   | confirms the token and the one-member rule; **replaces** its slot: the member sits on the piece segment, and `#` in a path is data (D6) |
-| The projection grammar is its own; `--schema @` is the file form                                                         | `packages/cli/README.md`, "Shell completion"                            | confirms as out of scope; records the borrowed characters                                                                               |
-| The space is written `/@<space>/`                                                                                        | `parseReferenceParts`; `createLLMFriendlyLink`                          | **replaces** (D1)                                                                                                                       |
-| A bare `@word` is the whole qualifier vocabulary                                                                         | `parseScopedIdSegment`, `CELL_SCOPE_VALUES`                             | **replaces** with the named form; the bare form survives as the scope's abbreviation (D2, D3)                                           |
+| Decision                                                                                                                 | Where                                                                   | This document                                                                                                                     |
+| ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| The reference is the one syntax; the bare form is an alias that never leads                                              | `packages/cli/README.md`; `llm-friendly-ref.ts` doc comment             | confirms (R1)                                                                                                                     |
+| Space by slash depth; leading `@` namespace rejected                                                                     | [Pattern imports](pattern-imports/README.md#alternatives-considered)    | confirms and extends to the reference (D1)                                                                                        |
+| `@` reserved for the trailing qualifier; the pin lives there                                                             | [Pattern imports](pattern-imports/README.md#specifier-syntax)           | confirms (D2); asks the pin to take a name (D5, migration step 4)                                                                 |
+| Scope is expressible in every layer, on a `space < user < session` lattice                                               | [Scoped cell instances](scoped-cell-instances.md)                       | confirms, and gives `inherit` its written form (D3)                                                                               |
+| The space rides in front only when it differs; the scope only when not the base                                          | `createLLMFriendlyLink`; `packages/cli/README.md`                       | confirms, as the case of a context that knows the space and holds scope `space` (D7, D10)                                         |
+| The positional path is a path against the target cell and never begins with `/`                                          | `packages/cli/README.md`, "Writing the target"                          | confirms as the piece-relative form (R4, D1)                                                                                      |
+| A stored link with no `id` is the base cell's document, path from its root                                               | `parseLinkPrimitive` in `packages/runner/src/link-types.ts`             | confirms as a reader with a one-part context: the base cell (D10)                                                                 |
+| A link's space is embedded only when it differs from the context, so a caller with no context passes a placeholder space | `HANDLE_REF_CONTEXT_SPACE` in `packages/cf-harness/src/handle-table.ts` | **replaces**: the empty context writes every part, and the placeholder retires (D7)                                               |
+| `#argument` is the one suffix, split off before anything else parses                                                     | `splitArgumentSuffix`                                                   | confirms the token; **replaces** its slot — the member sits on the piece segment, `#` in a path is data — and adds `#result` (D6) |
+| The projection grammar is its own; `--schema @` is the file form                                                         | `packages/cli/README.md`, "Shell completion"                            | confirms as out of scope; records the borrowed characters                                                                         |
+| The space is written `/@<space>/`                                                                                        | `parseReferenceParts`; `createLLMFriendlyLink`                          | **replaces** (D1)                                                                                                                 |
+| A bare `@word` is the whole qualifier vocabulary                                                                         | `parseScopedIdSegment`, `CELL_SCOPE_VALUES`                             | **replaces** with the named form; the bare form survives as the scope's abbreviation (D2, D3)                                     |
 
 ## Open questions
 
@@ -1085,11 +1103,11 @@ D10's two rules — the first location part written cuts the context off below i
 the scope is the string's when written and the context's when not — produce this
 table:
 
-| Level          | From the string                                                   | From the context                                                                                                                    |
-| -------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| complete       | space, piece, member, path                                        | scope, when the string omits it                                                                                                     |
-| space-relative | piece, member, path                                               | space; scope, when omitted                                                                                                          |
-| piece-relative | a path against the position, and a member or qualifier on its `.` | space, piece; the document unless `.#argument` switches it; the scope unless `.@scope` writes it; the position's path as the anchor |
+| Level          | From the string                                                   | From the context                                                                                                                                  |
+| -------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| complete       | space, piece, member, path                                        | scope, when the string omits it                                                                                                                   |
+| space-relative | piece, member, path                                               | space; scope, when omitted                                                                                                                        |
+| piece-relative | a path against the position, and a member or qualifier on its `.` | space, piece; the document unless `.#argument` or `.#result` switches it; the scope unless `.@scope` writes it; the position's path as the anchor |
 
 The string's parts are never overridden by the context, and the context's parts
 are never read for a slot the string fills. That is what "defaulting is
