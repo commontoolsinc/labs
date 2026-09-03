@@ -18,14 +18,10 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type {
-  FactoryInput,
-  JSONSchema,
-  Reactive,
-  WishParams,
-  WishState,
-} from "@commonfabric/api";
-import type { Schema } from "@commonfabric/api/schema";
+import type { Reactive, WishState } from "@commonfabric/api";
+// Imported for the module augmentation it carries as much as for the type: the
+// schema-carrying overloads it adds are part of what the pin below calls.
+import "@commonfabric/api/schema";
 import { createBuilder } from "../src/builder/factory.ts";
 import type {
   BuilderFunctionsAndConstants,
