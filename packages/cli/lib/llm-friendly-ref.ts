@@ -141,8 +141,10 @@ export function namesResolvedParts(ref: NormalizedLLMFriendlyRef): boolean {
  * slug may not, so the segment says which it is before either is checked. A
  * segment that is neither is reported as neither, rather than as a failure of
  * whichever check happened to run last.
+ *
+ * @throws ValidationError when the segment is in neither vocabulary.
  */
-function validatePieceSegment(pieceId: string): void {
+export function validatePieceSegment(pieceId: string): void {
   if (isSlugAddress(pieceId)) {
     if (!isValidSlug(pieceId)) {
       throw new ValidationError(
