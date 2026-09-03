@@ -357,7 +357,7 @@ export const assertCapture = <T>(
  * three, so the renderer's default depth elides an operand after a handful
  * of nodes, and a diagnostic wants the whole of it.
  */
-const ASSERT_RENDER_MAX_DEPTH = Number.MAX_SAFE_INTEGER;
+const ASSERT_RENDER_MAX_DEPTH = Infinity;
 
 /**
  * Renders the operands captured by `assertCapture` into the record's `parts`.

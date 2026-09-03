@@ -741,7 +741,7 @@ class DebugStringifier {
  * `defaultMaxDepth` when not, either one capped at `ABSOLUTE_MAX_DEPTH`.
  *
  * @throws {Error} if `options` is not a plain object, or if its `maxDepth` is
- * not a positive integer.
+ * neither a positive integer nor `Infinity`.
  */
 function checkedMaxDepth(
   options: DebugValueOptions | undefined,
@@ -760,7 +760,10 @@ function checkedMaxDepth(
 
   switch (typeof maxDepth) {
     case "number": {
-      if (Number.isSafeInteger(maxDepth) && (maxDepth > 0)) {
+      if (
+        (Number.isSafeInteger(maxDepth) && (maxDepth > 0)) ||
+        (maxDepth === Infinity)
+      ) {
         return Math.min(maxDepth, ABSOLUTE_MAX_DEPTH);
       }
       break;
@@ -774,7 +777,7 @@ function checkedMaxDepth(
     toCompactDebugString(maxDepth, { maxLength: 20 }),
   );
   throw new Error(
-    `\`maxDepth\` must be a positive integer or \`undefined\`; got ${badDepth}`,
+    `\`maxDepth\` must be a positive integer, \`Infinity\`, or \`undefined\`; got ${badDepth}`,
   );
 }
 
