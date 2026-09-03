@@ -39,7 +39,10 @@ const context: Ctx = {
   env: () => undefined,
 };
 
-const withToken: Ctx = { ...context, env: (key) => key === "GH_TOKEN" ? "t" : undefined };
+const withToken: Ctx = {
+  ...context,
+  env: (key) => key === "GH_TOKEN" ? "t" : undefined,
+};
 
 /** A `perf-metrics` file recording `lines`, with a warm compile cache. */
 const metricsFile = (lines: number) =>

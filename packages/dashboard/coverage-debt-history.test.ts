@@ -188,7 +188,9 @@ describe("coverage-debt-history", () => {
     it("reads back what it wrote", async () => {
       const store = new CoverageDebtStore(file);
       await store.load();
-      store.set("2026-09-01", { measured: { uncoveredLines: 78404, runId: 7 } });
+      store.set("2026-09-01", {
+        measured: { uncoveredLines: 78404, runId: 7 },
+      });
       store.set("2026-09-02", {});
       await store.save(["2026-09-01", "2026-09-02"]);
 
