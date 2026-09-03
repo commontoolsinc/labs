@@ -18,6 +18,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import type { DebugValueOptions } from "@/interface.ts";
 import { toStructuredDebugValue } from "@/value-debug.ts";
 import { isValidFabricValue } from "@/type-check.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
@@ -344,14 +345,14 @@ describe("toStructuredDebugValue()", () => {
 
   describe("with `maxDepth`", () => {
     it("returns `/...` and the elided value's kind at the limit", () => {
-      expect(toStructuredDebugValue({ a: { b: 1 } }, 2))
+      expect(toStructuredDebugValue({ a: { b: 1 } }, { maxDepth: 2 }))
         .toEqual({ a: { "/...": "object" } });
-      expect(toStructuredDebugValue({ a: [1, 2] }, 2))
+      expect(toStructuredDebugValue({ a: [1, 2] }, { maxDepth: 2 }))
         .toEqual({ a: { "/...": "array" } });
     });
 
     it("returns the elision at the top level given a `maxDepth` of `1`", () => {
-      expect(toStructuredDebugValue({ a: 1 }, 1))
+      expect(toStructuredDebugValue({ a: 1 }, { maxDepth: 1 }))
         .toEqual({ "/...": "object" });
     });
 
@@ -359,16 +360,17 @@ describe("toStructuredDebugValue()", () => {
       // The converting leaf makes this say that conversion reached the
       // bottom, not merely that nothing was elided on the way.
 
-      expect(toStructuredDebugValue({ a: { b: Symbol("leaf") } }, 3))
-        .toEqual({ a: { b: { "/uniqueSymbol": "leaf" } } });
+      expect(
+        toStructuredDebugValue({ a: { b: Symbol("leaf") } }, { maxDepth: 3 }),
+      ).toEqual({ a: { b: { "/uniqueSymbol": "leaf" } } });
     });
 
     it("returns a `FabricPrimitive` at the limit rather than eliding it", () => {
       // A primitive is atomic, so including it adds no nesting to the result.
 
       const value = new FabricEpochNsec(123n);
-      expect((toStructuredDebugValue({ t: value }, 2) as { t: unknown }).t)
-        .toBe(value);
+      const result = toStructuredDebugValue({ t: value }, { maxDepth: 2 });
+      expect((result as { t: unknown }).t).toBe(value);
     });
 
     it("returns a bounded result for a structure deeper than the default", () => {
@@ -387,35 +389,42 @@ describe("toStructuredDebugValue()", () => {
 
     it("throws given a `maxDepth` that is not a positive integer", () => {
       for (const bad of [0, -1, 1.5, Infinity, NaN]) {
-        expect(() => toStructuredDebugValue({}, bad))
+        expect(() => toStructuredDebugValue({}, { maxDepth: bad }))
           .toThrow("`maxDepth` must be a positive integer or `undefined`");
       }
     });
 
     it("throws given a `maxDepth` that is not a number", () => {
       for (const bad of ["3", null, {}]) {
-        expect(() => toStructuredDebugValue({}, bad as unknown as number))
+        const options = { maxDepth: bad as unknown as number };
+        expect(() => toStructuredDebugValue({}, options))
           .toThrow("`maxDepth` must be a positive integer or `undefined`");
+      }
+    });
+  });
+
+  describe("with `options` that are not a plain object", () => {
+    it("throws, naming the offending value", () => {
+      for (const bad of [100, "3", null, [], new Map()]) {
+        expect(() =>
+          toStructuredDebugValue({}, bad as unknown as DebugValueOptions)
+        ).toThrow("`options` must be a plain object or `undefined`; got `");
       }
     });
   });
 
   describe("with a `replacer`", () => {
     it("returns the replacement in place of the original value", () => {
-      const result = toStructuredDebugValue(
-        { a: 1, b: 2 },
-        undefined,
-        (value) => (value === 1 ? "one" : value),
-      );
+      const result = toStructuredDebugValue({ a: 1, b: 2 }, {
+        replacer: (value) => (value === 1 ? "one" : value),
+      });
       expect(result).toEqual({ a: "one", b: 2 });
     });
 
     it("returns a replacement offered for the top-level value", () => {
-      const result = toStructuredDebugValue(
-        { a: 1 },
-        undefined,
-        (value) => (typeof value === "object" ? "replaced" : value),
-      );
+      const result = toStructuredDebugValue({ a: 1 }, {
+        replacer: (value) => (typeof value === "object" ? "replaced" : value),
+      });
       expect(result).toBe("replaced");
     });
 
@@ -423,11 +432,9 @@ describe("toStructuredDebugValue()", () => {
       // The replacement re-enters conversion, so a value the replacer hands
       // back still gets escaped, tagged, and depth-limited like any other.
 
-      const result = toStructuredDebugValue(
-        { a: 1 },
-        undefined,
-        (value) => (value === 1 ? new Map() : value),
-      );
+      const result = toStructuredDebugValue({ a: 1 }, {
+        replacer: (value) => (value === 1 ? new Map() : value),
+      });
       expect(result).toEqual({ a: { "/Map": "/..." } });
     });
 
@@ -435,14 +442,12 @@ describe("toStructuredDebugValue()", () => {
       // A failed replacement reads as a refusal to replace rather than as a
       // conversion error, so the rest of the result is unaffected.
 
-      const result = toStructuredDebugValue(
-        { a: 1, m: new Map() },
-        undefined,
-        (value) => {
+      const result = toStructuredDebugValue({ a: 1, m: new Map() }, {
+        replacer: (value) => {
           if (value === 1) throw new Error("no thanks");
           return value;
         },
-      );
+      });
       expect(result).toEqual({ a: 1, m: { "/Map": "/..." } });
     });
   });

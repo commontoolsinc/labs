@@ -46,5 +46,5 @@ export function toReportableState(state: any): FabricValue {
     // cannot classify gets anyway.
   }
 
-  return toCompactDebugString(state, MAX_RENDERED_LENGTH);
+  return toCompactDebugString(state, { maxLength: MAX_RENDERED_LENGTH });
 }

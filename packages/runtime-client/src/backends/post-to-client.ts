@@ -86,7 +86,7 @@ function undeliverableMessageFrom(
   error: unknown,
 ): IPCRemotePost {
   const reason = `Undeliverable message: ${describeFailure(error)}: ${
-    toCompactDebugString(message, MAX_UNDELIVERABLE_RENDER)
+    toCompactDebugString(message, { maxLength: MAX_UNDELIVERABLE_RENDER })
   }`;
   const msgId = (message as { msgId?: unknown }).msgId;
 

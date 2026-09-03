@@ -624,11 +624,10 @@ function newConsoleDebugReplacer(): (value: any) => any {
  * Exported for testing.
  */
 export function toConsoleDebugValue(value: unknown): FabricValue {
-  return toStructuredDebugValue(
-    value,
-    MAX_CONSOLE_DEBUG_DEPTH,
-    newConsoleDebugReplacer(),
-  );
+  return toStructuredDebugValue(value, {
+    maxDepth: MAX_CONSOLE_DEBUG_DEPTH,
+    replacer: newConsoleDebugReplacer(),
+  });
 }
 
 export const hasExplicitSubscriptionSchema = (schema: unknown): boolean =>
@@ -2110,7 +2109,7 @@ export class RuntimeProcessor {
       // is bounded because the argument is a caller's data.
       throw new Error(
         `A piece's argument must be a record, not: ${
-          toCompactDebugString(argument, 120)
+          toCompactDebugString(argument, { maxLength: 120 })
         }`,
       );
     }

@@ -289,7 +289,7 @@ function truncateValue(value: unknown, maxLength: number): unknown {
   }
 
   if (typeof value === "object") {
-    return toCompactDebugString(value, maxLength);
+    return toCompactDebugString(value, { maxLength: maxLength });
   }
 
   return value;
