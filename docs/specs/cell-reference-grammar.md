@@ -255,11 +255,10 @@ requirements, and the shell-safe alphabet below is smaller than it looks.
 | `/`                    | this grammar                          | segment separator; at the head, `//` opens the space slot, one `/` roots at the context's space, and neither is piece-relative                                               |
 | `@`                    | this grammar                          | qualifier introducer on the piece ([D2](#d2--is-the-qualifier-introducer-and-nothing-else))                                                                                  |
 | `#`                    | this grammar                          | fragment introducer, `#argument` ([D6](#d6-the-fragment-selects-a-secondary-cell)); separately, a leading `#name` on a whole operand is a wish target at `cf`'s intake seams |
-| `~0`, `~1`             | RFC 6901, via the path                | escapes for `~` and `/` inside a path key                                                                                                                                    |
+| `~0`, `~1`, `~2`       | RFC 6901, extended by one entry       | escapes for `~`, `/`, and `#` inside a path key — the one escape scheme the grammar has                                                                                      |
 | `:`                    | the identifiers                       | inside a DID and a handle (`did:key:…`, `of:fid1:…`); a segment holding one is an identifier, one without is a name                                                          |
 | `=`                    | this grammar, inside a qualifier      | separates a qualifier's name from its value                                                                                                                                  |
 | `.`, `..`              | this grammar, in a relative reference | the context's position and its parent, each as a whole segment; `.` is where a relative reference takes a qualifier                                                          |
-| `%`                    | this grammar, in a path key           | percent-encoding: `%23` for `#` in a form that names a piece, `%25` for `%` itself ([D6](#d6-the-fragment-selects-a-secondary-cell))                                         |
 | `,` and a trailing `@` | the projection grammar                | list separator, and the address marker on a projected position                                                                                                               |
 | a leading `@`          | `--schema`                            | its `@file` form; the projection's own document records the interaction with the trailing marker                                                                             |
 
@@ -301,6 +300,31 @@ The `#` row records a hazard the grammar already carries: a bare `#favorites` is
 a comment to `bash` and to every script, and survives only at an interactive
 `zsh` prompt with stock options. That is outside this document's decisions and
 is recorded so the next reader of the wish syntax finds it measured.
+
+### Escaping is the grammar's; quoting is the transport's
+
+Two different things make a character survive, and they belong to different
+owners.
+
+**Escaping** is part of the string. It is what lets a key that holds a
+structural character be written at all, and it is the grammar's own: the writer
+applies it, the reader removes it, and the string round-trips under D10's law
+with the escape inside it. The grammar has one escape table, the path's — RFC
+6901's `~0` for `~` and `~1` for `/`, extended by `~2` for `#` — and nothing
+else in the string is ever escaped. `%` is data.
+
+**Quoting** is not part of the string. It is what a transport needs so that its
+own reading does not consume the string on the way through — a shell's quotes
+around a `$` or a `?`, a URL's percent-encoding of a space or a `#` — and the
+transport strips it before the grammar sees anything. The page URL is the worked
+case: `parseFabricUrl` percent-decodes each segment, which undoes the URL's
+quoting, and only then applies the pointer's unescaping, which is the grammar's.
+The [table above](#shell-behavior-measured) is about quoting: it measures which
+characters a shell consumes unquoted, and the grammar's design goal is that none
+of its structural characters need quoting at the prompt where a reference is
+typed. A writer never adds quoting, and a reader never expects it; whoever hands
+a reference to a transport — a person, completion, a tool printing a command
+line — owns it.
 
 ## Decisions
 
@@ -480,8 +504,8 @@ Each qualifier is introduced by its own `@`. Order carries no meaning, and a
 name written twice is refused. A qualifier's value runs to the next `@`, `/`, or
 `#`, so a value holds none of those three; every registered value is drawn from
 an alphabet that excludes them (scope words are letters; a pin is base64url). A
-value that ever needs one of them takes percent-encoding, which is the URL's
-answer and the one the shell page URL already applies.
+value that ever needs one of them takes the path's `~n` escapes; none of the
+registered values can.
 
 Serves R3, R7.
 
@@ -511,16 +535,15 @@ selection `--input` writes as a flag; the path applies inside the selected cell.
 The fragment is last because it is a fragment: it names a cell that belongs to
 the piece the rest of the reference names, and a URL puts that after everything
 else. It is the one fragment, and any other is refused. A path key holding `#`
-is written `%23` in a form that names a piece, and literally in a relative
-reference, which carries no fragment; `%` itself is `%25` wherever `%23` is
-read. That is percent-encoding, the answer D4 already gives a qualifier value
-and the one `parseFabricUrl` already decodes, and it is what lets the writer of
-D7 write every part against the empty context: today `createLLMFriendlyLink`
-writes such a key raw and `splitArgumentSuffix` in
-`packages/cli/lib/llm-friendly-ref.ts` refuses it on the way back. Completion
-offers such a key already encoded where the target names a piece and literally
-where it is relative, so the encoding is something a person sees rather than
-something they have to know.
+is written `~2` in a form that names a piece, and literally in a relative
+reference, which carries no fragment. That is the path's own escape table — RFC
+6901's `~0` for `~` and `~1` for `/` — extended by one entry, so the grammar has
+one escape scheme rather than two, and it is what lets the writer of D7 write
+every part against the empty context: today `createLLMFriendlyLink` writes such
+a key raw and `splitArgumentSuffix` in `packages/cli/lib/llm-friendly-ref.ts`
+refuses it on the way back. Completion offers such a key already encoded where
+the target names a piece and literally where it is relative, so the encoding is
+something a person sees rather than something they have to know.
 
 In the location a context holds, the cell sits between the piece and the path —
 writing a piece resets it to the result unless `#argument` is written — even
@@ -808,9 +831,9 @@ source. Then it is placed by asking, in order:
 
 A requirement that survives all five is the case for a new structural character,
 and the [measured table](#shell-behavior-measured) says which characters there
-are to spend: `: , + -`, of which `:` is inside every identifier and `,` is the
-projection's; `%` is spent on percent-encoding. That is the whole reason the
-grammar spends names rather than characters.
+are to spend: `: % , + -`, of which `:` is inside every identifier and `,` is
+the projection's. That is the whole reason the grammar spends names rather than
+characters.
 
 This is what makes the mechanism reasonable rather than merely tidy. Four
 independent uses of `@` sit on the `cf` surface — the space, the scope, the
