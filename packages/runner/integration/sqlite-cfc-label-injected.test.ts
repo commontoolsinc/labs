@@ -80,17 +80,42 @@ function seedDiskDb(path: string): void {
 }
 
 /**
+ * A stuck-condition backstop, not a bound on how long a settle may legitimately
+ * take. This test holds a live client and an in-process server, so the event
+ * loop never drains and Deno's "Promise resolution is still pending" fail-fast
+ * cannot fire; an unsatisfied wait would hang the lane to its ambient limit
+ * instead of failing it. `docs/development/waiting-in-tests.md` covers the
+ * distinction, and `test/support/wait-until.ts` keeps a deadline for the same
+ * reason. Sized so only a multi-minute stall reaches it.
+ */
+const SETTLE_BACKSTOP_MS = 60_000;
+
+/**
  * Resolves once the query cell records a SETTLED result for a request other
  * than `superseded`. The result write raises the change the sink delivers, so
  * this waits on the event rather than polling. Reads go through `getRaw` so the
- * pattern's result schema cannot project `requestHash` away.
+ * pattern's result schema cannot project `requestHash` away. Crossing
+ * `SETTLE_BACKSTOP_MS` rejects with the query's own state, so a settle that
+ * never arrives names the pending, errored, or superseded request it was
+ * waiting on rather than reporting only that time ran out.
  */
 function settled(query: Cell<QueryState>, superseded?: unknown): Promise<void> {
-  return new Promise<void>((resolve) => {
+  return new Promise<void>((resolve, reject) => {
     // The sink can fire DURING `sink()` itself, before it has returned the
     // canceller, so the callback reaches it through this record rather than
     // through a binding that is still uninitialized on that first call.
-    const sub: { done: boolean; cancel?: () => void } = { done: false };
+    const sub: {
+      done: boolean;
+      cancel?: () => void;
+      timer?: ReturnType<typeof setTimeout>;
+    } = {
+      done: false,
+    };
+    const stop = () => {
+      sub.done = true;
+      if (sub.timer !== undefined) clearTimeout(sub.timer);
+      sub.cancel?.();
+    };
     const check = () => {
       if (sub.done) return;
       if (query.key("pending").getRaw() !== false) return;
@@ -100,10 +125,25 @@ function settled(query: Cell<QueryState>, superseded?: unknown): Promise<void> {
       ) {
         return;
       }
-      sub.done = true;
+      stop();
       resolve();
-      sub.cancel?.();
     };
+    sub.timer = setTimeout(() => {
+      if (sub.done) return;
+      stop();
+      reject(
+        new Error(
+          `query never settled within ${SETTLE_BACKSTOP_MS} ms; q=` +
+            JSON.stringify({
+              pending: query.key("pending").getRaw(),
+              error: query.key("error").getRaw(),
+              requestHash: query.key("requestHash").getRaw(),
+              superseded,
+              result: query.key("result").getRaw(),
+            }),
+        ),
+      );
+    }, SETTLE_BACKSTOP_MS);
     sub.cancel = query.sink(check);
     if (sub.done) sub.cancel();
   });
@@ -201,9 +241,58 @@ async function runTest(base: URL, contractArrivesLate: boolean) {
     try {
       const direct = result.key("direct") as Cell<QueryState>;
       const derived = result.key("derived") as Cell<QueryState>;
+      /** The row's own entity doc, which a labeled result splits each row into
+       *  and stores the row's labels on. Declared here because the labeled
+       *  reads below and the contract-free probe above them both need it. */
+      const rowDoc = (query: Cell<QueryState>) => {
+        const link = parseLink(query.key("result").key(0).getRaw());
+        if (!link?.id) {
+          throw new Error("result row did not split into its own entity doc");
+        }
+        return runtime.getCellFromLink({
+          ...link,
+          space: link.space ?? space,
+          path: [],
+        });
+      };
+      /** Each query and the one column of its result that carries a label. */
+      const columns = [
+        ["direct", direct, "secret"],
+        ["derived", derived, "shouted"],
+      ] as const;
       await Promise.all([settled(direct), settled(derived)]);
 
       if (contractArrivesLate) {
+        await runtime.idle();
+        await runtime.storageManager.synced();
+        // The queries settled against an EMPTY contract, so their results carry
+        // no label yet. Pinning that is what makes the reconcile below the
+        // thing under test: an implementation that labeled a contract-free
+        // result would reach the same end state and pass every assertion after
+        // this block. Both halves the labeled case checks are checked here,
+        // because they fail independently — what is STORED on the row's own
+        // doc, and what a consumer reading the leaf INHERITS.
+        for (const [name, query, column] of columns) {
+          const stored = cfcLabelViewForCellWithStatus(rowDoc(query));
+          if (stored.readFailed || stored.view !== undefined) {
+            throw new Error(
+              `the contract-free ${name} result was labeled at "${column}" ` +
+                `before the contract arrived; got ${JSON.stringify(stored)}`,
+            );
+          }
+          const inherited = await inheritedConfidentiality(
+            runtime,
+            query.key("result").key(0).key(column),
+          );
+          if (inherited.length !== 0) {
+            throw new Error(
+              `a consumer inherited confidentiality from the contract-free ` +
+                `${name} result at "${column}"; got ${
+                  JSON.stringify(inherited)
+                }`,
+            );
+          }
+        }
         const before = {
           direct: direct.key("requestHash").getRaw(),
           derived: derived.key("requestHash").getRaw(),
@@ -222,8 +311,7 @@ async function runTest(base: URL, contractArrivesLate: boolean) {
       await runtime.idle();
       await runtime.storageManager.synced();
 
-      const queries = [["direct", direct], ["derived", derived]] as const;
-      for (const [name, query] of queries) {
+      for (const [name, query] of columns) {
         const error = query.key("error").getRaw();
         if (error !== undefined) {
           throw new Error(`${name} query failed: ${JSON.stringify(error)}`);
@@ -249,17 +337,6 @@ async function runTest(base: URL, contractArrivesLate: boolean) {
       // (b) The label is STORED on each row's own entity doc — the per-field
       // entry an aliased column gets, and the `observes: "value"` entry the
       // null-origin expression gets from the whole-db union.
-      const rowDoc = (query: Cell<QueryState>) => {
-        const link = parseLink(query.key("result").key(0).getRaw());
-        if (!link?.id) {
-          throw new Error("result row did not split into its own entity doc");
-        }
-        return runtime.getCellFromLink({
-          ...link,
-          space: link.space ?? space,
-          path: [],
-        });
-      };
       const storedEntry = (query: Cell<QueryState>, column: string) => {
         const stored = cfcLabelViewForCellWithStatus(rowDoc(query));
         if (stored.readFailed) {
@@ -296,12 +373,28 @@ async function runTest(base: URL, contractArrivesLate: boolean) {
       // The NULL-ORIGIN arm: `upper(body)` names no single source, so it takes
       // the union of every labeled column in the db — including `meta.k`,
       // which its query never touches — and is value-class.
+      //
+      // Every check on this arm compares the COMPLETE set rather than asking
+      // whether one atom is present. A partial union satisfies a membership
+      // check, so `some(...)` cannot tell the whole-db union from a query-scoped
+      // one, and a propagation that dropped `meta-atom` on the way to a reader
+      // would read as correct. `atomsOf` sorts because the union's order is not
+      // stable between the two arms of this test.
+      const WHOLE_DB_UNION = ["meta-atom", "secret-body"];
+      const atomsOf = (conf: readonly unknown[] | undefined) =>
+        [...(conf ?? [])].map(String).sort();
+      const sameAtoms = (
+        conf: readonly unknown[] | undefined,
+        expected: readonly string[],
+      ) =>
+        JSON.stringify(atomsOf(conf)) === JSON.stringify([...expected].sort());
+
       const derivedEntry = storedEntry(derived, "shouted");
-      if (!derivedEntry.label.confidentiality?.some((a) => a === "meta-atom")) {
+      if (!sameAtoms(derivedEntry.label.confidentiality, WHOLE_DB_UNION)) {
         throw new Error(
-          `the null-origin column did not take the whole-db union; got ${
-            JSON.stringify(derivedEntry)
-          }`,
+          `the null-origin column did not take the whole-db union; wanted ${
+            JSON.stringify(WHOLE_DB_UNION)
+          }, got ${JSON.stringify(derivedEntry)}`,
         );
       }
       if (derivedEntry.observes !== "value") {
@@ -317,21 +410,21 @@ async function runTest(base: URL, contractArrivesLate: boolean) {
         runtime,
         direct.key("result").key(0).key("secret"),
       );
-      if (!secretConf.some((a) => a === "secret-body")) {
+      if (!sameAtoms(secretConf, ["secret-body"])) {
         throw new Error(
-          `the aliased column did not inherit its origin's confidentiality; ` +
-            `got ${JSON.stringify(secretConf)}`,
+          `the aliased column did not inherit exactly its origin's ` +
+            `confidentiality; got ${JSON.stringify(secretConf)}`,
         );
       }
       const shoutedConf = await inheritedConfidentiality(
         runtime,
         derived.key("result").key(0).key("shouted"),
       );
-      if (!shoutedConf.some((a) => a === "secret-body")) {
+      if (!sameAtoms(shoutedConf, WHOLE_DB_UNION)) {
         throw new Error(
-          `the null-origin column did not inherit the whole-db union; got ${
-            JSON.stringify(shoutedConf)
-          }`,
+          `the null-origin column did not inherit the whole-db union; wanted ${
+            JSON.stringify(WHOLE_DB_UNION)
+          }, got ${JSON.stringify(shoutedConf)}`,
         );
       }
 
@@ -401,26 +494,29 @@ async function runTest(base: URL, contractArrivesLate: boolean) {
         e.path.length === 0
       );
       if (
-        !atDerivedEntry?.label.confidentiality?.some((a) =>
-          a === "secret-body"
-        ) ||
-        atDerivedEntry.observes !== "value"
+        !sameAtoms(atDerivedEntry?.label.confidentiality, WHOLE_DB_UNION) ||
+        atDerivedEntry?.observes !== "value"
       ) {
         throw new Error(
-          `get-label lost the null-origin column's value-class label; got ${
-            JSON.stringify(atDerived)
-          }`,
+          `get-label lost the null-origin column's value-class whole-db ` +
+            `union; wanted ${JSON.stringify(WHOLE_DB_UNION)} with ` +
+            `observes "value", got ${JSON.stringify(atDerived)}`,
         );
       }
     } finally {
       cancelSink();
     }
   } finally {
-    await runtime.dispose();
+    // The file removal is in an inner `finally` so a rejecting `dispose()`
+    // cannot leave a temp SQLite file behind on every failing run.
     try {
-      Deno.removeSync(diskPath);
-    } catch {
-      // The file is gone either way.
+      await runtime.dispose();
+    } finally {
+      try {
+        Deno.removeSync(diskPath);
+      } catch {
+        // The file is gone either way.
+      }
     }
   }
 }
