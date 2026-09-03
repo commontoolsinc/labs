@@ -9,10 +9,10 @@
  * removal has to follow the last process in the tree, and
  * `Deno.ChildProcess.status` covers one process.
  *
- * Every process in the tree inherits the standard error the browser was
- * spawned with, so the read end of that pipe reports end of file once the last
- * of them has exited. The browser is spawned here and astral attached to the
- * running browser with `connect()`, which is what keeps that pipe in reach.
+ * Every process in the tree inherits the two pipes the browser was spawned
+ * with, so their read ends reach end of file once the last of them has
+ * exited. The browser is spawned here and astral attached to the running
+ * browser with `connect()`, which is what keeps those pipes in reach.
  */
 
 import {
@@ -21,6 +21,7 @@ import {
   generateBinArgs,
   getBinary,
   type LaunchOptions,
+  type Page,
   WEBSOCKET_ENDPOINT_REGEX,
 } from "@astral/astral";
 import { isChildProcessGone } from "@commonfabric/integration/astral-adapter";
@@ -33,37 +34,32 @@ type SpawnedBrowser = {
   /** Host and port of the browser's developer-tools endpoint. */
   endpoint: string;
 
-  /** Resolves once every write end of the browser's standard error is closed. */
-  standardErrorClosed: Promise<void>;
+  /** Resolves once every write end of the browser's output is closed. */
+  outputClosed: Promise<void>;
 };
 
 /**
- * Resolves once every write end of `child`'s standard error has been closed,
- * discarding everything read from it.
+ * Resolves once every write end of `stream` is closed, discarding everything
+ * read from it.
  *
  * A process that inherits a pipe holds its write end open until it exits or
  * closes the descriptor, and a browser closes neither, so for a browser and
  * everything it starts this is the point at which the last of them has gone.
  * What is read is discarded rather than left unread because a full pipe blocks
  * the process writing into it.
- *
- * The child has to have been spawned with `stderr: "piped"`, and nothing else
- * may be reading the stream.
  */
-export function standardErrorClosed(child: Deno.ChildProcess): Promise<void> {
-  const closed = child.stderr.pipeTo(new WritableStream());
-  // The promise is awaited at the end of the run rather than here, and a
-  // rejection nothing is listening for ends the process where it stands. This
-  // handler is what marks it listened for; `closed` still carries the failure
-  // to whoever awaits it.
-  closed.catch(() => {});
-  return closed;
+export async function readToEnd(
+  stream: ReadableStream<Uint8Array>,
+): Promise<void> {
+  for await (const _chunk of stream) {
+    // The bytes say nothing the run acts on; the end of them says everything.
+  }
 }
 
 /**
  * Kills `child` and returns once every process in its tree has exited.
  *
- * `closed` is what `standardErrorClosed()` returned for the same child. A
+ * `closed` is what `readBrowserOutput()` reported for the same child. A
  * browser asked to close over the protocol is usually still shutting down when
  * the kill lands, and is occasionally gone already, which throws rather than
  * doing nothing.
@@ -84,12 +80,65 @@ export async function stopBrowserProcess(
 }
 
 /**
- * Spawns the browser `options` names and reads its standard error up to the
- * line naming its developer-tools endpoint, handing the rest of that stream to
- * `standardErrorClosed()`.
+ * Reads the browser's standard output and standard error to the end of both,
+ * and reports the developer-tools endpoint named in the latter.
  *
- * Writes out what the browser printed and throws when it exits before naming
- * an endpoint.
+ * The endpoint is reported while the reads carry on, because the pipes are
+ * what say when the browser's processes have gone and a pipe nobody reads
+ * fills up and stops the process writing into it. Output that ends without
+ * naming an endpoint is a browser that never started: it is written out, and
+ * the endpoint fails.
+ */
+function readBrowserOutput(
+  child: Deno.ChildProcess,
+): { endpoint: Promise<string>; closed: Promise<void> } {
+  const endpoint = Promise.withResolvers<string>();
+  const decoder = new TextDecoder();
+  let printed = "";
+  let named = false;
+
+  const readStandardError = (async () => {
+    for await (const chunk of child.stderr) {
+      if (named) {
+        continue;
+      }
+      printed += decoder.decode(chunk, { stream: true });
+      const found = printed.match(WEBSOCKET_ENDPOINT_REGEX)?.[1];
+      if (found) {
+        named = true;
+        endpoint.resolve(found);
+      }
+    }
+    if (!named) {
+      // `isRetryableAstralLaunchError()` matches the message below exactly to
+      // decide whether the launch is worth another attempt, so what the
+      // browser printed is written out here rather than carried in the error.
+      const { code } = await child.status;
+      console.error(`${printed}\nProcess exited with code ${code}`);
+      endpoint.reject(
+        new Error(
+          printed.includes("error while loading shared libraries")
+            ? "Your binary refused to boot due to missing system dependencies"
+            : "Your binary refused to boot",
+        ),
+      );
+    }
+  })();
+
+  const closed = Promise.all([readStandardError, readToEnd(child.stdout)])
+    .then(() => {});
+  // The reads run alongside the tests and are awaited when the browser is
+  // closed. A rejection nothing is listening for in between ends the process
+  // where it stands, so this handler is what marks it listened for; `closed`
+  // still carries the failure to whoever awaits it.
+  closed.catch(() => {});
+
+  return { endpoint: endpoint.promise, closed };
+}
+
+/**
+ * Spawns the browser `options` names and returns once it has named its
+ * developer-tools endpoint, with its output still being read.
  */
 async function spawnBrowser(options: LaunchOptions): Promise<SpawnedBrowser> {
   const product = options.product ?? "chrome";
@@ -108,72 +157,49 @@ async function spawnBrowser(options: LaunchOptions): Promise<SpawnedBrowser> {
     throw new Error("A browser launch has to name a `--user-data-dir`.");
   }
 
-  const command = new Deno.Command(binary, { args, stderr: "piped" });
-
-  const child = command.spawn();
-  const reader = child.stderr.getReader();
-  const decoder = new TextDecoder();
-  let printed = "";
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) {
-      break;
-    }
-    printed += decoder.decode(value, { stream: true });
-
-    const endpoint = printed.match(WEBSOCKET_ENDPOINT_REGEX)?.[1];
-    if (endpoint) {
-      reader.releaseLock();
-      return {
-        child,
-        endpoint,
-        standardErrorClosed: standardErrorClosed(child),
-      };
-    }
+  const child = new Deno.Command(binary, {
+    args,
+    stdout: "piped",
+    stderr: "piped",
+  }).spawn();
+  const { endpoint, closed } = readBrowserOutput(child);
+  try {
+    return { child, endpoint: await endpoint, outputClosed: closed };
+  } catch (error) {
+    await stopBrowserProcess(child, closed);
+    throw error;
   }
-
-  const { code } = await child.status;
-  // `isRetryableAstralLaunchError()` matches the message below exactly to
-  // decide whether the launch is worth another attempt, so what the browser
-  // printed is written out here rather than carried in the error.
-  console.error(`${printed}\nProcess exited with code ${code}`);
-  if (printed.includes("error while loading shared libraries")) {
-    throw new Error(
-      "Your binary refused to boot due to missing system dependencies",
-    );
-  }
-  throw new Error("Your binary refused to boot");
 }
 
 /** A running browser, and the process tree the run can wait out. */
 export class BrowserProcess {
   #child: Deno.ChildProcess;
-  #standardErrorClosed: Promise<void>;
+  #outputClosed: Promise<void>;
   #browser: AstralBrowser;
 
   /**
-   * Takes the browser process, the promise `standardErrorClosed()` returned
-   * for it, and astral's connection to it. `start()` is what supplies the
-   * three of them.
+   * Takes the browser process, the promise that resolves once its output has
+   * ended, and astral's connection to it. `start()` is what supplies the three
+   * of them.
    */
   constructor(
     child: Deno.ChildProcess,
-    standardErrorClosed: Promise<void>,
+    outputClosed: Promise<void>,
     browser: AstralBrowser,
   ) {
     this.#child = child;
-    this.#standardErrorClosed = standardErrorClosed;
+    this.#outputClosed = outputClosed;
     this.#browser = browser;
   }
 
-  /** Astral's connection to the browser, which pages are opened through. */
-  get browser(): AstralBrowser {
-    return this.#browser;
+  /** Opens a page on `url`. */
+  newPage(url: string): Promise<Page> {
+    return this.#browser.newPage(url);
   }
 
   /**
    * Closes the browser and returns once every process holding the browser's
-   * standard error has closed it, which is once the last of them has exited.
+   * output has closed it, which is once the last of them has exited.
    *
    * The browser is stopped by the signal rather than by astral's `close()`,
    * which asks over the browser's connection and waits for an answer. A
@@ -182,7 +208,7 @@ export class BrowserProcess {
    */
   async close(): Promise<void> {
     try {
-      await stopBrowserProcess(this.#child, this.#standardErrorClosed);
+      await stopBrowserProcess(this.#child, this.#outputClosed);
     } finally {
       await this.#browser.disconnect();
     }
@@ -202,11 +228,11 @@ export class BrowserProcess {
       });
       return new BrowserProcess(
         spawned.child,
-        spawned.standardErrorClosed,
+        spawned.outputClosed,
         browser,
       );
     } catch (error) {
-      await stopBrowserProcess(spawned.child, spawned.standardErrorClosed);
+      await stopBrowserProcess(spawned.child, spawned.outputClosed);
       throw error;
     }
   }

@@ -16,7 +16,7 @@ import { afterEach, describe, it } from "@std/testing/bdd";
 
 import {
   BrowserProcess,
-  standardErrorClosed,
+  readToEnd,
   stopBrowserProcess,
 } from "../browser-process.ts";
 
@@ -109,14 +109,14 @@ describe("browser-process", () => {
     it("ends a running process with `SIGTERM`", async () => {
       const child = shell("read line", { stdin: "piped" });
 
-      await stopBrowserProcess(child, standardErrorClosed(child));
+      await stopBrowserProcess(child, readToEnd(child.stderr));
 
       expect((await child.status).signal).toBe("SIGTERM");
     });
 
     it("returns for a process that has already exited, leaving its exit status intact", async () => {
       const child = shell("exit 0");
-      const closed = standardErrorClosed(child);
+      const closed = readToEnd(child.stderr);
       await child.status;
 
       await stopBrowserProcess(child, closed);
@@ -142,7 +142,7 @@ describe("browser-process", () => {
         stdin: "piped",
         stdout: "piped",
       });
-      const closed = standardErrorClosed(child);
+      const closed = readToEnd(child.stderr);
 
       // `cat` is running by the time the shell has said so, so the kill below
       // takes the shell without taking the holder of the pipe with it.
@@ -185,7 +185,7 @@ describe("browser-process", () => {
             },
           } as unknown as AstralBrowser;
 
-          await new BrowserProcess(child, standardErrorClosed(child), browser)
+          await new BrowserProcess(child, readToEnd(child.stderr), browser)
             .close();
 
           expect(disconnected).toBe(true);

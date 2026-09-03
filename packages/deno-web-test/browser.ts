@@ -70,7 +70,7 @@ export class BrowserController extends EventTarget {
       this.#process = await launchWithRetry(
         extractAstralConfig(config, this.#manifest.profileDir),
       );
-      this.#page = await this.#process.browser.newPage(testUrl);
+      this.#page = await this.#process.newPage(testUrl);
       this.#page.addEventListener("console", (e) => {
         // Not sure why this event needs reconstructed in order
         // to re-fire, rather than just passing it into `dispatchEvent`.
