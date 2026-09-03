@@ -38,8 +38,12 @@ describe("line", () => {
       });
     });
 
-    it("separates on every whitespace character, not on the space alone", () => {
-      expect(splitLine("a\tb\nc\rd e")).toEqual({
+    it("separates on a whitespace character that is not the space", () => {
+      // Every separator here is written as an escape, and none of them is
+      // a line break: an invisible character in a fixture is unreadable,
+      // and a line break would tie this case to the one below it.
+
+      expect(splitLine("a\tb\rc\vd\fe")).toEqual({
         kind: "split",
         tokens: ["a", "b", "c", "d", "e"],
       });
@@ -189,7 +193,7 @@ describe("line", () => {
         });
       });
 
-      it("counts the column in code points, so a wide character ahead of the quote is one", () => {
+      it("counts the column in code points, so a character stored as two code units counts one", () => {
         expect(splitLine("\u{1f369} 'a b")).toEqual({
           kind: "refused",
           reason: "The `'` opened at column 3 is never closed.",

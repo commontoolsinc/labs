@@ -17,9 +17,9 @@
  *
  * `packages/cli` splits a line too, in `tokenizeLine` under `lib/completion/`,
  * and this is not a second copy of it. That one reconstructs what bash would
- * have done to a *partial* line: it reads up to a cursor offset and its last
- * word is whatever the cursor sits in, which is empty only where the cursor
- * follows a separator; it separates on the space and the tab alone; and it
+ * have done to a *partial* line: it reads up to a cursor offset and always
+ * pushes a last word for the cursor to sit in, so its list is never empty
+ * where this one's is; it separates on the space and the tab alone; and it
  * refuses nothing, a half-typed line being its normal input. It is also not an
  * export entry of that package, so nothing here could call it.
  */
@@ -90,12 +90,13 @@ export type LineSplit =
  * Nothing else refuses a line here, so a line that splits says only that; it
  * says nothing about whether its tokens name anything.
  *
- * `line` is one line, and a terminator on it is the caller's to strip. The
+ * `line` is one line, and a terminator on it is whoever read it to strip. The
  * separator class holds the line terminators, so text carrying one splits
  * across the break into a single run of tokens rather than into two commands.
- * A newline cannot refuse instead: {@link quoteToken} writes a value holding
- * one between single quotes, and reading that back is the round trip the two
- * halves guarantee.
+ * That is a choice and not a necessity: every value {@link quoteToken} writes
+ * that holds a line break lands inside quotes, so a rule refusing an unquoted
+ * one would leave the round trip whole. What the round trip settles is that
+ * the choice is safe, not that it was forced.
  */
 export function splitLine(line: string): LineSplit {
   const tokens: string[] = [];
@@ -182,10 +183,10 @@ export function quoteToken(value: string): string {
 
 /**
  * Helper for {@link splitLine}, which is the 1-based column of the character
- * at `index`, counted in code points. The number exists for a person to find
- * that character with, so it counts what a reader counts rather than the code
- * units the string is stored in: an emoji ahead of the quote is one column and
- * not two.
+ * at `index`, counted in code points. The number is there for a person to find
+ * that character with, and a code point is the unit this can count: it is
+ * neither the code unit the string is stored in, nor the grapheme cluster a
+ * reader sees as one character.
  */
 function columnOf(line: string, index: number): number {
   return [...line.slice(0, index)].length + 1;
