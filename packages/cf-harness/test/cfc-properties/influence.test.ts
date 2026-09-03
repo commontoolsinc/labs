@@ -21,6 +21,7 @@ import { CfHarnessPromptLoop } from "../../src/prompt-loop.ts";
 
 import {
   auditArtifacts,
+  checkThatRan,
   directPromptSlotBinding,
   mediatedBashResult,
   messagesOf,
@@ -118,7 +119,7 @@ describe("cfc property: influence accumulation", () => {
       const episode = await runInfluenceEpisode();
 
       const audit = await auditArtifacts(episode.runDir);
-      const disagreeing = audit.findings("AUD-8").filter((finding) =>
+      const disagreeing = checkThatRan(audit, "AUD-8").filter((finding) =>
         finding.verdict === "fail"
       );
       expect(messagesOf(disagreeing)).toBe("");

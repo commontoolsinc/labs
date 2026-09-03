@@ -26,6 +26,7 @@ import { CfHarnessPromptLoop } from "../../src/prompt-loop.ts";
 
 import {
   auditArtifacts,
+  checkThatRan,
   directPromptSlotBinding,
   messagesOf,
   propertyArtifactRoot,
@@ -133,10 +134,12 @@ describe("cfc property: no silent fallback", () => {
       const audit = await auditArtifacts(episode.runDir);
       expect(audit.verdicts("AUD-2")).toEqual(["pass"]);
       expect(audit.verdicts("AUD-7")).toEqual(["pass"]);
-      const weakened = [...audit.findings("AUD-2"), ...audit.findings("AUD-7")]
-        .filter((finding) =>
-          finding.verdict === "fail" || finding.verdict === "warn"
-        );
+      const weakened = [
+        ...checkThatRan(audit, "AUD-2"),
+        ...checkThatRan(audit, "AUD-7"),
+      ].filter((finding) =>
+        finding.verdict === "fail" || finding.verdict === "warn"
+      );
       expect(messagesOf(weakened)).toBe("");
     });
   });

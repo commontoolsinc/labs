@@ -36,6 +36,7 @@ import { CfHarnessPromptLoop } from "../../src/prompt-loop.ts";
 import {
   adversarialArtifactRoot,
   auditArtifacts,
+  checkThatRan,
   createLabeledFabric,
   directPromptSlotBinding,
   messagesOf,
@@ -297,7 +298,7 @@ describe("cfc property: delegation", () => {
       const episode = await runDelegationEpisode({ reachForWithheld: false });
 
       const audit = await auditArtifacts(episode.runDir);
-      const failing = audit.findings("AUD-5").filter((finding) =>
+      const failing = checkThatRan(audit, "AUD-5").filter((finding) =>
         finding.verdict === "fail"
       );
       expect(messagesOf(failing)).toBe("");

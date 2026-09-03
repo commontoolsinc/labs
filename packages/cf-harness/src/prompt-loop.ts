@@ -1922,20 +1922,34 @@ const deniedObservationPointers = (
   ];
 };
 
+/** What becomes of an observation the boundary did not clear. */
+type UnclearedObservationDisposition =
+  | "expose"
+  | "expose-with-warning"
+  | "deny";
+
 /**
- * What the model-facing path does with an observation whose trusted mediation
- * metadata is absent.
+ * What the model-facing path does with an observation the boundary did not
+ * clear, under `mode`.
+ *
+ * Three cases reach here and they share one answer: an output whose trusted
+ * mediation metadata is absent, and the `read_file` and `edit_file` status
+ * errors, whose text is a covert channel the boundary will not release. Each
+ * asks the same question — this observation has not been cleared, may the
+ * model see it? — so each takes the same answer rather than three ladders
+ * kept in step by hand.
  *
  * Derived from the published descriptor rather than from the mode, so the
- * behavior a run takes is the behavior its artifacts say it takes. A mode
- * reaches this only through `cfcAbsenceBehaviorForMode`, and every value that
- * function can return is answered here.
+ * behavior a run takes is the behavior its artifacts say it takes. That
+ * couples the status-error cases to the dial named for absence: a mode that
+ * became permissive about absent metadata would become permissive about
+ * unredacted status too. That is the intended reading — both are the boundary
+ * declining to clear an observation — and it is written down here because the
+ * dial's name does not say it.
  */
-type ObservationAbsenceDisposition = "expose" | "expose-with-warning" | "deny";
-
-const observationAbsenceDisposition = (
+const unclearedObservationDisposition = (
   mode: CfcEnforcementMode,
-): ObservationAbsenceDisposition => {
+): UnclearedObservationDisposition => {
   switch (cfcAbsenceBehaviorForMode(mode)) {
     case "not-required":
     case "permissive-if-absent":
@@ -4114,7 +4128,7 @@ export class CfHarnessPromptLoop {
       };
     }
     if (toolId === "read_file" && isReadFileStatusObservationError(output)) {
-      const disposition = observationAbsenceDisposition(mode);
+      const disposition = unclearedObservationDisposition(mode);
       if (disposition !== "deny") {
         if (disposition === "expose-with-warning") {
           await writePolicyEvent({
@@ -4153,7 +4167,7 @@ export class CfHarnessPromptLoop {
       };
     }
     if (toolId === "edit_file" && isStructuredFileToolErrorOutput(output)) {
-      const disposition = observationAbsenceDisposition(mode);
+      const disposition = unclearedObservationDisposition(mode);
       if (disposition !== "deny") {
         if (disposition === "expose-with-warning") {
           await writePolicyEvent({
@@ -4317,7 +4331,7 @@ export class CfHarnessPromptLoop {
     if (cfcResult === undefined) {
       const detail =
         `${toolId} output did not include trusted CFC mediation metadata`;
-      const disposition = observationAbsenceDisposition(mode);
+      const disposition = unclearedObservationDisposition(mode);
       if (disposition !== "deny") {
         if (disposition === "expose-with-warning") {
           await writePolicyEvent({

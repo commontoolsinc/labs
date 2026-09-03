@@ -177,6 +177,9 @@ describe("cfc property: egress of a labeled flow", () => {
       const episode = await runEpisode({ withSource: false });
 
       const audit = await auditArtifacts(episode.runDir);
+      // Without this the assertion below would hold on an audit that read
+      // nothing at all.
+      expect(audit.results.length).toBeGreaterThan(0);
       const failing = audit.results.filter((result) =>
         result.verdict === "fail"
       );

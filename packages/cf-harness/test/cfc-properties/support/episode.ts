@@ -424,6 +424,27 @@ export const auditArtifacts = async (
   };
 };
 
+/**
+ * The findings of one check, having established that the check ran at all.
+ *
+ * A property that filtered a check's findings for failures and asserted the
+ * list was empty would pass just as well on a check that never ran — a wrong
+ * run directory, a renamed id, a check dropped from the registry. Asking for
+ * the findings through here makes that a failure rather than a green run.
+ */
+export const checkThatRan = (
+  audit: AuditOfArtifacts,
+  checkId: string,
+): readonly CheckResult[] => {
+  const findings = audit.findings(checkId);
+  if (findings.length === 0) {
+    throw new Error(
+      `${checkId} reported nothing over these artifacts, so an assertion about its findings would hold vacuously`,
+    );
+  }
+  return findings;
+};
+
 /** Every message a check wrote, for quoting into an assertion failure. */
 export const messagesOf = (findings: readonly CheckResult[]): string =>
   findings.map((finding) =>

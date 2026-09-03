@@ -28,6 +28,7 @@ import { CfHarnessPromptLoop } from "../../src/prompt-loop.ts";
 
 import {
   auditArtifacts,
+  checkThatRan,
   InertSandboxRuntime,
   messagesOf,
   propertyArtifactRoot,
@@ -164,7 +165,7 @@ describe("cfc property: prompt authority", () => {
       );
 
       const audit = await auditArtifacts(episode.runDir);
-      const failing = audit.findings("AUD-4").filter((finding) =>
+      const failing = checkThatRan(audit, "AUD-4").filter((finding) =>
         finding.verdict === "fail"
       );
       expect(messagesOf(failing)).toBe("");
