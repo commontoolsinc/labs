@@ -1,4 +1,5 @@
 import { checkoutDocsCorpusRoots } from "../src/docs-corpus/corpus.ts";
+import { resolveHarnessSkillsRoot } from "../src/skills/root.ts";
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
@@ -268,6 +269,7 @@ Deno.test({
           source: "checkout-default",
           roots: checkoutDocsCorpusRoots(),
         },
+        skillsRoot: resolveHarnessSkillsRoot(),
         artifactRoot: runRoot,
         capabilitySnapshot: {
           type: "cf-harness.capability-snapshot",
@@ -1227,6 +1229,11 @@ Deno.test({
       });
       assertEquals(childState.runManifest?.source, "loom");
       assertEquals(childState.runManifest?.credentialOwner, credentialOwner);
+      // The child scans the tree its parent scanned, and records how that tree
+      // was arrived at rather than relabelling an inherited default as
+      // something an operator named.
+      assertEquals(childState.skillsRoot?.source, "checkout-default");
+      assertEquals(childState.skillsRoot, persistedState.skillsRoot);
       assertEquals(childState.status, "completed");
       assertEquals(childState.artifactRoot, childRunRoot);
       assertEquals(

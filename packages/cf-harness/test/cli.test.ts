@@ -4913,6 +4913,7 @@ Deno.test("formatCfHarnessCliResult names the skills tree and a docs channel tha
   // The model read an error and carried on; the operator has no other place
   // to learn the run's documentation channel was down.
   assertEquals(text.includes("docsQueryFailures: 3"), true);
+  assertEquals(text.includes("ended with no answer"), true);
 });
 
 Deno.test("formatCfHarnessCliResult summarizes cache usage and cost", () => {

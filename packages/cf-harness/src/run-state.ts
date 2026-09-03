@@ -180,8 +180,9 @@ export interface HarnessRunState {
   policyDecisions?: HarnessPolicyDecisionRecord[];
 
   /**
-   * How many `query_docs` calls in this run and its descendants could not
-   * reach the model that answers them. A run whose documentation channel is
+   * How many `query_docs` calls in this run and its descendants ended with no
+   * answer — the model that answers them was unreachable, or what came back
+   * was not a reply the tool could read. A run whose documentation channel is
    * down still answers every call, with an error the model reads and the
    * operator never sees, so the count is kept where a summary can state it.
    */

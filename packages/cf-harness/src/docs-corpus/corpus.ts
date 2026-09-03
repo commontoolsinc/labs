@@ -213,9 +213,8 @@ export const loadHarnessDocsCorpus = async (
  * The reference trees of the labs checkout the harness is running out of, or
  * an empty list when it is not running out of one.
  *
- * A console started with no documentation configuration is a console whose
- * children cannot find the documentation they need, which is the failure this
- * corpus exists to end.
+ * This is what keeps a console started with no documentation configuration
+ * from being one whose children cannot find the documentation they need.
  */
 export const checkoutDocsCorpusRootsFrom = (
   moduleUrl: string,

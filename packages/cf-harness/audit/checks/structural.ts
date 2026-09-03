@@ -585,8 +585,12 @@ const countsAgree = (
   // A run recorded before the `invalid` outcome existed declares no count for
   // it, and its decisions hold none: absent and zero are the same reading, so
   // reading absent as zero keeps such a run conclusive rather than failing it
-  // for a field it could not have written.
-  (declared.invalid ?? 0) === (computed.invalid ?? 0);
+  // for a field it could not have written. Absent means absent, though — a
+  // count that is present and not the number beside it is a disagreement,
+  // whatever it holds.
+  (declared.invalid === undefined
+    ? computed.invalid === 0
+    : declared.invalid === computed.invalid);
 
 const describeCounts = (counts: HarnessPolicyDecisionCounts): string =>
   `total ${counts.total}, allowed ${counts.allowed}, warned ${counts.warned}, denied ${counts.denied}, invalid ${

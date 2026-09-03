@@ -374,7 +374,7 @@ describe("seeded violations", () => {
     });
 
     it("counts denials rather than defects when one denial fails twice", () => {
-      const seededFamily = seeded((root) => {
+      const mutate = (root: RunEvidence): void => {
         const denied = reportOf(root).toolActivity.find((activity) =>
           activity.policyDecision === "denied"
         )!;
@@ -395,12 +395,17 @@ describe("seeded violations", () => {
             message.content = "refused";
           }
         }
-      });
-      const outcome = auditRunFamily(seededFamily, RUN_CHECKS).find((result) =>
-        result.checkId === "AUD-4" && result.runId === FIXTURE_RUN_ID
-      )!;
+      };
+      // The whole map, as every case in this file asserts it: a mutation that
+      // also turned a neighbor's verdict would say nothing about AUD-4.
+      turnsOnly("AUD-4", "fail", mutate);
 
-      expect(outcome.verdict).toBe("fail");
+      // Then the message itself, which is what this case is really about: the
+      // numerator counts denials, so it cannot exceed the denominator even
+      // though this one denial failed the check twice over.
+      const outcome = auditRunFamily(seeded(mutate), RUN_CHECKS).find((
+        result,
+      ) => result.checkId === "AUD-4" && result.runId === FIXTURE_RUN_ID)!;
       expect(outcome.message).toContain("1 of 1 denial");
       expect(outcome.evidence?.length).toBe(2);
     });

@@ -19,6 +19,7 @@ import type {
 import type { HarnessBrowserAccessLease } from "./contracts/browser-access.ts";
 import type { HarnessDocsCorpusRecord } from "./contracts/docs-corpus.ts";
 import { resolveHarnessDocsCorpus } from "./docs-corpus/corpus.ts";
+import { resolveHarnessSkillsRoot } from "./skills/root.ts";
 import type { DockerRunscSandboxConfig } from "./sandbox/types.ts";
 
 export const DEFAULT_GATEWAY_BASE_URL = "https://llm.stage.commontools.dev/";
@@ -438,14 +439,14 @@ export const resolveHarnessConfig = (
   // is the checkout the harness runs out of, resolved here so that every
   // surface — the CLI, the console, a child engine — reaches the same answer.
   const docsCorpus = resolveHarnessDocsCorpus(options.docsCorpus);
-  // A caller that resolved the tree itself says where it came from; one that
-  // only names a path said so by naming it.
+  // The same reading for the skills tree, and for the same reason. Resolved
+  // here rather than at each surface so an engine a caller constructs directly
+  // — a delegated child's among them — reaches the answer the CLI and the
+  // console reach. A caller that already resolved the tree hands the record
+  // over, which is how a child keeps its parent's provenance instead of
+  // relabelling an inherited default as something the operator configured.
   const skillsRootRecord = options.skillsRootRecord ??
-    (options.skillsRoot === undefined ? undefined : {
-      type: "cf-harness.skills-root-record" as const,
-      source: "configured" as const,
-      hostPath: options.skillsRoot,
-    });
+    resolveHarnessSkillsRoot(options.skillsRoot);
   const common: HarnessCommonConfig = {
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
     ...(options.model !== undefined ? { model: options.model } : {}),

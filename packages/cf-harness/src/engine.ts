@@ -1037,8 +1037,8 @@ export class CfHarnessEngine {
   /**
    * Counts documentation queries this run could not get an answer for, its
    * descendants' included. A `query_docs` failure is a normal tool error to
-   * the model that asked, so without this the operator's own summary is the
-   * one place a docs-blind run leaves no trace.
+   * the model that asked, so without this a docs-blind run leaves no trace in
+   * the one place an operator reads.
    */
   recordDocsQueryFailures(count: number): HarnessRunState {
     this.#runState = addHarnessDocsQueryFailures(

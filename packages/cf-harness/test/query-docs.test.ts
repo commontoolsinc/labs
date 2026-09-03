@@ -488,6 +488,88 @@ describe("query-docs", () => {
       expect(result.runState.docsQueryFailures).toBe(1);
     });
 
+    it("counts a failed child's documentation queries on the parent, however the delegation ended", async () => {
+      let childTurns = 0;
+      const modelClient: HarnessModelClient = {
+        providerId: "test-provider",
+        complete: (request) => {
+          if (request.tools.length === 0) {
+            // The explore turn, which this provider will not serve.
+            return Promise.reject(new Error("request failed (400)"));
+          }
+          const child = request.runId.includes(".subagent.");
+          if (!child) {
+            return Promise.resolve(
+              request.transcript.some((message) => message.role === "tool")
+                ? {
+                  assistant: { role: "assistant" as const, content: "Done." },
+                }
+                : {
+                  assistant: {
+                    role: "assistant" as const,
+                    content: "",
+                    toolCalls: [{
+                      id: "call-delegate-docs-down",
+                      type: "function" as const,
+                      function: {
+                        name: "delegate_task",
+                        arguments: JSON.stringify({
+                          goal: "Look up glazing.",
+                          profile: "pattern-author",
+                        }),
+                      },
+                    }],
+                  },
+                },
+            );
+          }
+          childTurns += 1;
+          if (childTurns === 1) {
+            return Promise.resolve({
+              assistant: {
+                role: "assistant" as const,
+                content: "",
+                toolCalls: [{
+                  id: "call-child-query-docs",
+                  type: "function" as const,
+                  function: {
+                    name: "query_docs",
+                    arguments: JSON.stringify({ question: "glazing" }),
+                  },
+                }],
+              },
+            });
+          }
+          // The child asked, got nothing, and then died. Its count has to
+          // reach the parent from the failure path or it reaches nobody.
+          return Promise.reject(new Error("the child's transport failed"));
+        },
+      };
+      const loop = new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId: `query-docs-child-down-${crypto.randomUUID()}`,
+          model: "test-model",
+          cfcEnforcementMode: "disabled",
+          docsCorpus: {
+            type: "cf-harness.docs-corpus-record",
+            source: "configured",
+            roots: [root],
+          },
+        }),
+        modelClient,
+        allowedToolIds: ["delegate_task", "query_docs"],
+        allowedSubagentProfiles: ["pattern-author"],
+      });
+
+      const result = await loop.runPrompt({ prompt: "Delegate a lookup." });
+
+      // The delegation failed, so the success path never ran; the count still
+      // reaches the parent, and exactly once.
+      expect(result.runState.subagentRuns?.at(-1)).toBeDefined();
+      expect(result.runState.docsQueryFailures).toBe(1);
+    });
+
     it("refuses when the run configures no corpus root", async () => {
       const engine = createEngine({ corpus: false });
 

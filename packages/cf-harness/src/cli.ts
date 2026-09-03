@@ -2643,7 +2643,7 @@ export const formatCfHarnessCliResult = (
   const docsQueryFailures = result.runState.docsQueryFailures ?? 0;
   if (docsQueryFailures > 0) {
     lines.push(
-      `docsQueryFailures: ${docsQueryFailures} — query_docs calls in this run or its children reached no model, so what they asked went unanswered`,
+      `docsQueryFailures: ${docsQueryFailures} — query_docs calls in this run or its children that ended with no answer`,
     );
   }
   if (

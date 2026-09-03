@@ -1,4 +1,5 @@
 import { checkoutDocsCorpusRoots } from "../src/docs-corpus/corpus.ts";
+import { resolveHarnessSkillsRoot } from "../src/skills/root.ts";
 import { assertEquals, assertThrows } from "@std/assert";
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
@@ -262,7 +263,12 @@ Deno.test("resolveHarnessConfig preserves legacy gateway fields for openai-codex
       source: "checkout-default",
       roots: checkoutDocsCorpusRoots(),
     },
+    // The skills tree resolves the same way and in the same place, so a
+    // caller that names neither gets both from the checkout it runs out of.
+    skillsRoot: resolveHarnessSkillsRoot()?.hostPath,
+    skillsRootRecord: resolveHarnessSkillsRoot(),
   });
+  assertEquals(config.skillsRootRecord?.source, "checkout-default");
   assertThrows(
     () =>
       resolveHarnessConfig({

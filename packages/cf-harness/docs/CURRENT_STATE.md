@@ -72,7 +72,10 @@ The current package provides:
   no boundary policy evaluation, so it sits outside the posture's caveat policy:
   the corpus is trusted for confidentiality, which is what makes a sink with no
   ceiling the right shape for it and also the whole of what holds it — the
-  endorsement is an integrity claim and gates nothing on the way out;
+  endorsement is an integrity claim and gates nothing on the way out. Which
+  cheap model answers is resolved from the run's transport, since a transport
+  serves only its own models, and a call that ended with no answer is counted on
+  the run, its children's included, and printed in the operator summary;
 - schema-validated, sanitized child returns with raw child evidence retained
   outside the ordinary parent return channel;
 - image inputs and structured top-level batch results;

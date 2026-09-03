@@ -6,6 +6,7 @@ import {
   assertThrows,
 } from "@std/assert";
 import { decodeBase64 } from "@std/encoding/base64";
+import { parentToolIdsForBacking } from "../src/contracts/tool-descriptor.ts";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
 
@@ -2078,27 +2079,49 @@ Deno.test("CfHarnessPromptLoop drops run_pattern from an explicit allowlist when
   );
 });
 
-Deno.test("CfHarnessPromptLoop withholds the skill tools from an explicit allowlist when no skills root is configured", async () => {
+Deno.test("CfHarnessPromptLoop withholds the skill tools from an explicit allowlist when the run has no skill registry", () => {
+  // The tool surface a backing decides, read where the decision is made. A run
+  // with no registry cannot be built out of a checkout any more — the default
+  // sees to that — so the withholding branch is asserted on the function that
+  // owns it rather than on an engine that can no longer reach it.
+  assertEquals(
+    parentToolIdsForBacking({
+      fabricSessionAvailable: false,
+      patternIndexAvailable: false,
+      skillsShSearchAvailable: false,
+      skillsShAcquisitionAvailable: false,
+      skillRegistryAvailable: false,
+      docsCorpusAvailable: false,
+    }).filter((toolId) =>
+      toolId === "read_skill_resource" || toolId === "run_skill_script"
+    ),
+    [],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop offers the skill tools out of the checkout's own skills tree", async () => {
   const fetchCalls: RequestInit[] = [];
+  const engine = new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runId: "run-skill-tools-checkout-default",
+    model: "gpt-5.4",
+  });
   const loop = new CfHarnessPromptLoop({
     apiKey: "test-key",
     allowedToolIds: ["read_file", "read_skill_resource", "run_skill_script"],
-    engine: new CfHarnessEngine({
-      sandboxRuntime: new FakeSandboxRuntime(),
-      runId: "run-skill-tools-no-root",
-      model: "gpt-5.4",
-    }),
+    engine,
     fetchFn: noToolCallFetch(fetchCalls),
   });
 
   await loop.runPrompt({ prompt: "Say hi." });
 
+  assertEquals(engine.config.skillsRootRecord?.source, "checkout-default");
   const request = JSON.parse(String(fetchCalls[0]?.body)) as {
     tools: Array<{ function: { name: string } }>;
   };
   assertEquals(
     chatViewOfRequest(request).tools.map((name) => name),
-    ["read_file"],
+    ["read_file", "read_skill_resource", "run_skill_script"],
   );
 });
 

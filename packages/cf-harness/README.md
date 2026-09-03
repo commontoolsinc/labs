@@ -1176,7 +1176,8 @@ Which cheap model answers is the run's transport's to say — a transport serves
 only its own models, and a name it does not serve is a refused request rather
 than a fallback — so the gateway answers on `gemini-3.5-flash` and the Codex
 Responses transport on `gpt-5.6-luna`. The model that answered is on the
-artifact, in `exploreRecord.model`. A call that reached no model at all is
+artifact, in `exploreRecord.model`. A call that ended with no answer — the
+provider refused it, or what came back was not a reply the tool could read — is
 counted on the run, its children's included, and printed in operator output as a
 `docsQueryFailures:` line: the model reads an ordinary tool error and carries
 on, so without that count a documentation-blind run leaves no trace an operator
