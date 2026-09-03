@@ -2310,6 +2310,53 @@ go red — and where the answer should be "the thing it is named after", to prov
 it by breaking that thing once. Two of the three were found that way; the third
 was found in review, by someone asking the question the author had not.
 
+### Three things a check rests on, and each needs its own pin
+
+A check is an expression of a rule about evidence, and three separate things
+have to keep holding for it to go on meaning what it meant: **the words** of the
+rule it enforces, **the location** the evidence it reads lives at, and **the
+shape** of what it finds there. They move independently — a spec is reworded by
+one team, a channel is relocated by another, a field's meaning changes under a
+third — so a guard on one says nothing whatever about the other two. Each needs
+pinning separately, and a check with only one of the three pinned is guarded
+against one third of the ways it can quietly stop being true.
+
+The failure mode is the same in all three cases and is the reason to care: the
+check does not start failing. It goes on passing, against a document that no
+longer says what it quotes, or a place nothing writes to any more, or a field
+that no longer carries what it carried. A check that has silently stopped
+testing anything is worse than an absent one, because the report it appears in
+reads as coverage.
+
+1. **The words — pinned.** Every citation carries the clause's text copied
+   verbatim, and `audit/test/citation-drift.test.ts` reads each cited document
+   back and requires the quote to still be in it. A rewording breaks the suite,
+   which is the notice that the check resting on it needs rewriting too.
+
+2. **The location — not pinned here.** A check names where it reads, and AUD-16
+   is the sharp case: it counts release refusals in `policy-trace.json` at
+   `decisions[].release`, and that pointer appears in its findings. Nothing in
+   this package fails if that channel moves. It is not a hypothetical — CT-2200
+   relocated exactly this channel — and a check reading a relocated channel
+   finds nothing there and reports nothing wrong, which is indistinguishable
+   from a corpus that had nothing to report. The guard is a property test that
+   pins the pointer, so a channel move breaks the property rather than passing
+   quietly; it arrives with the deterministic property suite, and until then
+   nothing here notices.
+
+3. **The shape — not pinned anywhere.** A field can keep its name and its place
+   and change what it carries, and no check would notice. AUD-16's own reading
+   turns on `release` being written only by a boundary that consulted a label,
+   and AUD-20's turns on the same fact; neither would fail if something else
+   started writing that field, and both would go on reporting confidently about
+   a distinction that had stopped existing. Nothing pins the meaning of any
+   field the audit depends on.
+
+The third is stated here as a gap rather than described as covered, and
+deliberately: an honest gap in a document is worth more than a rule nobody
+implemented, and a reader deciding how much weight a green audit carries needs
+to know which of the three pins is holding it up.
+
 ## Testing
 
 Unit/package tests:
