@@ -164,7 +164,7 @@ export class JsonDecodeAct extends BaseDecodeAct<JsonCodecValue, string> {
             CODEC_META_TAGS.hole,
             count,
             `hole: expected a positive integer count, got ${
-              backtickQuote(toCompactDebugString(count, 30))
+              backtickQuote(toCompactDebugString(count, { maxLength: 30 }))
             }`,
           );
         }

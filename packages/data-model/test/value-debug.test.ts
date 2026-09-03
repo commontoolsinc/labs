@@ -19,6 +19,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import type { CompactDebugStringOptions, DebugValueOptions } from "@/api.ts";
 import {
   toCompactDebugString,
   toDebugKindString,
@@ -65,7 +66,7 @@ describe("value-debug", () => {
         it("renders the full text when `maxLength` fits the whole thing", () => {
           const item = ["xy", NaN];
           const expected = '["xy",NaN]'; // Note: Length 10.
-          expect(toCompactDebugString(item, len)).toBe(expected);
+          expect(toCompactDebugString(item, { maxLength: len })).toBe(expected);
         });
 
         it("truncates to `maxLength` when it is smaller than the whole rendered length", () => {
@@ -74,10 +75,43 @@ describe("value-debug", () => {
           const whole = toCompactDebugString(item);
           const expected = whole.slice(0, len - 3) + "...";
           expect(whole.length).toBeGreaterThan(len);
-          expect(toCompactDebugString(item, len)).toBe(expected);
-          expect(toCompactDebugString(item, len).length).toBe(len);
+          expect(toCompactDebugString(item, { maxLength: len })).toBe(expected);
+          expect(toCompactDebugString(item, { maxLength: len }).length).toBe(
+            len,
+          );
         });
       }
+    });
+
+    describe("with `maxDepth`", () => {
+      it("renders to the given depth rather than to the default", () => {
+        const value = { a: { b: { c: 1 } } };
+        expect(toCompactDebugString(value, { maxDepth: 2 })).toBe("{a:...}");
+        expect(toCompactDebugString(value, { maxDepth: 3 })).toBe(
+          "{a:{b:...}}",
+        );
+      });
+
+      it("throws given a `maxDepth` that is not a positive integer", () => {
+        expect(() => toCompactDebugString({}, { maxDepth: 0 }))
+          .toThrow("`maxDepth` must be a positive integer or `undefined`");
+      });
+    });
+
+    describe("with a `replacer`", () => {
+      it("renders the replacement in place of the original value", () => {
+        const options: CompactDebugStringOptions = {
+          replacer: (value) => (value === 1 ? "one" : value),
+        };
+        expect(toCompactDebugString({ a: 1, b: 2 }, options))
+          .toBe('{a:"one",b:2}');
+      });
+    });
+
+    it("throws given `options` that are not a plain object", () => {
+      expect(() =>
+        toCompactDebugString({}, 20 as unknown as CompactDebugStringOptions)
+      ).toThrow("`options` must be a plain object or `undefined`; got `20`");
     });
   });
 
@@ -101,6 +135,25 @@ describe("value-debug", () => {
       for (const value of values) {
         expect(toIndentedDebugString(value)).toBe(toCompactDebugString(value));
       }
+    });
+
+    it("renders to the given depth rather than to the default", () => {
+      const value = { a: { b: 1 } };
+      expect(toIndentedDebugString(value, { maxDepth: 2 }))
+        .toBe("{\n  a: ...\n}");
+    });
+
+    it("renders the replacement in place of the original value", () => {
+      const options: DebugValueOptions = {
+        replacer: (value) => (value === 1 ? "one" : value),
+      };
+      expect(toIndentedDebugString({ a: 1 }, options)).toBe('{\n  a: "one"\n}');
+    });
+
+    it("throws given `options` that are not a plain object", () => {
+      expect(() =>
+        toIndentedDebugString({}, null as unknown as DebugValueOptions)
+      ).toThrow("`options` must be a plain object or `undefined`; got `null`");
     });
   });
 

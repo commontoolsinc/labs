@@ -4,6 +4,7 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
+import type { CompactDebugStringOptions, DebugValueOptions } from "./api.ts";
 import {
   FabricInstance,
   type FabricPlainObject,
@@ -24,10 +25,13 @@ import { NULL_LIVE_ENVIRONMENT } from "@/codec-interface/NullLiveEnvironment.ts"
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 
 /**
- * Nesting depth a debug string renders to. TODO(danfuzz): Make this
- * adjustable by the caller, once there is a caller that wants to.
+ * Nesting depth a conversion stops at whatever its options say, so that
+ * converting cannot blow out the stack.
  */
-const DEBUG_STRING_MAX_DEPTH = 10;
+const ABSOLUTE_MAX_DEPTH = 100;
+
+/** Nesting depth a debug string renders to, when its options do not say. */
+const DEFAULT_STRING_MAX_DEPTH = 10;
 
 /**
  * What a `FabricPrimitive`'s codec hands back to be rendered: the
@@ -317,13 +321,16 @@ class DebugConverter {
  * are what records them.
  */
 class DebugStringifier {
+  readonly #options: DebugValueOptions;
   readonly #indent: string | undefined;
 
   /**
    * Constructs an instance which renders using `indent` spaces per nesting
-   * level when given, and on a single line when not.
+   * level when given, and on a single line when not. A value which turns up
+   * unconverted while rendering is converted with `options`.
    */
-  constructor(indent?: number) {
+  constructor(options: DebugValueOptions, indent?: number) {
+    this.#options = options;
     this.#indent = (indent === undefined) ? undefined : " ".repeat(indent);
   }
 
@@ -453,7 +460,7 @@ class DebugStringifier {
       return this.#renderContainer("{", "}", parts, indent);
     } else {
       return this.#renderSubvalue(
-        toStructuredDebugValue(value, DEBUG_STRING_MAX_DEPTH),
+        toStructuredDebugValue(value, this.#options),
         indent,
       );
     }
@@ -715,13 +722,68 @@ class DebugStringifier {
 }
 
 /**
- * Renders the debug-string form of the given value with optional indentation,
- * by converting it with `toStructuredDebugValue()` and rendering the result.
+ * Helper for the entry points, which validates `options` and returns the
+ * maximum nesting depth they call for: their `maxDepth` when present, and
+ * `defaultMaxDepth` when not, either one capped at `ABSOLUTE_MAX_DEPTH`.
+ *
+ * @throws {Error} if `options` is not a plain object, or if its `maxDepth` is
+ * not a positive integer.
  */
-function renderDebugString(value: unknown, indent?: number): string {
+function checkedMaxDepth(
+  options: DebugValueOptions | undefined,
+  defaultMaxDepth: number,
+): number {
+  if ((options !== undefined) && !isPlainObject(options)) {
+    const badOptions = backtickQuote(
+      toCompactDebugString(options, { maxLength: 20 }),
+    );
+    throw new Error(
+      `\`options\` must be a plain object or \`undefined\`; got ${badOptions}`,
+    );
+  }
+
+  const maxDepth = options?.maxDepth;
+
+  switch (typeof maxDepth) {
+    case "number": {
+      if (Number.isSafeInteger(maxDepth) && (maxDepth > 0)) {
+        return Math.min(maxDepth, ABSOLUTE_MAX_DEPTH);
+      }
+      break;
+    }
+    case "undefined": {
+      return Math.min(defaultMaxDepth, ABSOLUTE_MAX_DEPTH);
+    }
+  }
+
+  const badDepth = backtickQuote(
+    toCompactDebugString(maxDepth, { maxLength: 20 }),
+  );
+  throw new Error(
+    `\`maxDepth\` must be a positive integer or \`undefined\`; got ${badDepth}`,
+  );
+}
+
+/**
+ * Renders the debug-string form of the given value with optional indentation,
+ * by converting it with `toStructuredDebugValue()` per `options` and rendering
+ * the result. A depth the options leave unsaid is `DEFAULT_STRING_MAX_DEPTH`.
+ *
+ * @throws {Error} if given invalid `options`.
+ */
+function renderDebugString(
+  value: unknown,
+  options: DebugValueOptions | undefined,
+  indent?: number,
+): string {
+  const converterOptions: DebugValueOptions = {
+    ...options,
+    maxDepth: checkedMaxDepth(options, DEFAULT_STRING_MAX_DEPTH),
+  };
+
   try {
-    const converted = toStructuredDebugValue(value, DEBUG_STRING_MAX_DEPTH);
-    return new DebugStringifier(indent).render(converted);
+    const converted = toStructuredDebugValue(value, converterOptions);
+    return new DebugStringifier(converterOptions, indent).render(converted);
     // deno-coverage-ignore-start
   } catch {
     // Neither the conversion nor the rendering is meant to throw. This `catch`
@@ -734,12 +796,13 @@ function renderDebugString(value: unknown, indent?: number): string {
 
 /**
  * Produces a compact string representation of a value, optionally truncating to
- * a specified maximum length. When truncating is requested and turns out to be
- * necessary, the returned result will be the indicated length, which includes
- * an "ASCII ellipsis" of `...`.
+ * the maximum length given in `options`. When truncating is requested and turns
+ * out to be necessary, the returned result will be the indicated length, which
+ * includes an "ASCII ellipsis" of `...`.
  *
- * The value is first converted with `toStructuredDebugValue()`, and it is that
- * result which gets rendered. This function handles:
+ * The value is first converted with `toStructuredDebugValue()`, passing along
+ * the depth limit and replacer given in `options`, and it is that result which
+ * gets rendered. This function handles:
  * * all normal JSON-compatible values.
  * * other JavaScript primitive values:
  *   * bigints.
@@ -752,8 +815,8 @@ function renderDebugString(value: unknown, indent?: number): string {
  * * objects and arrays with circular references.
  * * arrays with holes.
  *
- * The rendering stops at a fixed nesting depth, below which a value is
- * elided.
+ * The rendering stops at the nesting depth given in `options`, ten levels
+ * when not given, below which a value is elided.
  *
  * How any of these renders is _not_ a contract. The rendering is meant for a
  * human reading a diagnostic, and it changes as that reading is improved;
@@ -765,12 +828,15 @@ function renderDebugString(value: unknown, indent?: number): string {
  * **Note:** In _many_ cases, the output of this function is valid JSON text,
  * but not _all_ cases. This function must _not_ be relied on to produce a
  * parseable string.
+ *
+ * @throws {Error} if given invalid `options`.
  */
 export function toCompactDebugString(
   value: unknown,
-  maxLength?: number,
+  options?: CompactDebugStringOptions,
 ): string {
-  const result = renderDebugString(value);
+  const result = renderDebugString(value, options);
+  const maxLength = options?.maxLength;
 
   if (typeof maxLength === "number") {
     const actualMax = Math.max(Math.floor(maxLength), 3);
@@ -784,11 +850,16 @@ export function toCompactDebugString(
 
 /**
  * Like `toCompactDebugString()`, except that the result is indented by two
- * spaces per nesting level, and is never truncated for length. The depth
- * limit applies to both.
+ * spaces per nesting level, and is never truncated for length, there being no
+ * length to give. The depth limit and replacer apply to both.
+ *
+ * @throws {Error} if given invalid `options`.
  */
-export function toIndentedDebugString(value: unknown): string {
-  return renderDebugString(value, 2);
+export function toIndentedDebugString(
+  value: unknown,
+  options?: DebugValueOptions,
+): string {
+  return renderDebugString(value, options, 2);
 }
 
 /**
@@ -831,56 +902,25 @@ export function toDebugKindString(value: unknown): string {
  * `codec-json` encoding form, and with as little chance for ambiguity as can
  * be reasonably achieved.
  *
- * If a `maxDepth` is supplied as a positive integer, that is the nesting limit
- * of the result. Any items which would require further nesting are instead
- * converted into a form suggestive of the elided information.
- *
- * If a `replacer` is supplied, it is called on every value and sub-value
- * encountered, to get a replacement value to use. If the `replacer` does not
- * want to replace the value, then it should return the value it receives.
+ * The nesting limit of the result and a replacer to consult are the
+ * `maxDepth` and `replacer` of `options`. When there is no limit given, the
+ * result nests as deep as reasonably possible.
  *
  * If the conversion could not be completed (stack overflow, object
  * `toJSON()` conversion error, etc.), this function returns the literal value
  * `{ "/unconvertible": "<errorMessage>" }`.
  *
- * @throws {Error} if given an invalid value for `maxDepth`.
+ * @throws {Error} if given invalid `options`.
  */
 export function toStructuredDebugValue(
   /** Value to convert. */
   value: any,
-  /**
-   * Maximum depth of result nesting. Must be a positive integer or `undefined`
-   * if specified. `undefined` and large integers are taken to mean "as high as
-   * reasonably possible." There is no guarantee about the _actual_ possible
-   * maximum depth.
-   */
-  maxDepth?: number | undefined,
-  /** Replacer function, if desired. */
-  replacer?: (value: any) => any,
+  /** Conversion options, if desired. */
+  options?: DebugValueOptions,
 ): FabricValue {
-  const ACTUAL_MAX = 100; // To prevent blowing out the stack when converting.
-
-  // Validate `maxDepth` and transform as necessary.
-  maxDepth = (() => {
-    switch (typeof maxDepth) {
-      case "number": {
-        if (Number.isSafeInteger(maxDepth) && (maxDepth > 0)) {
-          return Math.min(maxDepth, ACTUAL_MAX);
-        }
-        break;
-      }
-      case "undefined": {
-        return ACTUAL_MAX;
-      }
-    }
-
-    const badDepth = backtickQuote(toCompactDebugString(maxDepth, 20));
-    throw new Error(
-      `\`maxDepth\` must be a positive integer or \`undefined\`; got ${badDepth}`,
-    );
-  })();
+  const maxDepth = checkedMaxDepth(options, ABSOLUTE_MAX_DEPTH);
 
   // We subtract one from `maxDepth` because the "suggestive forms" for elided
   // data all use one layer of depth.
-  return new DebugConverter(value, maxDepth - 1, replacer).convert();
+  return new DebugConverter(value, maxDepth - 1, options?.replacer).convert();
 }

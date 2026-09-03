@@ -140,7 +140,7 @@ export abstract class BaseEncodeAct<Encoded, SerializedForm = Encoded>
       const label = (typeName === "object") ? "instance" : typeName;
       throw new Error(
         `Cannot encode ${label} ${
-          backtickQuote(toCompactDebugString(value, 50))
+          backtickQuote(toCompactDebugString(value, { maxLength: 50 }))
         }: no applicable codec.`,
       );
     }

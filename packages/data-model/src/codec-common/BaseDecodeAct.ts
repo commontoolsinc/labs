@@ -111,7 +111,7 @@ export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
     if (!this.enter(value)) {
       return this.reportMalformed(
         "",
-        toCompactDebugString(value, 50),
+        toCompactDebugString(value, { maxLength: 50 }),
         "circular reference in decoded data",
       );
     }
@@ -238,7 +238,7 @@ export abstract class BaseDecodeAct<Encoded, SerializedForm = Encoded>
         tag,
         this.decodeValue(rawState),
         `tagged value has a malformed tag: ${
-          backtickQuote(toCompactDebugString(tag, 30))
+          backtickQuote(toCompactDebugString(tag, { maxLength: 30 }))
         }`,
       );
     }

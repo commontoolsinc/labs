@@ -10024,7 +10024,7 @@ function describeHandlerStreamFailure(
 
   if (eventTarget.link === undefined) {
     return `${prefix} is not a stream reference (got: ${
-      toCompactDebugString(eventTarget.value, 80)
+      toCompactDebugString(eventTarget.value, { maxLength: 80 })
     })`;
   }
 
@@ -10055,7 +10055,7 @@ function describeHandlerStreamFailure(
 
   return `${prefix} resolves to ${where}, whose value is not a stream ` +
     `marker — { "$stream": true } was overwritten (found: ${
-      toCompactDebugString(eventTarget.value, 80)
+      toCompactDebugString(eventTarget.value, { maxLength: 80 })
     })`;
 }
 

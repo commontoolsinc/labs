@@ -31,6 +31,8 @@ export {
   type NonNullableFabricValue,
 } from "./interface.ts";
 
+export type { CompactDebugStringOptions, DebugValueOptions } from "./api.ts";
+
 export {
   cloneForMutation,
   CloneForMutationError,
