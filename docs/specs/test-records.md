@@ -217,8 +217,8 @@ produced an artifact inside that artifact. Its context and object name use
 that value on every relay invocation. Late-shipped objects then land in
 the partition where their report was produced, not where it was uploaded.
 A trailing window can make late arrivals likely to be found, but cannot
-make discovery exact; an exact incremental reader needs the arrival index
-described below. The whole dataset is readable by `allUsers`. Writers hold
+make discovery exact; what listing does and does not settle is described
+below. The whole dataset is readable by `allUsers`. Writers hold
 `roles/storage.objectCreator` pinned to their own folder, which cannot
 read, list, overwrite, or delete; nothing already stored can be modified
 by any append credential. An incompatible schema writes under `v2/` and
@@ -277,63 +277,35 @@ exists, not that the shards are one atomic snapshot or that no more objects
 can arrive for that source and date. A reader that finds no manifest reads
 the raw area for that source and date.
 
-The version-one rollup manifest records neither the source object names it
-contains nor an arrival position through which it is complete. An exact
-reader cannot combine one with raw objects from the same source and date:
-it cannot tell whether a raw object is a later arrival or is already in a
-shard. Folding it may count it twice, while suppressing it may lose it. The
-current bootstrap uses a version-one rollup as a one-time baseline and
-closes that date to later raw arrivals. The common publisher path described
-in the test-selection plan requires the next rollup format instead. Its
-receipt is scoped by source as well as by date; a CI receipt cannot
-suppress local submissions.
+The rollup manifest records neither the source object names it contains
+nor a point through which it is complete. A reader cannot combine one with
+raw objects from the same source and date: it cannot tell whether a raw
+object is a later arrival or is already in a shard. Folding it may count it
+twice, while suppressing it may lose it. A reader that folds a rollup
+therefore closes that source and date to later raw arrivals and records a
+receipt saying so. The receipt is scoped by source as well as by date, so a
+receipt for the continuous-integration area cannot suppress that day's
+local submissions.
 
-An aggregate seeded from a version-one rollup cannot migrate in place to
-the arrival index. Its receipt cannot distinguish journal entries already
-represented in its shards from later arrivals. A reader rebuilds such an
-aggregate from raw objects or from the next rollup format and its later
-journal entries. The previous published result stays current until that
-replacement succeeds.
+Discovery is by listing. A reader names the source-and-date partitions of
+the window it reads, lists each one, and folds the objects it has not
+folded already, identified by object name. That costs what the window holds
+rather than what arrived in it. A reader sees every object that arrives for
+a partition while that partition is still inside its window; an object
+arriving after that is not found until something reads a wider one.
 
-The planned arrival index is an ordered record of storage arrivals and
-identifies the created object and its generation. A consumer of Cloud
-Storage object-finalize notifications appends them to a durable journal;
-the uploader does not make a second, non-atomic marker write. Journal
-positions are assigned when an entry commits. Assignment and deduplication
-by object and generation are atomic, as is the uniqueness check on the
-logical submission: repository, workflow run, attempt, and artifact for
-CI; repository and report id for local records. The notification is
-acknowledged only after that commit. A delayed notification therefore
-receives a position after the journal entries already present rather than
-being inserted behind a reader's cursor. A reader advances only through
-contiguous committed positions and persists that cursor with the aggregate
-the entries produced.
+Two limits follow, and both are accepted rather than closed. An object
+arriving for a source and date already folded from its rollup is never
+counted, which needs the relay to write a partition older than the
+compaction lag. And a re-run crossing a UTC midnight ships its earlier
+attempt's artifacts under the later attempt's date, so the same records
+reach two objects and a reader keying on object name folds both. The relay
+contract above is what settles the second.
 
-Only canonical raw objects under `submissions/ci/` and
-`submissions/local/` enter the journal. Rollup shards and manifests,
-test-selection outputs, and the journal's own storage are not inputs. The
-same allowlist governs notification ingestion and the historical backfill,
-so a derived object cannot feed itself back into aggregation.
-
-Before the journal's genesis receipt is published, the backfill groups
-existing CI objects by logical submission. Cross-date objects produced by
-the mutable retry timestamp are one submission, not two arrivals. The
-first-created valid object is retained, later copies are recorded as
-excluded, and a disagreement in their artifact-derived records or stable
-context is reported rather than silently choosing one. The repaired relay
-prevents new copies; the backfill prevents old ones from becoming two
-observations in every rebuilt aggregate.
-
-The compactor builds the next rollup format from journal entries through a
-recorded position. Before it publishes the manifest, it accounts exactly
-once for every eligible entry at or before that position for the manifest's
-source and date. A failed read or incomplete shard leaves the manifest
-absent. An exact reader can then start from the rollup and consume every
-later journal entry, in both a cold start and an ordinary update. Listing a
-trailing window remains a recovery audit rather than the authority for
-finding new objects. Recording the exact source object names in the rollup
-can prove which raw objects overlap it, but does not discover a later
-object without an arrival index or another listing of that partition.
+Recording the exact source object names in a rollup would let a reader
+prove which raw objects overlap it and stop closing the date, at the cost
+of carrying a day of object names in the manifest. That is the change to
+make if a closed partition is ever shown to have lost something.
 
 ## CI movement
 

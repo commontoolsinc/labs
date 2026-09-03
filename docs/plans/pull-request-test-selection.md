@@ -1149,8 +1149,9 @@ nothing downstream of the store has to know this happened.
 
 **Compaction is live now, and was not when this was written.** The
 compactor's identity was provisioned on 2026-08-31 and its daily workflow
-has rolled up 2026-08-19 through 2026-08-26, which is every day closed
-long enough for it to touch. Compaction collapses a day of raw records
+has rolled up 2026-08-19 through 2026-08-26. The floor is where the store's
+records begin and the ceiling is the seven-day lag, so that range is every
+day it can touch. Compaction collapses a day of raw records
 into a manifest and a few tens of shards, which is the difference between
 reading 15,000 objects for a historical day and reading a manifest and
 seventeen shards. A day is a manifest and shards rather than a single object: a
