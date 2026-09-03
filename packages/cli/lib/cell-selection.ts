@@ -37,6 +37,7 @@ import {
   schemaIsObjectShaped,
 } from "./declared-fields.ts";
 import { nearestName } from "./refusal.ts";
+import { timeCliPhase } from "./trace-timing.ts";
 
 type PredicateComparisonOperator = "==" | "!=" | "<" | "<=" | ">" | ">=";
 
@@ -80,21 +81,11 @@ const LINK_MARKER_KEY = "$link";
  */
 const CONCISE_ADDRESS_SUFFIX = "@";
 
-const CLI_TRACE_TIMINGS = Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
-
-async function timeSelectionPhase<T>(
+/** A selection phase in the command's trace, under its own prefix. */
+const timeSelectionPhase = <T>(
   label: string,
   run: () => T | Promise<T>,
-): Promise<T> {
-  if (!CLI_TRACE_TIMINGS) return await run();
-  const start = performance.now();
-  try {
-    return await run();
-  } finally {
-    const elapsed = Math.round(performance.now() - start);
-    console.error(`[cf-phase] ${elapsed}ms :: cellSelection.${label}`);
-  }
-}
+): Promise<T> => timeCliPhase(`cellSelection.${label}`, run);
 
 /**
  * The address a marked position accumulates as the walk descends, which is

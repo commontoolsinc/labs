@@ -108,6 +108,7 @@ import {
   CellSelectionError,
   deriveSelectedValue,
 } from "./cell-selection.ts";
+import { timeCliPhase } from "./trace-timing.ts";
 import { cliCommand } from "./cli-name.ts";
 import {
   type ExecCommandSpec,
@@ -421,8 +422,6 @@ interface PieceOperationDependencies extends PieceResolutionDeps {
   deriveSelectedValue?: typeof deriveSelectedValue;
 }
 
-const CLI_TRACE_TIMINGS = Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
-
 interface DisposableRuntime {
   dispose(): Promise<unknown>;
   storageManager?: unknown;
@@ -474,22 +473,6 @@ export async function withRuntimeCleanupOnFailure<T>(
       },
     );
     throw error;
-  }
-}
-
-async function timeCliPhase<T>(
-  label: string,
-  run: () => T | Promise<T>,
-): Promise<T> {
-  if (!CLI_TRACE_TIMINGS) {
-    return await run();
-  }
-  const start = performance.now();
-  try {
-    return await run();
-  } finally {
-    const elapsed = Math.round(performance.now() - start);
-    console.error(`[cf-phase] ${elapsed}ms :: ${label}`);
   }
 }
 
