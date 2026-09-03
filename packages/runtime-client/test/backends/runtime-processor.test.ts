@@ -3,6 +3,7 @@ import { describe, it } from "@std/testing/bdd";
 
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import {
+  type FabricValue,
   isValidFabricValue,
   taggedHashStringOf,
 } from "@commonfabric/data-model";
@@ -4193,6 +4194,36 @@ describe("runtime-processor", () => {
       // Nested too, the walk reaching it through the container rebuild.
       expect(() => mapCellRefsToSigilLinks({ e: error })).toThrow(message);
       expect(() => mapCellRefsToSigilLinks([error])).toThrow(message);
+    });
+
+    it("throws for a value that contains itself, naming the path where the cycle closes", () => {
+      const inner: Record<string, unknown> = { leaf: 1 };
+      const value = { list: [inner] };
+      inner.back = value;
+
+      expect(() => mapCellRefsToSigilLinks(value as unknown as FabricValue))
+        .toThrow(
+          "Cannot map cell refs to sigil links in a value with a cycle; " +
+            "the cycle closes at path `list.0.back`.",
+        );
+    });
+
+    it("maps a subtree reachable from two positions at each, rather than taking it for a cycle", () => {
+      const ref: CellRef = {
+        id: "of:shared-subtree" as CellRef["id"],
+        space: "did:key:test" as CellRef["space"],
+        scope: "space",
+        path: [],
+      };
+      const shared = { ref };
+
+      const mapped = mapCellRefsToSigilLinks({ a: shared, b: shared }) as {
+        a: { ref: unknown };
+        b: { ref: unknown };
+      };
+
+      expect(mapped.a.ref).toEqual(cellRefToSigilLink(ref));
+      expect(mapped.b.ref).toEqual(cellRefToSigilLink(ref));
     });
   });
 

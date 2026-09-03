@@ -1661,4 +1661,31 @@ describe("stripSigilCfcLabelViews", () => {
         "stripping sigil CFC label views.",
     );
   });
+
+  //
+  // Cycles and sharing
+  //
+
+  it("throws for a value that contains itself, naming the path where the cycle closes", () => {
+    const items: unknown[] = [linkWithView("of:cycle")];
+    const value = { items };
+    items.push(value);
+
+    expect(() => stripSigilCfcLabelViews(value)).toThrow(
+      "Cannot strip sigil CFC label views from a value with a cycle; " +
+        "the cycle closes at path `items.1`.",
+    );
+  });
+
+  it("strips a subtree reachable from two positions at each, rather than taking it for a cycle", () => {
+    const shared = { tagged: linkWithView("of:shared") };
+
+    const stripped = stripSigilCfcLabelViews({ a: shared, b: shared }) as {
+      a: { tagged: { "/": Record<string, Record<string, unknown>> } };
+      b: { tagged: { "/": Record<string, Record<string, unknown>> } };
+    };
+
+    expect("cfcLabelView" in stripped.a.tagged["/"][LINK_V1_TAG]).toBe(false);
+    expect("cfcLabelView" in stripped.b.tagged["/"][LINK_V1_TAG]).toBe(false);
+  });
 });

@@ -24,6 +24,7 @@ import {
   linkRefFrom,
   refuseFabricInstance,
 } from "@commonfabric/runner/shared";
+import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
 import type { LoggerFlagsBreakdown } from "@commonfabric/utils/logger";
 import { backtickQuote } from "@commonfabric/utils/markdown";
 
@@ -37,17 +38,37 @@ import { CellRef, type LoggerFlagsData, PageRef } from "@/protocol/types.ts";
  *
  * A cell's value is a `FabricValue`, as are a `CellRef` and a `SigilLink`, so
  * the conversion moves within that type. The result holds no `CellRef`.
+ *
+ * A value that contains itself is refused, with the path at which the cycle
+ * closes. A subtree reachable from two positions is shared rather than
+ * cyclic, and is walked at each.
+ *
+ * @throws If the value contains a cycle, or a `FabricInstance`.
  */
 export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
+  return mapOne(value, [], new IndexTrackingStack<object>());
+}
+
+/**
+ * Recursive worker for {@link mapCellRefsToSigilLinks}, carrying the state of
+ * the walk in progress. `path` is the way from the root to `value`, held as
+ * one array the walk pushes to and pops from. `ancestors` holds the containers
+ * the walk is inside, so that what it recognizes is a cycle: an entry sits
+ * there only while the walk is inside it, and a container reached again by a
+ * different path is not there any more.
+ */
+function mapOne(
+  value: FabricValue,
+  path: string[],
+  ancestors: IndexTrackingStack<object>,
+): FabricValue {
   if (
     typeof value === "string" || typeof value === "number" ||
     typeof value === "boolean"
   ) {
     return value;
   }
-  if (Array.isArray(value)) {
-    return value.map((v) => mapCellRefsToSigilLinks(v));
-  } else if (isCellRef(value)) {
+  if (isCellRef(value)) {
     return cellRefToSigilLink(value);
   } else if (isSigilLink(value)) {
     // A RAW sigil link in an inbound value bypasses the CellRef branch above
@@ -90,13 +111,36 @@ export function mapCellRefsToSigilLinks(value: FabricValue): FabricValue {
     // at which point this becomes a walk rather than a refusal.
     refuseFabricInstance(value, "when mapping cell refs to sigil links");
   } else if (typeof value === "object" && value) {
-    return Object.entries(value).reduce(
-      (acc: Record<string, FabricValue>, [k, v]) => {
-        acc[k] = mapCellRefsToSigilLinks(v);
-        return acc;
-      },
-      {},
-    );
+    // A container. It goes onto `ancestors` for as long as the walk is inside
+    // it, and every way out below clears it again.
+    if (ancestors.has(value)) {
+      throw new Error(
+        "Cannot map cell refs to sigil links in a value with a cycle; " +
+          `the cycle closes at path \`${path.join(".")}\`.`,
+      );
+    }
+    ancestors.push(value);
+
+    try {
+      if (Array.isArray(value)) {
+        return value.map((item, index) => {
+          path.push(String(index));
+          const next = mapOne(item, path, ancestors);
+          path.pop();
+          return next;
+        });
+      }
+
+      const out: Record<string, FabricValue> = {};
+      for (const [key, item] of Object.entries(value)) {
+        path.push(key);
+        out[key] = mapOne(item, path, ancestors);
+        path.pop();
+      }
+      return out;
+    } finally {
+      ancestors.popExpect(value);
+    }
   }
   return value;
 }
