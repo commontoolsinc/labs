@@ -1940,7 +1940,11 @@ type UnclearedObservationDisposition =
  * kept in step by hand.
  *
  * Derived from the published descriptor rather than from the mode, so the
- * behavior a run takes is the behavior its artifacts say it takes. That
+ * behavior a run takes is the behavior its artifacts say it takes. It carries
+ * no fallthrough of its own: `cfcAbsenceBehaviorForMode` already answers a
+ * mode it does not recognize with the closed one, so a second default here
+ * would be unreachable, and a switch left total is what makes a new descriptor
+ * value fail to compile rather than quietly pick a branch. That
  * couples the status-error cases to the dial named for absence: a mode that
  * became permissive about absent metadata would become permissive about
  * unredacted status too. That is the intended reading — both are the boundary
@@ -1957,11 +1961,6 @@ const unclearedObservationDisposition = (
     case "observe-only":
       return "expose-with-warning";
     case "fail-closed-if-absent":
-      return "deny";
-    default:
-      // Unreachable while the descriptor is total, and closed anyway: the
-      // fallthrough of a switch that decides whether the model sees something
-      // must not be the branch that shows it.
       return "deny";
   }
 };

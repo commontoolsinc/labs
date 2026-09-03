@@ -375,4 +375,131 @@ describe("cli", () => {
       expect(written.join("")).toContain("usage: cfc-audit");
     });
   });
+
+  //
+  // Held to an expected-failures list
+  //
+  // The list decides the exit in place of the threshold, so what these pin is
+  // which answer the exit carries and whether the report says the same thing.
+  // A configuration this run could not read is the same answer as an
+  // unreadable command line: the comparison asked for did not happen.
+  //
+
+  describe("runAuditCli() with --expected-failures", () => {
+    /** Runs the audit over the clean fixture against `entries`. */
+    const auditWithList = async (
+      entries: unknown,
+      extra: readonly string[] = [],
+    ): Promise<{ code: number; output: string }> => {
+      const path = await Deno.makeTempFile({
+        prefix: "cfc-expected-",
+        suffix: ".json",
+      });
+      await Deno.writeTextFile(path, JSON.stringify(entries));
+      const written: string[] = [];
+      try {
+        const code = await runAuditCli(
+          [FIXTURE_RUN_DIR, "--expected-failures", path, ...extra],
+          (text) => {
+            written.push(text);
+          },
+        );
+        return { code, output: written.join("\n") };
+      } finally {
+        await Deno.remove(path);
+      }
+    };
+
+    it("returns 2 when the option is given no path", async () => {
+      const written: string[] = [];
+
+      expect(
+        await runAuditCli([FIXTURE_RUN_DIR, "--expected-failures"], (text) => {
+          written.push(text);
+        }),
+      ).toBe(2);
+      expect(written.join("")).toContain("usage: cfc-audit");
+    });
+
+    it("returns 2 naming the file when it cannot be read", async () => {
+      const written: string[] = [];
+
+      expect(
+        await runAuditCli(
+          [FIXTURE_RUN_DIR, "--expected-failures", "/nonexistent/list.json"],
+          (text) => {
+            written.push(text);
+          },
+        ),
+      ).toBe(2);
+      expect(written.join("")).toContain("could not read --expected-failures");
+    });
+
+    it("returns 2 when the file carries no `expected` array", async () => {
+      // An empty list excuses nothing, so a malformed file must not read as a
+      // strict one — the mistake would never surface.
+      const { code, output } = await auditWithList({ nope: [] });
+
+      expect(code).toBe(2);
+      expect(output).toContain("has no `expected` array");
+    });
+
+    it("returns 2 when an entry cannot do its job", async () => {
+      const { code, output } = await auditWithList({
+        expected: [{
+          checkId: "AUD-1",
+          runShape: "any",
+          runs: ".*",
+          detail: "",
+          why: "w",
+          issue: "CT-0000",
+        }],
+      });
+
+      expect(code).toBe(2);
+      expect(output).toContain("is not usable");
+      expect(output).toContain("non-empty `detail`");
+    });
+
+    it("returns 1 and names an entry that no longer matches anything", async () => {
+      // The direction that stops the list rotting: a closed gap must take its
+      // entry with it.
+      const { code, output } = await auditWithList({
+        expected: [{
+          checkId: "AUD-1",
+          runShape: "a shape that does not arise",
+          runs: "no-such-run",
+          detail: "a message nothing writes",
+          why: "w",
+          issue: "CT-0000",
+        }],
+      });
+
+      expect(code).toBe(1);
+      expect(output).toContain("no longer occur");
+      expect(output).toContain("CT-0000");
+    });
+
+    it("returns 0 over a clean fixture whose list names nothing", async () => {
+      // The fixture produces no finding at the default threshold, so an empty
+      // list is exactly right and the run is green.
+      const { code, output } = await auditWithList({ expected: [] });
+
+      expect(code).toBe(0);
+      expect(output).toContain(
+        "are reconciled against the expected-failures list",
+      );
+      expect(output).not.toContain("exiting non-zero at or above");
+    });
+
+    it("emits one JSON document carrying the results and the reconciliation", async () => {
+      // A caller piping this into a parser gets one parse. Appending the
+      // reconciliation after the document would leave stdout unparseable.
+      const { output } = await auditWithList({ expected: [] }, ["--json"]);
+
+      const parsed = JSON.parse(output) as Record<string, unknown>;
+      expect(Object.keys(parsed).sort()).toEqual(["reconciliation", "results"]);
+      expect(Array.isArray(parsed.results)).toBe(true);
+    });
+  });
 });

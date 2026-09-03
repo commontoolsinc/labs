@@ -13,6 +13,7 @@ import { expect } from "@std/expect";
 import {
   assertUsableExpectedFailure,
   type ExpectedFailure,
+  readExpectedFailures,
   reconcileExpectedFailures,
   reconciliationFails,
   renderReconciliation,
@@ -210,7 +211,62 @@ describe("expected-failures", () => {
     });
   });
 
+  describe("readExpectedFailures()", () => {
+    it("answers the entries of a well-formed file", () => {
+      expect(readExpectedFailures({ expected: [entry("AUD-9", "a read")] }))
+        .toHaveLength(1);
+    });
+
+    it("refuses a top level that is not an object", () => {
+      // A list read out of an array or a bare string would answer entries
+      // nobody wrote.
+      expect(() => readExpectedFailures([])).toThrow("not an object");
+      expect(() => readExpectedFailures(null)).toThrow("not an object");
+    });
+
+    it("refuses a file with no `expected` array", () => {
+      // The failure this exists for: `?? []` would have turned a malformed
+      // file into an empty list, and an empty list excuses nothing, so a
+      // broken file would have looked like a strict one.
+      expect(() => readExpectedFailures({})).toThrow("no `expected` array");
+      expect(() => readExpectedFailures({ expected: "nonsense" })).toThrow(
+        "no `expected` array",
+      );
+    });
+  });
+
   describe("renderReconciliation()", () => {
+    it("names each finding no entry covers, with the run it arose on", () => {
+      // What a reader of a red job needs first: which finding, and where.
+      const rendered = renderReconciliation(
+        reconcileExpectedFailures(
+          [finding("AUD-3", "fail", "an output nothing accounts for", "run-7")],
+          [],
+          "warn",
+        ),
+      );
+
+      expect(rendered).toContain("1 finding(s) no entry covers");
+      expect(rendered).toContain("AUD-3");
+      expect(rendered).toContain("run-7");
+      expect(rendered).toContain("an output nothing accounts for");
+    });
+
+    it("counts the findings an entry covers rather than listing them", () => {
+      // The known ones are the quiet part of the report: a count says the
+      // list is doing its job without burying the findings that are not.
+      const rendered = renderReconciliation(
+        reconcileExpectedFailures(
+          [finding("AUD-9", "fail", "retained none of: a read")],
+          [entry("AUD-9", "a read")],
+          "warn",
+        ),
+      );
+
+      expect(rendered).toContain("1 known finding(s)");
+      expect(rendered).not.toContain("no entry covers");
+    });
+
     it("names the issue of each entry that went stale", () => {
       const rendered = renderReconciliation(
         reconcileExpectedFailures([], [entry("AUD-9", "a read")], "warn"),

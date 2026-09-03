@@ -348,6 +348,19 @@ describe("cfc absence policy", () => {
       }
     });
 
+    it("fails closed for a mode this build does not recognize", () => {
+      // The type says this cannot happen and a resumed or injected run state
+      // can carry it anyway. An enforcement mode nobody here recognizes is
+      // not a licence to expose: the unknown answer is the closed one, and
+      // the disposition derived from it denies.
+      const unknown = "enforce-from-the-future" as CfcEnforcementMode;
+
+      expect(cfcAbsenceBehaviorForMode(unknown)).toBe("fail-closed-if-absent");
+      expect(OUTCOME_FOR_BEHAVIOR[cfcAbsenceBehaviorForMode(unknown)]).toBe(
+        "denied",
+      );
+    });
+
     it("fails closed in both enforcing modes", () => {
       // AH-CFC-6 admits no weaker answer, and `enforce-explicit` names a rule
       // about invocation authority rather than about observation mediation.
