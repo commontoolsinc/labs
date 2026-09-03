@@ -33,7 +33,10 @@ const SUMMARY_VALUE_OPTIONS: CompactDebugStringOptions = {
 };
 
 /**
- * Condensed summary of a transaction suitable for LLM consumption
+ * Summary of a transaction. Its `summary` line, and the rendering
+ * `formatTransactionSummary()` makes of it, are condensed for an LLM to
+ * read; `writes` carries each written value as it was written, unbounded,
+ * and is not itself meant to be serialized or handed to one.
  */
 export interface TransactionSummary {
   /** Human-readable one-line summary */
@@ -45,7 +48,7 @@ export interface TransactionSummary {
     writes: number;
   };
 
-  /** Actual writes with values */
+  /** Actual writes, with their values as written */
   writes: WriteDetail[];
 }
 
@@ -62,10 +65,10 @@ export interface WriteDetail {
   /** Path that was written to */
   path: string;
 
-  /** The value that was written */
+  /** The value that was written, as written: a rendering bounds it, this does not */
   value: unknown;
 
-  /** The previous value (if available) */
+  /** The previous value, as it was, if available */
   previousValue?: unknown;
 
   /** Whether this was a deletion */
@@ -73,11 +76,12 @@ export interface WriteDetail {
 }
 
 /**
- * Create a condensed transaction summary from an IExtendedStorageTransaction
+ * Create a transaction summary from an IExtendedStorageTransaction, whose
+ * summary line is condensed and whose writes carry their values as written
  *
  * @param tx - The completed transaction
  * @param space - Optional memory space to filter changes (defaults to first space found)
- * @returns Condensed summary for LLM consumption
+ * @returns Summary, its `summary` line condensed for LLM consumption
  */
 export function summarizeTransaction(
   tx: IExtendedStorageTransaction,
