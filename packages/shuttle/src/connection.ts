@@ -5,10 +5,13 @@
  * long-lived process has to make, and this module is where they are made.
  *
  * The connect sequence belongs to `loadPieces` (`@commonfabric/cli/lib/piece`),
- * which this module calls. What it adds is a memo, and the memo covers the
- * connection that never opened: a rejected construction is not held, so a
- * later ask opens again. A connection that opens and then drops is outside
- * that entirely — nothing here observes a drop, retries one, or reports one.
+ * which this module calls. What it adds is two memos, whose retry policies
+ * are opposites. A construction is not held when it fails, so a later ask
+ * opens again; that covers the connection that never opened, and a connection
+ * that opens and then drops is outside it entirely, since nothing here
+ * observes a drop, retries one, or reports one. A disposal is held whatever
+ * it does, so a close that fails is terminal and the holder serves nothing
+ * after it.
  */
 
 import { loadPieces, type SpaceConfig } from "@commonfabric/cli/lib/piece";
@@ -186,8 +189,8 @@ export class HeldConnection implements AsyncDisposable {
    * intercept, and `catch` on a native promise. So the window before
    * `dispose()` holds what this returns cannot be re-entered, rather than
    * merely happening not to be — and an `async` function never throws
-   * synchronously, so that hold always happens. Which is what lets
-   * `dispose()` memoize the result instead of setting a flag ahead of the
+   * synchronously, so that hold always happens, which is what lets
+   * `dispose()` memoize the result rather than set a flag ahead of the
    * call.
    */
   async #disposeOnce(): Promise<void> {

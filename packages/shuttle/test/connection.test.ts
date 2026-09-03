@@ -54,12 +54,16 @@ interface StubController {
 
 /**
  * Helper for the cases below, which stands in for the controller a connection
- * carries. Nothing here reads a controller, so what it reports is the two
- * things a close can be observed by: how many times it ran, which is what the
- * ownership cases turn on, and whether it failed, where a case hands it a
- * `closeError`. The failure is what separates a close that is awaited from
- * one merely started, which the count cannot, since a failure reaches a
- * caller of `dispose()` only through an `await`.
+ * carries. Nothing here reads a controller, so what this helper reports is
+ * two things: how many times the close ran, which is what the ownership cases
+ * turn on, and whether it failed, where a case hands it a `closeError`. The
+ * failure is what separates a close that is awaited from one merely started,
+ * which the count cannot, since a failure reaches a caller of `dispose()`
+ * only through an `await`.
+ *
+ * When a close finished is a third observable and not one of these. The case
+ * that turns on it builds a controller of its own, with a gate inside the
+ * close.
  */
 function stubController(closeError?: Error): StubController {
   let closed = 0;
@@ -186,6 +190,29 @@ describe("connection", () => {
             "This connection is disposed.",
           );
         });
+
+        it("throws where the connection's own close asks for one", async () => {
+          let refused: unknown;
+          const pieces = {
+            dispose: () => {
+              try {
+                connection.pieces();
+              } catch (error) {
+                refused = error;
+              }
+              return Promise.resolve();
+            },
+          } as unknown as PiecesController;
+          const connection = new HeldConnection(
+            owning(() => Promise.resolve(pieces)),
+          );
+          await connection.pieces();
+          await connection.dispose();
+          expect(refused).toBeInstanceOf(Error);
+          expect((refused as Error).message).toBe(
+            "This connection is disposed.",
+          );
+        });
       });
 
       describe("dispose()", () => {
@@ -249,14 +276,20 @@ describe("connection", () => {
         });
 
         it("settles a second disposal only once the close they share has finished", async () => {
-          // A gate inside the close, and a ledger either side of it. The
-          // order the two entries land in is the whole assertion, so nothing
-          // here counts microtasks or waits on a clock.
+          // A gate inside the close, and a ledger recording what settles
+          // once it opens. The close puts a tick between the gate and its own
+          // entry, which is what leaves the order to the code under test: with
+          // the entry in the gate's first reaction, a close that is started
+          // and never awaited still records first, off queue position alone,
+          // and reads exactly like one that was awaited. The real
+          // implementation orders the two the same way at any tick count, so
+          // the tick buys sensitivity and costs no stability.
 
           const order: string[] = [];
           const closing = Promise.withResolvers<void>();
           const pieces = {
-            dispose: () => closing.promise.then(() => order.push("closed")),
+            dispose: () =>
+              closing.promise.then(() => {}).then(() => order.push("closed")),
           } as unknown as PiecesController;
           const connection = new HeldConnection(
             owning(() => Promise.resolve(pieces)),
