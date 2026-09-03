@@ -1669,7 +1669,7 @@ describe("cli piece parsing", () => {
     expect(schemaOption.description).toContain("--select field list");
   });
 
-  it("steps, reads, syncs, and stops in one get operation", async () => {
+  it("steps, pulls only the requested result path, syncs, and stops", async () => {
     const order: string[] = [];
     const controller = {
       get: (
@@ -1682,10 +1682,10 @@ describe("cli piece parsing", () => {
         return Promise.resolve({
           input: { get: () => Promise.resolve(undefined) },
           getCell: () => ({
-            pull: () => {
-              order.push("piece.pull");
-              return Promise.resolve();
-            },
+            pull: () =>
+              Promise.reject(
+                new Error("a nested stepped read pulled the piece root"),
+              ),
           }),
           result: {
             getCell: () =>
@@ -1742,7 +1742,6 @@ describe("cli piece parsing", () => {
     expect(value).toBe("ready");
     expect(order).toEqual([
       `get:${PIECE}:true:session`,
-      "piece.pull",
       "result.key:value",
       "result.pull",
       "pieces.synced",
@@ -1752,6 +1751,162 @@ describe("cli piece parsing", () => {
       // The read-path guard classifies the read path after the value read
       // (verb contract WS-F), descending to the same key once more.
       "result.key:value",
+      `stop:${PIECE}`,
+    ]);
+  });
+
+  it("steps an input path read without pulling the piece root either", async () => {
+    // The skipped pull sat ahead of the input/result fork, so the input side
+    // of a stepped path read changed on the same terms as the result side.
+    const order: string[] = [];
+    const controller = {
+      get: (id: string, runIt: boolean) => {
+        order.push(`get:${id}:${runIt}`);
+        return Promise.resolve({
+          getCell: () => ({
+            pull: () =>
+              Promise.reject(
+                new Error("a nested stepped input read pulled the piece root"),
+              ),
+          }),
+          input: {
+            getCell: () =>
+              Promise.resolve({
+                key: (segment: string) => {
+                  order.push(`input.key:${segment}`);
+                  return {
+                    pull: () => {
+                      order.push("input.pull");
+                      return Promise.resolve();
+                    },
+                  };
+                },
+              }),
+            get: () => {
+              order.push("input.get");
+              return Promise.resolve(["updated-while-stopped"]);
+            },
+          },
+          result: { get: () => Promise.resolve(undefined) },
+        });
+      },
+      stopPiece: (id: string) => {
+        order.push(`stop:${id}`);
+        return Promise.resolve();
+      },
+      runtime: {
+        idle: () => {
+          order.push("runtime.idle");
+          return Promise.resolve();
+        },
+      },
+      synced: () => {
+        order.push("pieces.synced");
+        return Promise.resolve();
+      },
+    };
+
+    const value = await getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      ["values"],
+      { step: true, input: true },
+      {
+        loadPieces: () => Promise.resolve(controller as any),
+        resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
+      },
+    );
+
+    expect(value).toEqual(["updated-while-stopped"]);
+    expect(order).toEqual([
+      `get:${PIECE}:true`,
+      "input.key:values",
+      "input.pull",
+      "pieces.synced",
+      "runtime.idle",
+      "pieces.synced",
+      "input.get",
+      "input.key:values",
+      `stop:${PIECE}`,
+    ]);
+  });
+
+  it("steps a path-less read through the whole result before syncing", async () => {
+    const order: string[] = [];
+    const controller = {
+      get: (id: string, runIt: boolean) => {
+        order.push(`get:${id}:${runIt}`);
+        return Promise.resolve({
+          input: { get: () => Promise.resolve(undefined) },
+          getCell: () => ({
+            pull: () => {
+              order.push("piece.pull");
+              return Promise.resolve();
+            },
+          }),
+          result: {
+            getCell: () => {
+              // `rootCell.key(...path)` with an empty path is `key()`: the
+              // root itself, never a descent.
+              const root = {
+                key: (...segments: string[]) => {
+                  if (segments.length > 0) {
+                    throw new Error("a path-less read descended into a key");
+                  }
+                  order.push("result.key:<root>");
+                  return root;
+                },
+                pull: () => {
+                  order.push("result.pull");
+                  return Promise.resolve();
+                },
+              };
+              return Promise.resolve(root);
+            },
+            get: () => {
+              order.push("result.get");
+              return Promise.resolve({ value: "ready" });
+            },
+          },
+        });
+      },
+      stopPiece: (id: string) => {
+        order.push(`stop:${id}`);
+        return Promise.resolve();
+      },
+      runtime: {
+        idle: () => {
+          order.push("runtime.idle");
+          return Promise.resolve();
+        },
+      },
+      synced: () => {
+        order.push("pieces.synced");
+        return Promise.resolve();
+      },
+    };
+
+    const value = await getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      [],
+      { step: true },
+      {
+        loadPieces: () => Promise.resolve(controller as any),
+        resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
+      },
+    );
+
+    expect(value).toEqual({ value: "ready" });
+    // The whole-result pull is the path-less read's materialization step;
+    // a nested read replaces it with its own target pull (the test above).
+    expect(order).toEqual([
+      `get:${PIECE}:true`,
+      "piece.pull",
+      "result.key:<root>",
+      "result.pull",
+      "pieces.synced",
+      "runtime.idle",
+      "pieces.synced",
+      "result.get",
       `stop:${PIECE}`,
     ]);
   });
