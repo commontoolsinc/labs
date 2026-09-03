@@ -3746,7 +3746,10 @@ export class PieceController<T = unknown> {
     pattern: Pattern;
     ref: { identity: string; symbol: string };
   }> {
-    await this.#cell.sync();
+    // The pattern pointer lives on the result document's metadata. Do not
+    // project the result schema here: a caller asking which pattern a piece
+    // uses does not need every document reachable from that result.
+    await this.#cell.asSchema(undefined).sync();
     const ref = this.#patternPointer();
     if (!ref) throw new Error("piece missing pattern identity");
     const runtime = this.#pieces.runtime;

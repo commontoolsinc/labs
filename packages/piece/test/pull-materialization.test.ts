@@ -1771,6 +1771,28 @@ describe("piece pull materialization", () => {
     }
   });
 
+  it("loads a pattern through a document-bounded result cell", async () => {
+    const pattern = await runtime.patternManager.compilePattern(
+      compiledMultiplierProgram("bounded-pattern-load", 2),
+      { space: pieces.getSpace() },
+    );
+    const piece = await pieces.runPersistent(
+      pattern,
+      { input: 5 },
+      undefined,
+      { start: false },
+    );
+    const schemas: unknown[] = [];
+    const originalAsSchema = piece.asSchema.bind(piece);
+    piece.asSchema = ((schema: unknown) => {
+      schemas.push(schema);
+      return originalAsSchema(schema as never);
+    }) as typeof piece.asSchema;
+
+    expect(await new PieceController(pieces, piece).getPattern()).toBe(pattern);
+    expect(schemas).toEqual([undefined]);
+  });
+
   it("keeps pattern content refs useful when source programs are unavailable", async () => {
     const identityless = runtime.getCell(
       pieces.getSpace(),

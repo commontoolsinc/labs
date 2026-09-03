@@ -63,11 +63,12 @@ as `cf cell get`, so a survey can be narrowed on the way out.
 `cf piece verbs --json` is the first call to make against an unfamiliar piece:
 it names the deployed pattern and lists every callable verb with its prose and
 the schemas a payload is judged against, which is what a caller needs to act.
-Each of the reads below is its own cold CLI process that starts the piece, so
-they are not a preflight to run together; reach for the others when the
-question they answer comes up. `cf piece describe` prints the piece's man page
-— what it is, what it holds, what a caller supplies, and what it can do — with
-every sentence compiled from the pattern's own doc comments:
+Each of the reads below is its own cold CLI process. `verbs` and `describe` load
+the stored callable surface and pattern metadata without starting the piece;
+they are still not a preflight to run together, so reach for the others when
+the question they answer comes up. `cf piece describe` prints the piece's man
+page — what it is, what it holds, what a caller supplies, and what it can do —
+with every sentence compiled from the pattern's own doc comments:
 
 ```bash
 cf piece describe --cell <piece>

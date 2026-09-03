@@ -421,21 +421,30 @@ describe("piece-describe", () => {
       space: "home",
     };
 
-    it("starts the addressed piece without starting the space root", async () => {
+    it("loads the addressed piece without starting it or the space root", async () => {
       // Discovery reads the addressed piece and nothing else: the space
-      // root's bootstrap is dispatch's concern (a verb that creates a piece
-      // registers it with the root), not a description's.
-      const getCalls: unknown[][] = [];
+      // root's bootstrap and the target's start are dispatch concerns, not a
+      // description's.
+      const fixture = pieceDouble();
+      const resultRoot = await fixture.result.getCell();
+      const inputRoot = await fixture.input.getCell();
+      const pieceRoot = {
+        ...fixture.getCell(),
+        entityId: { "/": config.piece },
+      };
+      const getPieceCellCalls: unknown[][] = [];
       let ensureCalls = 0;
       const manager = {
         ensureDefaultPattern: () => {
           ensureCalls++;
           return Promise.resolve();
         },
-        get: (...args: unknown[]) => {
-          getCalls.push(args);
-          return Promise.resolve(pieceDouble());
+        getPieceCell: (...args: unknown[]) => {
+          getPieceCellCalls.push(args);
+          return Promise.resolve(pieceRoot);
         },
+        getResult: () => resultRoot,
+        getArgument: () => inputRoot,
         getSpace: () => "home",
       };
 
@@ -444,8 +453,14 @@ describe("piece-describe", () => {
       });
 
       expect(ensureCalls).toBe(0);
-      expect(getCalls).toEqual([[config.piece, true, undefined, undefined]]);
-      expect(description.name).toBe("Work tracker");
+      expect(getPieceCellCalls).toEqual([
+        [
+          config.piece,
+          { reconcile: true, start: false },
+          undefined,
+          undefined,
+        ],
+      ]);
       expect(description.verbs.map((verb) => verb.name)).toEqual(["addItem"]);
     });
 
@@ -469,6 +484,32 @@ describe("piece-describe", () => {
       expect(description.verbs[0].description).toBe(
         "File a new root item on the board.",
       );
+    });
+
+    it("reads a controller's already-loaded name without pulling its cell", async () => {
+      const base = pieceDouble();
+      const baseCell = base.getCell();
+      const piece = pieceDouble({
+        name: () => "Local name",
+        getCell: () => ({
+          ...baseCell,
+          key: (key: unknown) =>
+            key === NAME
+              ? {
+                pull: () => {
+                  throw new Error("pulled the already-loaded name");
+                },
+              }
+              : baseCell.key(key),
+        }),
+      });
+
+      const description = await describePiece(config, {
+        loadPieces: () => Promise.resolve({} as never),
+        loadPiece: () => Promise.resolve(piece as never),
+      });
+
+      expect(description.name).toBe("Local name");
     });
 
     it("describes an unnamed piece without a name key", async () => {

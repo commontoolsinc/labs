@@ -28,6 +28,7 @@ import {
 import {
   type PatternCompatibilityReport,
   type PatternUpdateReceipt,
+  PieceController,
   type PiecePatternRef,
   PiecesController,
 } from "@commonfabric/piece/ops";
@@ -1847,9 +1848,14 @@ async function tryResolveLivePieceToolCallable(
  * `deps.loadPiece` is absent (the test seam is the one way around it): a verb
  * that creates a piece registers it by sending an event to the default pattern's
  * `addPiece` stream (see `newPiece`), so against an unbootstrapped root it
- * fails with "Cannot add pieces" rather than running slowly. Discovery
- * (`verbs`, `describe`) only reads the addressed piece, so it starts that
- * piece and nothing else.
+ * fails with "Cannot add pieces" rather than running slowly. Dispatch then
+ * starts the addressed piece before resolving the requested callable.
+ *
+ * Discovery (`verbs`, `describe`) only reads the addressed piece's stored
+ * callable surface and pattern metadata. It neither starts the piece nor asks
+ * `PiecesController.get()` to project the piece's full result schema: the
+ * document sync in `getPieceCell()` supplies the canonical result cell and its
+ * metadata, which are the bounded inputs discovery needs.
  *
  * `cf piece call <verb> --help` takes the dispatch path: `executePieceCallable`
  * resolves the verb before it parses the arguments, so it cannot know it is
@@ -1861,7 +1867,7 @@ async function tryResolveLivePieceToolCallable(
 async function loadPieceForCallables(
   config: PieceConfig,
   deps: PieceCallableDependencies,
-  { ensureSpaceRoot }: { ensureSpaceRoot: boolean },
+  { prepareDispatch }: { prepareDispatch: boolean },
 ): Promise<{
   pieces: any;
   piece: any;
@@ -1871,7 +1877,7 @@ async function loadPieceForCallables(
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
 
-  if (!deps.loadPiece && ensureSpaceRoot) {
+  if (!deps.loadPiece && prepareDispatch) {
     try {
       await pieces.ensureDefaultPattern();
     } catch (error) {
@@ -1889,11 +1895,21 @@ async function loadPieceForCallables(
       resolvedConfig.piece,
       resolvedConfig.pieceScope,
     )
-    : pieces.get(
+    : prepareDispatch
+    ? pieces.get(
       resolvedConfig.piece,
       true,
       undefined,
       resolvedConfig.pieceScope,
+    )
+    : new PieceController(
+      pieces,
+      await pieces.getPieceCell(
+        resolvedConfig.piece,
+        { reconcile: true, start: false },
+        undefined,
+        resolvedConfig.pieceScope,
+      ),
     ));
   const space = pieces.getSpace?.() ?? config.space;
   return { pieces, piece, space, resolvedConfig };
@@ -1907,7 +1923,7 @@ async function resolvePieceCallable(
   const { pieces, piece, space, resolvedConfig } = await loadPieceForCallables(
     config,
     deps,
-    { ensureSpaceRoot: true },
+    { prepareDispatch: true },
   );
 
   const onResultCell = await tryResolvePieceCallableAt(
@@ -3057,10 +3073,17 @@ export async function listPieceCallables(
   config: PieceConfig,
   deps: PieceCallableDependencies = {},
 ): Promise<PieceCallablesListing> {
-  const { piece } = await loadPieceForCallables(config, deps, {
-    ensureSpaceRoot: false,
-  });
-  return (await listCallablesForLoadedPiece(piece)).listing;
+  const { piece } = await timeCliPhase(
+    "listPieceCallables.loadPiece",
+    () =>
+      loadPieceForCallables(config, deps, {
+        prepareDispatch: false,
+      }),
+  );
+  return (await timeCliPhase(
+    "listPieceCallables.list",
+    () => listCallablesForLoadedPiece(piece),
+  )).listing;
 }
 
 /** The listing walk over an already-loaded piece, returning the compiled
@@ -3073,14 +3096,15 @@ async function listCallablesForLoadedPiece(piece: any): Promise<{
   listing: PieceCallablesListing;
   compiled: { argumentSchema?: unknown; resultSchema?: unknown } | null;
 }> {
-  let pattern: PiecePatternRef | null = null;
-  if (typeof piece.getPatternRef === "function") {
-    try {
-      pattern = (await piece.getPatternRef()) ?? null;
-    } catch {
-      pattern = null; // Identity is advisory; the listing itself still holds.
-    }
-  }
+  // The authored source reference and the compiled pattern are independent
+  // storage closures. Start both reads together: on a cold CLI process either
+  // can dominate, and serializing them adds their latencies for no benefit.
+  const patternRef = typeof piece.getPatternRef === "function"
+    ? timeCliPhase(
+      "listPieceCallables.patternRef",
+      () => piece.getPatternRef(),
+    ).then((value) => value ?? null).catch(() => null)
+    : Promise.resolve(null);
 
   // The compiled pattern, read once for three independent jobs. Its result
   // properties are candidate NAMES for the sweep below — the only source for a
@@ -3101,25 +3125,20 @@ async function listCallablesForLoadedPiece(piece: any): Promise<{
   // partial answer. What it must not do either is present a shortened list as
   // the whole surface, which is the difference between losing a row's
   // `outputSchema` and losing the row.
-  let graphNames: string[] = [];
-  let handlerResults = new Map<string, JSONSchema | undefined>();
-  let verbProse = new Map<string, DeclaredVerbProse>();
-  let graphConsulted = false;
-  let compiledPattern:
-    | { argumentSchema?: unknown; resultSchema?: unknown }
-    | null = null;
-  if (typeof piece.getPattern === "function") {
-    try {
-      const compiled = await piece.getPattern();
-      graphNames = patternResultNames(compiled);
-      handlerResults = handlerVerbResults(compiled);
-      verbProse = declaredVerbProse(compiled);
-      compiledPattern = compiled ?? null;
-      graphConsulted = true;
-    } catch {
-      // Reported as `incomplete` below rather than swallowed.
-    }
-  }
+  const compiledRead = typeof piece.getPattern === "function"
+    ? timeCliPhase(
+      "listPieceCallables.pattern",
+      () => piece.getPattern(),
+    ).then((value) => value ?? null).catch(() => null)
+    : Promise.resolve(null);
+  const [pattern, compiledPattern] = await Promise.all([
+    patternRef,
+    compiledRead,
+  ]);
+  const graphConsulted = compiledPattern !== null;
+  const graphNames = patternResultNames(compiledPattern);
+  const handlerResults = handlerVerbResults(compiledPattern);
+  const verbProse = declaredVerbProse(compiledPattern);
 
   /**
    * The prose row for a callable, on the same terms `handlerResults` is
@@ -3346,18 +3365,28 @@ export async function describePiece(
   deps: PieceCallableDependencies = {},
 ): Promise<PieceDescription> {
   const { piece } = await loadPieceForCallables(config, deps, {
-    ensureSpaceRoot: false,
+    prepareDispatch: false,
   });
   const { listing, compiled } = await listCallablesForLoadedPiece(piece);
   let name: string | undefined;
   try {
-    const pieceCell = typeof piece.getCell === "function"
-      ? piece.getCell()
-      : undefined;
-    const nameCell = pieceCell?.key?.(NAME);
-    const value = typeof nameCell?.pull === "function"
-      ? await nameCell.pull()
-      : nameCell?.get?.();
+    // A real PieceController was built from getPieceCell(), whose document
+    // sync already brought the NAME field local. Pulling that field opens a
+    // second storage watch and repeats work just to read one advisory string.
+    // Keep the cell fallback for injected adapters that predate name().
+    const value = await timeCliPhase(
+      "describePiece.name",
+      () => {
+        if (typeof piece.name === "function") return piece.name();
+        const pieceCell = typeof piece.getCell === "function"
+          ? piece.getCell()
+          : undefined;
+        const nameCell = pieceCell?.key?.(NAME);
+        return typeof nameCell?.pull === "function"
+          ? nameCell.pull()
+          : nameCell?.get?.();
+      },
+    );
     if (typeof value === "string" && value !== "") name = value;
   } catch {
     // Unnamed is a state, not a failure.
