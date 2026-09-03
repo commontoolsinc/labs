@@ -206,9 +206,10 @@ export class Client {
 
   /**
    * The promise handed to every current `whenStateChanged()` caller, or
-   * `null` when nobody is waiting. One promise is shared by all waiters and
-   * replaced on each change, so a waiter that re-registers gets the next
-   * transition rather than the one it has just observed.
+   * `null` when nobody is waiting. One promise is shared by all waiters, and
+   * clearing it as the client notifies is what makes a waiter that
+   * re-registers wait for the next notification rather than see again the
+   * one it has just observed.
    */
   #stateChanged: PromiseWithResolvers<void> | null = null;
 

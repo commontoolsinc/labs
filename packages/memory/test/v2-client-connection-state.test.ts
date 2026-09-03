@@ -170,16 +170,18 @@ const connectSeverable = async (reconnectHello: ReconnectHello) => {
 describe("Client", () => {
   describe("instance members", () => {
     describe("connectionState and whenStateChanged()", () => {
-      // Each case drives one transition and reads it back through both
+      // Each case drives one notification and reads it back through both
       // members: `whenStateChanged()` says when to look, `.connectionState`
-      // says what is there. Every wait here resolves on an event the client
-      // raises — a severed socket, a refused handshake, a `close()` — so
-      // nothing polls and nothing sleeps.
+      // says what is there. Usually that notification carries a transition;
+      // the closed-client case is here because one of them does not. Every
+      // wait resolves on an event the client raises — a severed socket, a
+      // refused handshake, a `close()` — so nothing polls and nothing
+      // sleeps.
       //
-      // Each waiter is registered before the transition it observes. That is
-      // how a caller uses it too: the loop in the doc comment reads the getter
-      // and calls `whenStateChanged()` in one synchronous step, with no chance
-      // for the state to move in between.
+      // Each waiter is registered before the notification it observes. That
+      // is how a caller uses it too: the loop in the doc comment reads the
+      // getter and calls `whenStateChanged()` in one synchronous step, with
+      // no chance for the state to move in between.
 
       it("returns `connected` for a client whose transport is up", async () => {
         const { client } = await connectSeverable("ok");
