@@ -174,12 +174,17 @@ export class BrowserProcess {
   /**
    * Closes the browser and returns once every process holding the browser's
    * standard error has closed it, which is once the last of them has exited.
+   *
+   * The browser is stopped by the signal rather than by astral's `close()`,
+   * which asks over the browser's connection and waits for an answer. A
+   * browser that has already gone takes that connection with it, and the wait
+   * then has nothing to resolve it.
    */
   async close(): Promise<void> {
     try {
-      await this.#browser.close();
-    } finally {
       await stopBrowserProcess(this.#child, this.#standardErrorClosed);
+    } finally {
+      await this.#browser.disconnect();
     }
   }
 

@@ -10,14 +10,21 @@
  * `BrowserProcess`.
  */
 
+import type { Browser as AstralBrowser } from "@astral/astral";
 import { expect } from "@std/expect";
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, describe, it } from "@std/testing/bdd";
 
 import {
   BrowserProcess,
   standardErrorClosed,
   stopBrowserProcess,
 } from "../browser-process.ts";
+
+// What the tests below made, and what it takes to put each of it away. A test
+// that fails partway through returns through `afterEach` rather than through
+// its own last lines, so registering here is what keeps a directory, a
+// listening socket, or a process from outliving a failure.
+const madeByTest: (() => Promise<void>)[] = [];
 
 // A shell that starts `cat` in the background, says so on its standard output,
 // and then waits. `cat` inherits the standard error the shell was spawned with
@@ -28,13 +35,56 @@ import {
 const HOLDS_STANDARD_ERROR =
   "exec 3<&0; cat <&3 >/dev/null & echo started; wait";
 
-// A developer-tools endpoint that answers `/json/version` with `protocol` as
-// the version it speaks, and the port it listens on. Astral reads that answer
-// before it opens a websocket, so a version it does not speak is a connection
-// that fails at once rather than one that waits.
-function fakeEndpoint(
-  protocol: string,
-): { server: Deno.HttpServer; port: number } {
+// Spawns `script` under `sh` with its standard error piped, and registers the
+// kill and the closing of its standard input.
+function shell(
+  script: string,
+  streams: { stdin?: "piped" | "null"; stdout?: "piped" | "null" } = {},
+): Deno.ChildProcess {
+  const stdin = streams.stdin ?? "null";
+  const child = new Deno.Command("sh", {
+    args: ["-c", script],
+    stdin,
+    stdout: streams.stdout ?? "null",
+    stderr: "piped",
+  }).spawn();
+  madeByTest.push(async () => {
+    try {
+      child.kill();
+    } catch {
+      // Already gone, which is where most of these tests leave it.
+    }
+    if (stdin === "piped") {
+      await child.stdin.close().catch(() => {});
+    }
+    await child.status;
+  });
+  return child;
+}
+
+// Launch options naming a stand-in for a browser binary: a shell script that
+// writes `printed` to its standard error and exits with `code`, never naming
+// an endpoint. The directory holding it is registered for removal.
+async function fakeBrowser(
+  printed: string,
+  code: number,
+): Promise<{ path: string; args: string[] }> {
+  const directory = await Deno.makeTempDir({ prefix: "deno-web-test-fake-" });
+  madeByTest.push(() => Deno.remove(directory, { recursive: true }));
+  const path = `${directory}/browser`;
+  await Deno.writeTextFile(
+    path,
+    `#!/bin/sh\nprintf '%s\\n' '${printed}' >&2\nexit ${code}\n`,
+  );
+  await Deno.chmod(path, 0o755);
+  return { path, args: [`--user-data-dir=${directory}/profile`] };
+}
+
+// The port of a developer-tools endpoint that answers `/json/version` with
+// `protocol` as the version it speaks. Astral reads that answer before it
+// opens a websocket, so a version it does not speak is a connection that fails
+// on the answer rather than one that waits for a socket that never opens.
+function fakeEndpoint(protocol: string): number {
   const server = Deno.serve(
     { port: 0, onListen: () => {} },
     () =>
@@ -43,52 +93,29 @@ function fakeEndpoint(
         webSocketDebuggerUrl: "ws://127.0.0.1:1/devtools/browser/none",
       }),
   );
-  return { server, port: (server.addr as Deno.NetAddr).port };
-}
-
-// A stand-in for a browser binary: a directory holding a shell script that
-// writes `printed` to its standard error and exits with `code`, never naming
-// an endpoint, and the launch options that point at it. The caller removes the
-// directory.
-async function fakeBrowser(printed: string, code: number): Promise<{
-  directory: string;
-  options: { path: string; args: string[] };
-}> {
-  const directory = await Deno.makeTempDir({ prefix: "deno-web-test-fake-" });
-  const path = `${directory}/browser`;
-  await Deno.writeTextFile(
-    path,
-    `#!/bin/sh\nprintf '%s\\n' '${printed}' >&2\nexit ${code}\n`,
-  );
-  await Deno.chmod(path, 0o755);
-  return {
-    directory,
-    options: { path, args: [`--user-data-dir=${directory}/profile`] },
-  };
+  madeByTest.push(() => server.shutdown());
+  return (server.addr as Deno.NetAddr).port;
 }
 
 describe("browser-process", () => {
+  afterEach(async () => {
+    const made = madeByTest.splice(0).reverse();
+    for (const putAway of made) {
+      await putAway();
+    }
+  });
+
   describe("stopBrowserProcess()", () => {
     it("ends a running process with `SIGTERM`", async () => {
-      const child = new Deno.Command("sh", {
-        args: ["-c", "read line"],
-        stdin: "piped",
-        stdout: "null",
-        stderr: "piped",
-      }).spawn();
+      const child = shell("read line", { stdin: "piped" });
 
       await stopBrowserProcess(child, standardErrorClosed(child));
 
       expect((await child.status).signal).toBe("SIGTERM");
-      await child.stdin.close();
     });
 
     it("returns for a process that has already exited, leaving its exit status intact", async () => {
-      const child = new Deno.Command("sh", {
-        args: ["-c", "exit 0"],
-        stdout: "null",
-        stderr: "piped",
-      }).spawn();
+      const child = shell("exit 0");
       const closed = standardErrorClosed(child);
       await child.status;
 
@@ -111,17 +138,16 @@ describe("browser-process", () => {
     });
 
     it("returns after a process that outlived the one it was given has exited", async () => {
-      const child = new Deno.Command("sh", {
-        args: ["-c", HOLDS_STANDARD_ERROR],
+      const child = shell(HOLDS_STANDARD_ERROR, {
         stdin: "piped",
         stdout: "piped",
-        stderr: "piped",
-      }).spawn();
+      });
       const closed = standardErrorClosed(child);
 
       // `cat` is running by the time the shell has said so, so the kill below
       // takes the shell without taking the holder of the pipe with it.
       const stdout = child.stdout.getReader();
+      madeByTest.push(() => stdout.cancel());
       const started = await stdout.read();
       expect(new TextDecoder().decode(started.value)).toBe("started\n");
 
@@ -139,25 +165,47 @@ describe("browser-process", () => {
       await stopping;
 
       expect(events).toEqual(["shell exited", "released", "stopped"]);
-      await stdout.cancel();
     });
   });
 
   describe("BrowserProcess", () => {
+    describe("instance members", () => {
+      describe("close()", () => {
+        it("returns for a browser that no longer answers", async () => {
+          const child = shell("read line", { stdin: "piped" });
+          // A browser whose connection has gone takes every answer with it,
+          // so nothing it is asked settles. The cast is what lets a stub of
+          // the two members stand in for astral's whole `Browser`.
+          let disconnected = false;
+          const browser = {
+            close: () => new Promise<void>(() => {}),
+            disconnect: () => {
+              disconnected = true;
+              return Promise.resolve();
+            },
+          } as unknown as AstralBrowser;
+
+          await new BrowserProcess(child, standardErrorClosed(child), browser)
+            .close();
+
+          expect(disconnected).toBe(true);
+          expect((await child.status).signal).toBe("SIGTERM");
+        });
+      });
+    });
+
     describe("static members", () => {
       describe("start()", () => {
         it("throws when the browser exits without naming an endpoint", async () => {
-          const { directory, options } = await fakeBrowser("no endpoint", 1);
+          const options = await fakeBrowser("no endpoint", 1);
 
           await expect(BrowserProcess.start(options)).rejects.toThrow(
             "Your binary refused to boot",
           );
-
-          await Deno.remove(directory, { recursive: true });
         });
 
         it("names the missing dependencies a browser reports", async () => {
-          const { directory, options } = await fakeBrowser(
+          const options = await fakeBrowser(
             "error while loading shared libraries: libnss3.so",
             127,
           );
@@ -165,13 +213,11 @@ describe("browser-process", () => {
           await expect(BrowserProcess.start(options)).rejects.toThrow(
             "missing system dependencies",
           );
-
-          await Deno.remove(directory, { recursive: true });
         });
 
         it("stops a browser that starts and then cannot be connected to", async () => {
-          const { server, port } = fakeEndpoint("0.0");
-          const { directory, options } = await fakeBrowser(
+          const port = fakeEndpoint("0.0");
+          const options = await fakeBrowser(
             `DevTools listening on ws://127.0.0.1:${port}/devtools/browser/x`,
             0,
           );
@@ -179,18 +225,13 @@ describe("browser-process", () => {
           await expect(BrowserProcess.start(options)).rejects.toThrow(
             "Differing protocol versions",
           );
-
-          await server.shutdown();
-          await Deno.remove(directory, { recursive: true });
         });
 
         it("throws when the launch names no `--user-data-dir`", async () => {
-          const { directory, options } = await fakeBrowser("no endpoint", 1);
+          const options = await fakeBrowser("no endpoint", 1);
 
           await expect(BrowserProcess.start({ ...options, args: [] })).rejects
             .toThrow("--user-data-dir");
-
-          await Deno.remove(directory, { recursive: true });
         });
       });
     });
