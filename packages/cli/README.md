@@ -3,17 +3,22 @@
 ## View pager
 
 `cf view [file]` is an interactive pager for transformed TypeScript, source
-files, and unified diffs. Named Markdown, JSON, JSONC, YAML, and Python files
-use their own syntax highlighting. Transformed compiler output piped without a
-filename keeps TypeScript highlighting when its module header identifies it.
-Python interpreter shebangs select Python for otherwise unrecognized names.
-Node, Deno, and Bun shebangs select the TypeScript and JavaScript language
-family. Other filename-free source and named files with unrecognized syntax are
-shown as plain text. For piped source, `--filename` selects syntax as though the
-input had that name. `--language` selects a language by its stable identifier or
-alias. Both options keep the pipe read-only and suppress unified-diff
-auto-detection. An explicit language takes priority when both options are
-present. Use `--diff` instead when the pipe is a unified diff.
+files, and unified diffs. Named Markdown, JSON, JSONC, JSON Lines, YAML, and
+Python files use their own syntax highlighting. Web manifests, TLDraw documents,
+Deno lock files, editor workspace files, and Swift package resolutions use the
+JSON highlighting their suffixes do not announce. A `.cfg` file uses JSON
+highlighting when the source in view opens a JSON object; that suffix is shared
+with unrelated syntaxes, so its name alone leaves it as plain text. Transformed
+compiler output piped without a filename keeps TypeScript highlighting when its
+module header identifies it. Python interpreter shebangs select Python for
+otherwise unrecognized names. Node, Deno, and Bun shebangs select the TypeScript
+and JavaScript language family. Other filename-free source and named files with
+unrecognized syntax are shown as plain text. For piped source, `--filename`
+selects syntax as though the input had that name. `--language` selects a
+language by its stable identifier or alias. Both options keep the pipe read-only
+and suppress unified-diff auto-detection. An explicit language takes priority
+when both options are present. Use `--diff` instead when the pipe is a unified
+diff.
 
 The binary language handles known binary filenames, input containing a NUL byte,
 and input that is not valid UTF-8. It starts in a read-only rendered view with

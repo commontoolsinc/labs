@@ -13,7 +13,11 @@ import {
   jsonDocument,
   jsonHighlightLines,
 } from "../lib/view/languages/json/json.ts";
-import { languageForFile } from "../lib/view/languages/language.ts";
+import {
+  decodeLanguageInput,
+  languageForFile,
+  languageForSource,
+} from "../lib/view/languages/language.ts";
 import type { Line, TokenClass } from "../lib/view/model.ts";
 import { parseDiff } from "../lib/view/diff.ts";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
@@ -44,6 +48,47 @@ Deno.test("json: language metadata selects JSON filenames", () => {
   assertEquals(languageForFile("main.ts").id, "typescript");
   assertEquals(languageForFile("README.md").id, "markdown");
   assertEquals(languageForFile(undefined).id, "plain-text");
+});
+
+Deno.test("json: language metadata selects JSON-shaped names without a JSON suffix", () => {
+  assertEquals(
+    languageForFile("packages/shell/public/manifest.webmanifest").id,
+    "json",
+  );
+  assertEquals(languageForFile("packages/memory/memory.tldr").id, "json");
+  assertEquals(languageForFile("/repo/deno.lock").id, "json");
+  assertEquals(languageForFile("bay.code-workspace").id, "json");
+  assertEquals(languageForFile("ios/Package.resolved").id, "json");
+  assertEquals(languageForFile("Cargo.lock").id, "plain-text");
+  assertEquals(languageForFile("package.resolved").id, "plain-text");
+});
+
+Deno.test("json: a shared .cfg extension needs an opening brace in the source", () => {
+  const syzkaller = '{\n\t"name": "gvisor",\n\t"cover": false\n}\n';
+  const tlc = "\\* A model.\nSPECIFICATION Spec\nCONSTANT Keys = {k1}\n";
+  const ini = "[defaults]\nroles_path = roles\n";
+
+  assertEquals(
+    languageForSource("images/syzkaller/default-gvisor-config.cfg", syzkaller)
+      .id,
+    "json",
+  );
+  assertEquals(languageForSource("tlaplus/LeaseOps.cfg", tlc).id, "plain-text");
+  assertEquals(languageForSource("ansible/ansible.cfg", ini).id, "plain-text");
+  assertEquals(languageForSource("model.cfg", "").id, "plain-text");
+  // The name alone never selects JSON, because a diff of a `.cfg` file shows
+  // no source that could settle which syntax it holds.
+  assertEquals(
+    languageForFile("images/syzkaller/default-gvisor-config.cfg").id,
+    "plain-text",
+  );
+  assertEquals(
+    decodeLanguageInput(
+      "images/syzkaller/default-gvisor-config.cfg",
+      new TextEncoder().encode(syzkaller),
+    ).language.id,
+    "json",
+  );
 });
 
 Deno.test("json: line-oriented files use JSON token classes", () => {
