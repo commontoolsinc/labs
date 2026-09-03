@@ -51,9 +51,10 @@ is shuttle's, and it is POSIX's:
   strip. Line terminators are in the separator class, so text carrying one
   splits across the break into a single run of tokens: a pasted second line
   arrives as more operands of the first command rather than as a command of
-  its own. A line break cannot refuse instead, because a value holding one
-  prints between single quotes and reading that back is the round trip
-  below.
+  its own. That is a choice and not a necessity — every value the printer
+  writes that holds a line break lands inside quotes, so refusing an
+  unquoted one would leave the round trip below whole. The round trip says
+  the choice is safe, not that it was forced.
 
 Quoting is what makes a value holding whitespace one operand, which is what
 the write surface below needs. `set draft '{"title": "a b"}'` is three
@@ -85,13 +86,13 @@ split nothing and would cost the bare printing of every handle, every slug,
 every path and every flag — which is to say nearly everything shuttle
 prints, leaving nothing conditional about conditional quoting.
 
-The `:` is the one character this grammar spends on structure that the set
-still leaves out. It marks a scheme and the `x:` base, which by the rule
-above would reserve it; but it is also in every handle — `of:fid1:…` — so
-quoting on it would quote every reference that prints, which is the cost
-the exclusion exists to avoid. A scheme is read at the head of an operand
-rather than by the split, which is what puts `:` with the address
-characters and not with the structural ones.
+Some characters this grammar spends on structure are left out all the same,
+and the same cost is the reason. `:` marks a scheme and the `x:` base, and
+it also sits in every handle — `of:fid1:…` — so reserving it would quote
+every reference that prints. `-` is the previous place and the stdin
+sentinel, and it opens every long flag. Each of them is read at the head of
+an operand, or as the whole of one, rather than by the split, which is what
+puts them with the address characters rather than with the reserved ones.
 
 The two halves are one decision: what the printer writes, the split reads
 back as the one value it was given. That is the whole of the guarantee. What
