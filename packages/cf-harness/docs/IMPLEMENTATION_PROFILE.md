@@ -4,6 +4,9 @@ Status: draft conformance statement\
 Profile date: 2026-09-03\
 Implementation revision: Labs `889e34c55a`
 
+The [system map](system-map/README.md) moves in lockstep with this
+implementation profile.
+
 This document describes `@commonfabric/cf-harness` against the draft Common
 Fabric
 [Agent Harness specifications](../../../docs/specs/agent-harness/README.md). It

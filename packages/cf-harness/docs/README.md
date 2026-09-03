@@ -27,6 +27,13 @@ migration notes live under `docs/history/` at the repository root.
   status, where the threats lie and which are closed by planned work, guarded by
   CFC, or held by people and process; with the procedure for keeping it true.
 
+The system map moves in lockstep with the implementation. A change that lands or
+downgrades a gate, adds a boundary, threat, sink, or posture, or changes what
+`CURRENT_STATE.md` or `IMPLEMENTATION_PROFILE.md` says updates the map's data
+tables and `SNAPSHOT` in the same pull request, following the map's
+[update procedure](system-map/README.md#updating-it). The map is a reading aid,
+never a source of truth; when it disagrees with code, the map is wrong.
+
 ## Normative boundary
 
 The implementation-independent runtime and CFC contracts live in

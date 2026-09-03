@@ -3,6 +3,9 @@
 Status: current implementation reference\
 Last verified: 2026-08-26
 
+The [system map](system-map/README.md) moves in lockstep with this current-state
+reference.
+
 `cf-harness` is an experimental but product-integrated Common Fabric agent
 runtime. Loom is its first product adapter and Pattern Factory is its first
 multi-phase orchestration adapter.
