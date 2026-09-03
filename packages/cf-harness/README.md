@@ -339,6 +339,18 @@ From [packages/cf-harness](.):
   discovery half of
   [`../../docs/plans/external-skill-acquisition.md`](../../docs/plans/external-skill-acquisition.md)
   is what it exists to exercise.
+- `scripts/hostile-skill-demo.sh` — the CT-2091 hostile-skill demo (CT-2066 Demo
+  3). One direct batch run under `max-enforcement / enforce-strict` with a
+  restricted parent surface (`delegate_task`, `describe_handle`,
+  `search_skills`, `acquire_skill`) that runs two arms over one finance-labeled
+  input cell: a real skill acquired from the registry and used by handle, and
+  the malicious [`fixtures/hostile-skills-root/`](fixtures/README.md) skill
+  delivered into a `pattern-author` child. After the run it emits the three
+  receipts — the canary grep over the parent run directory, the release-refusal
+  trace, and the persisted label plus `TransformedBy` on derived data. It reads
+  the identity keyfile from `CF_HARNESS_FABRIC_IDENTITY` and never echoes it;
+  override the toolshed, space, cell, and space-db through the environment
+  variables it documents at the top.
 
 ## CLI Example
 

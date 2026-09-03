@@ -21,6 +21,7 @@ dist/
 .ct/
 .cf-harness-artifacts/
 .cf-harness-console/
+.cf-harness-hostile-demo*/
 claude-research.key
 *.key
 # Backup keys the tailscale share script rotates aside (e.g. cf.key.implicit-trust.bak)
