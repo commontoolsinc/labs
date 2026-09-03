@@ -95,3 +95,54 @@ Deno.test("diskHandleSeed leaves an already-committed empty contract alone", () 
   // and keeps the rule one sentence long.
   assertEquals(diskHandleSeed(ID, { id: ID, tables: {}, rev: 0 }), undefined);
 });
+
+Deno.test("diskHandleSeed repairs a handle whose id is an empty string", () => {
+  // `""` is a string, so a presence check on `id` reads this doc as committed.
+  // It is not a handle any query can use — `readDbRef` needs an id that names
+  // this source — so leaving it alone points the link at a handle that can
+  // never resolve, and nothing would ever re-seed it.
+  assertEquals(diskHandleSeed(ID, { id: "", tables: {}, rev: 0 }), {
+    id: ID,
+    tables: {},
+    rev: 0,
+  });
+});
+
+Deno.test("diskHandleSeed repairs an id that names a different source, keeping the contract", () => {
+  // The id is the one field this (space, path) derives, so it is the one field
+  // a repair rewrites. `tables[].ifc` carries per-column read labels and a
+  // store's effective label may strengthen but never weaken, so a declared
+  // contract travels onto the repaired id rather than being dropped; `owner`,
+  // `scope` and `rev` travel for the same reason they survive a re-link.
+  const declared = {
+    records: {
+      properties: { body: { ifc: { confidentiality: ["finance"] } } },
+    },
+  };
+  assertEquals(
+    diskHandleSeed(ID, {
+      id: "fid1:another-source",
+      tables: declared,
+      owner: "did:key:z6MkOwner",
+      scope: "user",
+      rev: 7,
+    }),
+    {
+      id: ID,
+      tables: declared,
+      owner: "did:key:z6MkOwner",
+      scope: "user",
+      rev: 7,
+    },
+  );
+});
+
+Deno.test("diskHandleSeed drops a malformed contract when it repairs", () => {
+  // Only a well-formed contract is worth carrying: a `tables` that is not an
+  // object declares no column labels, so keeping it would preserve nothing and
+  // write back a value no query-side load can read.
+  assertEquals(
+    diskHandleSeed(ID, { id: "", tables: "not-a-contract" as never }),
+    { id: ID, tables: {}, rev: 0 },
+  );
+});

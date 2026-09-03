@@ -3901,14 +3901,33 @@ export async function linkSqliteDiskSource(
   );
   await handle.sync();
   let kept: DiskHandleValue | undefined;
+  let repaired: DiskHandleValue | undefined;
   const writeRes = await pieces.runtime.editWithRetry((tx) => {
     const target = handle.withTx(tx);
     const prior = target.get() as DiskHandleValue | undefined;
     const seed = diskHandleSeed(id, prior);
     if (seed !== undefined) target.set(seed);
     kept = seed === undefined ? prior : undefined;
+    // A first link seeds an empty contract, so a written seed that carries
+    // tables can only be a contract this repair brought across from a handle
+    // whose own `id` was unusable.
+    repaired = seed !== undefined && Object.keys(seed.tables ?? {}).length > 0
+      ? seed
+      : undefined;
   });
   if (writeRes.error) throw writeRes.error;
+  if (repaired !== undefined) {
+    // The same reporting obligation as the kept-contract warning below, for
+    // the same reason: the contract now sitting on this handle was declared
+    // against a handle that named something else, so its per-column labels may
+    // describe a different database. Keeping it is the monotone-safe direction
+    // and still worth saying out loud.
+    const tables = Object.keys(repaired.tables ?? {}).length;
+    console.warn(
+      `cf piece link: repaired an unusable handle id, keeping the existing ` +
+        `contract, ${tables} ${tables === 1 ? "table" : "tables"}`,
+    );
+  }
   if (kept !== undefined) {
     // Say so. Keeping the contract is right — its per-column `ifc` may only
     // strengthen — but the file on disk can have moved on since someone

@@ -66,6 +66,29 @@ export interface DiskHandleValue {
 }
 
 /**
+ * A plain, inline copy of a stored contract, or `{}` when there is nothing
+ * well-formed to keep.
+ *
+ * The caller reads `prior` off a live cell, so `tables` can be a proxy over
+ * stored data. A handle's contract must be written INLINE — a query-side load
+ * resolves no links inside it — so the value that goes back is a materialized
+ * copy rather than the proxy itself.
+ */
+function inlineTables(tables: unknown): Record<string, unknown> {
+  if (tables === null || typeof tables !== "object" || Array.isArray(tables)) {
+    return {};
+  }
+  try {
+    const copy = JSON.parse(JSON.stringify(tables)) as unknown;
+    return copy !== null && typeof copy === "object" && !Array.isArray(copy)
+      ? copy as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
  * The handle value a link action should write for the on-disk source at `id`,
  * or `undefined` to leave an already-committed handle exactly as it stands.
  *
@@ -89,10 +112,30 @@ export function diskHandleSeed(
   id: string,
   prior: DiskHandleValue | undefined,
 ): DiskHandleValue | undefined {
-  // "Committed" is decided by the handle's OWN id, not by the doc being
-  // present. A doc holding `null`, or a partial value with no `id`, is not a
-  // handle any query can use — `readDbRef` refuses a value whose `id` is not a
-  // string — so treating it as committed would leave the link pointing at a
-  // handle that can never resolve, and nothing would re-seed it.
-  return typeof prior?.id === "string" ? undefined : { id, tables: {}, rev: 0 };
+  // "Committed" is decided by the handle's own `id` BEING the one this
+  // (space, path) derives — not by the doc being present, and not by the field
+  // merely holding a string. A doc holding `null`, a partial value with no
+  // `id`, an empty string, or an id that names a different source is not a
+  // handle any query can use: `readDbRef` refuses a value whose `id` is not a
+  // string, and an id that does resolve reaches another source's registry
+  // entry. Treating any of them as committed leaves the link pointing at a
+  // handle that can never resolve this file, and nothing re-seeds it.
+  if (prior?.id === id) return undefined;
+
+  // A repair rewrites the one field this function can derive and preserves the
+  // rest, because dropping a field is the direction that loses something. The
+  // contract is why: carrying a declared `tables` onto the repaired id can only
+  // over-label, which monotonicity permits, while dropping it lowers every
+  // column's read label to nothing — the same silent downgrade the re-link rule
+  // above exists to prevent. `owner`, `scope` and `rev` travel for the reason
+  // that paragraph gives. Only a well-formed contract is worth carrying: a
+  // `tables` that is not an object declares no labels to preserve.
+  const seed: DiskHandleValue = {
+    id,
+    tables: inlineTables(prior?.tables),
+    rev: typeof prior?.rev === "number" ? prior.rev : 0,
+  };
+  if (typeof prior?.scope === "string") seed.scope = prior.scope;
+  if (typeof prior?.owner === "string") seed.owner = prior.owner;
+  return seed;
 }

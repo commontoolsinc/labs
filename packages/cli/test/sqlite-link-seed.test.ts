@@ -148,6 +148,40 @@ describe("linkSqliteDiskSource handle seeding", () => {
     expect(linkCalls.length).toBe(1);
   });
 
+  it("repairs a handle whose id names a different source, and says that it did", async () => {
+    // The handle sits at the id this (space, path) derives, so a stored `id`
+    // that names something else is corrupt: a query following it reaches the
+    // wrong registry entry, and an id-presence check would leave it there.
+    // Repairing the id carries the declared contract across rather than
+    // lowering every column's read label to nothing.
+    const declared = {
+      records: {
+        properties: { body: { ifc: { confidentiality: ["finance"] } } },
+      },
+    };
+    const seed = runtime.edit();
+    handleCell().withTx(seed).set(
+      { id: "of:fid1:another-source", tables: declared, rev: 7 } as never,
+    );
+    expect((await seed.commit()).error).toBeUndefined();
+
+    await link();
+
+    const handle = handleCell();
+    await handle.pull();
+    expect(handle.get()).toEqual({
+      id: deriveDiskHandleId(signer.did(), DISK_PATH),
+      tables: declared,
+      rev: 7,
+    });
+    expect(warnings).toEqual([
+      "cf piece link: repaired an unusable handle id, keeping the existing " +
+      "contract, 1 table",
+    ]);
+    expect(registered.length).toBe(1);
+    expect(linkCalls.length).toBe(1);
+  });
+
   it("re-seeds a handle whose stored value carries no id", async () => {
     // Not a usable handle: `readDbRef` refuses a value whose `id` is not a
     // string, so a doc in this state must be seeded rather than preserved.
