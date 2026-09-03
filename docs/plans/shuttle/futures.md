@@ -89,6 +89,23 @@ decisions point here where they defer.
   its v1 member, and `set x - < https://…` joins when a use rules it in.
 - **`search`.** A `search <query>` verb at any place, over what stands
   below it. Pipes over `ls` cover the interim.
+- **A canonical output form.** A second form for everything shuttle prints:
+  RFC 6901 pointers, no shuttle quoting, exactly what `cf` parses. `pwd`,
+  `ls` and `get` all print, so the fork is a dimension of the output rather
+  than one verb's flag, and the switch is a `where` dimension — the form is
+  an ambient property of the whole run, and `where` is the ambient record's
+  one surface (decision 22). It arrives when a caller exists to want it, and
+  the scripting bundle above is where one does: stable machine-readable
+  output is part of that bundle rather than of the interactive surface.
+- **Vim keybindings, as a `where` dimension.** Modal editing at the prompt,
+  an option and never a default. What keeps it reachable is that the line
+  editor is built on the view substrate rather than on `node:readline`,
+  which offers no keymap hook at all: `EditBuffer`
+  (`packages/cli/lib/view/editbuffer.ts`) holds the motions, bound to emacs
+  keys by the substrate's own key handler, and `decodeKeys`
+  (`packages/cli/lib/view/keys.ts`) supplies the key stream a binding table
+  reads. So what this costs is a second binding table over motions that
+  already exist, plus the mode the table switches on.
 - **Which space a piece is in.** Naming the space that holds an arbitrary
   piece, rather than the one the place stands in. It is a query over the
   fabric and not a dimension of the ambient record, so it arrives with

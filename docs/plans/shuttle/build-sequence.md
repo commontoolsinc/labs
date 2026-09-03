@@ -158,6 +158,24 @@ Landed:
   revisits this trade rather than inheriting it. No verb reaches the
   connection yet, and the place is untouched.
 
+- **B1b (slice 2) — the line grammar** (`packages/shuttle/src/line.ts`). How
+  a line becomes tokens, and how a value prints as one of them. `cf` is
+  handed words the operating system's shell already split; shuttle is handed
+  the line, and both halves are its own. The split is POSIX quoting —
+  whitespace separates, single quotes are literal, double quotes group, a
+  backslash escapes one character, and runs that touch are one token — and a
+  line is refused for one of two reasons: a quote that never closes, naming
+  the column it opened at, and a trailing backslash with nothing to escape.
+  The printer quotes only where quoting is needed, which is what keeps a
+  slug, a handle, a flag and a path each printing as themselves; what forces
+  it is whitespace, either quote, the backslash, and the characters the
+  grammar spends on structure, collected in one constant rather than counted
+  in prose. The characters an operand writes an address with stay out of that
+  set, which is what leaves the relative-segment question below intact: what
+  the pair guarantees is that a printed value splits back into that one
+  value, and whether a quote should also reach the reading of a token is
+  still `ls`'s to settle. No verb reads a line yet.
+
 Still to come:
 
 - **The prompt, a readline loop, and the verbs** (B1b for the verbs and
