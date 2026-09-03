@@ -504,10 +504,22 @@ describe("listing", () => {
      * nothing about the rows the naming rule has most to say about. Two of
      * these are chosen for what they do to a line rather than for what they
      * say: one holds an odd quote, so the line as a whole does not split and
-     * only its front can be copied, and one holds a line break — written as an
-     * escape, which `deno task check-control-characters` would not have caught
-     * as a literal — which would open a second line, with a name on it, if the
-     * renderer wrote it as it stands.
+     * only its front can be copied, and one holds a line break, which would
+     * open a second line with a name on it if the renderer wrote it as it
+     * stands.
+     *
+     * The break is written as an escape, and no gate would have said so had it
+     * been written as the byte. A quoted string holding a real break does not
+     * parse, so it would have had to become a template literal — and there
+     * `check-control-characters` skips the newline outright, the branch that
+     * counts a line running before the one that tests for a codepoint below
+     * `0x20`, so a literal break never reaches that test. The gate's other
+     * blind spot is the opposite one, and `MARKS` above is where this file met
+     * it: a no-break space and the Unicode line and paragraph separators are
+     * above `U+007F`, so every byte of them is at or above `0x80` and none can
+     * be a byte the test sees. Both holes are in the one gate, which is why a
+     * fixture writes an awkward character as an escape on its own account
+     * rather than on the gate's.
      */
     const REPORTED = [
       undefined,
