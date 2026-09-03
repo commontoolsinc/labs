@@ -173,11 +173,15 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
 ## Headless / agent use
 
 Agents are first-class participants. Treat the running piece as authoritative:
-start with `cf piece describe --piece <piece>`,
-`cf piece verbs --piece <piece> --json`, and
-`cf piece call --piece <piece> <verb> --help --json`. The default verb listing
-is the contract surface; `--all` additionally shows UI wrappers and deprecated
-verbs. Against a deployed board piece:
+start with `cf piece verbs --piece <piece> --json`, which carries the deployed
+pattern reference and every verb's prose and schemas. Reach for
+`cf piece describe --piece <piece>` when piece-wide purpose, state, or input
+documentation is needed, and for
+`cf piece call --piece <piece> <verb> --help
+--json` once a verb is chosen; each
+is its own cold CLI process, so the three are not a default preflight. The
+default verb listing is the contract surface; `--all` additionally shows UI
+wrappers and deprecated verbs. Against a deployed board piece:
 
 ```bash
 cf piece call --piece <board> \
