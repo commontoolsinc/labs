@@ -2652,21 +2652,9 @@ describe("runtime-processor", () => {
           cell: ref,
         },
       );
-      const responseLink = (response.value as {
-        nested: {
-          "/": {
-            "link@1": {
-              cfcLabelView: {
-                entries: Array<
-                  { label: { confidentiality: Array<Record<string, unknown>> } }
-                >;
-              };
-            };
-          };
-        };
-      }).nested["/"]["link@1"];
-      const atom =
-        responseLink.cfcLabelView.entries[0].label.confidentiality[0];
+      const atom = sourcedCaveatOf(
+        (response.value as { nested: SigilLink }).nested,
+      );
       expect(atom.source).toBe("did:key:alice");
     });
 
