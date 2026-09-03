@@ -239,9 +239,11 @@ export const EnvSchema = z.object({
     .optional(),
   MEMORY_DOCUMENT_CACHE_MAX_ENTRIES: z.coerce.number().int().positive()
     .optional(),
-  // Process-wide bound across every open space's document cache (default
-  // DOCUMENT_CACHE_PROCESS_BUDGET_BYTES in packages/memory/v2/server.ts).
-  MEMORY_DOCUMENT_CACHE_PROCESS_BUDGET_BYTES: z.coerce.number().int()
+  // Bound across every space's document cache on the memory server this
+  // process hosts (default DOCUMENT_CACHE_TOTAL_BUDGET_BYTES in
+  // packages/memory/v2/server.ts; one memory server per toolshed process, so
+  // in deployment this is the process's bound).
+  MEMORY_DOCUMENT_CACHE_TOTAL_BUDGET_BYTES: z.coerce.number().int()
     .positive().optional(),
 
   // Set ONLY when a trusted reverse proxy sits in front of this process and

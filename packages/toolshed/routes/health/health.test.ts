@@ -39,14 +39,6 @@ Deno.test("health routes", async (t) => {
         sessionOpenAuth: { audience: "did:key:z6Mk-health-stats-audience" },
       });
       try {
-        const response = await app.request("/api/health/stats");
-        assertEquals(response.status, 200);
-        const json = await response.json();
-        assertEquals(json.documentCaches, server.documentCachesDiagnostics());
-        assertEquals(typeof json.documentCaches.processBudgetBytes, "number");
-        assertEquals(json.documentCaches.bytes, 0);
-        assertEquals(json.documentCaches.spaces, {});
-        // The declared response schema admits the live response.
         const declared = (statsRoute.responses as Record<
           number,
           {
@@ -57,7 +49,50 @@ Deno.test("health routes", async (t) => {
             };
           }
         >)[200].content["application/json"].schema;
-        assertEquals(declared.safeParse(json).success, true);
+        const stats = async () => {
+          const response = await app.request("/api/health/stats");
+          assertEquals(response.status, 200);
+          const json = await response.json();
+          assertEquals(json.documentCaches, server.documentCachesDiagnostics());
+          // The declared response schema admits the live response.
+          assertEquals(declared.safeParse(json).success, true);
+          return json;
+        };
+        const empty = await stats();
+        assertEquals(typeof empty.documentCaches.totalBudgetBytes, "number");
+        assertEquals(empty.documentCaches.bytes, 0);
+        assertEquals(empty.documentCaches.totalBudgetEvictions, 0);
+        assertEquals(empty.documentCaches.spaces, {});
+        // Any read opens a space; its record carries every per-space field
+        // the schema declares, and the schema refuses a malformed one.
+        const space = "did:key:z6Mk-health-stats-space";
+        await server.evaluateGraphQuery(space, {
+          roots: [{ id: "of:doc:1", selector: { path: [], schema: true } }],
+        });
+        const populated = await stats();
+        const cache = populated.documentCaches.spaces[space];
+        assertEquals(
+          Object.keys(cache).sort(),
+          [
+            "budgetBytes",
+            "bytes",
+            "entries",
+            "evictions",
+            "hits",
+            "maxEntries",
+            "misses",
+          ],
+        );
+        assertEquals(
+          declared.safeParse({
+            ...populated,
+            documentCaches: {
+              ...populated.documentCaches,
+              spaces: { [space]: { ...cache, hits: "wrong" } },
+            },
+          }).success,
+          false,
+        );
       } finally {
         await server.close();
       }

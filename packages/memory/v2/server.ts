@@ -398,22 +398,27 @@ const withdrawProvider = <T>(providers: T[], provider: T): void => {
 };
 
 /** Every open engine's decoded-document cache, keyed by space, under the
- * process-wide budget the Server enforces across them. */
+ * total budget this server holds across them: `bytes` is the total retained
+ * now and `totalBudgetEvictions` what holding it has cost, lifetime. */
 export type DocumentCachesDiagnostics = {
-  processBudgetBytes: number;
+  totalBudgetBytes: number;
   bytes: number;
+  totalBudgetEvictions: number;
   spaces: Record<string, Engine.DocumentCacheDiagnostics>;
 };
 
 /**
- * Default process-wide bound on decoded documents retained across every open
- * space's cache: twice the per-space default, room for two active corpora at
- * their full per-space allowance (a Topics-board page load retains 17.7 MB;
- * see DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES for the sizing). Enforced as each
- * document is cached (Engine's `onDocumentCached`), least recently used
- * space first and oldest entries first within it.
+ * Default bound on decoded documents retained across every space one Server
+ * serves: twice the per-space default, room for two active corpora at their
+ * full per-space allowance (a Topics-board page load retains 17.7 MB; see
+ * DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES for the sizing). Held by the server's
+ * `Engine.DocumentCacheCoordinator` on every cache access, least recently
+ * used space first and oldest entries first within it. Per Server instance,
+ * not per process: the toolshed hosts one memory server, so in deployment
+ * this is the process's bound, while a second live server (tests construct
+ * them) keeps its own total under its own budget.
  */
-export const DOCUMENT_CACHE_PROCESS_BUDGET_BYTES = 256 * 1024 * 1024;
+export const DOCUMENT_CACHE_TOTAL_BUDGET_BYTES = 256 * 1024 * 1024;
 
 /** Live servers' providers in construction order; a server removes its own
  * on close(), so the newest LIVE server is always the one reported. */
@@ -1389,10 +1394,9 @@ export class Server {
   // (server-execution v2 Phase 5; see openEngine / #liveCoHostedLeaseSpaceFor).
   #resolvedEngines = new Map<string, Engine.Engine>();
 
-  /** Per-space use stamps, bumped on every request that reaches an engine:
-   * the order the cross-space document-cache budget drains spaces in. */
-  #engineUse = new Map<string, number>();
-  #engineUseClock = 0;
+  /** Holds `documentCacheTotalBudgetBytes` across this server's engines and
+   * keeps their recency; every engine this server opens reports to it. */
+  #documentCacheCoordinator: Engine.DocumentCacheCoordinator;
   // Synthesized session state for direct out-of-band document writes, such as blob uploads.
   #directSessionId = `server:${crypto.randomUUID()}`;
   #directLocalSeq = 0;
@@ -1505,10 +1509,10 @@ export class Server {
       documentCacheBudgetBytes?: number;
       documentCacheMaxEntries?: number;
 
-      /** Process-wide bound on decoded documents retained across all open
-       * spaces (default DOCUMENT_CACHE_PROCESS_BUDGET_BYTES); enforced
-       * least-recently-used space first. */
-      documentCacheProcessBudgetBytes?: number;
+      /** Bound on decoded documents retained across every space this
+       * server serves (default DOCUMENT_CACHE_TOTAL_BUDGET_BYTES; per
+       * instance, see there), held least-recently-used space first. */
+      documentCacheTotalBudgetBytes?: number;
 
       authorizeSessionOpen: (
         message: SessionOpenRequest,
@@ -1591,8 +1595,12 @@ export class Server {
     Engine.validateDocumentCacheBounds({
       documentCacheBudgetBytes: options.documentCacheBudgetBytes,
       documentCacheMaxEntries: options.documentCacheMaxEntries,
-      documentCacheProcessBudgetBytes: options.documentCacheProcessBudgetBytes,
+      documentCacheTotalBudgetBytes: options.documentCacheTotalBudgetBytes,
     });
+    this.#documentCacheCoordinator = new Engine.DocumentCacheCoordinator(
+      options.documentCacheTotalBudgetBytes ??
+        DOCUMENT_CACHE_TOTAL_BUDGET_BYTES,
+    );
     // Module-level providers for the health route (push-priority counters,
     // Phase 6; document caches): the newest live server is reported, and
     // close() withdraws exactly this server's.
@@ -1601,34 +1609,6 @@ export class Server {
       this.#documentCachesDiagnosticsProvider,
     );
   }
-
-  /** Evict, least recently used space first and oldest entries first
-   * within it, until the decoded documents retained across every open
-   * space fit the process-wide budget. Runs as each engine caches a
-   * document (`onDocumentCached`) — the one moment the total grows — so the
-   * bound holds at every return, whichever path read; cheap enough for
-   * that: a sum over the open engines, and no work at all while under
-   * budget. */
-  #enforceDocumentCacheBudget(): void {
-    const budget = this.options.documentCacheProcessBudgetBytes ??
-      DOCUMENT_CACHE_PROCESS_BUDGET_BYTES;
-    let total = 0;
-    for (const engine of this.#resolvedEngines.values()) {
-      total += engine.documentCacheBytes;
-    }
-    if (total <= budget) return;
-    const byUse = [...this.#resolvedEngines].sort(([a], [b]) =>
-      (this.#engineUse.get(a) ?? 0) - (this.#engineUse.get(b) ?? 0)
-    );
-    for (const [, engine] of byUse) {
-      if (total <= budget) return;
-      total -= Engine.evictDocumentCacheEntries(engine, total - budget);
-    }
-  }
-
-  /** Handed to every engine this server opens: the process-wide budget is
-   * held at insertion time. */
-  #onDocumentCached = () => this.#enforceDocumentCacheBudget();
 
   /** This server's health-route providers, kept so close() can withdraw
    * exactly them and no other server's. */
@@ -1639,15 +1619,14 @@ export class Server {
    * nothing is opened by asking. */
   documentCachesDiagnostics(): DocumentCachesDiagnostics {
     const spaces: Record<string, Engine.DocumentCacheDiagnostics> = {};
-    let bytes = 0;
     for (const [space, engine] of this.#resolvedEngines) {
       spaces[space] = Engine.documentCacheDiagnostics(engine);
-      bytes += engine.documentCacheBytes;
     }
+    const coordinator = this.#documentCacheCoordinator;
     return {
-      processBudgetBytes: this.options.documentCacheProcessBudgetBytes ??
-        DOCUMENT_CACHE_PROCESS_BUDGET_BYTES,
-      bytes,
+      totalBudgetBytes: coordinator.budgetBytes,
+      bytes: coordinator.bytes,
+      totalBudgetEvictions: coordinator.evictions,
       spaces,
     };
   }
@@ -6814,10 +6793,6 @@ export class Server {
    * it out of reach.
    */
   private openEngine(space: string): Promise<Engine.Engine> {
-    // Every request that reaches an engine passes here: stamp the space's
-    // use, the order the cross-space document-cache budget drains in (the
-    // budget itself is held as each engine caches, see #onDocumentCached).
-    this.#engineUse.set(space, ++this.#engineUseClock);
     const existing = this.#engines.get(space);
     if (existing !== undefined) {
       return existing;
@@ -6839,7 +6814,7 @@ export class Server {
         operationCheckpointInterval: this.options.operationCheckpointInterval,
         documentCacheBudgetBytes: this.options.documentCacheBudgetBytes,
         documentCacheMaxEntries: this.options.documentCacheMaxEntries,
-        onDocumentCached: this.#onDocumentCached,
+        documentCacheCoordinator: this.#documentCacheCoordinator,
       });
     })();
     // The SYNC engine view (server-execution v2 Phase 5): the read-row

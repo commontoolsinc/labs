@@ -1012,10 +1012,9 @@ export type Engine = {
 
   documentCacheStats: DocumentCacheStats;
 
-  /** Told after each entry that reaches {@link Engine.documentCache} (the
-   * open option of the same name): where a host holds a bound across
-   * engines. */
-  onDocumentCached?: (engine: Engine) => void;
+  /** The coordinator this engine's cache reports to for the bound across
+   * engines (the open option of the same name), if it has one. */
+  documentCacheCoordinator?: DocumentCacheCoordinator;
 
   /**
    * Where {@link cacheDocumentForRevision} puts entries while a commit is
@@ -1106,15 +1105,14 @@ export type OpenOptions = {
   documentCacheMaxEntries?: number;
 
   /**
-   * Called with this engine after each entry is added to its cache. A host
-   * that bounds decoded documents across engines (the Server's process-wide
-   * budget) enforces that bound here, at the one moment the total grows,
-   * rather than around the operations that read: every read path is
-   * covered without naming one, and the bound holds at every return. It may
-   * evict from this engine or any other; an entry evicted straight away was
-   * served and is simply not retained.
+   * The {@link DocumentCacheCoordinator} bounding decoded documents across
+   * the engines that share it (a Server's spaces). The cache reports to it
+   * on every access — a hit refreshes this engine's recency; an insertion
+   * also grows the total and trims least-recently-used engines first — so
+   * the bound holds at every return whichever path reached the engine, a
+   * retained engine's direct reads included.
    */
-  onDocumentCached?: (engine: Engine) => void;
+  documentCacheCoordinator?: DocumentCacheCoordinator;
 };
 
 export type InvocationRecord = {
@@ -1391,7 +1389,7 @@ export const DEFAULT_OPERATION_CHECKPOINT_INTERVAL = 100;
  * Least-recently-read eviction under a budget SMALLER than a corpus's working
  * set serves nothing (each miss displaces what the next read wants), so the
  * per-space default errs on the side of fitting; the Server bounds the total
- * across spaces (its `documentCacheProcessBudgetBytes`), and a host lowers
+ * across spaces (its `documentCacheTotalBudgetBytes`), and a host lowers
  * either through the toolshed's MEMORY_DOCUMENT_CACHE_* variables.
  * `documentCaches` on /api/health/stats shows `evictions` when a space does
  * not fit. Superseded revisions, read once more at most, age out on their
@@ -1411,7 +1409,7 @@ export const validateDocumentCacheBounds = (
     Record<
       | "documentCacheBudgetBytes"
       | "documentCacheMaxEntries"
-      | "documentCacheProcessBudgetBytes",
+      | "documentCacheTotalBudgetBytes",
       number
     >
   >,
@@ -1423,6 +1421,94 @@ export const validateDocumentCacheBounds = (
     }
   }
 };
+
+/**
+ * The bound on decoded documents retained across the engines that share it:
+ * a Server's spaces, under its `documentCacheTotalBudgetBytes`.
+ *
+ * Every cache access reports here, so both facts the bound rests on are
+ * exact at every return whichever path reached the engine — a retained
+ * engine handed to the runner as much as a request through the Server. The
+ * total in bytes is kept incrementally (an insertion adds, an eviction of
+ * any kind subtracts, a closed engine leaves), and recency is a set of
+ * engines in access order that a hit or an insertion re-inserts into. The
+ * common under-budget insertion is therefore O(1), and over budget the trim
+ * walks only its victims: least recently used engine first, oldest entries
+ * first within it.
+ *
+ * Engine code only. The class is closed — a private field keeps duck-typed
+ * substitutes out — so nothing a host wrote runs inside a cache access; in
+ * particular nothing foreign runs after a commit is durable, when the
+ * entries the commit staged reach the cache.
+ */
+export class DocumentCacheCoordinator {
+  #budgetBytes: number;
+  #bytes = 0;
+  #evictions = 0;
+  /** Least recently used first. */
+  #engines = new Set<Engine>();
+
+  constructor(budgetBytes: number) {
+    validateDocumentCacheBounds({ documentCacheTotalBudgetBytes: budgetBytes });
+    this.#budgetBytes = budgetBytes;
+  }
+
+  /** The bound, in encoded UTF-8 bytes. */
+  get budgetBytes(): number {
+    return this.#budgetBytes;
+  }
+
+  /** Bytes retained across every engine reporting here. */
+  get bytes(): number {
+    return this.#bytes;
+  }
+
+  /** Entries evicted to hold the total budget, lifetime. An engine's own
+   * budget or cap evicts on its own account and is not counted here. */
+  get evictions(): number {
+    return this.#evictions;
+  }
+
+  /** Engines that have reported an access and not closed. */
+  get engines(): number {
+    return this.#engines.size;
+  }
+
+  /** A hit in `engine`: it is now the most recently used. */
+  touched(engine: Engine): void {
+    this.#engines.delete(engine);
+    this.#engines.add(engine);
+  }
+
+  /** An entry of `weight` bytes left some engine's cache — on the engine's
+   * own account (its budget or cap) or in a coordinator trim. */
+  released(weight: number): void {
+    this.#bytes -= weight;
+  }
+
+  /** `engine` retained an entry of `weight` bytes: it is the most recently
+   * used, and if the total is now over budget the least recently used
+   * engines give up their oldest entries until it fits again. The engine
+   * that just inserted is the last to be asked. */
+  admitted(engine: Engine, weight: number): void {
+    this.#bytes += weight;
+    this.touched(engine);
+    if (this.#bytes <= this.#budgetBytes) return;
+    for (const victim of this.#engines) {
+      if (this.#bytes <= this.#budgetBytes) return;
+      const before = victim.documentCacheStats.evictions;
+      evictDocumentCacheEntries(victim, this.#bytes - this.#budgetBytes);
+      this.#evictions += victim.documentCacheStats.evictions - before;
+    }
+  }
+
+  /** `engine` closed: what it retained is gone. */
+  removed(engine: Engine): void {
+    if (this.#engines.delete(engine)) {
+      this.#bytes -= engine.documentCacheBytes;
+    }
+  }
+}
 
 const prepareStatements = (database: Database): PreparedStatements => ({
   insertAuthorization: database.prepare(INSERT_AUTHORIZATION),
@@ -1873,7 +1959,7 @@ export const open = async (
     operationCodecs = createDefaultOperationCodecRegistry(),
     documentCacheBudgetBytes = DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES,
     documentCacheMaxEntries = DEFAULT_DOCUMENT_CACHE_MAX_ENTRIES,
-    onDocumentCached,
+    documentCacheCoordinator,
   }: OpenOptions,
 ): Promise<Engine> => {
   if (
@@ -1916,7 +2002,9 @@ export const open = async (
     documentCacheBudgetBytes,
     documentCacheMaxEntries,
     documentCacheStats: { hits: 0, misses: 0, evictions: 0 },
-    ...(onDocumentCached === undefined ? {} : { onDocumentCached }),
+    ...(documentCacheCoordinator === undefined
+      ? {}
+      : { documentCacheCoordinator }),
   };
 };
 
@@ -1933,8 +2021,8 @@ export const documentCacheDiagnostics = (
 
 /**
  * Evict the least recently read entries until at least `bytes` have been
- * freed or the cache is empty; returns what was freed. The Server's
- * cross-space budget drains engines through this, least recently used
+ * freed or the cache is empty; returns what was freed. The coordinator's
+ * cross-engine budget drains engines through this, least recently used
  * engine first.
  */
 export const evictDocumentCacheEntries = (
@@ -1943,14 +2031,22 @@ export const evictDocumentCacheEntries = (
 ): number => {
   let freed = 0;
   while (freed < bytes && engine.documentCache.size > 0) {
-    const oldestKey = engine.documentCache.keys().next().value!;
-    const oldest = engine.documentCache.get(oldestKey)!;
-    engine.documentCache.delete(oldestKey);
-    engine.documentCacheBytes -= oldest.weight;
-    engine.documentCacheStats.evictions++;
-    freed += oldest.weight;
+    freed += dropOldestDocumentCacheEntry(engine);
   }
   return freed;
+};
+
+/** Drop the least recently read entry and return its weight. Every eviction
+ * passes here, so the engine's byte count and its coordinator's total move
+ * together. */
+const dropOldestDocumentCacheEntry = (engine: Engine): number => {
+  const oldestKey = engine.documentCache.keys().next().value!;
+  const oldest = engine.documentCache.get(oldestKey)!;
+  engine.documentCache.delete(oldestKey);
+  engine.documentCacheBytes -= oldest.weight;
+  engine.documentCacheStats.evictions++;
+  engine.documentCacheCoordinator?.released(oldest.weight);
+  return oldest.weight;
 };
 
 const utf8Encoder = new TextEncoder();
@@ -1962,6 +2058,10 @@ const storedByteLength = (text: string | null | undefined): number =>
   text ? utf8Encoder.encode(text).byteLength : 0;
 
 export const close = (engine: Engine): void => {
+  // The cache goes with the engine, and its coordinator stops counting it.
+  engine.documentCacheCoordinator?.removed(engine);
+  engine.documentCache.clear();
+  engine.documentCacheBytes = 0;
   engine.database.close();
 };
 
@@ -2357,6 +2457,7 @@ const readStateForScopeKey = (
     engine.documentCache.delete(cacheKey);
     engine.documentCache.set(cacheKey, cached);
     engine.documentCacheStats.hits++;
+    engine.documentCacheCoordinator?.touched(engine);
     document = cached.document;
   } else {
     engine.documentCacheStats.misses++;
@@ -6888,9 +6989,9 @@ const documentCacheKey = (
  * (see DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES): a working set that fits stays
  * resident across every walk that reads it, and what ages out is what was
  * not read again — superseded revisions foremost. An entry heavier than the
- * whole budget is served but not retained. A host bounding the total across
- * engines hears of each insertion (`onDocumentCached`) and trims then, the
- * one moment that total grows.
+ * whole budget is served but not retained. The engine's coordinator, if it
+ * has one, hears of each insertion and trims across engines then, the one
+ * moment its total grows.
  */
 const cacheDocumentForRevision = (
   engine: Engine,
@@ -6915,15 +7016,11 @@ const cacheDocumentForRevision = (
     (engine.documentCache.size >= engine.documentCacheMaxEntries ||
       engine.documentCacheBytes + weight > engine.documentCacheBudgetBytes)
   ) {
-    const oldestKey = engine.documentCache.keys().next().value!;
-    const oldest = engine.documentCache.get(oldestKey)!;
-    engine.documentCache.delete(oldestKey);
-    engine.documentCacheBytes -= oldest.weight;
-    engine.documentCacheStats.evictions++;
+    dropOldestDocumentCacheEntry(engine);
   }
   engine.documentCache.set(key, { document: entry.document, weight });
   engine.documentCacheBytes += weight;
-  engine.onDocumentCached?.(engine);
+  engine.documentCacheCoordinator?.admitted(engine, weight);
 };
 
 const decodeStoredDocument = (data: string | null): EntityDocument =>

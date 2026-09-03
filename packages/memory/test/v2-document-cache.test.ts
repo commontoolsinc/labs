@@ -19,6 +19,7 @@ import {
   applyCommit,
   close,
   DEFAULT_DOCUMENT_CACHE_MAX_ENTRIES,
+  DocumentCacheCoordinator,
   documentCacheDiagnostics,
   type Engine,
   evictDocumentCacheEntries,
@@ -32,6 +33,12 @@ import {
   Server,
 } from "../v2/server.ts";
 import { resolveSpaceStoreUrl } from "../v2/storage-path.ts";
+import { encodeMemoryBoundary } from "../v2.ts";
+
+/** What the cache weighs an entry by: the document encoded as stored, in
+ * UTF-8 bytes. */
+const encodedWeight = (document: unknown): number =>
+  new TextEncoder().encode(encodeMemoryBoundary(document as never)).byteLength;
 
 const withEngine = async (
   fn: (engine: Engine) => void | Promise<void>,
@@ -111,12 +118,12 @@ const seedSpaces = async (
   }
 };
 
-const serverOptions = (store: URL, processBudget?: number) => ({
+const serverOptions = (store: URL, totalBudget?: number) => ({
   store,
   subscriptionRefreshDelayMs: 0,
-  ...(processBudget === undefined
+  ...(totalBudget === undefined
     ? {}
-    : { documentCacheProcessBudgetBytes: processBudget }),
+    : { documentCacheTotalBudgetBytes: totalBudget }),
   authorizeSessionOpen: () => "did:key:z6Mk-document-cache-principal",
   sessionOpenAuth: { audience: "did:key:z6Mk-document-cache-audience" },
 });
@@ -254,7 +261,8 @@ describe("v2 document cache", () => {
       assertEquals(getPushPriorityStats(), server.pushPriorityStats());
       assertEquals(empty?.spaces, {});
       assertEquals(empty?.bytes, 0);
-      assertEquals(typeof empty?.processBudgetBytes, "number");
+      assertEquals(typeof empty?.totalBudgetBytes, "number");
+      assertEquals(empty?.totalBudgetEvictions, 0);
       // Any read opens the space's engine; a never-opened space is absent.
       await server.evaluateGraphQuery(space, {
         roots: [{ id: "of:doc:1", selector: { path: [], schema: true } }],
@@ -324,12 +332,11 @@ describe("v2 document cache", () => {
       assertEquals(body.value.p9, chunk);
       const after = documentCacheDiagnostics(engine);
       assertEquals(after.misses - before.misses, 1);
-      const weight = after.bytes;
-      assertEquals(
-        weight >= 9 * chunk.length,
-        true,
-        `weight ${weight} charges less than the nine chunks retained`,
-      );
+      // Exactly the result as it would be stored: no less (the nine chunks
+      // are all in it) and no more (a replay-cost sum would charge the base
+      // and every patch again, and evict useful entries early).
+      assertEquals(after.bytes >= 9 * chunk.length, true, `${after.bytes}`);
+      assertEquals(after.bytes, encodedWeight(body));
     }, { documentCacheMaxEntries: 1 });
   });
 
@@ -350,6 +357,8 @@ describe("v2 document cache", () => {
         true,
         `weight ${after.bytes} counted code units, not bytes`,
       );
+      // Exactly the stored row, which is the document encoded.
+      assertEquals(after.bytes, encodedWeight({ value: cjk }));
     }, { documentCacheMaxEntries: 1 });
   });
 
@@ -375,7 +384,7 @@ describe("v2 document cache", () => {
     }, { documentCacheMaxEntries: 64 });
   });
 
-  it("holds the process-wide budget across spaces, draining the least recently used space first", async () => {
+  it("holds the total budget across spaces, draining the least recently used space first", async () => {
     const spaces = [
       "did:key:z6Mk-document-cache-process-a",
       "did:key:z6Mk-document-cache-process-b",
@@ -405,7 +414,7 @@ describe("v2 document cache", () => {
           });
         await readAll(spaces[0]);
         const afterA = server.documentCachesDiagnostics();
-        assertEquals(afterA.processBudgetBytes, budget);
+        assertEquals(afterA.totalBudgetBytes, budget);
         // One space fits whole.
         const first = afterA.spaces[spaces[0]];
         assertEquals(first.entries, 30);
@@ -439,13 +448,17 @@ describe("v2 document cache", () => {
           afterB.bytes,
           first.bytes + newest.bytes - required * weight,
         );
+        // The total is what the spaces hold, and every eviction was the
+        // total budget's doing, not a space's own bounds.
+        assertEquals(afterB.bytes, older.bytes + newest.bytes);
+        assertEquals(afterB.totalBudgetEvictions, required);
       } finally {
         await server.close();
       }
     });
   });
 
-  it("holds the process-wide budget on a plain document read, not only after an evaluation", async () => {
+  it("holds the total budget on a plain document read, not only after an evaluation", async () => {
     // The budget is held as each document is cached, so a path with no
     // enforcement of its own — the public readDocument here — returns
     // within it: two spaces holding one document each of more than half the
@@ -491,7 +504,7 @@ describe("v2 document cache", () => {
     const bounds = [
       "documentCacheBudgetBytes",
       "documentCacheMaxEntries",
-      "documentCacheProcessBudgetBytes",
+      "documentCacheTotalBudgetBytes",
     ] as const;
     for (const bound of bounds) {
       for (const bad of [0, -5, 2.5]) {
@@ -509,6 +522,178 @@ describe("v2 document cache", () => {
     assertEquals(getDocumentCachesDiagnostics(), registeredBefore);
     assertEquals(getPushPriorityStats(), pushBefore);
   });
+  it("drains by recency of access, not by order of opening: a retained engine's reads count", async () => {
+    // A, then B, then A again THROUGH THE ENGINE HANDED OUT EARLIER (the
+    // runner's SpaceServer holds one, and its reads never pass openEngine),
+    // then C under pressure: the least recently used space is B, and B
+    // alone must give. Recency by order of opening would drain A, the hot
+    // space, while B survived.
+    const spaces = [
+      "did:key:z6Mk-document-cache-recency-a",
+      "did:key:z6Mk-document-cache-recency-b",
+      "did:key:z6Mk-document-cache-recency-c",
+    ] as const;
+    const valueOf = (index: number) =>
+      `document ${String(index).padStart(2, "0")} ${"·".repeat(20)}`;
+    await withStoreDir(async (store) => {
+      await seedSpaces(store, spaces, 30, valueOf);
+      // Two sets fit, three do not (checked below once the weight is known).
+      const budget = 5_000;
+      const server = new Server(serverOptions(store, budget));
+      try {
+        const readAll = (space: string) =>
+          server.evaluateGraphQuery(space, {
+            roots: Array.from({ length: 30 }, (_, index) => ({
+              id: entityId(index),
+              selector: { path: [], schema: true },
+            })),
+          });
+        await readAll(spaces[0]);
+        const retained = await server.engineForSpace(spaces[0]);
+        await readAll(spaces[1]);
+        const two = server.documentCachesDiagnostics();
+        const weight = two.spaces[spaces[0]].bytes / 30;
+        assertEquals(Number.isInteger(weight), true, "unequal row weights");
+        assertEquals(
+          60 * weight <= budget && 90 * weight > budget,
+          true,
+          `budget ${budget} against sets of ${30 * weight}`,
+        );
+        assertEquals(two.totalBudgetEvictions, 0);
+        // A again, one hit through the retained engine: A is now the most
+        // recently used space.
+        assertEquals(read(retained, { id: entityId(0) } as never), {
+          value: valueOf(0),
+        });
+        assertEquals(
+          server.documentCachesDiagnostics().spaces[spaces[0]].hits -
+            two.spaces[spaces[0]].hits,
+          1,
+        );
+        await readAll(spaces[2]);
+        const three = server.documentCachesDiagnostics();
+        const required = Math.ceil((90 * weight - budget) / weight);
+        assertEquals(
+          three.spaces[spaces[1]].evictions,
+          required,
+          "B, the least recently used space, should have given",
+        );
+        assertEquals(three.spaces[spaces[1]].entries, 30 - required);
+        assertEquals(
+          three.spaces[spaces[0]].entries,
+          30,
+          "A, re-read through its retained engine, was drained",
+        );
+        assertEquals(three.spaces[spaces[0]].evictions, 0);
+        assertEquals(three.spaces[spaces[2]].entries, 30);
+        assertEquals(three.totalBudgetEvictions, required);
+        assertEquals(three.bytes <= budget, true, `bytes ${three.bytes}`);
+      } finally {
+        await server.close();
+      }
+    });
+  });
+
+  it("bounds each live server's own total: a second server keeps its own", async () => {
+    // Per instance, not per process: the toolshed hosts one memory server,
+    // and a test's extra server neither drains it nor is drained by it. The
+    // health route reports the newest live one, then the one before it.
+    const body = "x".repeat(700);
+    const budget = 1_000;
+    const registeredBefore = getDocumentCachesDiagnostics();
+    const first = new Server(
+      serverOptions(new URL("memory://document-cache-two-servers-a"), budget),
+    );
+    try {
+      const second = new Server(
+        serverOptions(new URL("memory://document-cache-two-servers-b"), budget),
+      );
+      try {
+        const space = "did:key:z6Mk-document-cache-two-servers";
+        for (const server of [first, second]) {
+          await server.writeDocument(space, entityId(0), body);
+          assertEquals(await server.readDocument(space, entityId(0)), {
+            value: body,
+          });
+        }
+        for (const server of [first, second]) {
+          const report = server.documentCachesDiagnostics();
+          assertEquals(report.totalBudgetBytes, budget);
+          assertEquals(report.spaces[space].entries, 1);
+          assertEquals(
+            report.bytes > budget / 2 && report.bytes <= budget,
+            true,
+          );
+          assertEquals(report.totalBudgetEvictions, 0);
+        }
+        assertEquals(
+          getDocumentCachesDiagnostics(),
+          second.documentCachesDiagnostics(),
+        );
+      } finally {
+        await second.close();
+      }
+      assertEquals(
+        getDocumentCachesDiagnostics(),
+        first.documentCachesDiagnostics(),
+      );
+    } finally {
+      await first.close();
+    }
+    assertEquals(getDocumentCachesDiagnostics(), registeredBefore);
+  });
+
+  it("keeps one coordinator's total exact across its engines and forgets a closed one", async () => {
+    assertThrows(
+      () => new DocumentCacheCoordinator(0),
+      TypeError,
+      "documentCacheTotalBudgetBytes",
+    );
+    const coordinator = new DocumentCacheCoordinator(10_000);
+    const paths = [
+      await Deno.makeTempFile({ suffix: ".sqlite" }),
+      await Deno.makeTempFile({ suffix: ".sqlite" }),
+    ];
+    const engines: Engine[] = [];
+    const closed = new Set<Engine>();
+    const shut = (engine: Engine) => {
+      if (!closed.has(engine)) {
+        closed.add(engine);
+        close(engine);
+      }
+    };
+    try {
+      for (const path of paths) {
+        engines.push(
+          await open({
+            url: toFileUrl(path),
+            documentCacheCoordinator: coordinator,
+          }),
+        );
+      }
+      for (const engine of engines) {
+        seed(engine, 5);
+        for (let index = 0; index < 5; index++) storedValue(engine, index);
+      }
+      const [a, b] = engines.map(documentCacheDiagnostics);
+      assertEquals(coordinator.bytes, a.bytes + b.bytes);
+      assertEquals(coordinator.engines, 2);
+      assertEquals(coordinator.evictions, 0);
+      // An eviction an engine makes on its own account leaves the total too.
+      const freed = evictDocumentCacheEntries(engines[0], 1);
+      assertEquals(coordinator.bytes, a.bytes + b.bytes - freed);
+      shut(engines[0]);
+      assertEquals(coordinator.bytes, b.bytes);
+      assertEquals(coordinator.engines, 1);
+      shut(engines[1]);
+      assertEquals(coordinator.bytes, 0);
+      assertEquals(coordinator.engines, 0);
+    } finally {
+      for (const engine of engines) shut(engine);
+      for (const path of paths) await Deno.remove(path);
+    }
+  });
+
   it("remembers the revision a commit wrote once its rows are durable, and serves the next read from it", async () => {
     const id = entityId(0);
     await withEngine((engine) => {
@@ -559,6 +744,53 @@ describe("v2 document cache", () => {
       for (const entry of engine.documentCache.values()) sum += entry.weight;
       assertEquals(after.bytes, sum, "bytes drifted from the entries' weights");
       assertEquals(after.entries, engine.documentCache.size);
+    });
+  });
+
+  it("forgets what a rolled-back commit read, so a retry at the same coordinates is served fresh", async () => {
+    const x = entityId(0);
+    const y = entityId(1);
+    const attempt = (engine: Engine, body: string, andThen: unknown[]) =>
+      applyCommit(engine, {
+        sessionId: "s:a",
+        commit: commit(1, {
+          operations: [
+            { op: "set", id: x, value: { value: body } },
+            ...andThen,
+          ],
+        }),
+      } as never);
+    await withEngine((engine) => {
+      // A commit that writes X and Y, then fails while reading its own rows
+      // back (materialization reconstructs Y's patch, which cannot apply):
+      // by then X's read-back is staged. SQLite rolls both revisions back,
+      // and the staged read must go with them — it answers to the retry's
+      // key (same sequence, operation index, op and data length) with
+      // content that never existed.
+      const before = documentCacheDiagnostics(engine);
+      assertThrows(() =>
+        attempt(engine, "b".repeat(20), [
+          { op: "set", id: y, value: { value: 1 } },
+          {
+            op: "patch",
+            id: y,
+            patches: [{ op: "replace", path: "/value/missing/deep", value: 1 }],
+          },
+        ])
+      );
+      const rolledBack = documentCacheDiagnostics(engine);
+      assertEquals(rolledBack.misses - before.misses, 2, "no read was staged");
+      assertEquals(rolledBack.entries, before.entries);
+      assertEquals(rolledBack.bytes, before.bytes);
+      // The retry at the same coordinates, same length, different content.
+      const applied = attempt(engine, "c".repeat(20), []);
+      assertEquals(applied.seq, 1);
+      assertEquals(storedValue(engine, 0), { value: "c".repeat(20) });
+      const served = documentCacheDiagnostics(engine);
+      assertEquals(served.entries, 1);
+      assertEquals(served.bytes, encodedWeight({ value: "c".repeat(20) }));
+      assertEquals(storedValue(engine, 0), { value: "c".repeat(20) });
+      assertEquals(documentCacheDiagnostics(engine).hits - served.hits, 1);
     });
   });
 });

@@ -358,7 +358,9 @@ process:
   behind fan-out, not expensive itself.
 - `documentCaches` — the memory server's decoded-document cache, one entry
   per open space (`Engine.documentCache` in `packages/memory/v2/engine.ts`)
-  under the process-wide `processBudgetBytes` (total `bytes` beside it):
+  under the server's `totalBudgetBytes` (beside it the total `bytes`, and
+  `totalBudgetEvictions`: entries given up to hold that total rather than a
+  space's own bounds):
   per space, `entries` and `bytes` against `budgetBytes` and `maxEntries`,
   and the lifetime `hits`, `misses` and `evictions`. The occupancy figures
   (`entries`, `bytes`, and which spaces appear at all) are a snapshot of the

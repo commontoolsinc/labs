@@ -34,9 +34,21 @@ export const stats = createRoute({
         // (packages/memory/v2/engine.ts `DocumentCacheDiagnostics`) —
         // present whenever a memory server is co-hosted in this process.
         documentCaches: z.object({
-          processBudgetBytes: z.number(),
-          bytes: z.number(),
-          spaces: z.record(z.string(), z.any()),
+          totalBudgetBytes: z.number().int().positive(),
+          bytes: z.number().int().nonnegative(),
+          totalBudgetEvictions: z.number().int().nonnegative(),
+          spaces: z.record(
+            z.string(),
+            z.object({
+              hits: z.number().int().nonnegative(),
+              misses: z.number().int().nonnegative(),
+              evictions: z.number().int().nonnegative(),
+              entries: z.number().int().nonnegative(),
+              bytes: z.number().int().nonnegative(),
+              budgetBytes: z.number().int().positive(),
+              maxEntries: z.number().int().positive(),
+            }),
+          ),
         }).optional(),
         // The serving loop's counters (server-execution v2,
         // serving-loop.md §7) — present only while an ExecutorHost runs
