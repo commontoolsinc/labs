@@ -29,18 +29,18 @@ describe("the pattern and package suites", () => {
     expect(invocation!.junit?.[0]?.scope).toBe("patterns");
   });
 
-  it("runs the server-execution OFF arm with the define set", async () => {
-    const suite = byId("pattern-integration-off");
+  it("runs the server-execution ON arm with the define set", async () => {
+    const suite = byId("pattern-integration-on");
     const [invocation] = await suite.command(
       [{ unit: suite.units[0]!, skip: [] }],
       { root, outputDir: await outputDir() },
     );
-    expect(invocation!.env?.EXPERIMENTAL_SERVER_EXECUTION).toBe("false");
-    expect(suite.variant).toBe("server-execution-off");
+    expect(invocation!.env?.EXPERIMENTAL_SERVER_EXECUTION).toBe("true");
+    expect(suite.variant).toBe("server-execution");
   });
 
   it("names a skip list only where a leaf inside a unit is skipped", async () => {
-    const suite = byId("pattern-integration");
+    const suite = byId("pattern-integration-on");
     const out = await outputDir();
     const unit = suite.units[0]!;
     const [whole] = await suite.command([{ unit, skip: [] }], {

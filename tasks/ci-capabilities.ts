@@ -6,7 +6,7 @@
  * once, and runs the batches inside it. Naming them is what lets two ways
  * of providing the same thing coexist: `toolshed` runs the default posture
  * from source, which is cheap enough for a pull request, while
- * `toolshed-baked-off` restores or builds a binary because the explicit-OFF
+ * `toolshed-baked-on` restores or builds a binary because the explicit-ON
  * server-execution posture is baked into the browser shell inside it and a
  * source run cannot reproduce that. A suite says which it needs and neither
  * the workflow nor the other suites know the difference.
@@ -26,7 +26,7 @@ export type CapabilityId =
   | "browser"
   | "git-history"
   | "toolshed"
-  | "toolshed-baked-off"
+  | "toolshed-baked-on"
   | "bg-piece-service-binary"
   | "cf"
   | "local-dev-servers"
@@ -379,18 +379,18 @@ const toolshed: Capability = {
 };
 
 /**
- * The same server with server execution explicitly off, from a compiled
- * binary. The OFF posture is a compile-time define baked into the browser
+ * The same server with server execution explicitly on, from a compiled
+ * binary. The ON posture is a compile-time define baked into the browser
  * shell inside the binary, so a source run cannot reproduce it. The lane's
  * workflow restores the binary from the Actions cache before the runner starts;
  * building it here is what happens when that cache missed.
  */
-const toolshedBakedOff: Capability = {
-  id: "toolshed-baked-off",
-  description: "a Toolshed server with server execution OFF in its baked shell",
+const toolshedBakedOn: Capability = {
+  id: "toolshed-baked-on",
+  description: "a Toolshed server with server execution ON in its baked shell",
   needs: ["deno"],
   async open(context) {
-    const binary = path.join(context.root, BINARY_CACHE_DIR, "toolshed-off");
+    const binary = path.join(context.root, BINARY_CACHE_DIR, "toolshed-on");
     if (!context.dryRun) {
       let present = true;
       try {
@@ -410,7 +410,7 @@ const toolshedBakedOff: Capability = {
             cwd: context.root,
             env: {
               ...Deno.env.toObject(),
-              EXPERIMENTAL_SERVER_EXECUTION: "false",
+              EXPERIMENTAL_SERVER_EXECUTION: "true",
             },
           },
         );
@@ -425,7 +425,7 @@ const toolshedBakedOff: Capability = {
     return await startToolshed(context, {
       command: [binary],
       cwd: context.root,
-      env: { EXPERIMENTAL_SERVER_EXECUTION: "false" },
+      env: { EXPERIMENTAL_SERVER_EXECUTION: "true" },
     });
   },
 };
@@ -532,7 +532,7 @@ export const CAPABILITIES: ReadonlyMap<CapabilityId, Capability> = new Map(
     browser,
     gitHistory,
     toolshed,
-    toolshedBakedOff,
+    toolshedBakedOn,
     bgPieceServiceBinary,
     cf,
     localDevServers,

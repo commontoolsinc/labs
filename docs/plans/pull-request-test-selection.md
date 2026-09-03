@@ -301,8 +301,8 @@ because one runner does not imply one scope: `workspace-unit` spans every
 workspace package, and the package integration command spans `runner`,
 `runtime-client`, and `shell`. The optional `variant` is suite-wide because
 the suite declares the configuration in which every one of its items runs.
-Default suites omit it. Since the server-execution flip, the two explicit OFF
-suites set it to `server-execution-off`.
+Default suites omit it. The two server-execution ON suites set it to
+`server-execution`.
 
 `enumerate()` is what makes a new test visible without a workflow edit. It
 reads the working tree — usually a file glob, sometimes a list parsed out
@@ -394,31 +394,29 @@ table is the migration's checklist.
 | `pattern-vintage` | `Pattern Update State and Baseline Integrity` | — | `deno`, `git-history` |
 | `generated-patterns` | `Generated Patterns Integration Tests (1..2)` | — | `deno`, `compile-cache` |
 | `package-integration` | `Package Integration Tests (3 suites)` | — | `deno`, `toolshed`, `browser` |
-| `package-integration-off` | the server-execution OFF arm | `server-execution-off` | `deno`, `toolshed-baked-off`, `browser` |
+| `package-integration-on` | the server-execution ON arm | `server-execution` | `deno`, `toolshed-baked-on`, `browser` |
 | `deployed-topology` | the background-service and cf-harness default-posture gates | — | `deno`, `toolshed`, `bg-piece-service-binary` |
 | `cli-core` | `CLI Integration Tests (3 suites)` | — | `deno`, `toolshed`, `cf`, `jq` |
 | `cli-fuse` | the FUSE steps of the third CLI suite | — | `deno`, `toolshed`, `cf`, `fuse` |
 | `cli-deno` | the Deno-based CLI integration step | — | `deno`, `toolshed`, `cf` |
 | `pattern-integration` | `Pattern Integration Tests (1..10)` | — | `deno`, `toolshed`, `browser`, `compile-cache` |
-| `pattern-integration-off` | the server-execution OFF arm | `server-execution-off` | `deno`, `toolshed-baked-off`, `browser` |
+| `pattern-integration-on` | the server-execution ON arm | `server-execution` | `deno`, `toolshed-baked-on`, `browser` |
 | `pattern-reload` | `Pattern Reload Integration Tests` | — | `deno`, `local-dev-servers`, `browser` |
 | `pattern-unit` | `Pattern Unit Tests (1..4)` | — | `deno`, `cf`, `compile-cache` |
 | `binaries` | the compile inside `Build Binary (toolshed)` and the two beside it | — | `deno` |
-| `binaries-off` | the compile inside `Build Binary (toolshed, server-execution OFF shell)` | `server-execution-off` | `deno` |
+| `binaries-on` | the compile inside `Build Binary (toolshed, server-execution ON shell)` | `server-execution` | `deno` |
 
-The server-execution flip moved the unmarked `package-integration` and
-`pattern-integration` suites to the ON posture without changing their record
-identity. Their pre-flip explicit-ON counterparts became explicit-OFF suites
-under `server-execution-off`. No identity alias joins these histories: the
-unmarked default continues by construction, and each non-default posture has
-its own marker.
+The unmarked `package-integration` and `pattern-integration` suites run the
+current default posture. Their explicit-ON counterparts use
+`server-execution`. No identity alias joins these histories: the unmarked
+default continues by construction, and each non-default posture has its own
+marker.
 
 ### Declared unavailable tests
 
 A configuration-specific skip is neither an unknown test nor evidence that
-the topology missed a surface. The default suites, which run the
-server-execution ON posture since the flip, therefore read
-`tasks/server-execution-on-skips.ts` as part of their topology. The explicit
+the topology missed a surface. The server-execution ON suites therefore read
+`tasks/server-execution-on-skips.ts` as part of their topology. The default
 OFF suites run every file. The skip registry remains the single source of
 truth for the phase and reason; the selection system does not grow a second
 list.
@@ -446,7 +444,7 @@ servers and its command line from source and compiles nothing, so a
 compile that breaks would be found on `main`, after the change that broke
 it has merged — where today it is caught before it lands. So `binaries`
 makes each shipped binary a unit whose test is that it still compiles,
-and `binaries-off` does the same for the toolshed under the explicit-OFF
+and `binaries-on` does the same for the toolshed under the explicit-ON
 server-execution define, which is the same build in a different
 configuration and therefore a variant of it rather than a second test.
 
@@ -1024,7 +1022,7 @@ batches.
 | `git-history` | Unshallows the checkout | 3–10 seconds |
 | `toolshed` | A Toolshed server listening on an allocated port | see below |
 | `local-dev-servers` | The whole local dev stack, brought up by `deno task integration` on a chosen port offset | 15–20 seconds |
-| `toolshed-baked-off` | The same, from a binary whose shell carries the explicit-OFF server-execution define | 42 seconds to build, or 17 to restore |
+| `toolshed-baked-on` | The same, from a binary whose shell carries the explicit-ON server-execution define | 42 seconds to build, or 17 to restore |
 | `bg-piece-service-binary` | The compiled background service used by its deployed-topology gate | about 30 seconds to build, or under a second to restore |
 | `cf` | The `cf` command-line tool on the path | as above |
 | `compile-cache` | Restores a pattern compile byte cache | 3 seconds |
@@ -1042,7 +1040,7 @@ source costs a few seconds. The full run on `main` keeps the
 compiled-binary path, because it needs the binary anyway for attestation
 and deployment.
 
-**`toolshed-baked-off` cannot.** The server-execution OFF arm depends on a
+**`toolshed-baked-on` cannot.** The server-execution ON arm depends on a
 compile-time define baked into the browser shell inside the binary, and a
 source run cannot reproduce that. So that capability has a different
 provider: restore the binary from the Actions cache if the key hits, and
