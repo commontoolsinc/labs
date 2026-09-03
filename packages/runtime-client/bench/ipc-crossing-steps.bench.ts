@@ -60,6 +60,7 @@ import {
 } from "@commonfabric/data-model/codecs";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import {
+  type CellLinkInput,
   convertCellsToLinks,
   KeepAsCell,
   type SigilLink,
@@ -107,12 +108,12 @@ function makeLabelView(index: number): CfcLabelView {
  * converted cell becomes, or when `labeled` a cell carrying a label view, for
  * the conversion to mint the link from.
  */
-function makeSource(index: number, labeled: boolean): FabricValue {
+function makeSource(index: number, labeled: boolean): CellLinkInput {
   if (labeled) {
     return cellCarryingLabelView(
       `steps-labeled-${index}`,
       makeLabelView(index),
-    ) as unknown as FabricValue;
+    );
   }
 
   return linkRefFrom({
@@ -126,8 +127,8 @@ function makeSource(index: number, labeled: boolean): FabricValue {
  * A list of records, each with a few scalars, a nested array, and one
  * `source`.
  */
-function makeList(items: number, labeled: boolean): FabricValue {
-  const list: FabricValue[] = [];
+function makeList(items: number, labeled: boolean): CellLinkInput {
+  const list: CellLinkInput[] = [];
 
   for (let i = 0; i < items; i++) {
     list.push({
@@ -170,7 +171,7 @@ const base = new CellHandle(
 /** One subject: a payload, and what each step of the crossing turns it into. */
 type Subject = {
   readonly name: string;
-  readonly value: FabricValue;
+  readonly value: CellLinkInput;
 
   /** Whether the payload's cells carry a label view. */
   readonly labeled: boolean;
@@ -187,18 +188,18 @@ const SUBJECTS: readonly Subject[] = [
   // annotated and frozen, and each `source` a `Cell` rather than a link.
   {
     name: "100 records, read",
-    value: await readRecordList(100) as FabricValue,
+    value: await readRecordList(100) as CellLinkInput,
     labeled: false,
   },
   {
     name: "1000 records, read",
-    value: await readRecordList(1000) as FabricValue,
+    value: await readRecordList(1000) as CellLinkInput,
     labeled: false,
   },
 ];
 
 for (const { name, value, labeled } of SUBJECTS) {
-  const converted = convertCellsToLinks(value as never, CONVERT_OPTIONS);
+  const converted = convertCellsToLinks(value, CONVERT_OPTIONS);
   const encoded = realmFromFabricValue(converted);
 
   // What each far side is handed: a message arrives as a clone, never as the
@@ -230,7 +231,7 @@ for (const { name, value, labeled } of SUBJECTS) {
     group: name,
     baseline: true,
   }, () => {
-    convertCellsToLinks(value as never, CONVERT_OPTIONS);
+    convertCellsToLinks(value, CONVERT_OPTIONS);
   });
 
   Deno.bench({ name: `encode — ${name}`, group: name }, () => {
