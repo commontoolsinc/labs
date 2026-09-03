@@ -205,7 +205,6 @@ export default pattern<
     // different sessions of the same user (the lot-watch `reporterName`
     // scoping).
     const joinMessage = new Writable.perUser("");
-    const joinNotice = computed(() => joinMessage.get() ?? "");
     const boundJoin = joinAs({
       users,
       host,
@@ -232,6 +231,28 @@ export default pattern<
       return equals(current, mine);
     });
     const hasProfile = computed(() => trimmedName(profileName) !== "");
+    // The profile DOCUMENT must read as present before a join can land, and
+    // `#profileName` resolving does not say that it does: the `#profile` wish
+    // hands the cell out as a reference, and under a slow link its document
+    // is still on its way from the viewer's own space when the name string
+    // has already arrived. A click in that window reached `joinAs`, read the
+    // profile as absent, and left the complaint below on screen with a live
+    // button beside it; the next click succeeded. Reading the document here
+    // is what asks the runtime to pull it, and re-runs when it arrives, so the
+    // button waits for the identity it would store.
+    const profileLoaded = computed(() =>
+      profile !== undefined && profile.get() !== undefined
+    );
+    const canJoin = computed(() => hasProfile && profileLoaded);
+    // The exported verdict is the handler's, unchanged: a headless caller
+    // (the deploy doc's CLI smoke test) reads it to learn whether its join
+    // landed, and a refusal that raced the profile document is still a
+    // refusal — that caller has not joined, and `isJoined` says so too. The
+    // rendered notice is the derived one: on screen, a complaint left by such
+    // a race is stale the moment a join would succeed, which is when the
+    // name and the document both read present and the button is live.
+    const joinVerdict = computed(() => joinMessage.get() ?? "");
+    const joinNotice = computed(() => canJoin ? "" : joinVerdict);
     const canonicalProfileName = computed(() => trimmedName(profileName));
     const hostName = computed(() => {
       const current = (host?.get() ?? {}).profile;
@@ -305,9 +326,12 @@ export default pattern<
                       id="lp-join-button"
                       variant="primary"
                       aria-label="Join the poll with your profile"
+                      disabled={!canJoin}
                       onClick={() => boundJoin.send({})}
                     >
-                      Join as {canonicalProfileName}
+                      {profileLoaded
+                        ? `Join as ${canonicalProfileName}`
+                        : "Loading your profile…"}
                     </cf-button>
                   </div>
                 )
@@ -362,7 +386,7 @@ export default pattern<
       ),
       isJoined,
       isAdmin,
-      joinMessage: joinNotice,
+      joinMessage: joinVerdict,
       joinAs: boundJoin,
       claimHost: boundClaimHost,
     };
