@@ -310,10 +310,10 @@ describe("seeded violations", () => {
           ),
         ),
       ).toEqual({
-        [at("AUD-20")]: "fail",
         [at("AUD-21")]: "fail",
-        [at("AUD-22")]: "warn",
-        [on("AUD-21", `${FIXTURE_RUN_ID}.subagent.1`)]: "fail",
+        [at("AUD-22")]: "fail",
+        [at("AUD-23")]: "warn",
+        [on("AUD-22", `${FIXTURE_RUN_ID}.subagent.1`)]: "fail",
       });
     });
 
@@ -505,11 +505,11 @@ describe("seeded violations", () => {
       // finding. What is left is the reading AUD-7 owns: a diagnostic run
       // whose evidence must not be taken for enforcement.
       //
-      // AUD-20 leaves the register with it, and correctly: a diagnostic run
+      // AUD-21 leaves the register with it, and correctly: a diagnostic run
       // admits its side effects without claiming to have decided about them,
       // so there is no admission for the known defect to be about.
 
-      turnsInto({ "AUD-7": "warn", "AUD-20": "not-applicable" }, (root) => {
+      turnsInto({ "AUD-7": "warn", "AUD-21": "not-applicable" }, (root) => {
         // Every enforcing reason code has an observe-family counterpart of
         // the same name, so the substitution lands inside the closed union.
         const observing = (
@@ -607,19 +607,19 @@ describe("seeded violations", () => {
     });
   });
 
-  describe("AUD-20 label-consulting admission", () => {
+  describe("AUD-21 label-consulting admission", () => {
     it("fails today, on a run whose side effects were admitted on authority", () => {
       // The defect direction, and it needs no seeding: nothing but
       // `run_pattern` reaches a boundary that consults a label, so a captured
       // run of sandbox tools carries no `release` record at all.
-      expect(CLEAN[at("AUD-20")]).toBe("fail");
+      expect(CLEAN[at("AUD-21")]).toBe("fail");
     });
 
     it("passes once each admitting decision carries a release record", () => {
       // The direction that makes this a check rather than a constant: the
       // shape a fix produces, where each side effect's own decision states
       // what a boundary measured its flow against.
-      turnsOnly("AUD-20", "pass", (root) => {
+      turnsOnly("AUD-21", "pass", (root) => {
         const admitted = new Set(
           reportOf(root).toolActivity
             .filter((activity) =>
@@ -641,16 +641,16 @@ describe("seeded violations", () => {
     });
   });
 
-  describe("AUD-21 prompt-slot binding", () => {
+  describe("AUD-22 prompt-slot binding", () => {
     it("fails today, on a binding whose subject is not a principal", () => {
       // The CLI binds a workspace path or a resume-run id into the field
       // AH-CFC-3 reserves for an authenticated subject, and no mint site
       // populates a value digest.
-      expect(CLEAN[at("AUD-21")]).toBe("fail");
+      expect(CLEAN[at("AUD-22")]).toBe("fail");
     });
 
     it("passes a binding carrying a subject DID and a value digest", () => {
-      turnsOnly("AUD-21", "pass", (root) => {
+      turnsOnly("AUD-22", "pass", (root) => {
         const bind = (binding: Mutable<PromptSlotBinding> | undefined) => {
           if (binding === undefined) return;
           binding.subject = "did:key:z6MkseededPromptSubject";
@@ -669,7 +669,7 @@ describe("seeded violations", () => {
     it("fails a binding carrying a digest but still no principal", () => {
       // The two halves are separately required, so a fix landing one of them
       // must not read as the obligation closing.
-      turnsOnly("AUD-21", "fail", (root) => {
+      turnsOnly("AUD-22", "fail", (root) => {
         const digest = (binding: Mutable<PromptSlotBinding> | undefined) => {
           if (binding === undefined) return;
           binding.valueDigest = "sha256:" + "b".repeat(64);
@@ -685,16 +685,16 @@ describe("seeded violations", () => {
     });
   });
 
-  describe("AUD-22 delegation ceiling", () => {
+  describe("AUD-23 delegation ceiling", () => {
     it("warns today, on a delegation binding tools and no ceiling", () => {
-      expect(CLEAN[at("AUD-22")]).toBe("warn");
+      expect(CLEAN[at("AUD-23")]).toBe("warn");
     });
 
     it("passes a delegation whose manifest records a ceiling", () => {
       // Written onto the record rather than through the type, because the
       // type has no such field — which is the defect. The check reads what a
       // tree holds, so it turns green the day a delegation writes one.
-      turnsOnly("AUD-22", "pass", (root) => {
+      turnsOnly("AUD-23", "pass", (root) => {
         for (const delegation of stateOf(root).subagentRuns ?? []) {
           (delegation.manifest as unknown as Record<string, unknown>)
             .confidentialityCeiling = ["Confidential(did:key:zSeeded)"];
@@ -703,12 +703,12 @@ describe("seeded violations", () => {
     });
   });
 
-  describe("AUD-23 cell-labels snapshot", () => {
+  describe("AUD-24 cell-labels snapshot", () => {
     it("warns a run that recorded no cell-labels read and attempted none", () => {
       // And AUD-9 does not move, which is the point of the split. The
       // cell-labels snapshot is not among the six artifacts AH-CFC-16
       // enumerates, so a run missing it has not failed that clause.
-      turnsOnly("AUD-23", "warn", (root) => {
+      turnsOnly("AUD-24", "warn", (root) => {
         root.cellLabels = {
           status: "absent",
           path: root.cellLabels.path,
@@ -720,7 +720,7 @@ describe("seeded violations", () => {
     it("fails an enforcing run whose attempted cell-labels read failed", () => {
       // A different fact from the one above, and the artifacts distinguish
       // them: this run held a ref, asked, and the answer is gone.
-      turnsOnly("AUD-23", "fail", (root) => {
+      turnsOnly("AUD-24", "fail", (root) => {
         root.cellLabels = {
           status: "absent",
           path: root.cellLabels.path,
@@ -742,7 +742,7 @@ describe("seeded violations", () => {
 
     it("passes a run holding the snapshot", () => {
       // The other direction: the fixture keeps one, and the check reaches it.
-      expect(CLEAN[at("AUD-23")]).toBe("pass");
+      expect(CLEAN[at("AUD-24")]).toBe("pass");
     });
 
     it("carries the issue on the finding it cannot decide", () => {
@@ -757,7 +757,7 @@ describe("seeded violations", () => {
         RUN_CHECKS,
       );
       const finding = audited.find((result) =>
-        result.checkId === "AUD-23" && result.runId === FIXTURE_RUN_ID
+        result.checkId === "AUD-24" && result.runId === FIXTURE_RUN_ID
       );
       expect(finding?.knownDefect?.issue).toBe("CT-2210");
       expect(finding?.message).toContain(finding?.knownDefect?.detail);

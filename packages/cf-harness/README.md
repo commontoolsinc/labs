@@ -1944,9 +1944,9 @@ declared it was doing), one per clause family:
 | AUD-15  | a run whose enforcement **mode** came from a default and landed weaker than the mode its session claims — a silent fallback from an enforcing mode                                                                                                                                                                                                          | AH-CFC-15                                  |
 | AUD-15a | a run whose **flow-label dial** came from a default and landed weaker than the named posture bundle it claims asserts. Ours: no clause names the dial                                                                                                                                                                                                       |                                            |
 | AUD-20  | counts each model-boundary omission by its recorded rule and rejects duplicated or transcript-mismatched results, duplicated rules, and rules with no artifact location. Ours: AH-CFC-16 motivates retained evidence but does not require this accounting artifact                                                                                          |                                            |
-| AUD-21  | **known defect (CT-2175).** an executed side effect admitted by a decision that could not have consulted a label. The predicate is the `release` record, which only a boundary that measured a flow against a sink writes; every `cfc_*` reason code comes from the authority switch instead. Ours: no clause states it |                                            |
-| AUD-22  | **known defect (CT-2216).** a `direct-command` prompt-slot binding carrying no digest of the value, or a subject that is not a principal — a workspace path or a resume-run id occupying the field | AH-CFC-3                                   |
-| AUD-23  | **known defect (CT-2217).** a delegation whose manifest binds tools, skills and a turn budget and no confidentiality ceiling, so nothing bounds what the child may observe through what it inherits. `warn`, which is the clause's own weight | AH-CFC-12a                                 |
+| AUD-21  | **known defect (CT-2175).** an executed side effect admitted by a decision that could not have consulted a label. The predicate is the `release` record, which only a boundary that measured a flow against a sink writes; every `cfc_*` reason code comes from the authority switch instead. Ours: no clause states it                                     |                                            |
+| AUD-22  | **known defect (CT-2216).** a `direct-command` prompt-slot binding carrying no digest of the value, or a subject that is not a principal — a workspace path or a resume-run id occupying the field                                                                                                                                                          | AH-CFC-3                                   |
+| AUD-23  | **known defect (CT-2217).** a delegation whose manifest binds tools, skills and a turn budget and no confidentiality ceiling, so nothing bounds what the child may observe through what it inherits. `warn`, which is the clause's own weight                                                                                                               | AH-CFC-12a                                 |
 
 Five verdicts, and the distinctions between them are the point. `inconclusive`
 is a check whose evidence was absent or unreadable — it is never `pass`, and
@@ -2155,11 +2155,10 @@ requirement they are.
 `required-by`, and that clause enumerates exactly six things to retain —
 prompt-slot evidence, invocation-context references, mediation dispositions,
 policy events, model-context influence state, and side-effect decisions. A
-cell-labels snapshot is not among them, so demanding one under that citation
-was one check answering to two authorities, which is the shape AUD-15 and
-AUD-15a are already split along. AUD-9 now expresses the six and nothing else;
-AUD-24 carries the snapshot as `extends`, and a finding from it renders as
-ours.
+cell-labels snapshot is not among them, so demanding one under that citation was
+one check answering to two authorities, which is the shape AUD-15 and AUD-15a
+are already split along. AUD-9 now expresses the six and nothing else; AUD-24
+carries the snapshot as `extends`, and a finding from it renders as ours.
 
 [audit/citations.ts](audit/citations.ts) holds that table and
 `audit/test/citation-drift.test.ts` reads every cited document and requires each

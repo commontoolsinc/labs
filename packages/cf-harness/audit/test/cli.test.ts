@@ -193,9 +193,9 @@ describe("cli", () => {
         }),
       ).toBe(1);
       const report = written.join("");
-      expect(report).toContain("AUD-20 label-consulting admission");
-      expect(report).toContain("AUD-21 prompt-slot binding");
-      expect(report).toContain("AUD-22 delegation ceiling");
+      expect(report).toContain("AUD-21 label-consulting admission");
+      expect(report).toContain("AUD-22 prompt-slot binding");
+      expect(report).toContain("AUD-23 delegation ceiling");
     });
 
     it("marks a finding that rests on our judgment rather than the specification", () => {
@@ -487,12 +487,14 @@ describe("cli", () => {
       expect(output).toContain("CT-0000");
     });
 
-    it("returns 0 over a clean fixture whose list names nothing", async () => {
-      // The fixture produces no finding at the default threshold, so an empty
-      // list is exactly right and the run is green.
+    it("returns 1 over a fixture whose known defects the list does not name", async () => {
+      // The fixture is a captured run of a system with the Group E gaps in it,
+      // so an empty list is not "nothing to excuse" — it is a list that names
+      // none of the findings the run produces, and each is a finding no entry
+      // covers. Green here would be the ledger excusing by omission.
       const { code, output } = await auditWithList({ expected: [] });
 
-      expect(code).toBe(0);
+      expect(code).toBe(1);
       expect(output).toContain(
         "are reconciled against the expected-failures list",
       );
@@ -505,7 +507,11 @@ describe("cli", () => {
       const { output } = await auditWithList({ expected: [] }, ["--json"]);
 
       const parsed = JSON.parse(output) as Record<string, unknown>;
-      expect(Object.keys(parsed).sort()).toEqual(["reconciliation", "results"]);
+      expect(Object.keys(parsed).sort()).toEqual([
+        "conformance",
+        "reconciliation",
+        "results",
+      ]);
       expect(Array.isArray(parsed.results)).toBe(true);
     });
   });

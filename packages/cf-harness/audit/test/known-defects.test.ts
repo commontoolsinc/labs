@@ -27,12 +27,12 @@ import { FIXTURE_RUN_ID, FIXTURE_RUNS_DIR } from "./regenerate-fixtures.ts";
 const family = await loadRunFamily(join(FIXTURE_RUNS_DIR, FIXTURE_RUN_ID));
 
 /**
- * The fixture with its cell-labels snapshot removed, so AUD-23's registration
+ * The fixture with its cell-labels snapshot removed, so AUD-24's registration
  * is exercised here too.
  *
- * The fixture keeps a snapshot, so AUD-23 passes on it and carries nothing.
+ * The fixture keeps a snapshot, so AUD-24 passes on it and carries nothing.
  * Reading only the clean tree would leave that registration untested while
- * every assertion below still passed — over a list AUD-23 was not in.
+ * every assertion below still passed — over a list AUD-24 was not in.
  */
 const withoutCellLabels = (): RunFamily => {
   const root = structuredClone(family.root);
@@ -53,7 +53,7 @@ const RESULTS = [
  * Every finding this fixture produced that says it is about a known defect.
  *
  * Read off the results of every registered check rather than off one group's:
- * a registration is a property of a finding, and AUD-23 carries one from
+ * a registration is a property of a finding, and AUD-24 carries one from
  * `structural.ts` while the Group E checks carry theirs from
  * `known-defects.ts`. Collecting them by where they were declared would leave
  * a check's registration untested the moment one was added anywhere else.
@@ -71,11 +71,11 @@ describe("known defects", () => {
   it("reports a finding for every registered defect", () => {
     // Without this the assertions below would hold over an empty list. The
     // fixture is a captured run of a system with all three Group E gaps in
-    // it, and AUD-23 joins them on the variant with no cell-labels snapshot.
+    // it, and AUD-24 joins them on the variant with no cell-labels snapshot.
     expect(
       [...new Set(findings().map((result) => result.checkId))].sort(),
     ).toEqual(
-      [...Object.keys(KNOWN_DEFECT_REGISTRATIONS), "AUD-23"].sort(),
+      [...Object.keys(KNOWN_DEFECT_REGISTRATIONS), "AUD-24"].sort(),
     );
   });
 
@@ -149,10 +149,10 @@ describe("known defects", () => {
 
   it("covers a registration declared outside Group E", () => {
     // A registration is a property of a finding rather than of a group.
-    // AUD-23 declares its own from `structural.ts`, beside the check it was
+    // AUD-24 declares its own from `structural.ts`, beside the check it was
     // split out of, and everything above has to reach it.
     expect(
-      registered().some((result) => result.checkId === "AUD-23"),
+      registered().some((result) => result.checkId === "AUD-24"),
     ).toBe(true);
   });
 });

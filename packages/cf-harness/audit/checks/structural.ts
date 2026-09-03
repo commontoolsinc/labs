@@ -1696,8 +1696,12 @@ const omissionAccounting: AuditCheck = {
         artifact: "transcript-omissions.json",
         detail: `${rule}: ${counts[rule]}`,
       })),
+    };
+  },
+};
 
-// AUD-23 cell-labels snapshot
+//
+// AUD-24 cell-labels snapshot
 //
 
 /**
@@ -1721,7 +1725,7 @@ const CELL_LABELS_REGISTRATION: KnownDefectRegistration = {
 };
 
 /**
- * AUD-23, which asks whether a run kept a snapshot of the labels its space
+ * AUD-24, which asks whether a run kept a snapshot of the labels its space
  * carried.
  *
  * Cited as `extends`, and the distinction is the whole reason this is its own
@@ -1743,7 +1747,7 @@ const CELL_LABELS_REGISTRATION: KnownDefectRegistration = {
  * rather than deciding it.
  */
 const cellLabelsSnapshot: AuditCheck = {
-  id: "AUD-23",
+  id: "AUD-24",
   title: "cell-labels snapshot",
   citations: extendsClause("AH-CFC-16"),
   falsifiedBy:

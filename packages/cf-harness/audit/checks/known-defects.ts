@@ -40,7 +40,7 @@ import {
 } from "./structural.ts";
 
 //
-// AUD-20 label-consulting admission (H9)
+// AUD-21 label-consulting admission (H9)
 //
 
 /**
@@ -55,7 +55,7 @@ import {
  * rather than something broken.
  */
 export const KNOWN_DEFECT_REGISTRATIONS = {
-  "AUD-20": {
+  "AUD-21": {
     detail: "were admitted on authority alone",
     runShape:
       "an enforcing run whose executed side effects are sandbox tools rather than `run_pattern`",
@@ -63,14 +63,14 @@ export const KNOWN_DEFECT_REGISTRATIONS = {
       "H9. Every side-effecting tool except `run_pattern` is admitted by a gate on the descriptor's static `effectClass` crossed with whether the run carries direct-command evidence, recorded before the tool runs, consulting no sink, no ceiling and no label. It closes when each side-effecting tool's effect is routed through a named sink with a declared ceiling, the way `run_pattern` already routes its answer.",
     issue: "CT-2175",
   },
-  "AUD-21": {
+  "AUD-22": {
     detail: "without binding what AH-CFC-3 requires it to bind",
     runShape: "any run that binds a `direct-command` prompt slot",
     why:
       "H2. No mint site populates a `valueDigest`, and the subject is a run-scoping fact — a workspace path or a resume-run id — rather than an authenticated principal. Both halves are additive: the contract already types the fields, and the work is at the two mint sites.",
     issue: "CT-2216",
   },
-  "AUD-22": {
+  "AUD-23": {
     detail: "no confidentiality ceiling",
     runShape: "any run that delegates",
     why:
@@ -109,7 +109,7 @@ const labelConsultingDecisions = (
 };
 
 const labelConsultingAdmission: AuditCheck = {
-  id: "AUD-20",
+  id: "AUD-21",
   title: "label-consulting admission",
   // The clause wants a side-effect request to carry the influence labels its
   // profile requires. It does not say the decision admitting the request must
@@ -178,13 +178,13 @@ const labelConsultingAdmission: AuditCheck = {
         count(unconsulted.length, "side effect", "side effects")
       } of ${effects.length} were admitted on authority alone, with no decision that could have consulted a label`,
       evidence,
-      knownDefect: KNOWN_DEFECT_REGISTRATIONS["AUD-20"],
+      knownDefect: KNOWN_DEFECT_REGISTRATIONS["AUD-21"],
     };
   },
 };
 
 //
-// AUD-21 prompt-slot binding (H2)
+// AUD-22 prompt-slot binding (H2)
 //
 
 /** Every distinct prompt-slot binding this run's artifacts carry. */
@@ -265,7 +265,7 @@ const missingBindingFields = (
 };
 
 const promptSlotBindingEvidence: AuditCheck = {
-  id: "AUD-21",
+  id: "AUD-22",
   title: "prompt-slot binding",
   citations: requiredBy("AH-CFC-3"),
   falsifiedBy:
@@ -315,13 +315,13 @@ const promptSlotBindingEvidence: AuditCheck = {
         count(evidence.length, "binding mints", "bindings mint")
       } direct-command authority without binding what AH-CFC-3 requires it to bind`,
       evidence,
-      knownDefect: KNOWN_DEFECT_REGISTRATIONS["AUD-21"],
+      knownDefect: KNOWN_DEFECT_REGISTRATIONS["AUD-22"],
     };
   },
 };
 
 //
-// AUD-22 delegation ceiling (H8)
+// AUD-23 delegation ceiling (H8)
 //
 
 /**
@@ -341,7 +341,7 @@ const recordsCeiling = (manifest: HarnessSubagentRunManifest): boolean => {
 };
 
 const delegationCeiling: AuditCheck = {
-  id: "AUD-22",
+  id: "AUD-23",
   title: "delegation ceiling",
   citations: requiredBy("AH-CFC-12a"),
   falsifiedBy:
@@ -377,7 +377,7 @@ const delegationCeiling: AuditCheck = {
       message: `${
         count(uncapped.length, "delegation records", "delegations record")
       } no confidentiality ceiling, so nothing bounds what the child may observe through the handles and arguments it inherits`,
-      knownDefect: KNOWN_DEFECT_REGISTRATIONS["AUD-22"],
+      knownDefect: KNOWN_DEFECT_REGISTRATIONS["AUD-23"],
       evidence: uncapped.map((delegation) => ({
         artifact: "run-state.json",
         pointer: `subagentRuns[${delegation.childRunId}].manifest`,
