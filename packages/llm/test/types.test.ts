@@ -1,28 +1,19 @@
 import { describe, it } from "@std/testing/bdd";
 import { assert } from "@std/assert";
 import { expect } from "@std/expect";
+import type { BuiltInLLMContent } from "@commonfabric/api";
 import {
   DEFAULT_MODEL_NAME,
   GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
   isLLMRequest,
   isLLMTool,
-  isLLMToolCall,
   type LLMTool,
-  type LLMToolCall,
 } from "../src/types.ts";
 
-// These carry their declared types so that renaming a field stops this file
+// This carries its declared type so that renaming a field stops this file
 // compiling. A guard reads fields by name, which no type check reaches, so an
 // untyped fixture would go on agreeing with a guard that the type had left
 // behind.
-
-/** The shape `client.ts` builds from a `tool-call` stream event. */
-const TOOL_CALL: LLMToolCall = {
-  id: "call_1",
-  name: "lookup",
-  input: { term: "fabric" },
-};
-
 const TOOL: LLMTool = {
   description: "Look a term up",
   inputSchema: { type: "object" },
@@ -140,37 +131,36 @@ describe("types", () => {
       ).toBe(false);
     });
 
-    it("returns `true` for a request whose message carries tool calls", () => {
+    it("returns `true` for a message whose content carries a tool call", () => {
+      const content: BuiltInLLMContent = [
+        { type: "text", text: "Looking that up" },
+        {
+          type: "tool-call",
+          toolCallId: "call_1",
+          toolName: "lookup",
+          input: { term: "fabric" },
+        },
+      ];
       expect(
         isLLMRequest({
-          messages: [{
-            role: "assistant",
-            content: "Looking that up",
-            toolCalls: [TOOL_CALL],
-          }],
+          messages: [{ role: "assistant", content }],
           model: DEFAULT_MODEL_NAME,
           cache: true,
         }),
       ).toBe(true);
     });
-  });
 
-  describe("isLLMToolCall()", () => {
-    it("returns `true` for the shape the client builds", () => {
-      expect(isLLMToolCall(TOOL_CALL)).toBe(true);
-    });
-
-    it("returns `false` when the `input` map is missing", () => {
-      expect(isLLMToolCall({ id: "call_1", name: "lookup" })).toBe(false);
-    });
-
-    it("returns `false` for an `input` map given as an array", () => {
-      expect(isLLMToolCall({ ...TOOL_CALL, input: [] })).toBe(false);
-    });
-
-    it("returns `false` when the id or name is not a string", () => {
-      expect(isLLMToolCall({ ...TOOL_CALL, id: 1 })).toBe(false);
-      expect(isLLMToolCall({ ...TOOL_CALL, name: undefined })).toBe(false);
+    it("returns `false` for a content part of an unrecognized type", () => {
+      expect(
+        isLLMRequest({
+          messages: [{
+            role: "assistant",
+            content: [{ type: "tool-invocation", toolCallId: "call_1" }],
+          }],
+          model: DEFAULT_MODEL_NAME,
+          cache: true,
+        }),
+      ).toBe(false);
     });
   });
 
