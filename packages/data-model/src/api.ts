@@ -1,9 +1,9 @@
 /**
  * Pattern-visible declarations for the fabric value type system, and for the
  * options of the debug renderers over it, in the form that `@commonfabric/api`
- * re-exports to patterns. Everything here is an
- * interface, a type, or a `declare const`, except for the one brand-key
- * constant, so the module's only runtime footprint is that constant.
+ * re-exports to patterns. Everything here is an interface, a type, or a
+ * `declare const`, except for the one brand-key constant, so the module's only
+ * runtime footprint is that constant.
  *
  * The canonical implementations live in this module's siblings --
  * `interface.ts`, `fabric-primitives/FabricHash.ts`,
