@@ -735,8 +735,8 @@ interface CoreParams {
  * this rule — the canonical env mapping, else the first-party default —
  * so the DEFAULT CI lane's test processes run the arm the lane's server
  * runs (testing.md §2's uniform posture; a raw env read resolves unset to
- * the AMBIENT baseline instead, which under default-ON is the P7 review's
- * finding-7 mixed posture, resurrected by the flip).
+ * the AMBIENT baseline instead, which can produce the P7 review's
+ * finding-7 mixed posture when the selected arm is ON).
  */
 export function withServerExecutionDefault(
   experimental: ExperimentalOptions,

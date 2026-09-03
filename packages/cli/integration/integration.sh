@@ -100,9 +100,9 @@ new_invocation_id() {
 # testing.md §2), decided the way the cf binary itself decides: an explicit
 # EXPERIMENTAL_SERVER_EXECUTION wins, else the deployment's own posture —
 # probed off /api/health/stats (`servingLoop` present = the toolshed
-# serves, and cf adopts the published ON posture). ON since the flip in
-# the default CI lane; a pre-flip toolshed, or the explicit-`false`
-# rollback arm, resolves OFF. Verb receipts are DELIBERATELY not written
+# serves, and cf adopts the published ON posture). The default lane
+# resolves OFF; the explicit-`true` guard lane resolves ON. Verb receipts
+# are DELIBERATELY not written
 # under ON (events.md §4: exactly-once is the stream's eventWatermark, so
 # the receipt create-only mechanism must not coexist with it), which is
 # why the dedup asserts below branch on this: the `deduplicated` key is

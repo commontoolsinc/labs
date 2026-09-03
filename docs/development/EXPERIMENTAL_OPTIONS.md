@@ -400,10 +400,11 @@ server](#clients-that-are-not-built-alongside-their-server).
   `deployed-topology-gate` job exercises the real `bg-piece-service`
   binary and cf-harness's fabric session at the default resolution, and
   the CLI lanes probe the server their `cf` adopts its posture from.
-  End state, unchanged by the rollback: re-flip once the condition that
-  forced it is fixed, soak on main, then retire the flag and remove the
-  OFF code path in the split-out post-soak PR (the plan's Phase 7 task 2,
-  which also removes the guard lanes and the second toolshed build).
+  End state, unchanged by the rollback: re-flip in a reviewed PR when the
+  next ON soak is intended and approved, soak on main, then retire the flag
+  and remove the OFF code path in the split-out post-soak PR (the plan's
+  Phase 7 task 2, which also removes the guard lanes and the second toolshed
+  build).
 - **Status on 2026-08-29 (the ROLLBACK).** The flip-OFF lever
   (#6552) set the constant back to `false`: the minimal inverse of
   #6535's default-coupled surfaces, KEEPING every mechanism the flip PR

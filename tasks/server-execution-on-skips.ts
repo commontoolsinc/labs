@@ -13,9 +13,7 @@
 // every skip from this file, and an empty list means the ON arm runs the
 // full suite — the OFF arm never skips. This list is EMPTY, which is what
 // lets the lane roles swap in either direction without opening a coverage
-// hole. Between the flip PR and the lever the roles were inverted
-// (default = ON carrying this list; explicit-`false` = the OFF guard on
-// `build-toolshed-off`).
+// hole.
 //
 // An entry retires when its phase lands (docs/plans/server-execution-v2.md);
 // a file listed here that no longer exists fails the run, so the lists

@@ -413,8 +413,8 @@ function resolveBlobUrl(url: string, apiUrl: URL, space: DID): string {
  * realm and dead in the other). The worker asserts the CONSTRUCTED
  * runtime's resolved posture matches the declaration and refuses
  * initialization loudly on divergence — in either direction (a worker
- * whose realm-ambient default flipped ON under a host that declared
- * nothing is the same divergence mirrored). OFF-arm-neutral: a host
+ * whose realm-ambient default differs from an absent declaration is the
+ * same divergence mirrored). OFF-arm-neutral: a host
  * that declares nothing and a worker that resolves OFF agree, which is
  * every pre-existing deployment. Exported for testing.
  */

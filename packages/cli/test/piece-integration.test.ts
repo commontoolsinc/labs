@@ -53,9 +53,8 @@ let spaceConfig: SpaceConfig;
 // The server-execution arm `cf` itself runs at (server-execution v2,
 // testing.md §2): resolved exactly as the cf binary resolves it — the
 // deployed-client rule (explicit EXPERIMENTAL_* env, else the server's
-// published posture, else the first-party default). ON since the flip in
-// the default CI lane; the explicit-`false` OFF guard lane, and a
-// pre-flip toolshed, resolve OFF.
+// published posture, else the first-party default). The default lane
+// resolves OFF; the explicit-`true` guard lane resolves ON.
 let serverExecutionOn = false;
 
 // Resolves once the piece's result/content cell holds `expected`. Uses its
@@ -160,7 +159,7 @@ describe("cf cell get (integration)", { ignore: !API_URL }, () => {
     expect(json.content).toBe(NOTE_CONTENT);
   });
 
-  it("reports present result data that cannot project in a fresh session (OFF) — and serves it under the flipped default (ON)", async () => {
+  it("reports present result data that cannot project in a fresh session under OFF and serves it under ON", async () => {
     const sessionFlags =
       `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${sessionResultPieceId}`;
     const { code, stdout, stderr } = await integrationCf(

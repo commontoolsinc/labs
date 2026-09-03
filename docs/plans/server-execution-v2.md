@@ -32,11 +32,23 @@ tables with the v2 basis index — and partly a build. The spec §5
 deletion list is enforced by deleting on main and *not rebuilding*,
 with the survival test as the gate on anything that feels needed.
 
-## Coordination state (2026-08-28) — read this first
+## Coordination state (2026-09-02) — read this first
 
 The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
+
+**Delta 2026-09-02 (the prepared FLIP-OFF lever —
+[#6552](https://github.com/commontoolsinc/labs/pull/6552), stacked on the
+current head of #6535): `SERVER_EXECUTION_DEFAULT_ENABLED` → `false`.
+This preserves the execution implementation and every posture seam added
+by #6535; it changes the default-coupled surfaces together. Default CI
+lanes and deployed-topology gates resolve OFF, while explicit-`true` lanes
+use the ON-built toolshed and retain full ON coverage. The ON-skip registry
+remains empty. Merge #6552 only when main should return to OFF before an
+Estuary deployment. A later ON soak is another reviewed toggle PR carrying
+the same constant, absolute pin, lane roles and probes, deployed-topology
+expectations, test-selection topology, and live documentation together.**
 
 **Delta 2026-08-28, last updated 2026-08-29 (the FLIP PR —
 [#6535](https://github.com/commontoolsinc/labs/pull/6535), OPEN, the

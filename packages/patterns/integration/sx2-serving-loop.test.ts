@@ -44,9 +44,8 @@ import {
 const { API_URL, SPACE_NAME } = env;
 
 // The arm this process runs in: the explicit env value, else the
-// first-party default (ON since the server-execution v2 Phase 7 flip —
-// the deployed-topology presets resolve an unset flag to it, and so does
-// the toolshed the harness started).
+// first-party default. The deployed-topology presets and the toolshed the
+// harness started resolve an unset value the same way.
 const FLAG_ON = Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") === undefined
   ? SERVER_EXECUTION_DEFAULT_ENABLED
   : Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") === "true";

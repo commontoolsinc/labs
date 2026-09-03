@@ -113,7 +113,7 @@ export async function startBackgroundPieceService(
   const runtime = dependencies.createRuntime(dependencies.env, identity);
   // The server-execution v2 posture this service RESOLVED (the
   // productionServer preset: an explicit EXPERIMENTAL_SERVER_EXECUTION,
-  // else the first-party default — ON since the Phase 7 flip). Logged at
+  // else the first-party default). Logged at
   // startup so the deployed-topology posture gate, and an operator reading
   // service logs, can verify the arm the binary actually runs — the role
   // /api/meta's `experimental` plays for toolshed; this binary has no HTTP

@@ -108,12 +108,10 @@ async function runTest() {
     apiUrl: new URL(API_URL),
     // The posture this client runs (server-execution v2, testing.md §2):
     // resolved exactly like a deployed entry point — the canonical env
-    // mapping, else the first-party default (ON since the flip) — so this
-    // process runs the arm the lane's toolshed runs: the DEFAULT lane's
-    // unset flag resolves ON, the OFF regression-guard lane's explicit
-    // `false` the OFF arm. A bare construction resolves the AMBIENT
-    // baseline instead, which post-flip is the P7 review's finding-7
-    // mixed posture.
+    // mapping, else the first-party default — so this process and the
+    // lane's toolshed apply the same resolution. A bare construction
+    // resolves the ambient baseline instead, which can produce a mixed
+    // posture when the selected arm is ON.
     experimental: withServerExecutionDefault(
       experimentalOptionsFromEnv(Deno.env.get),
     ),

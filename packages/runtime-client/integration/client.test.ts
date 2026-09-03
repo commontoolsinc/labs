@@ -47,11 +47,10 @@ const identity = await Identity.fromPassphrase("test operator", keyConfig);
 
 // The server-execution v2 posture this test process runs (testing.md §2):
 // resolved exactly like a deployed entry point — the canonical env
-// mapping, else the first-party default (ON since the flip) — so the
-// worker below runs the arm the lane's toolshed runs: the DEFAULT lane's
-// unset flag resolves ON, the explicit-`false` OFF regression-guard
-// lane the OFF arm. An UNDECLARED worker resolves the ambient baseline
-// instead, which post-flip is the P7 review's finding-7 mixed posture.
+// mapping, else the first-party default — so the worker below and the
+// lane's toolshed apply the same resolution. An undeclared worker resolves
+// the ambient baseline instead, which can produce a mixed posture when the
+// selected arm is ON.
 const SERVER_EXECUTION_RESOLVED = withServerExecutionDefault(
   experimentalOptionsFromEnv(Deno.env.get),
 ).serverExecution;
@@ -1978,10 +1977,9 @@ async function clientOptionsFor(
     // The HOST declares the worker's posture (runtime-client's posture
     // agreement; the worker refuses to initialize on a mismatch). Only the
     // server-execution flag is declared: the other experimental keys keep
-    // the worker's own defaults. Always declared since the flip — the
+    // the worker's own defaults. Always declared — the
     // resolved value is env-else-first-party-default, never the worker's
-    // ambient baseline (which would be the finding-7 mixed posture under
-    // default ON).
+    // ambient baseline (which could produce the finding-7 mixed posture).
     experimental: { serverExecution: SERVER_EXECUTION_RESOLVED },
     ...extraOptions,
   };
