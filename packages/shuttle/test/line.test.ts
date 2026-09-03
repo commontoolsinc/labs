@@ -10,11 +10,12 @@
  * fragment of it, since a fragment lets a rewording through that says
  * something else.
  *
- * Two properties are checked over a construction rather than over listed
- * values, because listing them is what leaves a class unguarded: every
- * character the grammar reserves forces quoting, and every awkward value
- * prints as text that splits back into that one value. The construction is
- * where a value nobody would have listed gets driven.
+ * Two of them are checked over a construction rather than over listed
+ * outcomes, because a list is a slice of a class and the rest of the class is
+ * where a gap hides: that every character the grammar reserves forces
+ * quoting, and that a printed value splits back into the one value it was
+ * printed from. The construction is where a value nobody would have listed
+ * gets driven.
  */
 
 import { expect } from "@std/expect";
@@ -24,7 +25,7 @@ import { quoteToken, RESERVED_CHARACTERS, splitLine } from "../src/line.ts";
 
 describe("line", () => {
   describe("RESERVED_CHARACTERS", () => {
-    it("holds the pipe, the local escape, the redirections, `#` and `%`", () => {
+    it("holds the pipe, the local escape, the redirections, `#` and `%`, and nothing else", () => {
       expect(RESERVED_CHARACTERS).toBe("!#%<>|");
     });
   });
@@ -48,7 +49,7 @@ describe("line", () => {
       expect(splitLine("  \t ")).toEqual({ kind: "split", tokens: [] });
     });
 
-    it("returns a run of separators as one separator", () => {
+    it("returns no empty token for a run of separators, or for one at either edge", () => {
       expect(splitLine("  cd   board  ")).toEqual({
         kind: "split",
         tokens: ["cd", "board"],
@@ -199,7 +200,7 @@ describe("line", () => {
       }
     });
 
-    it("returns for every awkward value text that splits back into that one value", () => {
+    it("returns text that splits back into the value it was printed from, for every value the construction drives", () => {
       // What the two halves owe each other, held over a construction rather
       // than over a list: a listed set is a slice of the class, and the
       // values nobody lists are the ones that break a printer.
