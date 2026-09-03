@@ -1024,11 +1024,13 @@ Deno.test("server-execution CI uses stable default and opposite roles", async ()
   // No step anywhere selects an arm by literal: every assignment of the flag
   // is the resolve step's output, so a flip of the default moves both roles
   // together and a value pinned by hand cannot turn a flip into a mixed
-  // posture. Comments are stripped so a note naming a value is not read as
-  // setting it; the CLI lane's `${EXPERIMENTAL_SERVER_EXECUTION:-…}` is a
-  // read, not an assignment, and does not match.
+  // posture. Every assignment form counts — a YAML `env:` entry in either
+  // quote style, a shell `NAME=value`, and the shell default-assignment
+  // `${NAME:=value}`. Comments are stripped so a note naming a value is not
+  // read as setting it; the CLI lane's `${EXPERIMENTAL_SERVER_EXECUTION:-…}`
+  // is a read, not an assignment, and does not match.
   const literal = withoutComments(contents).match(
-    /EXPERIMENTAL_SERVER_EXECUTION\s*[:=]\s*"?(?:true|false)/,
+    /EXPERIMENTAL_SERVER_EXECUTION\s*(?::=|[:=])\s*['"]?(?:true|false)\b/,
   );
   assert(
     literal === null,
