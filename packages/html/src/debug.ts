@@ -89,11 +89,9 @@ export function formatTree(node: unknown, indent = 0): string {
   }
   if (typeof node !== "object") return `${pad}${String(node)}`;
 
-  // A `FabricSpecialObject` keeps its state in private fields and has zero
-  // enumerable own properties, so `stringify()` renders one as `{}` -- and
-  // does so silently, since the `catch` below fires only on a throw and
-  // `stringify()` does not throw on one. The debug renderer knows what to do
-  // with one.
+  // A `FabricSpecialObject` is rendered before the vdom-node check below
+  // reads it: one can carry a `name` of its own, as a `FabricError` does,
+  // which would pass for a node's.
   if (node instanceof FabricSpecialObject) {
     return `${pad}${toCompactDebugString(node)}`;
   }
@@ -108,12 +106,8 @@ export function formatTree(node: unknown, indent = 0): string {
 
   const name = obj.name as string | undefined;
   if (!name) {
-    // Not a vdom node — try to stringify
-    try {
-      return `${pad}${JSON.stringify(node)}`;
-    } catch {
-      return `${pad}[object]`;
-    }
+    // Not a vdom node.
+    return `${pad}${toCompactDebugString(node)}`;
   }
 
   // Format props
@@ -124,18 +118,8 @@ export function formatTree(node: unknown, indent = 0): string {
     for (const [key, value] of Object.entries(props)) {
       if (isCellHandle(value)) {
         propParts.push(`${key}=<cell>`);
-      } else if (typeof value === "string") {
-        propParts.push(`${key}="${value}"`);
-      } else if (value instanceof FabricSpecialObject) {
-        // Named rather than stringified, for the reason given at the node case
-        // above: `stringify()` renders one as `{}` and does not throw doing so.
-        propParts.push(`${key}=${toCompactDebugString(value)}`);
       } else {
-        try {
-          propParts.push(`${key}=${JSON.stringify(value)}`);
-        } catch {
-          propParts.push(`${key}=[object]`);
-        }
+        propParts.push(`${key}=${toCompactDebugString(value)}`);
       }
     }
     if (propParts.length > 0) {
