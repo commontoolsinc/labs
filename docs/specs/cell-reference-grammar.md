@@ -554,9 +554,9 @@ row is the whole cost of a new qualifier
 ### D6. A piece's other documents are members
 
 ```text
-/glaze-tracker#argument/items/0/title      the arguments document, then inside it
-/glaze-tracker#argument@user/items         the user instance's arguments document
-/glaze-tracker/issue#12                 the result document, a key named `issue#12`
+/glaze-tracker#argument/items/0/title   the arguments document, then inside it
+/glaze-tracker#argument@user/items      the user instance's arguments document
+/glaze-tracker/issue#12                 the result document, a key `issue#12`
 ```
 
 A piece is named by its result document — the one its id names, that a slug
