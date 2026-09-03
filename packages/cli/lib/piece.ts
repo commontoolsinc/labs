@@ -3865,12 +3865,21 @@ export async function linkPieces(
 /**
  * Phase 7: link a pattern field to an injected on-disk SQLite source
  * (`cf piece link sqlite:<absPath> <piece>/<field>`, read-only v1). Derives a
- * stable handle id from (space, absPath), creates the handle cell at that id with
- * value `{ id, tables: {}, rev: 0 }`, registers the on-disk source with the server
- * (so reads attach the file read-only for that id), then links the handle into
- * the target field. Idempotent: re-linking the same path resolves to the same
- * handle id (same cell, same registration). v1 is read-only — `db.exec` against an
- * injected source is rejected by the server (Q13/Q14).
+ * stable handle id from (space, absPath), settles the handle cell at that id,
+ * registers the on-disk source with the server (so reads attach the file
+ * read-only for that id), then links the handle into the target field.
+ *
+ * What the handle cell ends up holding is `diskHandleSeed`'s decision, made
+ * against whatever is already there. A first link seeds the empty contract
+ * `{ id, tables: {}, rev: 0 }`. A RE-link — the same path, so the same handle
+ * id (same cell, same registration) — leaves a handle whose `id` is already
+ * the derived one exactly as it stands, contract included, and says on stderr
+ * how many tables it kept. A handle whose stored `id` is missing, empty, or
+ * names a different source is unusable and gets REPAIRED: the id is rewritten,
+ * a declared contract is carried onto it rather than dropped (labels may only
+ * strengthen), and the repair is reported on stderr when it carried one. v1 is
+ * read-only — `db.exec` against an injected source is rejected by the server
+ * (Q13/Q14).
  */
 export async function linkSqliteDiskSource(
   config: SpaceConfig,

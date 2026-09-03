@@ -66,26 +66,39 @@ export interface DiskHandleValue {
 }
 
 /**
- * A plain, inline copy of a stored contract, or `{}` when there is nothing
- * well-formed to keep.
+ * A plain, inline copy of a stored contract: `{}` for a value that is not an
+ * object (it declares no labels, so there is nothing to keep), and a THROW for
+ * an object that cannot be copied.
  *
  * The caller reads `prior` off a live cell, so `tables` can be a proxy over
  * stored data. A handle's contract must be written INLINE — a query-side load
  * resolves no links inside it — so the value that goes back is a materialized
- * copy rather than the proxy itself.
+ * copy rather than the proxy itself. A copy that fails is not an empty
+ * contract: writing `{}` in its place would lower every column's read label
+ * to nothing, silently, so the repair refuses instead.
  */
-function inlineTables(tables: unknown): Record<string, unknown> {
+function inlineTables(id: string, tables: unknown): Record<string, unknown> {
   if (tables === null || typeof tables !== "object" || Array.isArray(tables)) {
     return {};
   }
+  let copy: unknown;
   try {
-    const copy = JSON.parse(JSON.stringify(tables)) as unknown;
-    return copy !== null && typeof copy === "object" && !Array.isArray(copy)
-      ? copy as Record<string, unknown>
-      : {};
-  } catch {
-    return {};
+    copy = JSON.parse(JSON.stringify(tables));
+  } catch (err) {
+    throw new Error(
+      `cf piece link: the contract on handle ${id} cannot be copied, so the ` +
+        `handle is left as it stands rather than re-seeded without its ` +
+        `labels: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
+  if (copy === null || typeof copy !== "object" || Array.isArray(copy)) {
+    throw new Error(
+      `cf piece link: the contract on handle ${id} did not copy as an ` +
+        `object, so the handle is left as it stands rather than re-seeded ` +
+        `without its labels`,
+    );
+  }
+  return copy as Record<string, unknown>;
 }
 
 /**
@@ -122,19 +135,27 @@ export function diskHandleSeed(
   // handle that can never resolve this file, and nothing re-seeds it.
   if (prior?.id === id) return undefined;
 
-  // A repair rewrites the one field this function can derive and preserves the
-  // rest, because dropping a field is the direction that loses something. The
-  // contract is why: carrying a declared `tables` onto the repaired id can only
-  // over-label, which monotonicity permits, while dropping it lowers every
-  // column's read label to nothing — the same silent downgrade the re-link rule
-  // above exists to prevent. `owner`, `scope` and `rev` travel for the reason
-  // that paragraph gives. Only a well-formed contract is worth carrying: a
-  // `tables` that is not an object declares no labels to preserve.
+  // A repair rewrites the one field this function can derive. What else it
+  // keeps depends on what the stored `id` says about where the value came
+  // from. No id at all (or an empty one) is THIS path's handle with its
+  // derived field missing, and every other field is preserved — dropping one
+  // is the direction that loses something, as the re-link rule above says. An
+  // id that names ANOTHER source means the value was written for a handle
+  // that is not this one, and only the labels come across: carrying a
+  // declared `tables` can at most over-label, which monotonicity permits,
+  // while `owner` (row admission), `scope` (the db partition) and `rev` (a
+  // count of a source this handle never was) are not labels, and carrying
+  // them is not the safe direction. They start fresh. A `tables` that is not
+  // an object declares no labels and is not worth carrying either way; one
+  // that cannot be copied refuses the repair rather than writing `{}`.
   const seed: DiskHandleValue = {
     id,
-    tables: inlineTables(prior?.tables),
-    rev: typeof prior?.rev === "number" ? prior.rev : 0,
+    tables: inlineTables(id, prior?.tables),
+    rev: 0,
   };
+  const foreign = typeof prior?.id === "string" && prior.id !== "";
+  if (foreign) return seed;
+  if (typeof prior?.rev === "number") seed.rev = prior.rev;
   if (typeof prior?.scope === "string") seed.scope = prior.scope;
   if (typeof prior?.owner === "string") seed.owner = prior.owner;
   return seed;

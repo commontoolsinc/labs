@@ -108,12 +108,14 @@ Deno.test("diskHandleSeed repairs a handle whose id is an empty string", () => {
   });
 });
 
-Deno.test("diskHandleSeed repairs an id that names a different source, keeping the contract", () => {
-  // The id is the one field this (space, path) derives, so it is the one field
-  // a repair rewrites. `tables[].ifc` carries per-column read labels and a
-  // store's effective label may strengthen but never weaken, so a declared
-  // contract travels onto the repaired id rather than being dropped; `owner`,
-  // `scope` and `rev` travel for the same reason they survive a re-link.
+Deno.test("diskHandleSeed repairs an id that names a different source, carrying only the labels", () => {
+  // A stored `id` that names another source means the value came from
+  // somewhere else. `tables[].ifc` still travels: a store's effective label may
+  // strengthen but never weaken, so carrying labels can only over-label, while
+  // dropping them lowers every column's read label to nothing. The other
+  // fields are NOT labels and carrying them is not the safe direction: `owner`
+  // admits rows under whoever the foreign handle named, `scope` partitions the
+  // db, and `rev` counts a source this handle never was. They start fresh.
   const declared = {
     records: {
       properties: { body: { ifc: { confidentiality: ["finance"] } } },
@@ -127,6 +129,26 @@ Deno.test("diskHandleSeed repairs an id that names a different source, keeping t
       scope: "user",
       rev: 7,
     }),
+    { id: ID, tables: declared, rev: 0 },
+  );
+});
+
+Deno.test("diskHandleSeed keeps every field of a handle that lost its id", () => {
+  // No id at all names no other source: this is THIS path's handle with its
+  // one derived field missing, so the repair rewrites that field and preserves
+  // the rest — `owner`, `scope` and `rev` survive exactly as they do a re-link.
+  const declared = {
+    records: {
+      properties: { body: { ifc: { confidentiality: ["finance"] } } },
+    },
+  };
+  assertEquals(
+    diskHandleSeed(ID, {
+      tables: declared,
+      owner: "did:key:z6MkOwner",
+      scope: "user",
+      rev: 7,
+    } as never),
     {
       id: ID,
       tables: declared,
@@ -134,6 +156,19 @@ Deno.test("diskHandleSeed repairs an id that names a different source, keeping t
       scope: "user",
       rev: 7,
     },
+  );
+});
+
+Deno.test("diskHandleSeed refuses a repair whose contract it cannot copy", () => {
+  // The contract must be written inline, so the repair copies it. A copy that
+  // fails is not an empty contract: writing `{}` in its place would lower every
+  // column's read label to nothing, silently — the downgrade the whole
+  // function exists to prevent. Refusing leaves the handle for a person.
+  const uncopyable = { records: { properties: { n: { bad: 1n } } } };
+  assertThrows(
+    () => diskHandleSeed(ID, { id: "", tables: uncopyable as never }),
+    Error,
+    "cannot be copied",
   );
 });
 

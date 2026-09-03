@@ -169,10 +169,12 @@ describe("linkSqliteDiskSource handle seeding", () => {
 
     const handle = handleCell();
     await handle.pull();
+    // The labels travel; `rev` counted a source this handle never was, so it
+    // starts over.
     expect(handle.get()).toEqual({
       id: deriveDiskHandleId(signer.did(), DISK_PATH),
       tables: declared,
-      rev: 7,
+      rev: 0,
     });
     expect(warnings).toEqual([
       "cf piece link: repaired an unusable handle id, keeping the existing " +
