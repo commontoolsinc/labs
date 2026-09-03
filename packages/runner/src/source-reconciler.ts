@@ -298,12 +298,16 @@ export class SourceReconciler {
       }
       if (getPatternSource(piece) === undefined) {
         // A piece that records no origin claims the supplied one by retaining
-        // what it runs. One whose pattern this space can no longer load has
+        // what it runs, which is the source closure THIS space holds for it.
+        // A pattern live in the runtime's index says nothing about that: the
+        // index is keyed by identity alone, so it answers for a pattern
+        // compiled into any space. A piece whose space holds no closure has
         // nothing to retain, and nothing else ever moves it: it takes the
         // origin's current source in the same transition that records the
         // origin, and records the identity it displaced.
-        const rescued =
-          await this.#loadPattern(running, piece.space) === undefined &&
+        const retained = await this.#runtime.patternManager
+          .getPatternSourceProgramByIdentity(running.identity, piece.space);
+        const rescued = retained === undefined &&
           await this.#rescueSupplied(piece, origin);
         // Recording where a piece's code comes from is worth doing and worth
         // saying when it fails, but it is not what the caller asked for: a

@@ -10,7 +10,6 @@ import {
   getPatternSource,
   getPieceReconciliation,
   getPieceSourceRevisions,
-  type Pattern,
   resolveEntryIdentity,
   Runtime,
   type RuntimeFetch,
@@ -1217,38 +1216,47 @@ describe("piece source reconciliation", () => {
         .toEqual(originalRef);
     });
 
-    it("gives the origin and its source to a piece whose own pattern will not load", async () => {
+    it("gives the origin and its source to a piece whose space holds no source for what it runs", async () => {
       // A piece the runtime made before it claimed an origin, running a
-      // pattern this space can no longer load and retaining no source for
-      // it: what the origin names now is the only code it can run, so it
-      // takes that in the same revision that records the origin, and keeps
-      // the identity it displaced.
+      // pattern its own space retains no source for: what the origin names
+      // now is the only code that space can give it, so it takes that in the
+      // same revision that records the origin, and keeps the identity it
+      // displaced. The pattern stays live in this runtime's index, compiled
+      // into another space, because the index answers by identity alone and
+      // an answer from there is not this space holding the source.
+      const v1Identity = await identityFor(source("v1"));
       const v2Identity = await identityFor(source("v2"));
-      const piece = await preparePiece(
-        servingFetch(() => v2Identity, () => source("v2")),
+      createRuntime(servingFetch(() => v2Identity, () => source("v2")));
+      const elsewhere = (await Identity.fromPassphrase("another space")).did();
+      const v1 = await runtime.patternManager.compilePattern(
+        parentProgram(source("v1")),
+        { space: elsewhere },
       );
+      const piece = runtime.getCell<{ marker?: string }>(
+        signer.did(),
+        `supplied-${crypto.randomUUID()}`,
+      );
+      await runtime.setup(undefined, v1, {}, piece);
+      await runtime.patternManager.flushCompileCacheWrites();
       const originalRef = getPatternIdentityRef(piece)!;
+      expect(originalRef.identity).toBe(v1Identity);
+      expect(
+        await runtime.patternManager.getPatternSourceProgramByIdentity(
+          v1Identity,
+          piece.space,
+        ),
+        "the piece's space must hold no source for what it runs",
+      ).toBeUndefined();
+      expect(
+        await runtime.patternManager.loadPatternByIdentity(
+          v1Identity,
+          SYMBOL,
+          piece.space,
+        ),
+        "the pattern must stay live in the runtime's index",
+      ).toBeDefined();
 
-      const manager = runtime.patternManager;
-      const load = manager.loadPatternByIdentity.bind(manager);
-      const program = manager.getPatternSourceProgramByIdentity.bind(manager);
-      manager.loadPatternByIdentity = (...args: Parameters<typeof load>) =>
-        args[0] === originalRef.identity
-          ? Promise.resolve(undefined)
-          : load(...args);
-      manager.getPatternSourceProgramByIdentity = (
-        ...args: Parameters<typeof program>
-      ) =>
-        args[0] === originalRef.identity
-          ? Promise.resolve(undefined)
-          : program(...args);
-      let pattern: Pattern | undefined;
-      try {
-        pattern = await open(piece);
-      } finally {
-        manager.loadPatternByIdentity = load;
-        manager.getPatternSourceProgramByIdentity = program;
-      }
+      const pattern = await open(piece);
 
       expect(runtime.patternManager.getArtifactEntryRef(pattern!)).toEqual({
         identity: v2Identity,
