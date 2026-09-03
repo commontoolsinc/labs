@@ -2093,17 +2093,21 @@ second copy would be a second encoding rather than more coverage:
   postures the harness is willing to emit, so it cannot reach a non-conforming
   matrix point at all without the same seeded mutation.
 
-Two checks fail on every fresh run today, and P-allow asserts the exact set so
-that neither can quietly become permanent:
+No check fails on a fresh permitted run. Two did when this suite was first
+pointed at one — AUD-3 counted the `run-pattern-source` sidecar as an unrecorded
+effect, and AUD-9 demanded an invocation context from a side effect that reaches
+the fabric rather than the substrate that mints one — and both were the check
+overclaiming rather than the harness underdelivering. Both are fixed.
 
-- **AUD-3** — `run_pattern` persists a `run-pattern-source` artifact into
-  `tool-outputs/` that the run report's `toolOutputs` never lists. The historic
-  corpus holds 534 `run_pattern` outputs and no source artifact, so the check
-  passed 234 runs that predate the artifact and fails the first run audited with
-  one.
-- **AUD-9** — an executed side effect wants a CFC invocation context, and
-  `run_pattern` reaches the fabric rather than the sandbox, so none is recorded
-  for it.
+What a permitted run still cannot settle, P-allow asserts as an exact set, so a
+check that starts warning is caught rather than absorbed: AUD-2 and AUD-9 warn
+because the run's one side effect reaches the fabric, so nothing exercised its
+enforcing claim and nothing minted a context to retain; AUD-13, AUD-18 and
+AUD-19 are inconclusive over a single run. The nightly's
+`audit/expected-failures.json` names the same findings for the corpus, each with
+the issue that closes it — and fails both on a finding no entry covers and on an
+entry that stopped occurring, so the list shrinking is the progress signal
+rather than a growing excuse.
 
 ### A consistency check cannot detect a consistent wrong answer
 
@@ -2132,6 +2136,28 @@ now, exactly as intended. What fails is the assertion anchored to AH-CFC-6,
 which states that absence of metadata must not read as an unlabeled successful
 observation. That clause is outside the code and cannot be moved by editing it,
 which is the whole of why it works.
+
+### Asserting the absence of failures asserts nothing on its own
+
+The companion mistake, and the easier one to make, because it reads as
+carefulness. A test that collects a check's findings, filters them for failures,
+and asserts the list is empty passes for two different reasons: the check ran
+and found nothing wrong, or the check never ran at all. A renamed id, a run
+directory that held no run, a check dropped from the registry — each produces a
+green test that has established nothing, and none of them looks different from
+success.
+
+It is the same defect the audit's own verdict vocabulary exists to prevent.
+`inconclusive` is never `pass` precisely because a check that could not look at
+anything has not found anything; a test that treats an empty result set as a
+pass reintroduces at the assertion layer the confusion the verdicts removed at
+the reporting layer.
+
+So a property here reaches a check's findings through `checkThatRan` in
+`test/cfc-properties/support/episode.ts`, which fails when a check reported
+nothing over the artifacts it was given. Assert what a check said, not merely
+that it said nothing bad — and where the whole verdict set is the subject,
+assert the set rather than its emptiness, which is what P-allow does.
 
 ## Testing
 

@@ -22,7 +22,7 @@
       "checkId": "AUD-2",
       "runShape": "a fabric-only episode: an enforcing run whose only side effect is `run_pattern`",
       "detail": "never exercised it",
-      "why": "a `run_pattern` side effect reaches the fabric, not the sandbox that carries CFC evidence, so the run's enforcing claim goes untested. Honest reduced assurance rather than a defect; it closes when a property drives a labeled flow through a sandbox side effect as well.",
+      "why": "a `run_pattern` side effect reaches the fabric, not the sandbox that carries CFC evidence, so the run's enforcing claim goes untested. Honest reduced assurance rather than a defect. AUD-9 reads the same fact for retention and warns beside this one; both close together when a property drives a labeled flow through a sandbox side effect as well.",
       "issue": "PLACEHOLDER-cfc-property-sandbox-side-effect"
     },
     {
@@ -31,6 +31,13 @@
       "detail": "weakened by",
       "why": "the suite's episodes supply no run manifest, so every run records `not-attested` and the refusal count carries that qualifier. It closes when the suite runs under a manifest.",
       "issue": "PLACEHOLDER-cfc-property-run-manifest"
+    },
+    {
+      "checkId": "AUD-9",
+      "runShape": "a fabric-only episode: an enforcing run whose only side effect reaches the fabric",
+      "detail": "retention unconfirmed",
+      "why": "the same fact AUD-2 warns about, read for retention. A run that recorded no invocation context could have run host-side or could have lost the evidence, and a tool activity states neither, so the check says unconfirmed rather than missing. It closes with the AUD-2 warning beside it.",
+      "issue": "PLACEHOLDER-cfc-property-sandbox-side-effect"
     }
   ]
 }

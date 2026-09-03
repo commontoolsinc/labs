@@ -192,8 +192,11 @@ describe("cfc property: egress of a labeled flow", () => {
       // permitted run honestly cannot establish:
       //
       // AUD-2  — this run's one side effect is `run_pattern`, which reaches
-      //          the fabric, so nothing exercised the enforcing claim. The
-      //          same fabric-versus-sandbox distinction AUD-9 reads.
+      //          the fabric, so nothing exercised the enforcing claim.
+      // AUD-9  — the same fact read for retention: a run that recorded no
+      //          invocation context could have run host-side or could have
+      //          lost the evidence, and a tool activity states neither, so
+      //          the answer is unconfirmed rather than missing.
       // AUD-13 — the fabric-session posture predates the full posture record.
       // AUD-16 — a corpus holding one permitted run has no refusal in it.
       //          P-deny-egress is where that check is exercised.
@@ -215,6 +218,7 @@ describe("cfc property: egress of a labeled flow", () => {
         "AUD-18 inconclusive",
         "AUD-19 inconclusive",
         "AUD-2 warn",
+        "AUD-9 warn",
       ]);
     });
   });
