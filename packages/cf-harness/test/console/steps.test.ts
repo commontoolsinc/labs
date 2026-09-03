@@ -663,6 +663,37 @@ describe("console/steps CFC and disclosure", () => {
     expect(steps[0].policyEvents).toHaveLength(1);
   });
 
+  it("reads a step the loop rejected for its arguments as an error, not a denial", () => {
+    const steps = consoleRunSteps(
+      [
+        call("c1", "delegate_task", { goal: "" }),
+        result("c1", "delegate_task", {
+          type: "cf-harness.invalid-tool-call",
+          reason: "invalid_arguments",
+          expected: "a non-empty goal",
+          detail: "delegate_task goal must be a non-empty string",
+        }),
+      ],
+      [{
+        type: "cf-harness.policy-decision",
+        sequence: 1,
+        runId: "run-invalid",
+        at: "2026-01-01T00:00:00.000Z",
+        toolActivitySequence: 1,
+        toolCallId: "c1",
+        toolId: "delegate_task",
+        cfcEnforcementMode: "enforce-explicit",
+        decision: "invalid",
+        reasonCodes: ["invalid_tool_call"],
+      }],
+    );
+
+    // The answer carries no `status` of its own, so without reading the
+    // decision the step would read as an ordinary success.
+    expect(steps[0].status).toBe("error");
+    expect(steps[0].policyEvents).toHaveLength(0);
+  });
+
   it("measures the longest numeric run a result let across as value", () => {
     const bytes = Array.from({ length: 40 }, (_, index) => index);
     const steps = consoleRunSteps([

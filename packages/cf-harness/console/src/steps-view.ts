@@ -390,6 +390,8 @@ export class ConsoleSteps extends LitElement {
             <span
               class="badge ${step.policy.decision === "denied"
                 ? "denied"
+                : step.policy.decision === "invalid"
+                ? "warn"
                 : "ok"}"
             >${step.policy.decision}</span>
             ${step.policy.effectClass === undefined ? nothing : html`
