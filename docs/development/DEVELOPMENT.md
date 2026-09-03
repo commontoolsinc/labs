@@ -449,11 +449,14 @@ stored value:
   instances still answer `true`, so it is a drop-in wherever
   `isObjectOrArray()` was standing in for the container question.
 - A walk that can meet an instance and has a better answer than a throw tests
-  for one first. `attestation.ts`'s `resolve()` is the worked example, using
-  the `TypeMismatchError` its own signature already carries; a walk that can
-  meet a *link* tests `isPrimitiveCellLink()` first, since a link is a
+  for one first. Three such answers exist. `attestation.ts`'s `resolve()`
+  reports the `TypeMismatchError` its own signature already carries. A walk
+  that can meet a *link* tests `isPrimitiveCellLink()` first, since a link is a
   reference rather than a container, and under `modernCellRep` it is a
-  `FabricInstance`.
+  `FabricInstance`. And a walk that must not throw at all ends its descent
+  instead: `reactive-dependencies.ts` runs under a storage subscription, which
+  has to keep delivering, so its `isKeyable()` stops at an instance and leaves
+  a path below one unreachable on both sides.
 - `isWalkableObjectNotArray(value)` is the same test with arrays removed, for a
   walk to which an array is not merely a different shape but something it must
   not treat as a record.

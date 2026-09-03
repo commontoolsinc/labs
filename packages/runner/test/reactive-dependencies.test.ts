@@ -2009,18 +2009,12 @@ describe("determineTriggeredActions", () => {
       expect(result).toEqual([]);
     });
 
-    it("propagates the failure from a value it cannot descend", () => {
-      // The descent refuses a `FabricInstance` before any comparison is
-      // reached: an instance is a container this walk cannot address by key,
-      // and the alternative is the equal-by-vacancy answer that reads every
-      // key off it as `undefined` on both sides and triggers nothing however
-      // its contents changed. The failure is deliberately left to propagate
-      // rather than being caught and turned into "unchanged".
-      //
-      // A comparison that cannot answer is a separate refusal, raised by
-      // `valueEqual()` and covered in `data-model`. It is unreachable from
-      // here now, because every class whose comparison is an unimplemented
-      // stub is an instance, and the descent stops at one first.
+    it("propagates the failure from a leaf it cannot compare", () => {
+      // The descent ends quietly at a value it cannot address by key, but a
+      // read landing on such a value still has to compare it, and a class
+      // whose comparison is an unimplemented stub cannot answer. That failure
+      // is left to propagate rather than being caught and turned into
+      // "unchanged", which would report a changed value as unchanged.
 
       const action = createAction("nonRecursiveUncomparableLeaf");
       const dependencies = new Map<Action, SortedAndCompactPaths>([
@@ -2037,7 +2031,24 @@ describe("determineTriggeredActions", () => {
           ["value", "a"],
           { nonRecursive: true },
         )
-      ).toThrow("`FabricInstance`) in a structural walk");
+      ).toThrow("`FabricMap`: not yet implemented");
+    });
+
+    it("does not trigger a read below an instance it cannot descend", () => {
+      // An instance is a container this walk cannot address by key. A
+      // subscription that throws stops delivering, so the descent ends here
+      // as it does at any other value with no reachable keys, and the read
+      // below reads as unreachable on both sides.
+
+      const action = createAction("readBelowInstance");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a", "b"]]],
+      ]);
+      const before = { value: { a: new FabricMap(new Map([["b", 1]])) } };
+      const after = { value: { a: new FabricMap(new Map([["b", 2]])) } };
+
+      const result = determineTriggeredActions(dependencies, before, after);
+      expect(result).toEqual([]);
     });
 
     it("triggers on a special object replaced at the read's own path", () => {

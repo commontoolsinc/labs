@@ -1,5 +1,6 @@
 import { isPlainContainer } from "@commonfabric/utils/types";
 import {
+  FabricInstance,
   type FabricValue,
   isWalkableObjectOrArray,
   valueEqual,
@@ -102,6 +103,18 @@ export function addressesToPathByEntity(
 }
 
 /**
+ * Whether the descent below may address `value` by key.
+ *
+ * A `FabricInstance` answers `false` here, ending the descent at it. This walk
+ * runs under a storage subscription, which has to keep delivering, so an
+ * instance it cannot address is left to reachability: a path continuing below
+ * one is absent on both sides at the same depth, and triggers nothing.
+ */
+function isKeyable(value: unknown): boolean {
+  return !(value instanceof FabricInstance) && isWalkableObjectOrArray(value);
+}
+
+/**
  * Determines the actions that are triggered based on the changes to the data.
  *
  * Functionally equivalent looking for any `!deepEqual` for `getAtPath` for all
@@ -162,8 +175,8 @@ export function determineTriggeredActions(
   // action still never triggers however the instance's contents changed. The
   // `shallowEqual` marker at the bottom of this file covers the leaf
   // comparison; this is the descent's half of the same gap.
-  let beforeLastObject = isWalkableObjectOrArray(before) ? 0 : -1;
-  let afterLastObject = isWalkableObjectOrArray(after) ? 0 : -1;
+  let beforeLastObject = isKeyable(before) ? 0 : -1;
+  let afterLastObject = isKeyable(after) ? 0 : -1;
 
   while (subscribers.length > 0) {
     // Pull the next path from the queue
@@ -183,13 +196,13 @@ export function determineTriggeredActions(
     for (let i = overlap; i < targetPath.length; i++) {
       if (i <= beforeLastObject) {
         beforeValues[i + 1] = (beforeValues[i] as Keyable)[targetPath[i]!];
-        if (isWalkableObjectOrArray(beforeValues[i + 1])) {
+        if (isKeyable(beforeValues[i + 1])) {
           beforeLastObject = i + 1;
         } else beforeLastObject = i;
       }
       if (i <= afterLastObject) {
         afterValues[i + 1] = (afterValues[i] as Keyable)[targetPath[i]!];
-        if (isWalkableObjectOrArray(afterValues[i + 1])) {
+        if (isKeyable(afterValues[i + 1])) {
           afterLastObject = i + 1;
         } else afterLastObject = i;
       }
