@@ -99,7 +99,10 @@ Deno's V8 coverage profile.
 
 ### Running a test under a server-execution posture
 
-`serverExecution` is currently ON by default. CI keeps stable `default` and
+`serverExecution`'s first-party default is the constant
+`SERVER_EXECUTION_DEFAULT_ENABLED`; the summary table in
+[EXPERIMENTAL_OPTIONS.md](EXPERIMENTAL_OPTIONS.md#serverexecution) states its
+current value. CI keeps stable `default` and
 `opposite` roles; `tasks/server-execution-ci.ts` derives their actual ON/OFF
 posture from the first-party default constant. The opposite toolshed binary is
 built with an explicit inverse so its browser shell, server, and test processes

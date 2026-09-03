@@ -21,7 +21,7 @@ in the same change.
 flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-09-02. Each flag's section carries the date its status
+**Last reviewed:** 2026-09-03. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -35,7 +35,7 @@ was last checked against the code.
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
 | [`readerSchemaPrecedence`](#readerschemaprecedence)                         | `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` env, or `RuntimeOptions.experimental`                                                                   | on                                                                                   | Robin McCollum (#6338)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
-| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **on** (`SERVER_EXECUTION_DEFAULT_ENABLED = true`; explicit `false` = rollback) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | soak on main, then delete the flag and OFF path | Phases 1–7 landed; stable `default`/`opposite` CI roles keep both postures guarded and make a default flip data-only |
+| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **off** (`SERVER_EXECUTION_DEFAULT_ENABLED = false`; explicit `true` selects the other arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | re-flip ON (the same two-surface change back), soak on main, then delete the flag and OFF path | Phases 1–7 landed; the default rolled back to OFF 2026-09-03 (its section); stable `default`/`opposite` CI roles keep both postures guarded and make a default flip data-only |
 | [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-explicit`                                                                   | Bernhard Seefeld (#3263)                              | tighten default toward `enforce-strict`                                                                                                                                                                                           | active; ladder is permanent                                                     |
 | [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4011)                              | move toward `persist`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcWriteFloor`](#cfcwritefloor)                                           | `RuntimeOptions.cfcWriteFloor`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4479)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
@@ -71,10 +71,11 @@ are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
 `contentAddressedSchemas`, `plainResultReceipts`, `computedCellIds`,
 `lazyMaterialization` and `readerSchemaPrecedence` default on;
 `serverExecution` resolves an unset flag to the ONE first-party default
-`SERVER_EXECUTION_DEFAULT_ENABLED` in the deployed-topology presets — `true`
-since the Phase 7 flip (2026-08-28; its section), with an explicit `false`
-selecting the OFF arm, the soak's rollback lever (the single-process presets
-read no default and stay OFF — the section says how); the other flags in
+`SERVER_EXECUTION_DEFAULT_ENABLED` in the deployed-topology presets (the
+summary table above states its current value and its section carries the
+dated history), with an explicit value selecting either arm regardless (the
+single-process presets read no default and stay OFF — the section says how);
+the other flags in
 this category default off unless their section says otherwise.
 
 The mapping from environment variable to flag is defined once, canonically, as
@@ -318,8 +319,7 @@ server](#clients-that-are-not-built-alongside-their-server).
   states, no shippable intermediates (spec README §3.4); deliberately named
   unlike v1's `SERVER_PRIMARY_EXECUTION` so the archived v1 documents never
   alias it. Both states, defined:
-  - **OFF (the ROLLBACK arm since the flip — explicit `false` selects it
-    regardless of the constant, which is `true` since the flip PR): the
+  - **OFF (explicit `false` selects it regardless of the constant): the
     pre-v2 behavior, byte-for-byte.** Every client
     runtime runs and commits derivations exactly as it does today, and every
     client commit is `authored`-class — `derived` is never claimed off the
@@ -328,8 +328,8 @@ server](#clients-that-are-not-built-alongside-their-server).
     is enforced from it, and `stream-data` behaves as today. Any OFF-arm
     behavioral diff from a v2 stage is a phase-gate failure by itself
     (testing.md §2).
-  - **ON (the DEFAULT since the flip PR set the constant `true`; explicit
-    `true` selects it regardless): the v2 posture.** With stages A–F landed
+  - **ON (explicit `true` selects it regardless of the constant): the v2
+    posture.** With stages A–F landed
     this means: the per-class admission rows of protocol.md §2 are enforced
     — the `derived` row is the stage-B lease equality check PLUS stage F's
     derived-envelope defense-in-depth (the producing session must BE the
@@ -362,10 +362,11 @@ server](#clients-that-are-not-built-alongside-their-server).
     F10 interim — is DELETED). Later stages add their surfaces under
     this same flag; both halves of any coupled behavior move together
     on it.
-- **Current default and planned end state.** **ON by default** — the ONE
+- **Current default and planned end state.** **OFF by default** — the ONE
   first-party default is `SERVER_EXECUTION_DEFAULT_ENABLED` in
   [`packages/memory/v2/server-execution-default.ts`](../../packages/memory/v2/server-execution-default.ts),
-  value `true` since the flip PR (2026-08-28, after the plan's Phase-7
+  value `false` again since the rollback PR (2026-09-03), which returned it
+  from the `true` the flip PR set (2026-08-28, after the plan's Phase-7
   ordered gates were met: the ON-skip registry EMPTY, OW31's ruled
   posture built, OW45–OW53 closed, the OW38(ii) benchmark bar ruled met
   — "topics numbers are fine"; landed flip-READY DARK at `false`
@@ -378,9 +379,10 @@ server](#clients-that-are-not-built-alongside-their-server).
   longer an implicit-OWNER service principal), and the browser
   shell's build define fallback. An UNSET flag resolves to it; an explicit
   `EXPERIMENTAL_SERVER_EXECUTION=false` (or `experimental.serverExecution:
-  false`, or the shell define `"false"`) selects the OFF arm — THE
-  ROLLBACK LEVER through the soak — and an explicit `true` the ON arm,
-  regardless of the constant. CI resolves stable `default` and `opposite`
+  false`, or the shell define `"false"`) selects the OFF arm and an explicit
+  `true` the ON arm, regardless of the constant; whichever arm is not the
+  default is the per-deployment lever (the rollback lever whenever the
+  default is ON). CI resolves stable `default` and `opposite`
   roles through `tasks/server-execution-ci.ts`: `default` leaves the flag
   unset, while `opposite` explicitly selects the inverse and bakes that same
   value into its toolshed shell. Therefore changing the default requires only
@@ -396,8 +398,9 @@ server](#clients-that-are-not-built-alongside-their-server).
   the lane-posture item the topics measurement report recorded for the
   flip decision); the ON posture's unit coverage sets the
   flag explicitly (the `executor-*` suites) and its integration coverage
-  is the DEFAULT CI lanes. In CI (testing.md §2), `default` is currently ON
-  and `opposite` is currently OFF. Both are probed through the shared role
+  is the `opposite` CI lanes while the default is rolled back. In CI
+  (testing.md §2), `default` is currently OFF and `opposite` is currently
+  ON. Both are probed through the shared role
   resolver; the opposite lane uses `build-toolshed-opposite`, whose shell
   define is baked from the resolved inverse. The
   `deployed-topology-gate` job exercises the real `bg-piece-service`
@@ -406,11 +409,21 @@ server](#clients-that-are-not-built-alongside-their-server).
   with ON-arm skips and OFF-arm authored coverage following the resolved arm.
   Skips are only through `tasks/server-execution-on-skips.ts`, printed loudly
   (EMPTY at the flip, its stated precondition). End
-  state: after a soak on main (which started at the flip PR's merge) the
-  flag retires and the OFF code path is removed — a separate post-soak
+  state: re-flip ON (the same two-surface change back), soak on main, and
+  then the flag retires and the OFF code path is removed — a separate post-soak
   PR (the plan's Phase 7 task 2; it also removes the opposite guard lanes and
   `build-toolshed-opposite`).
-- **Status on 2026-09-02 (toggle hygiene).** The default remains ON and runtime
+- **Status on 2026-09-03 (the ROLLBACK).** The rollback PR (#6840)
+  returned the constant to `false` — the first data-only flip: this value
+  and this registry's current-status prose, with no workflow, test, or role
+  edits (the 2026-09-02 hygiene's promise, exercised). Everything the flip
+  PR built stays: the serving-side machinery, the deployed-topology gates,
+  and the two-arm lanes, whose roles now resolve `default` = OFF and
+  `opposite` = ON (an ON-built shell, carrying the EMPTY ON-arm skip
+  registry and the `server-execution` record marker; authored-pattern
+  coverage rides the default lanes). Explicit `true` selects ON per
+  deployment. Re-flipping is the same two-surface change back.
+- **Status on 2026-09-02 (toggle hygiene).** The default remained ON and runtime
   behavior is unchanged. CI now expresses the two postures as stable roles
   derived from the one default constant. A rollback-default PR can therefore
   be a constant change plus its status documentation; it does not duplicate or
@@ -462,8 +475,9 @@ server](#clients-that-are-not-built-alongside-their-server).
   still dark: OFF by default and byte-identical to today; the ON arm now
   actually serves (with the documented two-deriver interim). Stage G
   (effects + outbox) remains.
-- **Path to removal.** The flip PR (the constant → `true`) after the
-  ordered gates above; soak the default on main; then the post-soak PR
+- **Path to removal.** Re-flip (the constant → `true` with this registry's
+  status) once the rollback's reason is settled; soak the default on main;
+  then the post-soak PR
   retires the flag, removes the OFF path (and the opposite regression-guard
   lanes + `build-toolshed-opposite`), and closes out this entry.
 

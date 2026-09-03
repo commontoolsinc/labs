@@ -31,12 +31,16 @@ describe("server-execution-ci", () => {
     );
     expect(summary).toBeDefined();
     // The whole status cell, so the posture word, the constant's value and
-    // the rollback arm cannot drift apart from each other or from the code.
+    // the explicit arm cannot drift apart from each other or from the code.
+    // The wording is direction-neutral on purpose: the explicit value is
+    // "the other arm" whichever way the default points (it is the rollback
+    // lever only while the default is ON), so a flip changes the values in
+    // the cell and never its phrasing.
     const enabled = SERVER_EXECUTION_DEFAULT_ENABLED;
     expect(summary!).toContain(
       `| **${enabled ? "on" : "off"}** ` +
         `(\`SERVER_EXECUTION_DEFAULT_ENABLED = ${enabled}\`; ` +
-        `explicit \`${!enabled}\` = rollback) |`,
+        `explicit \`${!enabled}\` selects the other arm) |`,
     );
   });
 

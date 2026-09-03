@@ -3510,6 +3510,15 @@ personally; the soak starts at ITS merge.** What it carries:
   the corrected call; under OFF the same id executes. The step's ON
   comment points at this row.
 
+Delta 2026-09-03 — the rollback (#6840):
+
+- The first-party default returned to OFF by the first data-only flip:
+  the constant plus current-status prose, with no workflow, test, or role
+  edit. The PR's own CI board is the exercise of the hygiene delta below —
+  the `default` lanes probe OFF, the `opposite` lanes build an ON shell
+  and probe ON, and the docs pin is what forced the status prose to move
+  with the constant.
+
 Delta 2026-09-03 — post-flip toggle hygiene:
 
 - The absolute literal default pin introduced by #6535 is retired. Stable

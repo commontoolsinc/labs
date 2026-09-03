@@ -30,9 +30,11 @@ A test's identity has three required parts, scoped within a repository:
   server-execution deployed-topology lanes have stable `default` and
   `opposite` roles. `default` follows the first-party constant and remains
   unmarked; `opposite` receives the marker for the posture it actually runs:
-  `server-execution` for ON or `server-execution-off` for OFF. Since the
-  2026-08-28 flip, that resolves to unmarked ON and marked OFF. The pre-flip
-  explicit-ON history remains queryable under `server-execution`. The claim is
+  `server-execution` for ON or `server-execution-off` for OFF. Which
+  posture is unmarked follows the constant (the registry's summary table
+  states it); each marker is the continuous history of its posture whenever
+  that posture is not the default, across flips in either direction. The
+  claim is
   deliberately narrow: the
   single-process default jobs (the unit suites, `cf test`, the no-server
   pattern-unit lane — the `patternTest` / `unitTest` presets) never read

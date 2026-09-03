@@ -41,14 +41,17 @@ not-yet-implemented phases via explicit skip lists per phase, never via
 silent filtering. (v1's terminal failure mode: the flags-on branch never
 went through CI at all.)
 
-*Phase 7 FLIPPED (2026-08-28):
-`SERVER_EXECUTION_DEFAULT_ENABLED = true`. CI names the two exercised
-postures by stable role rather than by today's value:
+*Phase 7's flip mechanism (landed dark 2026-08-16, flipped ON 2026-08-28,
+rolled back 2026-09-03 — the registry's `serverExecution` entry in
+[EXPERIMENTAL_OPTIONS.md](../../development/EXPERIMENTAL_OPTIONS.md#serverexecution) carries the dated
+history and its summary table states the current value of
+`SERVER_EXECUTION_DEFAULT_ENABLED`). CI names the two exercised postures by
+stable role rather than by the current value:
 
 - `default` leaves `EXPERIMENTAL_SERVER_EXECUTION` unset and follows the
-  first-party constant. It is ON today.
+  first-party constant.
 - `opposite` explicitly selects the inverse and uses a toolshed whose browser
-  shell has that same value baked in. It is OFF today.
+  shell has that same value baked in.
 
 `tasks/server-execution-ci.ts` is the single mapping from those roles to the
 resolved value, label, record variant, runtime environment, baked shell define,
@@ -80,9 +83,10 @@ Test-record identity follows the [test-run record
 contract](../test-records.md). The `default` role leaves the shipping action's
 variant unset, continuing the existing unmarked history. The `opposite` role
 uses the marker for the posture it actually exercises: `server-execution` when
-ON, or `server-execution-off` when OFF. Today that means unmarked ON and marked
-OFF. The pre-flip explicit-ON history stays queryable under
-`server-execution`. Workflow tests assert both the dynamic opposite marker and
+ON, or `server-execution-off` when OFF. Each marker is the continuous
+history of its posture whenever that posture is not the default, across
+flips in either direction. Workflow tests assert both the dynamic opposite
+marker and
 the unmarked default.
 
 ## 3. The watermark replaces polling
