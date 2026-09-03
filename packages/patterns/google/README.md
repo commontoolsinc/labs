@@ -35,18 +35,21 @@ packages/patterns/google/
 │       ├── calendar-viewer.tsx
 │       └── google-docs-comment-orchestrator.tsx
 │
-└── extractors/               # End-user patterns
-    ├── usps-informed-delivery.tsx
-    ├── email-notes.tsx
-    ├── chase-bill-tracker.tsx
-    ├── bofa-bill-tracker.tsx
-    ├── pge-bill-tracker.tsx
-    ├── berkeley-library.tsx
-    ├── united-flight-tracker.tsx
-    ├── hotel-membership-gmail-agent.tsx
-    ├── favorite-foods-gmail-agent.tsx
-    ├── email-pattern-launcher.tsx
-    └── ...
+├── extractors/               # End-user patterns
+│   ├── usps-informed-delivery.tsx
+│   ├── email-notes.tsx
+│   ├── chase-bill-tracker.tsx
+│   ├── bofa-bill-tracker.tsx
+│   ├── pge-bill-tracker.tsx
+│   ├── berkeley-library.tsx
+│   ├── united-flight-tracker.tsx
+│   ├── hotel-membership-gmail-agent.tsx
+│   ├── favorite-foods-gmail-agent.tsx
+│   ├── email-pattern-launcher.tsx
+│   └── ...
+│
+└── WIP/                      # Work in progress
+    └── google-docs-importer.tsx
 ```
 
 ## Quick Start
@@ -217,6 +220,16 @@ Your Pattern
 | `extractors/favorite-foods-gmail-agent.tsx`   | Extract food preferences from emails     |
 | `extractors/email-pattern-launcher.tsx`       | Auto-launch patterns based on emails     |
 | `extractors/calendar-change-detector.tsx`     | Detect schedule changes                  |
+
+### WIP/ — Work In Progress
+
+| Pattern                        | Description                |
+| ------------------------------ | -------------------------- |
+| `WIP/google-docs-importer.tsx` | Import Google Docs content |
+
+> **Note:** `google-docs-importer.tsx` imports from `../../notes/note.tsx` and
+> requires deploying with `--root packages/patterns` to resolve cross-folder
+> imports.
 
 ## OAuth Scopes
 

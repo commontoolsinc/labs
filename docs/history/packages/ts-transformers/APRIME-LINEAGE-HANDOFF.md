@@ -401,8 +401,8 @@ emit-invariance check and the full fixture suite green.
   (hoisting-stage fixture asserting recovered-authored positions for all five
   origins) rather than leaving instrumentation ad hoc.
 - Emit sanity: `--show-transformed` diff on a corpus pattern (e.g.
-  `bookmarks.tsx`) should be **byte-identical** pre/post fix — lineage channels
-  are emit-map metadata, not output text. Any text diff is a bug.
+  `age-category.tsx`) should be **byte-identical** pre/post fix — lineage
+  channels are emit-map metadata, not output text. Any text diff is a bug.
 - Sourcemap spot-check in a dev shell (positions in devtools land on authored
   lines for a rebuilt callback).
 
