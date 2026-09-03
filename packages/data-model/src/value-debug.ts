@@ -744,8 +744,12 @@ class DebugStringifier {
           const excerpt = this.#renderSubvalue(partial.excerpt, indent);
           return `${excerpt} + ... length: ${partial.length}`;
         }
+        // deno-coverage-ignore-start
+        // The conversion is the form's only producer and shapes it no other
+        // way, so this fallthrough is a prophylactic no test can reach.
         return this.#renderInstance(tag, payload, indent);
       }
+      // deno-coverage-ignore-stop
 
       default: {
         // A class instance, carried under its class name.
@@ -824,9 +828,13 @@ class DebugStringifier {
     value: FabricValue,
   ): { readonly length: number; readonly excerpt: string } | undefined {
     const length = DebugStringifier.#lengthOf(value);
+    // deno-coverage-ignore-start
+    // The conversion shapes the form no other way; see the `partialString`
+    // arm of `#renderTaggedForm()`.
     if (length === undefined) {
       return undefined;
     }
+    // deno-coverage-ignore-stop
 
     const { excerpt } = value as FabricPlainObject;
     return (typeof excerpt === "string") ? { length, excerpt } : undefined;
