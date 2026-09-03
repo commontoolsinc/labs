@@ -51,6 +51,7 @@ describe("convert-cells-to-links-label-views", () => {
 
   /** The one caveat of a view, as a bag of properties. */
   function caveatOf(view: CfcLabelView | undefined): Record<string, unknown> {
+    expect(view).toBeDefined();
     return view!.entries[0].label.confidentiality![0] as Record<
       string,
       unknown

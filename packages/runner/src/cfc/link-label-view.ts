@@ -53,7 +53,7 @@ export function setLinkCfcLabelView(
  * (inv-12 Stage 0): views arriving from the main thread are untrusted display
  * artifacts and must not become worker label state or link-write policy
  * inputs. `cellRefToSigilLink` already refuses to forward ref-carried views,
- * but raw sigil links bypass the CellRef path -- hand-crafted JSON in write
+ * but raw sigil links bypass the CellRef path — hand-crafted JSON in write
  * values, and CellHandles serialized into `CustomEvent.detail` via `toJSON`
  * re-entering through the VDOM event ingress.
  *
