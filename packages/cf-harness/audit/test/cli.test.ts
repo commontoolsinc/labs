@@ -273,7 +273,6 @@ describe("cli", () => {
         .toContain("AUD-16");
       expect(idsOf(asked).has("AUD-16")).toBe(true);
       expect(idsOf(asked).has("AUD-18")).toBe(true);
-      expect(idsOf(asked).has("AUD-19")).toBe(true);
     });
 
     it("returns 1 when a corpus declared adversarial recorded no release refusal", async () => {

@@ -27,7 +27,7 @@ import type { HarnessSubagentRunManifest } from "../../src/contracts/subagent.ts
 import type { PromptSlotBinding } from "../../src/contracts/prompt-slot.ts";
 import { extendsClause, requiredBy } from "../citations.ts";
 import type { RunEvidence } from "../evidence.ts";
-import type { CheckEvidence } from "../report.ts";
+import type { CheckEvidence, KnownDefectRegistration } from "../report.ts";
 import {
   activitiesOf,
   type AuditCheck,
@@ -44,15 +44,40 @@ import {
 //
 
 /**
- * The issue each known defect is tracked under, so a finding carries the place
- * the work is, and the manifest and the expected-failures ledger cite one
- * string rather than three copies of it.
+ * What a ledger entry for each of these checks would say, other than the run
+ * selector, which is written from the finding's own run id.
+ *
+ * Held beside the checks rather than inside each one so that the set is
+ * readable as a register in its own right — these are the defects, and this
+ * file is where the list shrinks from. A nightly audit fails on every one of
+ * these until a ledger records them as known; that ledger arrives with the
+ * nightly, and until then a failing Group E check is the register working
+ * rather than something broken.
  */
-export const KNOWN_DEFECT_ISSUES = {
-  "AUD-20": "CT-2175",
-  "AUD-21": "CT-2178",
-  "AUD-22": "CT-2178",
-} as const;
+export const KNOWN_DEFECT_REGISTRATIONS = {
+  "AUD-20": {
+    detail: "were admitted on authority alone",
+    runShape:
+      "an enforcing run whose executed side effects are sandbox tools rather than `run_pattern`",
+    why:
+      "H9. Every side-effecting tool except `run_pattern` is admitted by a gate on the descriptor's static `effectClass` crossed with whether the run carries direct-command evidence, recorded before the tool runs, consulting no sink, no ceiling and no label. It closes when each side-effecting tool's effect is routed through a named sink with a declared ceiling, the way `run_pattern` already routes its answer.",
+    issue: "CT-2175",
+  },
+  "AUD-21": {
+    detail: "without binding what AH-CFC-3 requires it to bind",
+    runShape: "any run that binds a `direct-command` prompt slot",
+    why:
+      "H2. No mint site populates a `valueDigest`, and the subject is a run-scoping fact — a workspace path or a resume-run id — rather than an authenticated principal. Both halves are additive: the contract already types the fields, and the work is at the two mint sites.",
+    issue: "CT-2216",
+  },
+  "AUD-22": {
+    detail: "no confidentiality ceiling",
+    runShape: "any run that delegates",
+    why:
+      "H8. Nothing in the subagent profile represents a ceiling, so a child that inherits a handle to a cell the parent could read can read it, whatever tools it was given. Not harness-local: the reads bottom out in the runner, so the ceiling has to be something the runner's access check can consume.",
+    issue: "CT-2217",
+  },
+} as const satisfies Record<string, KnownDefectRegistration>;
 
 /**
  * Whether any decision recorded for `toolCallId` consulted a label.
@@ -151,10 +176,9 @@ const labelConsultingAdmission: AuditCheck = {
       verdict: "fail",
       message: `${
         count(unconsulted.length, "side effect", "side effects")
-      } of ${effects.length} were admitted on authority alone, with no decision that could have consulted a label (${
-        KNOWN_DEFECT_ISSUES["AUD-20"]
-      })`,
+      } of ${effects.length} were admitted on authority alone, with no decision that could have consulted a label`,
       evidence,
+      knownDefect: KNOWN_DEFECT_REGISTRATIONS["AUD-20"],
     };
   },
 };
@@ -289,10 +313,9 @@ const promptSlotBindingEvidence: AuditCheck = {
       verdict: "fail",
       message: `${
         count(evidence.length, "binding mints", "bindings mint")
-      } direct-command authority without binding what AH-CFC-3 requires it to bind (${
-        KNOWN_DEFECT_ISSUES["AUD-21"]
-      })`,
+      } direct-command authority without binding what AH-CFC-3 requires it to bind`,
       evidence,
+      knownDefect: KNOWN_DEFECT_REGISTRATIONS["AUD-21"],
     };
   },
 };
@@ -353,9 +376,8 @@ const delegationCeiling: AuditCheck = {
       verdict: "warn",
       message: `${
         count(uncapped.length, "delegation records", "delegations record")
-      } no confidentiality ceiling, so nothing bounds what the child may observe through the handles and arguments it inherits (${
-        KNOWN_DEFECT_ISSUES["AUD-22"]
-      })`,
+      } no confidentiality ceiling, so nothing bounds what the child may observe through the handles and arguments it inherits`,
+      knownDefect: KNOWN_DEFECT_REGISTRATIONS["AUD-22"],
       evidence: uncapped.map((delegation) => ({
         artifact: "run-state.json",
         pointer: `subagentRuns[${delegation.childRunId}].manifest`,

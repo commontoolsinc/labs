@@ -47,6 +47,44 @@ export interface CheckEvidence {
   detail: string;
 }
 
+/**
+ * What a known-defect finding says about itself so that recording it in a
+ * nightly's expected-failures ledger is data entry rather than rediscovery.
+ *
+ * A Group E check fails by design until its defect is fixed, so a nightly that
+ * runs the audit has to be told which of its findings were already known. That
+ * ledger's entries carry a check id, the run shape, a substring of the
+ * finding's message to match on, the reason it is open, and the issue. Every
+ * one of those except the run selector is something the check knows and the
+ * person writing the entry would otherwise have to reconstruct by reading the
+ * check's source and guessing which part of a message is stable.
+ *
+ * {@link CheckResult.runId} is the sixth field: an entry's selector is an
+ * anchored expression over the run id, and this is the id to write one from.
+ */
+export interface KnownDefectRegistration {
+  /**
+   * A substring of the finding's `message` that does not vary between runs.
+   *
+   * A message carries counts, and an entry matching on a count would stop
+   * matching the moment a run made one more call. This is the part that does
+   * not move, and `test/known-defects.test.ts` holds every finding to it being
+   * genuinely a substring of the message beside it — an entry copied from a
+   * finding whose detail was not in the message would match nothing and be
+   * reported stale forever.
+   */
+  detail: string;
+
+  /** The kind of run this arises on, in prose, for a reader of the ledger. */
+  runShape: string;
+
+  /** Why it is open rather than fixed. */
+  why: string;
+
+  /** Where the work that closes it is planned. */
+  issue: string;
+}
+
 /** One check's verdict on one run. */
 export interface CheckResult {
   checkId: string;
@@ -63,6 +101,13 @@ export interface CheckResult {
 
   citations: readonly CheckCitation[];
   evidence: readonly CheckEvidence[];
+
+  /**
+   * Set on a finding from a defect we already know about, carrying what a
+   * ledger entry for it would need. Absent on a `pass`, and absent on every
+   * check that is about a regression rather than about a known gap.
+   */
+  knownDefect?: KnownDefectRegistration;
 }
 
 /** The verdict at or above which the audit exits non-zero. */

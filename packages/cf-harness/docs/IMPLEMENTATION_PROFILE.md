@@ -36,76 +36,32 @@ The CFC specification defines three implementation profiles in
 
 | Profile                   | Position                                                                                                                                                                                                                                                                                                                                                                            |
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `CfcAgentHarnessProfile`  | **Not claimed.** Three of §18.3.3's nine obligations have no implementation behind them and four are partly met. The list is below.                                                                                                                                                                                                                                                 |
+| `CfcAgentHarnessProfile`  | **Not claimed.** Which of §18.3.3's obligations are answered is held in [`audit/conformance-manifest.ts`](../audit/conformance-manifest.ts) and printed by `deno task cfc-audit`, so it is not restated here.                                                                                                                                                                       |
 | `CfcGVisorSandboxProfile` | **Not claimed, and not this package's to claim.** cf-harness runs tools under the sibling gVisor runtime `runsc-cfc`, so the profile is in scope for a deployment; the mediation it requires belongs to that runtime, the Common Fabric FUSE daemon, and the runner's label store. Four of §18.2.7's nineteen documentation obligations are this package's, and are answered below. |
 | `CfcTrustedRenderProfile` | **Not applicable.** cf-harness has no user-visible render surface. Its outputs are model context, operator terminal lines, and artifact files, none of which is a certified authorship boundary.                                                                                                                                                                                    |
 
-`CfcAgentHarnessProfile` is not claimed for these reasons, one per §18.3.3
-obligation:
+Which §18.3.3 obligations are answered, and which are not, is
+[`audit/conformance-manifest.ts`](../audit/conformance-manifest.ts) and not this
+document. That file holds, per obligation, the obligation in the specification's
+words, the status, the code the answer rests on, the audit checks covering it,
+and where the work is tracked; `deno task cfc-audit` prints the position on
+every run, and the manifest's status is reconciled against those checks'
+verdicts so a status nothing tests cannot be asserted.
 
-1. **Which surfaces may mint `PromptSlotBound`, and which roles.** Two surfaces
-   mint, both through `createCliPromptSlotBinding`: the batch CLI and the
-   console web server. Roles are a closed union and validated on the way in.
-   Nothing restricts which role which surface may mint, which is what the
-   obligation asks to be documented.
-2. **How input-capture records bind subject, surface, value digest, role, and
-   kernel name.** `kernelName`, `surface`, and `role` are bound. No mint site
-   populates a `valueDigest`, and the CLI's `subject` is a resume-run id or a
-   workspace path rather than an authenticated subject. §18.3.1 requires a
-   non-UI surface minting without a render reference to supply an equivalent
-   trusted input-capture record; neither surface does. **Not met.**
-3. **How direct-command evidence is kept unforgeable.** Met, and mechanically:
-   the binding is never a field of a tool input schema, a skill's prompt role is
-   pinned to `context` at the type level, what crosses into the sandbox is a
-   `PromptSlotInfluence` atom rather than a `PromptSlotBound` one, and the
-   runner strips a pattern-authored `PromptSlotBound` from a declared label.
-4. **How tool descriptor and measured-contract registry snapshots are issued,
-   accepted, expired, revoked, and bound to invocations.** There are no
-   snapshots. The tool registry is a compile-time map and a descriptor carries
-   no digest. There is no measured-contract registry, so sandboxed output is
-   handled under §18.2.4.1's conservative default. `acquire_skill` is the one
-   dynamic acquisition path and does record issuance-grade provenance — a
-   registry id, a full commit SHA, a pinned source URL, and a host-computed
-   digest over the fetched bytes — which is binding without acceptance, expiry,
-   or revocation. **Not met.**
-5. **Which descriptor fields are low-observable by default.** Descriptor fields
-   carry no observation labels and there is no low-safe descriptor view. Tool
-   _availability_ is narrowed — a tool the run cannot back is absent rather than
-   present-and-failing — so a model cannot probe for hidden availability, but
-   that is an ergonomic property rather than a labeling decision. **Not met.**
-6. **How free-form tool documentation is kept separate from structured
-   capability metadata.** Separated for skills: a skill's text is a labeled
-   document read under the `context` prompt role with a registry digest, an
-   observed digest, and a match flag recorded beside it. Not separated for
-   tools: a descriptor's `description` is a plain string inside the same record
-   as its effect class and schema, with no `docRef` and no opaque-handle path.
-   **Partly met.**
-7. **How opaque handles are passed to tools and subagents without revealing
-   payload bytes.** The address form is built and disciplined: deterministic
-   per-run tokens for positively identified cell addresses, swapped in both
-   directions around policy evaluation, seeded into a child table only for the
-   handles a delegation names, and inspectable for shape but never for value.
-   §18.2.4.2's opaque handle over _bytes_ is half-built: six sites mint a handle
-   for a blocked observation — a withheld sandbox stream, exit code, error, or
-   output value — and no code anywhere reads a `handleId`. With no resolution
-   step the token identifies a denial rather than conferring a capability, so
-   the blocked-value recovery flow through a sanitizer subagent cannot be run
-   end to end. **Partly met**; see deviation 4.
-8. **How subagent ceilings and observation policies are applied before inherited
-   handles are resolved.** A child profile binds tools, host tools, a model
-   override, native model tools, skills, allowed scripts, a script target, a
-   turn budget, and a return contract. It binds no confidentiality ceiling and
-   attenuates no principal, so §18.2.4.3's upper bound on what a callee may
-   observe has no representation. What is built is capability attenuation, which
-   is a different property and does not substitute for it. **Not met.**
-9. **How side-effecting tool calls bottom out in the same sink-specific intent
-   and commit-point checks used outside the agent harness.** `run_pattern` does:
-   it measures its release against a named sink and an explicit ceiling and
-   returns the commit boundary's refusal as structured evidence. No other
-   side-effecting tool does. The gate the rest pass through turns on the
-   descriptor's static effect class and on whether the run carries a
-   direct-command binding, records its decision before the tool runs, and
-   consults no sink, no ceiling, and no label. **Partly met**; see deviation 6.
+Stating the statuses here as well would be a second encoding of one truth, and a
+consistency check across two copies cannot detect a consistent wrong answer: the
+copy nobody runs is the one that goes stale, and a reader has no way to tell
+which of two disagreeing documents is right. So this document says where the
+position lives and does not restate it. The reading of it is:
+
+```bash
+cd packages/cf-harness
+deno task cfc-audit .cf-harness-console/runs
+```
+
+The obligation-by-obligation working, with the code each answer rests on, is in
+[`docs/history/packages/cf-harness/cfc-profile-conformance-gap-2026-09-03.md`](../../../docs/history/packages/cf-harness/cfc-profile-conformance-gap-2026-09-03.md),
+which is a point-in-time record and is not maintained.
 
 The four §18.2.7 obligations that are this package's:
 

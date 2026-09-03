@@ -46,13 +46,21 @@ import {
   type RunEvidence,
   type RunFamily,
 } from "../evidence.ts";
-import type { CheckEvidence, CheckResult, CheckVerdict } from "../report.ts";
+import type {
+  CheckEvidence,
+  CheckResult,
+  CheckVerdict,
+  KnownDefectRegistration,
+} from "../report.ts";
 
 /** What a check found, before it is stamped with the run it looked at. */
 export interface CheckOutcome {
   verdict: CheckVerdict;
   message: string;
   evidence?: readonly CheckEvidence[];
+
+  /** What a ledger entry for this finding would need. See its own type. */
+  knownDefect?: KnownDefectRegistration;
 }
 
 /** One registered check. */
@@ -1773,6 +1781,9 @@ export const auditRunFamily = (
         message: outcome.message,
         citations: check.citations,
         evidence: outcome.evidence ?? [],
+        ...(outcome.knownDefect !== undefined
+          ? { knownDefect: outcome.knownDefect }
+          : {}),
       });
     }
   }
