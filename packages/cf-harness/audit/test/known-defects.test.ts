@@ -17,35 +17,71 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
 
-import {
-  KNOWN_DEFECT_CHECKS,
-  KNOWN_DEFECT_REGISTRATIONS,
-} from "../checks/known-defects.ts";
+import { KNOWN_DEFECT_REGISTRATIONS } from "../checks/known-defects.ts";
+import { RUN_CHECKS } from "../checks/registry.ts";
 import { auditRunFamily } from "../checks/structural.ts";
-import { loadRunFamily } from "../evidence.ts";
+import { loadRunFamily, type RunFamily } from "../evidence.ts";
 import type { CheckResult } from "../report.ts";
 import { FIXTURE_RUN_ID, FIXTURE_RUNS_DIR } from "./regenerate-fixtures.ts";
 
 const family = await loadRunFamily(join(FIXTURE_RUNS_DIR, FIXTURE_RUN_ID));
-const RESULTS = auditRunFamily(family, KNOWN_DEFECT_CHECKS);
+
+/**
+ * The fixture with its cell-labels snapshot removed, so AUD-23's registration
+ * is exercised here too.
+ *
+ * The fixture keeps a snapshot, so AUD-23 passes on it and carries nothing.
+ * Reading only the clean tree would leave that registration untested while
+ * every assertion below still passed — over a list AUD-23 was not in.
+ */
+const withoutCellLabels = (): RunFamily => {
+  const root = structuredClone(family.root);
+  root.cellLabels = { status: "absent", path: root.cellLabels.path };
+  const state = root.runState;
+  if (state.status === "present") {
+    delete (state.value as { cellLabels?: unknown }).cellLabels;
+  }
+  return { root, children: structuredClone(family.children) };
+};
+
+const RESULTS = [
+  ...auditRunFamily(family, RUN_CHECKS),
+  ...auditRunFamily(withoutCellLabels(), RUN_CHECKS),
+];
+
+/**
+ * Every finding this fixture produced that says it is about a known defect.
+ *
+ * Read off the results of every registered check rather than off one group's:
+ * a registration is a property of a finding, and AUD-23 carries one from
+ * `structural.ts` while the Group E checks carry theirs from
+ * `known-defects.ts`. Collecting them by where they were declared would leave
+ * a check's registration untested the moment one was added anywhere else.
+ */
+const registered = (): readonly CheckResult[] =>
+  RESULTS.filter((result) => result.knownDefect !== undefined);
 
 const findings = (): readonly CheckResult[] =>
   RESULTS.filter((result) =>
-    result.verdict === "fail" || result.verdict === "warn"
+    (result.verdict === "fail" || result.verdict === "warn") &&
+    result.knownDefect !== undefined
   );
 
 describe("known defects", () => {
   it("reports a finding for every registered defect", () => {
     // Without this the assertions below would hold over an empty list. The
-    // fixture is a captured run of a system with all three gaps in it.
+    // fixture is a captured run of a system with all three Group E gaps in
+    // it, and AUD-23 joins them on the variant with no cell-labels snapshot.
     expect(
       [...new Set(findings().map((result) => result.checkId))].sort(),
-    ).toEqual(Object.keys(KNOWN_DEFECT_REGISTRATIONS).sort());
+    ).toEqual(
+      [...Object.keys(KNOWN_DEFECT_REGISTRATIONS), "AUD-23"].sort(),
+    );
   });
 
   it("carries what a ledger entry needs on every finding", () => {
     expect(
-      findings()
+      registered()
         .filter((result) =>
           result.knownDefect === undefined ||
           result.knownDefect.detail.trim() === "" ||
@@ -62,7 +98,7 @@ describe("known defects", () => {
     // the message matches nothing, so an entry written from it is stale the
     // day it lands and the gap looks closed.
     expect(
-      findings()
+      registered()
         .filter((result) =>
           result.knownDefect === undefined ||
           !result.message.includes(result.knownDefect.detail)
@@ -78,11 +114,9 @@ describe("known defects", () => {
     // the `3` of `AH-CFC-3` — is not a count, which is why this looks for a
     // standalone one rather than for any digit.
     expect(
-      Object.entries(KNOWN_DEFECT_REGISTRATIONS)
-        .filter(([, registration]) =>
-          /(^|\s)\d+(\s|$)/.test(registration.detail)
-        )
-        .map(([checkId]) => checkId),
+      registered()
+        .filter((result) => /(^|\s)\d+(\s|$)/.test(result.knownDefect!.detail))
+        .map((result) => result.checkId),
     ).toEqual([]);
   });
 
@@ -90,11 +124,13 @@ describe("known defects", () => {
     // A tracker id or a URL. Which tracker is not this file's business; that
     // the work can be found is.
     expect(
-      Object.entries(KNOWN_DEFECT_REGISTRATIONS)
-        .filter(([, registration]) =>
-          !/^([A-Z][A-Z0-9]*-\d+|https?:\/\/\S+)$/.test(registration.issue)
+      registered()
+        .filter((result) =>
+          !/^([A-Z][A-Z0-9]*-\d+|https?:\/\/\S+)$/.test(
+            result.knownDefect!.issue,
+          )
         )
-        .map(([checkId]) => checkId),
+        .map((result) => result.checkId),
     ).toEqual([]);
   });
 
@@ -111,9 +147,12 @@ describe("known defects", () => {
     ).toEqual([]);
   });
 
-  it("registers exactly the checks the register names", () => {
-    expect(KNOWN_DEFECT_CHECKS.map((check) => check.id).sort()).toEqual(
-      Object.keys(KNOWN_DEFECT_REGISTRATIONS).sort(),
-    );
+  it("covers a registration declared outside Group E", () => {
+    // A registration is a property of a finding rather than of a group.
+    // AUD-23 declares its own from `structural.ts`, beside the check it was
+    // split out of, and everything above has to reach it.
+    expect(
+      registered().some((result) => result.checkId === "AUD-23"),
+    ).toBe(true);
   });
 });

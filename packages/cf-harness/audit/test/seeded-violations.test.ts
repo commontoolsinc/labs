@@ -703,6 +703,67 @@ describe("seeded violations", () => {
     });
   });
 
+  describe("AUD-23 cell-labels snapshot", () => {
+    it("warns a run that recorded no cell-labels read and attempted none", () => {
+      // And AUD-9 does not move, which is the point of the split. The
+      // cell-labels snapshot is not among the six artifacts AH-CFC-16
+      // enumerates, so a run missing it has not failed that clause.
+      turnsOnly("AUD-23", "warn", (root) => {
+        root.cellLabels = {
+          status: "absent",
+          path: root.cellLabels.path,
+        };
+        delete stateOf(root).cellLabels;
+      });
+    });
+
+    it("fails an enforcing run whose attempted cell-labels read failed", () => {
+      // A different fact from the one above, and the artifacts distinguish
+      // them: this run held a ref, asked, and the answer is gone.
+      turnsOnly("AUD-23", "fail", (root) => {
+        root.cellLabels = {
+          status: "absent",
+          path: root.cellLabels.path,
+        };
+        const state = stateOf(root);
+        delete state.cellLabels;
+        state.failureRecords = [
+          ...(state.failureRecords ?? []),
+          {
+            type: "cf-harness.failure-record",
+            at: "2026-09-03T00:00:00.000Z",
+            source: "cell_labels",
+            kind: "unknown",
+            detail: "the space refused the read",
+          },
+        ];
+      });
+    });
+
+    it("passes a run holding the snapshot", () => {
+      // The other direction: the fixture keeps one, and the check reaches it.
+      expect(CLEAN[at("AUD-23")]).toBe("pass");
+    });
+
+    it("carries the issue on the finding it cannot decide", () => {
+      // The open question is which of the two absences AH-CFC-16 should want.
+      // Until that is settled the check reports the fact and names where the
+      // question is being decided.
+      const audited = auditRunFamily(
+        seeded((root) => {
+          root.cellLabels = { status: "absent", path: root.cellLabels.path };
+          delete stateOf(root).cellLabels;
+        }),
+        RUN_CHECKS,
+      );
+      const finding = audited.find((result) =>
+        result.checkId === "AUD-23" && result.runId === FIXTURE_RUN_ID
+      );
+      expect(finding?.knownDefect?.issue).toBe("CT-2210");
+      expect(finding?.message).toContain(finding?.knownDefect?.detail);
+    });
+  });
+
   describe("AUD-13 conforming matrix point", () => {
     it("fails a strict run whose flow labels are not persisted", () => {
       sessionTurnsOnly("AUD-13", "fail", (posture) => {

@@ -1373,9 +1373,13 @@ interface RetentionRequirement {
 }
 
 /**
- * Helper for AUD-9, which says what became of a run's cell-labels read: the
- * artifact's own state, and, for a run without one, whether the harness
- * tried and failed — which it records on the run — or never asked.
+ * What became of a run's cell-labels read: the artifact's own state, and, for
+ * a run without one, whether the harness tried and failed — which it records
+ * on the run — or never asked.
+ *
+ * The two cases are different facts and {@link cellLabelsSnapshot} reports
+ * them differently, so this says which it was rather than only that the
+ * artifact is absent.
  */
 const cellLabelsRetentionDetail = (run: RunEvidence): string => {
   if (run.cellLabels.status === "present") {
@@ -1430,8 +1434,15 @@ const missingInvocationContexts = (run: RunEvidence): readonly number[] => {
 };
 
 /**
- * AUD-9, which asks whether a run kept the artifacts that would explain why
- * each of its results was exposed or denied.
+ * AUD-9, which asks whether a run kept the artifacts AH-CFC-16 enumerates.
+ *
+ * The clause names six: prompt-slot evidence, invocation-context references,
+ * mediation dispositions, policy events, model-context influence state, and
+ * side-effect decisions. This check is an expression of those and of nothing
+ * else, which is why it can cite the clause as `required-by`. A run's
+ * cell-labels snapshot is not among them, and asking for it here would have
+ * been one check answering to two authorities — the shape AUD-15 and AUD-15a
+ * are split along. {@link cellLabelsSnapshot} carries it as `extends`.
  *
  * What AH-CFC-16 obliges a run to retain is bounded by what its execution
  * produced. An invocation context is minted where a call reaches the CFC
@@ -1455,7 +1466,7 @@ const evidenceRetention: AuditCheck = {
   title: "evidence retention",
   citations: requiredBy("AH-CFC-16"),
   falsifiedBy:
-    "an enforcing run missing one of the artifacts that would explain why a result was exposed or denied: its policy trace, its policy snapshot or that snapshot's digest, an invocation context for a side effect that reached the CFC substrate, a hole in the numbering of the contexts it retained, or any recorded attempt to read its space's cell labels; and, as a warning, a run whose side effects recorded no invocation context at all, which its artifacts cannot tell from evidence that was lost",
+    "an enforcing run missing one of the artifacts AH-CFC-16 enumerates: its policy trace, its policy snapshot or that snapshot's digest, an invocation context for a side effect that reached the CFC substrate, or a hole in the numbering of the contexts it retained; and, as a warning, a run whose side effects recorded no invocation context at all, which its artifacts cannot tell from evidence that was lost",
   inspect(run) {
     if (run.runState.status !== "present") {
       return notReadable("run-state.json", run.runState);
@@ -1500,12 +1511,6 @@ const evidenceRetention: AuditCheck = {
             count(lostContexts.length, "context", "contexts")
           } the run minted are held by no artifact: ${lostContexts.join(", ")}`,
       },
-      {
-        name: "a recorded cell-labels read",
-        held: run.cellLabels.status === "present" ||
-          runStateOf(run)?.cellLabels !== undefined,
-        detail: cellLabelsRetentionDetail(run),
-      },
     ];
     const missing = requirements.filter((requirement) => !requirement.held);
     if (missing.length === 0 && contexts.length === 0 && effects.length > 0) {
@@ -1525,7 +1530,7 @@ const evidenceRetention: AuditCheck = {
       return {
         verdict: "pass",
         message:
-          "every artifact that would explain why a result was exposed or denied is present; what each holds is not read here",
+          "every artifact AH-CFC-16 enumerates is present; what each holds is not read here",
       };
     }
     return {
@@ -1691,6 +1696,88 @@ const omissionAccounting: AuditCheck = {
         artifact: "transcript-omissions.json",
         detail: `${rule}: ${counts[rule]}`,
       })),
+
+// AUD-23 cell-labels snapshot
+//
+
+/**
+ * What a ledger entry for this finding would need. See {@link
+ * KnownDefectRegistration}.
+ *
+ * The check reports a real gap and the question it turns on is open, which is
+ * what CT-2210 carries: whether AH-CFC-16 wants a recorded read from a run
+ * that touched no cell, or whether "nobody asked" is the honest answer there.
+ */
+const CELL_LABELS_REGISTRATION: KnownDefectRegistration = {
+  detail: "recorded no read of its space's cell labels",
+  runShape:
+    "a run that minted no handle, so the engine never read a cell label for it",
+  why:
+    "The engine reads a space's cell labels only for the refs its handle table holds, so a run that minted no handle records no read at all. Whether AH-CFC-16 wants a recorded read from a run that touched no cell, or whether `nobody asked` is the honest answer there, is the open question.",
+  issue: "CT-2210",
+};
+
+/**
+ * AUD-23, which asks whether a run kept a snapshot of the labels its space
+ * carried.
+ *
+ * Cited as `extends`, and the distinction is the whole reason this is its own
+ * check. AH-CFC-16's enumeration — prompt-slot evidence, invocation-context
+ * references, mediation dispositions, policy events, model-context influence
+ * state, side-effect decisions — does not include cell labels. The snapshot is
+ * worth having for the same reason those are: without it, a later reading
+ * cannot say what the enforcement was enforcing against. That is our judgment
+ * about what explains a run, not the clause speaking, and a finding here says
+ * so.
+ *
+ * Two absences, reported differently, because the artifacts distinguish them.
+ * A read the run attempted and failed is evidence that was reachable and is
+ * gone. A read nobody attempted is a run that never held a ref to ask about —
+ * the engine reads labels only for the refs in the handle table — and calling
+ * that a lost artifact would report a run's shape as its failure. Which of
+ * the two the obligation should want is the open question CT-2210 carries,
+ * and until it is settled the check reports the fact and names the issue
+ * rather than deciding it.
+ */
+const cellLabelsSnapshot: AuditCheck = {
+  id: "AUD-23",
+  title: "cell-labels snapshot",
+  citations: extendsClause("AH-CFC-16"),
+  falsifiedBy:
+    "a run with no cell-labels snapshot: a failure where the run recorded an attempted read whose evidence is now gone, and a warning where it recorded no attempt, which is a run that held no ref to ask about rather than an artifact that was lost",
+  inspect(run) {
+    if (run.runState.status !== "present") {
+      return notReadable("run-state.json", run.runState);
+    }
+    const state = runStateOf(run)!;
+    if (run.cellLabels.status === "present" || state.cellLabels !== undefined) {
+      return {
+        verdict: "pass",
+        message:
+          "this run kept a snapshot of the labels its space carried; what it holds is not read here",
+      };
+    }
+    const attempted = state.failureRecords?.find((record) =>
+      record.source === "cell_labels"
+    );
+    const evidence: readonly CheckEvidence[] = [{
+      artifact: "cell-labels.json",
+      detail: cellLabelsRetentionDetail(run),
+    }];
+    if (attempted !== undefined) {
+      return {
+        verdict: isEnforcing(state.cfcEnforcementMode) ? "fail" : "warn",
+        message:
+          `this run attempted a cell-labels read and it failed, so what its space carried is not recoverable from these artifacts: ${attempted.detail}`,
+        evidence,
+      };
+    }
+    return {
+      verdict: "warn",
+      message:
+        "this run recorded no read of its space's cell labels, and attempted none — the engine reads labels only for the refs a handle table holds, so a run that minted no handle has nothing to record",
+      evidence,
+      knownDefect: CELL_LABELS_REGISTRATION,
     };
   },
 };
@@ -1711,6 +1798,7 @@ export const STRUCTURAL_CHECKS: readonly AuditCheck[] = [
   influenceAccumulation,
   evidenceRetention,
   omissionAccounting,
+  cellLabelsSnapshot,
 ];
 
 /**
