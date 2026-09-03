@@ -1334,7 +1334,7 @@ client's only computational commit (spec §3.6).
 | Phase 3 ON — events down (D-v2-1) | unchanged | SpaceServer, reacting to the event commit / ONLY the event append; the local run is speculative echo, and the client handler-write commit path DELETES (events.md §7 — F10's interim ends) | unchanged | handler consequences land in the ACTING principal's instances, resolved from the server-stamped `firedAt` (scopes.md §5, protocol.md §2) | commits nothing but intent: event appends + UI-binding writes; echo via overlay |
 | Phase 4 ON — effect channel | unchanged | unchanged | external effects: server only; session effects (navigate): the server COMPUTES the intent, the client ENACTS and acks by nonce (protocol.md §5) | the effects doc is itself a session-scoped instance; the ack is written into the session's own instance (protocol.md §5) | adds the effects-doc subscription and the enact/ack duty (the ack is an authored write) |
 | Phase 5 ON — cross-space | home SpaceServer over foreign reads, under the piece's granted authority / commits HOME only — never derived into a foreign space (protocol.md §2b) | unchanged; cross-space mutation leaves ONLY as outbox event appends; `.inSpace` provisioning lands authored-class, foreign-first, under the event's acting principal | unchanged; the outbox also carries the cross-space appends | foreign reads name their instance explicitly, lease-holder-only (protocol.md §2's read row) | unchanged |
-| Phase 7 flip (FLIP-READY landed DARK 2026-08-16; #6535 flipped the first-party default ON after the ordered gates and began the soak; the rollback PR (2026-09-03) returned it to OFF with the machinery kept; removal is the split-out post-soak PR). **Every cell in this row describes the arm explicit `true` selects; while the default is rolled back, the default arm is the OFF baseline row above, until the re-flip** | SpaceServer | SpaceServer / events only | server, plus the client-enacted channel | unchanged from Phase 5; session-data GC is the remaining owed design (scopes.md §8 item 2) | final: speculate freely, commit only intent; flag retires after the soak |
+| Phase 7 flip (FLIP-READY landed DARK 2026-08-16; flipped ON by #6535 2026-08-28 after the ordered gates; since then a data-only toggle whose flips are dated deltas in the coordination block; removal is the split-out post-soak PR). **Every cell in this row describes the ON arm; whenever the default is OFF, the default arm is the OFF baseline row above and explicit `true` selects this one** | SpaceServer | SpaceServer / events only | server, plus the client-enacted channel | unchanged from Phase 5; session-data GC is the remaining owed design (scopes.md §8 item 2) | final: speculate freely, commit only intent; flag retires after the soak |
 
 A surface a milestone has not yet landed (navigateTo before
 Phase 4, cross-space before Phase 5) has no defined interim
@@ -1958,16 +1958,16 @@ Success criteria:
 
 ## Phase 7 — Flip and retire
 
-**Current scoping (updated 2026-09-03): Phase 7's flip LANDED — #6535
-changed the first-party default to `true` after the ordered gates, merged,
-and began the ON soak — and was ROLLED BACK on 2026-09-03 by the data-only
-rollback PR (the constant to `false` plus status prose, machinery kept);
-explicit `true` selects ON per deployment meanwhile, and the flip's ordered
-gates are the bar for re-flipping. Stable
-`default` and `opposite` CI roles now follow the one default constant, so a
-deliberate rollback changes that value and current-status prose without
-rewiring the workflow. Task 2's OFF-path removal stays split into a separate
-post-soak PR, and task 3 remains the final archive.** The original 2026-08-16
+**Current scoping (updated 2026-09-03): Phase 7's flip mechanism is landed
+and the first-party default is a data-only toggle. The coordination-state
+deltas above are the dated record of each flip (#6535 flipped ON 2026-08-28
+after the ordered gates; every later flip adds a delta), and the registry's
+summary table states the current value. Stable `default` and `opposite` CI
+roles follow the one constant, so a flip in either direction is the
+constant, the registry's cell and dated entry, and a delta above — never a
+workflow edit. The ordered gates below are the bar for any flip to ON.
+Task 2's OFF-path removal stays split into a separate post-soak PR, and
+task 3 remains the final archive.** The original 2026-08-16
 ruling landed the mechanism dark first because, at that time, with
 the constant `true` the REQUIRED default CI lanes went red on merge
 (two two-browser gates stall 300 s under the full ON posture, neither
@@ -2025,9 +2025,9 @@ Preconditions (all RULED 2026-08-15, all landed with this phase):
 
 Tasks:
 
-- [ ] **Default ON — #6535 merged and the soak began; ROLLED BACK on
-      2026-09-03 by the data-only rollback PR, so this box reopens until the
-      re-flip.** The ONE first-party default `SERVER_EXECUTION_DEFAULT_ENABLED`
+- [x] **The flip — landed by #6535 (2026-08-28); the default has since
+      been a data-only toggle, each flip a dated delta in the coordination
+      block above.** The ONE first-party default `SERVER_EXECUTION_DEFAULT_ENABLED`
       (`packages/memory/v2/server-execution-default.ts`; the registry's
       summary table states its current value) is resolved by the
       `productionServer` / `remoteClient`
@@ -2113,12 +2113,11 @@ Tasks:
       cf-harness's fabric session; the CLI lanes probed as `cf`'s gate
       via posture adoption; `PiecesController` hosts on the default
       package/pattern lanes)*;
-      then (6) the flip PR, and the soak starts at ITS merge — **DONE, then
-      ROLLED BACK on 2026-09-03:
-      [#6535](https://github.com/commontoolsinc/labs/pull/6535) is MERGED
-      and its soak ran until the data-only rollback PR returned the default
-      to OFF (the coordination-state deltas above carry both; the ON path
-      stays selectable by explicit `true`).
+      then (6) the flip PR, and the soak starts at ITS merge — **DONE:
+      [#6535](https://github.com/commontoolsinc/labs/pull/6535) is MERGED;
+      the default has since been a data-only toggle, each flip a dated
+      delta in the coordination block above (whichever arm is not the
+      default stays selectable explicitly).
       Its first board surfaced ONE owner-court STOP — RULED AND BUILT,
       no longer standing: the verb DECLARED-RESULT surface was absent
       under ON, because receipts went unwritten under the flag by
