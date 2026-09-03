@@ -299,9 +299,10 @@ table. No alias is precedent for another.
 Source: the writers that render a reference today — `createLLMFriendlyLink` in
 the runner; `linkAddress` in `packages/patterns/notes/reference-address.ts`, a
 copy of it that a pattern can import; `canonicalAddress` in
-`packages/cli/lib/callable.ts`; and `decomposeUrl` in
-`packages/cli/commands/piece.ts`, which renders a `--url`'s space _name_ — plus
-the bare form `addressArgument` prints there.
+`packages/cli/lib/callable.ts`; `decomposeUrl` in
+`packages/cli/commands/piece.ts`, which renders a `--url`'s space _name_; and
+`renderPosition` in `packages/shuttle/src/place.ts`, which writes what `pwd`
+prints — plus the bare form `addressArgument` prints there.
 
 ## Character inventory
 
@@ -950,9 +951,12 @@ leaves the tree consistent.
    and completion providers follow the same split. The reader takes a context
    ([D10](#d10-reader-and-writer-share-one-context)) and reads the
    piece-relative form against it; `cf`'s positional path is one already, and
-   gains only `./` and `..`. `#argument` is read on the piece segment, and the
-   trailing slot is refused with a message naming the new one: no writer has
-   rendered it, so nothing rendered carries it.
+   gains only `./` and `..`; every reader of the piece-relative form — an
+   interactive reader with a position among them — takes `.`, `./`, and `..`
+   from the shared reader rather than reading them on its own. `#argument` is
+   read on the piece segment, and the trailing slot is refused with a message
+   naming the new one: no writer has rendered it, so nothing rendered carries
+   it.
 2. **Write the new forms.** `renderCellReference` is the reader's inverse, in
    the same module, and takes the same context, and every writer moves onto it.
    `createLLMFriendlyLink` becomes a wrapper that passes a context holding its
@@ -964,15 +968,25 @@ leaves the tree consistent.
    `packages/patterns/notes/reference-address.ts` takes the same wrapper, or
    imports it; `canonicalAddress` in `packages/cli/lib/callable.ts` and
    `decomposeUrl` in `packages/cli/commands/piece.ts` write `//<space>/`, and
-   the name alias retires with them. From here every address the CLI publishes
-   is in this grammar.
+   the name alias retires with them. `renderPosition` in
+   `packages/shuttle/src/place.ts` delegates to `renderCellReference` — its
+   scope half, `renderScope`, writes the `@scope` suffix D3 keeps and does not
+   move — and gains what one renderer with a context parameter gives its
+   callers: `pwd` passes no context and prints the complete form, a listing
+   passes the place and abbreviates its rows, under the listing's own rule that
+   a row abbreviates only where the abbreviated spelling is not itself a
+   reading. That listing's round-trip check — every printed name driven back
+   through `cd` onto the row it named — is the writer migration's test where it
+   has landed before this step. From here every address the CLI publishes is in
+   this grammar.
 3. **Documents and tests.** The live documents that quote the form: the grammar
    line in `packages/cli/README.md` and `docs/common/verbs/over-the-cli.md`; the
    examples in `docs/tutorial/06-workflow.md`; the doc comment on
    `packages/cli/lib/llm-friendly-ref.ts` and its `splitArgumentSuffix`; the
-   `#argument` paragraphs and completion in `packages/cli/README.md`; and the
-   `/@my-space/` row in `docs/plans/cli-surface-shape.md`. Tests and pattern
-   baselines that hold a rendered reference follow the writer.
+   `#argument` paragraphs and completion in `packages/cli/README.md`; the
+   `/@my-space/` row in `docs/plans/cli-surface-shape.md`; and
+   `docs/plans/shuttle/grammar.md`, which quotes the forms `pwd` and `ls` print.
+   Tests and pattern baselines that hold a rendered reference follow the writer.
 4. **The specifier's pin.** When [pattern imports](pattern-imports/README.md)
    next changes its specifier syntax, its bare `@<pin>` becomes `@pin=`, or it
    records why the specifier keeps a bare form the reference does not.
