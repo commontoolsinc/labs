@@ -45,6 +45,22 @@ describe("line", () => {
       });
     });
 
+    it("separates on a no-break space and on the Unicode line separator, neither of which a reader sees", () => {
+      // The realistic way an operand acquires one is a paste out of a
+      // document. The pair stays consistent about them either way: what
+      // separates here is what the printer quotes, so a value holding one
+      // still round-trips.
+
+      expect(splitLine("a\u00a0b")).toEqual({
+        kind: "split",
+        tokens: ["a", "b"],
+      });
+      expect(splitLine("a\u2028b")).toEqual({
+        kind: "split",
+        tokens: ["a", "b"],
+      });
+    });
+
     it("returns no tokens for a line holding separators alone", () => {
       expect(splitLine("  \t ")).toEqual({ kind: "split", tokens: [] });
     });
@@ -63,7 +79,15 @@ describe("line", () => {
       });
     });
 
-    it("returns a backslash inside single quotes as a character of the token", () => {
+    it("returns a backslash inside single quotes as a character of the token, even before one double quotes would escape", () => {
+      // The character after the backslash is what makes this discriminate.
+      // Before an ordinary one the two quote rules agree, so a fixture
+      // there would pass whether or not single quotes escape.
+
+      expect(splitLine("'a\\\"b'")).toEqual({
+        kind: "split",
+        tokens: ['a\\"b'],
+      });
       expect(splitLine("'a\\b'")).toEqual({
         kind: "split",
         tokens: ["a\\b"],
@@ -81,6 +105,17 @@ describe("line", () => {
       expect(splitLine('"a\\"b"')).toEqual({
         kind: "split",
         tokens: ['a"b'],
+      });
+      expect(splitLine('"a\\\\b"')).toEqual({
+        kind: "split",
+        tokens: ["a\\b"],
+      });
+    });
+
+    it("returns a backslash inside double quotes as a character of the token where it escapes neither quote nor backslash", () => {
+      expect(splitLine('"C:\\path"')).toEqual({
+        kind: "split",
+        tokens: ["C:\\path"],
       });
     });
 

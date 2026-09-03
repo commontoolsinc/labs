@@ -14,6 +14,13 @@
  * What a token then means is decided elsewhere — `place.ts` reads an operand
  * as a reference or as one of the navigation spellings, and a verb reads its
  * own. This module bounds where a token ends and says nothing past that.
+ *
+ * `packages/cli` splits a line too, in `tokenizeLine` under `lib/completion/`,
+ * and this is not a second copy of it. That one reconstructs what bash would
+ * have done to a *partial* line: it takes a cursor offset, always ends with an
+ * empty word for the cursor to sit in, and refuses nothing, a half-typed line
+ * being its normal input. It is also not an export entry of that package, so
+ * nothing here could call it.
  */
 
 /**
@@ -44,6 +51,13 @@ export const RESERVED_CHARACTERS = "!#%<>|";
 const SYNTAX_CHARACTERS = "\"'\\";
 
 /**
+ * What a backslash escapes between double quotes: a double quote, and another
+ * backslash. Every other character there is literal, so a path or a JSON
+ * escape written between double quotes arrives as it was typed.
+ */
+const DOUBLE_QUOTE_ESCAPES = '"\\';
+
+/**
  * What separates two tokens. The definition is JavaScript's own — what
  * `String.prototype.trim` removes — so a token this module split and an
  * operand a caller trimmed agree about where a value's edges are.
@@ -63,9 +77,10 @@ export type LineSplit =
  *
  * Whitespace separates tokens, and a run of it separates no more than one.
  * Single quotes are literal, so what sits between them is the token's own
- * whatever it is. Double quotes group, and inside them a backslash escapes
- * the character after it, as one outside quotes does. Runs that touch are one
- * token, so `a"b c"d` is the single token `ab cd`, and an empty pair of
+ * whatever it is. Double quotes group, and between them a backslash escapes
+ * one of {@link DOUBLE_QUOTE_ESCAPES} and is otherwise a character of the
+ * token; outside quotes it escapes whatever follows it. Runs that touch are
+ * one token, so `a"b c"d` is the single token `ab cd`, and an empty pair of
  * quotes is a token that is the empty string.
  *
  * A line is refused for one of two reasons, both of them a token with no end:
@@ -86,13 +101,16 @@ export function splitLine(line: string): LineSplit {
       if (character === quote) {
         quote = undefined;
       } else if (
-        character === "\\" && quote === '"' && index + 1 < line.length
+        character === "\\" && quote === '"' && index + 1 < line.length &&
+        DOUBLE_QUOTE_ESCAPES.includes(line[index + 1])
       ) {
         current += line[++index];
       } else {
-        // A backslash with nothing after it lands here, and the line then ends
-        // with the quote still open, so the unterminated-quote refusal below
-        // is what the caller reads rather than a second reason for one fault.
+        // A backslash escaping nothing lands here and is a character of the
+        // token like any other. Where it is the line's last character, the
+        // line then ends with the quote still open, so what the caller reads
+        // is the unterminated-quote refusal below rather than a second reason
+        // for one fault.
         current += character;
       }
       continue;
