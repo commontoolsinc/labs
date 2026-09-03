@@ -1,9 +1,9 @@
-# The reference grammar
+# The cell reference grammar
 
 ## Status
 
-Proposed. This is a decision record for the canonical reference grammar — the
-one string form that names a cell — and for the mechanism by which that grammar
+Proposed. This is a decision record for the cell reference grammar — the one
+string form that names a cell — and for the mechanism by which that grammar
 admits a new requirement. It records the requirements the grammar answers to,
 the decisions taken against them, the alternatives each decision rejected, and
 the decisions elsewhere in this tree that each confirms or replaces.
@@ -17,8 +17,8 @@ document answers.
 
 ## Summary
 
-A reference is one string that names one cell, read the same way by every reader
-in the fabric:
+A cell reference is one string that names one cell, read the same way by every
+reader in the fabric:
 
 ```text
 [//<space>]/<piece>[@<qualifier>…][/<path>][#argument]
@@ -57,7 +57,7 @@ And the common case — a same-space, base-scoped cell — is what it always was
 
 ## What this governs
 
-The canonical reference grammar: the form `parseReferenceParts` reads, the form
+The cell reference grammar: the form `parseReferenceParts` reads, the form
 `createLLMFriendlyLink` writes, and the form every `cf` command reads in its
 target positional and prints in every address it publishes. The CLI's bare alias
 (`pieceId[@scope]`, and a slug on its own) is a convenience over this grammar
@@ -518,7 +518,7 @@ Refused, and why:
 
 The same cell in each grammar, segment for segment (R8):
 
-| Reference                           | Shell page URL                                   | Import specifier                      |
+| Cell reference                      | Shell page URL                                   | Import specifier                      |
 | ----------------------------------- | ------------------------------------------------ | ------------------------------------- |
 | `/glaze-tracker/items`              | `https://<host>/<my-space>/glaze-tracker/items`  | `cf:glaze-tracker`                    |
 | `//bakery/glaze-tracker`            | `https://<host>/bakery/glaze-tracker`            | `cf:/bakery/glaze-tracker`            |
