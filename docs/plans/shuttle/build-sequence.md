@@ -196,8 +196,8 @@ Landed:
   one `cd` takes back to that row, and leaves the split returning plain
   strings. And every door holds a piece to the slug and handle vocabularies,
   `validatePieceSegment` being called rather than copied, so a walk, a resolved
-  target and a settled move refuse what a reference refuses and give its
-  reason. What the first ruling costs is one shape: a key whose first character
+  target and a settled move hold a piece to what a reference holds one to, and
+  give its reason. What the first ruling costs is one shape: a key whose first character
   is `#` is reached from the piece it sits in by neither spelling, and a
   listing prints no name for it. Which keys are spelled through one door and
   not the other is pinned case by case in

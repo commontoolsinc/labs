@@ -210,18 +210,20 @@ redundant cases cost nothing.
 is the canonical parse's own — `validatePieceSegment`
 (`packages/cli/lib/llm-friendly-ref.ts`), called rather than copied, so that a
 name in neither vocabulary is refused with one sentence whichever door read
-it. A reference was already held that way; so are a walk into a piece, a
-target the fabric resolved, and a settled move. `cd slugs/Board` is refused,
-and the reason it gives is the reason `cd /Board` gives. That is what makes a
-listing's job possible: a name printed as an operand is one every door takes,
-and a name no door takes is one nothing prints an operand for.
+it. The doors are the reference, a walk into a piece, a target the fabric
+resolved, and a settled move, which is every way a piece reaches a place:
+`cd slugs/Board` is refused, and the reason it gives is the reason `cd /Board`
+gives. That is what makes a listing's job possible: a name printed as an
+operand is one every door takes, and a name no door takes is one nothing
+prints an operand for.
 
 The vocabulary rule still buys no guarantee that every rendering is
-followable, and the two halves cover different names. A piece holding an `@`
-or ending in whitespace is caught by the rendering rules above rather than by
-the vocabulary, `isPieceHandle` being a length rule that takes either; and a
-path segment holding a `#` reaches a place under the readings below and
-renders as a reference the parse then refuses.
+followable, and it and the rendering rules above catch different names. A
+handle-shaped piece holding an `@` or ending in whitespace is caught by the
+rendering rules above rather than by the vocabulary, `isPieceHandle` being a
+length rule that takes either; and a path segment holding a `#` reaches a
+place under the readings below and renders as a reference the parse then
+refuses.
 
 A segment lifted out of a rendering is an operand in its own right, so
 these readings decide it rather than the key it was printed from.
@@ -239,12 +241,11 @@ it governs the head and nothing else.
 
 Those two readings between them leave one key with no spelling at all. A key
 whose *first* character is `#` is a wish target when it is the whole operand,
-and a reference carrying a `#` anywhere is refused as an unknown suffix, so
-neither door reaches it from the piece it sits in — a later segment does, `#`
-being data everywhere but the head, which is a route out of the facet rather
-than out of the piece. That is what the quoting ruling above costs, and a
-listing prints no name for such a row rather than one that means something
-else.
+and a reference carrying a `#` anywhere is refused, so neither door reaches it
+from the piece it sits in. A later segment does — `#` is data everywhere but
+the head — so the key is reachable from the facet above the piece and not from
+the piece itself. That is what the quoting ruling above costs, and a listing
+prints no name for such a row rather than one that means something else.
 
 A container renders without the leading `/` that marks a reference, so a
 space root and a facet cannot be read back as a piece whose slug happens to
@@ -303,13 +304,14 @@ that implied completeness would be false.
 `cd` cannot reach prints no name at all. Most rows print their own name,
 written as a token by the rule above — a slug, a handle and an ordinary key
 each print as themselves. A row whose name's own characters are readings —
-a key called `..`, one holding the separator, one a scope suffix would come
-off — prints the reference that names it instead, which reads none of them
-and unescapes `~1`. A row nothing reaches prints a marker in place of a name:
+a key called `..` or `-`, one holding the separator, one beginning with `@` —
+prints the reference that names it instead, which reads none of them and
+unescapes `~1`. A row nothing reaches prints a marker in place of a name:
 everything on a listed line that is not a name is written between angle
 brackets, and the printer quotes every value holding one, so a line opening
-with `<` carries no name. A row is one line, so a name or a message carrying
-a line break is described rather than written.
+with `<` carries no name. A row is one line, so a name carrying a line break
+is described rather than written, and a message carrying one has it written
+as a space.
 
 Large collections appear everywhere (a space's pieces, an array of
 thousands). `ls` prints one height-fit page — what the terminal shows

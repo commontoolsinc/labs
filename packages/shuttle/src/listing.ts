@@ -1,19 +1,18 @@
 /**
  * What `ls` finds where shuttle stands, and how each row is written back.
  *
- * A listing is the first surface that prints a name a person then types, so a
- * row carries the operand `cd` takes to reach it and not only the name it goes
- * by. The two are the same string for nearly every row and differ wherever a
- * name's own characters are readings — a key called `..`, one holding the
- * separator — which is a question about the place rather than about the
- * listing, so `operandForChild` answers it and this module asks.
+ * A listing prints names a person then types, so a row carries the operand
+ * `cd` takes to reach it and not only the name it goes by. The two are the
+ * same string for nearly every row and differ wherever a name's own characters
+ * are readings — a key called `..`, one holding the separator — which is a
+ * question about the place rather than about the listing, so
+ * `operandForChild` answers it and this module asks.
  *
  * The reads are `packages/cli`'s, over the connection this process holds: a
  * space root has nothing to read, the two facets are `listSpaceSlugs` and
  * `listPieces`, and the keys inside a piece are `listCellKeys`. Each takes the
- * connection through `deps.loadPieces`, and each raises what it cannot read
- * rather than listing empty, so a listing that comes back is one that
- * happened.
+ * connection through `deps.loadPieces`, which is the seam a held connection
+ * fills.
  */
 
 import { listCellKeys } from "@commonfabric/cli/lib/cell-listing";
@@ -89,10 +88,10 @@ export interface ListingDeps {
  * What `ls` finds at `place`, read over `connection` with `config` saying what
  * to connect as.
  *
- * A row that failed on its own account is still a row: a name the space has
- * and nothing resolves is a name the space has, so it comes back carrying what
- * went wrong rather than being dropped or taking the listing down with it. A
- * read that failed outright is no listing, and raises.
+ * A row the read reported a failure against is still a row: a name the space
+ * has and nothing resolves is a name the space has, so it comes back carrying
+ * what went wrong rather than being dropped, and it never takes the listing
+ * down with it. A read that failed outright is no listing, and raises.
  *
  * @throws Whatever the read throws — an unreachable server, an identity that
  * will not load, a path the piece refuses.
@@ -126,8 +125,10 @@ export async function listPlace(
  * A row is one line, and lines are separated by a newline, so neither a name
  * nor a message may put one inside a row: a message carrying newlines has them
  * written as spaces, and a name carrying one is described rather than written.
- * What a terminal makes of the other control characters is outside that,
- * exactly as it is for the rendering of a place.
+ * Every other control character is written as it stands. Rewriting one inside
+ * a name would leave a token `cd` no longer takes back to the row, which is
+ * the guarantee the name is printed for, so what a terminal makes of it is not
+ * something this can spend that on.
  */
 export function renderListing(listing: Listing): string {
   const lines = listing.rows.map(lineFor);
@@ -173,11 +174,12 @@ async function listFacet(
  * Helper for {@link listPlace}, which is what the cell `position` names lists
  * at `place`.
  *
- * The piece, the path and the scope all ride the config, which is what makes a
- * slug typed back from a listing reach its piece: the read resolves the piece
- * the way `--cell` does. An empty listing means the path names a leaf, and
- * nothing here can tell that from an empty container, so nothing here says
- * which it was.
+ * The piece, the path and the scope all ride the config. A place stands on the
+ * piece as an operand named it, a slug included, so what makes a slug typed
+ * back off a listing reach its piece is the read's own resolution step
+ * (`PieceResolutionDeps.resolvePieceAddress`). An empty listing means the path
+ * names a leaf, and nothing here can tell that from an empty container, so
+ * nothing here says which it was.
  */
 async function listKeys(
   config: SpaceConfig,

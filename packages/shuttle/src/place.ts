@@ -180,11 +180,11 @@ export function placeAtSpaceRoot(space: MemorySpace): Place {
  * `child`, and nothing where no operand reaches that child.
  *
  * Two spellings are offered, the shorter first. The name on its own is what
- * `cd` takes wherever none of the name's own characters is a reading; where
- * one is — a key called `..`, one holding the separator, a name a scope suffix
- * would come off — the reference the child renders as reads none of them and
- * reaches it anyway. A child no rendering names back has neither, and that is
- * what the absent answer means.
+ * `cd` takes wherever `cd` reads that name as data. Where one of the readings
+ * above takes it instead, the reference the child renders as reaches it
+ * anyway: a reference reads none of them, and it escapes the separator where a
+ * relative operand cannot. A child no rendering names back has neither
+ * spelling, and that is what an absent answer means.
  *
  * Each spelling is answered by making the move rather than by a second copy of
  * the readings, so what comes back is an operand `cd` took. The move is made
@@ -939,9 +939,9 @@ function refuseUnnameable(operand: string, fault: Fault): Step {
  *
  * The rule is `validatePieceSegment`'s
  * (`packages/cli/lib/llm-friendly-ref.ts`), called rather than copied, so that
- * a piece any door admits is one a reference could have named and one name
- * gets one reason whichever door refused it. Its sentence reaches the reader
- * unaltered.
+ * a piece is held to the same two vocabularies whichever door admits it and
+ * one name gets one reason whichever door refused it. Its sentence reaches the
+ * reader unaltered.
  */
 function outsideVocabulary(piece: string): Step | undefined {
   try {
