@@ -4314,10 +4314,16 @@ export async function getCellValue(
 
   try {
     if (shouldStep) {
-      await timeCliPhase(
-        "getCellValue.step.piece.pull",
-        () => piece.getCell().pull(),
-      );
+      // A nested target pull is itself the demand and storage boundary for
+      // the requested cell. Pulling the canonical piece first widens that
+      // read to every result sibling, which defeats a path-scoped get. Keep
+      // the whole-piece pull only for a path-less whole-result read.
+      if (path.length === 0) {
+        await timeCliPhase(
+          "getCellValue.step.piece.pull",
+          () => piece.getCell().pull(),
+        );
+      }
       const rootCell =
         await (options.input ? piece.input.getCell() : piece.result.getCell());
       const targetCell = rootCell.key(...path);

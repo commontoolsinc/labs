@@ -1669,7 +1669,7 @@ describe("cli piece parsing", () => {
     expect(schemaOption.description).toContain("--select field list");
   });
 
-  it("steps, reads, syncs, and stops in one get operation", async () => {
+  it("steps, pulls only the requested result path, syncs, and stops", async () => {
     const order: string[] = [];
     const controller = {
       get: (
@@ -1682,10 +1682,10 @@ describe("cli piece parsing", () => {
         return Promise.resolve({
           input: { get: () => Promise.resolve(undefined) },
           getCell: () => ({
-            pull: () => {
-              order.push("piece.pull");
-              return Promise.resolve();
-            },
+            pull: () =>
+              Promise.reject(
+                new Error("a nested stepped read pulled the piece root"),
+              ),
           }),
           result: {
             getCell: () =>
@@ -1742,7 +1742,6 @@ describe("cli piece parsing", () => {
     expect(value).toBe("ready");
     expect(order).toEqual([
       `get:${PIECE}:true:session`,
-      "piece.pull",
       "result.key:value",
       "result.pull",
       "pieces.synced",
