@@ -557,13 +557,8 @@ export class FabricError extends FabricNativeWrapper<Error>
     const type = (typeof className === "string") && (className !== "")
       ? className
       : "Error";
-    // Each slot is read once. A slot behind a getter that were read for what
-    // kind of thing it holds and again for what it is could answer the two
-    // reads differently.
-    const rawName = error.name;
+    const { name: rawName, message, stack, cause } = error;
     const name = (rawName === type) ? null : rawName;
-    const message = error.message;
-    const cause = error.cause;
     const extras: Array<[string, FabricValue]> = [];
     for (const key of Object.keys(error)) {
       if (isUnsafeObjectKey(key) || FABRIC_ERROR_RESERVED_KEYS.has(key)) {
@@ -581,7 +576,7 @@ export class FabricError extends FabricNativeWrapper<Error>
       // prototype leaves a message-less error without one at all. `FabricError`
       // declares a `string`, and the empty string is what such an error means.
       message: (typeof message === "string") ? message : "",
-      stack: error.stack,
+      stack,
       cause: (cause === undefined) ? undefined : convert(cause),
       extras,
     });
