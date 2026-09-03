@@ -22,6 +22,7 @@ import {
 import { WORKSPACE_TEST_WEIGHTS } from "./test-timing-weights.ts";
 
 const WORKSPACE_SHARDS = 8;
+const AGENTS_HOST_SHARDS = 5;
 const CLI_SHARDS = 10;
 
 // Write a minimal workspace under `dir`: a root deno.jsonc listing the
@@ -162,6 +163,31 @@ Deno.test("selectShardMembers expands the cli package into internal shards when 
   assertEquals(unitNames(units).filter((name) => name === "z"), ["z"]);
 });
 
+Deno.test("selectShardMembers expands agents-host into internal shards", () => {
+  const members = ["./packages/connectors/agents/host"];
+  const units = Array.from(
+    { length: AGENTS_HOST_SHARDS },
+    (_, offset) =>
+      selectShardMembers(members, [], {
+        index: offset + 1,
+        total: AGENTS_HOST_SHARDS,
+      }),
+  ).flat();
+
+  assertEquals(
+    units,
+    Array.from({ length: AGENTS_HOST_SHARDS }, (_, offset) => ({
+      memberPath: "./packages/connectors/agents/host",
+      packageName: `connectors/agents/host (${
+        offset + 1
+      }/${AGENTS_HOST_SHARDS})`,
+      env: {
+        AGENTS_HOST_TEST_SHARD: `${offset + 1}/${AGENTS_HOST_SHARDS}`,
+      },
+    })),
+  );
+});
+
 Deno.test("selectShardMembers expands piece and tasks into internal shards", () => {
   const members = ["./packages/piece", "./tasks"];
   const units = Array.from(
@@ -184,6 +210,19 @@ Deno.test("selectShardMembers expands piece and tasks into internal shards", () 
 });
 
 Deno.test("real workspace timing weights limit two-worker makespans", async () => {
+  const expectedAgentsHostUnits = Array.from(
+    { length: AGENTS_HOST_SHARDS },
+    (_, offset) =>
+      `connectors/agents/host (${offset + 1}/${AGENTS_HOST_SHARDS})`,
+  );
+  const profiledAgentsHostUnits = Object.keys(WORKSPACE_TEST_WEIGHTS)
+    .filter((name) => name.startsWith("connectors/agents/host ("))
+    .toSorted((a, b) => {
+      const slice = (name: string) => Number(name.match(/\((\d+)\//)?.[1]);
+      return slice(a) - slice(b);
+    });
+  assertEquals(profiledAgentsHostUnits, expectedAgentsHostUnits);
+
   const expectedCliUnits = Array.from(
     { length: CLI_SHARDS },
     (_, offset) => `cli (${offset + 1}/${CLI_SHARDS})`,
