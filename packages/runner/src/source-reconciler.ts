@@ -205,6 +205,15 @@ type PieceState = {
 /** A piece that records an origin, which is every piece following one. */
 type FollowedPieceState = PieceState & { storedSource: string };
 
+/**
+ * The origin an adoption gives a piece that followed none, and the operation
+ * its revision records for doing so.
+ */
+type OriginClaim = {
+  operation: PieceSourceTransition["operation"];
+  origin: string;
+};
+
 /** One network pass, so teardown can abort it and wait for it to settle. */
 type SourcePass = {
   abort: AbortController;
@@ -283,15 +292,24 @@ export class SourceReconciler {
         ]);
         return undefined;
       }
-      if (getPatternIdentityRef(piece) === undefined) {
+      const running = getPatternIdentityRef(piece);
+      if (running === undefined) {
         return await this.#resolveSupplied(piece.space, origin);
       }
       if (getPatternSource(piece) === undefined) {
+        // A piece that records no origin claims the supplied one by retaining
+        // what it runs. One whose pattern this space can no longer load has
+        // nothing to retain, and nothing else ever moves it: it takes the
+        // origin's current source in the same transition that records the
+        // origin, and records the identity it displaced.
+        const rescued =
+          await this.#loadPattern(running, piece.space) === undefined &&
+          await this.#rescueSupplied(piece, origin);
         // Recording where a piece's code comes from is worth doing and worth
         // saying when it fails, but it is not what the caller asked for: a
         // surface whose provenance could not be written still runs.
         try {
-          await this.#claimSuppliedOrigin(piece, origin.ref);
+          if (!rescued) await this.#claimSuppliedOrigin(piece, origin.ref);
           piece = await piece.withTx().sync();
         } catch (error) {
           logger.warn("claim-origin-failed", () => [
@@ -556,9 +574,10 @@ export class SourceReconciler {
    */
   async #followSystem(
     resultCell: Cell<unknown>,
-    state: FollowedPieceState,
+    state: PieceState,
     origin: Extract<PieceOriginKind, { kind: "system" }>,
     signal: AbortSignal,
+    claim?: OriginClaim,
   ): Promise<ReconcileOutcome> {
     const fetch = this.#revalidatingFetch(signal);
     const target = this.#systemSourceUrl(origin.route, state.space);
@@ -589,6 +608,7 @@ export class SourceReconciler {
       origin,
       signal,
       advertised,
+      claim,
     );
   }
 
@@ -733,6 +753,37 @@ export class SourceReconciler {
     await this.#recordOrigin(resultCell, state, suppliedOrigin, "follow");
   }
 
+  /**
+   * Give a piece that records no origin, and runs a pattern this space cannot
+   * load, the supplied origin and the source it currently names — in one
+   * transition, so that the piece is never left recording an origin over a
+   * pattern nothing can start.
+   *
+   * Claiming an origin retains what the piece runs, and a pattern that will
+   * not load has nothing to retain. The history this transition begins starts
+   * at the adopted source, and the identity it displaced is recorded beside
+   * it. Answers whether the piece now records the origin and runs its
+   * source.
+   */
+  async #rescueSupplied(
+    piece: Cell<unknown>,
+    origin: Extract<PieceOriginKind, { kind: "system" }>,
+  ): Promise<boolean> {
+    const state: PieceState = {
+      space: piece.space,
+      running: getPatternIdentityRef(piece)!,
+      storedSource: undefined,
+      snapshot: getPieceSourceSnapshot(piece)!,
+    };
+    const outcome = await this.#track((signal) =>
+      this.#followSystem(piece, state, origin, signal, {
+        operation: "follow",
+        origin: origin.ref,
+      })
+    );
+    return outcome === "updated";
+  }
+
   /** Run one aborting network pass, so teardown can stop and wait for it. */
   #track<T>(
     pass: (signal: AbortSignal) => Promise<T | undefined>,
@@ -868,14 +919,20 @@ export class SourceReconciler {
    * `advertisedIdentity`, where the origin supplied one, must equal what the
    * candidate compiles to. A source that does not produce the identity its own
    * origin advertises is not the source that origin names.
+   *
+   * The transition records the origin the piece already follows, as an
+   * update to it. A `claim` records a different one instead: the origin a
+   * piece that followed none is being given, with the adoption as the
+   * revision that gives it.
    */
   async #adopt(
     resultCell: Cell<unknown>,
-    state: FollowedPieceState,
+    state: PieceState,
     program: Parameters<Runtime["patternManager"]["compilePattern"]>[0],
     origin: PieceOriginKind,
     signal: AbortSignal,
     advertisedIdentity?: string,
+    claim?: OriginClaim,
   ): Promise<ReconcileOutcome> {
     const runtime = this.#runtime;
     if (signal.aborted) return "unavailable";
@@ -936,8 +993,8 @@ export class SourceReconciler {
       revisionId: crypto.randomUUID(),
       baseline,
       timestamp: Date.now(),
-      operation: "origin-update",
-      origin: state.storedSource,
+      operation: claim?.operation ?? "origin-update",
+      origin: claim?.origin ?? state.storedSource ?? null,
       expected: state.snapshot,
     };
     // Setting up the candidate restages the piece's stored argument against

@@ -10,6 +10,7 @@ import {
   getPatternSource,
   getPieceReconciliation,
   getPieceSourceRevisions,
+  type Pattern,
   resolveEntryIdentity,
   Runtime,
   type RuntimeFetch,
@@ -1214,6 +1215,54 @@ describe("piece source reconciliation", () => {
         .toEqual(["baseline", "follow"]);
       expect(runtime.patternManager.getArtifactEntryRef(pattern!))
         .toEqual(originalRef);
+    });
+
+    it("gives the origin and its source to a piece whose own pattern will not load", async () => {
+      // A piece the runtime made before it claimed an origin, running a
+      // pattern this space can no longer load and retaining no source for
+      // it: what the origin names now is the only code it can run, so it
+      // takes that in the same revision that records the origin, and keeps
+      // the identity it displaced.
+      const v2Identity = await identityFor(source("v2"));
+      const piece = await preparePiece(
+        servingFetch(() => v2Identity, () => source("v2")),
+      );
+      const originalRef = getPatternIdentityRef(piece)!;
+
+      const manager = runtime.patternManager;
+      const load = manager.loadPatternByIdentity.bind(manager);
+      const program = manager.getPatternSourceProgramByIdentity.bind(manager);
+      manager.loadPatternByIdentity = (...args: Parameters<typeof load>) =>
+        args[0] === originalRef.identity
+          ? Promise.resolve(undefined)
+          : load(...args);
+      manager.getPatternSourceProgramByIdentity = (
+        ...args: Parameters<typeof program>
+      ) =>
+        args[0] === originalRef.identity
+          ? Promise.resolve(undefined)
+          : program(...args);
+      let pattern: Pattern | undefined;
+      try {
+        pattern = await open(piece);
+      } finally {
+        manager.loadPatternByIdentity = load;
+        manager.getPatternSourceProgramByIdentity = program;
+      }
+
+      expect(runtime.patternManager.getArtifactEntryRef(pattern!)).toEqual({
+        identity: v2Identity,
+        symbol: SYMBOL,
+      });
+      expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
+      expect(getPatternIdentityRef(piece)).toEqual({
+        identity: v2Identity,
+        symbol: SYMBOL,
+      });
+      expect(piece.getMetaRaw("displacedPattern")).toMatchObject(originalRef);
+      expect(getPieceSourceRevisions(piece).map((entry) => entry.operation))
+        .toEqual(["follow"]);
+      expect(getPieceSourceRevisions(piece).at(-1)?.origin).toBe(PARENT_SOURCE);
     });
 
     it("adopts what the origin now names, and answers with that", async () => {
