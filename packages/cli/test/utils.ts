@@ -29,13 +29,14 @@ function isPerfDiagnosticLogLine(line: string): boolean {
   return isPerfDiagnosticWarnKey(loggerName, keyAndMessage);
 }
 
-// True when `line` opens a record a test has no business asserting on: noise
-// Deno itself writes, and the runtime's perf diagnostics. Neither says
-// anything about the command that ran — Deno's lines report the state of the
-// module cache, and a perf diagnostic reports how loaded the machine was — so
-// a test counting them would pass or fail on a fact about the machine.
+// True when `line`, which comes with its ANSI escapes stripped, opens a record
+// a test has no business asserting on: noise Deno itself writes, and the
+// runtime's perf diagnostics. Neither says anything about the command that ran
+// — Deno's lines report the state of the module cache, and a perf diagnostic
+// reports how loaded the machine was — so a test counting them would pass or
+// fail on a fact about the machine.
 function isIgnorableStderrLine(line: string): boolean {
-  const trimmed = stripAnsi(line).trimStart();
+  const trimmed = line.trimStart();
   return trimmed.startsWith(
     "Warning The following peer dependency issues were found:",
   ) ||
@@ -50,45 +51,47 @@ function isIgnorableStderrLine(line: string): boolean {
     isPerfDiagnosticLogLine(trimmed);
 }
 
-// The bracket characters a console pairs off when it inspects a value.
-const OPENING_BRACKETS = "([{";
-const CLOSING_BRACKETS = ")]}";
-
-// How many brackets stand open after `line`, given that `openBefore` of them
-// already did. `line` comes with its ANSI escapes stripped, because each of
-// those carries a `[` that pairs with nothing. The count floors at zero, so
-// that a closer with no opener above it — one inside a message, say — cannot
-// carry a deficit down into the lines below.
-function bracketsStillOpen(openBefore: number, line: string): number {
-  let open = openBefore;
-  for (const character of line) {
-    if (OPENING_BRACKETS.includes(character)) open += 1;
-    else if (CLOSING_BRACKETS.includes(character)) open = Math.max(0, open - 1);
-  }
-  return open;
-}
+// A console handed a value too wide for one line spills it over several, and
+// the shape of that spill is what says which lines below a record belong to
+// it. The bracket the console opens ends the line it opened on, every line of
+// the value is indented, and the bracket closes alone at column 0. Text the
+// value holds passes for neither end, because a console prints a string in its
+// quotes: a `[` in one never ends the line, and a `}` in one is indented and
+// quoted rather than standing alone.
+const OPENS_SPILLED_VALUE = /[[({]$/;
+const INSIDE_SPILLED_VALUE = /^\s/;
+const CLOSES_SPILLED_VALUE = /^[)\]}]+$/;
 
 /**
  * The lines of `stderr` a test has business asserting on: everything left
  * once the ignorable records are dropped.
  *
  * A record rather than a line, so that an ignorable line takes with it the
- * lines a console spilled inspecting a value it was handed. The brackets are
- * what say how far that reaches: the record runs until the value its first
- * line left open is closed again, so an ignorable line that balances takes
- * nothing with it, whatever the line beneath it happens to look like.
+ * lines a console spilled inspecting a value it was handed. Only a line ending
+ * in the bracket that opens such a value starts a record, and the record ends
+ * at the bracket closing it, so an ignorable line a console fitted on its own
+ * takes nothing with it whatever the line beneath happens to look like.
+ *
+ * A record a console shaped some other way is under-consumed rather than
+ * over-consumed: where something follows the value on the line closing it,
+ * that line is left for the budget, which fails the test reading it rather
+ * than hiding whatever the command wrote next.
  */
 export function relevantStderr(stderr: string[]): string[] {
   const relevant: string[] = [];
-  let open = 0;
+  let spilling = false;
   for (const line of stderr) {
     const plain = stripAnsi(line);
-    if (open > 0) {
-      open = bracketsStillOpen(open, plain);
-      continue;
+    if (spilling) {
+      if (CLOSES_SPILLED_VALUE.test(plain)) {
+        spilling = false;
+        continue;
+      }
+      if (INSIDE_SPILLED_VALUE.test(plain)) continue;
+      spilling = false;
     }
     if (isIgnorableStderrLine(plain)) {
-      open = bracketsStillOpen(0, plain);
+      spilling = OPENS_SPILLED_VALUE.test(plain);
       continue;
     }
     relevant.push(line);

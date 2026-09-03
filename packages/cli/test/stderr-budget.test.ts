@@ -89,6 +89,15 @@ const REPORTED_LINK = {
   type: "application/json",
 };
 
+// The same link, with a path segment that is a bracket. A segment is
+// arbitrary text, and a console prints this one in its quotes, indented, on a
+// line of the record's own.
+const LINK_WITH_A_BRACKET_IN_ITS_PATH = { ...REPORTED_LINK, path: ["["] };
+
+// A link narrow enough for a console to print on one line, holding the same
+// bracket.
+const NARROW_LINK_WITH_A_BRACKET = { path: ["["] };
+
 describe("stderr budget", () => {
   describe("relevantStderr()", () => {
     it("keeps a line the command itself wrote", () => {
@@ -177,6 +186,38 @@ describe("stderr budget", () => {
       ]);
     });
 
+    it("keeps an indented line that follows a report whose value holds a bracket", () => {
+      const report = logLines(
+        "warn",
+        "cell",
+        "get >210ms",
+        "get() took 213ms",
+        LINK_WITH_A_BRACKET_IN_ITS_PATH,
+      );
+
+      expect(report.length).toBeGreaterThan(1);
+      expect(relevantStderr([TASK_ECHO, ...report, STACK_LINE])).toEqual([
+        TASK_ECHO,
+        STACK_LINE,
+      ]);
+    });
+
+    it("keeps an indented line that follows a report holding a bracket on one line", () => {
+      const report = logLines(
+        "warn",
+        "cell",
+        "get >210ms",
+        "get() took 213ms",
+        NARROW_LINK_WITH_A_BRACKET,
+      );
+
+      expect(report.length).toBe(1);
+      expect(relevantStderr([TASK_ECHO, ...report, STACK_LINE])).toEqual([
+        TASK_ECHO,
+        STACK_LINE,
+      ]);
+    });
+
     it("keeps an error a logger wrote under a perf-diagnostic key", () => {
       const report = logLines("error", "traverse", "slow-traverse", "321ms");
 
@@ -213,6 +254,22 @@ describe("stderr budget", () => {
 
     it("throws where an indented line follows a slow-traversal report", async () => {
       const report = logLines("warn", "traverse", "slow-traverse", "321ms");
+
+      await captureStderr(() => {
+        expect(() => checkStderr([TASK_ECHO, ...report, STACK_LINE]))
+          .toThrow();
+        return Promise.resolve();
+      });
+    });
+
+    it("throws where an indented line follows a report whose value holds a bracket", async () => {
+      const report = logLines(
+        "warn",
+        "cell",
+        "get >210ms",
+        "get() took 213ms",
+        LINK_WITH_A_BRACKET_IN_ITS_PATH,
+      );
 
       await captureStderr(() => {
         expect(() => checkStderr([TASK_ECHO, ...report, STACK_LINE]))

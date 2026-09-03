@@ -299,9 +299,10 @@ list. A warning about behavior does not, and must keep failing tests.
 
 The budget drops records rather than lines. A logger hands the console the
 values it is reporting, and a console inspects one too wide for a line across
-several, so a dropped warning that leaves a value open takes the lines closing
-it with it. One that balances on its own line takes nothing, and whatever
-follows is held to the budget as usual.
+several, so a dropped warning whose line ends by opening a bracket takes the
+indented lines beneath it and the bracket closing them. One a console fitted on
+a single line takes nothing, and whatever follows it is held to the budget as
+usual.
 
 Writing such a diagnostic so that its own coverage does not move with the clock
 is a separate obligation, and
