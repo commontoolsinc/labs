@@ -10,6 +10,9 @@ import {
   Runtime,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type {
+  FirstPartyHttpSigner,
+} from "@commonfabric/runner/toolshed-http-auth";
 import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessFetch } from "../src/contracts/http-fetch.ts";
 import type { FabricPatternInstantiations } from "../src/fabric-instantiations.ts";
@@ -390,6 +393,7 @@ describe("run-pattern over the pattern index", () => {
       startFailure?: string;
       pieces?: PiecesController;
       instantiations?: FabricPatternInstantiations;
+      patternIndexSigner?: FirstPartyHttpSigner;
     } = {},
   ): CfHarnessEngine =>
     new CfHarnessEngine({
@@ -433,7 +437,7 @@ describe("run-pattern over the pattern index", () => {
             new PatternIndexClient({
               baseUrl: "https://index.test",
               fetchFn: index.fetchFn,
-              signer,
+              signer: options.patternIndexSigner ?? signer,
             }),
           ),
       }),
@@ -869,6 +873,28 @@ describe("run-pattern over the pattern index", () => {
     });
 
     it("reports an indexed run whose piece carries a session-only pointer as failed", async () => {
+      // Holding the first event signature makes instantiation slow while the
+      // terminal event is queued, pinning their delivery order independently
+      // of signature latency. Identify event requests from the proof itself so
+      // changes to how the lookup is signed cannot silently bypass the gate.
+      const firstEventSignature = Promise.withResolvers<void>();
+      let recordEventSignatureCount = 0;
+      const patternIndexSigner: FirstPartyHttpSigner = {
+        did: () => signer.did(),
+        async sign(payload) {
+          const proof = new TextDecoder().decode(payload);
+          if (!proof.includes("\npath: /recordEvent\n")) {
+            return { ok: new Uint8Array(64) };
+          }
+          recordEventSignatureCount += 1;
+          if (recordEventSignatureCount === 1) {
+            await firstEventSignature.promise;
+          } else if (recordEventSignatureCount === 2) {
+            queueMicrotask(firstEventSignature.resolve);
+          }
+          return { ok: new Uint8Array(64) };
+        },
+      };
       const index = stubIndex({ "pat-doubler": INDEXED_PATTERN });
       await createEngine(index, {
         instantiations: {
@@ -876,12 +902,15 @@ describe("run-pattern over the pattern index", () => {
           since: () => STRANDED_RECORDS,
           keylessSince: () => STRANDED_RECORDS,
         },
+        patternIndexSigner,
       }).invokeBuiltinTool("run_pattern", {
         patternId: "pat-doubler",
         inputs: { n: 21 },
       });
 
+      firstEventSignature.resolve();
       await index.settled("recordEvent", 2);
+      expect(recordEventSignatureCount).toBe(2);
       expect(
         index.calls.filter((call) => call.fn === "recordEvent")
           .map((call) => call.body.eventType),

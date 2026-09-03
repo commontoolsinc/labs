@@ -498,25 +498,25 @@ const errorMessage = (error: unknown): string =>
  * Reports what a run did with an indexed pattern, without letting the report
  * bear on the run. The index ranks on these events, so a failure to record
  * one costs ranking accuracy and nothing else — it is logged and dropped
- * rather than turned into a tool error for a pattern that ran.
+ * rather than turned into a tool error for a pattern that ran. Resolves after
+ * either path, so callers can preserve report order without awaiting it as part
+ * of the run.
  */
-const recordPatternIndexEvent = (
+const recordPatternIndexEvent = async (
   getClient: HarnessPatternIndexClientFactory,
   patternId: string,
   eventType: PatternIndexEventType,
-): void => {
-  void (async () => {
-    try {
-      const client = await getClient();
-      await client.recordEvent({ patternId, eventType });
-    } catch (error) {
-      console.error(
-        `run_pattern could not record the ${eventType} event for pattern index entry "${patternId}": ${
-          errorMessage(error)
-        }`,
-      );
-    }
-  })();
+): Promise<void> => {
+  try {
+    const client = await getClient();
+    await client.recordEvent({ patternId, eventType });
+  } catch (error) {
+    console.error(
+      `run_pattern could not record the ${eventType} event for pattern index entry "${patternId}": ${
+        errorMessage(error)
+      }`,
+    );
+  }
 };
 
 /**
@@ -1361,14 +1361,26 @@ export const runPatternTool: HarnessToolDefinition<
     // built without an instantiation recorder asks nothing.
     const instantiationStart = session.instantiations?.sequence() ?? 0;
 
+    let patternIndexEventTail: Promise<void> | undefined;
+
     /**
      * Reports this invocation's outcome to the index, when the pattern came
      * from there. A cancelled run reports nothing: it neither succeeded nor
-     * failed, and the index ranks on what a pattern did.
+     * failed, and the index ranks on what a pattern did. Reports start in call
+     * order without being awaited by the run, so a terminal event cannot
+     * overtake `instantiated`.
      */
     const recordOutcome = (eventType: PatternIndexEventType): void => {
       if (patternId !== undefined && getPatternIndexClient !== undefined) {
-        recordPatternIndexEvent(getPatternIndexClient, patternId, eventType);
+        const record = () =>
+          recordPatternIndexEvent(
+            getPatternIndexClient,
+            patternId,
+            eventType,
+          );
+        patternIndexEventTail = patternIndexEventTail === undefined
+          ? record()
+          : patternIndexEventTail.then(record);
       }
     };
 
