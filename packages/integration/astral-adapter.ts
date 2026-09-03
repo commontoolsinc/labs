@@ -160,16 +160,24 @@ export interface ScreencastFrame {
   sessionId: number;
 }
 
+/**
+ * Whether `error` is what Deno throws for an operation on a child process that
+ * has already exited. Both killing such a process and waiting on one report it
+ * this way, and the message is the only thing telling it from any other
+ * `TypeError`.
+ */
+export function isChildProcessGone(error: unknown): boolean {
+  return error instanceof TypeError &&
+    error.message === "Child process has already terminated";
+}
+
 export async function closeAstralBrowser(
   browser: Pick<AstralBrowser, "close">,
 ): Promise<void> {
   try {
     await browser.close();
   } catch (error) {
-    if (
-      error instanceof TypeError &&
-      error.message === "Child process has already terminated"
-    ) {
+    if (isChildProcessGone(error)) {
       return;
     }
     throw error;
