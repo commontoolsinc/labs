@@ -1367,7 +1367,9 @@ export const DEFAULT_OPERATION_CHECKPOINT_INTERVAL = 100;
  *
  * The byte budget is the retention bound — encoded UTF-8 bytes of the
  * document as stored, a proxy for the decoded graph kept alive (expect a few
- * times that in heap) — and the entry cap is the cardinality backstop.
+ * times that in heap) — and the entry cap is the cardinality backstop, set
+ * well above any real working set (the same board load is 13,371 entries;
+ * a cap of 8,192 evicted 6,542 of them under 13 MB and served nothing).
  * Least-recently-read eviction under a budget SMALLER than a corpus's working
  * set serves nothing (each miss displaces what the next read wants), so the
  * per-space default errs on the side of fitting; the Server bounds the total
@@ -1378,7 +1380,7 @@ export const DEFAULT_OPERATION_CHECKPOINT_INTERVAL = 100;
  * own, which is what the old bound existed for.
  */
 export const DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES = 128 * 1024 * 1024;
-export const DEFAULT_DOCUMENT_CACHE_MAX_ENTRIES = 8192;
+export const DEFAULT_DOCUMENT_CACHE_MAX_ENTRIES = 65_536;
 
 const prepareStatements = (database: Database): PreparedStatements => ({
   insertAuthorization: database.prepare(INSERT_AUTHORIZATION),
