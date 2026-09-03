@@ -176,14 +176,16 @@ refused before anything is written. `cf cell set` names one path instead. On a
 result-cell write it validates that selected path, which makes `set` the right
 operation for changing one result value.
 
-An input-cell write is currently sharper: `cf cell set --piece <id> --input
-<path>` resolves that path through the piece's input contract and revalidates
-the complete input document. It can therefore be refused over an unrelated
-allocated field. Addressing the raw argument cell by id avoids that
-whole-document check, but it is an unsafe recovery tool: it can erase
-link-bearing data that a later `cf cell set` will refuse to restore because the
-serialized link has no durable source contract. The superseded `cf set`
-spelling mounts this same command and has identical validation behavior.
+An input-cell write is currently sharper:
+`cf cell set --piece <id> --input
+<path>` resolves that path through the piece's
+input contract and revalidates the complete input document. It can therefore be
+refused over an unrelated allocated field. Addressing the raw argument cell by
+id avoids that whole-document check, but it is an unsafe recovery tool: it can
+erase link-bearing data that a later `cf cell set` will refuse to restore
+because the serialized link has no durable source contract. The superseded
+`cf set` spelling mounts this same command and has identical validation
+behavior.
 
 ## Updating piece source
 

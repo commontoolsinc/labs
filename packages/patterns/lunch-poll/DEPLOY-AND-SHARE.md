@@ -208,8 +208,7 @@ The helper requires the `CF_API_URL`, `CF_IDENTITY`, `SPACE`, and `PIECE`
 variables from Environment setup. Its default is deliberately preflight-only.
 The check compiles and stores unattached, content-addressed candidate artifacts
 in the space, but it does not move the piece's source pointer, restage its
-arguments, or create a source revision.
-The equivalent commands are:
+arguments, or create a source revision. The equivalent commands are:
 
 ```bash
 deno task cf piece setsrc --piece "$PIECE" -s "$SPACE" \
