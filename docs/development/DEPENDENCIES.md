@@ -162,6 +162,64 @@ that `check.sh` and the `deno-setup` action both still read `mise.toml` rather
 than a hardcoded version, and that the action holds no version literal that
 disagrees with the pin.
 
+### GitHub Actions
+
+Every step under `.github/` that names an action outside this repository
+selects it by a 40-character commit, with the release as a trailing comment:
+
+```
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+```
+
+Both halves of that line defend against something. The commit defends against
+the publisher: a tag is a name they can move, so a step naming one runs
+whatever the name points at when the job starts, and several of these steps
+share a job with a Google Cloud access token or a deploy key. The comment
+defends against us: nobody checks a 40-character commit by eye, so a commit
+that is not the release it claims to be would pass review on the strength of
+the comment beside it.
+
+`deno task check-action-pins`, a step in the `check` job, holds both. It asks
+GitHub which commit the named release points at and fails when a step names no
+commit, carries no release comment, or names a commit that release does not
+point at.
+
+The comment names the release itself, `# v4.2.0` and not `# v4`. A publisher
+moves `v4` onto each release, so a comment naming one says only which major
+version a commit belongs to, hides how far behind it is, and stops being true
+without anybody touching the file. The check rejects such a comment and names
+the release to write instead.
+
+The check reaches api.github.com, which means a GitHub outage fails it. That
+is the accepted cost of having one check that proves the thing rather than a
+local record of a proof made earlier, which would need its own verification to
+be worth anything. Set `GITHUB_TOKEN` in any context where the rate limit
+matters; CI passes it from `secrets.GITHUB_TOKEN`.
+
+To roll a pin, find the release to move to, resolve it to its commit, and
+write both:
+
+```bash
+gh api repos/actions/checkout/releases/latest --jq '.tag_name'
+gh api repos/actions/checkout/git/ref/tags/v7.0.1 --jq '.object.sha'
+```
+
+An annotated tag answers with the tag object rather than the commit; follow it
+through with `gh api repos/OWNER/REPO/git/tags/SHA --jq '.object.sha'`.
+Because the comments name releases, how far behind a pin is reads off the
+line itself, and the releases page says what is newer.
+
+Two actions are in use at two versions, which has to be decided when either is
+rolled: `google-github-actions/auth` at v1.3.0 on the deploy path and v3.0.0
+elsewhere, and `actions/cache` at v4.3.0 in four `deno.yml` steps and v6.1.0
+everywhere else.
+
+The `setup-deno` pin touches the Deno toolchain pin in one place.
+`deno task check-deno-pins` rejects any version literal in
+`.github/actions/deno-setup/action.yml` that disagrees with `mise.toml`, so
+that pin's comment keeps its `v` prefix, `# v2.0.5` rather than `# 2.0.5`, and
+the release is not read as a Deno version.
+
 ### TypeScript
 
 The runtime compiles patterns itself, using the TypeScript compiler API at
