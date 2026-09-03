@@ -82,7 +82,9 @@ const LINK_MARKER_KEY = "$link";
 const CONCISE_ADDRESS_SUFFIX = "@";
 
 /** A phase of `deriveSelectedValue`, named for the operation like every other
- * label. These run INSIDE the caller's `getCellValue.selection` phase. */
+ * label. The six are strict siblings, so they add up; what they must not be
+ * added to is whichever phase encloses the selection — `getCellValue.selection`
+ * on `cf cell get`, and on `cf piece call` and `cf wish` nothing yet. */
 const timeSelectionPhase = <T>(
   label: string,
   run: () => T | Promise<T>,

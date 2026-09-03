@@ -3,9 +3,13 @@
  * `CF_CLI_TRACE_TIMINGS=1` (docs/development/CONFIGURATION.md). Every phase
  * line has one shape, `[cf-phase] <ms>ms :: <label>`, so a trace from any
  * command greps the same way. Labels are `<operation>.<step>`, and phases
- * nest: an operation's phase encloses the phases of the operations it calls
- * (`getCellValue.selection` encloses every `deriveSelectedValue.*` line), so
- * the lines of a trace do not sum — total a run from its outermost phases.
+ * can nest: when an operation wraps a call to another traced operation, its
+ * phase encloses theirs — on `cf cell get`, `getCellValue.selection` encloses
+ * the `deriveSelectedValue.*` lines — so the lines of a trace do not sum;
+ * total a run from its outermost phases. Only phases with a common parent are
+ * siblings that add up, and an operation reached without a wrapper (a
+ * selection on `cf piece call` or `cf wish`) reports its own phases with no
+ * encloser at all.
  * The piece package keeps its own `[piece-phase]` lines behind the same
  * variable; together they attribute a command's latency across the
  * CLI/controller boundary.

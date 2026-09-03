@@ -1843,8 +1843,9 @@ async function tryResolveLivePieceToolCallable(
  * Load the target piece and its pieces controller for callable resolution or
  * discovery.
  *
- * Dispatch bootstraps the space root first, unconditionally: a verb that
- * creates a piece registers it by sending an event to the default pattern's
+ * Dispatch bootstraps the space root first, unconditionally whenever
+ * `deps.loadPiece` is absent (the test seam is the one way around it): a verb
+ * that creates a piece registers it by sending an event to the default pattern's
  * `addPiece` stream (see `newPiece`), so against an unbootstrapped root it
  * fails with "Cannot add pieces" rather than running slowly. Discovery
  * (`verbs`, `describe`) only reads the addressed piece, so it starts that
