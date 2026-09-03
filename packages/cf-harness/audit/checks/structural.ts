@@ -664,15 +664,6 @@ const isHostAuthoredOutputFile = (fileName: string): boolean => {
   return false;
 };
 
-/**
- * A counts object's `withheld` total, which a trace recorded before that
- * outcome existed does not carry.
- *
- * Read through an index rather than a field because the count is written by a
- * harness that may be newer than the contract this audit compiles against — an
- * audit that could only read the fields it was built with would go quiet on
- * exactly the runs worth reading.
- */
 /** The three readings of a `withheld` count that differ. */
 type WithheldCount =
   | { kind: "absent" }
@@ -686,6 +677,11 @@ type WithheldCount =
  * after declares a number, and a field that is present and is not a number is
  * neither — which is why the three are told apart rather than collapsed into
  * an optional number.
+ *
+ * Read through an index rather than a field because the count is written by a
+ * harness that may be newer than the contract this audit compiles against — an
+ * audit that could only read the fields it was built with would go quiet on
+ * exactly the runs worth reading.
  */
 const withheldIn = (
   counts: HarnessPolicyDecisionCounts | Record<string, unknown> | undefined,
