@@ -324,6 +324,59 @@ describe("verbs", () => {
         );
       });
 
+      it("refuses a target whose address carries the `#argument` suffix", async () => {
+        const outcome = await runLine(
+          "cd #favorites",
+          shuttleIn(),
+          addressed(`/${HANDLE}/title#argument`),
+        );
+        expect(reasonOf(outcome)).toBe(
+          "`#favorites` resolved to an address carrying the `#argument` " +
+            "suffix, which a place reached through a target does not keep: a " +
+            "place holds one scope and roots at a result. Reach that cell by " +
+            `its own reference, \`/${HANDLE}/title#argument\`.`,
+        );
+      });
+
+      it("refuses an address naming its space by a name rather than a DID", async () => {
+        // An address the fabric wrote names its space by DID or leaves it
+        // out, so a name in that slot is an answer nothing here can compare
+        // against the connected space — and comparing it wrongly is what
+        // decision 5's whole refusal turns on.
+        const outcome = await runLine(
+          "cd #favorites",
+          shuttleIn(),
+          addressed(`/@estuary/${HANDLE}`),
+        );
+        expect(reasonOf(outcome)).toBe(
+          "`#favorites` resolved to an address naming space `estuary`, " +
+            "which is no DID. An address the fabric wrote names its space by " +
+            "DID or leaves it out.",
+        );
+      });
+
+      it("refuses an address that is not written as a reference", async () => {
+        expect(
+          reasonOf(
+            await runLine("cd #favorites", shuttleIn(), addressed(HANDLE)),
+          ),
+        ).toBe(
+          `\`#favorites\` resolved to \`${HANDLE}\`, which is no reference: ` +
+            "one is rooted, and this is not.",
+        );
+      });
+
+      it("carries the reason the reference grammar gave an address it refused", async () => {
+        expect(
+          reasonOf(
+            await runLine("cd #favorites", shuttleIn(), addressed("/Board")),
+          ),
+        ).toBe(
+          '"Board" is not a slug: a slug is lowercase letters, numbers, and ' +
+            "single hyphens between words.",
+        );
+      });
+
       it("refuses a target the wish matched nothing for, carrying the wish's own error", async () => {
         const outcome = await runLine(
           "cd #profile",
