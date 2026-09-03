@@ -23,9 +23,11 @@ in a non-default configuration. The default configuration is unmarked. The
 server-execution deployed-topology lanes use stable `default` and `opposite`
 roles. `default` follows the first-party constant and stays unmarked;
 `opposite` uses `server-execution` when it resolves ON and
-`server-execution-off` when it resolves OFF. Since the 2026-08-28 flip, that
-means unmarked ON and marked OFF; the pre-flip explicit-ON history remains
-queryable under `server-execution`. The single-process default jobs (the unit
+`server-execution-off` when it resolves OFF. Since the 2026-09-03 rollback of
+the 2026-08-28 flip, that means unmarked OFF and marked ON, so the opposite
+lanes continue the `server-execution` history the pre-flip explicit-ON jobs
+wrote; the flip-era OFF guard's history stays queryable under
+`server-execution-off`. The single-process default jobs (the unit
 suites, `cf test`, the
 no-server pattern-unit lane) never read that default and stay ambient-OFF,
 so they are unmarked for the older reason: the flip does not reach them

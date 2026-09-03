@@ -28,11 +28,11 @@ import {
 import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
 
 // The RAW env posture, read only to key the skip guard below (testing.md
-// §2): the explicit-`false` OFF regression-guard lane sets
-// EXPERIMENTAL_SERVER_EXECUTION=false; the DEFAULT lanes leave it unset and
-// resolve the first-party default, which is ON since the flip. This value
-// is therefore undefined on the default (ON) lane — NOT the resolved
-// posture. The test's runtime posture is not taken from here:
+// §2): the `opposite` lane sets EXPERIMENTAL_SERVER_EXECUTION explicitly
+// to the inverse of the first-party default (`true` while the default is
+// rolled back to OFF); the `default` lanes leave it unset and resolve the
+// constant. This value is therefore undefined on the default lane — NOT the
+// resolved posture. The test's runtime posture is not taken from here:
 // `MultiRuntimeHarness` resolves it env-else-first-party-default and picks
 // its backend accordingly.
 const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)

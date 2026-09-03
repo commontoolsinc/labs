@@ -31,8 +31,10 @@ A test's identity has three required parts, scoped within a repository:
   `opposite` roles. `default` follows the first-party constant and remains
   unmarked; `opposite` receives the marker for the posture it actually runs:
   `server-execution` for ON or `server-execution-off` for OFF. Since the
-  2026-08-28 flip, that resolves to unmarked ON and marked OFF. The pre-flip
-  explicit-ON history remains queryable under `server-execution`. The claim is
+  2026-09-03 rollback of the 2026-08-28 flip, that resolves to unmarked OFF
+  and marked ON, continuing the pre-flip explicit-ON `server-execution`
+  history; the flip-era `server-execution-off` history stays queryable under
+  that marker. The claim is
   deliberately narrow: the
   single-process default jobs (the unit suites, `cf test`, the no-server
   pattern-unit lane — the `patternTest` / `unitTest` presets) never read

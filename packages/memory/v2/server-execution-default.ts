@@ -10,16 +10,18 @@
  * an implicit-OWNER service grant),
  * and the browser shell's build-define fallback
  * (`packages/shell/src/lib/env.ts`), so flipping the default is this one
- * value. `true` is the v2 posture — the first-party default since the
- * flip PR, which landed after the plan's Phase 7 ordered gates were met
- * (ON-skip registry EMPTY, OW31's ruled posture built, OW45–OW53 closed,
- * the OW38(ii) benchmark bar ruled met); `false` is the pre-flip behavior
+ * value. `true` is the v2 posture — the first-party default from the
+ * flip PR (#6535, which landed after the plan's Phase 7 ordered gates
+ * were met: ON-skip registry EMPTY, OW31's ruled posture built, OW45–OW53
+ * closed, the OW38(ii) benchmark bar ruled met) until the rollback PR
+ * returned this value to `false`; `false` is the pre-flip behavior
  * byte-for-byte. An explicit `EXPERIMENTAL_SERVER_EXECUTION=true|false`
  * (or `experimental.serverExecution`) selects an arm regardless of this
  * value. CI's stable `default` / `opposite` roles derive both postures
  * from this resolver, so both arms stay guarded without role renames or
- * source edits. While the default is ON, explicit `false` is the rollback
- * lever (and the relationship reverses symmetrically if the default flips).
+ * source edits. While the default is OFF, explicit `true` selects the v2
+ * posture per deployment; while it is ON, explicit `false` is the rollback
+ * lever — the relationship reverses symmetrically with the default.
  * To change the first-party default, update this value and the status row
  * in `docs/development/EXPERIMENTAL_OPTIONS.md` in the same PR; a test
  * intentionally pins that pair so an isolated one-token change fails.
@@ -36,4 +38,4 @@
  * serving host, so they resolve the ambient baseline (OFF) by construction
  * (see the ambient flag in `../v2.ts`).
  */
-export const SERVER_EXECUTION_DEFAULT_ENABLED = true;
+export const SERVER_EXECUTION_DEFAULT_ENABLED = false;
