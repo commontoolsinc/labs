@@ -10,11 +10,15 @@ paths:
 
 # The declarations a pattern compiles against
 
-`packages/api/index.ts` is the whole of the `commonfabric` module's type: the
-sandbox hands it to the pattern compiler as `types/commonfabric.d.ts`, which is
-a symlink to it. The only file it may reach for is `cfc.ts`, which
-`sandbox/runtime-modules.ts` registers alongside it under the same names the
-sandbox gives a pattern. Anything else it describes, it describes by declaring
+`packages/api/index.ts` is the whole of the `commonfabric` module's type. What
+the sandbox hands the pattern compiler is
+`packages/static/assets/types/commonfabric.d.ts`, which
+`scripts/generate-commonfabric-types.ts` builds from it -- so an edit here needs
+`deno task gen-commonfabric-types` in `packages/static`, and
+`check-commonfabric-types` fails the build until it has been run. The generator
+inlines the one module `index.ts` imports for its declarations rather than
+following the specifier out, because the compiler that reads the result resolves
+none. Anything else it describes, it describes by declaring
 a second copy of the shape by hand, and the implementation is in
 `packages/runner/src/builder`, `packages/data-model`, or
 `packages/memory/v2/sqlite`.

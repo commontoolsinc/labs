@@ -2653,7 +2653,12 @@ export type CellFromUrlFunction = (
     url: string;
     hosts?: string[];
   }>,
-) => Reactive<{ pending: boolean; cell?: ReadonlyCell<{ [NAME]: string }> }>;
+  /**
+   * The cell the URL named, once resolved, and absent when it named none. Its
+   * value is unconstrained: a URL addresses any cell, and resolution neither
+   * requires a piece nor supplies one's `[NAME]`.
+   */
+) => Reactive<{ pending: boolean; cell?: ReadonlyCell<unknown> }>;
 
 export type FetchProgramFunction = (
   params: FactoryInput<{ url: string }>,

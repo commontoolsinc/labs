@@ -18,6 +18,14 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type {
+  FactoryInput,
+  JSONSchema,
+  Reactive,
+  WishParams,
+  WishState,
+} from "@commonfabric/api";
+import type { Schema } from "@commonfabric/api/schema";
 import { createBuilder } from "../src/builder/factory.ts";
 import type {
   BuilderFunctionsAndConstants,
@@ -75,6 +83,25 @@ export function undeclaredBindingIsRejected(surface: Surface): Surface {
     neitherDeclaredNorExpected: 1,
   };
 }
+
+// `@commonfabric/api/schema` adds schema-carrying overloads to several of the
+// declarations by module augmentation, and those overloads are part of what a
+// binding has to satisfy. This pins one of them, `wish`'s second argument, so
+// that changing its shape has to be done here as well as there.
+//
+// It does not pin that the augmentation reaches the requirement at all. An
+// augmentation applies across the whole program rather than per module, so
+// this file importing `schema.ts` puts the overloads in scope however
+// `builder/types.ts` is written, and no assertion here can see that import go.
+export type SchemaOverloadsAreRequired = Satisfies<
+  Surface["wish"],
+  {
+    <S extends JSONSchema>(
+      target: FactoryInput<WishParams>,
+      schema: S,
+    ): Reactive<WishState<Schema<S>>>;
+  }
+>;
 
 // The pins above all turn on `navigateTo`, so they say nothing about how far
 // the requirement reaches. What decides that is the list of declared names

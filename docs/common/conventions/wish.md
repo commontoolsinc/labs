@@ -62,11 +62,13 @@ user browses candidates and clicks "Confirm Selection". Until confirmed,
 
 You can render the built-in UI directly. `[UI]` is optional — a wish that has
 resolved to nothing to show leaves it unset — so read the slot rather than
-rendering the whole state, and let the renderer skip it when it is absent:
+rendering the whole state. Hand it over as the slot itself, rather than wrapping
+it: an element around it is still an element when the slot is unset, and shows
+as an empty box.
 
 ```tsx
 // Shown inside a pattern body.
-return { [UI]: <div>{wishResult[UI]}</div> };
+return { [UI]: wishResult[UI] };
 ```
 
 ## Wishing for a Specific Piece
