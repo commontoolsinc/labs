@@ -1,27 +1,34 @@
 /**
- * That an element of the thread's filtered, sorted `computed()` still carries
- * the identity of the stored record it came from.
+ * That an element of a filtered, sorted `computed()` still carries the
+ * identity of the stored record it was derived from.
  *
- * The reader renders comments and links from a `computed()` that filters out
- * stamped records and sorts what is left, and the browser's retraction
- * controls are bound to the elements of those views. Whether such an element
- * still addresses the array it was derived from is the property those controls
- * stand on: bound to a copy, a control would stamp something no reader shows,
- * and the thread would be unchanged while the click looked as though it
- * worked.
+ * This is a property of the runtime, not of Topics: the reader's rows come
+ * from such a view, and the retraction controls are bound to their elements,
+ * so if a derived element were a copy every control would stamp something no
+ * reader shows. The views below are therefore a minimal reproduction of that
+ * shape rather than an attempt to re-test `topic.tsx`'s own `commentsView` —
+ * the shipped views are covered where they can only be covered, through the
+ * rendered rows and a real click, in
+ * `integration/topic-retraction-controls.test.ts`.
+ *
+ * The views cannot simply be shared with the pattern. A reactive read declares
+ * the schema it can SEE from the properties it names, so `removedAt` has to be
+ * written out inside each `computed()`; behind a helper call it is not named,
+ * is never demanded, and reads back absent on every element. `isPresent` in
+ * `topic.tsx` records that rule at its declaration. What guards this file
+ * against drifting from the shipped filter instead is
+ * `assert_view_agrees_with_shipped_count` below, which holds the local view to
+ * `commentCount` — the count `topic.tsx` derives with its own copy of the
+ * predicate.
  *
  * `removeComment` and `removeLink` are the oracles rather than a bespoke
  * assertion, because they already prove membership with `equals()` against the
  * stored positions and reject loudly when it fails. Handing them an element
- * taken from the view therefore answers the question with a pass or a throw.
+ * taken from a view therefore answers the question with a pass or a throw.
  *
  * The negative half lives in topics-rejections.test.tsx, where a structural
  * copy of a real stored comment is refused — the case that separates identity
  * from content, since a copy satisfies every content-based check.
- *
- * This pins the model property. That the SHIPPED controls are bound to it is a
- * separate question, and it is proven through a real click in
- * integration/topic-retraction-controls.test.ts.
  */
 import { action, assert, computed, pattern, TESTS } from "commonfabric";
 import Topic from "./topic.tsx";
@@ -36,23 +43,16 @@ export default pattern(() => {
   });
 
   const add_links = action(() => {
-    topic.addLink.send({
-      kind: "web",
-      url: "https://example.com/one",
-      label: "one",
-      agentName: "Sol",
-    });
-    topic.addLink.send({
-      kind: "web",
-      url: "https://example.com/two",
-      label: "two",
-      agentName: "Sol",
-    });
+    for (const url of ["one", "two", "three"]) {
+      topic.addLink.send({
+        kind: "web",
+        url: `https://example.com/${url}`,
+        label: url,
+        agentName: "Sol",
+      });
+    }
   });
 
-  // The shapes the reader renders from, rebuilt here so the elements handed to
-  // the verbs below have been through the same filter and sort the browser's
-  // rows go through.
   const commentsView = computed(() =>
     topic.comments.filter((c) => c.removedAt === undefined).toSorted((a, b) =>
       a.sentAt - b.sentAt
@@ -62,44 +62,82 @@ export default pattern(() => {
     topic.links.filter((l) => l.removedAt === undefined)
   );
 
-  // The middle one, not the first: an element whose position in the view and
-  // position in the stored array can differ is the one that catches an
-  // identity taken from the wrong array.
-  const retract_second_comment = action(() => {
-    const second = commentsView[1];
-    if (second) {
-      topic.removeComment.send({ comment: second, agentName: "Sol" });
+  // Index 1 of the VIEW, twice. The two calls are deliberately identical, and
+  // what separates them is what sits at that index each time.
+  //
+  // The first runs while the view and the stored array still agree — three
+  // live comments in `sentAt` order — so it proves the element addresses a
+  // stored record at all. The second runs after a record has been stamped, so
+  // the view holds the first and the last while the array still holds all
+  // three: view index 1 is now stored index 2. Only the second can tell an
+  // element taken from the view apart from one taken from the array, and it is
+  // the reason this file retracts twice rather than once.
+  const retract_view_index_1 = action(() => {
+    const target = commentsView[1];
+    if (target) {
+      topic.removeComment.send({ comment: target, agentName: "Sol" });
+    }
+  });
+  const retract_view_index_1_again = action(() => {
+    const target = commentsView[1];
+    if (target) {
+      topic.removeComment.send({ comment: target, agentName: "Sol" });
     }
   });
 
-  const retract_second_link = action(() => {
-    const second = linksView[1];
-    if (second) topic.removeLink.send({ link: second, agentName: "Sol" });
+  const retract_link_index_1 = action(() => {
+    const target = linksView[1];
+    if (target) topic.removeLink.send({ link: target, agentName: "Sol" });
+  });
+  const retract_link_index_1_again = action(() => {
+    const target = linksView[1];
+    if (target) topic.removeLink.send({ link: target, agentName: "Sol" });
   });
 
   const assert_three_comments = assert(() => topic.comments.length === 3);
 
-  // The write landed on the stored record, and on the RIGHT one: membership
-  // alone would be satisfied by stamping any element.
-  const assert_second_comment_stamped = assert(() => {
-    const stored = topic.comments;
-    const stamped = stored.filter((c) => c.removedAt !== undefined);
-    return stored.length === 3 && stamped.length === 1 &&
+  /** The drift guard named in the header: the local view and the shipped
+   * `commentCount` must agree about what is present. They are separate copies
+   * of one predicate, so a change to the shipped one that this file did not
+   * follow shows up here rather than passing silently. */
+  const assert_view_agrees_with_shipped_count = assert(() =>
+    commentsView.length === topic.commentCount
+  );
+
+  const assert_second_stamped = assert(() => {
+    const stamped = topic.comments.filter((c) => c.removedAt !== undefined);
+    return topic.comments.length === 3 && stamped.length === 1 &&
       stamped[0]?.body === "second";
   });
 
-  // What the reader is shown follows the stamp: the record stays, the count
-  // and the view drop it.
-  const assert_reader_sees_two = assert(() =>
-    topic.commentCount === 2 &&
-    topic.comments.filter((c) => c.removedAt === undefined).length === 2
+  // The stored array and the view now disagree about index 1: the array holds
+  // the stamped "second" there, the view holds "third". Asserted so the step
+  // that follows is known to be the divergent one rather than assumed to be.
+  const assert_view_and_array_diverge = assert(() =>
+    topic.comments[1]?.body === "second" &&
+    topic.comments[1]?.removedAt !== undefined &&
+    commentsView[1]?.body === "third"
   );
 
-  const assert_second_link_stamped = assert(() => {
-    const stored = topic.links;
-    const stamped = stored.filter((l) => l.removedAt !== undefined);
-    return stored.length === 2 && stamped.length === 1 &&
-      stamped[0]?.url === "https://example.com/two";
+  // "third", not "second": the element came from the view. Bound to the array
+  // position this would have found the already-stamped "second" and rejected,
+  // leaving one stamped record rather than two.
+  const assert_third_stamped_too = assert(() => {
+    const stamped = topic.comments.filter((c) => c.removedAt !== undefined);
+    const live = topic.comments.filter((c) => c.removedAt === undefined);
+    return topic.comments.length === 3 && stamped.length === 2 &&
+      live.length === 1 && live[0]?.body === "first" &&
+      stamped.some((c) => c.body === "third");
+  });
+
+  const assert_reader_sees_one = assert(() => topic.commentCount === 1);
+
+  const assert_links_stamped_through_view = assert(() => {
+    const stamped = topic.links.filter((l) => l.removedAt !== undefined);
+    const live = topic.links.filter((l) => l.removedAt === undefined);
+    return topic.links.length === 3 && stamped.length === 2 &&
+      live.length === 1 && live[0]?.url === "https://example.com/one" &&
+      stamped.some((l) => l.url === "https://example.com/three");
   });
 
   return {
@@ -107,11 +145,17 @@ export default pattern(() => {
       { action: add_comments },
       { action: add_links },
       { assertion: assert_three_comments },
-      { action: retract_second_comment },
-      { assertion: assert_second_comment_stamped },
-      { assertion: assert_reader_sees_two },
-      { action: retract_second_link },
-      { assertion: assert_second_link_stamped },
+      { assertion: assert_view_agrees_with_shipped_count },
+      { action: retract_view_index_1 },
+      { assertion: assert_second_stamped },
+      { assertion: assert_view_and_array_diverge },
+      { assertion: assert_view_agrees_with_shipped_count },
+      { action: retract_view_index_1_again },
+      { assertion: assert_third_stamped_too },
+      { assertion: assert_reader_sees_one },
+      { action: retract_link_index_1 },
+      { action: retract_link_index_1_again },
+      { assertion: assert_links_stamped_through_view },
     ],
   };
 });
