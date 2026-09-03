@@ -2,16 +2,20 @@
  * Phase timing for the CLI's own code paths, written to stderr when
  * `CF_CLI_TRACE_TIMINGS=1` (docs/development/CONFIGURATION.md). Every phase
  * line has one shape, `[cf-phase] <ms>ms :: <label>`, so a trace from any
- * command greps the same way. The piece package keeps its own `[piece-phase]`
- * lines behind the same variable; together they attribute a command's latency
- * across the CLI/controller boundary.
+ * command greps the same way. Labels are `<operation>.<step>`, and phases
+ * nest: an operation's phase encloses the phases of the operations it calls
+ * (`getCellValue.selection` encloses every `deriveSelectedValue.*` line), so
+ * the lines of a trace do not sum — total a run from its outermost phases.
+ * The piece package keeps its own `[piece-phase]` lines behind the same
+ * variable; together they attribute a command's latency across the
+ * CLI/controller boundary.
  */
 
 /** Where a phase reports, and whether it does. Injected by tests; commands
  * use {@link cliPhaseTrace}. */
 export interface PhaseTrace {
-  enabled: boolean;
-  log: (line: string) => void;
+  readonly enabled: boolean;
+  readonly log: (line: string) => void;
 }
 
 /** The process-wide trace: read once, since the flag is a property of the

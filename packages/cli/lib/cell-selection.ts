@@ -81,11 +81,12 @@ const LINK_MARKER_KEY = "$link";
  */
 const CONCISE_ADDRESS_SUFFIX = "@";
 
-/** A selection phase in the command's trace, under its own prefix. */
+/** A phase of `deriveSelectedValue`, named for the operation like every other
+ * label. These run INSIDE the caller's `getCellValue.selection` phase. */
 const timeSelectionPhase = <T>(
   label: string,
   run: () => T | Promise<T>,
-): Promise<T> => timeCliPhase(`cellSelection.${label}`, run);
+): Promise<T> => timeCliPhase(`deriveSelectedValue.${label}`, run);
 
 /**
  * The address a marked position accumulates as the walk descends, which is

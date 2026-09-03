@@ -141,6 +141,46 @@ describe("executePieceCallable", () => {
     ).rejects.toThrow('Callable "missing" not found');
   });
 
+  it("bootstraps the space root before resolving, help page included", async () => {
+    // The dispatch arm of `loadPieceForCallables`, pinned from the outside:
+    // a verb that creates a piece registers it through the root's `addPiece`
+    // stream, so dispatch starts the root that `verbs`/`describe` skip. A
+    // help page rides the same path because resolution precedes parsing.
+    const harness = createPieceCallableHarness({
+      callableKind: "handler",
+      cellKey: "refresh",
+      inputSchema: { type: "object", properties: {} },
+    });
+    const order: string[] = [];
+    const manager = {
+      ...harness.pieces,
+      ensureDefaultPattern: () => {
+        order.push("ensureDefaultPattern");
+        return Promise.resolve();
+      },
+      get: (id: string, runIt: boolean) => {
+        order.push(`get:${id}:${runIt}`);
+        return Promise.resolve(harness.piece);
+      },
+    };
+
+    const executed = await executePieceCallable(
+      {
+        apiUrl: "http://localhost:8000",
+        identity: "/tmp/test-identity.pem",
+        piece: "fid1:piece-123",
+        space: "home",
+      },
+      "refresh",
+      ["--help"],
+      { loadPieces: () => Promise.resolve(manager as never) },
+    );
+
+    expect(order).toEqual(["ensureDefaultPattern", "get:fid1:piece-123:true"]);
+    expect(executed.helpText).toContain("refresh");
+    expect(harness.tracker.handlerWrites).toEqual([]);
+  });
+
   it("preserves plain-text mode while resolving a callable", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "handler",

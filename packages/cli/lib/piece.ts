@@ -108,7 +108,6 @@ import {
   CellSelectionError,
   deriveSelectedValue,
 } from "./cell-selection.ts";
-import { timeCliPhase } from "./trace-timing.ts";
 import { cliCommand } from "./cli-name.ts";
 import {
   type ExecCommandSpec,
@@ -122,6 +121,7 @@ import { stderrConsoleHandler } from "./json-output.ts";
 import { validateEmbeddedSpaces } from "./llm-friendly-ref.ts";
 import { claimProcessDeployment } from "./process-deployment.ts";
 import { deriveDiskHandleId } from "./sqlite-source.ts";
+import { timeCliPhase } from "./trace-timing.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
 import { startVersionCheck } from "./version-check.ts";
 import { noteWroteTo } from "./write-receipt.ts";
@@ -1839,13 +1839,28 @@ async function tryResolveLivePieceToolCallable(
   return callableKind === "tool" ? callableCell : null;
 }
 
-/** Load the target piece and its pieces controller for callable resolution or
- * discovery. Dispatch may bootstrap the space root before calling; read-only
- * discovery starts only the addressed piece. */
+/**
+ * Load the target piece and its pieces controller for callable resolution or
+ * discovery.
+ *
+ * Dispatch bootstraps the space root first, unconditionally: a verb that
+ * creates a piece registers it by sending an event to the default pattern's
+ * `addPiece` stream (see `newPiece`), so against an unbootstrapped root it
+ * fails with "Cannot add pieces" rather than running slowly. Discovery
+ * (`verbs`, `describe`) only reads the addressed piece, so it starts that
+ * piece and nothing else.
+ *
+ * `cf piece call <verb> --help` takes the dispatch path: `executePieceCallable`
+ * resolves the verb before it parses the arguments, so it cannot know it is
+ * only rendering a page, and pays for the root start the two discovery reads
+ * skip. That makes per-verb help the most expensive of the three reads, not
+ * the cheapest; letting help skip the bootstrap means reordering resolution
+ * and parsing there.
+ */
 async function loadPieceForCallables(
   config: PieceConfig,
-  deps: PieceCallableDependencies = {},
-  ensureSpaceRoot = true,
+  deps: PieceCallableDependencies,
+  { ensureSpaceRoot }: { ensureSpaceRoot: boolean },
 ): Promise<{
   pieces: any;
   piece: any;
@@ -1891,6 +1906,7 @@ async function resolvePieceCallable(
   const { pieces, piece, space, resolvedConfig } = await loadPieceForCallables(
     config,
     deps,
+    { ensureSpaceRoot: true },
   );
 
   const onResultCell = await tryResolvePieceCallableAt(
@@ -3040,7 +3056,9 @@ export async function listPieceCallables(
   config: PieceConfig,
   deps: PieceCallableDependencies = {},
 ): Promise<PieceCallablesListing> {
-  const { piece } = await loadPieceForCallables(config, deps, false);
+  const { piece } = await loadPieceForCallables(config, deps, {
+    ensureSpaceRoot: false,
+  });
   return (await listCallablesForLoadedPiece(piece)).listing;
 }
 
@@ -3326,7 +3344,9 @@ export async function describePiece(
   config: PieceConfig,
   deps: PieceCallableDependencies = {},
 ): Promise<PieceDescription> {
-  const { piece } = await loadPieceForCallables(config, deps, false);
+  const { piece } = await loadPieceForCallables(config, deps, {
+    ensureSpaceRoot: false,
+  });
   const { listing, compiled } = await listCallablesForLoadedPiece(piece);
   let name: string | undefined;
   try {

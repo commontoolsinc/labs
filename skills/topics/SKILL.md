@@ -56,11 +56,17 @@ cf piece verbs --cell "$TOPICS_BOARD" --json
 ```
 
 That listing includes the deployed pattern reference, callable prose, and input
-and output schemas. Use `cf piece describe --cell "$TOPICS_BOARD"` only when you
-need piece-wide purpose, state, or input documentation. Use
+and output schemas. `cf piece describe --cell "$TOPICS_BOARD" --json` returns a
+superset of it (the same verb rows plus name, purpose, state, and inputs) for
+the same process and piece start, so the reason to default to `verbs` is
+payload, not time: the listing is the smaller document to hold in context, and
+it is complete for calling. Use `describe` when you need the piece-wide purpose,
+state, or input documentation. Use
 `cf piece call --cell "$TOPICS_BOARD" <verb> --help --json` only after choosing
-a verb and when its generated flags or standalone help are useful. Each command
-is an independent cold CLI process, so do not run all three by default.
+a verb and when its generated flags or standalone help are useful; help is
+served through the dispatch path, which also starts the space root, so it is the
+most expensive of the three. Each command is an independent cold CLI process, so
+do not run all three by default.
 
 The deployment can be well behind the checkout the CLI runs from, and that gap
 explains board behavior that would otherwise read as a defect. Ask it which
