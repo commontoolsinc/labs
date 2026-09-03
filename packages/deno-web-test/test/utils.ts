@@ -5,6 +5,8 @@ import { parse as parseJsonc } from "@std/jsonc";
 import { decode } from "@commonfabric/utils/encoding";
 import { RECORDS_DIR_VARIABLE } from "@commonfabric/test-support/records";
 
+import { removeDirectory } from "../remove-directory.ts";
+
 const dirname = import.meta.dirname as string;
 const CLI_PATH = path.join(dirname, "..", "cli.ts");
 const DenoWebTestCache: Map<string, Promise<HarnessRun>> = new Map();
@@ -175,8 +177,8 @@ export class HarnessRun {
   }
 }
 
-// Runs deno-web-test in `projectDir` and caches
-// the results for multiple test usages.
+// Runs deno-web-test in `projectDir` with `environment` added to the
+// variables it inherits, and caches the results for multiple test usages.
 //
 // Due to running within a workspace, these test subprojects
 // need to be workspace members in order to run deno tasks.
@@ -184,8 +186,10 @@ export class HarnessRun {
 // before running tests.
 export const runDenoWebTest = async (
   projectDir: string,
+  environment: Record<string, string> = {},
 ): Promise<HarnessRun> => {
-  const fromCache = DenoWebTestCache.get(projectDir);
+  const cacheKey = `${projectDir} ${JSON.stringify(environment)}`;
+  const fromCache = DenoWebTestCache.get(cacheKey);
   if (fromCache) {
     return fromCache;
   }
@@ -238,6 +242,7 @@ export const runDenoWebTest = async (
       // directory rather than tests of this repository, so the child is
       // given no spool to write them to.
       [RECORDS_DIR_VARIABLE]: "",
+      ...environment,
     },
   }).output().then((output) =>
     new HarnessRun(
@@ -245,6 +250,14 @@ export const runDenoWebTest = async (
       sanitizeDenoWebTestOutput(output, stderrBoundary),
     )
   );
-  DenoWebTestCache.set(projectDir, run);
+  DenoWebTestCache.set(cacheKey, run);
+
+  // The copy is the run's working directory, and a `HarnessRun` holds what
+  // the run printed rather than anything under it, so the copy goes once the
+  // run has settled, whichever way it settled. What the cache holds is the
+  // run, so a removal that fails says so here without becoming what every
+  // later caller reads.
+  await Promise.allSettled([run]);
+  await removeDirectory(tmp);
   return run;
 };

@@ -246,16 +246,12 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
     },
   },
   {
-    id: "gcp-spend",
+    id: "cubic-spend",
     view: {
-      label: "gcp spend",
+      label: "cubic spend",
       status: "good",
-      value: "~$410/mo",
-      valueLabel: "~$410/mo",
-      aside: `<span class="hmtd" title="$220 MTD">$220 MTD</span>`,
-      sub: "billing account spend",
-      extra: history(),
-      duration: 30 * DAY,
+      value: "—",
+      sub: "api does not expose value",
     },
   },
   {
@@ -287,12 +283,16 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
     },
   },
   {
-    id: "spend-metric-placeholder",
+    id: "gcp-spend",
     view: {
-      label: "YOUR METRIC HERE",
+      label: "gcp spend",
       status: "good",
-      value: "–",
-      sub: "no metric selected for this tile",
+      value: "~$410/mo",
+      valueLabel: "~$410/mo",
+      aside: `<span class="hmtd" title="$220 MTD">$220 MTD</span>`,
+      sub: "billing account spend",
+      extra: history(),
+      duration: 30 * DAY,
     },
   },
   {

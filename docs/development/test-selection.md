@@ -106,21 +106,48 @@ deliberately: the bootstrap is a manual dispatch with the bootstrap input
 set, run once, and an incremental run that finds no aggregate at all says
 so and stops. After that the incremental path keeps up.
 
-A bootstrap takes each closed day from its rollup where the day has a
-complete one, which is a manifest and a few tens of shards against that
+A bootstrap replaces the score history rather than extending it. It folds
+into an empty aggregate, so the state object it creates holds what its
+window shows and nothing earlier, and every later run reads that one. A
+test's catches accumulate over unbounded history, so the ones counted
+before the window stop counting, and a bootstrap over a narrow window
+throws away more than one over a wide window does. Nothing in the store
+is removed: the publisher's identity holds create and not delete or
+overwrite, so the state object a previous run left stays where it is and
+stops being the newest.
+
+The two paths look back over different windows. An incremental run reads
+two days. A bootstrap reads sixty. The dispatch carries a days input
+naming a window of its own, and it applies in either mode, so a bootstrap
+over a shorter stretch of history is a matter of giving it.
+
+The bootstrap input does not decide whether a run reads a rollup. One
+rule is asked of each source and date the window covers. A pair whose
+rollup is already folded is closed. A pair nothing is folded from is
+taken from its rollup, where a rollup covers it. Everything else is read
+raw. Both modes apply that rule. Their answers differ because their
+aggregates differ, rather than because the input names a second way to
+choose.
+
+A run reaching a pair nothing is folded from takes that day whole from
+its rollup, which is a manifest and a few tens of shards against the
 day's thousands of raw objects. It reads a day whole or not at all: a
 shard it could not read would leave the day partly folded, and recording
 the day as done would then hide the rest of it from every later run. The
 days it did take are recorded, so no later run over a wide window folds
 their raw objects on top and doubles every catch in them.
 
-Only a bootstrap reads a rollup. A rollup is written by the one principal
-here whose credential exists as key material, so it carries weaker
-provenance than the raw records it summarizes, and
+A rollup is written by the one principal here whose credential exists as
+key material, so it carries weaker provenance than the raw records it
+summarizes, and
 [the record spec](../specs/test-records.md#trust-boundaries-for-consumers)
 asks a consumer that feeds decisions to treat it as a cache of a day
-rather than the record of it. Seeding catch counts once, from days closed
-a week or more ago, is that use; the four-hourly path never touches one.
+rather than the record of it. Seeding catch counts from days closed a
+week or more ago is that use. The four-hourly path in its steady state
+reaches no day it could read one from: compaction leaves a partition open
+for a week, and that path reads two days. So a rollup is read by a
+bootstrap, and by a run catching up after an outage or over a window
+somebody widened.
 
 `deno task test-records-compact` is what writes rollups, and an operator
 runs it from a workstation with a downloaded key — nothing federated runs

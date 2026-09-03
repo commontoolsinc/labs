@@ -5,6 +5,11 @@ behavior. The diagnostic tooling is intentionally separate from the pattern
 files so repo-wide pattern checks do not compile it as a pattern:
 
 - `../tools/lunch-poll-diagnose.ts` runs headless multi-runtime scaling probes.
+- `deploy-safe.sh` runs the complete test set plus `setsrc --check`; it is
+  preflight-only unless explicitly invoked with `--apply`.
+
+Deployment and migration details, including why link-bearing JSON exports are
+not restorable backups, live in [`DEPLOY-AND-SHARE.md`](./DEPLOY-AND-SHARE.md).
 
 By default, diagnostics run against `main.tsx` so runtime changes are measured
 against the product lunch-poll graph instead of a comparison fixture.
@@ -39,11 +44,25 @@ deno run -A packages/patterns/tools/lunch-poll-diagnose.ts \
 ```
 
 `--quick` is the smoke-sized default matrix — options `1,3` against `2` users
-for one round — for checking that the probe itself still runs:
+for one round — for checking that the probe itself still runs. It and
+`--production` are mutually exclusive:
 
 ```bash
 deno run -A packages/patterns/tools/lunch-poll-diagnose.ts --quick
 ```
+
+`--production` reproduces the current deployed shape — `14` options, `1` viewer,
+and `3` vote rounds — without having to remember those dimensions:
+
+```bash
+deno run -A packages/patterns/tools/lunch-poll-diagnose.ts --production
+```
+
+Record graph size, phase elapsed time, settle time, and commit churn together. A
+fast handler measured without the rendered result graph does not represent a
+browser vote. The probe runs the server-execution OFF arm unless
+`EXPERIMENTAL_SERVER_EXECUTION` is set explicitly; headless, the ON posture
+waits on a toolshed that is not running.
 
 Use `--program=<file>` to point the same scenario runner at another local lunch
 poll pattern variant when you intentionally want to compare a branch-local

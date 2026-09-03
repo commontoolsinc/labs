@@ -269,6 +269,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         onPatternInstantiated,
         cfcEnforcementMode: "enforce-strict",
         cfcFlowLabels: "persist",
+        cfcWriteFloor: "enforce",
       })).toEqual({
         ...minimalOutputs.remoteClient,
         errorHandlers,
@@ -279,6 +280,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         onPatternInstantiated,
         cfcEnforcementMode: "enforce-strict",
         cfcFlowLabels: "persist",
+        cfcWriteFloor: "enforce",
       });
     });
 
@@ -824,6 +826,19 @@ describe("runtimePresets conformance (CT-1814)", () => {
       expect(output.cfcEnforcementMode).toBe("enforce-strict");
       // The bundle's persist is what makes the strict raise conform.
       expect(output.cfcFlowLabels).toBe("persist");
+    });
+
+    it("lets a host session hold the write floor at observe over the bundle", () => {
+      // The floor's rollout runs observe before enforce (§8.12.4.1 / SC-18),
+      // a rung the all-or-nothing bundle cannot name. The host dial is what
+      // reaches it, so it has to win over the bundle's enforcing value.
+      const output = runtimePresets.remoteClient({
+        ...minimalCore,
+        ...posture,
+        cfcWriteFloor: "observe",
+      });
+      expect(output.cfcWriteFloor).toBe("observe");
+      expect(postureOutputs.remoteClient.cfcWriteFloor).toBe("enforce");
     });
 
     it("ceilings every network-fetch sink public-only and no llm sink", () => {

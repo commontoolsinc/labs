@@ -24,12 +24,21 @@ on:
     - cron: "17 */4 * * *"
   workflow_dispatch:
     inputs:
+      # The label says what this costs rather than what it reads. A run
+      # with it set starts from an empty aggregate, so the state object it
+      # creates holds what the window shows and nothing earlier, and every
+      # later run reads that one. Nothing in the store is removed: the
+      # identity here holds create and not delete or overwrite, so the
+      # previous state object stays where it is and stops being the newest.
       bootstrap:
-        description: Read the whole window rather than what is unfolded
+        description: >-
+          COLD START, RUN ONCE. Rebuilds the score history from the whole
+          window instead of adding to it. Catches recorded before the
+          window stop counting. Nothing already stored is deleted.
         type: boolean
         default: false
       days:
-        description: Days of submissions to read
+        description: Days of submissions to read (default 2, or 60 with a cold start)
         required: false
 
 permissions:
@@ -52,7 +61,11 @@ jobs:
     # provisioned there is no identity to assume and nothing to create.
     if: vars.TEST_SELECTION_WIF_PROVIDER != ''
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Six hours is the ceiling for a job on a GitHub-hosted runner: past
+    # it the platform cancels the run whatever this says. A bootstrap
+    # reads sixty days of records in one job, and the four-hourly path
+    # reads two.
+    timeout-minutes: 360
     steps:
       # Every third-party action in this credentialed workflow is pinned to
       # an immutable commit, so a moved tag cannot alter the one privileged

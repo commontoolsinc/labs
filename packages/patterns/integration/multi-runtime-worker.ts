@@ -28,7 +28,10 @@ import {
   setBlindStructuralTarget,
   unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
-import { markRendererTrustedEvent } from "@commonfabric/runner/cfc";
+import {
+  type CfcWriteFloorMode,
+  markRendererTrustedEvent,
+} from "@commonfabric/runner/cfc";
 import { Identity } from "@commonfabric/identity";
 import {
   initializePiecesController,
@@ -200,7 +203,16 @@ const handlers: Record<
   string,
   (args: Record<string, unknown>) => Promise<FabricValue>
 > = {
-  async init({ identity: keyPair, spaceName, apiUrl, diagnostics, wsDelayMs }) {
+  async init(
+    {
+      identity: keyPair,
+      spaceName,
+      apiUrl,
+      diagnostics,
+      wsDelayMs,
+      cfcWriteFloor,
+    },
+  ) {
     const identity = await Identity.fromKeyPair(
       keyPair as FabricKeyPair,
     );
@@ -209,6 +221,9 @@ const handlers: Record<
       apiUrl: new URL(apiUrl as string),
       identity,
       space: spaceName as string,
+      ...(cfcWriteFloor !== undefined
+        ? { cfcWriteFloor: cfcWriteFloor as CfcWriteFloorMode }
+        : {}),
     });
     if (diagnostics === true) {
       const scheduler = controller().runtime.scheduler;

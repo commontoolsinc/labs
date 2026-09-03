@@ -457,6 +457,25 @@ export interface DebugValueOptions {
   readonly maxDepth?: number;
 
   /**
+   * Maximum number of elements of an array which are represented: a positive
+   * integer, or `Infinity` for as many as the conversion allows. An array
+   * with more elements than this has only the elements at indices below the
+   * limit converted, and in place of the rest a form suggestive of the
+   * elision, which includes the array's actual length. When absent, the limit
+   * is one hundred. A large value is capped.
+   */
+  readonly maxArrayLength?: number;
+
+  /**
+   * Maximum length of a string which is represented whole: a positive
+   * integer, or `Infinity` for as long as the conversion allows. A longer
+   * string is converted to a form suggestive of the elision, which carries an
+   * excerpt of the string up to the limit and the string's actual length.
+   * When absent, the limit is two hundred. A large value is capped.
+   */
+  readonly maxStringLength?: number;
+
+  /**
    * Replacer function, called on every value and sub-value encountered, to get
    * a replacement value to use. A replacer which does not want to replace a
    * value returns the value it receives, and one which throws is taken to have

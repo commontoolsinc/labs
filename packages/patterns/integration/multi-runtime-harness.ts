@@ -51,6 +51,7 @@ import { Identity } from "@commonfabric/identity";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import { experimentalOptionsFromEnv } from "@commonfabric/runner";
+import type { CfcWriteFloorMode } from "@commonfabric/runner/cfc";
 import { PatternsRoute } from "@commonfabric/runner/patterns-route.deno";
 import {
   type RuntimeDiagnosticsSnapshot,
@@ -79,6 +80,13 @@ export interface MultiRuntimeSessionSpec {
    * near-zero in-process latency hides.
    */
   wsDelayMs?: number;
+  /**
+   * Write-side `requiredIntegrity` floor for this session's runtime,
+   * overriding the harness-wide setting. Set it per session to model a fleet
+   * partway through the staged rollout, where one client already enforces the
+   * floor and another does not.
+   */
+  cfcWriteFloor?: CfcWriteFloorMode;
 }
 
 export interface MultiRuntimeHarnessOptions {
@@ -110,6 +118,12 @@ export interface MultiRuntimeHarnessOptions {
    * self-hosted in-process storage server.
    */
   apiUrl?: URL;
+  /**
+   * Write-side `requiredIntegrity` floor for every runtime this harness
+   * creates, the bootstrap worker that authors the piece included. Defaults to
+   * the runtime's own default, which is `off`.
+   */
+  cfcWriteFloor?: CfcWriteFloorMode;
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -494,6 +508,7 @@ export class MultiRuntimeHarness {
             `multi-runtime-harness ${normalized.label}`,
             { implementation: "noble" },
           );
+        const cfcWriteFloor = normalized.cfcWriteFloor ?? options.cfcWriteFloor;
         const client = new WorkerClient(normalized.label);
         await client.call("init", {
           identity: identity.keyPair,
@@ -503,6 +518,7 @@ export class MultiRuntimeHarness {
           ...(normalized.wsDelayMs !== undefined
             ? { wsDelayMs: normalized.wsDelayMs }
             : {}),
+          ...(cfcWriteFloor !== undefined ? { cfcWriteFloor } : {}),
         });
         sessions.push(
           new MultiRuntimeSession(normalized.label, identity, client),
@@ -520,6 +536,9 @@ export class MultiRuntimeHarness {
         spaceName,
         apiUrl,
         diagnostics: options.diagnostics === true,
+        ...(options.cfcWriteFloor !== undefined
+          ? { cfcWriteFloor: options.cfcWriteFloor }
+          : {}),
       });
       const { pieceId } = await bootstrap.call("createPiece", {
         programPath: options.programPath,

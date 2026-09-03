@@ -1,0 +1,15 @@
+(() => {
+  // A run of holes which crosses the default limit of 100 renders as only
+  // the holes below the limit.
+  const a = [1];
+  a.length = 250;
+  return a;
+})()
+
+[
+  1,
+  <99 holes>,
+  ... length: 250
+]
+
+[1,<99 holes>,... length: 250]

@@ -267,6 +267,26 @@ describe("module", () => {
       expect(part.rendered).toContain('"leaf"');
       expect(part.rendered).not.toContain("...");
     });
+
+    it("renders a long list operand out to its last element", () => {
+      // The renderer's default length elides a list after a hundred elements;
+      // the last element here sits past that.
+
+      const value = Array.from({ length: 150 }, (_, i) => i);
+      const [part] = assertRenderParts(false, [{ src: "items", value }]);
+      expect(part.rendered).toContain(",149]");
+      expect(part.rendered).not.toContain("...");
+    });
+
+    it("renders a long string operand out to its last character", () => {
+      // The renderer's default length carries a string whole to two hundred
+      // characters; the last one here sits past that.
+
+      const value = `${"x".repeat(299)}END`;
+      const [part] = assertRenderParts(false, [{ src: "text", value }]);
+      expect(part.rendered).toContain('END"');
+      expect(part.rendered).not.toContain("...");
+    });
   });
 
   describe("handler function", () => {

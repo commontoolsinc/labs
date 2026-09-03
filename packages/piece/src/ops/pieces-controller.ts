@@ -1,11 +1,9 @@
 import type { CellScope } from "@commonfabric/api";
-import { cfcAtom } from "@commonfabric/api/cfc";
 import {
   type EntityRef,
   entityRefToString,
   isEntityRef,
 } from "@commonfabric/data-model/cell-rep";
-import { internSchema } from "@commonfabric/data-model-schema";
 import { homeSchema } from "@commonfabric/home-schemas";
 import {
   createSession,
@@ -62,6 +60,7 @@ import type { CfcPosture } from "@commonfabric/runner";
 import type {
   CfcEnforcementMode,
   CfcFlowLabelsMode,
+  CfcWriteFloorMode,
 } from "@commonfabric/runner/cfc";
 import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
@@ -118,13 +117,6 @@ export type PieceOpen = { reconcile: boolean; start: boolean };
 
 const normalizePieceOpen = (open: boolean | PieceOpen): PieceOpen =>
   typeof open === "boolean" ? { reconcile: open, start: open } : open;
-
-const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
-  type: "array",
-  items: { type: "unknown", asCell: ["cell"] },
-  default: [],
-  ifc: { confidentiality: [cfcAtom.resource("PrivilegedPieceList")] },
-});
 
 // Timing stats record even while the logger is disabled, so every phase is
 // visible in the load summaries (browser worker included, where the
@@ -289,6 +281,7 @@ export class PiecesController<T = unknown> {
       cfcEnforcementMode,
       cfcFlowLabels,
       cfcPosture,
+      cfcWriteFloor,
     }: {
       apiUrl: URL | string;
       identity: Identity;
@@ -333,9 +326,10 @@ export class PiecesController<T = unknown> {
       cfcEnforcementMode?: CfcEnforcementMode;
       cfcFlowLabels?: CfcFlowLabelsMode;
       // Named CFC posture bundle for this controller's runtime (the
-      // remoteClient preset's `cfcPosture` opt-in); the two dials above still
-      // apply over it.
+      // remoteClient preset's `cfcPosture` opt-in); the dials above and below
+      // still apply over it.
       cfcPosture?: CfcPosture;
+      cfcWriteFloor?: CfcWriteFloorMode;
     },
   ): Promise<PiecesController> {
     const api = new URL(apiUrl);
@@ -369,6 +363,7 @@ export class PiecesController<T = unknown> {
       ...(cfcEnforcementMode !== undefined ? { cfcEnforcementMode } : {}),
       ...(cfcFlowLabels !== undefined ? { cfcFlowLabels } : {}),
       ...(cfcPosture !== undefined ? { cfcPosture } : {}),
+      ...(cfcWriteFloor !== undefined ? { cfcWriteFloor } : {}),
       ...(navigateCallback !== undefined ? { navigateCallback } : {}),
       ...(onPatternInstantiated !== undefined ? { onPatternInstantiated } : {}),
       trustSnapshotProvider: () => ({
@@ -761,12 +756,13 @@ export class PiecesController<T = unknown> {
     await timePiecePhase("add.synced", () => this.synced());
   }
 
+  // `pieceListSchema` gives its items no shape — they are `unknown` — so
+  // neither the value the caller receives nor the query behind it has anywhere
+  // to descend inside a piece, and no field a piece labels is ever selected.
+  // `asCell` alone would not be enough for that: it bounds the runtime's own
+  // walk, while the memory query walks through it.
   syncPieces(cell: Cell<Cell<unknown>[]>) {
-    // TODO(@ubik2) We use elevated permissions here temporarily.
-    // Our request for the piece list will walk the schema tree, and that will
-    // take us into confidential data of pieces. If that happens, we still want
-    // this bit to work, so we elevate this request.
-    return cell.asSchema(PRIVILEGED_PIECE_LIST_SCHEMA).pull();
+    return cell.asSchema(pieceListSchema).pull();
   }
 
   /**
@@ -1389,6 +1385,12 @@ export class PiecesController<T = unknown> {
     await piece.sync();
     const start = options?.start ?? true;
     let currentPiece = piece;
+    // The pattern `syncPattern` may be told about, which is only the one this
+    // call is certain the piece ended up running. `runSynced` carries no such
+    // certainty: a concurrent source update can supersede this caller between
+    // its setup commit and here, and `runSynced` then hands back a piece
+    // running the winner rather than this candidate.
+    let installedPattern: Pattern | Module | undefined;
     if (start) {
       currentPiece = await this.runtime.runSynced(piece, pattern, inputs, {
         expectedPatternIdentity: options?.expectedPatternIdentity,
@@ -1404,8 +1406,9 @@ export class PiecesController<T = unknown> {
       await this.runtime.setup(undefined, pattern, inputs ?? {}, piece, {
         patternRepository: options?.repository,
       });
+      installedPattern = pattern;
     }
-    await this.syncPattern(currentPiece);
+    await this.syncPattern(currentPiece, installedPattern);
     if (start) {
       await this.getResult(currentPiece).pull();
     }
@@ -1488,9 +1491,9 @@ export class PiecesController<T = unknown> {
       cause ?? { space: this.#space, random: crypto.randomUUID() },
       pattern.resultSchema,
     );
-    // Fast path: the pattern's content-addressed entry ref, if it carries one
-    // (every space-compiled pattern does). Lets us load by identity without
-    // waiting for the piece's `patternIdentity` meta to settle.
+    // Setup verifies the source closure of a pattern that carries a
+    // content-addressed entry ref, and verifies it synchronously. Load the
+    // parser it needs first, since setup cannot await one.
     const knownEntryRef = this.runtime.patternManager.getArtifactEntryRef(
       pattern,
     );
@@ -1511,10 +1514,7 @@ export class PiecesController<T = unknown> {
     );
     await timePiecePhase(
       "setupPersistent.syncPattern",
-      () =>
-        knownEntryRef
-          ? this.syncPatternByIdentity(knownEntryRef)
-          : this.syncPattern(piece),
+      () => this.syncPattern(piece, pattern),
     );
 
     return piece;
@@ -1584,8 +1584,37 @@ export class PiecesController<T = unknown> {
     await this.runtime.idle();
   }
 
-  // FIXME(JA): this really really really needs to be revisited
-  async syncPattern(piece: Cell<unknown>) {
+  /**
+   * Load the pattern a piece runs, so a later cold runtime can resolve it from
+   * the space by identity.
+   *
+   * Pass `pattern` only when the caller drove `setup` itself and so knows
+   * which pattern the piece ended up running. Setup stamps an entry ref onto
+   * every pattern it installs, keyed by content for a compiled one, so the
+   * identity is then a lookup in memory and the piece is never read. A caller
+   * that went through `runSynced` has no such knowledge and must pass nothing.
+   *
+   * Without a pattern the identity comes from the `patternIdentity` metadata
+   * on the piece, which names whichever pattern the piece actually runs. That
+   * metadata becomes readable once the write carrying it commits, so this
+   * settles the pending writes and then reads. The settle costs a wait on the
+   * storage manager's whole queue, which is the price of reading an answer
+   * that does not depend on when the read happened to land.
+   */
+  async syncPattern(piece: Cell<unknown>, pattern?: Pattern | Module) {
+    const ref =
+      (pattern !== undefined
+        ? this.runtime.patternManager.getArtifactEntryRef(pattern)
+        : undefined) ?? await this.readPatternIdentity(piece);
+
+    return await timePiecePhase(
+      "syncPattern.loadPattern",
+      () => this.syncPatternByIdentity(ref),
+    );
+  }
+
+  private async readPatternIdentity(piece: Cell<unknown>) {
+    await timePiecePhase("syncPattern.synced", () => this.synced());
     await timePiecePhase("syncPattern.piece.sync", () => piece.sync());
 
     // When we subscribe to a doc, our subscription includes the doc's pattern
@@ -1599,31 +1628,13 @@ export class PiecesController<T = unknown> {
     // except the session that minted it, never this one — so it must not
     // shadow the live session pointer; it stays the last resort so a fresh
     // session's orphan keeps its designed no-pattern outcome.
-    const resolvePatternRef = () => {
-      const durable = getPatternIdentityRef(piece);
-      if (
-        durable !== undefined &&
-        !PatternManager.isKeylessPatternIdentity(durable.identity)
-      ) {
-        return durable;
-      }
-      return this.runtime.runner.sessionPatternPointerFor(piece) ?? durable;
-    };
-    let ref = resolvePatternRef();
-    if (!ref) {
-      // Under remote sync, metadata can transiently lag the result value even
-      // though setup just wrote both. Wait for storage to settle and retry once
-      // before treating the pattern metadata as missing.
-      await timePiecePhase("syncPattern.retry.synced", () => this.synced());
-      await timePiecePhase("syncPattern.retry.piece.sync", () => piece.sync());
-      ref = resolvePatternRef();
-    }
+    const durable = getPatternIdentityRef(piece);
+    const ref = (durable !== undefined &&
+        !PatternManager.isKeylessPatternIdentity(durable.identity))
+      ? durable
+      : this.runtime.runner.sessionPatternPointerFor(piece) ?? durable;
     if (!ref) throw new Error("piece missing pattern identity");
-
-    return await timePiecePhase(
-      "syncPattern.loadPattern",
-      () => this.syncPatternByIdentity(ref),
-    );
+    return ref;
   }
 
   async syncPatternByIdentity(ref: { identity: string; symbol: string }) {

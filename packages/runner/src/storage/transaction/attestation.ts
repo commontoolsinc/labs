@@ -1,4 +1,5 @@
 import {
+  type DebugValueOptions,
   type FabricPlainObject,
   type FabricValue,
   toCompactDebugString,
@@ -371,6 +372,16 @@ export const TypeMismatchError = (
   },
 });
 
+/**
+ * Rendering options for the two values an inconsistency message compares:
+ * arrays and strings whole, so that a change past the renderer's default
+ * lengths shows as a difference rather than as two identical renderings.
+ */
+const INCONSISTENCY_RENDER_OPTIONS: DebugValueOptions = {
+  maxArrayLength: Infinity,
+  maxStringLength: Infinity,
+};
+
 export const StateInconsistency = (source: {
   address: IMemoryAddress;
   expected?: FabricValue;
@@ -384,9 +395,9 @@ export const StateInconsistency = (source: {
     }"`,
     space ? ` in space "${space}"` : "",
     ` hash changed. Previously it used to be:\n `,
-    toCompactDebugString(expected),
+    toCompactDebugString(expected, INCONSISTENCY_RENDER_OPTIONS),
     "\n and currently it is:\n ",
-    toCompactDebugString(actual),
+    toCompactDebugString(actual, INCONSISTENCY_RENDER_OPTIONS),
   ].join("");
 
   return {

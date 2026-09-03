@@ -91,11 +91,26 @@ export const applyDefaults = (config: object): Config => {
   return applied;
 };
 
-export const extractAstralConfig = (config: Config): LaunchOptions => {
+export const extractAstralConfig = (
+  config: Config,
+  profileDir: string,
+): LaunchOptions => {
   const astralConfig: LaunchOptions = {};
   if ("headless" in config) astralConfig.headless = config.headless;
   if ("product" in config) astralConfig.product = config.product;
-  if ("args" in config) astralConfig.args = config.args;
+
+  // The browser keeps its profile in `profileDir`, which belongs to the run
+  // and goes when the run ends. Astral reads `--user-data-dir` to tell
+  // whether the launch names a profile at all, so it goes in whatever the
+  // product; Firefox reads the directory from `-profile`, and is given the
+  // same one.
+  astralConfig.args = [
+    ...config.args ?? [],
+    `--user-data-dir=${profileDir}`,
+  ];
+  if (config.product === "firefox") {
+    astralConfig.args.push("-profile", profileDir);
+  }
 
   // Left unset, astral downloads a browser of its own choosing, whose version
   // is a constant inside astral rather than anything decided here. A system

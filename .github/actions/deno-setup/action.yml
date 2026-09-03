@@ -100,6 +100,18 @@ runs:
         dirname "$bin" >> "$GITHUB_PATH"
         "$bin" --version
 
+    # `actions/cache` evaluates its inputs again during its post-job save. Resolve
+    # the dependency hash before tests can fill the checkout with raw coverage
+    # profiles, so that save reads a stable step output instead of walking the
+    # enlarged workspace again.
+    - name: 🧮 Resolve Deno dependency hash
+      id: dependency-hash
+      if: inputs.cache == 'true'
+      shell: bash
+      env:
+        DEPENDENCY_HASH: ${{ hashFiles('**/deno.jsonc', '**/deno.lock') }}
+      run: printf 'hash=%s\n' "$DEPENDENCY_HASH" >> "$GITHUB_OUTPUT"
+
     # Cache version: bump to invalidate all caches (e.g., v2 -> v3)
     - name: 📦 Cache Deno dependencies
       if: inputs.cache == 'true'
@@ -109,7 +121,7 @@ runs:
           ~/.deno
           ~/.cache/deno
           ~/Library/Caches/deno
-        key: deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.resolve.outputs.version }}-${{ hashFiles('**/deno.jsonc', '**/deno.lock') }}
+        key: deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.resolve.outputs.version }}-${{ steps.dependency-hash.outputs.hash }}
         restore-keys: |
           deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.resolve.outputs.version }}-
           deno-deps-v4-${{ runner.os }}-${{ runner.arch }}-

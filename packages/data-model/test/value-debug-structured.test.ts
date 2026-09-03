@@ -187,7 +187,10 @@ describe("toStructuredDebugValue()", () => {
         },
       });
 
-      const result = toStructuredDebugValue(counted) as unknown[];
+      const result = toStructuredDebugValue(
+        counted,
+        { maxArrayLength: 1000 },
+      ) as unknown[];
       expect(result.length).toBe(1000);
       expect(Object.keys(result)).toEqual(["0", "999"]);
       expect(result[999]).toEqual({ "/Map": "/..." });
@@ -415,6 +418,166 @@ describe("toStructuredDebugValue()", () => {
         const options = { maxDepth: bad as unknown as number };
         expect(() => toStructuredDebugValue({}, options))
           .toThrow("`maxDepth` must be a positive integer, `Infinity`, or");
+      }
+    });
+  });
+
+  describe("with `maxArrayLength`", () => {
+    it("returns the elements below the limit, and `/...` carrying the length at it", () => {
+      const result = toStructuredDebugValue(
+        [1, new Map(), 3, 4, 5],
+        { maxArrayLength: 2 },
+      ) as unknown[];
+      expect(result).toEqual([
+        1,
+        { "/Map": "/..." },
+        { "/...": { length: 5 } },
+      ]);
+      expect(result.length).toBe(3);
+    });
+
+    it("returns an array whose length is the limit whole", () => {
+      expect(toStructuredDebugValue([1, 2, new Map()], { maxArrayLength: 3 }))
+        .toEqual([1, 2, { "/Map": "/..." }]);
+    });
+
+    it("returns the holes below the limit as holes, and none of the run past it", () => {
+      // The run of holes crosses the limit, so only the part of it below the
+      // limit is in the result.
+
+      const result = toStructuredDebugValue(
+        [1, , , , , new Map()],
+        { maxArrayLength: 3 },
+      ) as unknown[];
+      expect(result.length).toBe(4);
+      expect(Object.keys(result)).toEqual(["0", "3"]);
+      expect(result[3]).toEqual({ "/...": { length: 6 } });
+    });
+
+    it("returns the length form for a sparse array whose `length` alone is past the limit", () => {
+      const value: unknown[] = [new Map()];
+      value.length = 500;
+      const result = toStructuredDebugValue(
+        value,
+        { maxArrayLength: 3 },
+      ) as unknown[];
+      expect(result.length).toBe(4);
+      expect(Object.keys(result)).toEqual(["0", "3"]);
+      expect(result[3]).toEqual({ "/...": { length: 500 } });
+    });
+
+    it("returns no more than 100 elements when the limit is not given", () => {
+      const value = Array.from({ length: 150 }, (_, i) => i);
+      const result = toStructuredDebugValue(value) as unknown[];
+      expect(result.length).toBe(101);
+      expect(result[99]).toBe(99);
+      expect(result[100]).toEqual({ "/...": { length: 150 } });
+    });
+
+    it("returns no more than 10000 elements given a larger limit", () => {
+      const value = Array.from({ length: 20000 }, (_, i) => i);
+      for (const limit of [50000, Infinity]) {
+        const result = toStructuredDebugValue(
+          value,
+          { maxArrayLength: limit },
+        ) as unknown[];
+        expect(result.length).toBe(10001);
+        expect(result[9999]).toBe(9999);
+        expect(result[10000]).toEqual({ "/...": { length: 20000 } });
+      }
+    });
+
+    it("returns the length form whole where it lands at the depth limit", () => {
+      // The form nests two levels, which is one more than the depth limit
+      // leaves room for, and it is carried whole regardless.
+
+      const result = toStructuredDebugValue(
+        { a: [1, 2, 3] },
+        { maxArrayLength: 1, maxDepth: 3 },
+      );
+      expect(result).toEqual({ a: [1, { "/...": { length: 3 } }] });
+    });
+
+    it("throws given a `maxArrayLength` that is not a positive integer", () => {
+      for (const bad of [0, -1, 1.5, -Infinity, NaN, "3", null, {}]) {
+        const options = { maxArrayLength: bad as unknown as number };
+        expect(() => toStructuredDebugValue([], options)).toThrow(
+          "`maxArrayLength` must be a positive integer, `Infinity`, or",
+        );
+      }
+    });
+  });
+
+  describe("with `maxStringLength`", () => {
+    it("returns `/partialString` with the length and an excerpt for a string past the limit", () => {
+      expect(toStructuredDebugValue("abcdefgh", { maxStringLength: 5 }))
+        .toEqual({ "/partialString": { length: 8, excerpt: "abcde" } });
+    });
+
+    it("returns a string whose length is the limit whole", () => {
+      expect(toStructuredDebugValue("abcde", { maxStringLength: 5 }))
+        .toBe("abcde");
+    });
+
+    it("returns the form in place of a string inside a container", () => {
+      const partial = { "/partialString": { length: 8, excerpt: "abcde" } };
+      expect(
+        toStructuredDebugValue(
+          { s: "abcdefgh", a: ["abcdefgh"] },
+          { maxStringLength: 5 },
+        ),
+      ).toEqual({ s: partial, a: [partial] });
+    });
+
+    it("returns the form in place of a class instance's `toString()` form", () => {
+      class Foo {
+        toString() {
+          return "abcdefgh";
+        }
+      }
+      expect(toStructuredDebugValue(new Foo(), { maxStringLength: 5 }))
+        .toEqual({
+          "/Foo": { "/partialString": { length: 8, excerpt: "abcde" } },
+        });
+    });
+
+    it("returns an excerpt which does not end in half of a surrogate pair", () => {
+      // The emoji is two UTF-16 units, at indices 2 and 3; a limit of 3 cuts
+      // it in half, and the excerpt stops short of it instead.
+
+      const value = "ab\u{1F600}cd";
+      expect(toStructuredDebugValue(value, { maxStringLength: 3 }))
+        .toEqual({ "/partialString": { length: 6, excerpt: "ab" } });
+      expect(toStructuredDebugValue(value, { maxStringLength: 4 }))
+        .toEqual({ "/partialString": { length: 6, excerpt: "ab\u{1F600}" } });
+    });
+
+    it("returns no more than 200 characters when the limit is not given", () => {
+      const result = toStructuredDebugValue("x".repeat(250)) as {
+        "/partialString": { length: number; excerpt: string };
+      };
+      expect(result["/partialString"].length).toBe(250);
+      expect(result["/partialString"].excerpt).toBe("x".repeat(200));
+    });
+
+    it("returns no more than 100000 characters given a larger limit", () => {
+      const value = "x".repeat(150000);
+      for (const limit of [200000, Infinity]) {
+        const result = toStructuredDebugValue(
+          value,
+          { maxStringLength: limit },
+        ) as { "/partialString": { length: number; excerpt: string } };
+        expect(result["/partialString"].length).toBe(150000);
+        expect(result["/partialString"].excerpt.length).toBe(100000);
+      }
+    });
+
+    it("throws given a `maxStringLength` that is not a positive integer", () => {
+      for (const bad of [0, -1, 1.5, -Infinity, NaN, "3", null, {}]) {
+        const options = { maxStringLength: bad as unknown as number };
+        expect(() => toStructuredDebugValue("", options)).toThrow(
+          "`maxStringLength` must be a positive integer, `Infinity`, or",
+        );
       }
     });
   });
@@ -675,6 +838,8 @@ describe("toStructuredDebugValue()", () => {
         Symbol.for("interned"),
         () => {},
         [1, , 3],
+        Array.from({ length: 101 }, (_, i) => i),
+        "x".repeat(201),
         withOwnProto(),
         { "/circle": 1 },
         cyclic,

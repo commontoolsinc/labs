@@ -213,6 +213,24 @@ that reaches the chart without a recognized marker is counted as "other", drawn
 in gray, and listed on standard error when the script runs, so a missing marker
 is easy to find and fix.
 
+## Cache Keys And Post-Job Saves
+
+The combined `actions/cache` action restores during setup and saves in a
+post-job step. GitHub evaluates expressions in the action's inputs again for
+that save. A `hashFiles()` call written directly in `with.key` therefore walks
+the checkout twice: once before the work and once after it.
+
+When a job writes a large generated tree under the checkout, that second walk
+can become much more expensive than the first. The workspace test jobs are the
+important case here: raw V8 coverage can contain hundreds of thousands of files
+by the time post-job steps run.
+
+Resolve any workspace-wide dependency hash in an ordinary setup step and write
+it to `GITHUB_OUTPUT`. Give the cache action that step output as its key. The
+post-job save can reevaluate the output reference safely because its value was
+fixed before the job populated the workspace. The `deno-setup` composite action
+uses this shape for the shared Deno dependency cache.
+
 ## Step And Job Timeouts
 
 Every work step in `.github/workflows/deno.yml` carries its own
