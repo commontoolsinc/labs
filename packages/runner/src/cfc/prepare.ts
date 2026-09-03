@@ -31,7 +31,7 @@ import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { entityKindOfIdString } from "../entity-kind.ts";
-import { refuseFabricInstance } from "../fabric-special-object.ts";
+import { refuseFabricInstance } from "@commonfabric/data-model";
 import {
   containsExternalSchemaRef,
   decomposeSchema,
@@ -1329,6 +1329,12 @@ const linkWritesCoverCfcAffectedPaths = (
 const stripWriterIdentityStamp = (value: unknown): unknown => {
   if (Array.isArray(value)) {
     return value.map(stripWriterIdentityStamp);
+  }
+  // A link is carried whole. It is a reference rather than a record of the
+  // writer's, so there is no stamp inside one to strip -- and under
+  // `modernCellRep` it is a `FabricLink`, which the walk question refuses.
+  if (isPrimitiveCellLink(value)) {
+    return value;
   }
   // A fabric-valued node -- a schema `default`, say -- is carried by
   // reference: rebuilding one by its properties would answer `{}` and erase
@@ -3085,7 +3091,11 @@ const valuesAtPatternPath = (
     );
   }
 
-  if (!isWalkableObjectOrArray(value)) {
+  // A pattern path does not descend through a link: the reference is the
+  // value at that slot, and what it points at is resolved elsewhere. Asked
+  // before the walk question, because `modernCellRep` makes a link a
+  // `FabricLink`, which that question refuses.
+  if (isPrimitiveCellLink(value) || !isWalkableObjectOrArray(value)) {
     return [];
   }
   if (!(head in value)) {
@@ -3116,10 +3126,13 @@ const changedValuesAtPatternPath = (
     );
   }
 
-  if (!isWalkableObjectOrArray(value)) {
+  // As in `valuesAtPatternPath`: a link ends the descent, and the test comes
+  // before the walk question for the same reason.
+  if (isPrimitiveCellLink(value) || !isWalkableObjectOrArray(value)) {
     return [];
   }
-  const previousChild = isWalkableObjectOrArray(previousValue)
+  const previousChild = !isPrimitiveCellLink(previousValue) &&
+      isWalkableObjectOrArray(previousValue)
     ? (previousValue as Record<string, unknown>)[head]
     : undefined;
   if (!(head in value)) {
@@ -3246,7 +3259,13 @@ const policySchemaMatchesValue = (
   }
   // A special object has no property for a `properties` condition to read, so
   // it falls past this arm rather than matching every child vacuously.
-  if (isWalkableObjectOrArray(value) && isObjectOrArray(schema.properties)) {
+  // A link matches by what it is, not by what a `properties` condition would
+  // read off it; and under `modernCellRep` asking the walk question of one
+  // refuses.
+  if (
+    !isPrimitiveCellLink(value) && isWalkableObjectOrArray(value) &&
+    isObjectOrArray(schema.properties)
+  ) {
     return Object.entries(schema.properties).every(([key, childSchema]) =>
       value[key] === undefined ||
       policySchemaMatchesValue(childSchema, value[key], schemaRoot)

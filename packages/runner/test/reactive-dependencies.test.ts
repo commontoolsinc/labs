@@ -2009,14 +2009,18 @@ describe("determineTriggeredActions", () => {
       expect(result).toEqual([]);
     });
 
-    it("propagates the failure from a value it cannot compare", () => {
-      // A non-recursive read compares an opaque leaf by value, and a class
-      // whose comparison is an unimplemented stub cannot answer. The failure is
-      // deliberately left to propagate rather than being caught and turned into
-      // "changed": a stub announcing itself loudly is worth more than a quiet
-      // answer derived from an unfinished class, and swallowing it would let
-      // that class shape behavior here. `FabricMap` stands in for any value
-      // whose comparison is unavailable.
+    it("propagates the failure from a value it cannot descend", () => {
+      // The descent refuses a `FabricInstance` before any comparison is
+      // reached: an instance is a container this walk cannot address by key,
+      // and the alternative is the equal-by-vacancy answer that reads every
+      // key off it as `undefined` on both sides and triggers nothing however
+      // its contents changed. The failure is deliberately left to propagate
+      // rather than being caught and turned into "unchanged".
+      //
+      // A comparison that cannot answer is a separate refusal, raised by
+      // `valueEqual()` and covered in `data-model`. It is unreachable from
+      // here now, because every class whose comparison is an unimplemented
+      // stub is an instance, and the descent stops at one first.
 
       const action = createAction("nonRecursiveUncomparableLeaf");
       const dependencies = new Map<Action, SortedAndCompactPaths>([
@@ -2033,7 +2037,7 @@ describe("determineTriggeredActions", () => {
           ["value", "a"],
           { nonRecursive: true },
         )
-      ).toThrow("not yet implemented");
+      ).toThrow("`FabricInstance`) in a structural walk");
     });
 
     it("triggers on a special object replaced at the read's own path", () => {

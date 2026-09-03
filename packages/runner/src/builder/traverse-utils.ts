@@ -1,6 +1,6 @@
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { FabricInstance, FabricPrimitive } from "@commonfabric/data-model";
-import { refuseFabricInstance } from "../fabric-special-object.ts";
+import { refuseFabricInstance } from "@commonfabric/data-model";
 import { type FactoryInput, isPattern, isReactive } from "./types.ts";
 import { noteDerivedCopy } from "./pattern-metadata.ts";
 import { isCell } from "../cell.ts";

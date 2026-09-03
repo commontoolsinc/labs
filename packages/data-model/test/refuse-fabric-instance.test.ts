@@ -16,11 +16,11 @@ import {
   FabricMap,
 } from "@commonfabric/data-model/fabric-instances";
 
-import { refuseFabricInstance } from "../src/fabric-special-object.ts";
+import { refuseFabricInstance } from "@/refuse-fabric-instance.ts";
 
 const FABRIC_ERROR = FabricError.fromNativeError(new Error("boom"));
 
-describe("fabric-special-object", () => {
+describe("refuse-fabric-instance", () => {
   describe("refuseFabricInstance", () => {
     /** Runs the refusal and hands back the `Error` it threw. */
     function thrownBy(

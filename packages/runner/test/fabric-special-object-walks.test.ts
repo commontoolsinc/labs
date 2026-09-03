@@ -71,6 +71,12 @@ interface SpecialObjectKind {
   readonly make: () => FabricValue;
   /** Whether the kind's codec can freeze and hash it. */
   readonly storable: boolean;
+  /**
+   * Whether the kind is a `FabricInstance`. A walk carries a
+   * `FabricPrimitive` through as the leaf it is, and refuses an instance,
+   * which is a container it cannot descend yet.
+   */
+  readonly isInstance: boolean;
 }
 
 const SPECIAL_OBJECTS: readonly SpecialObjectKind[] = [
@@ -79,30 +85,35 @@ const SPECIAL_OBJECTS: readonly SpecialObjectKind[] = [
     cls: FabricBytes,
     make: () => new FabricBytes(new Uint8Array([1, 2, 3])),
     storable: true,
+    isInstance: false,
   },
   {
     name: "FabricEpochNsec",
     cls: FabricEpochNsec,
     make: () => new FabricEpochNsec(1_700n),
     storable: true,
+    isInstance: false,
   },
   {
     name: "FabricEpochDay",
     cls: FabricEpochDay,
     make: () => new FabricEpochDay(20_000n),
     storable: true,
+    isInstance: false,
   },
   {
     name: "FabricRegExp",
     cls: FabricRegExp,
     make: () => new FabricRegExp("es2025", "a+", "g"),
     storable: true,
+    isInstance: false,
   },
   {
     name: "FabricHash",
     cls: FabricHash,
     make: () => new FabricHash(new Uint8Array([9, 9]), "fid1"),
     storable: true,
+    isInstance: false,
   },
   {
     name: "FabricError",
@@ -116,28 +127,39 @@ const SPECIAL_OBJECTS: readonly SpecialObjectKind[] = [
         cause: undefined,
       }),
     storable: true,
+    isInstance: true,
   },
   {
     name: "FabricLink",
     cls: FabricLink,
     make: () => new FabricLink({ id: "of:fid1:aaa" }),
     storable: true,
+    isInstance: true,
   },
   {
     name: "FabricMap",
     cls: FabricMap,
     make: () => new FabricMap(new Map([["a", 1]])),
     storable: false,
+    isInstance: true,
   },
   {
     name: "FabricSet",
     cls: FabricSet,
     make: () => new FabricSet(new Set([1, 2])),
     storable: false,
+    isInstance: true,
   },
 ];
 
-const STORABLE_SPECIAL_OBJECTS = SPECIAL_OBJECTS.filter((k) => k.storable);
+/**
+ * The walks below carry a leaf through and refuse a container, so every case
+ * that asserts carrying runs over the primitives. The instances get one suite
+ * of their own, at the bottom, asserting the refusal instead.
+ */
+const FABRIC_PRIMITIVES = SPECIAL_OBJECTS.filter((k) => !k.isInstance);
+const FABRIC_INSTANCES = SPECIAL_OBJECTS.filter((k) => k.isInstance);
+const STORABLE_PRIMITIVES = FABRIC_PRIMITIVES.filter((k) => k.storable);
 
 /** Runs `body` once per kind in `kinds`, naming the kind in the case. */
 function forEachSpecialObject(
@@ -153,7 +175,7 @@ function forEachSpecialObject(
 describe("fabric special objects through the runner's walks", () => {
   describe("mergeDefaults()", () => {
     forEachSpecialObject(
-      STORABLE_SPECIAL_OBJECTS,
+      STORABLE_PRIMITIVES,
       (name) => `keeps a \`${name}\` default rather than merging it to \`{}\``,
       (kind, special) => {
         const merged = mergeDefaults(
@@ -166,7 +188,7 @@ describe("fabric special objects through the runner's walks", () => {
     );
 
     forEachSpecialObject(
-      STORABLE_SPECIAL_OBJECTS,
+      STORABLE_PRIMITIVES,
       (name) => `keeps a \`${name}\` on both sides of the merge`,
       (kind, special) => {
         // Both sides are `type: "object"` shaped, which is what the schema
@@ -196,7 +218,7 @@ describe("fabric special objects through the runner's walks", () => {
 
   describe("mergeAnyOfMatches()", () => {
     forEachSpecialObject(
-      SPECIAL_OBJECTS,
+      FABRIC_PRIMITIVES,
       (name) => `returns a \`${name}\` matched by two branches whole`,
       (_kind, special) => {
         expect(mergeAnyOfMatches([special, special])).toBe(special);
@@ -210,7 +232,7 @@ describe("fabric special objects through the runner's walks", () => {
 
   describe("snapshotQueryResult()", () => {
     forEachSpecialObject(
-      SPECIAL_OBJECTS,
+      FABRIC_PRIMITIVES,
       (name) => `snapshots a \`${name}\` by identity`,
       (_kind, special) => {
         expect(snapshotQueryResult(special)).toBe(special);
@@ -218,7 +240,7 @@ describe("fabric special objects through the runner's walks", () => {
     );
 
     forEachSpecialObject(
-      SPECIAL_OBJECTS,
+      FABRIC_PRIMITIVES,
       (name) => `snapshots a \`${name}\` held under a key by identity`,
       (_kind, special) => {
         const snapshot = snapshotQueryResult({ a: [{ b: special }] });
@@ -237,7 +259,7 @@ describe("fabric special objects through the runner's walks", () => {
 
   describe("extractDefaultValues()", () => {
     forEachSpecialObject(
-      STORABLE_SPECIAL_OBJECTS,
+      STORABLE_PRIMITIVES,
       (name) => `returns a \`${name}\` default under a property schema`,
       (kind, special) => {
         // The property-defaults assembly below this return would clone the
@@ -265,7 +287,7 @@ describe("fabric special objects through the runner's walks", () => {
 
   describe("sanitizeSchemaForLinks()", () => {
     forEachSpecialObject(
-      STORABLE_SPECIAL_OBJECTS,
+      STORABLE_PRIMITIVES,
       (name) => `carries a \`${name}\` schema default by reference`,
       (_kind, special) => {
         const sanitized = sanitizeSchemaForLinks({
@@ -287,7 +309,7 @@ describe("fabric special objects through the runner's walks", () => {
 
   describe("setValueAtPath()", () => {
     forEachSpecialObject(
-      SPECIAL_OBJECTS,
+      FABRIC_PRIMITIVES,
       (name) => `replaces a \`${name}\` spine slot rather than writing into it`,
       (_kind, special) => {
         const obj: Record<string, unknown> = { a: special };
@@ -297,7 +319,7 @@ describe("fabric special objects through the runner's walks", () => {
     );
 
     forEachSpecialObject(
-      SPECIAL_OBJECTS,
+      FABRIC_PRIMITIVES,
       (name) => `writes a \`${name}\` into a leaf slot`,
       (_kind, special) => {
         const obj: Record<string, unknown> = {};
@@ -309,7 +331,7 @@ describe("fabric special objects through the runner's walks", () => {
 
   describe("path reads", () => {
     forEachSpecialObject(
-      SPECIAL_OBJECTS,
+      FABRIC_PRIMITIVES,
       (name) => `report no path inside a \`${name}\``,
       (_kind, special) => {
         const root = { a: special };
@@ -327,7 +349,7 @@ describe("fabric special objects through the runner's walks", () => {
     );
 
     forEachSpecialObject(
-      SPECIAL_OBJECTS,
+      FABRIC_PRIMITIVES,
       (name) => `read a \`${name}\` at its own path`,
       (_kind, special) => {
         const root = { a: special };
@@ -337,5 +359,45 @@ describe("fabric special objects through the runner's walks", () => {
         expect(readValueAtPath(root as FabricValue, ["a"])).toBe(special);
       },
     );
+  });
+
+  describe("a `FabricInstance` in any of them", () => {
+    // The refusal is the whole point of separating the two kinds. A
+    // `FabricPrimitive` is a leaf and every walk above carries one through; an
+    // instance is a container the walks cannot descend yet, so answering at all
+    // would be answering wrongly, in one direction or the other. When the
+    // codec-mediated descent lands, these are the cases that change.
+
+    for (const kind of FABRIC_INSTANCES) {
+      it(`is refused by \`mergeAnyOfMatches()\` for a \`${kind.name}\``, () => {
+        const special = kind.make();
+        expect(() => mergeAnyOfMatches([special, special])).toThrow(
+          "`FabricInstance`) in a structural walk",
+        );
+      });
+
+      it(`is refused by \`snapshotQueryResult()\` for a \`${kind.name}\``, () => {
+        expect(() => snapshotQueryResult({ a: kind.make() })).toThrow(
+          "`FabricInstance`) in a structural walk",
+        );
+      });
+
+      it(`is refused by \`setValueAtPath()\` for a \`${kind.name}\``, () => {
+        const obj: Record<string, unknown> = { a: kind.make() };
+        expect(() => setValueAtPath(obj, ["a", "b"], 1)).toThrow(
+          "`FabricInstance`) in a structural walk",
+        );
+      });
+
+      it(`is refused by the stored path read for a \`${kind.name}\``, () => {
+        const root = { a: kind.make() } as FabricValue;
+        expect(() => hasStoredValueAtPath(root, ["a", "b"])).toThrow(
+          "`FabricInstance`) in a structural walk",
+        );
+        expect(() => readValueAtPath(root, ["a", "b"])).toThrow(
+          "`FabricInstance`) in a structural walk",
+        );
+      });
+    }
   });
 });

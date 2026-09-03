@@ -438,11 +438,22 @@ Three functions from `@commonfabric/data-model` are the whole of
 what a walk needs, and using them is not optional in code that can meet a
 stored value:
 
-- `isWalkableObjectOrArray(value)` is the container question: `isObjectOrArray()`
-  minus the fabric special objects. A `false` answer means "carry this value
-  whole". Arrays and non-fabric class instances still answer `true`, so it is a
-  drop-in wherever `isObjectOrArray()` was standing in for the container
-  question.
+- `isWalkableObjectOrArray(value)` is the container question, and it separates
+  the two special-object arms because they differ on exactly that question. A
+  `FabricPrimitive` answers `false`: it is a leaf, so "carry this value whole"
+  is the whole story, and no path addresses anything inside one. A
+  `FabricInstance` is refused, because it is a container a walk is *supposed*
+  to descend and cannot yet — `false` would claim it holds nothing, `true`
+  would send you into a property surface its codec does not speak for.
+  Everything outside the type is untouched: arrays and non-fabric class
+  instances still answer `true`, so it is a drop-in wherever
+  `isObjectOrArray()` was standing in for the container question.
+- A walk that can meet an instance and has a better answer than a throw tests
+  for one first. `attestation.ts`'s `resolve()` is the worked example, using
+  the `TypeMismatchError` its own signature already carries; a walk that can
+  meet a *link* tests `isPrimitiveCellLink()` first, since a link is a
+  reference rather than a container, and under `modernCellRep` it is a
+  `FabricInstance`.
 - `isWalkableObjectNotArray(value)` is the same test with arrays removed, for a
   walk to which an array is not merely a different shape but something it must
   not treat as a record.

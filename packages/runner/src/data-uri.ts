@@ -37,7 +37,7 @@ import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { type Cell, isCell } from "./cell.ts";
 import { ContextualFlowControl } from "./cfc.ts";
-import { refuseFabricInstance } from "./fabric-special-object.ts";
+import { refuseFabricInstance } from "@commonfabric/data-model";
 import { isPrimitiveCellLink, type NormalizedLink } from "./link-types.ts";
 import {
   createSigilLinkFromParsedLink,

@@ -73,7 +73,7 @@ import {
 } from "./cfc.ts";
 import { findAndInlineDataUriLinks } from "./data-uri.ts";
 import type { EntityKind } from "./entity-kind.ts";
-import { refuseFabricInstance } from "./fabric-special-object.ts";
+import { refuseFabricInstance } from "@commonfabric/data-model";
 import { MAX_PATH_RESOLUTION_LENGTH, resolveLink } from "./link-resolution.ts";
 import { FILTER_INPUT_SCHEMA } from "./builtins/filter.ts";
 import { FLATMAP_INPUT_SCHEMA } from "./builtins/flatmap.ts";

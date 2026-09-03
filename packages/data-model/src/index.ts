@@ -58,6 +58,8 @@ export {
   shallowFabricFromNativeValue,
 } from "./native-conversion.ts";
 
+export { refuseFabricInstance } from "./refuse-fabric-instance.ts";
+
 export { fabricAwareEqual, valueEqual } from "./valueEqual.ts";
 
 export {

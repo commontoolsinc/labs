@@ -119,7 +119,7 @@ import {
   dataUriFromValueWithResolvedLinks,
   findAndInlineDataUriLinks,
 } from "./data-uri.ts";
-import { refuseFabricInstance } from "./fabric-special-object.ts";
+import { refuseFabricInstance } from "@commonfabric/data-model";
 import { type LastNode, resolveLink } from "./link-resolution.ts";
 import {
   areLinksSame,

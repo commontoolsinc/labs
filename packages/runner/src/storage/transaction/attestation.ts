@@ -1,5 +1,6 @@
 import {
   type DebugValueOptions,
+  FabricInstance,
   type FabricPlainObject,
   FabricSpecialObject,
   type FabricValue,
@@ -212,10 +213,28 @@ export const resolve = (
 
   while (++at < path.length) {
     const key = path[at];
-    // A special object takes the mismatch arm below alongside the scalars: a
-    // path does not address anything inside one, so reporting the slot
-    // absent-but-writable would invite a write onto a value that holds no
-    // such slot.
+    // A `FabricInstance` is tested for before the walk question is asked,
+    // because this function has a better answer than the refusal that question
+    // raises: it is declared to return a `TypeMismatchError`, and a path
+    // reaching a value it cannot address by key is what that error is for. The
+    // resolution stops either way; saying so in band lets a caller handle it
+    // like every other unresolvable address instead of unwinding.
+    //
+    // Live traffic arrives here: the fetch builtins store a `FabricError` as a
+    // result, and resolving a link whose path continues past one lands exactly
+    // on this. Before this test the slot read as absent AND writable, which
+    // invited a write onto a value holding no such slot.
+    if (value instanceof FabricInstance) {
+      return {
+        error: TypeMismatchError(
+          { ...address, path: path.slice(0, at + 1) },
+          value.constructor.name,
+          "read",
+        ),
+      };
+    }
+    // A `FabricPrimitive` takes the mismatch arm below alongside the scalars:
+    // a path does not address anything inside a leaf.
     if (isWalkableObjectOrArray(value)) {
       const record = value as FabricPlainObject;
       value = Object.hasOwn(record, key) ? record[key] : undefined;

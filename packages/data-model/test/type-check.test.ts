@@ -1169,18 +1169,23 @@ describe("type-check", () => {
         ).toBe(false);
       });
 
-      it("returns `false` for each `FabricInstance` kind", () => {
-        expect(
-          isWalkableObjectOrArray(FabricError.fromNativeError(new Error("x"))),
-        )
-          .toBe(false);
-        expect(isWalkableObjectOrArray(new FabricMap(new Map([["a", 1]]))))
-          .toBe(false);
-        expect(isWalkableObjectOrArray(new FabricSet(new Set([1])))).toBe(
-          false,
-        );
-        expect(isWalkableObjectOrArray(new FabricLink({ id: "of:fid1:abc" })))
-          .toBe(false);
+      it("throws for each `FabricInstance` kind", () => {
+        // An instance is a container, so neither answer is available yet:
+        // `false` claims it holds nothing, and `true` sends the caller into a
+        // property surface its codec does not speak for.
+
+        for (
+          const instance of [
+            FabricError.fromNativeError(new Error("x")),
+            new FabricMap(new Map([["a", 1]])),
+            new FabricSet(new Set([1])),
+            new FabricLink({ id: "of:fid1:abc" }),
+          ]
+        ) {
+          expect(() => isWalkableObjectOrArray(instance)).toThrow(
+            "`FabricInstance`) in a structural walk",
+          );
+        }
       });
     });
 
@@ -1215,11 +1220,14 @@ describe("type-check", () => {
       expect(isWalkableObjectNotArray([1, 2, 3])).toBe(false);
     });
 
-    it("returns `false` for a `FabricSpecialObject`", () => {
+    it("returns `false` for a `FabricPrimitive`", () => {
       expect(isWalkableObjectNotArray(new FabricBytes(new Uint8Array([1]))))
         .toBe(false);
-      expect(isWalkableObjectNotArray(new FabricMap(new Map([["a", 1]]))))
-        .toBe(false);
+    });
+
+    it("throws for a `FabricInstance`", () => {
+      expect(() => isWalkableObjectNotArray(new FabricMap(new Map([["a", 1]]))))
+        .toThrow("`FabricInstance`) in a structural walk");
     });
 
     it("returns `false` for a value with no contents to walk", () => {
