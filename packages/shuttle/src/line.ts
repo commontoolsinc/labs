@@ -2,10 +2,9 @@
  * How a shuttle line splits into tokens, and how a value prints as one of
  * them.
  *
- * `cf` never does either. The operating system's shell splits a command line
- * and hands over the words it made, and every grammar below that reads what
- * arrives. Shuttle reads its own line, so the split is shuttle's, and so is
- * the printing that inverts it.
+ * `cf` never does either: it is handed `Deno.args`, split for it already by
+ * the operating system's shell. Shuttle reads its own line, so the split is
+ * shuttle's, and so is the printing that inverts it.
  *
  * The two halves live in one module because they are one decision: what
  * {@link quoteToken} writes, {@link splitLine} reads back as the one value it
@@ -134,10 +133,10 @@ export function splitLine(line: string): LineSplit {
 }
 
 /**
- * Returns `value` written as one token of a line: bare where nothing in it
- * would end the token early or be read as structure, and quoted where
- * something would. {@link splitLine} reads what this returns back as exactly
- * `value`, whatever `value` holds.
+ * Returns `value` written as one token of a line: bare where it holds
+ * nothing that ends a token and nothing the grammar reserves, and quoted
+ * where it holds one of those. {@link splitLine} reads what this returns back
+ * as exactly `value`, whatever `value` holds.
  *
  * That round trip is the whole of the guarantee. What an operand reading then
  * does with the token is decided where the operand is read, and nothing here
@@ -163,9 +162,8 @@ function refuse(reason: string): LineSplit {
  * come back as itself: it is empty, or it holds a separator, a syntax
  * character, or one of {@link RESERVED_CHARACTERS}.
  *
- * An empty value is in that list for a reason the others are not: it needs
- * quoting to be a token at all, since nothing written bare occupies no
- * characters.
+ * The empty value is in that list for a reason the others are not: a token
+ * written bare cannot be empty, so quoting is what makes it a token at all.
  */
 function needsQuoting(value: string): boolean {
   if (value === "") return true;
