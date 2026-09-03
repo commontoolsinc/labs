@@ -2,6 +2,10 @@ import * as path from "@std/path";
 
 import { Config, getConfig } from "./config.ts";
 
+// The name a run's directory carries. A directory a killed run leaves behind
+// has nothing but its name to say what made it.
+export const RUN_DIRECTORY_PREFIX = "deno-web-test-";
+
 export class Manifest {
   readonly #projectDir: string;
   readonly #tests: string[];
@@ -69,7 +73,7 @@ export class Manifest {
     const manifest = new Manifest(
       projectDir,
       tests,
-      await Deno.makeTempDir({ prefix: "deno-web-test-" }),
+      await Deno.makeTempDir({ prefix: RUN_DIRECTORY_PREFIX }),
       config,
     );
     await Deno.mkdir(manifest.serverDir);

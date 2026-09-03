@@ -1,16 +1,20 @@
 /**
  * What a harness run leaves in the directory it makes its temporary files in.
  *
- * The run is given a `TMPDIR` of this test's own, so that what it makes there
- * stands alone. Chrome's crash handler, zygote, and GPU processes are
- * re-parented when the browser process goes, and they write into whatever
- * directory `TMPDIR` names, so entries of Chrome's can appear here once the
- * run has ended. The directories are the run's own, and those are what the
- * assertion reads.
+ * The run is given a `TMPDIR` of this test's own, and does not have it to
+ * itself: Chrome writes its own scratch files into the directory `TMPDIR`
+ * names and leaves some of them behind, files and directories alike, and its
+ * crash handler, zygote, and GPU processes are re-parented when the browser
+ * process goes, so more can land there after the run has ended and a run that
+ * has ended cannot be waited for. What the run makes for itself carries the
+ * prefix `Manifest.create()` gives it, and the assertion reads that.
+ * `manifest.test.ts` is what pins the prefix onto the directory, so that a run
+ * making no such directory would fail there rather than pass silently here.
  */
 
 import { describe, it } from "@std/testing/bdd";
 
+import { RUN_DIRECTORY_PREFIX } from "../manifest.ts";
 import { runDenoWebTest } from "./utils.ts";
 
 describe("a harness run", () => {
@@ -32,7 +36,7 @@ describe("a harness run", () => {
 
     run.assert(run.success, "the run passed");
     run.assert(
-      !left.some((entry) => entry.isDirectory),
+      !left.some((entry) => entry.name.startsWith(RUN_DIRECTORY_PREFIX)),
       `${temporaryDirectory} still holds ${
         left.map((entry) =>
           `${entry.name} (${entry.isDirectory ? "directory" : "file"})`
