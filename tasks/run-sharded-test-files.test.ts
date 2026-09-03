@@ -79,6 +79,7 @@ describe("run-sharded-test-files", () => {
         ),
     );
 
+    expect(expensiveFiles).toHaveLength(AGENTS_HOST_SHARDS);
     expect(shards.flat().toSorted()).toEqual(files.toSorted());
     const placements = expensiveFiles.map((file) => ({
       file,
