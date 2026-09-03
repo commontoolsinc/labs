@@ -16,6 +16,9 @@ import { extractAstralConfig } from "../config.ts";
 /** A path that exists, whatever machine this runs on: this file. */
 const EXISTING_FILE = new URL(import.meta.url).pathname;
 
+/** A stand-in for the profile directory a run hands the launch. */
+const PROFILE_DIR = "/profile-dir";
+
 /** Runs the body with `ASTRAL_BIN_PATH` set as given, then puts it back. */
 function withBinaryOverride(value: string | undefined, body: () => void) {
   const previous = Deno.env.get("ASTRAL_BIN_PATH");
@@ -40,22 +43,36 @@ describe("extractAstralConfig()", () => {
     const config = extractAstralConfig({
       headless: false,
       args: ["--flag"],
-    });
+    }, PROFILE_DIR);
 
     expect(config.headless).toBe(false);
-    expect(config.args).toEqual(["--flag"]);
+    expect(config.args).toEqual(["--flag", `--user-data-dir=${PROFILE_DIR}`]);
+  });
+
+  it("names the profile directory it is given", () => {
+    expect(extractAstralConfig({}, PROFILE_DIR).args)
+      .toEqual([`--user-data-dir=${PROFILE_DIR}`]);
+  });
+
+  it('names it again in Firefox\'s spelling for `product: "firefox"`', () => {
+    // `--user-data-dir` is what astral reads to tell whether the launch names
+    // a profile, and Firefox reads `-profile`. Both name the run's own
+    // directory, which is the one the run removes when it ends.
+
+    expect(extractAstralConfig({ product: "firefox" }, PROFILE_DIR).args)
+      .toEqual([`--user-data-dir=${PROFILE_DIR}`, "-profile", PROFILE_DIR]);
   });
 
   describe("the browser binary", () => {
     it("supplies one for an unstated product, which astral takes as Chrome", () => {
       withBinaryOverride(EXISTING_FILE, () => {
-        expect(extractAstralConfig({}).path).toBe(EXISTING_FILE);
+        expect(extractAstralConfig({}, PROFILE_DIR).path).toBe(EXISTING_FILE);
       });
     });
 
     it('supplies one for `product: "chrome"`', () => {
       withBinaryOverride(EXISTING_FILE, () => {
-        expect(extractAstralConfig({ product: "chrome" }).path)
+        expect(extractAstralConfig({ product: "chrome" }, PROFILE_DIR).path)
           .toBe(EXISTING_FILE);
       });
     });
@@ -68,7 +85,7 @@ describe("extractAstralConfig()", () => {
       // `ASTRAL_BIN_PATH` itself, which is why one being set here must still
       // produce no `path`.
       withBinaryOverride(EXISTING_FILE, () => {
-        expect(extractAstralConfig({ product: "firefox" }).path)
+        expect(extractAstralConfig({ product: "firefox" }, PROFILE_DIR).path)
           .toBe(undefined);
       });
     });
