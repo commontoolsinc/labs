@@ -82,6 +82,10 @@ Add a line for each new document to the index below.
   request to the LLM gateway says which workload produced it, what a value is
   allowed to contain given that it reaches the provider, and why the machine
   label is drawn at random and the codebase declared
+- [`llm-provider-boundary.md`](llm-provider-boundary.md) — which side of the
+  language-model boundary owns the model catalog and the provider
+  credentials, why the caller's package cannot hold either, and how a model
+  name is resolved to a provider
 
 ## Patterns, components, and hosts
 

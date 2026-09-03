@@ -42,6 +42,16 @@ toolshed/
 └── index.ts      # Main hono entry point
 ```
 
+### The LLM provider abstraction
+
+The model catalog, the aliases, the capability records, the provider clients,
+and the chain that decides what `default` means are all in
+[`routes/ai/llm/models.ts`](routes/ai/llm/models.ts). `@commonfabric/llm` is the
+caller's side of that boundary and holds none of it: it names a model and posts
+the request here.
+[`docs/features/llm-provider-boundary.md`](../../docs/features/llm-provider-boundary.md)
+gives the reasoning.
+
 ### Gateway request provenance
 
 The LLM gateway attributes its spend by what a caller says about itself, so the
