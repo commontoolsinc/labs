@@ -42,7 +42,11 @@ import {
   lookupSchemaDocument,
   registerSchemaDocument,
 } from "../schema-registry.ts";
-import { UnknownCfcMetadataVersionError } from "./metadata.ts";
+import {
+  isCfcMetadata,
+  UnknownCfcMetadataVersionError,
+  UnreadableCfcMetadataError,
+} from "./metadata.ts";
 import {
   isPrimitiveCellLink,
   isWriteRedirectLink,
@@ -1059,6 +1063,14 @@ const writeIsPatternSetupInitialization = (
   );
 };
 
+// What resolving a label needs of a stored envelope beyond its being one:
+// entries it can iterate, each carrying the path a resolution matches
+// against. `isCfcMetadata` settles the envelope, this settles its entries.
+const isWalkableLabelMap = (metadata: CfcMetadata): boolean =>
+  metadata.labelMap.entries.every((entry) =>
+    isObjectOrArray(entry) && Array.isArray(entry.path)
+  );
+
 const storedMetadataFor = (
   tx: IExtendedStorageTransaction,
   space: MemorySpace,
@@ -1099,7 +1111,15 @@ const storedMetadataFor = (
     // unreadable envelope (rejected in enforcing modes) or abort loudly.
     throw new UnknownCfcMetadataVersionError(version);
   }
-  return metadata as CfcMetadata;
+  if (!isCfcMetadata(metadata) || !isWalkableLabelMap(metadata)) {
+    // A record at the reserved position naming a version this build
+    // interprets, carrying a label map it cannot walk. Every resolution
+    // reads `labelMap.entries` and matches each entry's `path`, so the
+    // refusal belongs where the value is read rather than wherever a walk
+    // first reaches the part that is missing.
+    throw new UnreadableCfcMetadataError(id);
+  }
+  return metadata;
 };
 
 /**
@@ -3807,8 +3827,30 @@ const verifyInputRequirements = (
   // Stage-0 measurement: read activities lacking a clock position (counted
   // below only while a hook collects; the enforcement path pays a
   // short-circuited presence check per read, nothing else).
+  //
+  // The stored envelope of each read's document is resolved here, ahead of
+  // the label: `storedMetadataFor` refuses an envelope this build cannot
+  // interpret, by version or by shape, and a transaction that consumed such
+  // a document fails closed whether or not anything asks what its label
+  // says. That refusal must not depend on what a target declares, nor on
+  // whether the measurement dial is on. One resolution serves every read
+  // that landed in the same document: nothing writes between here and the
+  // end of this map, so a later read sees the envelope the first one saw.
+  const envelopes = new Map<string, CfcMetadata | undefined>();
+  const envelopeFor = (
+    space: MemorySpace,
+    id: URI,
+    scope: ReturnType<typeof normalizeCellScope>,
+    type: MediaType,
+  ): CfcMetadata | undefined => {
+    const key = `${targetKey({ space, id, scope })}\u0000${type}`;
+    if (!envelopes.has(key)) {
+      envelopes.set(key, storedMetadataFor(tx, space, id, scope, type));
+    }
+    return envelopes.get(key);
+  };
   let clockLessReads = 0;
-  const gatedReads = [
+  const readSources = [
     ...[...(tx.getReadActivities?.() ?? [])].filter((read) =>
       !isInternalVerifierRead(read.meta)
     ).map((read) => {
@@ -3837,57 +3879,72 @@ const verifyInputRequirements = (
   ].map((read) => ({
     ...read,
     path: canonicalizeLogicalPath(read.path),
-    label: effectiveReadLabel(
-      storedMetadataFor(
-        tx,
-        read.space,
-        read.id,
-        normalizeCellScope(read.scope),
-        read.type ?? "application/json",
-      ),
-      canonicalizeLogicalPath(read.path),
-      { nonRecursive: read.nonRecursive, consumes: "all" },
+    metadata: envelopeFor(
+      read.space,
+      read.id,
+      normalizeCellScope(read.scope),
+      read.type ?? "application/json",
     ),
-  })).filter((read) =>
-    read.label !== undefined &&
-    // A present-but-empty label ({} — no atoms) is the same trust level as an
-    // absent one (excluded above); whether metadata materialized an empty
-    // entry is a persistence/sync artifact and must not decide gate
-    // membership.
-    hasLabelValues(read.label)
-  );
-  // Label-metadata observations (inv-12 Stage 2) join the gate with their
-  // pre-resolved §4.6.4.2 population labels. Like trigger reads they have no
-  // journal position, so they sit at -Infinity and join EVERY protected
-  // write's prefix — the conservative direction for a screen, and only new
-  // introspection-using code ever records one (no existing flow regresses).
-  // Confidentiality-only records: never provenance-only, never a floor
-  // witness.
-  for (const observation of tx.getCfcState().labelMetadataObservations) {
-    gatedReads.push({
-      space: observation.target.space,
-      id: observation.target.id as URI,
-      scope: normalizeCellScope(observation.target.scope),
-      path: canonicalizeLogicalPath(observation.target.path),
-      type: "application/json",
-      meta: {},
-      journalIndex: -Infinity,
-      label: { confidentiality: [...observation.confidentiality] },
-    });
+  }));
+  if (provenance !== undefined) {
+    provenance.clockLessReads = clockLessReads;
   }
+
+  // Resolving one read's label joins every entry of that document's stored
+  // label map that bears on the read path, so the whole set costs the
+  // transaction's read count times those maps' sizes. Only a schema entry
+  // declaring `requiredIntegrity` or `maxConfidentiality` reads the result,
+  // so the set is assembled on first ask and kept for the rest of the call.
+  const buildGatedReads = () => {
+    const gatedReads = readSources.map(({ metadata, ...read }) => ({
+      ...read,
+      label: effectiveReadLabel(
+        metadata,
+        read.path,
+        { nonRecursive: read.nonRecursive, consumes: "all" },
+      ),
+    })).filter((read) =>
+      read.label !== undefined &&
+      // A present-but-empty label ({} — no atoms) is the same trust level as
+      // an absent one (excluded above); whether metadata materialized an
+      // empty entry is a persistence/sync artifact and must not decide gate
+      // membership.
+      hasLabelValues(read.label)
+    );
+    // Label-metadata observations (inv-12 Stage 2) join the gate with their
+    // pre-resolved §4.6.4.2 population labels. Like trigger reads they have
+    // no journal position, so they sit at -Infinity and join EVERY protected
+    // write's prefix — the conservative direction for a screen, and only new
+    // introspection-using code ever records one (no existing flow regresses).
+    // Confidentiality-only records: never provenance-only, never a floor
+    // witness.
+    for (const observation of tx.getCfcState().labelMetadataObservations) {
+      gatedReads.push({
+        space: observation.target.space,
+        id: observation.target.id as URI,
+        scope: normalizeCellScope(observation.target.scope),
+        path: canonicalizeLogicalPath(observation.target.path),
+        type: "application/json",
+        meta: {},
+        journalIndex: -Infinity,
+        label: { confidentiality: [...observation.confidentiality] },
+      });
+    }
+    return gatedReads;
+  };
+  let gatedReadsMemo: ReturnType<typeof buildGatedReads> | undefined;
+  const gatedReadsOf = () => (gatedReadsMemo ??= buildGatedReads());
 
   // Stage-0 measurement: the pre-D4 comparison baseline. Before D4 the gate
   // quantified over every labeled read with the S7 provenance-only exemption
   // applied transaction-globally — so the baseline is the label filter
   // without the prefix condition. The gate-visible read set is the same on
   // every call within one prepare, hence assignment (not accumulation) for
-  // the per-prepare clock-less count.
-  const txGlobalGatedReads = provenance === undefined ? 0 : gatedReads
+  // the per-prepare clock-less count. The counter describes the whole set,
+  // which the dial therefore resolves.
+  const txGlobalGatedReads = provenance === undefined ? 0 : gatedReadsOf()
     .filter((read) => !isProvenanceOnlyConsumedLabel(read.label!))
     .length;
-  if (provenance !== undefined) {
-    provenance.clockLessReads = clockLessReads;
-  }
 
   for (const entry of cfcSchemaEntries(schema)) {
     if (
@@ -3960,10 +4017,12 @@ const verifyInputRequirements = (
     // protected writes (audit S7), now only ever needed for reads WITHIN the
     // prefix. Confidentiality- or endorsement-bearing reads stay, keeping
     // the prompt-injection screen sound.
-    const gating = gatedReads.filter((read) =>
-      read.journalIndex < bound &&
-      !isProvenanceOnlyConsumedLabel(read.label!)
-    );
+    const gating = protectedEntry
+      ? gatedReadsOf().filter((read) =>
+        read.journalIndex < bound &&
+        !isProvenanceOnlyConsumedLabel(read.label!)
+      )
+      : [];
     // Stage-0 precision counters (cfc-value-level-provenance.md §6): what
     // the shipped prefix did for THIS protected write versus the pre-D4
     // transaction-global quantification. Recorded before the entry's own
@@ -3971,7 +4030,7 @@ const verifyInputRequirements = (
     // these values.
     if (provenance !== undefined && protectedEntry) {
       let inPrefix = 0;
-      for (const read of gatedReads) {
+      for (const read of gatedReadsOf()) {
         if (read.journalIndex < bound) inPrefix += 1;
       }
       // Within-prefix reads excluded as provenance-only structural plumbing
@@ -4023,7 +4082,7 @@ const verifyInputRequirements = (
       // different witness per read — "each input was screened by someone"
       // is not "the inputs were screened". The single-read case reduces to
       // the plain floor. Quantifies over D4's per-write prefix `gating`, not
-      // the transaction-global `gatedReads`.
+      // the transaction-global gate-visible read set.
       const ok = cfcIntegritySatisfiesFloorCoherently(
         gating.map((read) => read.label?.integrity ?? []),
         requiredIntegrity,
@@ -5114,10 +5173,13 @@ export const loadStoredCfcEnvelope = (
       type,
     );
   } catch (error) {
-    // Unknown-version metadata is a property of the DOCUMENT, not of the
-    // caller's transaction, so it lands in the unreadable arm of the
-    // taxonomy; a transaction read failure keeps propagating.
-    if (error instanceof UnknownCfcMetadataVersionError) {
+    // An envelope this build cannot interpret is a property of the DOCUMENT,
+    // not of the caller's transaction, so it lands in the unreadable arm of
+    // the taxonomy; a transaction read failure keeps propagating.
+    if (
+      error instanceof UnknownCfcMetadataVersionError ||
+      error instanceof UnreadableCfcMetadataError
+    ) {
       return { status: "unreadable", reason: error.message };
     }
     throw error;

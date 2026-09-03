@@ -125,6 +125,111 @@ describe("CFC envelope version guard", () => {
     }
   });
 
+  it("rejects an enforcing write that READ a document whose envelope shape it cannot walk", async () => {
+    // The version is one this build interprets and the label map is not: no
+    // entries to walk, or an entry with no path to match a read against.
+    // Reading a label is what meets these, so the refusal has to be reached
+    // by every transaction that read the document, not only by one whose
+    // write target declares a requirement.
+    const shapes = {
+      "no-label-map": { version: 1, schemaHash: SEED_ENVELOPE_SCHEMA_HASH },
+      "no-entries": {
+        version: 1,
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+        labelMap: { version: 1 },
+      },
+      "pathless-entry": {
+        version: 1,
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+        labelMap: { version: 1, entries: [{ label: {} }] },
+      },
+    };
+    for (const [name, envelope] of Object.entries(shapes)) {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+        cfcEnforcementMode: "enforce-explicit",
+      });
+      try {
+        const sourceId = parseLink(
+          runtime.getCell(space, `shape-guard-src-${name}`).getAsLink(),
+        ).id!;
+        const seed = runtime.edit();
+        writeSeedEnvelopeDoc(seed, space);
+        seed.writeOrThrow({ space, scope: "space", id: sourceId, path: [] }, {
+          value: { secret: "sealed" },
+          cfc: envelope,
+        });
+        expect((await seed.commit()).ok).toBeDefined();
+
+        const tx = runtime.edit();
+        tx.readOrThrow({
+          space,
+          scope: "space",
+          id: sourceId,
+          type: "application/json",
+          path: ["value", "secret"],
+        });
+        const target = runtime.getCell(space, `shape-guard-dst-${name}`, {
+          type: "object",
+          properties: {
+            note: { type: "string", ifc: { confidentiality: ["vaulted"] } },
+          },
+        }, tx);
+        target.set({ note: "copied" });
+        tx.prepareCfc();
+        const result = await tx.commit();
+        expect(result.error?.message).toContain(
+          "carries no label map this build can read",
+        );
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    }
+  });
+
+  it("rejects an enforcing write that READ a document whose envelope version is unknown", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      // The read source carries the unreadable envelope and the write target
+      // is a different document, whose schema declares no requiredIntegrity
+      // and no maxConfidentiality. The write-side input gate is what resolves
+      // a read's stored envelope, and the reason it must resolve every read's
+      // rather than only the ones a requirement quantifies over.
+      const sourceId = await seedWithVersion(runtime, "version-guard-src", 3);
+      const tx = runtime.edit();
+      tx.readOrThrow({
+        space,
+        scope: "space",
+        id: sourceId,
+        type: "application/json",
+        path: ["value", "secret"],
+      });
+      const target = runtime.getCell(space, "version-guard-dst", {
+        type: "object",
+        properties: {
+          note: { type: "string", ifc: { confidentiality: ["vaulted"] } },
+        },
+      }, tx);
+      target.set({ note: "copied" });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "not one this build interprets",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("fails closed on an unknown version whose format renamed every field", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
