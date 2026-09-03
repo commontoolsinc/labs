@@ -1755,6 +1755,87 @@ describe("cli piece parsing", () => {
     ]);
   });
 
+  it("steps a path-less read through the whole result before syncing", async () => {
+    const order: string[] = [];
+    const controller = {
+      get: (id: string, runIt: boolean) => {
+        order.push(`get:${id}:${runIt}`);
+        return Promise.resolve({
+          input: { get: () => Promise.resolve(undefined) },
+          getCell: () => ({
+            pull: () => {
+              order.push("piece.pull");
+              return Promise.resolve();
+            },
+          }),
+          result: {
+            getCell: () => {
+              // `rootCell.key(...path)` with an empty path is `key()`: the
+              // root itself, never a descent.
+              const root = {
+                key: (...segments: string[]) => {
+                  if (segments.length > 0) {
+                    throw new Error("a path-less read descended into a key");
+                  }
+                  order.push("result.key:<root>");
+                  return root;
+                },
+                pull: () => {
+                  order.push("result.pull");
+                  return Promise.resolve();
+                },
+              };
+              return Promise.resolve(root);
+            },
+            get: () => {
+              order.push("result.get");
+              return Promise.resolve({ value: "ready" });
+            },
+          },
+        });
+      },
+      stopPiece: (id: string) => {
+        order.push(`stop:${id}`);
+        return Promise.resolve();
+      },
+      runtime: {
+        idle: () => {
+          order.push("runtime.idle");
+          return Promise.resolve();
+        },
+      },
+      synced: () => {
+        order.push("pieces.synced");
+        return Promise.resolve();
+      },
+    };
+
+    const value = await getCellValue(
+      { apiUrl: API_URL, space: SPACE, identity: ID, piece: PIECE },
+      [],
+      { step: true },
+      {
+        loadPieces: () => Promise.resolve(controller as any),
+        resolvePieceAddress: (_pieces, id) => Promise.resolve(id),
+      },
+    );
+
+    expect(value).toEqual({ value: "ready" });
+    // The whole-result pull is the path-less read's materialization step;
+    // a nested read replaces it with its own target pull (the test above).
+    expect(order).toEqual([
+      `get:${PIECE}:true`,
+      "piece.pull",
+      "result.key:<root>",
+      "result.pull",
+      "pieces.synced",
+      "runtime.idle",
+      "pieces.synced",
+      "result.get",
+      `stop:${PIECE}`,
+    ]);
+  });
+
   it("reports schema projection failure when raw result data exists", async () => {
     const rawCell = {
       schema: { type: "object" },
