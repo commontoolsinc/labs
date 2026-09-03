@@ -3,9 +3,9 @@
  * color, navigate, edit and (optionally) reason about it, plus selecting the
  * right language and byte decoder for a file. A language is a stateless
  * strategy object: one instance describes each supported syntax. Selection
- * combines explicit language choices, filename or shebang metadata, and byte
- * content detection. Once selected, the pager dispatches every operation
- * through that object's methods.
+ * combines explicit language choices, filename, shared-extension, or shebang
+ * metadata, and byte content detection. Once selected, the pager dispatches
+ * every operation through that object's methods.
  *
  * Per-file mutable state (a warm incremental parse, a language service) is not
  * held on the language; the language is a factory for the small stateful
@@ -236,7 +236,8 @@ export interface Language {
   /** Decoding and, for byte languages, incremental rendering behavior. */
   readonly input: LanguageInput;
 
-  /** Filename, explicit-name, and shebang selectors for this language. */
+  /** Filename, shared-extension, explicit-name, and shebang selectors for
+   * this language. */
   readonly metadata: LanguageMetadata;
 
   /** Parse `text` into the full document model: colored lines, a structure

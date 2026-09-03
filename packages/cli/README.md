@@ -40,8 +40,9 @@ and TypeScript semantic lookup.
 Automatic content detection is limited to binary input, structurally identified
 raw unified diffs, and standard Git commit output. A raw diff starts at the
 first nonblank line. Recognized shebangs and transformed compiler headers remain
-explicit selectors. JSON-, YAML-, Markdown-, Python-, and other language-shaped
-source is not guessed from its syntax.
+explicit selectors. A shared extension such as `.cfg` consults the source for
+the one pattern its metadata names. JSON-, YAML-, Markdown-, Python-, and other
+language-shaped source is otherwise not guessed from its syntax.
 
 A diff shows its whole-diff change totals at the top right corner of its first
 line: the added line count and the removed line count, colored like additions
