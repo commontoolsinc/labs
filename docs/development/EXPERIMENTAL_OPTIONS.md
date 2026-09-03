@@ -412,7 +412,7 @@ server](#clients-that-are-not-built-alongside-their-server).
   then the flag retires and the OFF code path is removed — a separate post-soak
   PR (the plan's Phase 7 task 2; it also removes the opposite guard lanes and
   `build-toolshed-opposite`).
-- **Status on 2026-09-03 (the ROLLBACK).** The rollback PR (#TBD-ROLLBACK)
+- **Status on 2026-09-03 (the ROLLBACK).** The rollback PR (#6840)
   returned the constant to `false` — the first data-only flip: this value
   and this registry's current-status prose, with no workflow, test, or role
   edits (the 2026-09-02 hygiene's promise, exercised). Everything the flip

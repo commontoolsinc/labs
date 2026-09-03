@@ -3510,7 +3510,7 @@ personally; the soak starts at ITS merge.** What it carries:
   the corrected call; under OFF the same id executes. The step's ON
   comment points at this row.
 
-Delta 2026-09-03 — the rollback (#TBD-ROLLBACK):
+Delta 2026-09-03 — the rollback (#6840):
 
 - The first-party default returned to OFF by the first data-only flip:
   the constant plus current-status prose, with no workflow, test, or role

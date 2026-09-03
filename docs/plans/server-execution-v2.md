@@ -39,7 +39,7 @@ agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
 **Delta 2026-09-03 (the ROLLBACK): the first-party default returned to OFF
-via the rollback PR (#TBD-ROLLBACK) — the first data-only flip:
+via the rollback PR (#6840) — the first data-only flip:
 `SERVER_EXECUTION_DEFAULT_ENABLED` → `false` plus current-status prose, with
 no workflow, test, or role edit (the 2026-09-02 hygiene's promise,
 exercised). Everything #6535 built stays: the serving-side machinery, the
