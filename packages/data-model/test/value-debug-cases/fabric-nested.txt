@@ -11,8 +11,12 @@
     /Bytes(buf [01])
   ],
   deeper: {
-    link: /Link(...)
+    link: /Link(
+      id: "of:fid1:abc",
+      path: [],
+      space: "did:key:z"
+    )
   }
 }
 
-{when:/EpochNsec(1n),list:[/EpochNsec(2n),/Bytes(buf [01])],deeper:{link:/Link(...)}}
+{when:/EpochNsec(1n),list:[/EpochNsec(2n),/Bytes(buf [01])],deeper:{link:/Link(id:"of:fid1:abc",p...

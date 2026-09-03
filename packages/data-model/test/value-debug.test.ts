@@ -31,6 +31,7 @@ import {
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
+import { FabricLink } from "@/fabric-instances/FabricLink.ts";
 import { FabricMap } from "@/fabric-instances/FabricMap.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 
@@ -233,8 +234,13 @@ describe("value-debug", () => {
     });
 
     it("renders a FabricInstance as its debug string, not `{}`", () => {
-      const err = FabricError.fromNativeError(new Error("boom"));
-      expect(Deno.inspect(err)).toBe("/Error(...)");
+      const link = new FabricLink({
+        id: "of:fid1:abc",
+        path: ["x"],
+        space: "did:key:z",
+      });
+      expect(Deno.inspect(link))
+        .toBe('/Link(id:"of:fid1:abc",path:["x"],space:"did:key:z")');
     });
 
     it("renders when nested in containers", () => {

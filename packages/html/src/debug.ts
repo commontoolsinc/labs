@@ -92,9 +92,8 @@ export function formatTree(node: unknown, indent = 0): string {
   // A `FabricSpecialObject` keeps its state in private fields and has zero
   // enumerable own properties, so `stringify()` renders one as `{}` -- and
   // does so silently, since the `catch` below fires only on a throw and
-  // `stringify()` does not throw on one. Naming it is the whole of what a
-  // debug dump can honestly say about a value whose contents are not reachable
-  // by property name.
+  // `stringify()` does not throw on one. The debug renderer knows what to do
+  // with one.
   if (node instanceof FabricSpecialObject) {
     return `${pad}${toCompactDebugString(node)}`;
   }

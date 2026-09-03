@@ -417,8 +417,7 @@ class DebugStringifier {
       return DebugStringifier.#renderElidedInstance(classNameOf(value));
     }
 
-    // Trim off the encoding version number.
-    const open = `/${tag.replace(/@.*$/, "")}(`;
+    const open = `/${DebugStringifier.#typeNameOf(tag)}(`;
     const realm = (v: PrimitiveState, i: string) =>
       this.#renderRealmState(v, i);
 
@@ -469,10 +468,12 @@ class DebugStringifier {
 
   /**
    * Renders a class instance which the conversion carried under its class
-   * name, as `/ClassName(<props>)` when its payload is its properties and as
-   * `/ClassName(...)` when the conversion had nothing to show for it. Any
-   * other payload -- a `toString()` form, or what `toJSON()` returned -- is
-   * rendered as it stands inside the parentheses.
+   * name, or a `FabricInstance` carried under its type name, as
+   * `/Name(<props>)` when its payload is a plain object of properties and as
+   * `/Name(...)` when the conversion had nothing to show for it. Any other
+   * payload -- a `toString()` form, what `toJSON()` returned, or an encoding
+   * that is not a plain object -- is rendered as it stands inside the
+   * parentheses.
    */
   #renderInstance(
     className: string,
@@ -609,8 +610,13 @@ class DebugStringifier {
     const { tag, payload } = tagged;
 
     if (isCodecTypeTag(tag)) {
-      // A `FabricInstance`, carried as its encoding under its codec type tag.
-      return DebugStringifier.#renderElidedInstance(tag);
+      // A `FabricInstance`, carried as its encoding under its codec type tag,
+      // laid out the way a class instance is.
+      return this.#renderInstance(
+        DebugStringifier.#typeNameOf(tag),
+        payload,
+        indent,
+      );
     }
 
     switch (tag) {
@@ -681,13 +687,20 @@ class DebugStringifier {
   }
 
   /**
-   * Renders the elided form of a `FabricInstance`, or of a `FabricPrimitive`
-   * whose state cannot be had, given its codec type tag (or, failing that,
-   * its class name). The slash suggests a known encodable type rather than an
-   * instance of some random class, and the version of the tag is left out.
+   * Renders the elided form of a `FabricPrimitive` whose state cannot be had,
+   * given its class name. The slash suggests a known encodable type rather
+   * than an instance of some random class.
    */
-  static #renderElidedInstance(tag: string): string {
-    return `/${tag.replace(/@.*$/, "")}(...)`;
+  static #renderElidedInstance(name: string): string {
+    return `/${name}(...)`;
+  }
+
+  /**
+   * Returns the type name of a codec type tag: the tag less its encoding
+   * version, which a rendering leaves out.
+   */
+  static #typeNameOf(tag: string): string {
+    return tag.replace(/@.*$/, "");
   }
 
   /**
