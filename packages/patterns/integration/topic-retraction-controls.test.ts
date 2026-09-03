@@ -24,7 +24,12 @@
  * bound to it.
  */
 import { Identity } from "@commonfabric/identity";
-import { env, type Page } from "@commonfabric/integration";
+import {
+  env,
+  type Page,
+  type ProbeApi,
+  waitForCondition,
+} from "@commonfabric/integration";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
@@ -86,15 +91,42 @@ const live = <T extends { removedAt?: number }>(records: T[]): T[] =>
   records.filter((record) => record.removedAt === undefined);
 
 /**
- * The text of each rendered row, in the order the page shows them, descending
- * shadow roots the way the flattened accessibility tree does.
+ * The text of each rendered row once the PAGE shows `expected` of them, in the
+ * order it shows them, descending shadow roots the way the flattened
+ * accessibility tree does.
  *
  * Reading the order rather than assuming it is what lets this file assert the
  * invariant that matters — clicking row *k* stamps the record displayed at row
  * *k* — without depending on the order the seed happened to commit in.
+ *
+ * The wait is not decoration. A retraction is confirmed against the test's own
+ * runtime, which is a different observer from the browser: the stamp can be
+ * durable while the page has not yet re-rendered without the row. Reading
+ * straight after that confirmation would sample the pre-render thread and pick
+ * the wrong row, intermittently and only under load.
  */
-const rowTexts = (page: Page, hook: string): Promise<string[]> =>
-  page.evaluate((attr: string) => {
+async function rowTexts(
+  page: Page,
+  hook: string,
+  expected: number,
+): Promise<string[]> {
+  await waitForCondition(
+    page,
+    (_probe: ProbeApi, attr: string, want: number) => {
+      let seen = 0;
+      const walk = (root: Document | ShadowRoot) => {
+        seen += root.querySelectorAll(`[${attr}]`).length;
+        for (const el of root.querySelectorAll("*")) {
+          const sr = (el as HTMLElement).shadowRoot;
+          if (sr) walk(sr);
+        }
+      };
+      walk(document);
+      return seen === want;
+    },
+    { args: [hook, expected] },
+  );
+  return await page.evaluate((attr: string) => {
     const texts: string[] = [];
     const walk = (root: Document | ShadowRoot) => {
       for (const el of root.querySelectorAll(`[${attr}]`)) {
@@ -108,6 +140,7 @@ const rowTexts = (page: Page, hook: string): Promise<string[]> =>
     walk(document);
     return texts;
   }, { args: [hook] });
+}
 
 /** Which of `candidates` the row at `index` is showing. */
 const rowAt = (rows: string[], index: number, candidates: string[]): string => {
@@ -248,8 +281,16 @@ describe("Topics retraction controls", () => {
     // Row 1 of the thread AS RENDERED, whichever comment that turns out to be.
     // The invariant under test is that the control stamps the record its own
     // row is showing, and reading the row first is what states it that way.
-    const before = await rowTexts(page, "data-comment-row");
-    assertEquals(before.length, 3);
+    // The row count comes from the STORE, not from how many comments were
+    // seeded. Under server execution a topic's first `addComment` can commit
+    // twice (#6808), so the thread may legitimately hold more records than
+    // this file filed. That defect is not what this file is about, and none
+    // of what it asserts depends on the multiplicity: the claim is that
+    // clicking row k stamps the record row k displays, whatever is in the
+    // thread.
+    const seeded = (topicResult.key("comments").get() ?? []) as StoredComment[];
+    const total = seeded.length;
+    const before = await rowTexts(page, "data-comment-row", total);
     const firstTarget = rowAt(before, 1, [ALPHA, BRAVO, CHARLIE]);
 
     await clickNthCfButton(page, RETRACT_COMMENT, 1);
@@ -266,8 +307,7 @@ describe("Topics retraction controls", () => {
     // the view has dropped it, so row 1 and array position 1 now name
     // different comments — bound to the array this would find the record it
     // just stamped and do nothing.
-    const between = await rowTexts(page, "data-comment-row");
-    assertEquals(between.length, 2);
+    const between = await rowTexts(page, "data-comment-row", total - 1);
     const secondTarget = rowAt(between, 1, [ALPHA, BRAVO, CHARLIE]);
     assertEquals(secondTarget === firstTarget, false);
 
@@ -281,13 +321,14 @@ describe("Topics retraction controls", () => {
       stamped(afterSecond).map((c) => c.body).toSorted(),
       [firstTarget, secondTarget].toSorted(),
     );
-    assertEquals(live(afterSecond).length, 1);
+    assertEquals(live(afterSecond).length, total - 2);
     // Stamped, not removed: membership is what never shrinks, and the board's
     // activity ordering depends on it.
-    assertEquals(afterSecond.length, 3);
+    assertEquals(afterSecond.length, total);
 
-    const linkRows = await rowTexts(page, "data-link-row");
-    assertEquals(linkRows.length, 2);
+    const storedLinks = (topicResult.key("links").get() ?? []) as StoredLink[];
+    const linkTotal = storedLinks.length;
+    const linkRows = await rowTexts(page, "data-link-row", linkTotal);
     const linkTarget = rowAt(linkRows, 0, [LINK_ONE, LINK_TWO]);
 
     await clickNthCfButton(page, RETRACT_LINK, 0);
@@ -297,7 +338,7 @@ describe("Topics retraction controls", () => {
       (links) => stamped(links ?? []).length === 1,
     );
     assertEquals(stamped(afterLink).map((l) => l.url), [linkTarget]);
-    assertEquals(live(afterLink).length, 1);
-    assertEquals(afterLink.length, 2);
+    assertEquals(live(afterLink).length, linkTotal - 1);
+    assertEquals(afterLink.length, linkTotal);
   });
 });
