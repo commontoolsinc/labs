@@ -103,8 +103,8 @@ the storage layer reports it:
   reconnect is visible only as the session's `closeError`.
 - The memory client reports its own connection state.
   `Client.connectionState` names which state it is in, and
-  `Client.whenStateChanged()` resolves on the next transition, so a consumer
-  of the client waits on a change rather than polling for one. That surface
+  `Client.whenStateChanged()` resolves the next time the client settles it,
+  so a consumer of the client waits rather than polling. That surface
   stops where `isConnected()` does: the storage layer reads neither member,
   so a consumer above it still cannot tell quiet because nothing changed
   from quiet because the socket is down and backoff has reached its

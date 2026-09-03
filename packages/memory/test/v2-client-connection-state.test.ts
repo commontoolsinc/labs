@@ -1,8 +1,10 @@
 /**
  * Covers the connection state `Client` reports and the promise it hands a
- * caller waiting for that state to move. The states are the branches
- * `#ensureConnected()` takes, and the getter is held here both to that order
- * and to agreement with `isConnected()`.
+ * caller waiting for the next report of it. The states are the branches
+ * `#ensureConnected()` takes, and the cases hold the getter to the part of
+ * that order a caller can observe — `#connected` ahead of the fall through
+ * to `reconnecting`, and `#closed` ahead of `#fatalError` — checking it
+ * against `isConnected()` where the two are meant to agree.
  *
  * The transport these cases run on can be severed on demand by firing the
  * close receiver the client registered, which is the entry point a lost

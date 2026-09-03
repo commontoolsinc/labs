@@ -406,8 +406,9 @@ export class Client {
   }
 
   /**
-   * Resolves when `.connectionState` next changes, so that a caller waits on
-   * a transition without registering and removing a listener:
+   * Resolves the next time the client settles its connection state, which is
+   * usually a change to `.connectionState` and sometimes is not. A caller
+   * waits on that instead of registering and removing a listener:
    *
    * ```js
    * while (client.connectionState !== desired) {
@@ -416,17 +417,16 @@ export class Client {
    * ```
    *
    * That loop reads the getter and calls this in one synchronous step, which
-   * is what stops a transition slipping between the two. A caller that awaits
+   * is what stops a change slipping between the two. A caller that awaits
    * anything else in between can miss one.
    *
-   * It yields no value, deliberately: the state can change again between the
+   * It yields no value, deliberately: the state can move again between the
    * resolution and the caller resuming, so anything handed over would be
-   * stale by construction. Losing a socket shows it concretely. `#onClose()`
-   * marks the client disconnected and arms the reconnect a few statements
-   * later, and a waiter resumes on a microtask, after both — so re-reading
-   * the getter yields `reconnecting`, true at the moment it is read, where a
-   * value captured at the transition would report a disconnection that was
-   * never observable for a whole turn.
+   * stale by construction. Giving up on a reconnect shows it concretely. The
+   * reconnect loop's catch settles on `reconnecting` and notifies, then
+   * records a permanent failure in the same synchronous block, so a waiter
+   * resuming on a microtask reads `failed` — the state when it looks, not
+   * the one that held when it was woken.
    *
    * A wakeup carrying no change is harmless for the same reason: the loop
    * re-tests and waits again. Calling `close()` on a closed client is one.
