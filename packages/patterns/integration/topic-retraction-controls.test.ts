@@ -136,15 +136,42 @@ describe("Topics retraction controls", () => {
     topicResult = cc.getResult(topic.getCell());
     sinkCancels.push(topicResult.sink(() => {}));
 
-    // Filed in order, so the thread's sort by `sentAt` puts them on the page
-    // in the order named above and the row index below is the one intended.
-    for (const body of [ALPHA, BRAVO, CHARLIE]) {
+    // Filed one at a time, each barriered on its own arrival before the next
+    // is sent, so the thread's sort by `sentAt` puts them on the page in the
+    // order named above and a row index addresses the row intended.
+    //
+    // The barrier is the whole point rather than caution. Under server
+    // execution a `set()` resolves before the SERVED consequence arrives, so
+    // three appends sent back to back can commit in any order and land
+    // `sentAt` stamps in that order too — which reorders the rendered thread
+    // and silently moves every row this test clicks. Unbarriered, this file
+    // passed with server execution off and retracted the wrong comment with
+    // it on.
+    const comments = topicResult.key("comments");
+    const bodies = [ALPHA, BRAVO, CHARLIE];
+    for (const [index, body] of bodies.entries()) {
       await topic.result.set({ body, agentName: AGENT }, ["addComment"]);
+      await waitForCellValue(
+        cc.runtime,
+        comments,
+        (stored: StoredComment[] | undefined) =>
+          (stored ?? []).length === index + 1 &&
+          stored![index]?.body === body,
+      );
     }
-    for (const url of [LINK_ONE, LINK_TWO]) {
+
+    const links = topicResult.key("links");
+    const urls = [LINK_ONE, LINK_TWO];
+    for (const [index, url] of urls.entries()) {
       await topic.result.set({ kind: "web", url, agentName: AGENT }, [
         "addLink",
       ]);
+      await waitForCellValue(
+        cc.runtime,
+        links,
+        (stored: StoredLink[] | undefined) =>
+          (stored ?? []).length === index + 1 && stored![index]?.url === url,
+      );
     }
 
     // Every write reaches the server before a browser asks for the piece; one
