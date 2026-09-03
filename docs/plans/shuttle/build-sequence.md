@@ -25,8 +25,9 @@ empty — right for tab completion, wrong for `ls` — so the listing raises
 its errors and completion's provider dispatch swallows them at its own
 call site. Keep the list to what shuttle names — an export entry is a
 contract, and the short list is the record of which internals have a
-second caller. (The view substrate's entries wait for B3, which is when
-they earn their place on that record.)
+second caller. (The view substrate's entries are not on it, nothing having
+named them yet; each lands with the milestone that first calls it, which is
+how a module earns its place on that record.)
 
 **A2 — connection injection for the write path.** Done (#6646). The write
 path takes the connection as a parameter, so a held `PiecesController`
@@ -158,6 +159,25 @@ Landed:
   revisits this trade rather than inheriting it. No verb reaches the
   connection yet, and the place is untouched.
 
+- **B1b (slice 2) — the line grammar** (`packages/shuttle/src/line.ts`). How
+  a line becomes tokens, and how a value prints as one of them. `cf` is
+  handed words the operating system's shell already split; shuttle is handed
+  the line, and both halves are its own. The split is POSIX quoting —
+  whitespace separates, single quotes are literal, double quotes group, a
+  backslash escapes one character and between double quotes only a quote or
+  another backslash, and runs that touch are one token — and a line is
+  refused for one of two reasons: a quote that never closes, naming the
+  column it opened at, and a trailing backslash with nothing to escape.
+  The printer quotes only where quoting is needed, which is what keeps a
+  slug, a handle, a flag and a path each printing as themselves; what forces
+  it is whitespace, either quote, the backslash, and the characters the
+  grammar spends on structure, collected in one constant rather than counted
+  in prose. The characters an operand writes an address with stay out of that
+  set, which is what leaves the relative-segment question below intact: what
+  the pair guarantees is that a printed value splits back into that one
+  value, and whether a quote should also reach the reading of a token is
+  still `ls`'s to settle. No verb reads a line yet.
+
 Still to come:
 
 - **The prompt, a readline loop, and the verbs** (B1b for the verbs and
@@ -166,6 +186,17 @@ Still to come:
   navigable within the connected space (`cd #favorites`, and the `wish`
   verb, over the `./lib/wish` export entry A1 adds; a home-anchored target
   from elsewhere is refused with the reason — decision 5).
+
+  The line editor is the view substrate's rather than `node:readline`'s.
+  `EditBuffer` (`packages/cli/lib/view/editbuffer.ts`) holds the motions and
+  the substrate's key handler binds them to emacs keys, and `decodeKeys`
+  (`packages/cli/lib/view/keys.ts`) supplies the key stream a binding table
+  reads — where `node:readline` offers no keymap hook at all, so a second
+  binding table is unreachable behind it. That is what keeps modal editing
+  an option later ([`futures.md`](futures.md)), and it is what brings the
+  view substrate's export entries with the prompt: the line editor calls
+  those modules, and an entry lands with the milestone that first calls one.
+
 - **Slug and name resolution** (B1b), riding the machinery `--cell` already
   uses
   (`resolveStoredPieceAddress`, `listSpaceSlugs`), so no CLI-surface arc
@@ -241,14 +272,14 @@ schema-derived flag machinery `cf` already exports (`pieceCallRawArgs`,
 `pieceCallInvocation`), so no arc step gates it either. Reaching-in-warms
 lands here, since `set` is what makes stale computed state visible.
 
-**B3 — watch and views** (after A4; view-substrate export entries added
-here). `Cell.sink` with the guard-plus-`idle()` settling discipline; the
-value, list, and structured piece-overview views on the `cf view` pager
-substrate; session watches (`watch`, `watches`, `unwatch`) with prompt
-event lines. Governed by [`views.md`](views.md); it opens with the two
-experiments and the raw-document-subscription proving test from issue
-[#6534](https://github.com/commontoolsinc/labs/issues/6534), falling back
-to the capped deep sink if the seam disappoints.
+**B3 — watch and views** (after A4; the substrate modules it is first to call
+bring their export entries with them). `Cell.sink` with the guard-plus-`idle()`
+settling discipline; the value, list, and structured piece-overview views on
+the `cf view` pager substrate; session watches (`watch`, `watches`, `unwatch`)
+with prompt event lines. Governed by [`views.md`](views.md); it opens with the
+two experiments and the raw-document-subscription proving test from issue
+[#6534](https://github.com/commontoolsinc/labs/issues/6534), falling back to
+the capped deep sink if the seam disappoints.
 
 **B4 — externals and escapes.** `>` and `<` to and from `file:` externals
 under the scheme-absolute rule; the external working location

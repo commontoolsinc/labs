@@ -89,6 +89,20 @@ decisions point here where they defer.
   its v1 member, and `set x - < https://…` joins when a use rules it in.
 - **`search`.** A `search <query>` verb at any place, over what stands
   below it. Pipes over `ls` cover the interim.
+- **A canonical output form.** A second form for everything shuttle prints:
+  RFC 6901 pointers, no shuttle quoting, exactly what `cf` parses. `pwd`,
+  `ls` and `get` all print, so the fork is a dimension of the output rather
+  than one verb's flag, and the switch is a `where` dimension — the form is
+  an ambient property of the whole run, and `where` is the ambient record's
+  one surface (decision 22). It arrives when a caller exists to want it, and
+  the scripting bundle above is where one does: stable machine-readable
+  output is part of that bundle rather than of the interactive surface.
+- **Vim keybindings, as a `where` dimension.** Modal editing at the prompt,
+  an option and never a default. What it costs is a second binding table
+  over motions the line editor already drives, plus the mode the table
+  switches on — which is what B1c's choice of substrate buys, and why that
+  choice is recorded with B1c rather than here
+  ([`build-sequence.md`](build-sequence.md)).
 - **Which space a piece is in.** Naming the space that holds an arbitrary
   piece, rather than the one the place stands in. It is a query over the
   fabric and not a dimension of the ambient record, so it arrives with

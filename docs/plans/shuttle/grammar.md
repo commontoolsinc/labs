@@ -21,6 +21,90 @@ machine" everywhere it appears: line-initial `! <cmd>` runs any local
 program, `|!` is the same escape in a pipeline, and `!cf …` is the special
 case that also injects place-derived flags.
 
+## Splitting the line
+
+`cf` never splits a line: it is handed `Deno.args`, already split by the
+operating system's shell, and the reference grammar it reads those words
+through has no rule for one. Shuttle is handed the line itself, so the split
+is shuttle's, and it is POSIX's:
+
+- **Whitespace separates tokens**, and a run of it separates no more than
+  one. Whitespace is JavaScript's own class, which is what `trim` removes,
+  so a no-break space and the Unicode line separator separate a line as a
+  space does — a reader cannot see either, and the realistic way an operand
+  acquires one is a paste out of a document. The pair stays consistent about
+  them: what separates here is what the printer quotes, so a value holding
+  one still reads back whole.
+- **Single quotes are literal**: what sits between them is the token's,
+  whatever it is.
+- **Double quotes group**, and a backslash between them escapes a double
+  quote or another backslash and is otherwise a character of the token, so
+  `"C:\path"` keeps its backslash. Outside quotes a backslash escapes
+  whatever follows it.
+- **Runs that touch are one token**, so `a"b c"d` is `ab cd`, and an empty
+  pair of quotes is a token that is the empty string.
+- A quote that never closes, and a trailing backslash with nothing to
+  escape, are refused with the reason. Nothing else refuses a line: one
+  that splits says only that, and whether its tokens name anything is
+  every later reading's question.
+- **A line is one line**, and a terminator on it is whoever read it to
+  strip. Line terminators are in the separator class, so text carrying one
+  splits across the break into a single run of tokens: a pasted second line
+  arrives as more operands of the first command rather than as a command of
+  its own. That is a choice and not a necessity — every value the printer
+  writes that holds a line break lands inside quotes, so refusing an
+  unquoted one would leave the round trip below whole. The round trip says
+  the choice is safe, not that it was forced.
+
+Quoting is what makes a value holding whitespace one operand, which is what
+the write surface below needs. `set draft '{"title": "a b"}'` is three
+tokens; the same line with the quotes left off is four, and the JSON's own
+quotes come off two of them, so what `set` would read is `{title:` rather
+than an object. A verb reads a token, and nothing reassembles one.
+
+**On output, a value is printed as a token**: bare where nothing in it would
+end the token early or read as structure, and quoted where something would.
+GNU `ls` has printed names this way since 8.25, so the habit is already in
+every terminal user's hands, and the point of it is that the common case
+stays bare — a slug, a handle, a flag and a path each print as themselves.
+
+What forces quoting is whitespace, either quote, the backslash, and the
+characters this grammar spends on structure rather than on data: the pipe,
+the `!` that marks a local program, the two redirection operators, the `#` a
+wish target and an argument suffix are written with, and the `%` a numbered
+handle is. Each is ruled elsewhere in this document; collected here, they
+are the set a printed value is held against, and a value holding one is
+quoted wherever in the value it sits — a printer is handed a value and no
+position, so it quotes on the character rather than on the reading.
+
+The characters an operand writes an address with — the `/` between segments,
+the `@` of a scope suffix, `-`, `..` — are deliberately not in that set, and
+that exclusion is what makes the output rule worth having rather than a
+detail of it. Those characters are read inside a token by the place
+resolution below rather than by the split, so quoting on them would buy the
+split nothing and would cost the bare printing of every handle, every slug,
+every path and every flag — which is to say nearly everything shuttle
+prints, leaving nothing conditional about conditional quoting.
+
+Some characters this grammar spends on structure are left out all the same,
+and the same cost is the reason. `:` marks a scheme and the `x:` base, and
+it also sits in every handle — `of:fid1:…` — so reserving it would quote
+every reference that prints. `-` is the previous place and the stdin
+sentinel, and it opens every long flag. Each of them is read at the head of
+an operand, or as the whole of one, rather than by the split, which is what
+puts them with the address characters rather than with the reserved ones.
+
+The two halves are one decision: what the printer writes, the split reads
+back as the one value it was given. That is the whole of the guarantee. What
+a reading then makes of that token is decided where the operand is read, and
+whether a quote should reach that decision — so that a key named `..`, or
+one beginning with `#`, has a spelling that names it — is part of the
+relative-segment question `ls` settles
+([`build-sequence.md`](build-sequence.md)). Ruling that it should has a
+known shape and a known cost: the split would start carrying which parts of
+a token were quoted, which grows the value it returns rather than adding a
+layer over it, and every reading that consults quoting reads that value.
+
 ## Place resolution
 
 A reference on the line resolves against the place, right-anchored, exactly
@@ -312,7 +396,8 @@ produce.
 ## Writes
 
 - `set <path> <value>` — the value parses as JSON; a bare word is a string
-  where that is unambiguous. `set <path> -` reads stdin.
+  where that is unambiguous, and a value holding whitespace is quoted, being
+  one token like any other operand. `set <path> -` reads stdin.
 - `edit <path>` — opens `$EDITOR` on the current value, writes back on save
   (the view substrate's editing buffers already do the hard part).
 - `link <target> <path>` — writes a cell reference, the fabric's link
