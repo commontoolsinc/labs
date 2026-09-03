@@ -13,6 +13,7 @@ export {
   FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
+  type FromNativeErrorOptions,
   type MutableFabricArrayLayer,
   type MutableFabricContainerValueLayer,
   type MutableFabricPlainObjectLayer,

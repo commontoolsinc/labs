@@ -22,6 +22,7 @@ import type {
   FabricPrimitive as ApiFabricPrimitive,
   FabricSpecialObject as ApiFabricSpecialObject,
   FabricValue,
+  FromNativeErrorOptions,
   NonNullableFabricValue,
 } from "./api.ts";
 
@@ -156,6 +157,7 @@ export type {
   FabricContainerValue,
   FabricPlainObject,
   FabricValue,
+  FromNativeErrorOptions,
   NonNullableFabricValue,
 };
 

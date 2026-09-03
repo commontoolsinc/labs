@@ -216,12 +216,21 @@ export function shallowFabricFromNativeObjectElseUndefined(
   switch (tagFromNativeValue(value)) {
     case VALUE_TAGS.Error: {
       // Shallow conversion, so the native `Error` is wrapped without recursing
-      // into its internals (`cause`, custom properties): the result is only a
-      // _shallow_ `FabricError`, whose `.cause` may still be a raw `Error`. A
-      // caller needing a proper (fully-`FabricValue`) one uses the deep
-      // `fabricFromNativeValue()`; the cell write paths do so at the points
+      // into its internals: `cause` and the custom properties are stored as
+      // they stand, and the result is only a _shallow_ `FabricError`, whose
+      // `.cause` may still be a raw `Error`. A caller needing a proper
+      // (fully-`FabricValue`) one uses the deep `fabricFromNativeValue()`,
+      // which rebuilds those slots; the cell write paths do so at the points
       // where they treat a `FabricError` as an atomic leaf.
-      return Object.freeze(FabricError.fromNativeError(value as Error));
+      //
+      // The identity converter is a type lie: it says the values it hands
+      // back are `FabricValue`s, and they are whatever the native error held.
+      // TODO(danfuzz): Address this type lie, for example by giving the deep
+      // walk an error arm of its own so that no shallow instance is ever
+      // built.
+      return Object.freeze(FabricError.fromNativeError(value as Error, {
+        convert: (nested) => nested as FabricValue,
+      }));
     }
 
     case VALUE_TAGS.Date: {

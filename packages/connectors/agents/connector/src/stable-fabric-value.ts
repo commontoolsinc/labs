@@ -44,17 +44,17 @@ function hasToJson(
 function replaceCellsWithLinks(
   value: unknown,
   seen: WeakMap<object, unknown>,
-  activeToJson = new WeakSet<object>(),
+  active = new WeakSet<object>(),
 ): unknown {
   if (isCellResultForDereferencing(value)) {
     return replaceCellsWithLinks(
       getCellOrThrow(value).getAsLink(),
       seen,
-      activeToJson,
+      active,
     );
   }
   if (isCell(value)) {
-    return replaceCellsWithLinks(value.getAsLink(), seen, activeToJson);
+    return replaceCellsWithLinks(value.getAsLink(), seen, active);
   }
   if (Array.isArray(value)) {
     if (!isArrayWithOnlyIndexProperties(value)) {
@@ -69,7 +69,7 @@ function replaceCellsWithLinks(
         converted[index] = replaceCellsWithLinks(
           value[index],
           seen,
-          activeToJson,
+          active,
         );
       } else {
         converted.length = index + 1;
@@ -82,22 +82,23 @@ function replaceCellsWithLinks(
     const error = value as Error;
     const existing = seen.get(error);
     if (existing) return existing;
-    const converted = FabricError.fromNativeError(error);
-    seen.set(error, converted);
-    if (error.cause !== undefined) {
-      converted.cause = replaceCellsWithLinks(
-        error.cause,
-        seen,
-        activeToJson,
-      ) as FabricValue;
+    if (active.has(error)) {
+      throw new Error("Cannot store circular reference through an error");
     }
-    for (const [key, child] of converted.extraEntries()) {
-      converted.setExtra(
-        key,
-        replaceCellsWithLinks(child, seen, activeToJson) as FabricValue,
-      );
+    // `cause` and the extras are converted by this walk, and the instance is
+    // built from the results, so a reference back to `error` from inside them
+    // has nothing to resolve to and is refused.
+    active.add(error);
+    try {
+      const converted = FabricError.fromNativeError(error, {
+        convert: (nested) =>
+          replaceCellsWithLinks(nested, seen, active) as FabricValue,
+      });
+      seen.set(error, converted);
+      return converted;
+    } finally {
+      active.delete(error);
     }
-    return converted;
   }
   if (
     nativeTag !== null &&
@@ -108,20 +109,20 @@ function replaceCellsWithLinks(
   }
   if (hasToJson(value)) {
     if (seen.has(value)) return seen.get(value);
-    if (activeToJson.has(value)) {
+    if (active.has(value)) {
       throw new Error("Cannot store circular toJSON conversion");
     }
-    activeToJson.add(value);
+    active.add(value);
     try {
       const converted = replaceCellsWithLinks(
         value.toJSON(),
         seen,
-        activeToJson,
+        active,
       );
       seen.set(value, converted);
       return converted;
     } finally {
-      activeToJson.delete(value);
+      active.delete(value);
     }
   }
   if (isPlainRecord(value)) {
@@ -133,7 +134,7 @@ function replaceCellsWithLinks(
     seen.set(value, converted);
     for (const [key, child] of Object.entries(value)) {
       Object.defineProperty(converted, key, {
-        value: replaceCellsWithLinks(child, seen, activeToJson),
+        value: replaceCellsWithLinks(child, seen, active),
         configurable: true,
         enumerable: true,
         writable: true,

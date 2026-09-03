@@ -327,9 +327,24 @@ export interface FabricError extends FabricInstance {
   extraEntries(): IterableIterator<[string, FabricValue]>;
 }
 
+/** Options accepted by `FabricError.fromNativeError()`. */
+export interface FromNativeErrorOptions {
+  /**
+   * Converter applied to the error's `cause` and to each of its custom
+   * enumerable properties, whose result is what the instance holds. When
+   * absent, a value that is already a valid `FabricValue` is held as it
+   * stands, and anything else is converted the way `fabricFromNativeValue()`
+   * converts it, without freezing.
+   */
+  readonly convert?: (value: unknown) => FabricValue;
+}
+
 export interface FabricErrorConstructor {
   new (state: FabricErrorState): FabricError;
-  fromNativeError(error: Error): FabricError;
+  fromNativeError(
+    error: Error,
+    options?: FromNativeErrorOptions,
+  ): FabricError;
   prototype: FabricError;
 }
 
