@@ -127,6 +127,8 @@ describe("citation drift", () => {
         "AUD-9",
         "AUD-13",
         "AUD-15",
+        "AUD-22",
+        "AUD-23",
       ]);
     });
   });

@@ -21,6 +21,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { FileSystemHarnessArtifactStore } from "../../src/artifacts.ts";
+import { KNOWN_DEFECT_CHECKS } from "../../audit/checks/known-defects.ts";
 import { CfHarnessEngine } from "../../src/engine.ts";
 import { CfHarnessPromptLoop } from "../../src/prompt-loop.ts";
 import type { RunPatternToolSuccessOutput } from "../../src/tools/run-pattern.ts";
@@ -185,18 +186,26 @@ describe("cfc property: egress of a labeled flow", () => {
       expect(episode.output.value).toEqual({ total: 2 });
     });
 
-    it("leaves the audit with no failing check", async () => {
+    it("leaves no check about what this run did failing", async () => {
       // The guard against the audit becoming an always-fails alarm. A check
       // that starts over-firing fails here rather than in a nightly report
       // nobody reads.
+      //
+      // The Group E checks are excluded, and only they: each is a defect we
+      // already know about, written to fail until it is fixed, so its finding
+      // here is the register working rather than a check over-firing. The
+      // exact set they report is the assertion below.
       const episode = await runEpisode({ withSource: false });
 
       const audit = await auditArtifacts(episode.runDir);
       // Without this the assertion below would hold on an audit that read
       // nothing at all.
       expect(audit.results.length).toBeGreaterThan(0);
+      const knownDefects = new Set(
+        KNOWN_DEFECT_CHECKS.map((check) => check.id),
+      );
       const failing = audit.results.filter((result) =>
-        result.verdict === "fail"
+        result.verdict === "fail" && !knownDefects.has(result.checkId)
       );
       expect(messagesOf(failing)).toBe("");
     });
@@ -216,8 +225,17 @@ describe("cfc property: egress of a labeled flow", () => {
       // AUD-16 — a corpus holding one permitted run has no refusal in it.
       //          P-deny-egress is where that check is exercised.
       // AUD-18 — one run records no posture, so there is nothing to compare.
-      // AUD-19 — no surface publishes the shell's render ceiling yet, so the
-      //          line item is inconclusive by construction until one does.
+      //
+      // AUD-22 IS a defect, and is here because it is a known one: the
+      // episode's binding mints direct-command authority with no digest of
+      // the value and a subject that names no principal, which is H2. It
+      // leaves this set when the mint sites are fixed.
+      //
+      // AUD-21 is absent from the set on purpose, and its absence is the
+      // check discriminating rather than the check being asleep: this run's
+      // one side effect is `run_pattern`, the one tool that does bottom out
+      // in a sink check, so its admitting decision carries a release record.
+      // It fails on a run of sandbox tools, which is H9.
       const episode = await runEpisode({ withSource: false });
 
       const audit = await auditArtifacts(episode.runDir);
@@ -231,8 +249,8 @@ describe("cfc property: egress of a labeled flow", () => {
         "AUD-13 inconclusive",
         "AUD-16 warn",
         "AUD-18 inconclusive",
-        "AUD-19 inconclusive",
         "AUD-2 warn",
+        "AUD-22 fail",
         "AUD-9 warn",
       ]);
     });

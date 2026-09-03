@@ -21,7 +21,7 @@ import { MAX_ENFORCEMENT_SINK_CEILINGS } from "@commonfabric/runner";
 
 import { harnessFabricSessionPosture } from "../../src/cfc-posture.ts";
 import type { HarnessRunState } from "../../src/run-state.ts";
-import { auditDeployment, CORPUS_RUN_ID } from "../checks/deployment.ts";
+import { auditDeployment } from "../checks/deployment.ts";
 import { readToolshedMeta } from "../cli.ts";
 import { loadRunFamily, type RunFamily } from "../evidence.ts";
 import { parseExpectedPosture } from "../expected-posture.ts";
@@ -596,16 +596,18 @@ describe("Group D deployment checks", () => {
     });
   });
 
-  describe("AUD-19 render ceiling", () => {
-    it("stays unattestable, because nothing publishes it", () => {
+  describe("the Group D register", () => {
+    it("registers no check that could never return a verdict", () => {
+      // A line item that is `inconclusive` on every tree forever reports the
+      // same thing about a deployment that publishes what it is asked for as
+      // about one that does not. AUD-19 was one, about the shell renderer's
+      // profile, which is not a profile cf-harness is a candidate for.
       const results = auditDeployment({
         families: [family],
         paths: [FIXTURE_RUNS_DIR],
         expectRefusals: false,
       });
-      const render = results.find((result) => result.checkId === "AUD-19");
-      expect(render?.verdict).toBe("inconclusive");
-      expect(render?.runId).toBe(CORPUS_RUN_ID);
+      expect(results.map((result) => result.checkId)).not.toContain("AUD-19");
     });
   });
 });

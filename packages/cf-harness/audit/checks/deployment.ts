@@ -563,30 +563,6 @@ const postureUniformity = (audit: DeploymentAudit): CheckResult => {
   );
 };
 
-//
-// AUD-19 render ceiling
-//
-
-/**
- * The render ceiling, which nothing publishes.
- *
- * A permanent line item rather than a check that could pass: the shell's
- * render ceiling is a CFC decision an audit of these artifacts cannot reach,
- * because no surface writes it down. Reporting it as `inconclusive` every
- * time is the honest answer — the alternative is an audit whose silence about
- * the render ceiling reads as a clean bill for it. It retires when a
- * publisher exists.
- */
-const renderCeiling = (audit: DeploymentAudit): CheckResult =>
-  corpusResult(
-    audit,
-    "AUD-19",
-    "render ceiling",
-    extendsClause("AH-CFC-14"),
-    "inconclusive",
-    "no surface publishes the shell's render ceiling, so this audit establishes nothing about it; the line item retires when a publisher exists",
-  );
-
 /** Every Group D finding, in id order. */
 export const auditDeployment = (
   audit: DeploymentAudit,
@@ -596,6 +572,6 @@ export const auditDeployment = (
   if (toolshed !== undefined) {
     results.push(toolshed);
   }
-  results.push(postureUniformity(audit), renderCeiling(audit));
+  results.push(postureUniformity(audit));
   return results;
 };

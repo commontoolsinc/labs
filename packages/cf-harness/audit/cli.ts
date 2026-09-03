@@ -32,6 +32,11 @@ import {
   type ToolshedMeta,
 } from "./checks/deployment.ts";
 import { RUN_CHECKS } from "./checks/registry.ts";
+import {
+  manifestReconciliationFails,
+  reconcileConformanceManifest,
+  renderConformancePosition,
+} from "./conformance-manifest.ts";
 import { auditRunFamily } from "./checks/structural.ts";
 import { discoverRunFamilies, type RunFamily } from "./evidence.ts";
 import {
@@ -262,6 +267,13 @@ const renderFinding = (result: CheckResult): string => {
     );
     lines.push(`      "${citation.quote}"`);
   }
+  if (result.knownDefect !== undefined) {
+    // A known defect's finding is not news, so what a reader needs from it is
+    // where the work is rather than more argument that it is real.
+    lines.push(
+      `    known defect, tracked under ${result.knownDefect.issue} — ${result.knownDefect.why}`,
+    );
+  }
   for (const evidence of result.evidence) {
     const where = [evidence.artifact, evidence.pointer].filter((part) =>
       part !== undefined
@@ -366,15 +378,27 @@ export const runAuditCli = async (
     );
     return 2;
   }
+  // Where we stand against the profile, printed on every run rather than left
+  // in a document nobody re-reads — and held to the verdicts beside it, so a
+  // status nothing tests cannot be asserted.
+  const conformance = reconcileConformanceManifest(results);
   if (options.expectedFailures === undefined) {
+    // One document, so a caller parsing `--json` gets the same top level
+    // whichever flags were passed and a field it does not read is absent
+    // rather than the whole document being a different kind of thing.
     write(
       options.json
-        ? JSON.stringify(results, null, 2)
-        : renderAuditReport(results, options.failOn),
+        ? JSON.stringify({ results, conformance }, null, 2)
+        : `${renderConformancePosition(conformance)}\n\n${
+          renderAuditReport(results, options.failOn)
+        }`,
     );
-    return results.some((result) =>
-        verdictFailsThreshold(result.verdict, options.failOn)
-      )
+    // A manifest disagreeing with the checks covering it is our account of
+    // ourselves being wrong, which is a failure whatever the threshold.
+    return manifestReconciliationFails(conformance) ||
+        results.some((result) =>
+          verdictFailsThreshold(result.verdict, options.failOn)
+        )
       ? 1
       : 0;
   }
@@ -412,18 +436,25 @@ export const runAuditCli = async (
     );
     return 2;
   }
-  // One document in JSON mode: the reconciliation is part of the answer, not
-  // a footer after it, and a caller piping this into a parser gets one parse.
+  // One document in JSON mode: the position and the reconciliation are part
+  // of the answer, not footers after it, and a caller piping this into a
+  // parser gets one parse.
   write(
     options.json
-      ? JSON.stringify({ results, reconciliation }, null, 2)
-      : `${
+      ? JSON.stringify({ results, conformance, reconciliation }, null, 2)
+      : `${renderConformancePosition(conformance)}\n\n${
         renderAuditReport(results, options.failOn, {
           exitDecidedBy: "expected-failures",
         })
       }\n${renderReconciliation(reconciliation)}`,
   );
-  return reconciliationFails(reconciliation) ? 1 : 0;
+  // The expected-failures list excuses findings it names. It does not excuse
+  // the manifest disagreeing with them: that is our account of ourselves being
+  // wrong, which no ledger entry is a reason to pass.
+  return manifestReconciliationFails(conformance) ||
+      reconciliationFails(reconciliation)
+    ? 1
+    : 0;
 };
 
 if (import.meta.main) {

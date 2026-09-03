@@ -25,11 +25,17 @@ import type {
   HarnessPolicyDecisionRecord,
   HarnessPolicyTrace,
 } from "../../src/contracts/policy-trace.ts";
+import type { PromptSlotBinding } from "../../src/contracts/prompt-slot.ts";
 import type { HarnessRunReport } from "../../src/contracts/run-report.ts";
+import { createToolOutputId } from "../../src/contracts/tool-result.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
 import type { HarnessRunState } from "../../src/run-state.ts";
+import { BUILTIN_TOOL_REGISTRY } from "../../src/tools/registry.ts";
 import { RUN_CHECKS } from "../checks/registry.ts";
-import { auditRunFamily } from "../checks/structural.ts";
+import {
+  auditRunFamily,
+  HOST_AUTHORED_OUTPUT_WRITERS,
+} from "../checks/structural.ts";
 import { harnessFabricSessionPosture } from "../../src/cfc-posture.ts";
 import type { HarnessFabricSessionCfcPosture } from "../../src/run-state.ts";
 import {
@@ -75,6 +81,28 @@ const turnsOnly = (
   expect(verdicts(seeded(mutate))).toEqual({
     ...CLEAN,
     [at(checkId)]: expected,
+  });
+};
+
+/**
+ * Asserts that seeding `mutate` turns exactly the verdicts `expected` names,
+ * and leaves every other verdict of the family where it was.
+ *
+ * The plural of {@link turnsOnly}, for a mutation two checks are each
+ * separately right to report on.
+ */
+const turnsInto = (
+  expected: Record<string, CheckVerdict>,
+  mutate: (root: RunEvidence) => void,
+): void => {
+  expect(verdicts(seeded(mutate))).toEqual({
+    ...CLEAN,
+    ...Object.fromEntries(
+      Object.entries(expected).map(([checkId, verdict]) => [
+        at(checkId),
+        verdict,
+      ]),
+    ),
   });
 };
 
@@ -141,6 +169,32 @@ const dropInvocationContexts = (
   trace.cfcInvocationContexts = (trace.cfcInvocationContexts ?? []).filter(
     (context) => !drop(context),
   );
+};
+
+/**
+ * Adds an invocation context to both artifacts that carry them, built from the
+ * fixture's own so it is the shape the mint site produces rather than one
+ * written to suit a check.
+ */
+const seedInvocationContext = (
+  run: RunEvidence,
+  overrides: Partial<HarnessCfcInvocationContext>,
+): void => {
+  const state = stateOf(run);
+  const template = (state.cfcInvocationContexts ?? [])[0];
+  if (template === undefined) {
+    throw new Error("the fixture recorded no invocation context to build on");
+  }
+  const context = { ...structuredClone(template), ...overrides };
+  state.cfcInvocationContexts = [
+    ...(state.cfcInvocationContexts ?? []),
+    context,
+  ];
+  const trace = traceOf(run);
+  trace.cfcInvocationContexts = [
+    ...(trace.cfcInvocationContexts ?? []),
+    context,
+  ];
 };
 
 /** Adds a file to the run's `tool-outputs/`, as a reader would have found it. */
@@ -243,12 +297,24 @@ const sessionTurnsOnly = (
 
 describe("seeded violations", () => {
   describe("the clean fixture", () => {
-    it("finds nothing to report against any check", () => {
+    it("reports nothing but the defects the register names", () => {
+      // The fixture is a captured run of a system that has the gaps the Group
+      // E checks are about, so a clean tree is no longer a silent one. What
+      // has to stay true is that the noise is exactly the known set: a Group
+      // A or Group C finding here is a regression, and this is where it
+      // surfaces.
       expect(
-        Object.entries(CLEAN).filter(([, verdict]) =>
-          verdict !== "pass" && verdict !== "not-applicable"
+        Object.fromEntries(
+          Object.entries(CLEAN).filter(([, verdict]) =>
+            verdict !== "pass" && verdict !== "not-applicable"
+          ),
         ),
-      ).toEqual([]);
+      ).toEqual({
+        [at("AUD-21")]: "fail",
+        [at("AUD-22")]: "fail",
+        [at("AUD-23")]: "warn",
+        [on("AUD-22", `${FIXTURE_RUN_ID}.subagent.1`)]: "fail",
+      });
     });
 
     it("exercises every check on the run that carries the delegation", () => {
@@ -352,6 +418,31 @@ describe("seeded violations", () => {
         );
       }))).toEqual(CLEAN);
     });
+
+    it("fails an unlisted tool output claiming a host writer's `type`", () => {
+      // The exemption is the writing path, which `persistToolOutput` composed
+      // and a model never reaches. This file took a `bash` call's path and
+      // says it took the sidecar's, which is the evasion an exemption keyed on
+      // a field inside the artifact would have admitted.
+
+      turnsOnly("AUD-3", "fail", (root) => {
+        seedToolOutput(root, `${FIXTURE_RUN_ID}_bash_4-bash.json`, {
+          type: "cf-harness.run-pattern-source",
+          outputId: `${FIXTURE_RUN_ID}:bash:4`,
+          stdout: "unrecorded\n",
+        });
+      });
+    });
+
+    it("names no builtin tool among the writers it exempts", () => {
+      // A writer name that were also a tool id would exempt every output of
+      // that tool, because the two share the one filename suffix.
+      expect(
+        [...BUILTIN_TOOL_REGISTRY.keys()].filter((toolId) =>
+          HOST_AUTHORED_OUTPUT_WRITERS.has(toolId)
+        ),
+      ).toEqual([]);
+    });
   });
 
   describe("AUD-4 denial channel", () => {
@@ -413,8 +504,12 @@ describe("seeded violations", () => {
       // nothing else has a disagreement to report — that shape is AUD-1's
       // finding. What is left is the reading AUD-7 owns: a diagnostic run
       // whose evidence must not be taken for enforcement.
+      //
+      // AUD-21 leaves the register with it, and correctly: a diagnostic run
+      // admits its side effects without claiming to have decided about them,
+      // so there is no admission for the known defect to be about.
 
-      turnsOnly("AUD-7", "warn", (root) => {
+      turnsInto({ "AUD-7": "warn", "AUD-21": "not-applicable" }, (root) => {
         // Every enforcing reason code has an observe-family counterpart of
         // the same name, so the substitution lands inside the closed union.
         const observing = (
@@ -512,6 +607,224 @@ describe("seeded violations", () => {
     });
   });
 
+  describe("AUD-21 label-consulting admission", () => {
+    it("fails today, on a run whose side effects were admitted on authority", () => {
+      // The defect direction, and it needs no seeding: nothing but
+      // `run_pattern` reaches a boundary that consults a label, so a captured
+      // run of sandbox tools carries no `release` record at all.
+      expect(CLEAN[at("AUD-21")]).toBe("fail");
+    });
+
+    it("passes once each admitting decision carries a release record", () => {
+      // The direction that makes this a check rather than a constant: the
+      // shape a fix produces, where each side effect's own decision states
+      // what a boundary measured its flow against.
+      turnsOnly("AUD-21", "pass", (root) => {
+        const admitted = new Set(
+          reportOf(root).toolActivity
+            .filter((activity) =>
+              activity.effectClass === "side-effect" &&
+              activity.executionStatus === "completed"
+            )
+            .map((activity) => activity.toolCallId),
+        );
+        for (const decision of traceOf(root).decisions) {
+          if (!admitted.has(decision.toolCallId)) continue;
+          decision.release = {
+            reasonCode: "cfc_release_allowed",
+            boundary: "release",
+            sink: "sandbox.command",
+            ceiling: [],
+          };
+        }
+      });
+    });
+  });
+
+  describe("AUD-22 prompt-slot binding", () => {
+    it("fails today, on a binding whose subject is not a principal", () => {
+      // The CLI binds a workspace path or a resume-run id into the field
+      // AH-CFC-3 reserves for an authenticated subject, and no mint site
+      // populates a value digest.
+      expect(CLEAN[at("AUD-22")]).toBe("fail");
+    });
+
+    it("passes a binding carrying a subject DID and a value digest", () => {
+      turnsOnly("AUD-22", "pass", (root) => {
+        const bind = (binding: Mutable<PromptSlotBinding> | undefined) => {
+          if (binding === undefined) return;
+          binding.subject = "did:key:z6MkseededPromptSubject";
+          binding.valueDigest = "sha256:" + "a".repeat(64);
+        };
+        bind(stateOf(root).promptSlotBinding);
+        for (const activity of reportOf(root).toolActivity) {
+          bind(activity.promptSlot);
+        }
+        for (const decision of traceOf(root).decisions) {
+          bind(decision.promptSlot);
+        }
+      });
+    });
+
+    it("has nothing to say about a run that minted no direct-command authority", () => {
+      // AH-CFC-3 binds what direct-command authority must rest on, so a run
+      // that minted none is outside the clause rather than failing it. The
+      // distinction matters because `not-applicable` and `pass` are different
+      // answers here: this run did not satisfy the obligation, it never
+      // reached it.
+
+      turnsOnly("AUD-22", "not-applicable", (root) => {
+        const demote = (binding: Mutable<PromptSlotBinding> | undefined) => {
+          if (binding === undefined) return;
+          binding.role = "context";
+        };
+        demote(stateOf(root).promptSlotBinding);
+        for (const activity of reportOf(root).toolActivity) {
+          demote(activity.promptSlot);
+        }
+        for (const decision of traceOf(root).decisions) {
+          demote(decision.promptSlot);
+        }
+        for (const context of stateOf(root).cfcInvocationContexts ?? []) {
+          demote(context.promptSlot);
+        }
+        for (const context of traceOf(root).cfcInvocationContexts ?? []) {
+          demote(context.promptSlot);
+        }
+      });
+    });
+
+    it("fails a binding carrying a digest but still no principal", () => {
+      // The two halves are separately required, so a fix landing one of them
+      // must not read as the obligation closing.
+      turnsOnly("AUD-22", "fail", (root) => {
+        const digest = (binding: Mutable<PromptSlotBinding> | undefined) => {
+          if (binding === undefined) return;
+          binding.valueDigest = "sha256:" + "b".repeat(64);
+        };
+        digest(stateOf(root).promptSlotBinding);
+        for (const activity of reportOf(root).toolActivity) {
+          digest(activity.promptSlot);
+        }
+        for (const decision of traceOf(root).decisions) {
+          digest(decision.promptSlot);
+        }
+      });
+    });
+  });
+
+  describe("AUD-23 delegation ceiling", () => {
+    it("warns today, on a delegation binding tools and no ceiling", () => {
+      expect(CLEAN[at("AUD-23")]).toBe("warn");
+    });
+
+    it("still sees the delegation when the run state loses it", () => {
+      // The union's point. `subagentRuns` is carried by both artifacts, and
+      // reading only the run state would report a run that delegated as one
+      // that did not — turning a known gap into `not-applicable`, which is a
+      // silence that reads like a clean bill.
+
+      expect(verdicts(seeded((root) => {
+        delete stateOf(root).subagentRuns;
+      }))).toEqual(CLEAN);
+    });
+
+    it("weakens a clean answer when the two artifacts disagree about children", () => {
+      // Containment, not equality: an interrupted write leaves one artifact a
+      // subset of the other and passes. Each holding a child the other lost is
+      // divergence, and then "every delegation bound a ceiling" is not a claim
+      // these artifacts support — so a ceiling on every child they still hold
+      // warns rather than passes.
+
+      turnsOnly("AUD-23", "warn", (root) => {
+        const state = stateOf(root);
+        const report = reportOf(root);
+        for (const delegation of state.subagentRuns ?? []) {
+          (delegation.manifest as unknown as Record<string, unknown>)
+            .confidentialityCeiling = ["Confidential(did:key:zSeeded)"];
+        }
+        const orphan = structuredClone(report.subagentRuns![0]!);
+        orphan.childRunId = `${FIXTURE_RUN_ID}.subagent.2`;
+        (orphan.manifest as unknown as Record<string, unknown>)
+          .confidentialityCeiling = ["Confidential(did:key:zSeeded)"];
+        report.subagentRuns = [orphan];
+      });
+    });
+
+    it("passes a delegation whose manifest records a ceiling", () => {
+      // Written onto the record rather than through the type, because the
+      // type has no such field — which is the defect. The check reads what a
+      // tree holds, so it turns green the day a delegation writes one.
+      turnsOnly("AUD-23", "pass", (root) => {
+        for (const delegation of stateOf(root).subagentRuns ?? []) {
+          (delegation.manifest as unknown as Record<string, unknown>)
+            .confidentialityCeiling = ["Confidential(did:key:zSeeded)"];
+        }
+      });
+    });
+  });
+
+  describe("AUD-24 cell-labels snapshot", () => {
+    it("warns a run that recorded no cell-labels read and attempted none", () => {
+      // And AUD-9 does not move, which is the point of the split. The
+      // cell-labels snapshot is not among the six artifacts AH-CFC-16
+      // enumerates, so a run missing it has not failed that clause.
+      turnsOnly("AUD-24", "warn", (root) => {
+        root.cellLabels = {
+          status: "absent",
+          path: root.cellLabels.path,
+        };
+        delete stateOf(root).cellLabels;
+      });
+    });
+
+    it("fails an enforcing run whose attempted cell-labels read failed", () => {
+      // A different fact from the one above, and the artifacts distinguish
+      // them: this run held a ref, asked, and the answer is gone.
+      turnsOnly("AUD-24", "fail", (root) => {
+        root.cellLabels = {
+          status: "absent",
+          path: root.cellLabels.path,
+        };
+        const state = stateOf(root);
+        delete state.cellLabels;
+        state.failureRecords = [
+          ...(state.failureRecords ?? []),
+          {
+            type: "cf-harness.failure-record",
+            at: "2026-09-03T00:00:00.000Z",
+            source: "cell_labels",
+            kind: "unknown",
+            detail: "the space refused the read",
+          },
+        ];
+      });
+    });
+
+    it("passes a run holding the snapshot", () => {
+      // The other direction: the fixture keeps one, and the check reaches it.
+      expect(CLEAN[at("AUD-24")]).toBe("pass");
+    });
+
+    it("carries the issue on the finding it cannot decide", () => {
+      // The open question is which of the two absences AH-CFC-16 should want.
+      // Until that is settled the check reports the fact and names where the
+      // question is being decided.
+      const audited = auditRunFamily(
+        seeded((root) => {
+          root.cellLabels = { status: "absent", path: root.cellLabels.path };
+          delete stateOf(root).cellLabels;
+        }),
+        RUN_CHECKS,
+      );
+      const finding = audited.find((result) =>
+        result.checkId === "AUD-24" && result.runId === FIXTURE_RUN_ID
+      );
+      expect(finding?.knownDefect?.issue).toBe("CT-2210");
+      expect(finding?.message).toContain(finding?.knownDefect?.detail);
+    });
+  });
+
   describe("AUD-13 conforming matrix point", () => {
     it("fails a strict run whose flow labels are not persisted", () => {
       sessionTurnsOnly("AUD-13", "fail", (posture) => {
@@ -573,6 +886,67 @@ describe("seeded violations", () => {
         [at("AUD-2")]: "warn",
         [at("AUD-9")]: "warn",
       });
+    });
+
+    it("fails a run where one tool lost every context it recorded", () => {
+      // The blind spot this witness exists for. Which tools transport CFC
+      // evidence is read off the contexts that survived, so a tool whose
+      // contexts ALL vanished leaves that set and its calls read as
+      // host-side — a run that never went near the substrate rather than one
+      // whose evidence went missing. A surviving context for another tool is
+      // what hides it: the run holds contexts, so the warning for a run that
+      // holds none does not fire either.
+      //
+      // The numbering is what still says so. `bash` was numbered 1 and 2, and
+      // a run retaining only 3 is missing two contexts it minted.
+
+      expect(verdicts(seeded((root) => {
+        seedInvocationContext(root, {
+          sequence: 3,
+          toolId: "web_fetch",
+          toolOutputId: createToolOutputId(FIXTURE_RUN_ID, "web_fetch", 3),
+        });
+        dropInvocationContexts(root, (context) => context.toolId === "bash");
+      }))).toEqual({
+        ...CLEAN,
+        [at("AUD-9")]: "fail",
+      });
+    });
+
+    it("fails two artifacts that each lost a context the other kept", () => {
+      // The union's own blind spot. Read together, `[1]` and `[2]` union back
+      // to a complete sequence and nothing looks lost; read either alone, a
+      // context is missing. Containment is what tells this from an
+      // interrupted write, where the trace is a subset of the live record.
+
+      turnsOnly("AUD-9", "fail", (root) => {
+        const trace = traceOf(root);
+        trace.cfcInvocationContexts = (trace.cfcInvocationContexts ?? [])
+          .filter((context) => context.sequence !== 2);
+        const state = stateOf(root);
+        state.cfcInvocationContexts = (state.cfcInvocationContexts ?? [])
+          .filter((context) => context.sequence !== 1);
+      });
+    });
+
+    it("recovers a context dropped from one artifact and left in the other", () => {
+      // Two artifacts carry the list, and the reader takes their union, so
+      // deleting a copy from one of them recovers rather than hides. Reading
+      // the first artifact that answered would have made this a run that
+      // minted one context, and the call the deleted one explained would have
+      // read as evidence gone missing.
+
+      expect(verdicts(seeded((root) => {
+        const trace = traceOf(root);
+        trace.cfcInvocationContexts = (trace.cfcInvocationContexts ?? [])
+          .filter((context) => context.sequence !== 1);
+      }))).toEqual(CLEAN);
+    });
+
+    it("passes a run holding every context it minted, in both artifacts", () => {
+      // The other direction: the same shape with nothing removed is the
+      // fixed shape, and the check has to be able to reach it.
+      expect(CLEAN[at("AUD-9")]).toBe("pass");
     });
   });
 

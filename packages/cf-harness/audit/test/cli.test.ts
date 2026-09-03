@@ -180,15 +180,22 @@ describe("cli", () => {
   });
 
   describe("runAuditCli()", () => {
-    it("returns 0 over the clean fixture at the default threshold", async () => {
+    it("reports the fixture's known defects at the default threshold", async () => {
+      // The fixture is a captured run of a system with the gaps the Group E
+      // checks report, so a green exit here would be the audit failing to say
+      // what it knows. The Group A and Group C checks are what still find
+      // nothing: no clause about what the run DID is contradicted.
       const written: string[] = [];
 
       expect(
         await runAuditCli([FIXTURE_RUN_DIR], (text) => {
           written.push(text);
         }),
-      ).toBe(0);
-      expect(written.join("")).toContain("FAIL 0");
+      ).toBe(1);
+      const report = written.join("");
+      expect(report).toContain("AUD-21 label-consulting admission");
+      expect(report).toContain("AUD-22 prompt-slot binding");
+      expect(report).toContain("AUD-23 delegation ceiling");
     });
 
     it("marks a finding that rests on our judgment rather than the specification", () => {
@@ -215,18 +222,19 @@ describe("cli", () => {
       expect(rendered).toContain("states this requirement");
     });
 
-    it("returns 0 over the clean fixture asked for JSON", async () => {
+    it("cites a clause on every result it emits as JSON", async () => {
       const written: string[] = [];
 
       expect(
         await runAuditCli([FIXTURE_RUN_DIR, "--json"], (text) => {
           written.push(text);
         }),
-      ).toBe(0);
+      ).toBe(1);
+      const document = JSON.parse(written.join("")) as {
+        results: CheckResult[];
+      };
       expect(
-        (JSON.parse(written.join("")) as CheckResult[]).every((one) =>
-          one.citations.length > 0
-        ),
+        document.results.every((one) => one.citations.length > 0),
       ).toBe(true);
     });
 
@@ -258,15 +266,13 @@ describe("cli", () => {
       });
       const idsOf = (written: string[]) =>
         new Set(
-          (JSON.parse(written.join("")) as CheckResult[]).map((one) =>
-            one.checkId
-          ),
+          (JSON.parse(written.join("")) as { results: CheckResult[] }).results
+            .map((one) => one.checkId),
         );
       expect([...idsOf(plain)].filter((id) => id.startsWith("AUD-1"))).not
         .toContain("AUD-16");
       expect(idsOf(asked).has("AUD-16")).toBe(true);
       expect(idsOf(asked).has("AUD-18")).toBe(true);
-      expect(idsOf(asked).has("AUD-19")).toBe(true);
     });
 
     it("returns 1 when a corpus declared adversarial recorded no release refusal", async () => {
@@ -299,9 +305,8 @@ describe("cli", () => {
         },
       );
       expect(
-        (JSON.parse(written.join("")) as CheckResult[]).some((one) =>
-          one.checkId === "AUD-18"
-        ),
+        (JSON.parse(written.join("")) as { results: CheckResult[] }).results
+          .some((one) => one.checkId === "AUD-18"),
       ).toBe(true);
     });
 
@@ -358,9 +363,11 @@ describe("cli", () => {
           written.push(text);
         },
       );
-      const toolshed = (JSON.parse(written.join("")) as CheckResult[]).find((
-        one,
-      ) => one.checkId === "AUD-17");
+      const toolshed =
+        (JSON.parse(written.join("")) as { results: CheckResult[] }).results
+          .find((
+            one,
+          ) => one.checkId === "AUD-17");
       expect(toolshed?.verdict).toBe("inconclusive");
     });
 
@@ -480,12 +487,14 @@ describe("cli", () => {
       expect(output).toContain("CT-0000");
     });
 
-    it("returns 0 over a clean fixture whose list names nothing", async () => {
-      // The fixture produces no finding at the default threshold, so an empty
-      // list is exactly right and the run is green.
+    it("returns 1 over a fixture whose known defects the list does not name", async () => {
+      // The fixture is a captured run of a system with the Group E gaps in it,
+      // so an empty list is not "nothing to excuse" — it is a list that names
+      // none of the findings the run produces, and each is a finding no entry
+      // covers. Green here would be the ledger excusing by omission.
       const { code, output } = await auditWithList({ expected: [] });
 
-      expect(code).toBe(0);
+      expect(code).toBe(1);
       expect(output).toContain(
         "are reconciled against the expected-failures list",
       );
@@ -498,7 +507,11 @@ describe("cli", () => {
       const { output } = await auditWithList({ expected: [] }, ["--json"]);
 
       const parsed = JSON.parse(output) as Record<string, unknown>;
-      expect(Object.keys(parsed).sort()).toEqual(["reconciliation", "results"]);
+      expect(Object.keys(parsed).sort()).toEqual([
+        "conformance",
+        "reconciliation",
+        "results",
+      ]);
       expect(Array.isArray(parsed.results)).toBe(true);
     });
   });

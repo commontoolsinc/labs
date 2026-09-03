@@ -63,6 +63,12 @@ const MATRIX_SPEC = "docs/specs/cfc-enforcement-matrix.md";
  * is numbered and by a section-scoped key where it is not.
  */
 export const SPEC_CITATIONS = {
+  "AH-CFC-3": {
+    doc: CFC_SPEC,
+    clause: "AH-CFC-3",
+    quote:
+      "Direct-command authority MUST depend on trusted `PromptSlotBound` evidence binding the kernel name, the authenticated subject, the named surface, the slot role, and a digest of the exact value carrying the authority.",
+  },
   "AH-CFC-6": {
     doc: CFC_SPEC,
     clause: "AH-CFC-6",
@@ -98,6 +104,12 @@ export const SPEC_CITATIONS = {
     clause: "AH-CFC-12",
     quote:
       "A child receives only the authority, labels, skills, and capabilities explicitly bound to the child profile.",
+  },
+  "AH-CFC-12a": {
+    doc: CFC_SPEC,
+    clause: "AH-CFC-12a",
+    quote:
+      "A child profile SHOULD carry a confidentiality ceiling bounding what the child may observe, through inherited handles, arguments, mounted files, and any other labeled channel.",
   },
   "AH-CFC-13": {
     doc: CFC_SPEC,

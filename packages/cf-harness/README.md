@@ -1944,6 +1944,9 @@ declared it was doing), one per clause family:
 | AUD-15  | a run whose enforcement **mode** came from a default and landed weaker than the mode its session claims — a silent fallback from an enforcing mode                                                                                                                                                                                                          | AH-CFC-15                                  |
 | AUD-15a | a run whose **flow-label dial** came from a default and landed weaker than the named posture bundle it claims asserts. Ours: no clause names the dial                                                                                                                                                                                                       |                                            |
 | AUD-20  | counts each model-boundary omission by its recorded rule and rejects duplicated or transcript-mismatched results, duplicated rules, and rules with no artifact location. Ours: AH-CFC-16 motivates retained evidence but does not require this accounting artifact                                                                                          |                                            |
+| AUD-21  | **known defect (CT-2175).** an executed side effect admitted by a decision that could not have consulted a label. The predicate is the `release` record, which only a boundary that measured a flow against a sink writes; every `cfc_*` reason code comes from the authority switch instead. Ours: no clause states it                                     |                                            |
+| AUD-22  | **known defect (CT-2216).** a `direct-command` prompt-slot binding carrying no digest of the value, or a subject that is not a principal — a workspace path or a resume-run id occupying the field                                                                                                                                                          | AH-CFC-3                                   |
+| AUD-23  | **known defect (CT-2217).** a delegation whose manifest binds tools, skills and a turn budget and no confidentiality ceiling, so nothing bounds what the child may observe through what it inherits. `warn`, which is the clause's own weight                                                                                                               | AH-CFC-12a                                 |
 
 Five verdicts, and the distinctions between them are the point. `inconclusive`
 is a check whose evidence was absent or unreadable — it is never `pass`, and
@@ -1963,12 +1966,11 @@ them the audit stays what it is above — a per-run reading of an artifact tree 
 so an ordinary audit's exit code is not spent on a question nobody asked. A
 Group D finding is stamped `(corpus)` rather than with a run id.
 
-| Check  | Subject                                                                                                                                                                                                                                                                                                                                                                                   | Turned on by                    |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| AUD-16 | how many release refusals the corpus recorded — a `policy-trace.json` decision carrying a `release` record, naming the gate (`sink-ceiling`, `writer-fit`) that refused — beside the count of releases the same boundary measured and admitted, and the counts of runs recording `not-attested` and `permissive-if-absent`. Zero warns, and fails when the corpus is declared adversarial | `--corpus`, `--expect-refusals` |
-| AUD-17 | the posture a deployment publishes on `/api/meta`, against the expected-posture spec. A deployment publishing none fails: what it enforces is indistinguishable from the default. So does one publishing a `projected` record — a prediction where an attestation was asked for                                                                                                           | `--toolshed-url`                |
-| AUD-18 | whether every posture record in the corpus is the same one. A run carries no surface identity, so this reads uniformity across records, not a named comparison of two surfaces; the harness's console and CLI diverge by default, so a mixed corpus surfaces that                                                                                                                         | `--corpus`                      |
-| AUD-19 | the shell's render ceiling, which nothing publishes: a permanent `inconclusive` line item, retiring when a publisher exists                                                                                                                                                                                                                                                               | any deployment flag             |
+| Check  | Subject                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | Turned on by                    |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------- |
+| AUD-16 | how many release refusals the corpus recorded — a `policy-trace.json` decision carrying a `release` record, naming the gate (`sink-ceiling`, `writer-fit`) that refused — beside the count of releases the same boundary measured and admitted, and the counts of runs recording `not-attested` and `permissive-if-absent`. Zero warns, and fails when the corpus is declared adversarial                                                                                                                    | `--corpus`, `--expect-refusals` |
+| AUD-17 | the posture a deployment publishes on `/api/meta`, against the expected-posture spec. A deployment publishing none fails: what it enforces is indistinguishable from the default. So does one publishing a `projected` record — a prediction where an attestation was asked for                                                                                                                                                                                                                              | `--toolshed-url`                |
+| AUD-18 | whether every posture record in the corpus is the same one. A run carries no surface identity, so this reads uniformity across records, not a named comparison of two surfaces; the harness's console and CLI diverge by default, so a mixed corpus surfaces that. **Unexercised today:** every corpus it has been pointed at records no posture, so it has only ever returned `inconclusive`. It is kept because a posture record appearing is what it is waiting for, not because it has said anything yet | `--corpus`                      |
 
 `--expected-posture` names a JSON profile stating what a posture record is
 supposed to hold — dial rungs, which sinks must carry a ceiling, which may
@@ -1978,6 +1980,98 @@ the first. A profile asserts only the fields it carries, and one asserting
 nothing is refused rather than passing: a spec that checks nothing is
 indistinguishable, in every line the audit prints, from a deployment whose every
 field held.
+
+### The known-defect checks, and the register they make
+
+AUD-1 through AUD-18 encode the specification's requirements where evidence
+exists. They detect a regression and they surface an anomaly, and there is a
+question they cannot answer: **is the system still broken in the ways we already
+know about, and is that list getting shorter?**
+
+Group E ([audit/checks/known-defects.ts](audit/checks/known-defects.ts)) is that
+question. Each check is one defect we have found, written so it fails today for
+a named reason with the issue tracking it, and passes the day the defect is
+fixed. A finding from one of these is not news; its value is the day it stops
+appearing.
+
+That makes falsifiability in **both** directions the whole of their worth. A
+check that only ever fails is a constant wearing a check's clothes: it reports
+the same thing about a fixed system as about a broken one, so it can never say
+the work landed. Every Group E check is therefore seeded twice in
+[audit/test/seeded-violations.test.ts](audit/test/seeded-violations.test.ts) —
+once with the defect, where it fails, and once with the shape a fix would
+produce, where it passes — and the second seeding is the one that matters. The
+same file's clean-fixture case names the exact set of findings a captured tree
+still produces, so a Group A or Group C finding appearing there is a regression
+rather than noise.
+
+**Why a `cfc-audit` run over any real tree is red today, and why that is not
+something broken.** These checks fail by design. The ledger that records a
+failing check as already-known — the expected-failures list a nightly reconciles
+its findings against — arrives with the nightly job that needs it, and no job in
+CI runs `cfc-audit` yet. Until then the audit reports the defects and nothing
+excuses them, which is the honest intermediate state: the checks exist and say
+what they find, and a reader seeing three red Group E checks and no ledger is
+looking at the register working rather than at a regression.
+
+So that wiring is data entry rather than rediscovery, each Group E finding
+carries what such an entry needs. `KNOWN_DEFECT_REGISTRATIONS` in the same file
+holds, per check, the stable substring of the finding's message to match on, the
+run shape in prose, the reason it is open, and the issue; the finding carries
+that block, and its `runId` is what a run selector is written from.
+[audit/test/known-defects.test.ts](audit/test/known-defects.test.ts) holds the
+one property that makes them usable — that the detail really is a substring of
+the message beside it, and carries no count that a busier run would change. An
+entry copied from a finding whose detail was not in its message would match
+nothing, be reported stale forever, and the fix would look like the gap closing.
+
+One gap is deliberately **not** checked. H7 asks how an opaque handle is passed
+without revealing payload bytes, and the half that is missing is resolution: six
+sites mint a handle for a blocked observation and nothing reads a `handleId`. No
+per-run artifact predicate separates a run whose model never needed a denied
+value from a run that could not resolve one, so any check would pass on most
+runs for the wrong reason. It is carried in the manifest with that stated
+instead. A check that passes for the wrong reason is worse than an honest gap,
+because it converts a known hole into a green line.
+
+### Where we stand against `CfcAgentHarnessProfile`
+
+[audit/conformance-manifest.ts](audit/conformance-manifest.ts) holds, per
+§18.3.3 obligation, the obligation in the specification's words, our status, the
+code the answer rests on, the checks covering it, and the issue. Every audit run
+prints that position — the headline is that `@commonfabric/cf-harness` does not
+satisfy the profile, with the counts — so our conformance position is what the
+tool says rather than something buried in a document nobody re-reads.
+
+**The manifest is itself audited.** Where an obligation names covering checks,
+its status is held to their verdicts, and a disagreement fails the run whatever
+the threshold. The rule runs both ways: an obligation recorded as answered whose
+covering check is failing is the manifest overclaiming, and an obligation
+recorded as unmet whose every covering check now passes is a gap that closed
+while the manifest stood still. The second is the direction that keeps this from
+rotting — a reconciliation that only caught overclaiming would let every entry
+sit at `absent` forever, describing a system that had since been fixed.
+
+An obligation no check covers is reported **unreconciled**, never as agreement.
+Counting it as agreement would report the absence of a check as a check that
+passed, which is the error `inconclusive` exists to prevent. Four of the nine
+are in that state, and H3 is `mechanized` by the type system rather than by
+anything an artifact tree can show.
+
+The obligations are quoted from the CFC specification, which is another
+repository, so a quote from it cannot carry what
+[audit/citations.ts](audit/citations.ts) gives an in-tree clause: nothing here
+re-reads that document and breaks when the words change. The pin is one constant
+— repository, commit, section — so moving it is a single visible edit, and the
+printed position marks it `external: not drift-guarded` so a reader can tell
+which authority is guarded and which is pinned by reference. The trade-off taken
+is that a CFC clause can be reworded without anything in this repository
+noticing.
+
+`docs/IMPLEMENTATION_PROFILE.md` points at the manifest and does not restate a
+status. Two encodings of one truth is the disease this audit exists to document:
+the copy nobody runs is the one that goes stale, and a check comparing two
+copies passes on whatever wrong answer they agree on.
 
 ### What AUD-16 reads
 
@@ -2048,12 +2142,25 @@ specification never asked for — the same divergence the citation table exists 
 prevent, pointed inward.
 
 Today AUD-1 through AUD-9, AUD-13, and AUD-15 rest on clauses that state what
-they enforce. AUD-14, AUD-15a, and AUD-16 through AUD-20 are ours: no clause
-requires that an ungated sink be published as a deviation, that a deployment
-answer on `/api/meta`, that a corpus hold one posture, that the render ceiling
-be published, or that model-boundary omissions have their own accounting
-artifact. They are worth checking anyway, and the report says whose requirement
-they are. [audit/citations.ts](audit/citations.ts) holds that table and
+they enforce, as do AUD-22 and AUD-23. AUD-14, AUD-15a, AUD-16 through AUD-21,
+and AUD-24 are ours: no clause requires that an ungated sink be published as a
+deviation, that a deployment answer on `/api/meta`, that a corpus hold one
+posture, that the render ceiling be published, that model-boundary omissions
+have their own accounting artifact, that the decision admitting a side effect be
+one that could have consulted a label, or that a run snapshot the labels its
+space carried. They are worth checking anyway, and the report says whose
+requirement they are.
+
+**AUD-24 is what AUD-9 used to overclaim.** AUD-9 cites AH-CFC-16 as
+`required-by`, and that clause enumerates exactly six things to retain —
+prompt-slot evidence, invocation-context references, mediation dispositions,
+policy events, model-context influence state, and side-effect decisions. A
+cell-labels snapshot is not among them, so demanding one under that citation was
+one check answering to two authorities, which is the shape AUD-15 and AUD-15a
+are already split along. AUD-9 now expresses the six and nothing else; AUD-24
+carries the snapshot as `extends`, and a finding from it renders as ours.
+
+[audit/citations.ts](audit/citations.ts) holds that table and
 `audit/test/citation-drift.test.ts` reads every cited document and requires each
 quote to still be in it, so a specification edit that invalidates a check breaks
 the suite rather than leaving the check quietly wrong.
@@ -2201,6 +2308,63 @@ What catches it is to ask, of a green test, what would have to break for this to
 go red — and where the answer should be "the thing it is named after", to prove
 it by breaking that thing once. Two of the three were found that way; the third
 was found in review, by someone asking the question the author had not.
+
+### Three things a check rests on, and each needs its own pin
+
+A check is an expression of a rule about evidence, and three separate things
+have to keep holding for it to go on meaning what it meant: **the words** of the
+rule it enforces, **the location** the evidence it reads lives at, and **the
+shape** of what it finds there. They move independently — a spec is reworded by
+one team, a channel is relocated by another, a field's meaning changes under a
+third — so a guard on one says nothing whatever about the other two. Each needs
+pinning separately, and a check with only one of the three pinned is guarded
+against one third of the ways it can quietly stop being true.
+
+The failure mode is the same in all three cases and is the reason to care: the
+check does not start failing. It goes on passing, against a document that no
+longer says what it quotes, or a place nothing writes to any more, or a field
+that no longer carries what it carried. A check that has silently stopped
+testing anything is worse than an absent one, because the report it appears in
+reads as coverage.
+
+1. **The words — pinned.** Every citation carries the clause's text copied
+   verbatim, and `audit/test/citation-drift.test.ts` reads each cited document
+   back and requires the quote to still be in it. A rewording breaks the suite,
+   which is the notice that the check resting on it needs rewriting too.
+
+2. **The location — pinned.** A check names where it reads, and AUD-16 is the
+   sharp case: it counts release refusals in `policy-trace.json` at
+   `decisions[].release`. `P-deny-egress` asserts that AUD-16's evidence carries
+   that artifact and that pointer, so a channel move breaks the property rather
+   than passing quietly. That guard exists because the move happened: CT-2200
+   relocated exactly this channel while the property suite was being written,
+   and a check reading a relocated channel finds nothing there and reports
+   nothing wrong — which is indistinguishable, in every line the audit prints,
+   from a corpus that had nothing to report.
+
+3. **The shape — not pinned.** A field can keep its name and its place and
+   change what it carries, and no check would notice. AUD-16's own reading turns
+   on `release` being written only by a boundary that consulted a label, and
+   AUD-21's turns on the same fact; neither would fail if something else started
+   writing that field, and both would go on reporting confidently about a
+   distinction that had stopped existing. Nothing pins the meaning of any field
+   the audit depends on.
+
+   `audit/test/regenerate-fixtures.ts` is the closest thing to a pin and is not
+   one: it builds the committed fixture from the real harness through the real
+   artifact store, precisely so the tree cannot drift from what the harness
+   persists — but regenerating is a manual act, so a shape that moves is noticed
+   only when somebody happens to run it.
+
+The third is stated here as a gap rather than described as covered, and
+deliberately: an honest gap in a document is worth more than a rule nobody
+implemented, and a reader deciding how much weight a green audit carries needs
+to know which of the three pins is holding it up.
+
+This is the same family as the two rules below — "a consistency check cannot
+detect a consistent wrong answer" and "a test that passes needs a reason". All
+three are about a check that has stopped testing its subject while still
+reporting on it, and each names a different way that happens.
 
 ## Testing
 

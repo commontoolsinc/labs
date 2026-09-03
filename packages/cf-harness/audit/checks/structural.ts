@@ -46,13 +46,21 @@ import {
   type RunEvidence,
   type RunFamily,
 } from "../evidence.ts";
-import type { CheckEvidence, CheckResult, CheckVerdict } from "../report.ts";
+import type {
+  CheckEvidence,
+  CheckResult,
+  CheckVerdict,
+  KnownDefectRegistration,
+} from "../report.ts";
 
 /** What a check found, before it is stamped with the run it looked at. */
 export interface CheckOutcome {
   verdict: CheckVerdict;
   message: string;
   evidence?: readonly CheckEvidence[];
+
+  /** What a ledger entry for this finding would need. See its own type. */
+  knownDefect?: KnownDefectRegistration;
 }
 
 /** One registered check. */
@@ -91,7 +99,7 @@ type UnreadableArtifact = Exclude<
 >;
 
 /** The outcome for a check whose subject artifact was not readable. */
-const notReadable = (
+export const notReadable = (
   artifact: string,
   state: UnreadableArtifact,
 ): CheckOutcome => ({
@@ -102,7 +110,7 @@ const notReadable = (
   evidence: [{ artifact, detail: state.status }],
 });
 
-const runStateOf = (run: RunEvidence): HarnessRunState | undefined =>
+export const runStateOf = (run: RunEvidence): HarnessRunState | undefined =>
   run.runState.status === "present" ? run.runState.value : undefined;
 
 /**
@@ -111,7 +119,7 @@ const runStateOf = (run: RunEvidence): HarnessRunState | undefined =>
  * The trace is the artifact whose subject they are; the report and the run
  * state carry the same list, so a tree missing the trace can still be read.
  */
-const decisionsOf = (
+export const decisionsOf = (
   run: RunEvidence,
 ):
   | { source: string; decisions: readonly HarnessPolicyDecisionRecord[] }
@@ -134,7 +142,9 @@ const decisionsOf = (
     : { source: "run-state.json", decisions: state.policyDecisions ?? [] };
 };
 
-const activitiesOf = (run: RunEvidence): readonly HarnessToolActivity[] =>
+export const activitiesOf = (
+  run: RunEvidence,
+): readonly HarnessToolActivity[] =>
   run.runReport.status === "present"
     ? run.runReport.value.toolActivity ?? []
     : [];
@@ -144,16 +154,62 @@ const policyEventsOf = (run: RunEvidence): readonly HarnessPolicyEvent[] =>
     ? run.runReport.value.policyEvents ?? []
     : runStateOf(run)?.policyEvents ?? [];
 
+/**
+ * The invocation contexts each artifact that carries them holds, separately.
+ *
+ * Two artifacts record the same list, and reading one of them is what makes a
+ * deletion from the other invisible. Keeping them apart is what lets AUD-9
+ * ask whether they still agree.
+ */
+const invocationContextArtifacts = (
+  run: RunEvidence,
+): readonly {
+  artifact: string;
+  contexts: readonly HarnessCfcInvocationContext[];
+}[] => {
+  const found: {
+    artifact: string;
+    contexts: readonly HarnessCfcInvocationContext[];
+  }[] = [];
+  if (run.policyTrace.status === "present") {
+    const contexts = run.policyTrace.value.cfcInvocationContexts;
+    if (contexts !== undefined) {
+      found.push({ artifact: "policy-trace.json", contexts });
+    }
+  }
+  const state = runStateOf(run);
+  if (state?.cfcInvocationContexts !== undefined) {
+    found.push({
+      artifact: "run-state.json",
+      contexts: state.cfcInvocationContexts,
+    });
+  }
+  return found;
+};
+
+/**
+ * Every invocation context this run retained anywhere, by sequence.
+ *
+ * The union rather than the first artifact that answered. A context is a
+ * record of a call reaching the CFC substrate, and one still held in either
+ * artifact was minted whatever became of the other copy — reading the union
+ * is the fail-closed direction, because it can only add calls the run must
+ * account for. Whether the two artifacts still agree is a retention question,
+ * and AUD-9 asks it there rather than here.
+ */
 const invocationContextsOf = (
   run: RunEvidence,
 ): readonly HarnessCfcInvocationContext[] => {
-  if (run.policyTrace.status === "present") {
-    const contexts = run.policyTrace.value.cfcInvocationContexts;
-    if (contexts !== undefined && contexts.length > 0) {
-      return contexts;
+  const bySequence = new Map<number, HarnessCfcInvocationContext>();
+  for (const { contexts } of invocationContextArtifacts(run)) {
+    for (const context of contexts) {
+      if (!bySequence.has(context.sequence)) {
+        bySequence.set(context.sequence, context);
+      }
     }
   }
-  return runStateOf(run)?.cfcInvocationContexts ?? [];
+  return [...bySequence.keys()].sort((left, right) => left - right)
+    .map((sequence) => bySequence.get(sequence)!);
 };
 
 const transcriptOf = (
@@ -168,7 +224,7 @@ const modelContextOf = (
 const handleTableOf = (run: RunEvidence): HarnessHandleTable | undefined =>
   runStateOf(run)?.handleTable;
 
-const isEnforcing = (mode: CfcEnforcementMode): boolean =>
+export const isEnforcing = (mode: CfcEnforcementMode): boolean =>
   mode === "enforce-explicit" || mode === "enforce-strict";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -184,8 +240,11 @@ const parsedToolContent = (message: HarnessToolTranscriptMessage): unknown => {
 };
 
 /** The number, and the singular or plural word for it. */
-const count = (total: number, singular: string, plural: string): string =>
-  `${total} ${total === 1 ? singular : plural}`;
+export const count = (
+  total: number,
+  singular: string,
+  plural: string,
+): string => `${total} ${total === 1 ? singular : plural}`;
 
 //
 // AUD-1 posture consistency
@@ -395,7 +454,7 @@ const modeOfReasonCode = (
 };
 
 /** The side effects this run actually executed, which need transport evidence. */
-const executedSideEffects = (
+export const executedSideEffects = (
   run: RunEvidence,
 ): readonly HarnessToolActivity[] =>
   activitiesOf(run).filter((activity) =>
@@ -557,21 +616,53 @@ const modeBehaviorAttestation: AuditCheck = {
 //
 
 /**
- * The artifacts a run writes into `tool-outputs/` that are not the output of
- * a tool the model called.
+ * The writers other than a tool the model called that persist a file into a
+ * run's `tool-outputs/` directory, named as each names itself to
+ * `persistToolOutput`.
  *
  * A delegation writes the child's final text there as the trusted side's own
  * validation evidence, and a `run_pattern` call writes the source text it
  * carried beside that call's own output, under the same output id. Neither is
  * a tool effect: each joins to no tool activity, no policy decision is
  * expected for it, and its absence from the report's `toolOutputs` is not an
- * unrecorded effect. Each is recognized by the `type` its writer stamps into
- * the file, which is the field that identifies it whatever the file is named.
+ * unrecorded effect.
+ *
+ * These are writing paths rather than contents. `persistToolOutput` names its
+ * file `<outputId>-<writer>.json`, and neither half is a string a tool
+ * invocation supplies: the output id is a host counter, and a writer name here
+ * is not a `BuiltinToolId`, so no tool the model calls is persisted under one.
+ * An exemption keyed on a field inside the file would be keyed on the artifact
+ * being judged — a model-authored output carries a `type` of its choosing as
+ * easily as a host-written one does, and the check would then be asking the
+ * subject whether to look at it.
+ *
+ * What this does NOT establish, and a reader should not take from it: that the
+ * name is beyond a model's reach altogether. The artifact root defaults inside
+ * the workspace, and `bash` does not consult the reserved-artifact guard that
+ * `write_file`, `edit_file`, `read_file` and `view_image` share, so a run that
+ * can execute a shell can create a file under any name it likes — including
+ * one of these. The type-keyed exemption this replaced was evadable by exactly
+ * the same capability, so nothing here is weaker; what closes it is the other
+ * discriminator, a host-side record of which outputs the harness authored,
+ * which is a change to what a run writes rather than to what the audit reads.
  */
-const NON_EFFECT_OUTPUT_TYPES: ReadonlySet<string> = new Set([
-  "cf-harness.subagent-raw-return",
-  "cf-harness.run-pattern-source",
+export const HOST_AUTHORED_OUTPUT_WRITERS: ReadonlySet<string> = new Set([
+  "subagent-return",
+  "run-pattern-source",
 ]);
+
+/**
+ * Whether `fileName` is one a host writer produced, read off the name
+ * `persistToolOutput` composed rather than off anything inside the file.
+ */
+const isHostAuthoredOutputFile = (fileName: string): boolean => {
+  for (const writer of HOST_AUTHORED_OUTPUT_WRITERS) {
+    if (fileName.endsWith(`-${writer}.json`)) {
+      return true;
+    }
+  }
+  return false;
+};
 
 const countsAgree = (
   declared: HarnessPolicyDecisionCounts | undefined,
@@ -594,7 +685,7 @@ const decisionCoverage: AuditCheck = {
     ...extendsClause("AH-CFC-9", "AH-CFC-11"),
   ],
   falsifiedBy:
-    "a side-effect tool activity with no policy decision on its `toolCallId`, a declared decision count that does not match the decisions beside it, or a persisted tool output no activity accounts for",
+    "a side-effect tool activity with no policy decision on its `toolCallId`, a declared decision count that does not match the decisions beside it, or a persisted tool output no activity accounts for and no host writer named",
   inspect(run) {
     if (run.runReport.status !== "present") {
       return notReadable("run-report.json", run.runReport);
@@ -672,12 +763,7 @@ const decisionCoverage: AuditCheck = {
       );
       for (const entry of run.toolOutputs.entries) {
         if (listed.has(entry.fileName)) continue;
-        if (
-          isRecord(entry.value) && typeof entry.value.type === "string" &&
-          NON_EFFECT_OUTPUT_TYPES.has(entry.value.type)
-        ) {
-          continue;
-        }
+        if (isHostAuthoredOutputFile(entry.fileName)) continue;
         evidence.push({
           artifact: `tool-outputs/${entry.fileName}`,
           detail:
@@ -1297,9 +1383,13 @@ interface RetentionRequirement {
 }
 
 /**
- * Helper for AUD-9, which says what became of a run's cell-labels read: the
- * artifact's own state, and, for a run without one, whether the harness
- * tried and failed — which it records on the run — or never asked.
+ * What became of a run's cell-labels read: the artifact's own state, and, for
+ * a run without one, whether the harness tried and failed — which it records
+ * on the run — or never asked.
+ *
+ * The two cases are different facts and {@link cellLabelsSnapshot} reports
+ * them differently, so this says which it was rather than only that the
+ * artifact is absent.
  */
 const cellLabelsRetentionDetail = (run: RunEvidence): string => {
   if (run.cellLabels.status === "present") {
@@ -1315,8 +1405,88 @@ const cellLabelsRetentionDetail = (run: RunEvidence): string => {
 };
 
 /**
- * AUD-9, which asks whether a run kept the artifacts that would explain why
- * each of its results was exposed or denied.
+ * The invocation contexts a run minted and no artifact still holds.
+ *
+ * The mint site numbers a context `contexts.length + 1`, so a run's retained
+ * contexts are `1..N` with nothing missing. A hole in that run is a context
+ * that was minted and is gone — and it is the only artifact-side witness to a
+ * tool losing EVERY context it recorded. Without it, the set of tools that
+ * transport CFC evidence is read off the contexts that survived, so a tool
+ * whose contexts all vanished leaves that set and reads as host-side: the run
+ * looks like one that never went near the substrate rather than one whose
+ * evidence went missing. A surviving context for another tool is what hides
+ * it, because the run then holds contexts and the warning for a run holding
+ * none does not fire either.
+ *
+ * The numbering is not the model's to influence: it is a host counter, and
+ * `invocationContextsOf` reads it across both artifacts that carry the list,
+ * so deleting a copy from one of them recovers rather than hides.
+ *
+ * What this cannot see, and what nothing read from artifacts alone can: a
+ * deletion taking the highest-numbered contexts from every artifact at once
+ * leaves `1..N` complete for a smaller N, and is indistinguishable from a run
+ * that stopped there. A run that retained no context at all is that case at
+ * its limit, and AUD-9 warns on it for the same reason.
+ */
+/**
+ * Whether the two artifacts carrying the context list have diverged, as
+ * opposed to one of them lagging the other.
+ *
+ * The union {@link invocationContextsOf} reads is fail-closed for coverage —
+ * a context held anywhere is one the run must account for — and it has one
+ * blind spot on its own: two artifacts that each lost a DIFFERENT context
+ * union back to a complete sequence, so a loss either artifact alone would
+ * expose is masked. A trace holding `[1]` beside a run state holding `[2]` is
+ * that shape.
+ *
+ * The test is containment rather than equality, and that is the whole
+ * distinction. The trace is written from the run state at each report, so an
+ * interrupted run leaves the trace a subset of the live record — a write that
+ * did not finish, not evidence that went missing, and failing on it would fire
+ * on every killed run. Neither list containing the other is divergence, which
+ * no ordinary write order produces.
+ */
+const invocationContextsDiverge = (run: RunEvidence): boolean => {
+  const artifacts = invocationContextArtifacts(run);
+  if (artifacts.length < 2) {
+    return false;
+  }
+  const sequencesOf = (index: number): ReadonlySet<number> =>
+    new Set(artifacts[index]!.contexts.map((context) => context.sequence));
+  const left = sequencesOf(0);
+  const right = sequencesOf(1);
+  const contains = (
+    bigger: ReadonlySet<number>,
+    smaller: ReadonlySet<number>,
+  ): boolean => [...smaller].every((sequence) => bigger.has(sequence));
+  return !contains(left, right) && !contains(right, left);
+};
+
+const missingInvocationContexts = (run: RunEvidence): readonly number[] => {
+  const retained = invocationContextsOf(run);
+  const held = new Set(retained.map((context) => context.sequence));
+  const highest = retained.length === 0
+    ? 0
+    : Math.max(...retained.map((context) => context.sequence));
+  const gaps: number[] = [];
+  for (let sequence = 1; sequence <= highest; sequence += 1) {
+    if (!held.has(sequence)) {
+      gaps.push(sequence);
+    }
+  }
+  return gaps;
+};
+
+/**
+ * AUD-9, which asks whether a run kept the artifacts AH-CFC-16 enumerates.
+ *
+ * The clause names six: prompt-slot evidence, invocation-context references,
+ * mediation dispositions, policy events, model-context influence state, and
+ * side-effect decisions. This check is an expression of those and of nothing
+ * else, which is why it can cite the clause as `required-by`. A run's
+ * cell-labels snapshot is not among them, and asking for it here would have
+ * been one check answering to two authorities — the shape AUD-15 and AUD-15a
+ * are split along. {@link cellLabelsSnapshot} carries it as `extends`.
  *
  * What AH-CFC-16 obliges a run to retain is bounded by what its execution
  * produced. An invocation context is minted where a call reaches the CFC
@@ -1340,7 +1510,7 @@ const evidenceRetention: AuditCheck = {
   title: "evidence retention",
   citations: requiredBy("AH-CFC-16"),
   falsifiedBy:
-    "an enforcing run missing one of the artifacts that would explain why a result was exposed or denied: its policy trace, its policy snapshot or that snapshot's digest, an invocation context for a side effect that reached the CFC substrate, or any recorded attempt to read its space's cell labels; and, as a warning, a run whose side effects recorded no invocation context at all, which its artifacts cannot tell from evidence that was lost",
+    "an enforcing run missing one of the artifacts AH-CFC-16 enumerates: its policy trace, its policy snapshot or that snapshot's digest, an invocation context for a side effect that reached the CFC substrate, or a hole in the numbering of the contexts it retained; and, as a warning, a run whose side effects recorded no invocation context at all, which its artifacts cannot tell from evidence that was lost",
   inspect(run) {
     if (run.runState.status !== "present") {
       return notReadable("run-state.json", run.runState);
@@ -1352,6 +1522,8 @@ const evidenceRetention: AuditCheck = {
     const contexts = invocationContextsOf(run);
     const effects = executedSideEffects(run);
     const unexplained = substrateEffectsMissingContext(run);
+    const lostContexts = missingInvocationContexts(run);
+    const diverged = invocationContextsDiverge(run);
     const requirements: readonly RetentionRequirement[] = [
       {
         name: "policy-trace.json",
@@ -1376,10 +1548,15 @@ const evidenceRetention: AuditCheck = {
         }, ${unexplained.length} of which reached the substrate carrying none`,
       },
       {
-        name: "a recorded cell-labels read",
-        held: run.cellLabels.status === "present" ||
-          runStateOf(run)?.cellLabels !== undefined,
-        detail: cellLabelsRetentionDetail(run),
+        name: "the invocation contexts it minted",
+        held: lostContexts.length === 0 && !diverged,
+        detail: diverged
+          ? "the two artifacts carrying the context list have diverged: neither holds everything the other does, so each has lost something the other kept"
+          : lostContexts.length === 0
+          ? `${contexts.length} retained, numbered without a gap`
+          : `${
+            count(lostContexts.length, "context", "contexts")
+          } the run minted are held by no artifact: ${lostContexts.join(", ")}`,
       },
     ];
     const missing = requirements.filter((requirement) => !requirement.held);
@@ -1400,7 +1577,7 @@ const evidenceRetention: AuditCheck = {
       return {
         verdict: "pass",
         message:
-          "every artifact that would explain why a result was exposed or denied is present; what each holds is not read here",
+          "every artifact AH-CFC-16 enumerates is present; what each holds is not read here",
       };
     }
     return {
@@ -1571,6 +1748,95 @@ const omissionAccounting: AuditCheck = {
 };
 
 //
+// AUD-24 cell-labels snapshot
+//
+
+/**
+ * What a ledger entry for this finding would need. See {@link
+ * KnownDefectRegistration}.
+ *
+ * CT-2210 is the record. Its substance was that AH-CFC-16's enumeration does
+ * not include a cell-labels read, so AUD-9 demanding one under a `required-by`
+ * citation was the check overclaiming rather than the harness underdelivering
+ * — which is closed by this split rather than by any change to what a run
+ * records. What the split leaves is this check, and the question of whether
+ * its remaining half is worth reporting at all.
+ */
+const CELL_LABELS_REGISTRATION: KnownDefectRegistration = {
+  detail: "recorded no read of its space's cell labels",
+  runShape:
+    "a run that minted no handle, so the engine never read a cell label for it",
+  why:
+    "CT-2210's substance — AH-CFC-16 enumerates six artifacts and a cell-labels read is not among them, so AUD-9 was overclaiming — is closed by the split that produced this check, not by a change to what a run records. What is left open is narrower and is this check's own: the engine reads a space's cell labels only for the refs its handle table holds, so a run that minted no handle has nothing to record, and whether an audit should report that at all is undecided. Until it is, the check states the fact as `extends` and names where the question sits.",
+  issue: "CT-2210",
+};
+
+/**
+ * AUD-24, which asks whether a run kept a snapshot of the labels its space
+ * carried.
+ *
+ * Cited as `extends`, and the distinction is the whole reason this is its own
+ * check. AH-CFC-16's enumeration — prompt-slot evidence, invocation-context
+ * references, mediation dispositions, policy events, model-context influence
+ * state, side-effect decisions — does not include cell labels. The snapshot is
+ * worth having for the same reason those are: without it, a later reading
+ * cannot say what the enforcement was enforcing against. That is our judgment
+ * about what explains a run, not the clause speaking, and a finding here says
+ * so.
+ *
+ * Two absences, reported differently, because the artifacts distinguish them.
+ * A read the run attempted and failed is evidence that was reachable and is
+ * gone. A read nobody attempted is a run that never held a ref to ask about —
+ * the engine reads labels only for the refs in the handle table — and calling
+ * that a lost artifact would report a run's shape as its failure. Which of
+ * the two the obligation should want is the open question CT-2210 carries,
+ * and until it is settled the check reports the fact and names the issue
+ * rather than deciding it.
+ */
+const cellLabelsSnapshot: AuditCheck = {
+  id: "AUD-24",
+  title: "cell-labels snapshot",
+  citations: extendsClause("AH-CFC-16"),
+  falsifiedBy:
+    "a run with no cell-labels snapshot: a failure where the run recorded an attempted read whose evidence is now gone, and a warning where it recorded no attempt, which is a run that held no ref to ask about rather than an artifact that was lost",
+  inspect(run) {
+    if (run.runState.status !== "present") {
+      return notReadable("run-state.json", run.runState);
+    }
+    const state = runStateOf(run)!;
+    if (run.cellLabels.status === "present" || state.cellLabels !== undefined) {
+      return {
+        verdict: "pass",
+        message:
+          "this run kept a snapshot of the labels its space carried; what it holds is not read here",
+      };
+    }
+    const attempted = state.failureRecords?.find((record) =>
+      record.source === "cell_labels"
+    );
+    const evidence: readonly CheckEvidence[] = [{
+      artifact: "cell-labels.json",
+      detail: cellLabelsRetentionDetail(run),
+    }];
+    if (attempted !== undefined) {
+      return {
+        verdict: isEnforcing(state.cfcEnforcementMode) ? "fail" : "warn",
+        message:
+          `this run attempted a cell-labels read and it failed, so what its space carried is not recoverable from these artifacts: ${attempted.detail}`,
+        evidence,
+      };
+    }
+    return {
+      verdict: "warn",
+      message:
+        "this run recorded no read of its space's cell labels, and attempted none — the engine reads labels only for the refs a handle table holds, so a run that minted no handle has nothing to record",
+      evidence,
+      knownDefect: CELL_LABELS_REGISTRATION,
+    };
+  },
+};
+
+//
 // The registry
 //
 
@@ -1586,6 +1852,7 @@ export const STRUCTURAL_CHECKS: readonly AuditCheck[] = [
   influenceAccumulation,
   evidenceRetention,
   omissionAccounting,
+  cellLabelsSnapshot,
 ];
 
 /**
@@ -1623,6 +1890,9 @@ export const auditRunFamily = (
         message: outcome.message,
         citations: check.citations,
         evidence: outcome.evidence ?? [],
+        ...(outcome.knownDefect !== undefined
+          ? { knownDefect: outcome.knownDefect }
+          : {}),
       });
     }
   }
