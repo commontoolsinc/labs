@@ -25,8 +25,9 @@ empty — right for tab completion, wrong for `ls` — so the listing raises
 its errors and completion's provider dispatch swallows them at its own
 call site. Keep the list to what shuttle names — an export entry is a
 contract, and the short list is the record of which internals have a
-second caller. (The view substrate's entries wait for B3, which is when
-they earn their place on that record.)
+second caller. (The view substrate's entries are not on it, nothing having
+named them yet; each lands with the milestone that first calls it, which is
+how a module earns its place on that record.)
 
 **A2 — connection injection for the write path.** Done (#6646). The write
 path takes the connection as a parameter, so a held `PiecesController`
@@ -192,8 +193,9 @@ Still to come:
   (`packages/cli/lib/view/keys.ts`) supplies the key stream a binding table
   reads — where `node:readline` offers no keymap hook at all, so a second
   binding table is unreachable behind it. That is what keeps modal editing
-  an option later ([`futures.md`](futures.md)), and it brings the view
-  substrate's export entries forward from B3, where A1 left them.
+  an option later ([`futures.md`](futures.md)), and it is what brings the
+  view substrate's export entries with the prompt: the line editor calls
+  those modules, and an entry lands with the milestone that first calls one.
 
 - **Slug and name resolution** (B1b), riding the machinery `--cell` already
   uses
@@ -270,14 +272,14 @@ schema-derived flag machinery `cf` already exports (`pieceCallRawArgs`,
 `pieceCallInvocation`), so no arc step gates it either. Reaching-in-warms
 lands here, since `set` is what makes stale computed state visible.
 
-**B3 — watch and views** (after A4; view-substrate export entries added
-here). `Cell.sink` with the guard-plus-`idle()` settling discipline; the
-value, list, and structured piece-overview views on the `cf view` pager
-substrate; session watches (`watch`, `watches`, `unwatch`) with prompt
-event lines. Governed by [`views.md`](views.md); it opens with the two
-experiments and the raw-document-subscription proving test from issue
-[#6534](https://github.com/commontoolsinc/labs/issues/6534), falling back
-to the capped deep sink if the seam disappoints.
+**B3 — watch and views** (after A4; the substrate modules it is first to call
+bring their export entries with them). `Cell.sink` with the guard-plus-`idle()`
+settling discipline; the value, list, and structured piece-overview views on
+the `cf view` pager substrate; session watches (`watch`, `watches`, `unwatch`)
+with prompt event lines. Governed by [`views.md`](views.md); it opens with the
+two experiments and the raw-document-subscription proving test from issue
+[#6534](https://github.com/commontoolsinc/labs/issues/6534), falling back to
+the capped deep sink if the seam disappoints.
 
 **B4 — externals and escapes.** `>` and `<` to and from `file:` externals
 under the scheme-absolute rule; the external working location
