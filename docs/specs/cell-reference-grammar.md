@@ -19,10 +19,11 @@ document answers.
 
 Seven nouns, each one thing, in the order a reference names them.
 
-- **Space** — where documents live; written as a DID, or as a **space name**: a
-  string the DID is derived from (`createSession` in
-  `packages/identity/src/session.ts`), the same for every reader, unvalidated,
-  and resolved by computation rather than by a read.
+- **Space** — where documents live; written as a DID, or as a **space name**,
+  which a session resolves to a DID and a pattern cannot. Today the DID is
+  derived from the name (`createSession` in `packages/identity/src/session.ts`);
+  a registry could resolve it instead, and the grammar assumes nothing about
+  which.
 - **Document** — the unit the store holds: an id (`of:fid1:…`, the `id` field)
   and a JSON value (the `value` field), with metadata beside the value. The
   store calls it an entity.
@@ -145,10 +146,10 @@ written here first.
 ### R1 — One grammar, every reader
 
 The same structure names the same cell in a pattern, in the shell, and at the
-CLI's intake seams. Readers differ in what they can _resolve_ — a pattern
-resolves from the string alone and so requires a DID and a handle; a
-session-holding reader resolves a space name and a slug as well — and not in
-what the grammar _admits_.
+CLI's intake seams. Readers differ in what they can _resolve_, and in how — a
+pattern resolves from the string alone and so requires a DID and a handle; a
+session-holding reader resolves a space name and a slug as well, by whatever
+mechanism its session has — and not in what the grammar _admits_.
 
 Source: `packages/cli/README.md` ("the one reference syntax of the fabric"); the
 doc comment heading `packages/cli/lib/llm-friendly-ref.ts`.
@@ -408,10 +409,10 @@ The head of the string says how much of the address it carries, and it spends no
 sigil to say so: `//` opens the space slot the way it opens a URL's authority, a
 single `/` roots at the context's space, and neither roots at the context's
 position. The space segment is a DID or a name; a segment holding `:` is a DID,
-and one without is a space name, derived to a DID — which is the rule the CLI
-already applies to the piece segment (`validatePieceSegment` and
-`namesResolvedParts` in `packages/cli/lib/llm-friendly-ref.ts`), now applied to
-both; `parseReferenceParts` itself holds neither segment to a form.
+and one without is a space name, which a session resolves to a DID — which is
+the rule the CLI already applies to the piece segment (`validatePieceSegment`
+and `namesResolvedParts` in `packages/cli/lib/llm-friendly-ref.ts`), now applied
+to both; `parseReferenceParts` itself holds neither segment to a form.
 
 A **context** is a cell address with parts missing — a space, a piece, a path
 inside it, and a scope, in the shape
@@ -687,8 +688,9 @@ to defeat the omission is no longer needed.
 
 A space segment is a DID or a name. A name may not contain `/` (the separator),
 `@` (a qualifier never attaches to a space), or `:` (what tells a DID from a
-name); `createSession` accepts any string, so these are the only rules a space
-name is held to. No word is reserved: a space named `user` is written
+name). Those are the grammar's rules; a resolver may hold a name to more —
+`createSession` today holds it to nothing further, and a registry would hold it
+to an alphabet of its own. No word is reserved: a space named `user` is written
 `//user/…`, and nothing else in the grammar can be written that way.
 
 Serves R7. This is where the reserved-word alternative under D1 becomes
@@ -890,10 +892,14 @@ The same cell in each grammar, segment for segment (R11):
 
 The page URL has no scope and no pin; the specifier has no scope, no path into a
 cell, and no relative form — an import's subpath is a public name, not a
-position. Where a slot exists in two of them it is in the same place and written
-the same way, and the one written difference — the specifier's bare `@<pin>`
-against the reference's `@pin=` — is the specifier's own to close when it next
-changes, since a bare word after `@` is the scope's under this grammar.
+position. The page URL may also carry, before the space, things a reference
+never does — a namespace naming the provider, or an empty space meaning the
+reader's home — the way it carries a host: the URL layer resolves them to a
+space before any reference is formed. Where a slot exists in two of them it is
+in the same place and written the same way, and the one written difference — the
+specifier's bare `@<pin>` against the reference's `@pin=` — is the specifier's
+own to close when it next changes, since a bare word after `@` is the scope's
+under this grammar.
 
 ## Admitting a new requirement
 
@@ -1015,6 +1021,14 @@ exit (R12):
   grammar's reading, so nothing is ambiguous today. Whether the alias retires in
   favor of `/slug` — one character longer, and needing no slot rule — is a CLI
   decision, recorded here because the collision is this grammar's to know about.
+- **Namespaces and registered names.** A URL may one day name a space through a
+  provider namespace before it (`/@namespace/space`) and through a registry
+  rather than a derivation. The direction this document holds: such a name is
+  resolved at the URL and flag layer — `--url`, `--space` — to a DID or a short
+  name before a reference is formed, and a reference never carries a namespace.
+  The alternative puts a leading `@` back into the head with a second meaning,
+  the shape #6775 is about, so it is closed unless a reader can show it cannot
+  manage without it.
 - **`#` at a shell.** The measured hazard on a leading `#` is real and predates
   this document. Whether the wish syntax moves, and to what, is a decision for
   the wish surface; the member's mid-word `#` is not affected.
