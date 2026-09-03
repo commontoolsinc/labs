@@ -99,8 +99,11 @@ export const KNOWN_DEFECT_REGISTRATIONS = {
  * status, which is `completed` for a call that ran and answered with a
  * failure.
  */
-const resultlessCalls = (run: RunEvidence): ReadonlySet<string> => {
-  if (run.toolOutputs.status !== "present") return new Set();
+const resultlessCalls = (run: RunEvidence): ReadonlySet<string> | undefined => {
+  // Unreadable outputs cannot say which calls produced a result, and reading
+  // that silence as "all of them did" is how an absent artifact becomes a
+  // finding about a run. The caller reports it as unread instead.
+  if (run.toolOutputs.status !== "present") return undefined;
   const resultless = new Set<string>();
   const failed = new Set<string>();
   for (const entry of run.toolOutputs.entries) {
@@ -108,7 +111,15 @@ const resultlessCalls = (run: RunEvidence): ReadonlySet<string> => {
       | { outputId?: unknown; status?: unknown }
       | undefined;
     if (typeof value?.outputId !== "string") continue;
-    if (typeof value.status === "string" && value.status !== "ok") {
+    // A failed output that carries a `releaseDecision` reached the boundary
+    // before it failed — `errorOutput` attaches the decision precisely so an
+    // exit below the fit still states what the boundary decided. Excluding it
+    // would drop a call the boundary DID measure out of the measured set.
+    const decided = (value as { releaseDecision?: unknown }).releaseDecision !==
+      undefined;
+    if (
+      typeof value.status === "string" && value.status !== "ok" && !decided
+    ) {
       failed.add(value.outputId);
     }
   }
@@ -190,6 +201,17 @@ const labelConsultingAdmission: AuditCheck = {
       };
     }
     const resultless = resultlessCalls(run);
+    if (resultless === undefined) {
+      return {
+        verdict: "inconclusive",
+        message:
+          "`tool-outputs/` did not load, so which of this run's side effects produced a result is not established, and whether any reached a boundary cannot be read",
+        evidence: [{
+          artifact: "tool-outputs/",
+          detail: run.toolOutputs.status,
+        }],
+      };
+    }
     const measured = effects.filter((activity) =>
       !resultless.has(activity.toolCallId)
     );
@@ -230,7 +252,7 @@ const labelConsultingAdmission: AuditCheck = {
       verdict: "fail",
       message: `${
         count(unconsulted.length, "side effect", "side effects")
-      } of ${effects.length} were admitted on authority alone, with no decision that could have consulted a label`,
+      } of ${measured.length} that produced a result were admitted on authority alone, with no decision that could have consulted a label`,
       evidence,
       knownDefect: KNOWN_DEFECT_REGISTRATIONS["AUD-21"],
     };

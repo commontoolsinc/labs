@@ -732,6 +732,71 @@ describe("seeded violations", () => {
       });
     });
 
+    it("reports unreadable tool outputs rather than assuming every call produced a result", () => {
+      // The absence-as-evidence case, in the check written to catch it. An
+      // audit that cannot read which calls produced a result cannot say any
+      // of them reached a boundary, and saying so is the honest verdict where
+      // a fail would be a finding manufactured out of a missing artifact.
+      turnsOnly("AUD-21", "inconclusive", (root) => {
+        root.toolOutputs = {
+          status: "absent",
+          path: root.toolOutputs.path,
+        };
+      });
+    });
+
+    it("skips an output entry that names no call", () => {
+      // A file under `tool-outputs/` that parsed but carries no `outputId`
+      // belongs to no call, so it says nothing about whether one produced a
+      // result: AUD-21 drops it rather than reading it as a failed call, and
+      // its verdict is unchanged. AUD-3 flags the same file, and correctly —
+      // an output no activity accounts for is exactly what that check is for,
+      // so the honest expectation names both rather than seeding around one.
+      turnsInto({ "AUD-3": "fail", "AUD-21": "fail" }, (root) => {
+        const outputs = root.toolOutputs;
+        if (outputs.status !== "present") throw new Error("no outputs");
+        (outputs.entries as unknown[]).push({
+          fileName: "orphan.json",
+          path: `${outputs.path}/orphan.json`,
+          value: { status: "compile-error" },
+        });
+      });
+    });
+
+    it("still measures a failed call whose output records a boundary decision", () => {
+      // `errorOutput` attaches the release decision when the boundary already
+      // decided, so an exit below the fit still states what it decided. Such a
+      // call reached the boundary and belongs in the measured set; dropping it
+      // for having failed would hide a decision that was actually made.
+      turnsOnly("AUD-21", "fail", (root) => {
+        const outputs = root.toolOutputs;
+        if (outputs.status !== "present") throw new Error("no outputs");
+        for (const entry of outputs.entries) {
+          const value = entry.value as
+            | { outputId?: string; status?: string; releaseDecision?: unknown }
+            | undefined;
+          if (value?.outputId === undefined) continue;
+          value.status = "error";
+          value.releaseDecision = {
+            reasonCode: "cfc_release_allowed",
+            boundary: "release",
+          };
+        }
+      });
+    });
+
+    it("reports a trace whose `withheld` count is present and not a number", () => {
+      // Absent is legacy and reads as zero; present-and-malformed is neither,
+      // and letting it read as absence would let a trace declare anything at
+      // all and reconcile.
+      turnsOnly("AUD-3", "fail", (root) => {
+        const trace = traceOf(root) as unknown as {
+          decisionCounts: Record<string, unknown>;
+        };
+        trace.decisionCounts.withheld = "two";
+      });
+    });
+
     it("does not count a call that produced no result as an ungated path", () => {
       // A call that failed before producing a value crossed no release
       // boundary, so its allow-side decision is the only one it can have.

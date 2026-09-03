@@ -190,6 +190,32 @@ const verdictOf = (
 
 describe("Group D deployment checks", () => {
   describe("AUD-16 reads the release reason, not the decision word", () => {
+    it("does not count a release record whose boundary names neither", () => {
+      // The contract exports its reason codes so a record read off disk is
+      // checked against them rather than asserted into them. A persisted shape
+      // nobody writes — a known reason beside a boundary that is neither
+      // `release` nor `commit` — is evidence of nothing, and counting it would
+      // let a malformed record answer the question this check asks.
+      const withRefusal = familyRefusingRelease(
+        ["sink-ceiling"],
+        ["run_pattern"],
+      );
+      const trace = withRefusal.root.policyTrace;
+      if (trace.status !== "present") throw new Error("no trace");
+      const decisions =
+        (trace.value as unknown as { decisions: Record<string, unknown>[] })
+          .decisions;
+      const seeded = decisions[decisions.length - 1]!;
+      (seeded.release as { boundary?: unknown }).boundary = "bogus";
+
+      const refusal = auditDeployment({
+        families: [withRefusal],
+        paths: [FIXTURE_RUNS_DIR],
+        expectRefusals: false,
+      }).find((one) => one.checkId === "AUD-16");
+      expect(refusal?.message).not.toContain("1 release refusal");
+    });
+
     it("counts a withheld release whose outcome word is not `denied`", () => {
       // CT-2232 gives a withheld release its own outcome word, parallel to
       // `invalid`. The refusal is the `release.reasonCode`; the outcome word

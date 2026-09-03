@@ -14,6 +14,10 @@
 import type { CfcPostureReport } from "@commonfabric/runner/cfc";
 
 import type { HarnessCfcPolicySnapshot } from "../../src/contracts/cfc-policy-snapshot.ts";
+import {
+  HARNESS_RELEASE_DECISION_REASON_CODES,
+  type HarnessReleaseDecisionReasonCode,
+} from "../../src/contracts/policy-refusal.ts";
 import type { HarnessPolicyDecisionRecord } from "../../src/contracts/policy-trace.ts";
 import { type CheckCitation, extendsClause } from "../citations.ts";
 import { familyRuns, type RunEvidence, type RunFamily } from "../evidence.ts";
@@ -165,11 +169,22 @@ interface ReleaseRefusal {
  */
 const releaseReasonOf = (
   decision: HarnessPolicyDecisionRecord,
-): string | undefined => {
-  const release = decision.release as { reasonCode?: unknown } | undefined;
-  return typeof release?.reasonCode === "string"
-    ? release.reasonCode
-    : undefined;
+): HarnessReleaseDecisionReasonCode | undefined => {
+  const release = decision.release as
+    | { reasonCode?: unknown; boundary?: unknown }
+    | undefined;
+  if (release === undefined) return undefined;
+  const reason = HARNESS_RELEASE_DECISION_REASON_CODES.find((known) =>
+    known === release.reasonCode
+  );
+  // The boundary is the record's other discriminant, and a record naming
+  // neither a release nor a commit is not one this reads: the contract
+  // exports the codes so a record off disk is checked against them rather
+  // than asserted into them, and a persisted shape nobody wrote is evidence
+  // of nothing.
+  const boundary = release.boundary;
+  if (boundary !== "release" && boundary !== "commit") return undefined;
+  return reason;
 };
 
 /**
@@ -220,7 +235,12 @@ const releasesMeasured = (audit: DeploymentAudit): number =>
       total +
       (decisionsOf(run) ?? []).filter((decision) => {
         const reason = releaseReasonOf(decision);
-        return reason !== undefined && reason !== "cfc_release_withheld";
+        // Only the two non-rejecting codes. `cfc_commit_refused` names a
+        // boundary that refused at the pattern's own sink requests, so
+        // counting it beside the allowed ones would report a refusal as a
+        // measurement that let the values out.
+        return reason === "cfc_release_allowed" ||
+          reason === "cfc_release_observed";
       }).length,
     0,
   );
