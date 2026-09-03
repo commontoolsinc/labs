@@ -352,12 +352,20 @@ export const assertCapture = <T>(
 };
 
 /**
+ * Nesting depth a failing assertion's operand renders to: as deep as the
+ * conversion allows. A view tree costs two levels per node and a nested cell
+ * three, so the renderer's default depth elides an operand after a handful
+ * of nodes, and a diagnostic wants the whole of it.
+ */
+const ASSERT_RENDER_MAX_DEPTH = Infinity;
+
+/**
  * Renders the operands captured by `assertCapture` into the record's `parts`.
  *
  * A passing assertion (`ok === true`) returns an empty list without touching
  * the values, so the common case pays nothing to render diagnostics it will
  * never show. Only a failing assertion renders each captured value with
- * `toCompactDebugString`.
+ * `toCompactDebugString`, to `ASSERT_RENDER_MAX_DEPTH`.
  */
 export const assertRenderParts = (
   ok: boolean,
@@ -365,7 +373,9 @@ export const assertRenderParts = (
 ): AssertPart[] =>
   ok ? [] : parts.map(({ src, value }) => ({
     src,
-    rendered: toCompactDebugString(value),
+    rendered: toCompactDebugString(value, {
+      maxDepth: ASSERT_RENDER_MAX_DEPTH,
+    }),
   }));
 
 /**

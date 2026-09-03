@@ -66,6 +66,12 @@ describe("value-debug", () => {
     });
 
     describe("with `maxLength`", () => {
+      it("renders the full text given a `maxLength` of `Infinity`", () => {
+        const item = { text: "x".repeat(200) };
+        expect(toCompactDebugString(item, { maxLength: Infinity }))
+          .toBe(toCompactDebugString(item));
+      });
+
       for (const len of [10, 25, 100]) {
         it("renders the full text when `maxLength` fits the whole thing", () => {
           const item = ["xy", NaN];
@@ -96,9 +102,18 @@ describe("value-debug", () => {
         );
       });
 
+      it("renders past the default depth given `Infinity`", () => {
+        let value: unknown = "leaf";
+        for (let i = 0; i < 20; i++) value = { o: value };
+        expect(toCompactDebugString(value, { maxDepth: Infinity }))
+          .toContain('"leaf"');
+        expect(toIndentedDebugString(value, { maxDepth: Infinity }))
+          .toContain('"leaf"');
+      });
+
       it("throws given a `maxDepth` that is not a positive integer", () => {
         expect(() => toCompactDebugString({}, { maxDepth: 0 }))
-          .toThrow("`maxDepth` must be a positive integer or `undefined`");
+          .toThrow("`maxDepth` must be a positive integer, `Infinity`, or");
       });
     });
 

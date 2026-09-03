@@ -387,10 +387,26 @@ describe("toStructuredDebugValue()", () => {
       expect(at).toEqual({ "/...": "object" });
     });
 
+    it("returns a result as deep as the conversion allows given `Infinity`", () => {
+      let value: unknown = 1;
+      for (let i = 0; i < 300; i++) value = { o: value };
+
+      let at = toStructuredDebugValue(value, { maxDepth: Infinity }) as Record<
+        string,
+        unknown
+      >;
+      let levels = 0;
+      while (at && (typeof at === "object") && ("o" in at)) {
+        at = at.o as Record<string, unknown>;
+        levels++;
+      }
+      expect(levels).toBe(99);
+    });
+
     it("throws given a `maxDepth` that is not a positive integer", () => {
-      for (const bad of [0, -1, 1.5, Infinity, NaN]) {
+      for (const bad of [0, -1, 1.5, -Infinity, NaN]) {
         expect(() => toStructuredDebugValue({}, { maxDepth: bad }))
-          .toThrow("`maxDepth` must be a positive integer or `undefined`");
+          .toThrow("`maxDepth` must be a positive integer, `Infinity`, or");
       }
     });
 
@@ -398,7 +414,7 @@ describe("toStructuredDebugValue()", () => {
       for (const bad of ["3", null, {}]) {
         const options = { maxDepth: bad as unknown as number };
         expect(() => toStructuredDebugValue({}, options))
-          .toThrow("`maxDepth` must be a positive integer or `undefined`");
+          .toThrow("`maxDepth` must be a positive integer, `Infinity`, or");
       }
     });
   });

@@ -489,10 +489,11 @@ export interface FabricPlainObject
  */
 export interface DebugValueOptions {
   /**
-   * Maximum depth of result nesting, a positive integer. An item which would
-   * require further nesting is instead converted into a form suggestive of the
-   * elided information. When absent, the depth is the default of the function
-   * called: as deep as reasonably possible for a structured value, and ten
+   * Maximum depth of result nesting: a positive integer, or `Infinity` for as
+   * deep as the conversion allows. An item which would require further
+   * nesting is instead converted into a form suggestive of the elided
+   * information. When absent, the depth is the default of the function
+   * called: as deep as the conversion allows for a structured value, and ten
    * levels for a debug string. A large value is capped; there is no guarantee
    * about the _actual_ possible maximum depth.
    */
@@ -510,9 +511,10 @@ export interface DebugValueOptions {
 /** Options accepted by `toCompactDebugString()`. */
 export interface CompactDebugStringOptions extends DebugValueOptions {
   /**
-   * Maximum length of the result. When the rendering runs longer, the result
-   * is truncated to this length, which includes a trailing ASCII ellipsis of
-   * `...`. A length below three is taken as three.
+   * Maximum length of the result, or `Infinity` for no limit. When the
+   * rendering runs longer, the result is truncated to this length, which
+   * includes a trailing ASCII ellipsis of `...`. A length below three is taken
+   * as three.
    */
   readonly maxLength?: number;
 }
