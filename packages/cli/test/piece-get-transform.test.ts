@@ -2053,6 +2053,47 @@ describe("cf cell get transforms", () => {
     }
   });
 
+  it("answers from the selected output without a storage-wide sync", async () => {
+    const setup = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "transform-output-readiness-source",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "number" },
+            ignored: { type: "string" },
+          },
+        },
+      },
+      setup,
+    );
+    source.set([
+      { id: 1, ignored: "not selected" },
+      { id: 2, ignored: "not selected" },
+    ]);
+    expect((await setup.commit()).ok).toBeDefined();
+
+    const originalSynced = storageManager.synced.bind(storageManager);
+    let storageWideSyncs = 0;
+    storageManager.synced = () => {
+      storageWideSyncs++;
+      return originalSynced();
+    };
+    try {
+      expect(
+        await deriveSelectedValue(runtime, space, source, {
+          projection: parseSelectProjection("id"),
+        }),
+      ).toEqual([{ id: 1 }, { id: 2 }]);
+      expect(storageWideSyncs).toBe(0);
+    } finally {
+      storageManager.synced = originalSynced;
+    }
+  });
+
   describe("the labels a selection carries", () => {
     // The two assertions here read a derived label component back out of
     // storage through `derivedConfidentiality`. Persisting flow labels
