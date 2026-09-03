@@ -98,14 +98,11 @@ decisions point here where they defer.
   the scripting bundle above is where one does: stable machine-readable
   output is part of that bundle rather than of the interactive surface.
 - **Vim keybindings, as a `where` dimension.** Modal editing at the prompt,
-  an option and never a default. What keeps it reachable is that the line
-  editor is built on the view substrate rather than on `node:readline`,
-  which offers no keymap hook at all: `EditBuffer`
-  (`packages/cli/lib/view/editbuffer.ts`) holds the motions, bound to emacs
-  keys by the substrate's own key handler, and `decodeKeys`
-  (`packages/cli/lib/view/keys.ts`) supplies the key stream a binding table
-  reads. So what this costs is a second binding table over motions that
-  already exist, plus the mode the table switches on.
+  an option and never a default. What it costs is a second binding table
+  over motions the line editor already drives, plus the mode the table
+  switches on — which is what B1c's choice of substrate buys, and why that
+  choice is recorded with B1c rather than here
+  ([`build-sequence.md`](build-sequence.md)).
 - **Which space a piece is in.** Naming the space that holds an arbitrary
   piece, rather than the one the place stands in. It is a query over the
   fabric and not a dimension of the ambient record, so it arrives with

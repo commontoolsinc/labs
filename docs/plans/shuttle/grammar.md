@@ -29,11 +29,18 @@ through has no rule for one. Shuttle is handed the line itself, so the split
 is shuttle's, and it is POSIX's:
 
 - **Whitespace separates tokens**, and a run of it separates no more than
-  one.
+  one. Whitespace is JavaScript's own class, which is what `trim` removes,
+  so a no-break space and the Unicode line separator separate a line as a
+  space does — a reader cannot see either, and the realistic way an operand
+  acquires one is a paste out of a document. The pair stays consistent about
+  them: what separates here is what the printer quotes, so a value holding
+  one still reads back whole.
 - **Single quotes are literal**: what sits between them is the token's,
   whatever it is.
-- **Double quotes group**, and a backslash between them escapes the
-  character after it, as one outside quotes does.
+- **Double quotes group**, and a backslash between them escapes a double
+  quote or another backslash and is otherwise a character of the token, so
+  `"C:\path"` keeps its backslash. Outside quotes a backslash escapes
+  whatever follows it.
 - **Runs that touch are one token**, so `a"b c"d` is `ab cd`, and an empty
   pair of quotes is a token that is the empty string.
 - A quote that never closes, and a trailing backslash with nothing to
@@ -63,10 +70,13 @@ quoted wherever in the value it sits — a printer is handed a value and no
 position, so it quotes on the character rather than on the reading.
 
 The characters an operand writes an address with — the `/` between segments,
-the `@` of a scope suffix, `-`, `..` — are deliberately not in that set.
-Those are read inside a token by the place resolution below rather than by
-the split, and quoting on them would cost the bare printing of every handle,
-slug and path while buying the split nothing.
+the `@` of a scope suffix, `-`, `..` — are deliberately not in that set, and
+that exclusion is what makes the output rule worth having rather than a
+detail of it. Those characters are read inside a token by the place
+resolution below rather than by the split, so quoting on them would buy the
+split nothing and would cost the bare printing of every handle, every slug,
+every path and every flag — which is to say nearly everything shuttle
+prints, leaving nothing conditional about conditional quoting.
 
 The two halves are one decision: what the printer writes, the split reads
 back as the one value it was given. That is the whole of the guarantee. What
@@ -74,7 +84,10 @@ a reading then makes of that token is decided where the operand is read, and
 whether a quote should reach that decision — so that a key named `..`, or
 one beginning with `#`, has a spelling that names it — is part of the
 relative-segment question `ls` settles
-([`build-sequence.md`](build-sequence.md)).
+([`build-sequence.md`](build-sequence.md)). Ruling that it should has a
+known shape and a known cost: the split would start carrying which parts of
+a token were quoted, which grows the value it returns rather than adding a
+layer over it, and every reading that consults quoting reads that value.
 
 ## Place resolution
 

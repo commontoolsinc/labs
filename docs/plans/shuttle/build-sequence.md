@@ -163,9 +163,10 @@ Landed:
   handed words the operating system's shell already split; shuttle is handed
   the line, and both halves are its own. The split is POSIX quoting —
   whitespace separates, single quotes are literal, double quotes group, a
-  backslash escapes one character, and runs that touch are one token — and a
-  line is refused for one of two reasons: a quote that never closes, naming
-  the column it opened at, and a trailing backslash with nothing to escape.
+  backslash escapes one character and between double quotes only a quote or
+  another backslash, and runs that touch are one token — and a line is
+  refused for one of two reasons: a quote that never closes, naming the
+  column it opened at, and a trailing backslash with nothing to escape.
   The printer quotes only where quoting is needed, which is what keeps a
   slug, a handle, a flag and a path each printing as themselves; what forces
   it is whitespace, either quote, the backslash, and the characters the
@@ -184,6 +185,16 @@ Still to come:
   navigable within the connected space (`cd #favorites`, and the `wish`
   verb, over the `./lib/wish` export entry A1 adds; a home-anchored target
   from elsewhere is refused with the reason — decision 5).
+
+  The line editor is the view substrate's rather than `node:readline`'s.
+  `EditBuffer` (`packages/cli/lib/view/editbuffer.ts`) holds the motions and
+  the substrate's key handler binds them to emacs keys, and `decodeKeys`
+  (`packages/cli/lib/view/keys.ts`) supplies the key stream a binding table
+  reads — where `node:readline` offers no keymap hook at all, so a second
+  binding table is unreachable behind it. That is what keeps modal editing
+  an option later ([`futures.md`](futures.md)), and it brings the view
+  substrate's export entries forward from B3, where A1 left them.
+
 - **Slug and name resolution** (B1b), riding the machinery `--cell` already
   uses
   (`resolveStoredPieceAddress`, `listSpaceSlugs`), so no CLI-surface arc
