@@ -31,10 +31,10 @@ describe("registry", () => {
       "discord-online",
       "github-members",
       "prod-uptime",
-      "gcp-spend",
+      "cubic-spend",
       "github-ci-spend",
       "model-spend",
-      "spend-metric-placeholder",
+      "gcp-spend",
       "recent-runs",
     ]);
   });
@@ -47,11 +47,22 @@ describe("registry", () => {
       placeholders.map((tile) => tile.collect(context)),
     );
 
-    expect(views).toEqual(Array(2).fill({
+    expect(views).toEqual(Array(1).fill({
       label: "YOUR METRIC HERE",
       status: "good",
       value: "–",
       sub: "no metric selected for this tile",
     }));
+  });
+
+  it("reports cubic spend as a named metric with no value", async () => {
+    const cubic = TILES.find((tile) => tile.id === "cubic-spend");
+
+    expect(await cubic?.collect(context)).toEqual({
+      label: "cubic spend",
+      status: "good",
+      value: "—",
+      sub: "api does not expose value",
+    });
   });
 });
