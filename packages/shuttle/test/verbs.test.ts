@@ -689,6 +689,26 @@ describe("verbs", () => {
       expect(shuttle.place.place).toBe(before);
     });
 
+    it("refuses a space written as a name that resolved to another space", async () => {
+      const shuttle = shuttleIn();
+      const outcome = await runLine(`get /@estuary/${HANDLE}`, shuttle, {
+        ...READS_NOTHING,
+        spaceNamed: () => Promise.resolve(OTHER_SPACE),
+      });
+      expect(reasonOf(outcome)).toBe(
+        "`estuary` resolves to space `did:key:z6MkHomeSpace`, and this " +
+          "shuttle is connected to `did:key:z6MkConnectedSpace`. One " +
+          "connection serves one space, so reaching that cell means a " +
+          "shuttle started against that space.",
+      );
+    });
+
+    it("raises what a read that failed raised", async () => {
+      await expect(runLine("get", atPiece(), READS_NOTHING)).rejects.toThrow(
+        "A cell was read.",
+      );
+    });
+
     it("refuses two operands", async () => {
       expect(reasonOf(await runLine("get a b", atPiece(), READS_NOTHING))).toBe(
         "`get` takes one operand, and was given 2.",
