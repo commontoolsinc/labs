@@ -1,10 +1,13 @@
 import { expect } from "@std/expect";
+import * as path from "@std/path";
 import { describe, it } from "@std/testing/bdd";
+
 import {
   collectTestFiles,
   isTestFile,
   selectShardedTestFiles,
 } from "./run-sharded-test-files.ts";
+import { AGENTS_HOST_TEST_WEIGHTS } from "./test-timing-weights.ts";
 
 describe("run-sharded-test-files", () => {
   it("recognizes Deno test module names", () => {
@@ -50,6 +53,36 @@ describe("run-sharded-test-files", () => {
     );
 
     expect(selected.sort()).toEqual(files);
+  });
+
+  it("keeps each expensive agents-host file on its own shard", async () => {
+    const root = path.fromFileUrl(
+      new URL("../packages/connectors/agents/host", import.meta.url),
+    );
+    const files = (await collectTestFiles(root)).map((file) =>
+      path.relative(root, file).replaceAll("\\", "/")
+    );
+    const expensiveFiles = Object.keys(AGENTS_HOST_TEST_WEIGHTS);
+    const shards = Array.from(
+      { length: expensiveFiles.length },
+      (_, offset) =>
+        selectShardedTestFiles(
+          files,
+          { index: offset + 1, total: expensiveFiles.length },
+          AGENTS_HOST_TEST_WEIGHTS,
+          0.4,
+        ),
+    );
+
+    expect(expensiveFiles).toHaveLength(5);
+    expect(shards.flat().toSorted()).toEqual(files.toSorted());
+    expect(
+      new Set(
+        expensiveFiles.map((file) =>
+          shards.findIndex((shard) => shard.includes(file))
+        ),
+      ).size,
+    ).toBe(expensiveFiles.length);
   });
 
   it("rejects more shards than test files", () => {
