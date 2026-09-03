@@ -52,10 +52,15 @@ reference edge, take no `agentName`, and return no value.
 The running piece is authoritative. Orient before mutating it:
 
 ```bash
-cf piece describe --cell "$TOPICS_BOARD"
 cf piece verbs --cell "$TOPICS_BOARD" --json
-cf piece call --cell "$TOPICS_BOARD" addTopic --help --json
 ```
+
+That listing includes the deployed pattern reference, callable prose, and input
+and output schemas. Use `cf piece describe --cell "$TOPICS_BOARD"` only when you
+need piece-wide purpose, state, or input documentation. Use
+`cf piece call --cell "$TOPICS_BOARD" <verb> --help --json` only after choosing
+a verb and when its generated flags or standalone help are useful. Each command
+is an independent cold CLI process, so do not run all three by default.
 
 The deployment can be well behind the checkout the CLI runs from, and that gap
 explains board behavior that would otherwise read as a defect. Ask it which
@@ -71,10 +76,11 @@ anything from a verb that behaves unlike the source in front of you. A gap of
 dozens of commits is ordinary, so which source is running is the first question,
 not the last.
 
-Repeat `describe`, `verbs`, and `call <verb> --help --json` after selecting a
-Topic. `piece verbs` lists contract verbs by default; `--all` additionally shows
-UI wrappers and deprecated verbs. The board's published Topic rows deliberately
-contain no verbs: take a row's address and call that Topic directly.
+Run `piece verbs --json` again after selecting a Topic, and use `describe` or
+per-verb help on demand. `piece verbs` lists contract verbs by default; `--all`
+additionally shows UI wrappers and deprecated verbs. The board's published Topic
+rows deliberately contain no verbs: take a row's address and call that Topic
+directly.
 
 The current declared contract is:
 
