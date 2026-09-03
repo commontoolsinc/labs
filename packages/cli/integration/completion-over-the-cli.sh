@@ -307,7 +307,7 @@ check "1" "$(printf '%s' "$ARGUMENT_KEYS" | grep -c 'settings')" \
 
 # The suffix rides the bare slug the same way, because the slug names the
 # piece the reference names.
-check "1" "$(succeeds $CF get --quiet --piece "board#argument" $ARGS)" \
+check "1" "$(succeeds $CF cell get --quiet --piece "board#argument" $ARGS)" \
   "the suffix on a bare slug is a --piece value the command accepts too"
 check "$ARGUMENT_KEYS" \
   "$(candidates_at "cf cell get $LINE_ARGS --piece board#argument ")" \

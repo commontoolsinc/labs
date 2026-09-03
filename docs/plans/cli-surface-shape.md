@@ -650,7 +650,10 @@ than taking anything away.
    spelling it had, hidden and dated, so a script keeps working while it is
    migrated. The date bounds a guarantee rather than schedules an execution:
    removing those mounts is 7b, a separate change, the way 6b was separate
-   from 6a.
+   from 6a. 7b takes the notice and its dated constant with the mounts, and
+   `packages/cli/test/integration-command-spellings.test.ts` too — the check
+   holding the integration drills to the blessed spellings has nothing left to
+   find once no superseded spelling answers.
 
    The duplicated nouns this step was named for resolve rather than merge.
    `piece inspect` reports on a live piece and `cf inspect` reads a stored
