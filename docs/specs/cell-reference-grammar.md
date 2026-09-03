@@ -666,7 +666,7 @@ parseCellReference(text, context?): ReferenceParts     the reader
 renderCellReference(link, context?): string            the writer
 parseReferenceContext(text): ReferenceContext          a context from its text
 renderReferenceContext(context): string                and back
-ReferenceContext                                       a cell address with parts missing
+ReferenceContext                          a cell address with parts missing
 ```
 
 The prose says _reader_ and _writer_; the code says `parse` and `render`,
@@ -674,8 +674,8 @@ because `render` is what this tree already calls structure-to-text and `write`
 is what it calls a store operation. `parseReferenceParts` is the reader today,
 without the context argument, and is folded into `parseCellReference`.
 `parseLLMFriendlyLink` and `createLLMFriendlyLink` become wrappers over the
-pair, kept for their callers â the name records an audience, and the grammar
-is for every reader.
+pair, kept for their callers — the name records an audience, and the grammar is
+for every reader.
 
 Serves R3 (the shape is the string's; the values are the context's), R9, R10,
 R12.
