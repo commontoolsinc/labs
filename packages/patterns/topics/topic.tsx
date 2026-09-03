@@ -1772,7 +1772,7 @@ export default pattern<TopicInput, TopicOutput>(
                   ? (
                     <cf-vstack gap="1">
                       {linksView.map((link) => (
-                        <cf-hstack gap="2" align="center">
+                        <cf-hstack gap="2" align="center" data-link-row="">
                           <cf-badge size="xs" color="neutral">
                             {link.kind}
                           </cf-badge>
@@ -1865,6 +1865,7 @@ export default pattern<TopicInput, TopicOutput>(
                       {commentsView.map((comment) => (
                         <cf-vstack
                           gap="0"
+                          data-comment-row=""
                           style="border-left: 2px solid var(--cf-theme-color-border); padding-left: 0.75rem;"
                         >
                           <cf-hstack gap="2" align="center">

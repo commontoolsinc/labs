@@ -24,7 +24,7 @@
  * bound to it.
  */
 import { Identity } from "@commonfabric/identity";
-import { env } from "@commonfabric/integration";
+import { env, type Page } from "@commonfabric/integration";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
@@ -85,6 +85,44 @@ const stamped = <T extends { removedAt?: number }>(records: T[]): T[] =>
 const live = <T extends { removedAt?: number }>(records: T[]): T[] =>
   records.filter((record) => record.removedAt === undefined);
 
+/**
+ * The text of each rendered row, in the order the page shows them, descending
+ * shadow roots the way the flattened accessibility tree does.
+ *
+ * Reading the order rather than assuming it is what lets this file assert the
+ * invariant that matters — clicking row *k* stamps the record displayed at row
+ * *k* — without depending on the order the seed happened to commit in.
+ */
+const rowTexts = (page: Page, hook: string): Promise<string[]> =>
+  page.evaluate((attr: string) => {
+    const texts: string[] = [];
+    const walk = (root: Document | ShadowRoot) => {
+      for (const el of root.querySelectorAll(`[${attr}]`)) {
+        texts.push(el.textContent ?? "");
+      }
+      for (const el of root.querySelectorAll("*")) {
+        const sr = (el as HTMLElement).shadowRoot;
+        if (sr) walk(sr);
+      }
+    };
+    walk(document);
+    return texts;
+  }, { args: [hook] });
+
+/** Which of `candidates` the row at `index` is showing. */
+const rowAt = (rows: string[], index: number, candidates: string[]): string => {
+  const text = rows[index] ?? "";
+  const hit = candidates.filter((c) => text.includes(c));
+  if (hit.length !== 1) {
+    throw new Error(
+      `row ${index} of ${rows.length} matched ${hit.length} candidates: ${
+        JSON.stringify(text.slice(0, 200))
+      }`,
+    );
+  }
+  return hit[0]!;
+};
+
 describe("Topics retraction controls", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
@@ -136,43 +174,40 @@ describe("Topics retraction controls", () => {
     topicResult = cc.getResult(topic.getCell());
     sinkCancels.push(topicResult.sink(() => {}));
 
-    // Filed one at a time, each barriered on its own arrival before the next
-    // is sent, so the thread's sort by `sentAt` puts them on the page in the
-    // order named above and a row index addresses the row intended.
+    // Seeded, then barriered on every record being PRESENT — not on any of
+    // them being at a particular index.
     //
-    // The barrier is the whole point rather than caution. Under server
-    // execution a `set()` resolves before the SERVED consequence arrives, so
-    // three appends sent back to back can commit in any order and land
-    // `sentAt` stamps in that order too — which reorders the rendered thread
-    // and silently moves every row this test clicks. Unbarriered, this file
-    // passed with server execution off and retracted the wrong comment with
-    // it on.
-    const comments = topicResult.key("comments");
-    const bodies = [ALPHA, BRAVO, CHARLIE];
-    for (const [index, body] of bodies.entries()) {
+    // An index barrier is what a first version used, and under server
+    // execution it can wait forever: a `set()` resolves before the served
+    // consequence arrives, so the appends can commit in an order the predicate
+    // never sees, and `waitForCellValue` has no safety net to end that wait.
+    // It hung a CI shard for 26 minutes. Nothing below depends on the filed
+    // order now — the rows are read from the page in the order the page shows
+    // them — so presence is the whole requirement.
+    for (const body of [ALPHA, BRAVO, CHARLIE]) {
       await topic.result.set({ body, agentName: AGENT }, ["addComment"]);
-      await waitForCellValue(
-        cc.runtime,
-        comments,
-        (stored: StoredComment[] | undefined) =>
-          (stored ?? []).length === index + 1 &&
-          stored![index]?.body === body,
-      );
     }
-
-    const links = topicResult.key("links");
-    const urls = [LINK_ONE, LINK_TWO];
-    for (const [index, url] of urls.entries()) {
+    for (const url of [LINK_ONE, LINK_TWO]) {
       await topic.result.set({ kind: "web", url, agentName: AGENT }, [
         "addLink",
       ]);
-      await waitForCellValue(
-        cc.runtime,
-        links,
-        (stored: StoredLink[] | undefined) =>
-          (stored ?? []).length === index + 1 && stored![index]?.url === url,
-      );
     }
+    await waitForCellValue(
+      cc.runtime,
+      topicResult.key("comments"),
+      (stored: StoredComment[] | undefined) =>
+        [ALPHA, BRAVO, CHARLIE].every((body) =>
+          (stored ?? []).some((c) => c.body === body)
+        ),
+    );
+    await waitForCellValue(
+      cc.runtime,
+      topicResult.key("links"),
+      (stored: StoredLink[] | undefined) =>
+        [LINK_ONE, LINK_TWO].every((url) =>
+          (stored ?? []).some((l) => l.url === url)
+        ),
+    );
 
     // Every write reaches the server before a browser asks for the piece; one
     // created but not yet synced is answered with "No data at cell".
@@ -210,18 +245,32 @@ describe("Topics retraction controls", () => {
       waitForText(page, "body", CHARLIE),
     ]);
 
+    // Row 1 of the thread AS RENDERED, whichever comment that turns out to be.
+    // The invariant under test is that the control stamps the record its own
+    // row is showing, and reading the row first is what states it that way.
+    const before = await rowTexts(page, "data-comment-row");
+    assertEquals(before.length, 3);
+    const firstTarget = rowAt(before, 1, [ALPHA, BRAVO, CHARLIE]);
+
     await clickNthCfButton(page, RETRACT_COMMENT, 1);
     const afterFirst = await waitForCellValue<StoredComment[]>(
       cc.runtime,
       topicResult.key("comments"),
       (comments) => stamped(comments ?? []).length === 1,
     );
-    assertEquals(stamped(afterFirst).map((c) => c.body), [BRAVO]);
+    assertEquals(stamped(afterFirst).map((c) => c.body), [firstTarget]);
     // The viewer's Profile, not the agent that filed the comment.
     assertEquals(stamped(afterFirst)[0]?.removedBy?.name, VIEWER);
 
-    // The discriminating click. See the header: the view and the stored array
-    // disagree about what sits at index 1 from here on.
+    // The discriminating click. The stamped record is still in the array and
+    // the view has dropped it, so row 1 and array position 1 now name
+    // different comments — bound to the array this would find the record it
+    // just stamped and do nothing.
+    const between = await rowTexts(page, "data-comment-row");
+    assertEquals(between.length, 2);
+    const secondTarget = rowAt(between, 1, [ALPHA, BRAVO, CHARLIE]);
+    assertEquals(secondTarget === firstTarget, false);
+
     await clickNthCfButton(page, RETRACT_COMMENT, 1);
     const afterSecond = await waitForCellValue<StoredComment[]>(
       cc.runtime,
@@ -230,12 +279,16 @@ describe("Topics retraction controls", () => {
     );
     assertEquals(
       stamped(afterSecond).map((c) => c.body).toSorted(),
-      [BRAVO, CHARLIE].toSorted(),
+      [firstTarget, secondTarget].toSorted(),
     );
-    assertEquals(live(afterSecond).map((c) => c.body), [ALPHA]);
+    assertEquals(live(afterSecond).length, 1);
     // Stamped, not removed: membership is what never shrinks, and the board's
     // activity ordering depends on it.
     assertEquals(afterSecond.length, 3);
+
+    const linkRows = await rowTexts(page, "data-link-row");
+    assertEquals(linkRows.length, 2);
+    const linkTarget = rowAt(linkRows, 0, [LINK_ONE, LINK_TWO]);
 
     await clickNthCfButton(page, RETRACT_LINK, 0);
     const afterLink = await waitForCellValue<StoredLink[]>(
@@ -243,8 +296,8 @@ describe("Topics retraction controls", () => {
       topicResult.key("links"),
       (links) => stamped(links ?? []).length === 1,
     );
-    assertEquals(stamped(afterLink).map((l) => l.url), [LINK_ONE]);
-    assertEquals(live(afterLink).map((l) => l.url), [LINK_TWO]);
+    assertEquals(stamped(afterLink).map((l) => l.url), [linkTarget]);
+    assertEquals(live(afterLink).length, 1);
     assertEquals(afterLink.length, 2);
   });
 });
