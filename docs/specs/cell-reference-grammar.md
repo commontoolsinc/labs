@@ -18,11 +18,20 @@ document answers.
 ## Summary
 
 A cell reference is one string that names one cell, read the same way by every
-reader in the fabric:
+reader in the fabric. It is written at one of three levels, and the head of the
+string says which:
 
 ```text
-[//<space>]/<piece>[@<qualifier>…][/<path>][#argument]
+//<space>/<piece>[@<qualifier>…][/<path>][#argument]     complete
+/<piece>[@<qualifier>…][/<path>][#argument]              space-relative
+[./]<path>                                               piece-relative
 ```
+
+A complete reference names everything. A space-relative one takes its space from
+the reader's context; a piece-relative one takes its space and piece from the
+context and names a path against the context's position. Parsing never needs the
+context — the head decides the level — and only resolving a relative reference
+does.
 
 Three characters carry structure, and each carries exactly one meaning:
 
@@ -55,14 +64,26 @@ And the common case — a same-space, base-scoped cell — is what it always was
 /glaze-tracker/items/0/title
 ```
 
+From inside that piece — the cell a `--cell` names on the command line — the
+path alone:
+
+```text
+items/0/title
+```
+
 ## What this governs
 
 The cell reference grammar: the form `parseReferenceParts` reads, the form
 `createLLMFriendlyLink` writes, and the form every `cf` command reads in its
 target positional and prints in every address it publishes. The CLI's bare alias
-(`pieceId[@scope]`, and a slug on its own) is a convenience over this grammar
-and follows it; `packages/cli/README.md` records that new capability lands in
-the reference first and the alias never grows one the reference lacks.
+(`pieceId[@scope]`, `pieceId/path` at a link endpoint, and a slug on its own) is
+a convenience over this grammar and follows it; `packages/cli/README.md` records
+that new capability lands in the reference first and the alias never grows one
+the reference lacks. The alias reads a bare string piece-first, where this
+grammar reads it as a path against the context's piece
+([D1](#d1-qualification-is-positional-the-urls-three-levels)); the CLI keeps the
+two apart by slot, offering the alias only where no path competes for the
+position, and the `./` form reaches the grammar's reading anywhere.
 
 Three neighboring grammars name related things and are **not** this grammar,
 though each is held to it in a stated way:
@@ -73,12 +94,6 @@ though each is held to it in a stated way:
 | Pattern import specifier, `cf:[/<space>/]<ref>[/<subpath>][@<pin>]` | [Pattern imports](pattern-imports/README.md#specifier-syntax)                             | Shares the reserved characters and the trailing-qualifier position; its pin is a qualifier this grammar registers ([D2](#d2--is-the-qualifier-introducer-and-nothing-else))                         |
 | Projection grammar, `--select 'topic@,topic.title'`                 | `packages/cli/README.md`, "Asking for an address instead of contents"                     | Its own grammar by its own statement: a list splits on `,`, a path on `.`, and a trailing `@` marks a position. It borrows `@` and `,`; the [inventory](#character-inventory) records the borrowing |
 
-Shuttle's line grammar
-([`../plans/shuttle/grammar.md`](../plans/shuttle/grammar.md)) is a layer above
-this one: it reads a reference through this grammar, adds place-relative
-readings of its own (`..`, `-`, `%3`, a bare segment), and records that it
-forbids itself a second spelling of anything this grammar already writes.
-
 ## Requirements
 
 Each requirement names where it comes from. A grammar decision below serves one
@@ -87,16 +102,14 @@ written here first.
 
 ### R1 — One grammar, every reader
 
-The same structure names the same cell in a pattern, in the shell, at the CLI's
-intake seams, and on shuttle's line. Readers differ in what they can _resolve_ —
-a pattern resolves from the string alone and so requires a DID and a handle; a
+The same structure names the same cell in a pattern, in the shell, and at the
+CLI's intake seams. Readers differ in what they can _resolve_ — a pattern
+resolves from the string alone and so requires a DID and a handle; a
 session-holding reader resolves a space name and a slug as well — and not in
 what the grammar _admits_.
 
 Source: `packages/cli/README.md` ("the one reference syntax of the fabric"); the
-doc comment heading `packages/cli/lib/llm-friendly-ref.ts`; shuttle's component
-table, which lists the grammar as something shuttle "consumes and must not
-fork".
+doc comment heading `packages/cli/lib/llm-friendly-ref.ts`.
 
 ### R2 — Every dimension of a link's address has a written form
 
@@ -112,12 +125,16 @@ and serialized sigil links". The runner's `createLLMFriendlyLink` renders any
 `NormalizedFullLink`, so a scope the renderer can write is a scope the parser
 must read.
 
-### R3 — Decidable from the string alone
+### R3 — The string decides its own shape
 
-Which characters are the space, the piece, a qualifier, the path, and the
-fragment is fixed by the string, without a session, a place, or a schema. A
-context-holding reader may _resolve_ more (a name to a DID); it never _parses_
-differently.
+Which level a reference is written at, and which characters are the space, the
+piece, a qualifier, the path, and the fragment, is fixed by the string, without
+a session, a position, or a schema. What a context supplies for the parts a
+string omits is the context's to decide — an interactive reader may hold a
+default for every one of them
+([Appendix](#appendix-how-an-interactive-reader-supplies-a-context)) — and it
+never changes which parts the string carries. Defaulting is resolution; parsing
+is the same everywhere.
 
 Source: `parseLLMFriendlyLink(target, space?)` takes the string and at most a
 fallback space; the runner has nothing else at link-resolution time.
@@ -166,9 +183,9 @@ A reference, a shell page URL, and a `cf:` import specifier that name the same
 cell translate into one another segment for segment, with no reordering and no
 character that one has and another must escape.
 
-Source: shuttle's component table ("Web shell route grammar … keep them mutually
-translatable"); `parseFabricUrl` reads both the page URL and the reference
-today.
+Source: `parseFabricUrl` in `packages/runner/src/fabric-url.ts` reads both the
+page URL and the reference today, and is where a translation that stopped
+holding would first fail.
 
 ### R9 — Composes across commands
 
@@ -182,15 +199,15 @@ string".
 
 A reference that omits a part has a defined meaning for the omission, and the
 canonical layer's definition is the base: no space means the reader's space, no
-scope means `space`. A layer that reads an omission relatively — shuttle reads
-an absent scope from the place — writes every part it does not want read that
-way. So a shared or printed reference is fully qualified, and the relative
-reading is a convenience for typing, never a property of a string in flight.
+scope means `space`. A layer that reads an omission relatively — a reader with a
+position may take an absent scope from it — writes every part it does not want
+read that way. So a shared or printed reference is fully qualified, and the
+relative reading is a convenience for typing, never a property of a string in
+flight.
 
 Source: `createLLMFriendlyLink` writes the space only when it differs from the
 context and the scope only when it is not the base; `linksEqual` compares
-`scope ?? "space"`; shuttle's grammar records that `pwd` writes the scope suffix
-"rather than trusting it to be inferred".
+`scope ?? "space"`.
 
 ### R11 — The forms that are emitted keep reading
 
@@ -205,6 +222,20 @@ Source: `createLLMFriendlyLink` is the one renderer, and it takes a
 `MemorySpace` (a DID) — so every rendered space is a DID, and a name-shaped
 space exists only where a person typed one.
 
+### R12 — Relative to a context, at each level
+
+A reader that holds a context writes only what the context does not supply. The
+contexts that exist are a space; a space and a piece; and a position inside a
+piece. Each is a prefix of the next, so the levels a reference can be written at
+are the levels a context can supply, and a reader with no context refuses a
+reference that needs one rather than guessing.
+
+Source: `parseLLMFriendlyLink(target, space)` takes a fallback space; `cf` takes
+`--space` (or `CF_SPACE`) and `--cell`, and its positional path is a path
+against that cell that "never begins with `/`" (`packages/cli/README.md`,
+"Writing the target"); `parseLink` in `packages/runner/src/link-types.ts`
+resolves a stored link with no `id` against its base cell.
+
 ## Character inventory
 
 What each structural character is reserved for, by which grammar, and what it
@@ -212,22 +243,21 @@ costs at a shell. The reserved set is deliberately small: a grammar that spends
 a character per requirement runs out of characters before it runs out of
 requirements, and the shell-safe alphabet below is smaller than it looks.
 
-| Character              | Reserved by                      | Meaning                                                                                                                                                                                                         |
-| ---------------------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/`                    | this grammar                     | segment separator; `//` at the head opens the space slot                                                                                                                                                        |
-| `@`                    | this grammar                     | qualifier introducer on the piece ([D2](#d2--is-the-qualifier-introducer-and-nothing-else))                                                                                                                     |
-| `#`                    | this grammar                     | fragment introducer, `#argument` ([D6](#d6-the-fragment-selects-a-secondary-cell)); separately, a leading `#name` on a whole operand is a wish target at `cf`'s intake seams, and shuttle records both readings |
-| `~0`, `~1`             | RFC 6901, via the path           | escapes for `~` and `/` inside a path key                                                                                                                                                                       |
-| `:`                    | the identifiers                  | inside a DID and a handle (`did:key:…`, `of:fid1:…`); a segment holding one is an identifier, one without is a name                                                                                             |
-| `=`                    | this grammar, inside a qualifier | separates a qualifier's name from its value                                                                                                                                                                     |
-| `%`                    | shuttle's line                   | a listing handle, `%3`, on a whole operand                                                                                                                                                                      |
-| `!`                    | shuttle's line                   | "runs on the local machine", line-initial and in a pipeline                                                                                                                                                     |
-| `.`, `..`, `-`         | shuttle's line                   | place tokens, matched against a whole segment or operand                                                                                                                                                        |
-| `,` and a trailing `@` | the projection grammar           | list separator, and the address marker on a projected position                                                                                                                                                  |
-| a leading `@`          | `--schema`                       | its `@file` form; the projection's own document records the interaction with the trailing marker                                                                                                                |
+| Character              | Reserved by                           | Meaning                                                                                                                                                                      |
+| ---------------------- | ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/`                    | this grammar                          | segment separator; at the head, `//` opens the space slot, one `/` roots at the context's space, and neither is piece-relative                                               |
+| `@`                    | this grammar                          | qualifier introducer on the piece ([D2](#d2--is-the-qualifier-introducer-and-nothing-else))                                                                                  |
+| `#`                    | this grammar                          | fragment introducer, `#argument` ([D6](#d6-the-fragment-selects-a-secondary-cell)); separately, a leading `#name` on a whole operand is a wish target at `cf`'s intake seams |
+| `~0`, `~1`             | RFC 6901, via the path                | escapes for `~` and `/` inside a path key                                                                                                                                    |
+| `:`                    | the identifiers                       | inside a DID and a handle (`did:key:…`, `of:fid1:…`); a segment holding one is an identifier, one without is a name                                                          |
+| `=`                    | this grammar, inside a qualifier      | separates a qualifier's name from its value                                                                                                                                  |
+| `.`, `..`              | this grammar, in a relative reference | the context's position and its parent, each as a whole segment                                                                                                               |
+| `,` and a trailing `@` | the projection grammar                | list separator, and the address marker on a projected position                                                                                                               |
+| a leading `@`          | `--schema`                            | its `@file` form; the projection's own document records the interaction with the trailing marker                                                                             |
 
-No character on this table is spent on the space. The space is introduced by
-position, and [D1](#d1-the-space-is-positional-introduced-by-) says why.
+No character on this table is spent on the space or on relativity. Both are
+introduced by position at the head of the string, and
+[D1](#d1-qualification-is-positional-the-urls-three-levels) says why.
 
 ### Shell behavior, measured
 
@@ -244,6 +274,7 @@ the program received:
 | `#favorites`                                                                             | passes                    | swallowed            | swallowed | read as a comment, the argument vanishes (bash interactive, and any script) |
 | `/board@user`, `//space/board`                                                           | passes                    | passes               | passes    |                                                                             |
 | `/board:user`, `/board%user`, `/board,user`, `/board+user`, `/board=user`, `/board!user` | passes                    | passes               | passes    |                                                                             |
+| `items/0`, `./items`, `../title`, `.`                                                    | passes                    | passes               | passes    | the relative forms                                                          |
 
 Available to the grammar unquoted, then: `@ : % , + = ! . - /`. Not available:
 `$` (silent, in every shell), `?` and `^` (a glob), `#` at the head of a word (a
@@ -264,64 +295,96 @@ is recorded so the next reader of the wish syntax finds it measured.
 Each decision names the requirements it serves, the alternatives it rejected,
 and the existing decisions it confirms or replaces.
 
-### D1. The space is positional, introduced by `//`
+### D1. Qualification is positional: the URL's three levels
 
 ```text
-//<space>/<piece>…      space-qualified
-/<piece>…               the reader's space
+//<space>/<piece>…      complete: nothing is read from the context
+/<piece>…               space-relative: the space is the context's
+<path>  or  ./<path>    piece-relative: the space and piece are the context's,
+                        and the path is against the context's position
 ```
 
-The space carries no sigil. A reference that opens with `//` names its space in
-the segment that follows, exactly as a URL names its authority; one that opens
-with a single `/` is in whatever space the reader is in. The space segment is a
-DID or a name; a segment holding `:` is a DID, and one without is a name only a
-session-holding reader can resolve — which is the rule `parseReferenceParts`
-already applies to the piece segment, now applied to both.
+The head of the string says how much of the address it carries, and it spends no
+sigil to say so: `//` opens the space slot the way it opens a URL's authority, a
+single `/` roots at the context's space, and neither roots at the context's
+position. The space segment is a DID or a name; a segment holding `:` is a DID,
+and one without is a name only a session-holding reader can resolve — which is
+the rule `parseReferenceParts` already applies to the piece segment, now applied
+to both.
 
-Serves R4, R5, R7, R8. Taking `@` off the space is what gives `@` one meaning
-([D2](#d2--is-the-qualifier-introducer-and-nothing-else)); it also ends the
-vocabulary overlap of R5 at its source, since a scope word can no longer be
+A **context** is a position: a space, a piece, a path inside it, and a scope.
+Whatever holds one — the runner's base cell, `cf`'s `--space` and `--cell` —
+supplies the parts a reference omits, and a reader holding less than a reference
+needs refuses it: a piece-relative reference read with a space and no piece
+names nothing. A relative reference is written against the position's path the
+way a relative URL is written against the page: `.` is the position, `..` its
+parent, and a `..` that would leave the piece is refused by this grammar, which
+has nothing above a piece — a layer with a larger tree above the piece may
+continue the walk on its own terms. At a position that is a piece's root, the
+common case, "against the position" and "from the piece's root" coincide.
+
+A relative reference names a path and nothing else. It carries no qualifier and
+no fragment: the scope and the cell are the context's, by construction, since
+the path is inside the context's cell. `@` and `#` in one are ordinary
+characters of a key. The `./` form exists so that a relative reference can be
+written where a bare word is read as something else — a slug on `--cell` — and
+means exactly what the bare form means.
+
+Serves R4, R5, R7, R8, R12. Taking `@` off the space is what gives `@` one
+meaning ([D2](#d2--is-the-qualifier-introducer-and-nothing-else)); it also ends
+the vocabulary overlap of R5 at its source, since a scope word can no longer be
 written where a space name is expected. And it is the shape the sibling grammars
-already have.
+already have, relative forms included.
 
 **Confirms.**
 [Pattern imports](pattern-imports/README.md#one-grammar-no-type-tag) qualifies
 the space by slash depth — `cf:<ref>`, `cf:/<space>/<ref>`,
 `cf://<host>/<space>/<ref>` — and rejected a leading-`@` namespace in so many
 words ("reads like npm, which is exactly the problem"). The shell's page URL is
-`/<space>/<piece>` with no sigil, and shuttle's component table asks that the
-two stay mutually translatable.
+`/<space>/<piece>` with no sigil. The CLI's positional path is already the
+piece-relative form — a path against the `--cell`, never beginning with `/`.
 
 **Replaces.** The `/@<space>/` prefix `parseReferenceParts` reads and
 `createLLMFriendlyLink` writes. [Migration](#migration) keeps the DID form of it
-readable.
+readable. The bare alias's piece-first reading of `pieceId/path` is not
+replaced; it is confined to the slots that take it, and the
+[open question](#open-questions) on the alias records the collision.
 
 **Rejected.**
 
 - `$<space>` — silently expanded by every shell; the
   [table](#shell-behavior-measured) shows the space vanishing without an error.
-- `./<piece>` for the reader's space, with `/<space>/<piece>` absolute — the
+- `./<piece>` for the context's space, with `/<space>/<piece>` absolute — the
   filesystem's shape, and Ben Follington's third option on #6775. It redefines
   `/of:fid1:…`, the one form everything emits, from "piece in my space" to
-  "space named `of:fid1:…`", against R11. `//` costs nothing: a doubled slash at
-  the head is an empty first segment today, and `parseReferenceParts` refuses
-  it, so the position is free to claim.
+  "space named `of:fid1:…`", against R11; and it spends `./` on the space where
+  a filesystem, and this grammar, spend it on the current position. `//` costs
+  nothing: a doubled slash at the head is an empty first segment today, and
+  `parseReferenceParts` refuses it, so the position is free to claim.
 - Keeping `/@<space>/` and reserving the scope words as space names — closes the
   measured collision and leaves `@` with two meanings, R7 unserved, and a
   reserved-word rule on a value the fabric otherwise never validates.
+- A piece-root form for a deep position — a token meaning "this piece, from its
+  root" once the position is inside a piece. A URL has the same gap and lives
+  with it, `..` or the piece's own name reaches the root, and the
+  [shell-safe alphabet](#shell-behavior-measured) has little left to spend on
+  it. Recorded rather than solved.
 
 **Cost, stated.** RFC 6901 reads `//` as an empty token. The reference is not a
 pointer — its head segments are not path keys — and no reader of one has ever
 been offered an empty first segment, so the reading is not one anyone holds; but
-it is the one objection to `//`, and it is recorded rather than argued away.
+it is the one objection to `//`, and it is recorded rather than argued away. And
+a bare string now has two readers that disagree — the alias says piece, the
+grammar says path — which the CLI's slots keep apart today and `./` settles
+anywhere.
 
 ### D2. `@` is the qualifier introducer, and nothing else
 
 `@` introduces a qualifier on the piece segment: a statement about _which_ of
 that piece is meant, without changing _what_ is meant. Which instance (scope)
 and which version (pin) are the two the grammar registers. A qualifier is
-written `@name=value` and attaches to the segment on its left; several are
-written one after another.
+written `@name=value` and attaches to the piece segment on its left; several are
+written one after another. A relative reference names no piece and takes none.
 
 Serves R4, R7. One meaning, one position, and a name rather than a character per
 qualifier.
@@ -334,10 +397,10 @@ is a qualifier under this decision and keeps its form
 ([D3](#d3-the-scope-keeps-its-abbreviation)).
 
 **Replaces.** `@` as the space introducer
-([D1](#d1-the-space-is-positional-introduced-by-)). Once that goes, the two
-grammars that write a trailing `@` — this one for the scope, pattern imports for
-the pin — agree on what the character is, and a future convergence of the two
-puts no two meanings in one position.
+([D1](#d1-qualification-is-positional-the-urls-three-levels)). Once that goes,
+the two grammars that write a trailing `@` — this one for the scope, pattern
+imports for the pin — agree on what the character is, and a future convergence
+of the two puts no two meanings in one position.
 
 **On the direction the precedent points.** Every established trailing-`@`
 convention puts the _container_ or the _version_ after the `@`: `user@host`,
@@ -383,8 +446,8 @@ unchanged).
 scope", and `parseLink` resolves it against its base before a full link exists,
 which is why the renderer has never had one to write. As a written qualifier it
 is the explicit form of the relative reading R10 describes: a context-holding
-reader that reads an absent scope from its place has a way to say so on a
-printed line, and a canonical reader that has no place refuses it rather than
+reader that reads an absent scope from its position has a way to say so on a
+printed line, and a canonical reader that has no context refuses it rather than
 guessing.
 
 ### D4. Qualifiers repeat; a name appears once
@@ -428,8 +491,9 @@ selection `--input` writes as a flag; the path applies inside the selected cell.
 The fragment is last because it is a fragment: it names a cell that belongs to
 the piece the rest of the reference names, and a URL puts that after everything
 else. It is the one fragment. Any other is refused, and a path key containing
-`#` takes the positional path spelling, as `splitArgumentSuffix` in
-`packages/cli/lib/llm-friendly-ref.ts` records.
+`#` is written in a piece-relative reference, which carries no fragment — the
+positional path that `splitArgumentSuffix` in
+`packages/cli/lib/llm-friendly-ref.ts` sends such a key to.
 
 Serves R4 (a fragment is not a qualifier: it changes _what_ cell is named, not
 _which_ instance of it), R8.
@@ -442,14 +506,14 @@ carrying `#argument` has the `#` mid-word, where only `extendedglob` touches it.
 
 A renderer writes the space only when it differs from the reader's, the scope
 only when it is not the base, and every other qualifier whenever it holds one.
-So the common case renders as `/<piece>/<path>` and nothing else, and a _fully
-qualified_ rendering — every slot written — is what a shared link, a `pwd`, and
-any string meant to be read from somewhere else carries.
+It never writes a piece-relative reference: it knows the reader's space and not
+the reader's position. So the common case renders as `/<piece>/<path>` and
+nothing else, and a _fully qualified_ rendering — every slot written — is what a
+shared link and any string meant to be read from somewhere else carries.
 
 Serves R9, R10, R11.
 
-**Confirms.** `createLLMFriendlyLink`'s two omission rules, and shuttle's
-grammar on what `pwd` prints and why.
+**Confirms.** `createLLMFriendlyLink`'s two omission rules.
 
 ### D8. The space segment's vocabulary
 
@@ -480,39 +544,46 @@ write-redirect flag rides along."
 
 Every combination the grammar admits, with `bakery` a space name,
 `did:key:z6MkBakery` its DID, `glaze-tracker` a slug, and `of:fid1:Glz…` the
-handle behind it. A row's meaning is what a reader with no place and no session
-takes from the string; a session-holding reader resolves the names to the same
-cells.
+handle behind it. A row's meaning is what a reader with no context and no
+session takes from the string; a session-holding reader resolves the names to
+the same cells. The relative rows at the end need a context, and theirs is
+`//bakery/glaze-tracker@user/items/0`.
 
-| Written                                          | Space                  | Piece  | Scope         | Path            | Cell                                                      |
-| ------------------------------------------------ | ---------------------- | ------ | ------------- | --------------- | --------------------------------------------------------- |
-| `/of:fid1:Glz…`                                  | the reader's           | handle | `space`       | root            | the piece's result                                        |
-| `/glaze-tracker`                                 | the reader's           | slug   | `space`       | root            | the same, by name                                         |
-| `/glaze-tracker/items/0/title`                   | the reader's           | slug   | `space`       | `items/0/title` | one field                                                 |
-| `/glaze-tracker@user`                            | the reader's           | slug   | `user`        | root            | the reading user's instance                               |
-| `/glaze-tracker@scope=user`                      | the reader's           | slug   | `user`        | root            | the same, written in full                                 |
-| `/glaze-tracker@session/items`                   | the reader's           | slug   | `session`     | `items`         | this session's instance                                   |
-| `/glaze-tracker@inherit`                         | the reader's           | slug   | the context's | root            | refused by a reader with no context                       |
-| `//bakery/glaze-tracker`                         | `bakery`               | slug   | `space`       | root            | needs a session to resolve both names                     |
-| `//did:key:z6MkBakery/of:fid1:Glz…`              | the DID                | handle | `space`       | root            | resolvable from the string alone                          |
-| `//did:key:z6MkBakery/of:fid1:Glz…@user/items/0` | the DID                | handle | `user`        | `items/0`       | fully qualified: the same cell from anywhere              |
-| `//user/glaze-tracker@user`                      | a space _named_ `user` | slug   | `user`        | root            | no ambiguity: the space slot is not `@`-introduced        |
-| `/glaze-tracker@pin=Avcny…rC1c`                  | the reader's           | slug   | `space`       | root            | pinned to one module identity; the runner ignores the pin |
-| `/glaze-tracker@user@pin=Avcny…rC1c`             | the reader's           | slug   | `user`        | root            | two qualifiers; order is free                             |
-| `/glaze-tracker#argument`                        | the reader's           | slug   | `space`       | root            | the arguments cell                                        |
-| `/glaze-tracker@user/items#argument`             | the reader's           | slug   | `user`        | `items`         | inside the arguments cell                                 |
+| Written                                          | Space                  | Piece         | Scope         | Path                         | Cell                                                                     |
+| ------------------------------------------------ | ---------------------- | ------------- | ------------- | ---------------------------- | ------------------------------------------------------------------------ |
+| `/of:fid1:Glz…`                                  | the reader's           | handle        | `space`       | root                         | the piece's result                                                       |
+| `/glaze-tracker`                                 | the reader's           | slug          | `space`       | root                         | the same, by name                                                        |
+| `/glaze-tracker/items/0/title`                   | the reader's           | slug          | `space`       | `items/0/title`              | one field                                                                |
+| `/glaze-tracker@user`                            | the reader's           | slug          | `user`        | root                         | the reading user's instance                                              |
+| `/glaze-tracker@scope=user`                      | the reader's           | slug          | `user`        | root                         | the same, written in full                                                |
+| `/glaze-tracker@session/items`                   | the reader's           | slug          | `session`     | `items`                      | this session's instance                                                  |
+| `/glaze-tracker@inherit`                         | the reader's           | slug          | the context's | root                         | refused by a reader with no context                                      |
+| `//bakery/glaze-tracker`                         | `bakery`               | slug          | `space`       | root                         | needs a session to resolve both names                                    |
+| `//did:key:z6MkBakery/of:fid1:Glz…`              | the DID                | handle        | `space`       | root                         | resolvable from the string alone                                         |
+| `//did:key:z6MkBakery/of:fid1:Glz…@user/items/0` | the DID                | handle        | `user`        | `items/0`                    | fully qualified: the same cell from anywhere                             |
+| `//user/glaze-tracker@user`                      | a space _named_ `user` | slug          | `user`        | root                         | no ambiguity: the space slot is not `@`-introduced                       |
+| `/glaze-tracker@pin=Avcny…rC1c`                  | the reader's           | slug          | `space`       | root                         | pinned to one module identity; the runner ignores the pin                |
+| `/glaze-tracker@user@pin=Avcny…rC1c`             | the reader's           | slug          | `user`        | root                         | two qualifiers; order is free                                            |
+| `/glaze-tracker#argument`                        | the reader's           | slug          | `space`       | root                         | the arguments cell                                                       |
+| `/glaze-tracker@user/items#argument`             | the reader's           | slug          | `user`        | `items`                      | inside the arguments cell                                                |
+| `title`                                          | the context's          | the context's | the context's | `title` against the position | `//bakery/glaze-tracker@user/items/0/title`                              |
+| `./title`                                        | the context's          | the context's | the context's | `title` against the position | the same as `title`; `./` forces the reading where a bare word is a slug |
+| `.`                                              | the context's          | the context's | the context's | the position                 | the context's own cell                                                   |
+| `../1/title`                                     | the context's          | the context's | the context's | the parent, then `1/title`   | `//bakery/glaze-tracker@user/items/1/title`                              |
 
 Refused, and why:
 
-| Written                     | Refusal                                                                                                |
-| --------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `/@bakery/glaze-tracker`    | a name-shaped `@` space: the message names `//bakery/…`                                                |
-| `/glaze-tracker@owner`      | not a scope value: the message names `@name=value` and the registered names                            |
-| `/glaze-tracker@user@user`  | a name written twice                                                                                   |
-| `/glaze-tracker@color=pink` | a name not on the table                                                                                |
-| `//bakery`                  | a space and no piece                                                                                   |
-| `/glaze-tracker#items`      | not the one fragment                                                                                   |
-| `glaze-tracker/items`       | not rooted: a bare form, read by the CLI's alias and by shuttle relatively, and by no canonical reader |
+| Written                               | Refusal                                                                     |
+| ------------------------------------- | --------------------------------------------------------------------------- |
+| `/@bakery/glaze-tracker`              | a name-shaped `@` space: the message names `//bakery/…`                     |
+| `/glaze-tracker@owner`                | not a scope value: the message names `@name=value` and the registered names |
+| `/glaze-tracker@user@user`            | a name written twice                                                        |
+| `/glaze-tracker@color=pink`           | a name not on the table                                                     |
+| `//bakery`                            | a space and no piece                                                        |
+| `/glaze-tracker#items`                | not the one fragment                                                        |
+| `items/0`, read with no context piece | a relative reference and nothing to resolve it against                      |
+| `./items@user`                        | a qualifier on a relative reference, which names no piece                   |
+| `..`, at a piece's root               | above the piece; this grammar has nothing there                             |
 
 ## Translation to the sibling grammars
 
@@ -524,9 +595,11 @@ The same cell in each grammar, segment for segment (R8):
 | `//bakery/glaze-tracker`            | `https://<host>/bakery/glaze-tracker`            | `cf:/bakery/glaze-tracker`            |
 | `//did:key:z6MkBakery/of:fid1:Glz…` | `https://<host>/did:key:z6MkBakery/of:fid1:Glz…` | `cf:/did:key:z6MkBakery/of:fid1:Glz…` |
 | `/glaze-tracker@pin=Avcny…rC1c`     | —                                                | `cf:glaze-tracker@Avcny…rC1c`         |
+| `items/0`                           | `items/0`, relative to the page                  | —                                     |
 
-The page URL has no scope and no pin; the specifier has no scope and no path
-into a cell. Where a slot exists in two of them it is in the same position and
+The page URL has no scope and no pin; the specifier has no scope, no path into a
+cell, and no relative form — an import's subpath is a public name, not a
+position. Where a slot exists in two of them it is in the same position and
 written the same way, and the one written difference — the specifier's bare
 `@<pin>` against the reference's `@pin=` — is the specifier's own to close when
 it next changes, since a bare word after `@` is the scope's under this grammar.
@@ -554,9 +627,9 @@ source. Then it is placed by asking, in order:
 
 A requirement that survives all five is the case for a new structural character,
 and the [measured table](#shell-behavior-measured) says which characters there
-are to spend: `: % , + ! . -`, of which `:` is inside every identifier, `%` and
-`!` are shuttle's, and `,` is the projection's. That is the whole reason the
-grammar spends names rather than characters.
+are to spend: `: % , + ! -`, of which `:` is inside every identifier and `,` is
+the projection's. That is the whole reason the grammar spends names rather than
+characters.
 
 This is what makes the mechanism reasonable rather than merely tidy. Four
 independent uses of `@` accrued on the `cf` surface — the space, the scope, the
@@ -578,17 +651,17 @@ the tree consistent.
    `/@<name>/` is refused with a message naming `//<name>/`: nothing has ever
    rendered it. `parseFabricUrl` reads `//<space>/` alongside the alias. The
    CLI's `validateEmbeddedSpaces` and completion providers follow the same
-   split.
+   split. A reader that holds a position reads the piece-relative form; `cf`'s
+   positional path is one already, and gains only `./` and `..`.
 2. **Write the new forms.** `createLLMFriendlyLink` writes `//<space>/` and its
    qualifiers under [D7](#d7-what-a-renderer-writes). From here every address
    the CLI publishes is in this grammar.
 3. **Documents and tests.** The live documents that quote the form: the grammar
    line in `packages/cli/README.md` and `docs/common/verbs/over-the-cli.md`; the
    examples in `docs/tutorial/06-workflow.md`; the doc comment on
-   `packages/cli/lib/llm-friendly-ref.ts`; the open question in
-   `docs/plans/shuttle/grammar.md`, which this document closes; and the
-   `/@my-space/` rows in `docs/plans/cli-surface-shape.md`. Tests and pattern
-   baselines that hold a rendered reference follow the renderer.
+   `packages/cli/lib/llm-friendly-ref.ts`; and the `/@my-space/` rows in
+   `docs/plans/cli-surface-shape.md`. Tests and pattern baselines that hold a
+   rendered reference follow the renderer.
 4. **The specifier's pin.** When [pattern imports](pattern-imports/README.md)
    next changes its specifier syntax, its bare `@<pin>` becomes `@pin=`, or it
    records why the specifier keeps a bare form the reference does not.
@@ -600,30 +673,35 @@ retire it once rendered markdown from before step 2 is judged old enough.
 
 ## Relationship to existing decisions
 
-| Decision                                                                                  | Where                                                                                   | This document                                                                                 |
-| ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| The reference is the one syntax; the bare form is an alias that never leads               | `packages/cli/README.md`; `llm-friendly-ref.ts` doc comment                             | confirms (R1)                                                                                 |
-| Space by slash depth; leading `@` namespace rejected                                      | [Pattern imports](pattern-imports/README.md#alternatives-considered)                    | confirms and extends to the reference (D1)                                                    |
-| `@` reserved for the trailing qualifier; the pin lives there                              | [Pattern imports](pattern-imports/README.md#specifier-syntax)                           | confirms (D2); asks the pin to take a name (D5, migration step 4)                             |
-| Scope is expressible in every layer, on a `space < user < session` lattice                | [Scoped cell instances](scoped-cell-instances.md)                                       | confirms, and gives `inherit` its written form (D3)                                           |
-| The space rides in front only when it differs; the scope only when not the base           | `createLLMFriendlyLink`; `packages/cli/README.md`                                       | confirms (D7)                                                                                 |
-| `pwd` writes the scope rather than trusting it inferred; canonical absence means the base | [Shuttle grammar](../plans/shuttle/grammar.md#place-resolution)                         | confirms (R10, D7)                                                                            |
-| Shuttle invents no spelling; a second scope spelling would be worse                       | [Shuttle README](../plans/shuttle/README.md), decision 13; its grammar's open questions | confirms: this document is the one place a spelling is decided                                |
-| Page URL and reference stay mutually translatable                                         | [Shuttle README](../plans/shuttle/README.md#what-exists-to-build-on)                    | confirms (R8, D1)                                                                             |
-| `#argument` is the one fragment, last, before anything else parses                        | `splitArgumentSuffix`                                                                   | confirms (D6)                                                                                 |
-| The projection grammar is its own; `--schema @` is the file form                          | `packages/cli/README.md`, "Asking for an address instead of contents"                   | confirms as out of scope; records the borrowed characters                                     |
-| The space is written `/@<space>/`                                                         | `parseReferenceParts`; `createLLMFriendlyLink`                                          | **replaces** (D1)                                                                             |
-| A bare `@word` is the whole qualifier vocabulary                                          | `parseScopedIdSegment`, `CELL_SCOPE_VALUES`                                             | **replaces** with the named form; the bare form survives as the scope's abbreviation (D2, D3) |
+| Decision                                                                        | Where                                                                 | This document                                                                                          |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| The reference is the one syntax; the bare form is an alias that never leads     | `packages/cli/README.md`; `llm-friendly-ref.ts` doc comment           | confirms (R1)                                                                                          |
+| Space by slash depth; leading `@` namespace rejected                            | [Pattern imports](pattern-imports/README.md#alternatives-considered)  | confirms and extends to the reference (D1)                                                             |
+| `@` reserved for the trailing qualifier; the pin lives there                    | [Pattern imports](pattern-imports/README.md#specifier-syntax)         | confirms (D2); asks the pin to take a name (D5, migration step 4)                                      |
+| Scope is expressible in every layer, on a `space < user < session` lattice      | [Scoped cell instances](scoped-cell-instances.md)                     | confirms, and gives `inherit` its written form (D3)                                                    |
+| The space rides in front only when it differs; the scope only when not the base | `createLLMFriendlyLink`; `packages/cli/README.md`                     | confirms (D7)                                                                                          |
+| The positional path is a path against the target cell and never begins with `/` | `packages/cli/README.md`, "Writing the target"                        | confirms as the piece-relative form (R12, D1)                                                          |
+| A stored link with no `id` is the base cell's document, path from its root      | `parseLink` in `packages/runner/src/link-types.ts`                    | confirms as the stored form's own rule; a renderer writes it space-relative, never piece-relative (D7) |
+| `#argument` is the one fragment, last, before anything else parses              | `splitArgumentSuffix`                                                 | confirms (D6)                                                                                          |
+| The projection grammar is its own; `--schema @` is the file form                | `packages/cli/README.md`, "Asking for an address instead of contents" | confirms as out of scope; records the borrowed characters                                              |
+| The space is written `/@<space>/`                                               | `parseReferenceParts`; `createLLMFriendlyLink`                        | **replaces** (D1)                                                                                      |
+| A bare `@word` is the whole qualifier vocabulary                                | `parseScopedIdSegment`, `CELL_SCOPE_VALUES`                           | **replaces** with the named form; the bare form survives as the scope's abbreviation (D2, D3)          |
 
 ## Open questions
 
 - **A host slot.** `cf://<host>/<space>/…` names a toolshed; the reference has
-  no host, because a connection serves one space and shuttle's v1 holds one
-  connection. When a reference needs to name its host, the URL's answer is the
-  `//` slot — `//<host>/<space>/<piece>` — and a host is distinguishable from a
-  space by holding a `.` or a `:<port>` where a DID holds `did:` and a name
-  holds neither. Whether that is enough, or whether the host wants its own
-  introducer, is decided when a reader needs it and not before.
+  no host, because a connection serves one space. When a reference needs to name
+  its host, the URL's answer is the `//` slot — `//<host>/<space>/<piece>` — and
+  a host is distinguishable from a space by holding a `.` or a `:<port>` where a
+  DID holds `did:` and a name holds neither. Whether that is enough, or whether
+  the host wants its own introducer, is decided when a reader needs it and not
+  before.
+- **The bare alias.** `pieceId/path` on `--cell` and at a link endpoint reads
+  piece-first; this grammar reads the same string as a path against the
+  context's piece. The CLI keeps them apart by slot and `./` forces the
+  grammar's reading, so nothing is ambiguous today. Whether the alias retires in
+  favor of `/slug` — one character longer, and needing no slot rule — is a CLI
+  decision, recorded here because the collision is this grammar's to know about.
 - **`#` at a shell.** The measured hazard on a leading `#` is real and predates
   this document. Whether the wish syntax moves, and to what, is a decision for
   the wish surface; the fragment's mid-word `#` is not affected.
@@ -632,3 +710,96 @@ retire it once rendered markdown from before step 2 is judged old enough.
   here so that a reader who finds four uses of `@` on the `cf` surface knows
   that two of them are this grammar's and settled, and two are the projection's
   to keep or change.
+
+## Appendix: how an interactive reader supplies a context
+
+An interactive reader — one that keeps a current position between commands and
+lets the person move it — is the reader with the most to default, and the one
+most tempted to let a default change what a string means. This appendix says how
+such a reader reads each level of reference against what it holds, so that the
+grammar stays one grammar (R1) and the string keeps deciding its own shape (R3)
+while the reader still gets to be terse.
+
+### What a context holds
+
+A context is up to four parts, and any suffix of the list may be absent:
+
+| Part  | Absent when                                              |
+| ----- | -------------------------------------------------------- |
+| space | the reader has no connection                             |
+| piece | the position is at a space, not inside any piece         |
+| path  | the position is a piece's root                           |
+| scope | never: a reader inside a piece is at some instance of it |
+
+Where the parts come from is the reader's business: flags and environment
+(`--space`, `CF_SPACE`, `--cell`), a stored position that navigation moves, or
+the base cell of a stored link. The grammar sees only the four values.
+
+### Reading each level against it
+
+| Level          | From the string              | From the context                                       |
+| -------------- | ---------------------------- | ------------------------------------------------------ |
+| complete       | space, piece, path, fragment | scope, when the string omits it                        |
+| space-relative | piece, path, fragment        | space; scope, when omitted                             |
+| piece-relative | a path against the position  | space, piece, scope; the position's path as the anchor |
+
+The string's parts are never overridden by the context, and the context's parts
+are never read for a slot the string fills. That is what "defaulting is
+resolution" means in practice: the reader decides _values_, never _shape_.
+
+### What absence means here, and canonically
+
+The one place an interactive reader may read a string differently from the
+canonical reader is the scope, and R10 is what makes that safe:
+
+| Omitted part | Canonical reader            | Interactive reader                  |
+| ------------ | --------------------------- | ----------------------------------- |
+| space        | the reader's space          | the context's space                 |
+| piece        | refused: nothing to resolve | the context's piece (relative form) |
+| path         | the piece's root            | the position's path (relative form) |
+| scope        | `space`, the base           | the position's scope, if it chooses |
+
+A reader that takes the position's scope for an omitted one owes one thing in
+return: **every reference it prints carries the scope** (D7), so that nothing it
+hands out depends on where it was standing. A string that leaves the reader is
+fully qualified; the relative reading is for what the person types, not for what
+the reader shows.
+
+### Above the piece
+
+An interactive reader usually has a tree above the piece — a space root that
+lists its pieces, by name or by id, in whatever facets the reader chooses to
+offer. A bare segment read at such a position is the reader's own grammar, not
+this one's: this grammar has no piece to resolve against there and refuses a
+piece-relative reference, and the reader may instead read the segment as a name
+in its tree. Two rules keep that layering honest:
+
+- Inside a piece, a bare segment is a key and nothing else. `x@user` is a key
+  named `x@user`, and `..` from the piece's root is refused by this grammar; a
+  reader that continues the walk upward into its own tree does so knowing it has
+  left the grammar.
+- A segment the reader reads as a piece — a name in its tree — is read by this
+  grammar as a piece segment, qualifiers included, so `glaze-tracker@user` names
+  the user-scoped instance there and a key with the same spelling inside a piece
+  does not. The position decides which reading applies, and the position is
+  never ambiguous about whether it is inside a piece.
+
+### What to refuse rather than default
+
+- A piece-relative reference with no piece in the context.
+- `..` that would leave the piece, unless the reader's own tree continues it.
+- A qualifier or fragment on a relative reference: `./items@user` is a key, and
+  if the reader wants to move the scope, that is a reader operation on the
+  position, not a reference.
+- A complete reference naming a space the connection does not serve. Denoting is
+  not reaching, and following the reference silently into a space the reader
+  cannot read would make the same string mean two things in two sessions.
+
+### The `./` form on an interactive line
+
+An interactive line has verbs and bare words of its own, so a bare `items` may
+be a command, a listing handle, or a key. `./items` is unambiguous everywhere:
+it is a piece-relative reference and nothing else, and it means exactly what the
+bare form means where the bare form is read as one. A reader that offers a bare
+form should offer `./` beside it for that reason, and never give `./` a reading
+of its own.
