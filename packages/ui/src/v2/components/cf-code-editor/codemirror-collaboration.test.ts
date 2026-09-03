@@ -970,6 +970,56 @@ describe("CodeMirror operation collaboration", () => {
     await controller.stop();
   });
 
+  it("stops only after submitting edits recorded during its own submissions", async () => {
+    // A closing controller refuses `localDocChanged()`, so an edit recorded
+    // while one of its submissions is in flight has no caller of its own.
+    // `stop()` carries it in the next round trip rather than failing.
+
+    const gates = [0, 1, 2].map(() => Promise.withResolvers<void>());
+    const captured = [0, 1, 2].map(() => Promise.withResolvers<void>());
+    const applies: ApplyRequest[] = [];
+    const { controller, view, errors } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followups: [
+        activeSnapshotAt("abcX", 1),
+        activeSnapshotAt("abcXY", 2),
+        activeSnapshotAt("abcXYZ", 3),
+      ],
+      apply: async (request) => {
+        const index = applies.length;
+        applies.push(request);
+        captured[index].resolve();
+        await gates[index].promise;
+        return resolutionFor(request);
+      },
+    });
+
+    await controller.start();
+    view.dispatch({ changes: { from: 3, insert: "X" } });
+    const sending = controller.localDocChanged();
+    await captured[0].promise;
+    const stopped = controller.stop();
+    view.dispatch({ changes: { from: 4, insert: "Y" } });
+    gates[0].resolve();
+    await captured[1].promise;
+    view.dispatch({ changes: { from: 5, insert: "Z" } });
+    gates[1].resolve();
+    // A stop that gives up on the pending edit rejects here instead.
+    await Promise.race([captured[2].promise, stopped]);
+    gates[2].resolve();
+    await Promise.all([sending, stopped]);
+
+    expect(errors).toEqual([]);
+    expect(
+      applies.map((request) => [
+        request.base?.version ?? null,
+        (request.payload as { updates: unknown[] }).updates.length,
+      ]),
+    ).toEqual([[null, 1], [1, 1], [2, 1]]);
+    expect(view.state.doc.toString()).toBe("abcXYZ");
+    expect(sendableUpdates(view.state)).toHaveLength(0);
+  });
+
   it("isolates synchronization observers from the Memory operation path", async () => {
     const accepted = acceptedResolution("abc", 1, "X");
     const { controller, view, errors } = controllerHarness({
