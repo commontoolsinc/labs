@@ -12,6 +12,10 @@ export const AGENTS_HOST_TEST_WEIGHTS: Readonly<Record<string, number>> = {
   "test/debug-view-deployment-protection.test.ts": 13.8,
   "test/debug-view-deployment-registry.test.ts": 10,
   "test/debug_view_replacement_test.ts": 9.6,
+  "test/cli_test.ts": 3.3,
+  "test/start_test.ts": 3.1,
+  "test/host_test.ts": 2.9,
+  "test/config_test.ts": 2.5,
 };
 
 export const RUNNER_TEST_WEIGHTS: Readonly<Record<string, number>> = {

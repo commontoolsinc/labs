@@ -9,6 +9,8 @@ import {
 } from "./run-sharded-test-files.ts";
 import { AGENTS_HOST_TEST_WEIGHTS } from "./test-timing-weights.ts";
 
+const AGENTS_HOST_SHARDS = 5;
+
 describe("run-sharded-test-files", () => {
   it("recognizes Deno test module names", () => {
     expect([
@@ -55,33 +57,40 @@ describe("run-sharded-test-files", () => {
     expect(selected.sort()).toEqual(files);
   });
 
-  it("keeps each expensive agents-host file on its own shard", async () => {
+  it("keeps each of the five heaviest agents-host files on its own shard", async () => {
     const root = path.fromFileUrl(
       new URL("../packages/connectors/agents/host", import.meta.url),
     );
     const files = (await collectTestFiles(root)).map((file) =>
       path.relative(root, file).replaceAll("\\", "/")
     );
-    const expensiveFiles = Object.keys(AGENTS_HOST_TEST_WEIGHTS);
+    const expensiveFiles = Object.entries(AGENTS_HOST_TEST_WEIGHTS)
+      .toSorted(([, left], [, right]) => right - left)
+      .slice(0, AGENTS_HOST_SHARDS)
+      .map(([file]) => file);
     const shards = Array.from(
-      { length: expensiveFiles.length },
+      { length: AGENTS_HOST_SHARDS },
       (_, offset) =>
         selectShardedTestFiles(
           files,
-          { index: offset + 1, total: expensiveFiles.length },
+          { index: offset + 1, total: AGENTS_HOST_SHARDS },
           AGENTS_HOST_TEST_WEIGHTS,
           0.4,
         ),
     );
 
-    expect(expensiveFiles).toHaveLength(5);
     expect(shards.flat().toSorted()).toEqual(files.toSorted());
+    const placements = expensiveFiles.map((file) => ({
+      file,
+      shardIndexes: shards.flatMap((shard, index) =>
+        shard.includes(file) ? [index] : []
+      ),
+    }));
     expect(
-      new Set(
-        expensiveFiles.map((file) =>
-          shards.findIndex((shard) => shard.includes(file))
-        ),
-      ).size,
+      placements.filter(({ shardIndexes }) => shardIndexes.length !== 1),
+    ).toEqual([]);
+    expect(
+      new Set(placements.flatMap(({ shardIndexes }) => shardIndexes)).size,
     ).toBe(expensiveFiles.length);
   });
 
