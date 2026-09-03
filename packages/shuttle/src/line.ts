@@ -38,9 +38,11 @@
  *
  * The characters an operand writes an address with are not here, the `:` of a
  * scheme and of a handle among them. Those are read inside a token by the
- * reference grammar rather than by the split, and which of them a printed
- * value has to carry is the question `ls` settles
- * (`docs/plans/shuttle/build-sequence.md`).
+ * reference grammar rather than by the split, and a quote reaches no reading
+ * (`docs/plans/shuttle/grammar.md`), so quoting them would change nothing a
+ * reading does and would cost the bare printing of every address. A value
+ * whose own characters a reading would take is named by a reference instead,
+ * which reads none of them.
  */
 export const RESERVED_CHARACTERS = "!#%<>|";
 
