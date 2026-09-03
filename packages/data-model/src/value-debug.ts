@@ -44,6 +44,15 @@ const ABSOLUTE_MAX_ARRAY_LENGTH = 10000;
 const DEFAULT_MAX_ARRAY_LENGTH = 100;
 
 /**
+ * Length of a string a conversion carries whole whatever its options say, so
+ * that a result is bounded in size whatever the input.
+ */
+const ABSOLUTE_MAX_STRING_LENGTH = 100000;
+
+/** Length of a string a conversion carries whole, when its options do not say. */
+const DEFAULT_MAX_STRING_LENGTH = 200;
+
+/**
  * What a `FabricPrimitive`'s codec hands back to be rendered: the
  * realm-crossing encoding of a terminal codec, or the expansion of a
  * nonterminal one into other `FabricValue`s.
@@ -55,6 +64,17 @@ type PrimitiveState = RealmCodecValue | FabricValue;
  * less its leading slash, and the payload under it.
  */
 type TaggedForm = { readonly tag: string; readonly payload: FabricValue };
+
+/**
+ * The limits a conversion runs within, each resolved from the option of the
+ * same name: the limit stated, or its default when none was, capped at its
+ * absolute maximum.
+ */
+type ConversionLimits = {
+  readonly maxDepth: number;
+  readonly maxArrayLength: number;
+  readonly maxStringLength: number;
+};
 
 /**
  * Returns the class name of the given object, or `<anonymous>` when it has
@@ -72,8 +92,7 @@ function classNameOf(value: object): string {
  */
 class DebugConverter {
   readonly #value: any;
-  readonly #maxDepth: number;
-  readonly #maxArrayLength: number;
+  readonly #limits: ConversionLimits;
   readonly #replacer: undefined | ((value: any) => any);
   readonly #nestingStack = new Map<object, number>();
 
@@ -83,16 +102,13 @@ class DebugConverter {
   constructor(
     /** Value to convert. */
     value: unknown,
-    /** Maximum nesting depth. */
-    maxDepth: number,
-    /** Maximum number of array elements to convert. */
-    maxArrayLength: number,
+    /** Limits to convert within. */
+    limits: ConversionLimits,
     /** Replacer function. */
     replacer?: (value: any) => any,
   ) {
     this.#value = value;
-    this.#maxDepth = maxDepth;
-    this.#maxArrayLength = maxArrayLength;
+    this.#limits = limits;
     this.#replacer = replacer;
   }
 
@@ -129,7 +145,7 @@ class DebugConverter {
    */
   #convertArray(value: any, depth: number): FabricValue {
     const length: number = value.length;
-    const maxLength = this.#maxArrayLength;
+    const maxLength = this.#limits.maxArrayLength;
     const result: FabricValue[] = [];
     // An array is indexable by property name directly, so the index names
     // `Object.keys()` yields are used as they come.
@@ -156,7 +172,7 @@ class DebugConverter {
     }
 
     if (length > maxLength) {
-      result.push({ "/...": { "/length": length } });
+      result.push({ "/...": { length } });
     }
 
     return result;
@@ -178,7 +194,7 @@ class DebugConverter {
       if (
         (matchedGenericName !== "Object") && (matchedGenericName !== className)
       ) {
-        return { [tag]: stringForm };
+        return { [tag]: this.#convertString(stringForm) };
       }
     }
 
@@ -214,6 +230,30 @@ class DebugConverter {
   }
 
   /**
+   * Converts a string. A string longer than the maximum string length is
+   * converted to a `/partialString` form carrying its length and an excerpt:
+   * its first characters up to that limit, less a final high surrogate, so
+   * that the excerpt does not end in half of a surrogate pair. That form
+   * nests two levels, so a result holding one can run one level past the
+   * maximum nesting depth.
+   */
+  #convertString(value: string): FabricValue {
+    const length = value.length;
+    const maxLength = this.#limits.maxStringLength;
+
+    if (length <= maxLength) {
+      return value;
+    }
+
+    let excerpt = value.slice(0, maxLength);
+    if (/[\uD800-\uDBFF]$/.test(excerpt)) {
+      excerpt = excerpt.slice(0, -1);
+    }
+
+    return { "/partialString": { length, excerpt } };
+  }
+
+  /**
    * Converts the given value, which is known to be at the indicated nesting
    * depth.
    */
@@ -231,9 +271,12 @@ class DebugConverter {
       case "bigint":
       case "boolean":
       case "number":
-      case "string":
       case "undefined": {
         return value;
+      }
+
+      case "string": {
+        return this.#convertString(value);
       }
 
       case "symbol": {
@@ -289,7 +332,7 @@ class DebugConverter {
         return { "/circle": nestedAt };
       }
 
-      if (depth >= this.#maxDepth) {
+      if (depth >= this.#limits.maxDepth) {
         return { "/...": toDebugKindString(value) };
       }
 
@@ -684,17 +727,29 @@ class DebugStringifier {
       }
 
       case "...": {
-        // The elision marker: the array-length form when its payload carries
-        // a `/length`, and otherwise the depth-limit form, whose payload --
-        // what kind of value was elided -- is left out of the rendering.
-        const inner = isPlainObject(payload)
-          ? DebugStringifier.#taggedFormOf(payload as FabricPlainObject)
-          : undefined;
-        if ((inner?.tag === "length") && (typeof inner.payload === "number")) {
-          return `... length: ${inner.payload}`;
-        }
-        return "...";
+        // The elision marker: the array-length form when its payload is an
+        // object holding a `length`, and otherwise the depth-limit form,
+        // whose payload -- what kind of value was elided -- is left out of
+        // the rendering.
+        const length = DebugStringifier.#lengthOf(payload);
+        return (length === undefined) ? "..." : `... length: ${length}`;
       }
+
+      case "partialString": {
+        // The excerpt of a string too long to carry whole, followed by the
+        // length of the whole. A payload not of that shape falls through to
+        // render as it is.
+        const partial = DebugStringifier.#partialStringOf(payload);
+        if (partial !== undefined) {
+          const excerpt = this.#renderSubvalue(partial.excerpt, indent);
+          return `${excerpt} + ... length: ${partial.length}`;
+        }
+        // deno-coverage-ignore-start
+        // The conversion is the form's only producer and shapes it no other
+        // way, so this fallthrough is a prophylactic no test can reach.
+        return this.#renderInstance(tag, payload, indent);
+      }
+      // deno-coverage-ignore-stop
 
       default: {
         // A class instance, carried under its class name.
@@ -751,6 +806,41 @@ class DebugStringifier {
   }
 
   /**
+   * Returns the `length` of the given value when it is a plain object whose
+   * `length` is a number, which is the payload shape of the array-length
+   * form, and `undefined` when it is not.
+   */
+  static #lengthOf(value: FabricValue): number | undefined {
+    if (!isPlainObject(value)) {
+      return undefined;
+    }
+
+    const { length } = value as FabricPlainObject;
+    return (typeof length === "number") ? length : undefined;
+  }
+
+  /**
+   * Returns the length and excerpt of the given value when it is the payload
+   * shape of the string-length form, a plain object whose `length` is a
+   * number and whose `excerpt` is a string, and `undefined` when it is not.
+   */
+  static #partialStringOf(
+    value: FabricValue,
+  ): { readonly length: number; readonly excerpt: string } | undefined {
+    const length = DebugStringifier.#lengthOf(value);
+    // deno-coverage-ignore-start
+    // The conversion shapes the form no other way; see the `partialString`
+    // arm of `#renderTaggedForm()`.
+    if (length === undefined) {
+      return undefined;
+    }
+    // deno-coverage-ignore-stop
+
+    const { excerpt } = value as FabricPlainObject;
+    return (typeof excerpt === "string") ? { length, excerpt } : undefined;
+  }
+
+  /**
    * Returns the tag and payload of the given plain object when it is one of the
    * conversion's single-key tagged forms, and `undefined` when it is not. No key
    * of an original value can arrive in such a form, because the conversion
@@ -774,8 +864,8 @@ class DebugStringifier {
 }
 
 /**
- * Helper for the entry points, which validates `options` as a whole. What each
- * option holds is validated as it is read, by `checkedLimit()`.
+ * Helper for `checkedLimits()`, which validates `options` as a whole. What
+ * each option holds is validated as it is read, by `checkedLimit()`.
  *
  * @throws {Error} if `options` is not a plain object.
  */
@@ -791,7 +881,7 @@ function checkOptions(options: DebugValueOptions | undefined): void {
 }
 
 /**
- * Helper for the entry points, which validates one of the limit options and
+ * Helper for `checkedLimits()`, which validates one of the limit options and
  * returns the limit it calls for: `value` when present, and `defaultValue`
  * when not, either one capped at `cap`. `name` is the option's name, for the
  * error.
@@ -828,6 +918,43 @@ function checkedLimit(
 }
 
 /**
+ * Helper for the entry points, which validates `options` and returns the
+ * limits they call for: each limit stated, or when not, `defaultMaxDepth` for
+ * the depth and the default for either length, all capped at their absolute
+ * maximums.
+ *
+ * @throws {Error} if `options` is not a plain object, or if one of its limits
+ * is none of a positive integer, `Infinity`, or `undefined`.
+ */
+function checkedLimits(
+  options: DebugValueOptions | undefined,
+  defaultMaxDepth: number,
+): ConversionLimits {
+  checkOptions(options);
+
+  return {
+    maxDepth: checkedLimit(
+      "maxDepth",
+      options?.maxDepth,
+      defaultMaxDepth,
+      ABSOLUTE_MAX_DEPTH,
+    ),
+    maxArrayLength: checkedLimit(
+      "maxArrayLength",
+      options?.maxArrayLength,
+      DEFAULT_MAX_ARRAY_LENGTH,
+      ABSOLUTE_MAX_ARRAY_LENGTH,
+    ),
+    maxStringLength: checkedLimit(
+      "maxStringLength",
+      options?.maxStringLength,
+      DEFAULT_MAX_STRING_LENGTH,
+      ABSOLUTE_MAX_STRING_LENGTH,
+    ),
+  };
+}
+
+/**
  * Renders the debug-string form of the given value with optional indentation,
  * by converting it with `toStructuredDebugValue()` per `options` and rendering
  * the result. A depth the options leave unsaid is `DEFAULT_STRING_MAX_DEPTH`.
@@ -839,24 +966,11 @@ function renderDebugString(
   options: DebugValueOptions | undefined,
   indent?: number,
 ): string {
-  checkOptions(options);
-
-  // Both limits are resolved here, ahead of the `try`, so that an invalid one
+  // The limits are resolved here, ahead of the `try`, so that an invalid one
   // is refused rather than rendered as unrenderable.
   const converterOptions: DebugValueOptions = {
     ...options,
-    maxDepth: checkedLimit(
-      "maxDepth",
-      options?.maxDepth,
-      DEFAULT_STRING_MAX_DEPTH,
-      ABSOLUTE_MAX_DEPTH,
-    ),
-    maxArrayLength: checkedLimit(
-      "maxArrayLength",
-      options?.maxArrayLength,
-      DEFAULT_MAX_ARRAY_LENGTH,
-      ABSOLUTE_MAX_ARRAY_LENGTH,
-    ),
+    ...checkedLimits(options, DEFAULT_STRING_MAX_DEPTH),
   };
 
   try {
@@ -896,7 +1010,10 @@ function renderDebugString(
  * The rendering stops at the nesting depth given in `options`, ten levels
  * when not given, below which a value is elided. It likewise stops at the
  * array length given in `options`, one hundred elements when not given, and
- * says the array's actual length in place of the elements past it.
+ * says the array's actual length in place of the elements past it; and a
+ * string longer than the string length given in `options`, two hundred
+ * characters when not given, renders as an excerpt of that length followed by
+ * the string's actual length.
  *
  * How any of these renders is _not_ a contract. The rendering is meant for a
  * human reading a diagnostic, and it changes as that reading is improved;
@@ -982,11 +1099,13 @@ export function toDebugKindString(value: unknown): string {
  * `codec-json` encoding form, and with as little chance for ambiguity as can
  * be reasonably achieved.
  *
- * The nesting limit of the result, the number of elements of an array it
- * represents, and a replacer to consult are the `maxDepth`, `maxArrayLength`,
- * and `replacer` of `options`. When there is no nesting limit given, the
- * result nests as deep as reasonably possible; when there is no array length
- * given, an array is represented to one hundred elements.
+ * The limits of the result -- its nesting, the number of elements of an array
+ * it represents, and the length of a string it carries whole -- and a replacer
+ * to consult are the `maxDepth`, `maxArrayLength`, `maxStringLength`, and
+ * `replacer` of `options`. When there is no nesting limit given, the result
+ * nests as deep as reasonably possible; when there is no array length given,
+ * an array is represented to one hundred elements; and when there is no
+ * string length given, a string is carried whole to two hundred characters.
  *
  * If the conversion could not be completed (stack overflow, object
  * `toJSON()` conversion error, etc.), this function returns the literal value
@@ -1000,27 +1119,14 @@ export function toStructuredDebugValue(
   /** Conversion options, if desired. */
   options?: DebugValueOptions,
 ): FabricValue {
-  checkOptions(options);
-
-  const maxDepth = checkedLimit(
-    "maxDepth",
-    options?.maxDepth,
-    ABSOLUTE_MAX_DEPTH,
-    ABSOLUTE_MAX_DEPTH,
-  );
-  const maxArrayLength = checkedLimit(
-    "maxArrayLength",
-    options?.maxArrayLength,
-    DEFAULT_MAX_ARRAY_LENGTH,
-    ABSOLUTE_MAX_ARRAY_LENGTH,
-  );
+  const limits = checkedLimits(options, ABSOLUTE_MAX_DEPTH);
 
   // We subtract one from `maxDepth` because the "suggestive forms" for elided
-  // data all use one layer of depth.
+  // data use a layer of depth. The array-length and string-length forms use
+  // two, and so can run one level past the limit.
   return new DebugConverter(
     value,
-    maxDepth - 1,
-    maxArrayLength,
+    { ...limits, maxDepth: limits.maxDepth - 1 },
     options?.replacer,
   ).convert();
 }

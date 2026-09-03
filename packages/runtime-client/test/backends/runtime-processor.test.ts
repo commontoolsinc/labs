@@ -1344,6 +1344,14 @@ describe("runtime-processor", () => {
       };
     }
 
+    it("carries a long string whole", () => {
+      // The renderer's default string length would cut what a pattern logs
+      // at two hundred characters; the tail here sits past that.
+
+      const value = `${"x".repeat(299)}END`;
+      expect(toConsoleDebugValue(value)).toBe(value);
+    });
+
     describe("what the transport accepts", () => {
       /**
        * Puts `value` through the ends the notification actually uses: the
