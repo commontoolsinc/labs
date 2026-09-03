@@ -568,6 +568,14 @@ export type QueryEvaluationCacheDiagnostics = {
  * watch corpus between two commits (a reconnect stampede after a process
  * death is this, at its worst).
  *
+ * Only whole, current-state evaluations consult the cache: an eligible
+ * `graph.query` (without `atSeq` or keyed snapshots), a whole watch-set
+ * establishment, and `session.watch.add` when the session has no tracked graph
+ * for that branch. A subsequent `session.watch.add` for an already tracked
+ * branch extends the session's graph through `extendTrackedGraph()`. An
+ * extension depends on the graph's existing coverage, so it neither serves nor
+ * records a cache entry.
+ *
  * Scope purity decides who may share an entry. An evaluation whose whole
  * reach — tracked, missed, and loaded — resolved under the `space` scope is
  * identical for every identity and is shared across them; one that touched

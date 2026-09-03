@@ -356,6 +356,16 @@ process:
   publication lock before evaluating. Flush passes hold that same lock, so
   a `transact` whose `lockWaitMs` dominates its elapsed time was queued
   behind fan-out, not expensive itself.
+  Read the traversal fields with the query evaluation cache's coverage in
+  mind. The cache serves only whole, current-state evaluations: an eligible
+  `graph.query` (without `atSeq` or keyed snapshots), each branch group
+  established by `session.watch.set`, and a `session.watch.add` group when that
+  session has no tracked graph for the branch yet. A subsequent
+  `session.watch.add` for an already tracked branch extends the session's graph
+  through `extendTrackedGraph()` and bypasses the cache because its result
+  depends on what the session already covers. A page load that grows its watch
+  set in batches therefore re-walks those later batches. Nonzero `rootsVisited`
+  there is expected extension work, not evidence of a cache miss.
 - `documentCaches` — the memory server's decoded-document cache, one entry
   per open space (`Engine.documentCache` in `packages/memory/v2/engine.ts`)
   under the server's `totalBudgetBytes` (beside it the total `bytes`, and
