@@ -1216,6 +1216,63 @@ describe("piece source reconciliation", () => {
         .toEqual(originalRef);
     });
 
+    it("gives the origin and its source to a piece whose space holds no source for what it runs", async () => {
+      // A piece the runtime made before it claimed an origin, running a
+      // pattern its own space retains no source for: what the origin names
+      // now is the only code that space can give it, so it takes that in the
+      // same revision that records the origin, and keeps the identity it
+      // displaced. The pattern stays live in this runtime's index, compiled
+      // into another space, because the index answers by identity alone and
+      // an answer from there is not this space holding the source.
+      const v1Identity = await identityFor(source("v1"));
+      const v2Identity = await identityFor(source("v2"));
+      createRuntime(servingFetch(() => v2Identity, () => source("v2")));
+      const elsewhere = (await Identity.fromPassphrase("another space")).did();
+      const v1 = await runtime.patternManager.compilePattern(
+        parentProgram(source("v1")),
+        { space: elsewhere },
+      );
+      const piece = runtime.getCell<{ marker?: string }>(
+        signer.did(),
+        `supplied-${crypto.randomUUID()}`,
+      );
+      await runtime.setup(undefined, v1, {}, piece);
+      await runtime.patternManager.flushCompileCacheWrites();
+      const originalRef = getPatternIdentityRef(piece)!;
+      expect(originalRef.identity).toBe(v1Identity);
+      expect(
+        await runtime.patternManager.getPatternSourceProgramByIdentity(
+          v1Identity,
+          piece.space,
+        ),
+        "the piece's space must hold no source for what it runs",
+      ).toBeUndefined();
+      expect(
+        await runtime.patternManager.loadPatternByIdentity(
+          v1Identity,
+          SYMBOL,
+          piece.space,
+        ),
+        "the pattern must stay live in the runtime's index",
+      ).toBeDefined();
+
+      const pattern = await open(piece);
+
+      expect(runtime.patternManager.getArtifactEntryRef(pattern!)).toEqual({
+        identity: v2Identity,
+        symbol: SYMBOL,
+      });
+      expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
+      expect(getPatternIdentityRef(piece)).toEqual({
+        identity: v2Identity,
+        symbol: SYMBOL,
+      });
+      expect(piece.getMetaRaw("displacedPattern")).toMatchObject(originalRef);
+      expect(getPieceSourceRevisions(piece).map((entry) => entry.operation))
+        .toEqual(["follow"]);
+      expect(getPieceSourceRevisions(piece).at(-1)?.origin).toBe(PARENT_SOURCE);
+    });
+
     it("adopts what the origin now names, and answers with that", async () => {
       const v2Identity = await identityFor(source("v2"));
       const piece = await preparePiece(
