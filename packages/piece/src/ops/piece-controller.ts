@@ -2928,6 +2928,13 @@ class PiecePropIo implements PieceCellIo {
   ): Promise<{ wrote: boolean }> {
     const pieces = this.#cc.pieces();
     let committedTargetCell: Cell<unknown> | undefined;
+    // A stream event is durable outside the transaction under server
+    // execution. Every transaction attempt for one Piece API call therefore
+    // carries the same invocation identity, so discarding an attempt after its
+    // send cannot turn the retry into a second event.
+    let streamSendOptions:
+      | { eventId: string; session: string }
+      | undefined;
 
     const { ok, error } = await pieces.runtime.editWithRetry((tx) => {
       // Resolve the target from the piece metadata inside every retry. A
@@ -3098,7 +3105,17 @@ class PiecePropIo implements PieceCellIo {
           pieces.runtime.getCellFromLink(rawTarget, undefined, tx)
             .setRawUntyped(undefined);
         } else {
-          txCell.set(nextValue);
+          txCell.set(
+            nextValue,
+            undefined,
+            isStream(txCell)
+              ? streamSendOptions ??= {
+                eventId: crypto.randomUUID(),
+                session: pieces.runtime.scopeKeyIdentity.sessionId ??
+                  pieces.runtime.id,
+              }
+              : undefined,
+          );
         }
       };
 
