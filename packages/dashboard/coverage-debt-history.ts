@@ -42,7 +42,14 @@ export const RUNS_READ_PER_DAY = 3;
 const FETCH_CONCURRENCY = 8;
 
 const DAY_MS = 86_400_000;
-const STORE_VERSION = 1;
+/**
+ * The shape the history file is written in, bumped when that shape changes. A
+ * file the running code cannot read as it was written is discarded whole
+ * rather than day by day: a day it half understands reads as a day that
+ * measured nothing, and a day that is over is never asked about again, so the
+ * window would stay empty until it aged out.
+ */
+export const STORE_VERSION = 2;
 
 const COVERAGE_DEBT_FILE = () =>
   dashboardCacheFile("fabric-wall-coverage-debt.json");

@@ -14,6 +14,7 @@ import {
   type CoverageDebtGitHub,
   CoverageDebtStore,
   daysEndingAt,
+  STORE_VERSION,
   refreshCoverageDebt,
   utcDay,
   workspaceDebtOf,
@@ -219,7 +220,7 @@ describe("coverage-debt-history", () => {
       await Deno.writeTextFile(
         file,
         JSON.stringify({
-          version: 1,
+          version: STORE_VERSION,
           days: {
             "2026-09-01": { measured: { uncoveredLines: "lots", runId: 1 } },
             "2026-09-02": { measured: { uncoveredLines: 5, runId: 2 } },
@@ -244,7 +245,7 @@ describe("coverage-debt-history", () => {
       const listed = join(directory, "listed.json");
       await Deno.writeTextFile(
         listed,
-        JSON.stringify({ version: 1, days: ["2026-09-02"] }),
+        JSON.stringify({ version: STORE_VERSION, days: ["2026-09-02"] }),
       );
       const fromList = new CoverageDebtStore(listed);
       await fromList.load();
@@ -253,16 +254,34 @@ describe("coverage-debt-history", () => {
       const notDays = join(directory, "not-days.json");
       await Deno.writeTextFile(
         notDays,
-        JSON.stringify({ version: 1, days: "none" }),
+        JSON.stringify({ version: STORE_VERSION, days: "none" }),
       );
       const fromNothing = new CoverageDebtStore(notDays);
       await fromNothing.load();
       expect(fromNothing.get("2026-09-02")).toBeUndefined();
 
+      // A file written before a day's measurement moved into `measured` has
+      // days this code would read as days that measured nothing, and a day
+      // that is over is never read again — so the whole file goes.
+      const older = join(directory, "older.json");
+      await Deno.writeTextFile(
+        older,
+        JSON.stringify({
+          version: 1,
+          days: { "2026-09-02": { uncoveredLines: 78404, runId: 7 } },
+        }),
+      );
+      const fromOlder = new CoverageDebtStore(older);
+      await fromOlder.load();
+      expect(fromOlder.get("2026-09-02")).toBeUndefined();
+
       const other = join(directory, "other.json");
       await Deno.writeTextFile(
         other,
-        JSON.stringify({ version: 2, days: { "2026-09-02": {} } }),
+        JSON.stringify({
+          version: STORE_VERSION + 1,
+          days: { "2026-09-02": {} },
+        }),
       );
       const newer = new CoverageDebtStore(other);
       await newer.load();
