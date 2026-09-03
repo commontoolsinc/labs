@@ -26,12 +26,19 @@ A test's identity has three required parts, scoped within a repository:
   piece-values`), or a task-plus-item pair (`cfcheck <file>`,
   `pattern-compat <key>`, `pattern-vintage <testKey> <tier> <stamp>`).
 - **variant**, when present — a stable name for a non-default configuration
-  that runs the same test. The default configuration has no variant. The
-  server-execution ON jobs use `server-execution` after variant-aware relay
-  support is on the default branch. When server execution becomes the
-  default, the ON jobs omit that marker, so new runs continue the history of
-  today's unmarked default jobs. The surviving explicit OFF jobs use
-  `server-execution-off` so their history remains separate.
+  that runs the same test. The default configuration has no variant. Since
+  the server-execution flip (2026-08-28) the default DEPLOYED-TOPOLOGY
+  lanes — the ones that run a test process against a serving toolshed —
+  run the ON posture unmarked, continuing the history of the previously
+  unmarked default jobs; the surviving explicit OFF regression-guard jobs
+  use `server-execution-off` so their history remains separate. The
+  pre-flip explicit-ON jobs' `server-execution` marker is retired; their
+  history stays queryable under it. The claim is deliberately narrow: the
+  single-process default jobs (the unit suites, `cf test`, the no-server
+  pattern-unit lane — the `patternTest` / `unitTest` presets) never read
+  the first-party default and stay ambient-OFF by construction, so they
+  are unmarked because the flip does not reach them, not because they run
+  ON.
 
 Identity survives moving a test between files, splitting or renaming test
 files, reformatting, editing bodies, and resharding — shard and slice

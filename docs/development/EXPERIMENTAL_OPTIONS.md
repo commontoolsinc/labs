@@ -35,7 +35,7 @@ was last checked against the code.
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
 | [`readerSchemaPrecedence`](#readerschemaprecedence)                         | `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` env, or `RuntimeOptions.experimental`                                                                   | on                                                                                   | Robin McCollum (#6338)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
-| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | off (`SERVER_EXECUTION_DEFAULT_ENABLED = false` — the ONE first-party default; Phase 7 landed flip-READY, DARK; explicit `true` = the ON arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | the flip is its OWN one-line PR after the plan's Phase-7 ordered gates; then soak on main, then delete the flag and the OFF path (the split-out post-soak PR) | Phases 1–6 landed; Phase 7 flip-READY landed dark (owner ruling 2026-08-16): OFF by default everywhere, the ON arm fully selectable and CI-tested on an ON-built binary |
+| [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | **on** (`SERVER_EXECUTION_DEFAULT_ENABLED = true` — the ONE first-party default, FLIPPED by the flip PR 2026-08-28; explicit `false` = the OFF arm / rollback lever) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | soak on main (started at the flip PR's merge), then delete the flag and the OFF path (the split-out post-soak PR, which also removes the OFF guard lanes) | Phases 1–7 landed; the flip PR made ON the default everywhere the deployed-topology presets reach; OFF stays fully selectable through the soak and is CI-guarded on an OFF-built binary |
 | [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-explicit`                                                                   | Bernhard Seefeld (#3263)                              | tighten default toward `enforce-strict`                                                                                                                                                                                           | active; ladder is permanent                                                     |
 | [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4011)                              | move toward `persist`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`cfcWriteFloor`](#cfcwritefloor)                                           | `RuntimeOptions.cfcWriteFloor`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4479)                              | move toward `enforce`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
@@ -71,8 +71,10 @@ are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
 `contentAddressedSchemas`, `plainResultReceipts`, `computedCellIds`,
 `lazyMaterialization` and `readerSchemaPrecedence` default on;
 `serverExecution` resolves an unset flag to the ONE first-party default
-`SERVER_EXECUTION_DEFAULT_ENABLED` in the deployed-topology presets — `false`
-today, Phase 7 having landed flip-ready DARK (its section); the other flags in
+`SERVER_EXECUTION_DEFAULT_ENABLED` in the deployed-topology presets — `true`
+since the Phase 7 flip (2026-08-28; its section), with an explicit `false`
+selecting the OFF arm, the soak's rollback lever (the single-process presets
+read no default and stay OFF — the section says how); the other flags in
 this category default off unless their section says otherwise.
 
 The mapping from environment variable to flag is defined once, canonically, as
@@ -316,9 +318,9 @@ server](#clients-that-are-not-built-alongside-their-server).
   states, no shippable intermediates (spec README §3.4); deliberately named
   unlike v1's `SERVER_PRIMARY_EXECUTION` so the archived v1 documents never
   alias it. Both states, defined:
-  - **OFF (the default today — the first-party default constant is `false`;
-    explicit `false` selects it regardless of the constant): today's
-    behavior, byte-for-byte.** Every client
+  - **OFF (the ROLLBACK arm since the flip — explicit `false` selects it
+    regardless of the constant, which is `true` since the flip PR): the
+    pre-v2 behavior, byte-for-byte.** Every client
     runtime runs and commits derivations exactly as it does today, and every
     client commit is `authored`-class — `derived` is never claimed off the
     flag. The commit `class` metadata is still *written* in this arm (it is
@@ -326,8 +328,8 @@ server](#clients-that-are-not-built-alongside-their-server).
     is enforced from it, and `stream-data` behaves as today. Any OFF-arm
     behavioral diff from a v2 stage is a phase-gate failure by itself
     (testing.md §2).
-  - **ON (explicit `true` — or the first-party default once the flip PR
-    sets the constant `true`): the v2 posture.** With stages A–F landed
+  - **ON (the DEFAULT since the flip PR set the constant `true`; explicit
+    `true` selects it regardless): the v2 posture.** With stages A–F landed
     this means: the per-class admission rows of protocol.md §2 are enforced
     — the `derived` row is the stage-B lease equality check PLUS stage F's
     derived-envelope defense-in-depth (the producing session must BE the
@@ -360,45 +362,65 @@ server](#clients-that-are-not-built-alongside-their-server).
     F10 interim — is DELETED). Later stages add their surfaces under
     this same flag; both halves of any coupled behavior move together
     on it.
-- **Current default and planned end state.** **OFF by default** — the ONE
+- **Current default and planned end state.** **ON by default** — the ONE
   first-party default is `SERVER_EXECUTION_DEFAULT_ENABLED` in
   [`packages/memory/v2/server-execution-default.ts`](../../packages/memory/v2/server-execution-default.ts),
-  value `false` (Phase 7 landed flip-READY, DARK, by owner ruling
-  2026-08-16), read by every deployed-topology entry point — the
-  `productionServer` / `remoteClient` construction presets (toolshed's
-  operator runtime, the background piece service, the CLI, every pieces
-  controller and integration harness against a toolshed), toolshed's
-  serving-host gate and its memory ACL principal lists (the DELEGATING
-  class since OW31's build — the process identity is no longer an
-  implicit-OWNER service principal), and the browser
+  value `true` since the flip PR (2026-08-28, after the plan's Phase-7
+  ordered gates were met: the ON-skip registry EMPTY, OW31's ruled
+  posture built, OW45–OW53 closed, the OW38(ii) benchmark bar ruled met
+  — "topics numbers are fine"; landed flip-READY DARK at `false`
+  2026-08-16 by owner ruling), read by every deployed-topology entry
+  point — the `productionServer` / `remoteClient` construction presets
+  (toolshed's operator runtime, the background piece service, the CLI,
+  every pieces controller and integration harness against a toolshed),
+  toolshed's serving-host gate and its memory ACL principal lists (the
+  DELEGATING class since OW31's build — the process identity is no
+  longer an implicit-OWNER service principal), and the browser
   shell's build define fallback. An UNSET flag resolves to it; an explicit
-  `EXPERIMENTAL_SERVER_EXECUTION=true` (or `experimental.serverExecution:
-  true`, or the shell define `true`) selects the ON arm, an explicit `false`
-  the OFF arm regardless of the constant. Single-process harnesses do not
+  `EXPERIMENTAL_SERVER_EXECUTION=false` (or `experimental.serverExecution:
+  false`, or the shell define `"false"`) selects the OFF arm — THE
+  ROLLBACK LEVER through the soak — and an explicit `true` the ON arm,
+  regardless of the constant. Un-flipping the default is reverting the
+  flip PR (repo convention: a flip is reverted by reverting the PR that
+  only flips — it carries the constant, the absolute pin, the CI lane
+  roles + probes, the deployed-topology gates, and this entry together).
+  Single-process harnesses do not
   read the constant: a bare `new Runtime` and the `patternTest` /
   `localDev` / `unitTest` presets have no serving host, so they resolve the
   ambient baseline (OFF) by construction — the unit suites and `cf test`
-  run the derive-and-commit model; the ON posture's unit coverage sets the
-  flag explicitly (the `executor-*` suites) and its integration coverage is
-  the explicit-`true` CI lanes. In CI (testing.md §2) the DEFAULT lanes are
-  the OFF posture (probed), and the explicit-`true` lanes on an ON-BUILT
-  binary (`build-toolshed-on`; the shell define is baked at build) are the
-  ON arm — the full posture, verified by a probe before each suite, its
-  Deno-side clients declaring the posture from the env — with skips only
-  through `tasks/server-execution-on-skips.ts`, printed loudly (six
-  `phase-7` entries today, all red under the full ON posture, none
-  vacuous). **THE FLIP IS ITS OWN ONE-LINE PR** (the constant → `true`, plus
-  the absolute pin, the CI lane roles + probes, and this entry; repo
-  convention: a flip is reverted by reverting the PR that only flips),
-  landing after the plan's Phase-7 ordered gates: OW32 (the client-side
-  non-settling loop in the two-browser journeys) triaged → OW17 (the
-  serving replica's per-instance re-keying, with OW29) → OW28
-  (`compile-and-run` as an outbox effect kind) → the honest propagation
-  benchmark → the skip list EMPTY and the deployed-topology binaries the
-  presets flip exercised ON by a gate → the flip PR. End state: after a soak
-  on main (which starts at the flip PR's merge) the flag retires and the
-  OFF code path is removed — a separate post-soak PR (the plan's Phase 7
-  task 2, split from the flip because stacked PRs cannot soak).
+  run the derive-and-commit model (which is why the flip does not reach
+  the no-server pattern-tests lane and its `topics/multi-user.test.tsx`,
+  the lane-posture item the topics measurement report recorded for the
+  flip decision); the ON posture's unit coverage sets the
+  flag explicitly (the `executor-*` suites) and its integration coverage
+  is the DEFAULT CI lanes. In CI (testing.md §2) the DEFAULT lanes are
+  the ON posture (probed: serving loop present, shell define unset), the
+  explicit-`false` lanes on an OFF-BUILT binary (`build-toolshed-off`;
+  the shell define is baked at build) are the OFF regression guard, the
+  `deployed-topology-gate` job exercises the real `bg-piece-service`
+  binary and cf-harness's fabric session at the default resolution, and
+  the CLI lanes probe the server their `cf` adopts its posture from —
+  with ON-arm skips only through `tasks/server-execution-on-skips.ts`,
+  printed loudly (EMPTY at the flip, its stated precondition). End
+  state: after a soak on main (which started at the flip PR's merge) the
+  flag retires and the OFF code path is removed — a separate post-soak
+  PR (the plan's Phase 7 task 2, split from the flip because stacked PRs
+  cannot soak; it also removes the OFF guard lanes and
+  `build-toolshed-off`).
+- **Status on 2026-08-28 (the FLIP).** The flip PR set the constant `true`
+  after every ordered gate was met on main (the ON-skip registry EMPTY
+  across all four suites — the ruled-3b-close lift #6528; OW31's ruled
+  write/read-authority posture BUILT; the first-ON-CI gate's owed rows
+  OW45–OW53 CLOSED; the OW38(ii) performance bar RULED met by the owner
+  on the topics measurement). It carried the lane-role swap (default
+  lanes = the ON arm, probed; explicit-`false` lanes = the OFF guard on
+  `build-toolshed-off`), the deployed-topology gates (the
+  `bg-piece-service` binary and cf-harness's fabric session at the
+  default resolution; the CLI lanes probed as `cf`'s gate;
+  `PiecesController` hosts riding the default lanes), and the
+  env-else-default posture resolution for the Deno-side integration
+  clients. The soak on main runs from its merge; the OFF path, the OFF
+  guard lanes, and this flag retire in the post-soak removal PR.
 - **Status on 2026-08-16 (Phase 7 flip-READY, landed DARK).** Phases 1–6
   landed; Phase 7 landed the flip's mechanism — the one constant and its
   readers, OW27 per-stream send pacing in the event-append queue
@@ -1316,7 +1338,8 @@ The background piece service's main and worker processes use the same mapping
 and the same presets, so the server-side wirings agree on how a value parses.
 
 The CLI is not one of them. `cf`, the pieces controller behind it, the agents
-host and `cast-admin` are clients of a deployment rather than part of one, and
+host, the GitHub connector host and `cast-admin` are clients of a deployment
+rather than part of one, and
 they resolve their posture from that deployment first — the environment
 supplies their overrides, not their starting point. Their wiring is
 [Clients that are not built alongside their
@@ -1358,7 +1381,8 @@ The shell disagrees with its server only by explicit define: toolshed bakes
 the defines and serves the bundle, so the two ship one posture per deploy.
 Every other client is installed, deployed, or checked out on its own
 schedule — the `cf` binary, the pieces controller a FUSE mount opens, the
-agents host, the background-piece admin CLI — and the environment they read
+agents host, the GitHub connector host, the background-piece admin CLI — and
+the environment they read
 belongs to whoever launched them, not to the deployment they talk to. Left
 there, the operator has to know a deployment's flags and set them by hand, and
 nothing reports it when they do not.
@@ -1368,7 +1392,7 @@ These clients take the posture from the server instead. Each one calls
 before constructing its `Runtime`:
 
 ```
-cf / pieces controller / agents host / cast-admin
+cf / pieces controller / agents host / github host / cast-admin
   |
   +-- GET <apiUrl>/api/meta  --> { experimental: { <flag>: <boolean>, ... } }
   |     the posture the SERVER runs at

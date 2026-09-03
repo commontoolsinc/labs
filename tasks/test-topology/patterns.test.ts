@@ -29,14 +29,14 @@ describe("the pattern and package suites", () => {
     expect(invocation!.junit?.[0]?.scope).toBe("patterns");
   });
 
-  it("runs the server-execution arm with the define set", async () => {
-    const suite = byId("pattern-integration-on");
+  it("runs the server-execution OFF arm with the define set", async () => {
+    const suite = byId("pattern-integration-off");
     const [invocation] = await suite.command(
       [{ unit: suite.units[0]!, skip: [] }],
       { root, outputDir: await outputDir() },
     );
-    expect(invocation!.env?.EXPERIMENTAL_SERVER_EXECUTION).toBe("true");
-    expect(suite.variant).toBe("server-execution");
+    expect(invocation!.env?.EXPERIMENTAL_SERVER_EXECUTION).toBe("false");
+    expect(suite.variant).toBe("server-execution-off");
   });
 
   it("names a skip list only where a leaf inside a unit is skipped", async () => {
@@ -84,6 +84,24 @@ describe("the pattern and package suites", () => {
     expect(made.length).toBe(2);
     expect(made.map((i) => i.junit?.[0]?.scope).toSorted())
       .toEqual(["runner", "shell"]);
+  });
+
+  it("owns both deployed-topology posture gates", async () => {
+    const suite = byId("deployed-topology");
+    expect(suite.units).toEqual([
+      "packages/background-piece-service/integration/posture-gate.test.ts",
+      "packages/cf-harness/integration/fabric-session-posture-gate.test.ts",
+    ]);
+    expect(suite.needs).toContain("bg-piece-service-binary");
+    expect(suite.needs).toContain("toolshed");
+    const made = await suite.command(
+      suite.units.map((unit) => ({ unit, skip: [] })),
+      { root, outputDir: await outputDir() },
+    );
+    expect(made.map((invocation) => invocation.junit?.[0]?.scope)).toEqual([
+      "background-piece-service",
+      "cf-harness",
+    ]);
   });
 
   it("gives the reload suite its own unit and its own task", async () => {

@@ -728,8 +728,17 @@ interface CoreParams {
  * has no serving host, so it runs the derive-and-commit model (the
  * ambient baseline, OFF) by construction — see
  * `docs/development/EXPERIMENTAL_OPTIONS.md`.
+ *
+ * Exported for the deployed-topology test clients that construct a bare
+ * `Runtime` against a lane's toolshed (the runner integration tests, the
+ * runtime-client integration host): they resolve the posture with exactly
+ * this rule — the canonical env mapping, else the first-party default —
+ * so the DEFAULT CI lane's test processes run the arm the lane's server
+ * runs (testing.md §2's uniform posture; a raw env read resolves unset to
+ * the AMBIENT baseline instead, which under default-ON is the P7 review's
+ * finding-7 mixed posture, resurrected by the flip).
  */
-function withServerExecutionDefault(
+export function withServerExecutionDefault(
   experimental: ExperimentalOptions,
 ): ExperimentalOptions {
   return {

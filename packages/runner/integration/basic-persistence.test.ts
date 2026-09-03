@@ -5,6 +5,7 @@ import {
   experimentalOptionsFromEnv,
   type JSONSchema,
   Runtime,
+  withServerExecutionDefault,
 } from "@commonfabric/runner";
 import { Identity, IdentityCreateConfig } from "@commonfabric/identity";
 import { env } from "@commonfabric/integration";
@@ -24,10 +25,16 @@ async function test() {
   const runtime1 = new Runtime({
     apiUrl: new URL(API_URL),
     // The posture this client runs (server-execution v2, testing.md §2):
-    // declared from the environment so the CI ON lane's test process
-    // really runs the ON client arm (a bare construction resolved OFF and
-    // made the ON lane a MIXED posture — P7 review finding 7); unset = OFF.
-    experimental: experimentalOptionsFromEnv(Deno.env.get),
+    // resolved exactly like a deployed entry point — the canonical env
+    // mapping, else the first-party default (ON since the flip) — so this
+    // process runs the arm the lane's toolshed runs: the DEFAULT lane's
+    // unset flag resolves ON, the OFF regression-guard lane's explicit
+    // `false` the OFF arm. A bare construction resolves the AMBIENT
+    // baseline instead, which post-flip is the P7 review's finding-7
+    // mixed posture.
+    experimental: withServerExecutionDefault(
+      experimentalOptionsFromEnv(Deno.env.get),
+    ),
     storageManager: StorageManager.open({
       as: identity,
       memoryHost: new URL(API_URL),
@@ -60,10 +67,16 @@ async function test() {
   const runtime2 = new Runtime({
     apiUrl: new URL(API_URL),
     // The posture this client runs (server-execution v2, testing.md §2):
-    // declared from the environment so the CI ON lane's test process
-    // really runs the ON client arm (a bare construction resolved OFF and
-    // made the ON lane a MIXED posture — P7 review finding 7); unset = OFF.
-    experimental: experimentalOptionsFromEnv(Deno.env.get),
+    // resolved exactly like a deployed entry point — the canonical env
+    // mapping, else the first-party default (ON since the flip) — so this
+    // process runs the arm the lane's toolshed runs: the DEFAULT lane's
+    // unset flag resolves ON, the OFF regression-guard lane's explicit
+    // `false` the OFF arm. A bare construction resolves the AMBIENT
+    // baseline instead, which post-flip is the P7 review's finding-7
+    // mixed posture.
+    experimental: withServerExecutionDefault(
+      experimentalOptionsFromEnv(Deno.env.get),
+    ),
     storageManager: StorageManager.open({
       as: identity,
       memoryHost: new URL(API_URL),

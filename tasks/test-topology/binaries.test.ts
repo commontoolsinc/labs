@@ -19,19 +19,21 @@ describe("the binary build suites", () => {
     // The same build under a different compile-time define, which is
     // what a variant is. One configuration's record must never stand in
     // for the other's.
-    const on = byId("binaries-on");
-    expect(on.variant).toBe("server-execution");
-    expect(on.units).toEqual(["toolshed"]);
+    const off = byId("binaries-off");
+    expect(off.variant).toBe("server-execution-off");
+    expect(off.units).toEqual(["toolshed"]);
     expect(
-      on.locate({ test: { k: "gate", s: "repo", n: "build-binary toolshed" } }),
+      off.locate({
+        test: { k: "gate", s: "repo", n: "build-binary toolshed" },
+      }),
     ).toBeUndefined();
     expect(
-      on.locate({
+      off.locate({
         test: {
           k: "gate",
           s: "repo",
           n: "build-binary toolshed",
-          v: "server-execution",
+          v: "server-execution-off",
         },
       }),
     ).toEqual({ level: "unit", unit: "toolshed" });
@@ -62,11 +64,11 @@ describe("the binary build suites", () => {
   });
 
   it("builds the server-execution shell with the define set", () => {
-    return byId("binaries-on").command(
+    return byId("binaries-off").command(
       [{ unit: "toolshed", skip: [] }],
       { root: "/repo", outputDir: "/out" },
     ).then((made) => {
-      expect(made[0]!.env?.EXPERIMENTAL_SERVER_EXECUTION).toBe("true");
+      expect(made[0]!.env?.EXPERIMENTAL_SERVER_EXECUTION).toBe("false");
     });
   });
 });

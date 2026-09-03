@@ -77,7 +77,7 @@ export const EXPERIMENTAL = {
   modernCellRep: flagValue(EXPERIMENTAL_MODERN_CELL_REP_DEFINE),
   computedCellIds: flagValue(EXPERIMENTAL_COMPUTED_CELL_IDS_DEFINE),
   // Server-execution v2 (docs/specs/server-side-execution/): the
-  // first-party default (the landed-dark constant, `false` until the flip
+  // first-party default (the constant — `true` since the Phase 7 flip
   // PR), overridable by the build define either way
   // (`EXPERIMENTAL_SERVER_EXECUTION=false` builds the OFF-arm shell — the
   // rollback lever and CI's regression guard). The worker refuses to

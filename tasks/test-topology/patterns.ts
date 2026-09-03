@@ -21,8 +21,8 @@ import {
   unavailableFrom,
 } from "./suite.ts";
 
-/** The variant the server-execution ON arms mark their records with. */
-export const SERVER_EXECUTION_VARIANT = "server-execution";
+/** The variant the explicit server-execution OFF arms mark their records with. */
+export const SERVER_EXECUTION_OFF_VARIANT = "server-execution-off";
 
 /** Test files directly inside a directory, repository-relative and sorted. */
 async function filesIn(
@@ -96,20 +96,20 @@ async function patternIntegrationSuites(root: string): Promise<Suite[]> {
         flags,
         env: { HEADLESS: "1" },
         junit,
-        files,
+        files: files.filter((file) => !on.whole.has(file)),
+        unavailable: on.unavailable,
       }],
     }),
     fileSuite({
-      id: "pattern-integration-on",
-      variant: SERVER_EXECUTION_VARIANT,
-      needs: ["deno", "toolshed-baked-on", "browser", "compile-cache"],
+      id: "pattern-integration-off",
+      variant: SERVER_EXECUTION_OFF_VARIANT,
+      needs: ["deno", "toolshed-baked-off", "browser", "compile-cache"],
       parts: [{
         packageDir,
         flags,
-        env: { HEADLESS: "1", EXPERIMENTAL_SERVER_EXECUTION: "true" },
+        env: { HEADLESS: "1", EXPERIMENTAL_SERVER_EXECUTION: "false" },
         junit,
-        files: files.filter((file) => !on.whole.has(file)),
-        unavailable: on.unavailable,
+        files,
       }],
     }),
   ];

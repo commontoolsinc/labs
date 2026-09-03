@@ -25,7 +25,10 @@ import {
   type RuntimeClientOptions,
   type VNode,
 } from "@commonfabric/runtime-client";
-import { experimentalOptionsFromEnv } from "@commonfabric/runner";
+import {
+  experimentalOptionsFromEnv,
+  withServerExecutionDefault,
+} from "@commonfabric/runner";
 import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
 import { MessagePortRuntimeTransport } from "@commonfabric/runtime-client/transports/message-port";
 import { WebWorkerRuntimeTransport } from "@commonfabric/runtime-client/transports/web-worker";
@@ -43,13 +46,15 @@ const keyConfig: IdentityCreateConfig = {
 const identity = await Identity.fromPassphrase("test operator", keyConfig);
 
 // The server-execution v2 posture this test process runs (testing.md §2):
-// declared from the environment — the CI ON lane sets
-// EXPERIMENTAL_SERVER_EXECUTION=true — so the worker below really runs the
-// ON client arm; unset = OFF (the first-party default while Phase 7 is
-// landed dark). An undeclared worker resolves OFF and made the ON lane a
-// MIXED posture (P7 review finding 7).
-const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
-  .serverExecution;
+// resolved exactly like a deployed entry point — the canonical env
+// mapping, else the first-party default (ON since the flip) — so the
+// worker below runs the arm the lane's toolshed runs: the DEFAULT lane's
+// unset flag resolves ON, the explicit-`false` OFF regression-guard
+// lane the OFF arm. An UNDECLARED worker resolves the ambient baseline
+// instead, which post-flip is the P7 review's finding-7 mixed posture.
+const SERVER_EXECUTION_RESOLVED = withServerExecutionDefault(
+  experimentalOptionsFromEnv(Deno.env.get),
+).serverExecution;
 
 /**
  * The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
@@ -60,7 +65,7 @@ const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
  * requires this file to name each listed step and call this guard.
  */
 function onArmStepSkip(step: string): { ignore: boolean } {
-  if (SERVER_EXECUTION_FROM_ENV !== true) return { ignore: false };
+  if (SERVER_EXECUTION_RESOLVED !== true) return { ignore: false };
   const entry = serverExecutionOnStepSkip(
     "runtime-client",
     "integration/client.test.ts",
@@ -1973,10 +1978,11 @@ async function clientOptionsFor(
     // The HOST declares the worker's posture (runtime-client's posture
     // agreement; the worker refuses to initialize on a mismatch). Only the
     // server-execution flag is declared: the other experimental keys keep
-    // the worker's own defaults.
-    experimental: SERVER_EXECUTION_FROM_ENV === undefined
-      ? {}
-      : { serverExecution: SERVER_EXECUTION_FROM_ENV },
+    // the worker's own defaults. Always declared since the flip — the
+    // resolved value is env-else-first-party-default, never the worker's
+    // ambient baseline (which would be the finding-7 mixed posture under
+    // default ON).
+    experimental: { serverExecution: SERVER_EXECUTION_RESOLVED },
     ...extraOptions,
   };
 }

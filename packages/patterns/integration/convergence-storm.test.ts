@@ -27,10 +27,14 @@ import {
 } from "./multi-runtime-harness.ts";
 import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
 
-// The server-execution v2 posture this test process runs (testing.md §2):
-// declared from the environment — the CI ON lane sets
-// EXPERIMENTAL_SERVER_EXECUTION=true; unset = OFF (the first-party default
-// while Phase 7 is landed dark).
+// The RAW env posture, read only to key the skip guard below (testing.md
+// §2): the explicit-`false` OFF regression-guard lane sets
+// EXPERIMENTAL_SERVER_EXECUTION=false; the DEFAULT lanes leave it unset and
+// resolve the first-party default, which is ON since the flip. This value
+// is therefore undefined on the default (ON) lane — NOT the resolved
+// posture. The test's runtime posture is not taken from here:
+// `MultiRuntimeHarness` resolves it env-else-first-party-default and picks
+// its backend accordingly.
 const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
   .serverExecution;
 
@@ -41,6 +45,13 @@ const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
  * the entry exists — the OFF arm and an unlisted step always run. Never a
  * silent filter: the CI step prints every entry, and the validator
  * requires this file to name each listed step and call this guard.
+ *
+ * The registry is EMPTY, so this guard is inert everywhere today. Note the
+ * key: it is the RAW env, while the on-skips module asks callers to resolve
+ * env-else-first-party-default (as runtime-client's host now does). Inert
+ * today for exactly that reason — undefined on the default lane — and a
+ * future entry for this file would fail LOUD there (a red lane, never a
+ * silent skip), which is when the key gets converted.
  */
 function onArmStepSkip(step: string): { ignore: boolean } {
   if (SERVER_EXECUTION_FROM_ENV !== true) return { ignore: false };

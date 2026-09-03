@@ -35,8 +35,8 @@ describe("the test topology", () => {
   });
 
   it("lets a default suite and a variant suite hold one source file", () => {
-    const on = suites.find((suite) => suite.id === "package-integration-on")!;
-    const off = suites.find((suite) => suite.id === "package-integration")!;
+    const on = suites.find((suite) => suite.id === "package-integration")!;
+    const off = suites.find((suite) => suite.id === "package-integration-off")!;
     // Pinned to a runner-scope file rather than whichever unit sorts
     // first: a record's scope has to match the part that holds the file,
     // and taking the first shared unit would make this fail for the
@@ -58,9 +58,9 @@ describe("the test topology", () => {
       expect(
         claimsFor(suites, {
           ...record,
-          test: { ...record.test, v: "server-execution" },
+          test: { ...record.test, v: "server-execution-off" },
         }).map((claim) => claim.suite.id),
-      ).toEqual(["package-integration-on"]);
+      ).toEqual(["package-integration-off"]);
     }
   });
 

@@ -517,9 +517,13 @@ Deno.test("pattern shard selection fails loudly instead of running an empty shar
 
   const contents = withoutComments(await workflow("deno.yml"));
   for (
+    // Both pattern shard lanes under their post-flip names: the DEFAULT
+    // lane (the ON arm since the flip) and the explicit-`false` OFF
+    // regression guard — the pre-flip `-server-execution-on` job with its
+    // role inverted, which is where this pin's second job went.
     const jobId of [
       "pattern-integration-test",
-      "pattern-integration-test-server-execution-on",
+      "pattern-integration-test-server-execution-off",
     ]
   ) {
     const job = jobBlock(contents, jobId);
@@ -878,15 +882,21 @@ Deno.test("test-records-ship forwards its optional variant input", async () => {
   assertStringIncludes(action, 'args+=(--variant "$SHIP_VARIANT")');
 });
 
-Deno.test("server-execution ON jobs ship records under their variant", async () => {
+Deno.test("server-execution OFF jobs ship records under their variant; the default (ON since the flip) stays unmarked", async () => {
+  // testing.md §2's test-record identity contract, post-flip: the DEFAULT
+  // configuration (ON since the Phase 7 flip) continues the existing
+  // unmarked history, and the surviving explicit-OFF regression guard is
+  // marked `server-execution-off`. (The pre-flip explicit-ON arm's
+  // `server-execution` marker retired with the flip — its history stays
+  // queryable under that variant.)
   const contents = withoutComments(await workflow("deno.yml"));
   const packageJob = jobBlock(
     contents,
-    "package-integration-test-server-execution-on",
+    "package-integration-test-server-execution-off",
   );
   const patternJob = jobBlock(
     contents,
-    "pattern-integration-test-server-execution-on",
+    "pattern-integration-test-server-execution-off",
   );
   assertStringIncludes(
     packageJob,
@@ -899,11 +909,11 @@ Deno.test("server-execution ON jobs ship records under their variant", async () 
   );
   assertStringIncludes(
     patternJob,
-    "--junit-path=../../test-results/patterns-server-execution-on-${{ matrix.shard }}.xml",
+    "--junit-path=../../test-results/patterns-server-execution-off-${{ matrix.shard }}.xml",
   );
   assertStringIncludes(
     stepBlock(patternJob, "📤 Ship test records"),
-    "glob=test-results/patterns-server-execution-on-${{ matrix.shard }}.xml",
+    "glob=test-results/patterns-server-execution-off-${{ matrix.shard }}.xml",
   );
 
   for (
@@ -918,20 +928,156 @@ Deno.test("server-execution ON jobs ship records under their variant", async () 
 
   for (
     const jobId of [
-      "package-integration-test-server-execution-on",
-      "pattern-integration-test-server-execution-on",
+      "package-integration-test-server-execution-off",
+      "pattern-integration-test-server-execution-off",
     ]
   ) {
     const ship = stepBlock(jobBlock(contents, jobId), "📤 Ship test records");
-    assertStringIncludes(ship, "variant: server-execution");
+    assertStringIncludes(ship, "variant: server-execution-off");
   }
 });
 
-Deno.test("server-execution ON pattern failures upload the toolshed log", async () => {
+Deno.test("server-execution lane roles match the flipped default (testing.md §2)", async () => {
+  // The flip PR's lane-role swap, pinned: the DEFAULT lanes are the ON
+  // exercise (probe: serving loop PRESENT, shell define unset) and carry
+  // the ON-arm skip list; the explicit-`false` lanes are the OFF
+  // regression guard on the OFF-built binary (probe: serving loop ABSENT,
+  // define "false") and take no skip list. A partial revert that swapped
+  // one half back would otherwise leave a lane silently testing the wrong
+  // arm with every test green.
+  const contents = await workflow("deno.yml");
+
+  for (
+    const jobId of ["package-integration-test", "pattern-integration-test"]
+  ) {
+    const job = jobBlock(contents, jobId);
+    assertStringIncludes(
+      job,
+      "✅ Verify the server-execution posture (default posture — server ON, shell define unset)",
+      `${jobId}: the default lane must probe the ON posture`,
+    );
+    assertStringIncludes(
+      job,
+      ".servingLoop != null",
+      `${jobId}: the default lane's probe must require the serving loop`,
+    );
+    assertStringIncludes(
+      job,
+      "server-execution-on-skips.ts",
+      `${jobId}: the ON-arm skip list rides the default lanes since the flip`,
+    );
+  }
+
+  // Each step that SELECTS the arm carries its own assertion: the step
+  // that starts the toolshed, and the step that runs the test processes.
+  // A job-wide substring is satisfied by any single occurrence — the
+  // posture probe's `::error::` prose selects nothing and satisfies it —
+  // so the two selecting steps could disagree, and a lane that starts its
+  // server on one arm while running its tests on the other is a MIXED
+  // posture that every test still passes. The posture probe cannot stand
+  // in for this: it reads the SERVER, so the arm the test processes run
+  // under is unexamined unless asserted here. Comments are stripped on
+  // both, so a note naming an arm never counts as selecting it.
+  for (
+    const { jobId, runStep } of [
+      {
+        jobId: "package-integration-test-server-execution-off",
+        runStep: "🧪 Run ${{ matrix.step_name }} (flag OFF)",
+      },
+      {
+        jobId: "pattern-integration-test-server-execution-off",
+        runStep: "🧩 Run end-to-end patterns integration tests (flag OFF)",
+      },
+    ]
+  ) {
+    const job = jobBlock(contents, jobId);
+    for (
+      const stepName of [
+        "🔌 Start Toolshed server for testing (flag OFF)",
+        runStep,
+      ]
+    ) {
+      assertStringIncludes(
+        withoutComments(stepBlock(job, stepName)),
+        "EXPERIMENTAL_SERVER_EXECUTION=false",
+        `${jobId}: "${stepName}" must select the OFF arm explicitly`,
+      );
+    }
+    assertStringIncludes(
+      job,
+      ".servingLoop == null",
+      `${jobId}: the OFF guard's probe must require the serving loop absent`,
+    );
+    assertStringIncludes(
+      job,
+      "binary-toolshed-off",
+      `${jobId}: the OFF guard runs the OFF-built binary`,
+    );
+    assert(
+      !withoutComments(job).includes("server-execution-on-skips.ts"),
+      `${jobId}: the OFF arm takes no skip list`,
+    );
+  }
+
+  const buildOff = jobBlock(contents, "build-toolshed-off");
+  assertStringIncludes(
+    buildOff,
+    'EXPERIMENTAL_SERVER_EXECUTION: "false"',
+    "build-toolshed-off must bake the OFF define into the shell",
+  );
+
+  // The deployed-topology gates (the flip PR's own obligation — P7 review
+  // finding 8): the real bg-piece-service binary and cf-harness's fabric
+  // session, exercised at the DEFAULT (ON) resolution.
+  const gate = jobBlock(contents, "deployed-topology-gate");
+  assertStringIncludes(gate, "binary-bg-piece-service");
+  assertStringIncludes(gate, "integration/posture-gate.test.ts");
+  assertStringIncludes(gate, "integration/fabric-session-posture-gate.test.ts");
+  assertStringIncludes(gate, ".servingLoop != null");
+});
+
+Deno.test("the CLI lane refuses a mixed server-execution posture", async () => {
+  // `cf` is a deployed CLIENT: it ADOPTS the arm the server publishes on
+  // /api/meta (experimentalOptionsForDeployedClient, authority "server")
+  // unless an explicit EXPERIMENTAL_SERVER_EXECUTION overrides it. A
+  // serving loop therefore proves only the SERVER's half — the review's
+  // finding-7 mixed posture (a client on the other arm) would still read
+  // as a passing ON exercise. The probe has to compare both arms and fail
+  // on a disagreement, which is what this pins.
+  const contents = await workflow("deno.yml");
+  const job = jobBlock(contents, "cli-integration-test");
+  const probe = stepBlock(
+    job,
+    "✅ Verify the server-execution posture (default posture — server ON, cf adopts ON)",
+  );
+
+  assertStringIncludes(
+    probe,
+    ".servingLoop != null",
+    "the CLI probe must require the server's serving loop",
+  );
+  assertStringIncludes(
+    probe,
+    ".experimental.serverExecution",
+    "the CLI probe must read the posture the server PUBLISHES, which is what cf adopts",
+  );
+  assertStringIncludes(
+    probe,
+    'CLIENT_ARM="${EXPERIMENTAL_SERVER_EXECUTION:-$SERVER_ARM}"',
+    "the CLI probe must resolve the client arm the way cf does: an explicit env wins, else the published posture",
+  );
+  assertStringIncludes(
+    probe,
+    '[ "$CLIENT_ARM" != "$SERVER_ARM" ]',
+    "the CLI probe must fail on a client/server arm disagreement",
+  );
+});
+
+Deno.test("server-execution OFF pattern failures upload the toolshed log", async () => {
   const contents = await workflow("deno.yml");
   const patternJob = jobBlock(
     contents,
-    "pattern-integration-test-server-execution-on",
+    "pattern-integration-test-server-execution-off",
   );
   const upload = stepBlock(patternJob, "📋 Upload toolshed log on failure");
 
@@ -939,9 +1085,22 @@ Deno.test("server-execution ON pattern failures upload the toolshed log", async 
   assertStringIncludes(upload, "uses: actions/upload-artifact@v7");
   assertStringIncludes(
     upload,
-    "name: toolshed-log-pattern-integration-server-execution-on-${{ matrix.shard }}",
+    "name: toolshed-log-pattern-integration-server-execution-off-${{ matrix.shard }}",
   );
   assertStringIncludes(upload, "path: ${{ runner.temp }}/toolshed.log");
   assertStringIncludes(upload, "retention-days: 14");
   assertStringIncludes(upload, "if-no-files-found: ignore");
+
+  // The default lane is the ON exercise since the flip; it carries the
+  // same triage affordance.
+  const defaultJob = jobBlock(contents, "pattern-integration-test");
+  const defaultUpload = stepBlock(
+    defaultJob,
+    "📋 Upload toolshed log on failure",
+  );
+  assertStringIncludes(defaultUpload, "if: failure()");
+  assertStringIncludes(
+    defaultUpload,
+    "name: toolshed-log-pattern-integration-${{ matrix.shard }}",
+  );
 });

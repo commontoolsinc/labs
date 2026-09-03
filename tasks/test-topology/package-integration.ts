@@ -1,7 +1,9 @@
 /**
  * The package integration suites: the runner, the runtime client and the
  * shell, each driving a real Toolshed server, and the same three again
- * with server execution on.
+ * with server execution explicitly off. The deployed-topology suite owns
+ * the background service and cf-harness gates that exercise the default-ON
+ * production construction paths.
  *
  * One runner does not imply one scope here. The three packages share a
  * command shape and a server, and each records under its own scope, so
@@ -19,7 +21,7 @@ import {
   type Suite,
   unavailableFrom,
 } from "./suite.ts";
-import { SERVER_EXECUTION_VARIANT } from "./patterns.ts";
+import { SERVER_EXECUTION_OFF_VARIANT } from "./patterns.ts";
 
 /** The packages the suite spans, and what each one's tests need. */
 const PACKAGES: ReadonlyArray<
@@ -53,32 +55,72 @@ async function integrationFiles(
   return found.sort();
 }
 
-/** Both suites, the default one and the server-execution arm. */
+/** The default-ON suite, its explicit-OFF arm, and the deployed-topology gate. */
 export async function loadPackageIntegrationSuites(
   root: string,
 ): Promise<Suite[]> {
   const defaults: FilePart[] = [];
-  const on: FilePart[] = [];
+  const off: FilePart[] = [];
   for (const { scope, headless } of PACKAGES) {
     const packageDir = `packages/${scope}`;
     const files = await integrationFiles(root, packageDir);
     const junit = { kind: "integration", scope, filePrefix: packageDir };
     const env: Record<string, string> = headless ? { HEADLESS: "1" } : {};
-    defaults.push({ packageDir, flags: ["-A"], env, junit, files });
-
     const { whole, unavailable } = unavailableFrom(
       SERVER_EXECUTION_ON_SKIPS[scope],
       packageDir,
     );
-    on.push({
+    defaults.push({
       packageDir,
       flags: ["-A"],
-      env: { ...env, EXPERIMENTAL_SERVER_EXECUTION: "true" },
+      env,
       junit,
       files: files.filter((file) => !whole.has(file)),
       unavailable,
     });
+    off.push({
+      packageDir,
+      flags: ["-A"],
+      env: { ...env, EXPERIMENTAL_SERVER_EXECUTION: "false" },
+      junit,
+      files,
+    });
   }
+  const backgroundPostureGate =
+    "packages/background-piece-service/integration/posture-gate.test.ts";
+  const harnessPostureGate =
+    "packages/cf-harness/integration/fabric-session-posture-gate.test.ts";
+  const deployedTopology = fileSuite({
+    id: "deployed-topology",
+    needs: ["deno", "toolshed", "bg-piece-service-binary"],
+    parts: [
+      {
+        packageDir: "packages/background-piece-service",
+        flags: ["--no-check", "--allow-env", "--allow-run", "--allow-net"],
+        junit: {
+          kind: "integration",
+          scope: "background-piece-service",
+          filePrefix: "packages/background-piece-service",
+        },
+        files: (await integrationFiles(
+          root,
+          "packages/background-piece-service",
+        )).filter((file) => file === backgroundPostureGate),
+      },
+      {
+        packageDir: "packages/cf-harness",
+        flags: ["--no-check", "-A"],
+        junit: {
+          kind: "integration",
+          scope: "cf-harness",
+          filePrefix: "packages/cf-harness",
+        },
+        files: (await integrationFiles(root, "packages/cf-harness")).filter(
+          (file) => file === harnessPostureGate,
+        ),
+      },
+    ],
+  });
   return [
     fileSuite({
       id: "package-integration",
@@ -86,10 +128,11 @@ export async function loadPackageIntegrationSuites(
       parts: defaults,
     }),
     fileSuite({
-      id: "package-integration-on",
-      variant: SERVER_EXECUTION_VARIANT,
-      needs: ["deno", "toolshed-baked-on", "browser"],
-      parts: on,
+      id: "package-integration-off",
+      variant: SERVER_EXECUTION_OFF_VARIANT,
+      needs: ["deno", "toolshed-baked-off", "browser"],
+      parts: off,
     }),
+    deployedTopology,
   ];
 }

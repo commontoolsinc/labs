@@ -38,6 +38,57 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
+**Delta 2026-08-28, last updated 2026-08-29 (the FLIP PR —
+[#6535](https://github.com/commontoolsinc/labs/pull/6535), OPEN, the
+owner merges it personally; the soak starts at ITS merge): `SERVER_EXECUTION_DEFAULT_ENABLED` →
+`true`, with every ordered gate met on main at the base (22c93b540 —
+rebased onto it 2026-08-29, from e16780fca and originally 4e02f75c4;
+the gate claims re-verified at each new base): the
+ON-skip registry EMPTY across all four suites (the ruled-3b-close lift,
+#6528), OW31's ruled posture BUILT, OW45–OW53 CLOSED, and the OW38(ii)
+bar RULED met ("topics numbers are fine", 2026-08-24).** The 2026-08-29
+updates this block carries, since the events they record post-date its
+2026-08-28 heading: the two rebases above; the DECLARED-RESULT STOP
+RULED (task 6's block — the serving side writes the verb
+receipt/result); and the bot-review AMENDMENT (the deployed-topology
+gates' startup wait made event-driven, their temporary identity no
+longer leaked, the CLI health probes bounded, and the CLI lane's gate
+now cross-checking `cf`'s resolved arm against the server's published
+one). The OFF-world half of those same findings landed separately on
+main as
+[#6545](https://github.com/commontoolsinc/labs/pull/6545) — the GitHub
+connector host adopting the deployment's posture, and the pattern
+shard selectors failing loudly on an empty selection — which is the
+base this branch now sits on. The PR carries,
+beside the one-liner and the absolute pin's re-tense: the LANE-ROLE SWAP
+(default lanes = the ON arm, probed serving-loop-present +
+shell-define-unset, carrying the empty ON skip list; the pre-flip
+explicit-`true` lanes become the explicit-`false` OFF regression guard
+on `build-toolshed-off` — the inversion of `build-toolshed-on` — with
+variant `server-execution-off`, per testing.md §2's identity contract);
+the DEPLOYED-TOPOLOGY obligation discharged (the Phase 7 table row):
+a new `deployed-topology-gate` job runs the REAL `bg-piece-service`
+binary (startup posture log line asserted; clean SIGTERM) and
+cf-harness's production fabric-session factory (posture adopted ON; one
+genuine piece flow) against the default toolshed, both red-first against
+forced-OFF; the CLI lanes gain the server posture probe (`cf` adopts the
+published posture — its gate); `PiecesController` hosts ride the default
+lanes (sx2-scale et al.). The Deno-side integration clients (4 runner
+files; the runtime-client host + its step-skip guard) resolve
+env-else-default via the now-exported `withServerExecutionDefault`, so
+the default lanes stay UNIFORM (the P7 finding-7 mixed posture does not
+resurrect). The topics multi-user LANE-POSTURE item (the measurement
+report's §5.1 flip-decision question) is discharged as recorded: the
+no-server pattern-tests lane resolves the AMBIENT baseline (OFF) by
+construction — the `patternTest` preset does not read the constant
+(conformance-golden-pinned) — verified live at the flipped head
+(`topics/multi-user.test.tsx` 7/7 with env unset); "grow the in-process
+serving role" stays the not-taken alternative. testing.md §2,
+EXPERIMENTAL_OPTIONS.md, and the register's FLIP PR block re-tensed
+with it. The OFF path is NOT removed — it is the soak's rollback lever;
+the post-soak removal PR (task 2) deletes it with the OFF lanes. The
+deltas below are the prior PRs' records.**
+
 **Delta 2026-08-28 (the ruled-3b-close PR): THE OWNER RULED THE 3B FORK
 — "go with (1) plus the (2-D) kick" — both mechanisms are LANDED
 red-first, and lunch-poll-vote's FILE entry is LIFTED: the ON-skip
@@ -2033,9 +2084,36 @@ Tasks:
       deployed-topology binaries the presets flip
       (`background-piece-service`, the CLI, cf-harness, every
       `PiecesController`) exercised ON by a gate — the flip PR's own
-      obligation (review finding 8: today nothing exercises them ON);
-      then (6) the flip PR, and the soak starts at ITS merge. OW31 (the
-      service-principal write-authority posture) was RULED 2026-08-18 —
+      obligation (review finding 8: at the flip-ready landing nothing
+      exercised them ON) — *DISCHARGED BY THE FLIP PR (2026-08-28, the
+      four-topology dispositions in its register block and PR body:
+      `deployed-topology-gate` job for the bg-piece-service binary and
+      cf-harness's fabric session; the CLI lanes probed as `cf`'s gate
+      via posture adoption; `PiecesController` hosts on the default
+      package/pattern lanes)*;
+      then (6) the flip PR, and the soak starts at ITS merge — **IN
+      PROGRESS 2026-08-28: the flip PR is
+      [#6535](https://github.com/commontoolsinc/labs/pull/6535), OPEN
+      (the coordination-state delta above carries its contents; the
+      owner reads and merges it personally — the soak starts at that
+      merge, and the OFF path stays the rollback lever through it).
+      Its first board surfaced ONE owner-court STOP — RULED AND BUILT,
+      no longer standing: the verb DECLARED-RESULT surface was absent
+      under ON, because receipts went unwritten under the flag by
+      events.md §4/N26's exactly-once subsumption, which replaced only
+      that role and left the receipt's result-carriage
+      (plainResultReceipts; `cf call`'s `.result`) with no substitute.
+      The owner RULED it 2026-08-29 — "yes, Serving-side receipt/result
+      write, as that is indeed what i said before" — and the PR's
+      result-carriage commit (its fourth) builds it: the served handler
+      run writes the receipt in its OWN transaction (same wave as the
+      entry's `consequenced` mark) at the same cause-derived address the
+      client-era write used, write-once by CAS with a lost CAS a loud
+      no-op. The register's FLIP block item (5) carries the mechanism
+      and its pins; the CLI piece-call lane's umbrella-create assert —
+      the witness that was red — is GREEN (board 33239003881)**. OW31
+      (the service-principal write-authority posture) was RULED
+      2026-08-18 —
       the serving identity never writes users' home spaces; genesis
       under the space's own keys, owner := the acting user — and its
       build (register OW31's work order) was owed post-merge, BEFORE
@@ -2043,22 +2121,25 @@ Tasks:
 - [ ] Retire the flag; OFF path removed; `EXPERIMENTAL_OPTIONS.md` entry
       closed out — **SPLIT OUT: the post-soak removal PR** (named here as
       the flip's follow-up; it also removes the OFF regression-guard CI
-      lanes and the OFF-built binary job that the flip PR will introduce
-      by inverting today's `build-toolshed-on`).
+      lanes and the OFF-built binary job — `build-toolshed-off`, which
+      the flip PR introduced by inverting the pre-flip
+      `build-toolshed-on` — while the `deployed-topology-gate` job
+      STAYS: it gates the surviving default posture, not the OFF path).
 - [ ] Archive this plan to `docs/history/plans/` per the lifecycle
       (close-out, after the soak and the removal PR).
 
 Success criteria:
 
-- [ ] The integration suites run ON-only and green. (NOT ticked — untrue
-      today: the default lanes are the OFF posture by ruling. *The rest
-      of this parenthetical was the 2026-08-16 state, since superseded:
-      the explicit-ON lanes were green only WITH the skip list's six
-      `phase-7` entries, which were RED under the full ON posture, not
-      vacuous — table below. The entries were lifted arc-by-arc and the
-      ON-skip registry is EMPTY across all four suites since #6528, the
-      ruled-3b-close lift — the explicit-ON lanes run green with no
-      skips; the Coordination-state delta above carries the lift.*)
+- [ ] The integration suites run ON-only and green. (NOT ticked — but no
+      longer for the old reason, which was the six `phase-7` skip
+      entries the explicit-ON lanes needed. The ON-skip registry has
+      been EMPTY across all four suites since #6528, and the flip PR
+      swaps the lane roles: the DEFAULT lanes ARE the ON arm and run the
+      full suite carrying that empty list. What stays untrue is
+      ON-ONLY — the explicit-`false` OFF regression-guard lanes are the
+      soak's rollback lever and run beside them by design. They retire
+      with the post-soak removal PR, which is when this box can be
+      ticked.)
 - [ ] Cross-user propagation beats the client-computed baseline on the
       byte-identical workloads (the §1 "faster, not tolerably slower"
       requirement). (NOT ticked — UNMEASURED: the measurement leg is
@@ -2103,19 +2184,26 @@ their protocol and full numbers are in the
 [stage-C closeout](../history/plans/server-execution-v2/stage-c-closeout.md)
 and the reports beside it):**
 
+*Reading the posture column after the flip: every `DEFAULT` row records
+the default AS OF THAT RUN — OFF, by the 2026-08-16 dark-landing ruling
+— not the default today. The flip PR makes the DEFAULT lanes the ON
+arm, so those gates re-run under ON on its own board rather than being
+re-tensed in place here; the `explicit ON` rows are what the ON arm
+exercised at the time.*
+
 | gate | posture | result |
 | --- | --- | --- |
 | `sx2-serving-loop`, `sx2-speculation`, `sx2-events`, `sx2-effect-channel`, `sx2-scale` | explicit `EXPERIMENTAL_SERVER_EXECUTION=true` everywhere (the ON arm — the sx2 arm detection reads env-else-default) | see the PR's bar (fixer re-run, fresh store) |
-| same five | DEFAULT (unset = OFF by ruling) | see the PR's bar (fixer re-run) |
-| runner package integration (14) | DEFAULT (OFF) | 14/14 GREEN |
+| same five | DEFAULT at the run's date (unset = OFF by the dark-landing ruling; the flip makes DEFAULT the ON arm) | see the PR's bar (fixer re-run) |
+| runner package integration (14) | DEFAULT at the run's date (OFF) | 14/14 GREEN |
 | runner package integration | explicit ON, UNIFORM (the 4 tests that talk to the lane's toolshed declare ON; the 8 in-process-app harness tests are OFF by construction) | 13/14 GREEN + `pattern-and-data-persistence` RED → ON-skip-listed (OW33); the pre-fix "14/14 under ON" was a MIXED posture (OFF clients) |
-| runtime-client package integration | DEFAULT (OFF) | 45 steps GREEN |
+| runtime-client package integration | DEFAULT at the run's date (OFF) | 45 steps GREEN |
 | runtime-client package integration | explicit ON, UNIFORM (the worker declares ON) | 43 steps GREEN + 2 STEP entries ignored loudly (CT-1606 PerUser header render 3/3 red; single-navigateTo dispatch 1/3 red — OW33) |
 | `counter` | full ON | 1 red / 3 green in the build's runs (OW30's controller write-destination race — intermittent); green in the review's run; server exhausts 2/5 waves with no client loop |
 | `topics-navigation` | full ON | RED fast (`missing required property myName`, OW30 class) — ON-skip-listed (and, since the fixer, actually skipped) |
 | `cfc-group-chat-demo-two-browsers` (the Phase-2 gate + the benchmark harness) | full ON — HEAD 2/2 and the unmodified Phase-6 BASE 1/1 (review); **fan-out stage B: 3/3 fresh-store, ON-built binary (2026-08-17)** | Phase 7: RED (300 s stall; the OW32 client loop, 40–56 k action runs / 5 min). **Fan-out stage B: GREEN 3/3 (1m08s / 1m21s / 1m23s), every step in seconds; client action runs 401–586 per browser; zero non-settling; serving loop waves 48–58, derivedCommits = waves, watermarkLag ≤ 12; UN-SKIPPED** |
 | lunch (`lunch-poll-vote`) | full ON — HEAD 2/2 (review); **fan-out stage B: 2 fresh-store runs on the final binary (2026-08-17)** | Phase 7: RED (the identity-less served `#profile` wish + the OW32 loop). **Fan-out stage B: BIMODAL 1/2 — run 4 GREEN 2m28s (login 1.6 s, runtimes idle 1.0 s, joins 12–640 ms, votes and merges in seconds); run 5 RED at "both browsers see 2 love it (merge)" — both vote events consequenced with no error, one vote's served `castVote` no-op'd (`nowTick` null in the actor's run); stays ON-skip-listed with that residual named** |
-| the deployed-topology binaries the presets flip (`background-piece-service`, CLI, cf-harness, `PiecesController` hosts) | ON | NO gate exercises them ON (review finding 8) — recorded as the flip PR's own obligation; with the constant `false` none flips today |
+| the deployed-topology binaries the presets flip (`background-piece-service`, CLI, cf-harness, `PiecesController` hosts) | ON | NO gate exercised them ON at the flip-ready landing (review finding 8) — recorded as the flip PR's own obligation. **DISCHARGED by the flip PR (2026-08-28)**: bg-piece-service + cf-harness get the `deployed-topology-gate` job (the real binary starts/serves and asserts its posture log line; the fabric-session factory resolves ON by adoption and serves one piece flow — both red-first against forced-OFF), the CLI's gate is the probed `cli-integration-test` lanes (`cf` adopts the server's published posture), and `PiecesController` hosts ride the default package/pattern lanes (sx2-scale's controllers; the pieces-controller helper) |
 | OFF-arm neutrality | full runner suite (OFF ambient) + memory + toolshed unit suites + explicit-OFF sx2 | see the PR's bar |
 | **STAGE-C BENCHMARK 1** (2026-08-17, `59b5329ae` ≡ fan-out B runtime; built binaries, posture-verified, fresh store, OFF→ON→OFF, loads 3–9; [report](../history/plans/server-execution-v2/stage-c/stage-c-benchmark-report.md)) — chat two-browsers series n=20 @2 s | OFF ×3 / ON ×3 (+1 at `fadc2efb1b`) | OFF median **227 / 328 / 477 ms** (p95 498–1 069); ON **0 series** — lockdown stall 300 s (t1, smoke0) or lease churn from t≈0 (t2: `lease.lost` 33, load 3.9); per-step ON 3.0–7.2 s vs OFF 4–47 ms where ON reached the step |
 | same benchmark — lunch two-user vote | OFF ×2 / ON ×1 | OFF ✓ 11 s, 16 s; ON **RED** at "both browsers see 2 love it (merge)" 300 s (option A propagates 7 873 ms vs 53/80; both cast green 22 943 ms vs 440/843) |

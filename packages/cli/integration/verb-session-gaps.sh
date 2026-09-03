@@ -56,6 +56,19 @@ if [ -z "${CF_IDENTITY:-}" ]; then
   $CF id new >"$CF_IDENTITY" 2>/dev/null
 fi
 ARGS="--api-url=$API_URL --identity=$CF_IDENTITY --space=$SPACE"
+
+# The host's server-execution posture (same probe as integration.sh): the
+# `deduplicated` key is the OFF arm's receipt-precondition witness and is
+# asserted per arm below. Deadlines as in integration.sh: an
+# accepted-then-silent server must not hold the suite with no output.
+server_execution_on() {
+  case "${EXPERIMENTAL_SERVER_EXECUTION:-}" in
+    true) return 0 ;;
+    false) return 1 ;;
+  esac
+  curl --connect-timeout 5 --max-time 15 -fsS "$API_URL/api/health/stats" \
+    2>/dev/null | jq -e '.servingLoop != null' > /dev/null 2>&1
+}
 # An id alone does not name an invocation — the session it was chosen within is
 # the other half, and `--invocation` is refused without one.
 if [ -z "${CF_INVOCATION_SESSION:-}" ]; then
@@ -335,8 +348,18 @@ check "first attempt" "$(echo "$R2" | jq -r '.result.note.body // empty')" \
   "replaying a settled id hands back the original result, not the new payload"
 check "$(echo "$R1" | jq -r '.receipt // empty')" "$(echo "$R2" | jq -r '.receipt // empty')" \
   "and names the same receipt the first call did"
-check "true" "$(echo "$R2" | jq -r '.deduplicated // false')" \
-  "and says so itself, rather than leaving a caller to infer it"
+if server_execution_on; then
+  # ON: no receipt precondition exists (events.md §4 subsumption) — the
+  # replay is skipped at the dedupe horizon and the two checks above (the
+  # ORIGINAL result and the SAME receipt address, read back from the
+  # serving-side receipt — the ruled result carriage, 2026-08-29) are the
+  # witness; the OFF-arm mechanism key must not be fabricated.
+  check "false" "$(echo "$R2" | jq -r '.deduplicated // false')" \
+    "and does not claim receipt-level dedup under server execution"
+else
+  check "true" "$(echo "$R2" | jq -r '.deduplicated // false')" \
+    "and says so itself, rather than leaving a caller to infer it"
+fi
 check "$LIVE1" "$(notes_len)" \
   "and the piece is unchanged — the replay committed no second note"
 
