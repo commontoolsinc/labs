@@ -229,8 +229,14 @@ export const createLabeledFabric = async (
     pieces,
     space: pieces.getSpace(),
     dispose: async () => {
-      await runtime.dispose();
-      await storage.close();
+      // The storage closes whatever the runtime does on the way down. A
+      // dispose that throws would otherwise leave the emulated storage open
+      // for the rest of the process.
+      try {
+        await runtime.dispose();
+      } finally {
+        await storage.close();
+      }
     },
   };
 };

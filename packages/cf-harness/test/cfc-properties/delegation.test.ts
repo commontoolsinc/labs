@@ -126,12 +126,14 @@ const runDelegationEpisode = async (
   const artifactRoot = options.reachForWithheld
     ? await adversarialArtifactRoot(runId)
     : await propertyArtifactRoot(runId);
-  const fabric = await createLabeledFabric("enforce-explicit");
+  // The sandbox first: nothing that can throw may sit between the fabric
+  // being created and the `try` that disposes it.
   const sandbox = new ScriptedSandboxRuntime([{
     stdout: "child-observed-secret\n",
     stderr: "",
     exitCode: 0,
   }]);
+  const fabric = await createLabeledFabric("enforce-explicit");
   try {
     // Two labeled cells the operator names, which is how a handle reaches a
     // run without the model having guessed it: minted before the first turn

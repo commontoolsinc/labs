@@ -2159,6 +2159,20 @@ nothing over the artifacts it was given. Assert what a check said, not merely
 that it said nothing bad — and where the whole verdict set is the subject,
 assert the set rather than its emptiness, which is what P-allow does.
 
+Both rules above are instances of one habit, and it is worth naming because this
+work has now hit it three separate times: **a test that passes needs a reason,
+and "nothing bad happened" is not one.** Each time the test was green and the
+thing it named was not being checked — an agreement test comparing two halves
+that had been collapsed into one, an empty-failure assertion over a check that
+never ran, and a delegation property reading its witness out of the wrong
+transcript. None of the three could have failed, and none of them looked any
+different from a test that could.
+
+What catches it is to ask, of a green test, what would have to break for this to
+go red — and where the answer should be "the thing it is named after", to prove
+it by breaking that thing once. Two of the three were found that way; the third
+was found in review, by someone asking the question the author had not.
+
 ## Testing
 
 Unit/package tests:

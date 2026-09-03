@@ -89,6 +89,10 @@ describe("cfc property: influence accumulation", () => {
       // AH-CFC-7, the positive direction.
       const episode = await runInfluenceEpisode();
 
+      // The observation has to have reached the model for influence over it
+      // to mean anything: a regression that dropped stdout and kept the CFC
+      // summary would otherwise satisfy the entry below.
+      expect(episode.modelVisibleText).toContain(OBSERVED_STDOUT.trim());
       expect(episode.influencing).toContain("call-1:stdout");
     });
 
@@ -119,6 +123,9 @@ describe("cfc property: influence accumulation", () => {
       const episode = await runInfluenceEpisode();
 
       const audit = await auditArtifacts(episode.runDir);
+      // `pass` rather than the absence of `fail`: `inconclusive` means the
+      // check could not read its evidence, which is not agreement.
+      expect(audit.verdicts("AUD-8")).toEqual(["pass"]);
       const disagreeing = checkThatRan(audit, "AUD-8").filter((finding) =>
         finding.verdict === "fail"
       );

@@ -96,6 +96,26 @@ export interface ExpectedFailuresFile {
   expected: readonly ExpectedFailure[];
 }
 
+/**
+ * The entries of a parsed expected-failures file, or a throw saying why not.
+ *
+ * A file whose `expected` is missing or is not an array must not read as an
+ * empty list: an empty list excuses nothing, so a malformed file would look
+ * like a strict one and the mistake would never surface.
+ */
+export const readExpectedFailures = (
+  value: unknown,
+): readonly ExpectedFailure[] => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("the file's top level is not an object");
+  }
+  const expected = (value as { expected?: unknown }).expected;
+  if (!Array.isArray(expected)) {
+    throw new Error("the file has no `expected` array");
+  }
+  return expected as readonly ExpectedFailure[];
+};
+
 /** What holding the findings to the list established. */
 export interface ExpectedFailureReconciliation {
   /** Findings no entry covers. Each is a new failure. */
@@ -117,7 +137,12 @@ const matches = (
   new RegExp(`^(?:${entry.runs})$`).test(finding.runId);
 
 /**
- * Reconciles the findings at or above `threshold` against the list.
+ * Reconciles the results against the list.
+ *
+ * The threshold decides which unmatched results are failures; it does not
+ * decide which entries are live. An entry is used when anything it names is
+ * still happening, at any verdict, so raising the threshold cannot make a
+ * standing gap look like a closed one.
  *
  * Reads only the results it is given; it neither knows nor cares which paths
  * produced them.
@@ -128,20 +153,25 @@ export const reconcileExpectedFailures = (
   threshold: FailOnThreshold,
 ): ExpectedFailureReconciliation => {
   expected.forEach(assertUsableExpectedFailure);
-  const findings = results.filter((result) =>
-    verdictFailsThreshold(result.verdict, threshold)
-  );
   const matched: CheckResult[] = [];
   const unexpected: CheckResult[] = [];
   const used = new Set<ExpectedFailure>();
-  for (const finding of findings) {
-    const entry = expected.find((candidate) => matches(candidate, finding));
-    if (entry === undefined) {
-      unexpected.push(finding);
+  for (const result of results) {
+    const entry = expected.find((candidate) => matches(candidate, result));
+    if (entry !== undefined) {
+      // Marked used whatever the threshold: an entry for a `warn` under
+      // `--fail-on fail` still describes something that is happening, and
+      // calling it stale would report a live gap as a closed one and fail the
+      // run for the opposite of the reason it looks like.
+      used.add(entry);
+      if (verdictFailsThreshold(result.verdict, threshold)) {
+        matched.push(result);
+      }
       continue;
     }
-    used.add(entry);
-    matched.push(finding);
+    if (verdictFailsThreshold(result.verdict, threshold)) {
+      unexpected.push(result);
+    }
   }
   return {
     unexpected,

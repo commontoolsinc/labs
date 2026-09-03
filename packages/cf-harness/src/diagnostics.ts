@@ -292,6 +292,12 @@ export const cfcAbsenceBehaviorForMode = (
     case "enforce-explicit":
     case "enforce-strict":
       return "fail-closed-if-absent";
+    default:
+      // A mode this build does not know, which a resumed or injected run
+      // state can carry. The type says it cannot happen and the value can, so
+      // the unknown answer is the closed one: an enforcement mode nobody here
+      // recognizes is not a licence to expose.
+      return "fail-closed-if-absent";
   }
 };
 

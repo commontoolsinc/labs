@@ -399,6 +399,20 @@ describe("cfc absence policy", () => {
       }
     });
 
+    it("discloses the path in the modes that publish they will", async () => {
+      // The positive direction of the redaction. Without it a regression that
+      // stripped the path in every mode would pass: the enforcing assertion
+      // below would still hold, and nothing would notice observe had stopped
+      // disclosing what it is meant to.
+      for (const tool of STATUS_TOOLS) {
+        for (const mode of ["disabled", "observe"] as const) {
+          const observed = await runStatusObservation(mode, tool);
+
+          expect(observed.disclosedContent).toBe(true);
+        }
+      }
+    });
+
     it("withholds the path from a status observation in enforcing modes", async () => {
       // The disclosure the redaction exists for: whether the file is there is
       // the fact being withheld, so the path must not survive into the reply.

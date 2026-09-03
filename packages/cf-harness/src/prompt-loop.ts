@@ -1958,6 +1958,11 @@ const unclearedObservationDisposition = (
       return "expose-with-warning";
     case "fail-closed-if-absent":
       return "deny";
+    default:
+      // Unreachable while the descriptor is total, and closed anyway: the
+      // fallthrough of a switch that decides whether the model sees something
+      // must not be the branch that shows it.
+      return "deny";
   }
 };
 

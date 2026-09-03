@@ -113,6 +113,21 @@ describe("expected-failures", () => {
       expect(reconciliation.matched).toEqual([]);
     });
 
+    it("keeps an entry live when what it names occurs below the threshold", () => {
+      // Raising the threshold must not turn a standing gap into a closed one.
+      // The warning is not a finding under `--fail-on fail`, but it is still
+      // happening, so its entry is used rather than stale.
+      const reconciliation = reconcileExpectedFailures(
+        [finding("AUD-9", "warn", "retained none of: a cell-labels read")],
+        [entry("AUD-9", "a cell-labels read")],
+        "fail",
+      );
+
+      expect(reconciliation.stale).toEqual([]);
+      expect(reconciliation.unexpected).toEqual([]);
+      expect(reconciliationFails(reconciliation)).toBe(false);
+    });
+
     it("does not match a finding on a run the entry does not name", () => {
       // The suppression an entry must not be able to do. `runShape` is prose;
       // `runs` is what decides, so the same message on a run nobody

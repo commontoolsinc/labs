@@ -59,9 +59,12 @@ interface EpisodeOutcome {
 const runEpisode = async (
   options: { withSource: boolean },
 ): Promise<EpisodeOutcome> => {
-  const fabric = await createLabeledFabric("enforce-explicit");
+  // The root first: nothing that can throw may sit between the fabric being
+  // created and the `try` that disposes it, or a failure leaks a runtime and
+  // a storage manager into the test process.
   const runId = `deny-egress-${options.withSource ? "refused" : "allowed"}`;
   const artifactRoot = await propertyArtifactRoot(runId);
+  const fabric = await createLabeledFabric("enforce-explicit");
   try {
     const sourceRef = await seedLabeledSecret(
       fabric.runtime,
