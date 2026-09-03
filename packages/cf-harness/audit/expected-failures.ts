@@ -17,9 +17,8 @@
  * run shape.
  */
 
-import type { CheckResult, CheckVerdict } from "./report.ts";
+import type { CheckResult, FailOnThreshold } from "./report.ts";
 import { verdictFailsThreshold } from "./report.ts";
-import type { FailOnThreshold } from "./report.ts";
 
 /** One finding the suite is known to produce, and what it is tracked under. */
 export interface ExpectedFailure {
@@ -134,10 +133,3 @@ export const renderReconciliation = (
   }
   return lines.join("\n");
 };
-
-/** The verdicts an audit reports, for a caller composing its own summary. */
-export const findingVerdicts: readonly CheckVerdict[] = [
-  "fail",
-  "warn",
-  "inconclusive",
-];
