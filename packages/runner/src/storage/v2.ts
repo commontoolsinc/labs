@@ -4708,6 +4708,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     type: "pull" | "integrate" = "pull",
     watchBranch = "",
   ): Promise<Result<Unit, PullError>> {
+    const refreshStart = performance.now();
     try {
       const { session } = await this.#activeSessionHandle();
       // Per-session (no global): mirror the storage setting onto the session so
@@ -4782,9 +4783,11 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         },
       }));
 
+      const watchAddStart = performance.now();
       const { view, precedingSyncs, sync } = await session.watchAddSync(
         watches,
       );
+      logger.time(watchAddStart, "watchRefresh", "watchAddSync");
 
       if (this.#closed) {
         view.close();
@@ -4792,6 +4795,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
       }
 
       this.#watchView = view;
+      const applyStart = performance.now();
       try {
         for (const precedingSync of precedingSyncs) {
           this.applySessionSync(precedingSync, "integrate");
@@ -4804,10 +4808,13 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         view.close();
         throw error;
       }
+      logger.time(applyStart, "watchRefresh", "applySessionSync");
       this.#consumeWatchView(view);
       return { ok: {} };
     } catch (error) {
       return { error: toPullError(error) };
+    } finally {
+      logger.time(refreshStart, "watchRefresh", "total");
     }
   }
 
