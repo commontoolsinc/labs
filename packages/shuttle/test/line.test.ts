@@ -137,6 +137,16 @@ describe("line", () => {
       });
     });
 
+    it("returns one run of tokens for text carrying a line break, the break separating like any other", () => {
+      // A terminator is the caller's to strip, and a paste of two lines is
+      // one caller's problem rather than two commands here.
+
+      expect(splitLine("set x 1\nset y 2")).toEqual({
+        kind: "split",
+        tokens: ["set", "x", "1", "set", "y", "2"],
+      });
+    });
+
     describe("a JSON value on the line", () => {
       // The case the split exists for. A JSON object holds a space after
       // every comma and colon a person writes, so the value it is written as
@@ -179,6 +189,13 @@ describe("line", () => {
         });
       });
 
+      it("counts the column in code points, so a wide character ahead of the quote is one", () => {
+        expect(splitLine("\u{1f369} 'a b")).toEqual({
+          kind: "refused",
+          reason: "The `'` opened at column 3 is never closed.",
+        });
+      });
+
       it("refuses a line ending in a backslash", () => {
         expect(splitLine("cd a\\")).toEqual({
           kind: "refused",
@@ -216,11 +233,16 @@ describe("line", () => {
     });
 
     it("returns a value holding a syntax character in single quotes", () => {
-      expect(quoteToken('say "hi"')).toBe("'say \"hi\"'");
+      // Neither value holds a separator or a reserved character, so each
+      // rests on the syntax character alone. A fixture that also holds a
+      // space passes whether or not the quote is in the set.
+
+      expect(quoteToken('a"b')).toBe("'a\"b'");
       expect(quoteToken("a\\b")).toBe("'a\\b'");
     });
 
     it("returns a value holding a single quote in double quotes, its own quotes escaped", () => {
+      expect(quoteToken("a'b")).toBe('"a\'b"');
       expect(quoteToken('it\'s "x"')).toBe('"it\'s \\"x\\""');
     });
 

@@ -17,10 +17,11 @@
  *
  * `packages/cli` splits a line too, in `tokenizeLine` under `lib/completion/`,
  * and this is not a second copy of it. That one reconstructs what bash would
- * have done to a *partial* line: it takes a cursor offset, always ends with an
- * empty word for the cursor to sit in, and refuses nothing, a half-typed line
- * being its normal input. It is also not an export entry of that package, so
- * nothing here could call it.
+ * have done to a *partial* line: it reads up to a cursor offset and its last
+ * word is whatever the cursor sits in, which is empty only where the cursor
+ * follows a separator; it separates on the space and the tab alone; and it
+ * refuses nothing, a half-typed line being its normal input. It is also not an
+ * export entry of that package, so nothing here could call it.
  */
 
 /**
@@ -35,9 +36,10 @@
  * position would have left the character ordinary, and is the price of a
  * printer that needs to know nothing about where its output lands.
  *
- * The characters an operand writes an address with are not here. Those are
- * read inside a token by the reference grammar rather than by the split, and
- * which of them a printed value has to carry is the question `ls` settles
+ * The characters an operand writes an address with are not here, the `:` of a
+ * scheme and of a handle among them. Those are read inside a token by the
+ * reference grammar rather than by the split, and which of them a printed
+ * value has to carry is the question `ls` settles
  * (`docs/plans/shuttle/build-sequence.md`).
  */
 export const RESERVED_CHARACTERS = "!#%<>|";
@@ -87,6 +89,13 @@ export type LineSplit =
  * a quote that never closes, and a trailing backslash with nothing to escape.
  * Nothing else refuses a line here, so a line that splits says only that; it
  * says nothing about whether its tokens name anything.
+ *
+ * `line` is one line, and a terminator on it is the caller's to strip. The
+ * separator class holds the line terminators, so text carrying one splits
+ * across the break into a single run of tokens rather than into two commands.
+ * A newline cannot refuse instead: {@link quoteToken} writes a value holding
+ * one between single quotes, and reading that back is the round trip the two
+ * halves guarantee.
  */
 export function splitLine(line: string): LineSplit {
   const tokens: string[] = [];
@@ -143,7 +152,8 @@ export function splitLine(line: string): LineSplit {
 
   if (quote !== undefined) {
     return refuse(
-      `The \`${quote}\` opened at column ${openedAt + 1} is never closed.`,
+      `The \`${quote}\` opened at column ${columnOf(line, openedAt)} is ` +
+        `never closed.`,
     );
   }
   if (started) tokens.push(current);
@@ -168,6 +178,17 @@ export function quoteToken(value: string): string {
   if (!needsQuoting(value)) return value;
   if (!value.includes("'")) return `'${value}'`;
   return `"${value.replaceAll(/["\\]/g, "\\$&")}"`;
+}
+
+/**
+ * Helper for {@link splitLine}, which is the 1-based column of the character
+ * at `index`, counted in code points. The number exists for a person to find
+ * that character with, so it counts what a reader counts rather than the code
+ * units the string is stored in: an emoji ahead of the quote is one column and
+ * not two.
+ */
+function columnOf(line: string, index: number): number {
+  return [...line.slice(0, index)].length + 1;
 }
 
 /** Helper for {@link splitLine}, which builds a refusal carrying `reason`. */
