@@ -5,6 +5,10 @@
  * for a smoke check, or `--cases=<options>x<users>,...` for an explicit
  * matrix. Diagnostics go to stderr and the machine-readable result is the one
  * JSON document written to stdout.
+ *
+ * The probe runs the server-execution OFF arm unless
+ * `EXPERIMENTAL_SERVER_EXECUTION` is set explicitly: it is a headless
+ * measurement of the pattern's own graph, not of a deployed topology.
  */
 
 import { parseLink } from "@commonfabric/runner";
@@ -956,6 +960,15 @@ export function casesFromConfig(
 }
 
 async function run(): Promise<void> {
+  // A headless probe measures the derive-and-commit graph of the pattern and
+  // hosts its own in-process memory server, which has no serving loop. Under
+  // the ON posture the harness instead targets the integration environment's
+  // toolshed (`env.API_URL`) and, with none running, waits on it forever. So
+  // when the caller has not chosen a posture, pin the OFF arm for this
+  // process; an explicit `EXPERIMENTAL_SERVER_EXECUTION` still wins.
+  if (Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") === undefined) {
+    Deno.env.set("EXPERIMENTAL_SERVER_EXECUTION", "false");
+  }
   const config = matrixConfigFromArgs(Deno.args);
   matrixProgram = config.program;
   const cases = casesFromConfig(config, Deno.args);

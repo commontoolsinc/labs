@@ -1,6 +1,7 @@
 import {
   computed,
   Default,
+  equals,
   lift,
   NAME,
   pattern,
@@ -11,14 +12,24 @@ import {
 import type {
   CastVoteEvent,
   LogVisitEvent,
+  LunchProfileCell,
   Option,
   OptionTargetEvent,
+  Vote,
   VoteColor,
 } from "./main.tsx";
-import { type GeneratedArtFetchState, safeImageUrl } from "./generated-art.tsx";
+import { safeImageUrl } from "./generated-art.tsx";
 
-/** Kept in the result contract for already-deployed card instances. */
-export type PollOptionArtSyncState = GeneratedArtFetchState;
+const myVoteFor = (
+  votes: readonly Vote[],
+  viewerProfile: LunchProfileCell | undefined,
+  optionId: string,
+): VoteColor | undefined => {
+  if (!viewerProfile) return undefined;
+  return votes.find(
+    (v) => v.optionId === optionId && equals(v.voter, viewerProfile),
+  )?.voteType;
+};
 
 const formatRank = lift<{ rank: number | undefined }, string>(({ rank }) =>
   rank === undefined || rank <= 0 ? "—" : `#${rank}`
@@ -37,8 +48,11 @@ const formatRank = lift<{ rank: number | undefined }, string>(({ rank }) =>
  * Inputs for one rendered ranked option row.
  *
  * The parent owns all durable and shared UI state. This pattern receives one
- * option, narrow current-viewer/admin facts, and the streams it should emit for
- * mutations or selection in the parent's shared editor surfaces.
+ * option, current viewer/admin facts, the shared vote list, and the streams it
+ * should emit for mutations or selection in the parent's editor surfaces. It
+ * derives the viewer's own vote itself: measured on the 14-option poll, a
+ * per-row vote handed down from the parent's ranked tallies re-ran three
+ * times as many nodes per vote as this lookup does.
  */
 export interface PollOptionCardInput {
   /** Option record to render. */
@@ -47,8 +61,11 @@ export interface PollOptionCardInput {
   /** One-based display rank, or undefined while the parent ranking settles. */
   rank: number | undefined;
 
-  /** This viewer's vote for the option, or `undefined` when they have none. */
-  myVote?: VoteColor;
+  /** The viewer's profile cell — identity, compared with `equals()`. */
+  viewerProfile?: LunchProfileCell;
+
+  /** Shared vote list used to compute this viewer's selected vote. */
+  votes: readonly Vote[];
 
   /** Whether the current viewer is allowed to vote. */
   isJoined: boolean;
@@ -63,11 +80,13 @@ export interface PollOptionCardInput {
   requestArt?: Stream<OptionTargetEvent>;
 
   /**
-   * Explicit scalar discriminator for the parent-owned request controls and
-   * art editor. Optional with a false default so pre-editor card instances
-   * retain legacy state without rendering controls they cannot dispatch.
+   * Whether the parent wires `requestRemove` and `requestArt`. A card
+   * instance deployed under the earlier contract has neither stream, and an
+   * absent optional stream still materializes as an unresolved handle, so
+   * their presence cannot tell that instance apart. This scalar defaults to
+   * false for it, which hides the two controls it could not dispatch.
    */
-  usesSharedArtEditor?: boolean | Default<false>;
+  parentOwnsEditors?: boolean | Default<false>;
 
   /** Parent-owned stream that toggles or records this viewer's vote. */
   castVote: Stream<CastVoteEvent>;
@@ -87,13 +106,6 @@ export interface PollOptionCardOutput {
 
   /** Static VNode rendering the complete option row. */
   [UI]: VNode;
-
-  /**
-   * Compatibility result for card instances deployed before art generation
-   * moved to the single parent-owned editor. New cards only report durable
-   * stored state here; live generation state belongs to that shared editor.
-   */
-  artSyncState?: PollOptionArtSyncState;
 }
 
 export default pattern<PollOptionCardInput, PollOptionCardOutput>(
@@ -101,12 +113,13 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
     {
       option,
       rank,
-      myVote,
+      viewerProfile,
+      votes,
       isJoined,
       isAdmin,
       requestRemove,
       requestArt,
-      usesSharedArtEditor,
+      parentOwnsEditors,
       castVote,
       logVisit,
     },
@@ -114,23 +127,13 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
     const oid = option.id;
     const optionTitle = option.title;
     const displayRank = formatRank({ rank });
+    const myVote = computed(() => myVoteFor(votes, viewerProfile, oid));
     const storedImageUrl = computed(() => safeImageUrl(option.imageUrl));
-    const artSyncState = computed<PollOptionArtSyncState>(() => {
-      if (safeImageUrl(option.imageUrl)) return "stored";
-      // Old deployed cards have no scalar editor discriminator and may already
-      // hold the generated marker in their result document. Keep that marker
-      // reachable without reinstating one GeneratedArt/fetch graph per option.
-      return usesSharedArtEditor === true ? "" : "generated";
-    });
-    // Optional stream inputs materialize as unresolved handles when absent, so
-    // their JavaScript presence cannot distinguish a vintage instance. The
-    // scalar discriminator defaults false for those instances and is true only
-    // when the current parent wires both request streams.
     const canRequestRemove = computed(() =>
-      isAdmin && usesSharedArtEditor === true
+      isAdmin && parentOwnsEditors === true
     );
     const canGenerateArt = computed(() =>
-      isAdmin && usesSharedArtEditor === true &&
+      isAdmin && parentOwnsEditors === true &&
       safeImageUrl(option.imageUrl) === ""
     );
 
@@ -353,7 +356,6 @@ export default pattern<PollOptionCardInput, PollOptionCardOutput>(
             : null}
         </div>
       ),
-      artSyncState,
     };
   },
 );

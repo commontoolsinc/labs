@@ -658,7 +658,6 @@ const parseVisitDate = (
 // fabric array lives in one cell, so an unbounded log would grow every computed
 // that reads it; 200 is generous for a lunch poll.
 const MAX_HISTORY = 200;
-const OPTION_PAGE_SIZE = 7;
 
 // Label for a visit derived purely from its own timestamp — never from the
 // current clock, so it stays idempotent inside reactive computations (timestamps
@@ -1012,7 +1011,6 @@ interface OptionTally {
   green: number;
   yellow: number;
   red: number;
-  myVote?: VoteColor;
   voters: Array<{
     name: string;
     voteType: VoteColor;
@@ -1048,25 +1046,23 @@ const tallyOptions = (
       : users.find((u) => equals(u.profile, voter));
   const tallies = options.map((option): OptionTally => {
     const optionVotes = votes.filter((v) => v.optionId === option.id);
-    const voters = optionVotes.map((v) => {
-      const entry = rosterOf(v.voter);
-      const name = entry?.name ?? "";
-      return {
-        name,
-        voteType: v.voteType,
-        color: entry?.color ?? "#888",
-        initials: initialsByName.get(name) ??
-          getInitials(name, participantNames),
-        isSelf: viewer !== undefined && equals(v.voter, viewer),
-      };
-    });
     return {
       option,
       green: optionVotes.filter((v) => v.voteType === "green").length,
       yellow: optionVotes.filter((v) => v.voteType === "yellow").length,
       red: optionVotes.filter((v) => v.voteType === "red").length,
-      myVote: voters.find((voter) => voter.isSelf)?.voteType,
-      voters,
+      voters: optionVotes.map((v) => {
+        const entry = rosterOf(v.voter);
+        const name = entry?.name ?? "";
+        return {
+          name,
+          voteType: v.voteType,
+          color: entry?.color ?? "#888",
+          initials: initialsByName.get(name) ??
+            getInitials(name, participantNames),
+          isSelf: viewer !== undefined && equals(v.voter, viewer),
+        };
+      }),
     };
   });
   return [...tallies].sort((a, b) => {
@@ -1218,10 +1214,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
     // not exposed as pattern inputs. Uses the scoped-constructor idiom
     // introduced by parking-coordinator (PR #3610).
     const optionDraft = Writable.perSession.of<string>("");
-    // The rendered page is shared because the composed card collection lives
-    // in the poll's space scope. Keeping it space-scoped avoids persisting
-    // session-scoped option links in that shared collection.
-    const optionPage = Writable.of<number>(0);
     // Host's backdate field for "we went here" — a "YYYY-MM-DD" draft, blank
     // means today. Per-session like the other form drafts.
     const visitDate = Writable.perSession.of<string>("");
@@ -1396,44 +1388,6 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       );
     });
     const todayVoteCount = computed(() => todaysVotes.length);
-    const currentOptionPage = computed(() => {
-      const lastPage = Math.max(
-        0,
-        Math.ceil(options.length / OPTION_PAGE_SIZE) - 1,
-      );
-      return Math.min(optionPage.get(), lastPage);
-    });
-    const visibleOptions = computed(() => {
-      const page = currentOptionPage;
-      const start = page * OPTION_PAGE_SIZE;
-      return options.slice(start, start + OPTION_PAGE_SIZE);
-    });
-    const hasMultipleOptionPages = computed(() =>
-      options.length > OPTION_PAGE_SIZE
-    );
-    const optionPageLabel = computed(() => {
-      const count = options.length;
-      if (count === 0) return "";
-      const start = currentOptionPage * OPTION_PAGE_SIZE + 1;
-      const end = Math.min(start + OPTION_PAGE_SIZE - 1, count);
-      return `Options ${start}–${end} of ${count} · shared view`;
-    });
-    const previousOptionPage = action(() => {
-      const lastPage = Math.max(
-        0,
-        Math.ceil(options.length / OPTION_PAGE_SIZE) - 1,
-      );
-      optionPage.set(
-        Math.max(0, Math.min(optionPage.get(), lastPage) - 1),
-      );
-    });
-    const nextOptionPage = action(() => {
-      const lastPage = Math.max(
-        0,
-        Math.ceil(options.length / OPTION_PAGE_SIZE) - 1,
-      );
-      optionPage.set(Math.min(lastPage, optionPage.get() + 1));
-    });
     // The "Recently eaten" card: the 8 most-recent visits (newest first),
     // derived straight from the `visits` array. An array-shaped computed (not a
     // lift-returned VNode) is what lets the card keep its plain-JSX `.map(...)`
@@ -2036,8 +1990,10 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                   : null}
 
                 {/* Interactive options — vote per option */}
-                {visibleOptions.map((option) => {
+                {options.map((option) => {
                   const oid = option.id;
+                  // Touch the full option shape here so the mapWithPattern
+                  // element schema includes every field the child reads.
                   const cardOption: Option = {
                     id: option.id,
                     title: option.title,
@@ -2046,66 +2002,28 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       ? {}
                       : { imageUrl: option.imageUrl }),
                   };
-                  const cardState = computed(() => {
+                  const rank = computed(() => {
                     const idx = ranked.findIndex(
                       (t) => t.option.id === oid,
                     );
-                    return {
-                      rank: idx >= 0 ? idx + 1 : undefined,
-                      myVote: idx >= 0 ? ranked[idx]?.myVote : undefined,
-                    };
+                    return idx >= 0 ? idx + 1 : undefined;
                   });
                   return (
                     <PollOptionCard
                       option={cardOption}
-                      rank={cardState.rank}
-                      myVote={cardState.myVote}
+                      rank={rank}
+                      viewerProfile={viewerProfileCell}
+                      votes={todaysVotes}
                       isJoined={isJoined}
                       isAdmin={isAdmin}
                       requestRemove={requestRemoveOption}
                       requestArt={requestArt}
-                      usesSharedArtEditor
+                      parentOwnsEditors
                       castVote={boundCastVote}
                       logVisit={boundLogVisit}
                     />
                   );
                 })}
-
-                {hasMultipleOptionPages
-                  ? (
-                    <div
-                      data-option-pagination
-                      style={{
-                        margin: "4px 0 16px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: "10px",
-                      }}
-                    >
-                      <cf-button
-                        size="sm"
-                        variant="ghost"
-                        disabled={currentOptionPage === 0}
-                        onClick={previousOptionPage}
-                      >
-                        Previous
-                      </cf-button>
-                      <span style={{ fontSize: "12px", color: "#6b7280" }}>
-                        {optionPageLabel}
-                      </span>
-                      <cf-button
-                        size="sm"
-                        variant="ghost"
-                        disabled={(currentOptionPage + 1) * OPTION_PAGE_SIZE >=
-                          optionCount}
-                        onClick={nextOptionPage}
-                      >
-                        Next
-                      </cf-button>
-                    </div>
-                  )
-                  : null}
 
                 {
                   /* Recently eaten — the visit log, shown below the options.

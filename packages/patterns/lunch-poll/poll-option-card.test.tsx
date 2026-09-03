@@ -21,8 +21,10 @@ import PollOptionCard from "./poll-option-card.tsx";
 import type {
   CastVoteEvent,
   LogVisitEvent,
+  LunchProfile,
   Option,
   OptionTargetEvent,
+  Vote,
 } from "./main.tsx";
 
 type EmptyState = Record<PropertyKey, never>;
@@ -52,6 +54,12 @@ const GENERATING_OPTION: Option = {
 };
 
 export default pattern(() => {
+  // Identity is a profile cell, so the viewer and their vote are built here
+  // rather than seeded as module-level static data.
+  const alex = Writable.of<LunchProfile>({ name: "Alex" });
+  const votes = computed((): Vote[] => [
+    { optionId: "opt-sushi", voter: alex, voteType: "green" },
+  ]);
   const removeConfirmTarget = new Writable<string | null | undefined>(
     undefined,
   );
@@ -71,12 +79,13 @@ export default pattern(() => {
   const card = PollOptionCard({
     option: STORED_OPTION,
     rank: reactiveRank,
-    myVote: "green",
+    viewerProfile: alex,
+    votes,
     isJoined: true,
     isAdmin: true,
     requestRemove,
     requestArt,
-    usesSharedArtEditor: true,
+    parentOwnsEditors: true,
     castVote,
     logVisit,
   });
@@ -182,21 +191,18 @@ export default pattern(() => {
       ) === undefined
   );
 
-  const assert_stored_art_compatibility_state = assert(() =>
-    readValue(card.artSyncState) === "stored"
-  );
-
   // An empty card opens the one parent-owned generator rather than
   // materializing a generator of its own.
   const generatingCard = PollOptionCard({
     option: GENERATING_OPTION,
     rank: 2,
-    myVote: undefined,
+    viewerProfile: alex,
+    votes,
     isJoined: true,
     isAdmin: true,
     requestRemove,
     requestArt,
-    usesSharedArtEditor: true,
+    parentOwnsEditors: true,
     castVote,
     logVisit,
   });
@@ -209,26 +215,19 @@ export default pattern(() => {
     ) !== undefined
   );
 
-  const assert_empty_art_compatibility_state = assert(() =>
-    readValue(generatingCard.artSyncState) === ""
-  );
-
   // A card instantiated under the previous argument contract has neither of
-  // the new parent-editor streams. Its historical generated marker remains
-  // readable, but the card still creates no per-row GeneratedArt instance.
+  // the new parent-editor streams, so it must not render the controls those
+  // streams would carry.
   const legacyGeneratingCard = PollOptionCard({
     option: GENERATING_OPTION,
     rank: 2,
-    myVote: undefined,
+    viewerProfile: alex,
+    votes,
     isJoined: true,
     isAdmin: true,
     castVote,
     logVisit,
   });
-
-  const assert_legacy_generated_art_state_survives = assert(() =>
-    readValue(legacyGeneratingCard.artSyncState) === "generated"
-  );
 
   const assert_legacy_card_hides_unwired_controls = assert(() =>
     findNodeByProp(
@@ -274,10 +273,7 @@ export default pattern(() => {
       { assertion: assert_remove_separator_is_plain },
       { assertion: assert_log_visit_control_renders },
       { assertion: assert_stored_image_renders_without_generator },
-      { assertion: assert_stored_art_compatibility_state },
       { assertion: assert_generate_button_when_image_missing },
-      { assertion: assert_empty_art_compatibility_state },
-      { assertion: assert_legacy_generated_art_state_survives },
       { assertion: assert_legacy_card_hides_unwired_controls },
       { action: action_open_generated_art },
       { assertion: assert_generate_targets_option },

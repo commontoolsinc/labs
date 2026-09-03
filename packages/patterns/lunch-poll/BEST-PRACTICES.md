@@ -31,15 +31,20 @@ shared pattern documentation.
 
 ## Mapped Children
 
-- Bound the number of composed children, not only the number visible in CSS.
-  Every dormant child still contributes graph nodes and invalidation work. Page
-  a large mapped collection before composition when interaction latency grows
-  with row count.
-- Pass the smallest derived value a row needs. For example, pass one viewer's
-  vote color instead of the viewer profile and the complete vote list.
-- Instantiate expensive editors once at the owning boundary and select the row
-  they edit. A generated-art or confirmation pattern per row costs graph work
-  even while every editor is closed.
+- Every composed child contributes graph nodes and invalidation work, even while
+  dormant. Paging a mapped collection before composition bounds that, but the
+  page index cannot be per-session without leaving session-scoped links in the
+  shared collection, and a shared index moves every viewer's page at once.
+  Reduce what each child composes instead.
+- Measure before narrowing a row's inputs. Handing each lunch-poll card a
+  derived "my vote" color from the parent's ranked tallies re-ran about three
+  times as many nodes per vote as letting the card find its own vote in the
+  shared list; the smaller input was the slower one.
+- Instantiating an editor once at the owning boundary and selecting the row it
+  edits shrinks the graph (about a fifth fewer nodes for the lunch poll), but
+  did not change vote settle time there, and a card with no nested sub-pattern
+  settled option adds slower than one nesting a dormant generator. Treat graph
+  size as a hint, and settle time under the real workload as the verdict.
 - When instantiating a sub-pattern inside `array.map(...)`, make every child
   field read explicit in the map body. Passing a reactive item object through
   without touching its fields can produce a narrowed element schema that omits

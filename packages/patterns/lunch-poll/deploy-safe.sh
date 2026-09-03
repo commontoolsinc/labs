@@ -30,7 +30,6 @@ tests=(
   "$root/lunch-poll/lunch-stats.test.tsx"
   "$root/lunch-poll/main.test.tsx"
   "$root/lunch-poll/multi-user.test.tsx"
-  "$root/lunch-poll/pagination.test.tsx"
   "$root/lunch-poll/participant-identity-card.test.tsx"
   "$root/lunch-poll/poll-option-card.test.tsx"
 )

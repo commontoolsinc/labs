@@ -127,7 +127,6 @@ LUNCH_POLL_TEST_ARGS=(
   --test packages/patterns/lunch-poll/lunch-stats.test.tsx
   --test packages/patterns/lunch-poll/main.test.tsx
   --test packages/patterns/lunch-poll/multi-user.test.tsx
-  --test packages/patterns/lunch-poll/pagination.test.tsx
   --test packages/patterns/lunch-poll/participant-identity-card.test.tsx
   --test packages/patterns/lunch-poll/poll-option-card.test.tsx
 )
@@ -148,7 +147,6 @@ deno task cf test packages/patterns/lunch-poll/generated-art.test.tsx --root pac
 deno task cf test packages/patterns/lunch-poll/lunch-stats.test.tsx --root packages/patterns
 deno task cf test packages/patterns/lunch-poll/main.test.tsx --root packages/patterns
 deno task cf test packages/patterns/lunch-poll/multi-user.test.tsx --root packages/patterns
-deno task cf test packages/patterns/lunch-poll/pagination.test.tsx --root packages/patterns
 deno task cf test packages/patterns/lunch-poll/participant-identity-card.test.tsx --root packages/patterns
 deno task cf test packages/patterns/lunch-poll/poll-option-card.test.tsx --root packages/patterns
 ```
@@ -198,7 +196,7 @@ mints a fresh, empty instance. Run the exact update once with `--check`; only a
 clean, zero-exit preflight authorizes the apply:
 
 ```bash
-# Runs all eight tests and the dry-run compatibility check; writes nothing.
+# Runs all seven tests and the dry-run compatibility check; writes nothing.
 packages/patterns/lunch-poll/deploy-safe.sh
 
 # Repeats the same gates, applies, then requires a successful render.
@@ -583,18 +581,34 @@ pick a shared profile before joining the poll.
 
 ## Performance notes
 
-Cold-load and vote latency are dominated by the rendered reactive graph, not the
-vote write. On the 14-option/1-viewer reproduction, the former UI built about
-1,454 nodes and 3,504 edges. Paging the composed controls to seven cards,
-passing each card one derived vote color, and sharing the editor surfaces cut
-the measured graph after option creation to about 636 nodes and 1,492 edges.
-Vote rounds stayed converged with no conflicts or reverts; recent settle maxima
-were roughly 77–107 ms in the final local diagnostic. Run the same workload
-with:
+Measured on the 14-option, one-viewer reproduction below (server-execution OFF,
+the arm the estuary poll runs), the reactive graph after option creation is
+about 1,100 nodes and 2,600 edges, down from about 1,360 and 3,350 before one
+parent-owned art editor replaced the generator every card carried. That smaller
+graph did not move vote latency: settle times per vote sit between roughly 85
+and 145 ms in both shapes, run to run, with no commit conflicts or reverts. Two
+things were measured on the way and are worth keeping in mind:
+
+- Passing each card a derived "my vote" color from the parent's ranked tallies
+  re-ran about three times as many nodes per vote as letting the card find its
+  own vote in the shared list, so the card does the lookup itself.
+- A card with no nested sub-pattern at all settles an option add in about 130 ms
+  where the old card, which nested a generator, settled it in about 30 ms. That
+  is a runtime question, not a pattern one, and is under investigation; option
+  adds are rare enough that the change ships with it.
+
+Paging the composed cards was tried and cut the graph roughly in half, but the
+page index cannot be per-session without leaving session-scoped links in the
+shared card collection, and a shared index moves every viewer's page at once, so
+it is not in this pattern. Run the same workload with:
 
 ```bash
 deno run -A packages/patterns/tools/lunch-poll-diagnose.ts --production
 ```
+
+The probe pins `EXPERIMENTAL_SERVER_EXECUTION=false` for itself unless the
+variable is already set: headless, the ON posture would wait forever on a
+toolshed that is not running.
 
 Cuisine art is generated only after the host clicks **generate art** for an
 option. One shared `generated-art.tsx` editor then requests `/api/ai/img` via

@@ -14,11 +14,11 @@ not restorable backups, live in [`DEPLOY-AND-SHARE.md`](./DEPLOY-AND-SHARE.md).
 By default, diagnostics run against `main.tsx` so runtime changes are measured
 against the product lunch-poll graph instead of a comparison fixture.
 
-The interactive option list composes at most seven cards at once. Pagination is
-shared poll state: moving the page changes which seven voting controls every
-viewer sees, while the all-options ranking below still covers the complete poll.
-Generated art and remove confirmation each use one shared editor instead of
-instantiating a dormant sub-pattern for every option.
+Generated art and remove confirmation each use one parent-owned editor instead
+of instantiating a dormant sub-pattern for every option. The option list is not
+paged: under the current scope rules a per-session page index would leave
+session-scoped links in the shared card collection, and a shared page index
+moves every viewer's page at once.
 
 Each case opens one poll across as many runtimes as it has voters, gives every
 voter an identity, joins them, has the host add the options, and then runs the
@@ -65,7 +65,9 @@ deno run -A packages/patterns/tools/lunch-poll-diagnose.ts --production
 
 Record graph size, phase elapsed time, settle time, and commit churn together. A
 fast handler measured without the rendered result graph does not represent a
-browser vote.
+browser vote. The probe runs the server-execution OFF arm unless
+`EXPERIMENTAL_SERVER_EXECUTION` is set explicitly; headless, the ON posture
+waits on a toolshed that is not running.
 
 Use `--program=<file>` to point the same scenario runner at another local lunch
 poll pattern variant when you intentionally want to compare a branch-local
