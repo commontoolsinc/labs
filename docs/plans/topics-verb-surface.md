@@ -168,9 +168,14 @@ usage:
   with the property above; it is what decides how a regression in it would
   present, refusing rather than stamping a record no reader shows.
 
-  A control for `editComment` is not built. Revising a comment in place needs
-  per-row session state that a retraction does not, and no reader shows the
-  `editedAt` stamp a revision leaves.
+  A revised comment says so: the row carries an `edited` marker wherever
+  `editedAt` is set, so a comment whose body is no longer what its author sent
+  cannot read as one never touched. `sentAt` is deliberately left showing when
+  the thread reached that point rather than when the revision happened.
+
+  A control for `editComment` is not built, and revising therefore stays a
+  verb call. It needs per-row session state that a retraction does not — which
+  comment is open, and its draft.
 
   Two other gaps are open against this item. An agent can add a comment and
   cannot retract one, because these verbs name their target by reference and a

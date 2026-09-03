@@ -1880,6 +1880,23 @@ export default pattern<TopicInput, TopicOutput>(
                             <cf-text variant="caption" tone="muted">
                               {whenLabel(comment.sentAt)}
                             </cf-text>
+                            {
+                              /* An edit is only honest if a reader can see one
+                                happened. `editedAt` says the body is no longer
+                                what its author sent, and `sentAt` deliberately
+                                still reads as when the thread reached here. */
+                            }
+                            {comment.editedAt
+                              ? (
+                                <cf-text
+                                  variant="caption"
+                                  tone="muted"
+                                  data-edited=""
+                                >
+                                  edited
+                                </cf-text>
+                              )
+                              : null}
                             <cf-button
                               variant="ghost"
                               size="sm"
