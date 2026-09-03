@@ -65,22 +65,22 @@ your mail cannot go to your accountant, because the mail could not. That
 is how systems like this actually fail: not by letting something
 through, but by growing so cautious that nothing useful can be done. So
 a rule can be relaxed on purpose — this summary, to that accountant — as
-an explicit decision at a boundary, one ordinary code cannot make and
-that leaves a record every time. Who may make that decision, and where,
-is the part most worth getting right.
+an explicit decision at a boundary: one that rides in a rule the data
+itself carries, or in a record that can be revoked, and whose evidence
+ordinary code cannot manufacture. Who may make that decision, and
+where, is the part most worth getting right.
 
 Identity is a keypair, not an account. There is nothing to suspend, and
 no one to ask.
 
 What that buys is not a better app store, and not the long tail
 either. Cheap code gets you niche tools, and that was never the
-constraint that was binding. The biggest, most obvious software does not
-exist, and cost is not why. A genuinely good shopping list. A household
-that runs itself. A plan four people can hold at once. An assistant that
-knows what you know. Every problem that can be solved inside one silo
-has already been solved by that silo. What is left is everything that
-spans them, and spanning them is exactly what the old rule could never
-make safe.
+constraint that was binding. The obvious software does not exist, and
+cost is not why. A genuinely good shopping list. A household that runs
+itself. A plan four people can hold at once. An assistant that knows
+what you know. Whatever fits inside one silo, somebody has built. What
+is left is everything that spans them, and spanning them is exactly
+what the old rule could never make safe.
 
 Take the household, since everyone has one. Four people; two calendars
 that do not talk to each other; a school that emails one parent and a
@@ -90,36 +90,30 @@ built is the thing that sees all of it at once and acts: notices the
 appointment and the pickup collide, moves what can move, tells the
 person who needs telling, adds what the appointment needs to the list,
 and does it while nobody is looking. It does not exist because it would
-have to read everything, and under the old rule a program that can read
-everything is a program you have to trust completely — and nobody should
-trust a program written last Tuesday that far. It is not a hard program.
-It is an unsafe one. Fence the danger with the data instead, and it
-becomes a program a model can write and a household can leave running.
+have to read everything, and under the old rule that means trusting it
+completely — and nobody should trust a program written last Tuesday that
+far. The hard part was never the logic. It is that the program is
+unsafe. Fence the danger with the data instead, and it becomes a program
+a model can write and a household can leave running.
 
 That is the shape of the mismatch. Software is sliced vertically, one
 application at a time. Lives run horizontally, across all of them at
-once, and no slice of your context can serve you as well as a view
-across the whole of it, however good the model inside the slice. And
-almost nothing that matters to a person is theirs alone: the trip, the
-household, the band, the argument with a sibling that has been running
-for a decade. "Our" has never been a real possessive on a computer. It
-has only ever been a label on someone else's storage, revocable whenever
-the owner of that storage decides. That is why social computing stalled
-at broadcasting to each other and never reached making things together.
+once. And almost nothing that matters to a person is theirs alone: the
+trip, the household, the band, the argument with a sibling that has
+been running for a decade. "Our" has never been a real possessive on a
+computer. It has only ever been a label on someone else's storage,
+revocable whenever the owner of that storage decides. We think that is
+a large part of why social computing stalled at broadcasting to each
+other and never reached making things together.
 
-So, roughly in order of nearness: agents you can leave running, because
-the worst case is capped by the substrate rather than by someone
-watching. Software for households, trips, clubs, and small communities,
-which only works when multiplayer is the foundation rather than a
-feature somebody has to fund. And software that passes between
-strangers, which is where it compounds: today everyone building their
-own software gets an island. Here programs stop being monuments and
-become crowd-sourced, cached save points in the latent space of
-software: some rando sneezes, and what comes out is a thing you can run
-on your real data, because the substrate is what keeps you safe rather
-than the author's good name. Code flows to the data instead of data
-flowing to the code. What accumulates in a close-ended system gets
-trapped. In an open-ended one it blossoms.
+Where it compounds is software that passes between strangers. Today
+everyone building their own software gets an island. Here programs stop
+being monuments and become crowd-sourced, cached save points in the
+latent space of software: some rando sneezes, and what comes out is a
+thing you can run on your real data, because the substrate is what
+keeps you safe rather than the author's good name. Code flows to the
+data instead of data flowing to the code. What accumulates in a
+close-ended system gets trapped. In an open-ended one it blossoms.
 
 [How it works](./how.md) is the code: what the compiler emits for an
 ordinary pattern, where the runtime checks the result, and what the
@@ -135,12 +129,10 @@ current work, a space still has a host that can revoke a participant,
 and robustness and performance are not there yet. The claim is never
 perfection. It is checkability: here is the mechanism, here is how to
 check it, here is what it does not cover. A promise of perfection is
-destroyed by its first counterexample. A guarantee built to be checked
-survives being tested and found wanting, because being tested was the
-point. The people who came before us settled arguments like this one by
-writing code rather than papers, and we would rather be judged the same
-way. One rule follows from that, and we hold ourselves to it: nothing
-gets said here that the code does not already do.
+destroyed by its first counterexample; a guarantee built to be checked
+survives being found wanting. The people who came before us settled
+arguments like this one by writing code rather than papers, and we
+would rather be judged the same way.
 
 Nothing here needs a token, a chain, or a consensus mechanism — only
 that trust be checkable by anyone, from evidence.

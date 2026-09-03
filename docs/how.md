@@ -285,13 +285,13 @@ The boundary is the interesting part, and the file states it plainly:
 
 ## Release is a decision, not a write
 
-Labels only tighten. Combine the mail with the calendar and the result
-is as restricted as both, and a system that could only do that would
-soon be unable to send anything anywhere — the summary of your mail
-could not go to your accountant, because the mail could not. So the
-runtime has one way to relax a rule, and it is not an edit to stored
-data. From `packages/patterns/cfc-exchange-rules/direct-release.tsx`,
-the rule, and the field that names it as its own release path:
+Labels only tighten. Join two labeled values and the result carries
+both sets of rules, and a system that could only do that would soon be
+unable to send anything anywhere — the summary of your mail could not
+go to your accountant, because the mail could not. So the runtime has
+one way to relax a rule, and it is not an edit to stored data. From
+`packages/patterns/cfc-exchange-rules/direct-release.tsx`, the rule,
+and the field that names it as its own release path:
 
 ```tsx
 export const releaseToSpaceReader = exchangeRule({
@@ -317,11 +317,22 @@ message: Confidential<
 The release path travels with the value rather than with the program
 reading it. The rule may rewrite only the clause that names it; sibling
 clauses, and anything derived from other inputs, stay conjunctive and
-untouched (the pattern's `README.md`). And it fires on evidence — a
-membership fact the runtime minted, not a string the pattern supplied —
-which is the same integrity axis the mint gate above protects.
+untouched
+(`packages/runner/test/cfc-module-policy-eval.test.ts`):
 
-The stored label never moves. Under `cfcDeclaredMonotonicity: "enforce"`
+```ts
+it("keeps wrong-subject evidence closed and sibling clauses untouched", () => {
+```
+
+And it fires on evidence — a membership fact the runtime minted, not a
+string the pattern supplied — which is the same integrity axis the mint
+gate above protects. Two dials govern this, and both default to `off`:
+`cfcPolicyEvaluation`, which decides whether rules are evaluated at all,
+and the render ceiling, which is where that membership fact is minted
+(`packages/runner/src/cfc/render-ceiling.ts`). In a default deployment
+the rule above is carried, not consulted.
+
+The stored label never loosens. Under `cfcDeclaredMonotonicity: "enforce"`
 a re-mint that drops a clause is refused, naming the document, the path
 and the direction
 (`packages/runner/test/cfc-declared-monotonicity.test.ts`):
@@ -355,10 +366,10 @@ expect(stagedReceiptWrite(first.tx, receiptId)).toBe(true);
 // fail closed, exactly like revoked/expired.
 ```
 
-Single-use consumption sits behind an experimental flag; with it off, a
-single-use grant is unsatisfiable rather than silently multi-use (same
-file). So every relaxation is either a rule the data itself named, or a
-record. Who may write the rule, and at which boundary, is where the real
+The receipt rides on the commit-preconditions flag, which is on by
+default with a rollback override; with it off, a single-use grant is
+unsatisfiable rather than silently multi-use (same file). So every
+relaxation is either a rule the data itself named, or a record. Who may write the rule, and at which boundary, is where the real
 design difficulty lives, and it is the part of this system most worth
 arguing with.
 
@@ -366,12 +377,14 @@ arguing with.
 
 A pattern runs in a compartment whose globals are installed deliberately
 (`packages/runner/src/sandbox/compartment-globals.ts`), because the
-checker only sees writes: a clock, a source of randomness, a timer, or
-shared memory is a channel through which a program can signal what it
-knows without ever writing it down. Covert channels that do not leave
-through a named exit are handled elsewhere and this document does not
-cover them: `packages/utils/src/sandbox-contract.ts`
-withholds globals with the channel each one closes recorded beside it,
+checker only sees writes: a timer or shared memory is a channel through
+which a program can signal what it knows without ever writing it down,
+so those are absent, and the clock and the random source are coarsened.
+Covert channels that do not leave through a named exit are handled
+elsewhere and this document does not cover them:
+`packages/utils/src/sandbox-contract.ts` lists the withheld globals,
+recording beside each the channel it closes or that nothing has
+supplied it,
 and `docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md` tables every
 real-time-correlated signal a pattern can reach with its status, its
 mitigation, and the test pinning it.
@@ -458,8 +471,8 @@ above is exercised by tests and by patterns that opt in rather than
 gating egress in a default deployment. The render ceiling is off too, and
 that boundary is held by the label and contract layer rather than by DOM
 sanitization, which has an open gap.
-The monotonicity gate and single-use grant receipts above are off by
-default in the same way.
+The monotonicity gate above, and the policy evaluation that decides
+releases at all, are off by default in the same way.
 `docs/development/EXPERIMENTAL_OPTIONS.md` carries every dial and where
 it is headed. Turning them on without wedging the patterns already
 running on them is the work.
