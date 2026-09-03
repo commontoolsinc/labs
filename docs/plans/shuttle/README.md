@@ -244,14 +244,13 @@ invisible, the prompt renders the whole ambient record — place and scope
     (a live region above the prompt) is designed and deferred
     ([`futures.md`](futures.md)).
 
-The line grammar itself — resolution rules, facets, listings, run-state and
-write surfaces, and the redirection/pipe proposals — is drafted in
-[`grammar.md`](grammar.md). The full-screen views are
-designed in [`views.md`](views.md). The order of
+The line grammar itself — from how a line splits into tokens to what an
+operand on one denotes — is drafted in [`grammar.md`](grammar.md). The
+full-screen views are designed in [`views.md`](views.md). The order of
 construction — the `cli` seam PRs and the shuttle milestones they gate — is
-[`build-sequence.md`](build-sequence.md). The trajectory
-past v1 — configuration in the fabric, the session scope as the variable
-store, the scripting layers, and the ranked candidates behind them — is
+[`build-sequence.md`](build-sequence.md). The trajectory past v1 —
+configuration in the fabric, the session scope as the variable store, the
+scripting layers, and the ranked candidates behind them — is
 [`futures.md`](futures.md).
 
 ## The ambient model
