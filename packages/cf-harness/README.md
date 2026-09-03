@@ -214,8 +214,8 @@ network confinement model.
   - `observe`
   - `enforce-explicit`
   - `enforce-strict`
-- default CFC mode aligned with the runner's permissive-if-absent
-  `enforce-explicit` rollout behavior
+- default CFC mode of `enforce-explicit`, which fails closed on an observation
+  whose trusted mediation metadata is absent
 - spec-aligned `PromptSlotBound` prompt-slot evidence
 - Loom run manifest intake through `--run-manifest`
 - first-pass policy events and deny/recovery behavior
@@ -2045,6 +2045,150 @@ they are. [audit/citations.ts](audit/citations.ts) holds that table and
 `audit/test/citation-drift.test.ts` reads every cited document and requires each
 quote to still be in it, so a specification edit that invalidates a check breaks
 the suite rather than leaving the check quietly wrong.
+
+### The property suite
+
+`test/cfc-properties/` produces the evidence the checks read, in both
+directions, so the audit is exercised rather than merely present. Each property
+runs a scripted adversarial episode against the real engine and prompt loop — no
+live model, no network — writes artifacts into a fresh root, and then runs the
+audit over its own artifacts and asserts the verdict. The checker is the
+assertion library; a property that hand-rolled its own artifact assertions would
+prove that the test can read JSON.
+
+```bash
+cd packages/cf-harness
+deno test -A test/cfc-properties/
+
+# What the nightly does: one root for the whole suite, then the corpus checks
+# over it. AUD-16's refusal count and AUD-18's posture uniformity are questions
+# about a population, which a single run cannot answer.
+CF_HARNESS_PROPERTY_ARTIFACT_ROOT=/tmp/cfc-properties \
+  deno test -A test/cfc-properties/
+deno task cfc-audit /tmp/cfc-properties \
+  --corpus --expect-refusals \
+  --expected-posture audit/profiles/max-enforcement.json --fail-on warn
+```
+
+| Property             | What it establishes                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P-deny-egress        | A pattern reading a `Confidential` input has its answer withheld by the answer sink's ceiling. The refusal is written twice — as `policyRefusal` on the tool output, which carries it to the model as data, and as a `release` decision in `policy-trace.json`, which is the channel AUD-16 counts — both naming `sink-ceiling`. No payload reaches any model-visible message                                                                                                     |
+| P-allow              | The same pattern with that one input dropped releases its answer, and the audit fails only the two checks a permitted run is known to fail. The guard against a gate that refuses everything, and against the audit becoming an always-fails alarm                                                                                                                                                                                                                                |
+| P-influence          | A mediated `bash` call whose `stdout` is observed under a confidentiality label accumulates as influence, and whose `stderr` is denied does not. AUD-8 reaches `pass`, which no run of the historic corpus ever gave it                                                                                                                                                                                                                                                           |
+| P-prompt-authority   | A side effect is allowed under a `direct-command` prompt slot and refused under `context`, under `quote`, and under no binding at all, each with `cfc_enforce_explicit_requires_direct_command`                                                                                                                                                                                                                                                                                   |
+| P-no-silent-fallback | An enforcing run whose `bash` result carries no mediation returns the typed denial, keeps recording the mode it was asked for, and reaches for no reason code from another mode's family. AUD-2 and AUD-7 both reach `pass`, which is what leaves a quiet drop to observe behavior nowhere to land                                                                                                                                                                                |
+| P-delegation         | A child resolves only the handle the delegation named, and the bound token is swapped for the bare reference in what the child dispatches — so at the address layer a handle is an indirection, not a boundary (AH-CFC-12 binds capabilities; §18.2.4.3 bounds observation). What bounds the observation is the output layer: the child's unmediated read returns as a typed denial. AUD-5 catches a child carrying a handle nobody transferred, and stays clean when it does not |
+
+Two properties the brief for this suite named are established elsewhere, and a
+second copy would be a second encoding rather than more coverage:
+
+- **P-refuse-start** — `assertDockerRunscCfcTransportForMode` refuses to start
+  an enforcing run whose CFC transports are unwired, and
+  `test/docker-runsc-sandbox.test.ts` covers both enforcing modes, each
+  transport missing on its own, and both present.
+- **P-dial-order** and **P-posture-parity** — `audit/test/seeded-violations.ts`
+  turns AUD-13 to `fail` and to `warn` on non-conforming matrix points, and
+  `audit/test/deployment.test.ts` covers AUD-18. These are the stronger form for
+  these two: a posture is a declaration, and a live episode can only produce
+  postures the harness is willing to emit, so it cannot reach a non-conforming
+  matrix point at all without the same seeded mutation.
+
+One caveat on AUD-9 before its numbers are quoted anywhere. AH-CFC-16 enumerates
+what a run must retain — prompt-slot evidence, invocation-context references,
+mediation dispositions, policy events, model-context influence state, and
+side-effect decisions — and a cell-labels read is not among them. The snapshot
+is worth having and is the CT-2076/E3 bridge, but it is our requirement rather
+than the specification's, so AUD-9 today carries two subjects under two
+authorities: the same shape the citation discriminator exposed in AUD-15.
+CT-2210 splits it, AUD-9 keeping the enumerated six as `required-by` and a
+companion carrying the snapshot as `extends`.
+
+The consequence is worth knowing in advance, because it moves a headline: **113
+of the 239 historic runs that fail AUD-9 fail only on its cell-labels
+component**, so they pass the spec-backed check once the split lands. The
+retention gap against the specification is narrower than today's number
+suggests. The history documents are not edited for this — they record the
+checker as it stood, and a later run disagreeing with them is what they are for.
+
+No check fails on a fresh permitted run. Two did when this suite was first
+pointed at one — AUD-3 counted the `run-pattern-source` sidecar as an unrecorded
+effect, and AUD-9 demanded an invocation context from a side effect that reaches
+the fabric rather than the substrate that mints one — and both were the check
+overclaiming rather than the harness underdelivering. Both are fixed.
+
+What a permitted run still cannot settle, P-allow asserts as an exact set, so a
+check that starts warning is caught rather than absorbed: AUD-2 and AUD-9 warn
+because the run's one side effect reaches the fabric, so nothing exercised its
+enforcing claim and nothing minted a context to retain; AUD-13, AUD-18 and
+AUD-19 are inconclusive over a single run. The nightly's
+`audit/expected-failures.json` names the same findings for the corpus, each with
+the issue that closes it — and fails both on a finding no entry covers and on an
+entry that stopped occurring, so the list shrinking is the progress signal
+rather than a growing excuse.
+
+### A consistency check cannot detect a consistent wrong answer
+
+Two encodings of one policy drift, and the repair is to collapse them so that
+one derivation feeds both the code that acts and the record that reports. That
+repair has a cost which is easy to miss: it also removes the disagreement a test
+was reading. Before the collapse, a wrong value in one encoding showed up as a
+mismatch against the other; after it, the two move together, and a test that
+only compares them passes on whatever answer they now agree on.
+
+So a collapse converts a detectable bug into an undetectable one unless it is
+paired with an anchor to something outside the system — a specification clause,
+a quoted requirement, a fact the code cannot restate for itself. **Every
+collapse of two encodings into one must ship with that anchor.** The
+correspondence test proves the halves cannot disagree; the anchor is what stops
+them agreeing on the wrong thing. Neither is sufficient alone, and of the two
+the anchor is the one that catches a deliberate but mistaken edit.
+
+The worked example is the absence policy. `enforce-explicit` published
+`permissive-if-absent` while failing closed, because the model-facing output
+path branched on the mode and the capability snapshot described the mode
+separately. `cfcAbsenceBehaviorForMode` is now the single derivation both read.
+Reverting the label after that collapse still passes the per-mode agreement test
+in `test/cfc-absence-policy.test.ts` — descriptor and behavior move together
+now, exactly as intended. What fails is the assertion anchored to AH-CFC-6,
+which states that absence of metadata must not read as an unlabeled successful
+observation. That clause is outside the code and cannot be moved by editing it,
+which is the whole of why it works.
+
+### Asserting the absence of failures asserts nothing on its own
+
+The companion mistake, and the easier one to make, because it reads as
+carefulness. A test that collects a check's findings, filters them for failures,
+and asserts the list is empty passes for two different reasons: the check ran
+and found nothing wrong, or the check never ran at all. A renamed id, a run
+directory that held no run, a check dropped from the registry — each produces a
+green test that has established nothing, and none of them looks different from
+success.
+
+It is the same defect the audit's own verdict vocabulary exists to prevent.
+`inconclusive` is never `pass` precisely because a check that could not look at
+anything has not found anything; a test that treats an empty result set as a
+pass reintroduces at the assertion layer the confusion the verdicts removed at
+the reporting layer.
+
+So a property here reaches a check's findings through `checkThatRan` in
+`test/cfc-properties/support/episode.ts`, which fails when a check reported
+nothing over the artifacts it was given. Assert what a check said, not merely
+that it said nothing bad — and where the whole verdict set is the subject,
+assert the set rather than its emptiness, which is what P-allow does.
+
+Both rules above are instances of one habit, and it is worth naming because this
+work has now hit it three separate times: **a test that passes needs a reason,
+and "nothing bad happened" is not one.** Each time the test was green and the
+thing it named was not being checked — an agreement test comparing two halves
+that had been collapsed into one, an empty-failure assertion over a check that
+never ran, and a delegation property reading its witness out of the wrong
+transcript. None of the three could have failed, and none of them looked any
+different from a test that could.
+
+What catches it is to ask, of a green test, what would have to break for this to
+go red — and where the answer should be "the thing it is named after", to prove
+it by breaking that thing once. Two of the three were found that way; the third
+was found in review, by someone asking the question the author had not.
 
 ## Testing
 

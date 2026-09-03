@@ -265,7 +265,23 @@ const parseCapabilityProbeOutput = (
   return snapshot;
 };
 
-const cfcAbsenceBehaviorForMode = (
+/**
+ * What a mode does with an observation whose trusted mediation metadata is
+ * absent.
+ *
+ * This is the one derivation of that policy. It is both published — as
+ * `HarnessCfcCapabilitySnapshot.cfc.absenceBehavior`, which is how a reader
+ * of a run's artifacts learns what the run would do — and enacted, by the
+ * model-facing output path that decides whether such an observation reaches
+ * the model. Deriving those separately lets a mode describe one policy and
+ * follow another, so they share this function rather than agreeing by hand.
+ *
+ * Both enforcing modes fail closed. AH-CFC-6 admits no weaker answer: absence
+ * of metadata must not read as an unlabeled successful observation, and
+ * `enforce-explicit` is a statement about invocation authority (AH-CFC-9),
+ * not a license to expose an unmediated one.
+ */
+export const cfcAbsenceBehaviorForMode = (
   mode: CfcEnforcementMode,
 ): HarnessCfcAbsenceBehavior => {
   switch (mode) {
@@ -274,8 +290,13 @@ const cfcAbsenceBehaviorForMode = (
     case "observe":
       return "observe-only";
     case "enforce-explicit":
-      return "permissive-if-absent";
     case "enforce-strict":
+      return "fail-closed-if-absent";
+    default:
+      // A mode this build does not know, which a resumed or injected run
+      // state can carry. The type says it cannot happen and the value can, so
+      // the unknown answer is the closed one: an enforcement mode nobody here
+      // recognizes is not a licence to expose.
       return "fail-closed-if-absent";
   }
 };

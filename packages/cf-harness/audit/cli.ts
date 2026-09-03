@@ -5,6 +5,7 @@
  * deno task cfc-audit <runDir | artifactRoot> [more paths...]
  *                     [--json] [--fail-on fail|warn|inconclusive]
  *                     [--corpus] [--expect-refusals]
+ *                     [--expected-failures <path>]
  *                     [--expected-posture <spec.json>] [--toolshed-url <url>]
  * ```
  *
@@ -34,6 +35,14 @@ import { RUN_CHECKS } from "./checks/registry.ts";
 import { auditRunFamily } from "./checks/structural.ts";
 import { discoverRunFamilies, type RunFamily } from "./evidence.ts";
 import {
+  type ExpectedFailure,
+  type ExpectedFailureReconciliation,
+  readExpectedFailures,
+  reconcileExpectedFailures,
+  reconciliationFails,
+  renderReconciliation,
+} from "./expected-failures.ts";
+import {
   type ExpectedPosture,
   loadExpectedPosture,
 } from "./expected-posture.ts";
@@ -55,6 +64,13 @@ export interface AuditCliOptions {
 
   /** Whether the named paths are to be read as one corpus (Group D). */
   corpus: boolean;
+
+  /**
+   * A file listing the findings this run is known to produce, when one was
+   * named. Findings it covers do not fail the run; anything else does, and so
+   * does an entry that matched nothing.
+   */
+  expectedFailures?: string;
 
   /** Whether that corpus is declared adversarial, so no refusal is a failure. */
   expectRefusals: boolean;
@@ -81,6 +97,7 @@ const USAGE = [
   "usage: cfc-audit <runDir | artifactRoot> [more paths...]",
   "                 [--json] [--fail-on fail|warn|inconclusive]",
   "                 [--corpus] [--expect-refusals]",
+  "                 [--expected-failures <path>]",
   "                 [--expected-posture <spec.json>] [--toolshed-url <url>]",
 ].join("\n");
 
@@ -96,6 +113,7 @@ export const parseAuditCliArgs = (
   let json = false;
   let failOn: FailOnThreshold = DEFAULT_FAIL_ON;
   let corpus = false;
+  let expectedFailures: string | undefined;
   let expectRefusals = false;
   let expectedPosture: string | undefined;
   let toolshedUrl: string | undefined;
@@ -109,6 +127,11 @@ export const parseAuditCliArgs = (
     const arg = args[index]!;
     if (arg === "--json") {
       json = true;
+      continue;
+    }
+    if (arg === "--expected-failures") {
+      expectedFailures = valueOf("--expected-failures", args[index + 1]);
+      index += 1;
       continue;
     }
     if (arg === "--corpus") {
@@ -159,6 +182,7 @@ export const parseAuditCliArgs = (
     json,
     failOn,
     corpus,
+    ...(expectedFailures !== undefined ? { expectedFailures } : {}),
     expectRefusals,
     ...(expectedPosture !== undefined ? { expectedPosture } : {}),
     ...(toolshedUrl !== undefined ? { toolshedUrl } : {}),
@@ -254,6 +278,7 @@ const renderFinding = (result: CheckResult): string => {
 export const renderAuditReport = (
   results: readonly CheckResult[],
   failOn: FailOnThreshold,
+  options: { exitDecidedBy?: "expected-failures" } = {},
 ): string => {
   const counts = countVerdicts(results);
   const runs = new Set(results.map((result) => result.runDir)).size;
@@ -276,7 +301,14 @@ export const renderAuditReport = (
     .map((verdict) => `${VERDICT_LABEL[verdict]} ${counts[verdict]}`)
     .join("  ");
   const header = `${results.length} checks over ${runs} runs — ${summary}`;
-  const footer = `exiting non-zero at or above \`${failOn}\``;
+  // What decides the exit is what the footer must say. Under an
+  // expected-failures list the threshold selects which findings are
+  // reconciled and the reconciliation decides the outcome, so a footer
+  // promising a non-zero exit at the threshold would contradict a green run
+  // that has findings in it.
+  const footer = options.exitDecidedBy === "expected-failures"
+    ? `findings at or above \`${failOn}\` are reconciled against the expected-failures list, which decides the exit`
+    : `exiting non-zero at or above \`${failOn}\``;
   return [header, ...sections, footer].join("\n\n");
 };
 
@@ -334,16 +366,64 @@ export const runAuditCli = async (
     );
     return 2;
   }
+  if (options.expectedFailures === undefined) {
+    write(
+      options.json
+        ? JSON.stringify(results, null, 2)
+        : renderAuditReport(results, options.failOn),
+    );
+    return results.some((result) =>
+        verdictFailsThreshold(result.verdict, options.failOn)
+      )
+      ? 1
+      : 0;
+  }
+  // Held to a list rather than to a threshold. A finding no entry covers
+  // fails, and so does an entry that matched nothing — a closed gap takes its
+  // entry with it, which is what stops the list becoming an excuse.
+  let expectedFailures: readonly ExpectedFailure[];
+  try {
+    expectedFailures = readExpectedFailures(
+      JSON.parse(await Deno.readTextFile(options.expectedFailures)),
+    );
+  } catch (error) {
+    write(
+      `could not read --expected-failures ${options.expectedFailures}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return 2;
+  }
+  let reconciliation: ExpectedFailureReconciliation;
+  try {
+    reconciliation = reconcileExpectedFailures(
+      results,
+      expectedFailures,
+      options.failOn,
+    );
+  } catch (error) {
+    // A malformed entry is a configuration error, the same answer as an
+    // unreadable command line: the audit did not run the comparison asked of
+    // it, and a verdict here would report otherwise.
+    write(
+      `--expected-failures ${options.expectedFailures} is not usable: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return 2;
+  }
+  // One document in JSON mode: the reconciliation is part of the answer, not
+  // a footer after it, and a caller piping this into a parser gets one parse.
   write(
     options.json
-      ? JSON.stringify(results, null, 2)
-      : renderAuditReport(results, options.failOn),
+      ? JSON.stringify({ results, reconciliation }, null, 2)
+      : `${
+        renderAuditReport(results, options.failOn, {
+          exitDecidedBy: "expected-failures",
+        })
+      }\n${renderReconciliation(reconciliation)}`,
   );
-  return results.some((result) =>
-      verdictFailsThreshold(result.verdict, options.failOn)
-    )
-    ? 1
-    : 0;
+  return reconciliationFails(reconciliation) ? 1 : 0;
 };
 
 if (import.meta.main) {

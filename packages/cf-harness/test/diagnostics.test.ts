@@ -133,7 +133,7 @@ Deno.test("collectHarnessCapabilitySnapshot captures fixed sandbox capabilities"
     at: "2026-04-22T23:00:00.000Z",
     cfc: {
       enforcementMode: "enforce-explicit",
-      absenceBehavior: "permissive-if-absent",
+      absenceBehavior: "fail-closed-if-absent",
       substrateStatus: "not-attested",
       runManifest: { present: false },
       sandbox: {

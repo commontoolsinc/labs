@@ -1,0 +1,49 @@
+{
+  "$comment": [
+    "The audit findings the nightly CFC property suite is known to produce, and",
+    "the issue each is tracked under. The job fails on any finding not listed",
+    "here, AND on any entry here that stopped occurring \u2014 a fixed gap must take",
+    "its entry with it, so the list cannot rot into a permanent excuse. The list",
+    "shrinking is the progress signal; it is never appended to without an issue.",
+    "",
+    "This is not a way to lower the bar. `--fail-on warn` stays where it is; an",
+    "entry names one check on one run shape, so a check that starts failing on a",
+    "shape nobody enumerated is still a red run.",
+    "Each entry names the runs it speaks for as an anchored regular expression over the run id. `runShape` is prose for a reader; `runs` is what matching uses, so an entry written for one shape cannot suppress the same message on a run nobody considered.",
+    "The AUD-9 cell-labels entry is the one to read before trusting today's retention headline: when CT-2210 splits that check, 113 of the 239 historic runs that fail AUD-9 fail only on its cell-labels component and will pass the spec-backed check. The gap against the specification is narrower than the current number says."
+  ],
+  "expected": [
+    {
+      "checkId": "AUD-9",
+      "runShape": "a sandbox-only episode: an enforcing run whose tools reach the sandbox and which mints no handle",
+      "runs": "authority-.+|influence|no-silent-fallback",
+      "detail": "retained none of: a recorded cell-labels read",
+      "why": "AUD-9 is overclaiming, and the entry closes when the check is split rather than when the harness changes. AH-CFC-16 enumerates what must be retained \u2014 prompt-slot evidence, invocation-context references, mediation dispositions, policy events, model-context influence state, and side-effect decisions \u2014 and a cell-labels read is not among them. The snapshot is worth having and is the CT-2076/E3 bridge, but it is our requirement rather than the specification's, so one check is carrying two subjects under two authorities. CT-2210 splits it: AUD-9 keeps the six enumerated items as `required-by`, and a companion carries the snapshot as `extends`. Nothing about a run has to change for this entry to go.",
+      "issue": "CT-2210"
+    },
+    {
+      "checkId": "AUD-2",
+      "runShape": "a fabric-only episode: an enforcing run whose only side effect is `run_pattern`",
+      "runs": "delegation-obedient|deny-egress-allowed|deny-egress-refused",
+      "detail": "never exercised it",
+      "why": "a `run_pattern` side effect reaches the fabric, not the sandbox that carries CFC evidence, so the run's enforcing claim goes untested. Honest reduced assurance rather than a defect. AUD-9 reads the same fact for retention and warns beside this one; both close together when a property drives a labeled flow through a sandbox side effect as well.",
+      "issue": "CT-2211"
+    },
+    {
+      "checkId": "AUD-16",
+      "runShape": "the property corpus, whose runs attest no CFC substrate",
+      "runs": "\\(corpus\\)",
+      "detail": "weakened by",
+      "why": "the suite's episodes supply no run manifest, so every run records `not-attested` and the refusal count carries that qualifier. It closes when the suite runs under a manifest.",
+      "issue": "CT-2212"
+    },
+    {
+      "checkId": "AUD-9",
+      "runShape": "a fabric-only episode: an enforcing run whose only side effect reaches the fabric",
+      "runs": "delegation-obedient|deny-egress-allowed|deny-egress-refused",
+      "detail": "retention unconfirmed",
+      "why": "the same fact AUD-2 warns about, read for retention. A run that recorded no invocation context could have run host-side or could have lost the evidence, and a tool activity states neither, so the check says unconfirmed rather than missing. It closes with the AUD-2 warning beside it.",
+      "issue": "CT-2211"
+    }
+  ]
+}
