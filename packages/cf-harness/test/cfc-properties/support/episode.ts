@@ -114,9 +114,12 @@ export class InertSandboxRuntime implements SandboxRuntime {
  * and the influence ledger act on.
  */
 export class ScriptedSandboxRuntime extends InertSandboxRuntime {
+  /** Every shell request dispatched, so a test can read what the child ran. */
+  readonly shellRequests: SandboxShellRequest[] = [];
+
   readonly #results: SandboxCommandResult[];
 
-  constructor(results: readonly SandboxCommandResult[]) {
+  constructor(results: readonly SandboxCommandResult[] = []) {
     super();
     this.#results = [...results];
   }
@@ -124,6 +127,7 @@ export class ScriptedSandboxRuntime extends InertSandboxRuntime {
   override runShell(
     request: SandboxShellRequest,
   ): Promise<SandboxCommandResult> {
+    this.shellRequests.push(request);
     if (request.command.includes(CAPABILITY_PROBE_SENTINEL)) {
       return Promise.resolve({
         stdout: "bash\tpresent\t/bin/bash\tGNU bash, version 5.2.26(1)-release",
@@ -353,6 +357,18 @@ export const propertyArtifactRoot = async (runId: string): Promise<string> => {
   await Deno.mkdir(configured, { recursive: true });
   return configured;
 };
+
+/**
+ * A root outside the shared one, for an episode that violates on purpose.
+ *
+ * A property that proves a check fires has to produce the shape the check
+ * catches, and that run is a fixture for the check rather than evidence about
+ * the system. Letting it into the corpus the nightly audits would report a
+ * deliberate violation as a conformance gap, so it always gets its own
+ * directory even when a shared root is configured.
+ */
+export const adversarialArtifactRoot = (runId: string): Promise<string> =>
+  Deno.makeTempDir({ prefix: `cfc-adversarial-${runId}-` });
 
 /**
  * The one run directory an episode wrote, which is what its own assertions
