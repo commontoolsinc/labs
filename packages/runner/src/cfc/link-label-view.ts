@@ -66,6 +66,11 @@ export function setLinkCfcLabelView(
  * Copy-on-write: unchanged subtrees are returned by reference (converted
  * response values can be large; the common labelless case allocates nothing).
  * Input trees are link-converted response values, so they are acyclic.
+ *
+ * The views it finds are the ones the conversion attached from live cells. A
+ * link in stored data carries none: the persist seam strips the view from
+ * every link before recording it, and the IPC ingress strips it from every
+ * link that arrives from the main thread.
  */
 export function redactSigilCfcLabelViewsForDisplay(value: unknown): unknown {
   return transformSigilCfcLabelViews(value, (payload) => ({
