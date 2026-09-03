@@ -167,4 +167,41 @@ describe("cfcLabelViewForResolvedCellWithStatus", () => {
       expect(status.readFailed).toBe(true);
     });
   });
+
+  it("answers a non-cell exactly as the one-hop reader does", () => {
+    // A value that is not a cell has no link to resolve. The resolved reader
+    // hands back the one-hop answer untouched — no view, and not a failure.
+    for (const value of ["plain string", 42, { body: "object" }, undefined]) {
+      const status = cfcLabelViewForResolvedCellWithStatus(value);
+      expect(status).toEqual(cfcLabelViewForCellWithStatus(value));
+      expect(status.readFailed).toBe(false);
+      expect(status.view).toBeUndefined();
+    }
+  });
+
+  it("treats a link getter that throws as no link, not a failed read", () => {
+    // The one-hop reader already swallows this and reports no label; the
+    // resolved reader must not turn the same object into a fail-closed read.
+    const broken = {
+      getAsNormalizedFullLink(): never {
+        throw new Error("no link here");
+      },
+    };
+    const status = cfcLabelViewForResolvedCellWithStatus(broken);
+    expect(status.readFailed).toBe(false);
+    expect(status.view).toBeUndefined();
+  });
+
+  it("reports no label, and no failure, for a cell without a runtime", async () => {
+    await withRuntime(async (runtime) => {
+      // A link with nothing to resolve it against: without a runtime there is
+      // no doc to read, which is an absent label rather than a failed read.
+      const link = runtime.getCell<string>(space, "resolved-no-runtime")
+        .getAsNormalizedFullLink();
+      const detached = { getAsNormalizedFullLink: () => link };
+      const status = cfcLabelViewForResolvedCellWithStatus(detached);
+      expect(status.readFailed).toBe(false);
+      expect(status.view).toBeUndefined();
+    });
+  });
 });
