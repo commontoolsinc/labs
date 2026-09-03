@@ -65,10 +65,17 @@ export interface CoverageDebtGitHub {
   download(path: string, token: string): Promise<GitHubDownload>;
 }
 
+/** What a day's runs came to, when one of them measured. */
+interface DayMeasurement {
+  uncoveredLines: number;
+
+  /** The run the number was read from. */
+  runId: number;
+}
+
 interface StoredDay {
-  /** Absent when the day's runs carried no usable measurement. */
-  uncoveredLines?: number;
-  runId?: number;
+  /** Absent when no run of the day carried a usable measurement. */
+  measured?: DayMeasurement;
 
   /**
    * The newest run the day listed when it was last read. Today is read on
@@ -94,20 +101,26 @@ interface RunArtifact {
 }
 
 const isRunId = (value: unknown): boolean =>
-  value === undefined || (Number.isInteger(value) && (value as number) > 0);
+  Number.isInteger(value) && (value as number) > 0;
+
+const isMeasurement = (value: unknown): value is DayMeasurement => {
+  if (typeof value !== "object" || value === null) return false;
+  const measured = value as DayMeasurement;
+  return Number.isFinite(measured.uncoveredLines) &&
+    measured.uncoveredLines >= 0 && isRunId(measured.runId);
+};
 
 const isStoredDay = (value: unknown): value is StoredDay => {
   if (typeof value !== "object" || value === null) return false;
   const day = value as StoredDay;
-  if (!isRunId(day.newestRun)) return false;
-  if (day.uncoveredLines === undefined) return day.runId === undefined;
-  return Number.isFinite(day.uncoveredLines) && day.uncoveredLines >= 0 &&
-    Number.isInteger(day.runId) && (day.runId ?? 0) > 0;
+  if (day.newestRun !== undefined && !isRunId(day.newestRun)) return false;
+  return day.measured === undefined || isMeasurement(day.measured);
 };
 
 const sameDay = (a: StoredDay | undefined, b: StoredDay): boolean =>
-  a !== undefined && a.uncoveredLines === b.uncoveredLines &&
-  a.runId === b.runId && a.newestRun === b.newestRun;
+  a !== undefined && a.newestRun === b.newestRun &&
+  a.measured?.uncoveredLines === b.measured?.uncoveredLines &&
+  a.measured?.runId === b.measured?.runId;
 
 /** The UTC day an instant falls in, as `YYYY-MM-DD`. */
 export function utcDay(at: number): string {
@@ -289,7 +302,7 @@ async function readDay(
       if (uncoveredLines === undefined) continue;
       return {
         outcome: "read",
-        day: { uncoveredLines, runId: run.id, newestRun },
+        day: { measured: { uncoveredLines, runId: run.id }, newestRun },
       };
     }
     const seen = newestRun === undefined ? {} : { newestRun };
@@ -341,13 +354,9 @@ export async function refreshCoverageDebt(options: {
   await store.save(window);
   const samples: CoverageDebtSample[] = [];
   for (const day of window) {
-    const stored = store.get(day);
-    if (stored?.uncoveredLines === undefined) continue;
-    samples.push({
-      day,
-      uncoveredLines: stored.uncoveredLines,
-      runId: stored.runId ?? 0,
-    });
+    const measured = store.get(day)?.measured;
+    if (measured === undefined) continue;
+    samples.push({ day, ...measured });
   }
   return error === undefined ? { samples } : { samples, error };
 }

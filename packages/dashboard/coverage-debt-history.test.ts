@@ -188,15 +188,14 @@ describe("coverage-debt-history", () => {
     it("reads back what it wrote", async () => {
       const store = new CoverageDebtStore(file);
       await store.load();
-      store.set("2026-09-01", { uncoveredLines: 78404, runId: 7 });
+      store.set("2026-09-01", { measured: { uncoveredLines: 78404, runId: 7 } });
       store.set("2026-09-02", {});
       await store.save(["2026-09-01", "2026-09-02"]);
 
       const reopened = new CoverageDebtStore(file);
       await reopened.load();
       expect(reopened.get("2026-09-01")).toEqual({
-        uncoveredLines: 78404,
-        runId: 7,
+        measured: { uncoveredLines: 78404, runId: 7 },
       });
       expect(reopened.get("2026-09-02")).toEqual({});
     });
@@ -204,14 +203,14 @@ describe("coverage-debt-history", () => {
     it("forgets the days outside the window it is saved with", async () => {
       const store = new CoverageDebtStore(file);
       await store.load();
-      store.set("2026-08-01", { uncoveredLines: 1, runId: 1 });
-      store.set("2026-09-02", { uncoveredLines: 2, runId: 2 });
+      store.set("2026-08-01", { measured: { uncoveredLines: 1, runId: 1 } });
+      store.set("2026-09-02", { measured: { uncoveredLines: 2, runId: 2 } });
       await store.save(["2026-09-02"]);
 
       const reopened = new CoverageDebtStore(file);
       await reopened.load();
       expect(reopened.get("2026-08-01")).toBeUndefined();
-      expect(reopened.get("2026-09-02")?.uncoveredLines).toBe(2);
+      expect(reopened.get("2026-09-02")?.measured?.uncoveredLines).toBe(2);
     });
 
     it("drops a day whose record it cannot read, and a file of another version", async () => {
@@ -220,15 +219,43 @@ describe("coverage-debt-history", () => {
         JSON.stringify({
           version: 1,
           days: {
-            "2026-09-01": { uncoveredLines: "lots", runId: 1 },
-            "2026-09-02": { uncoveredLines: 5, runId: 2 },
+            "2026-09-01": { measured: { uncoveredLines: "lots", runId: 1 } },
+            "2026-09-02": { measured: { uncoveredLines: 5, runId: 2 } },
+            "2026-08-31": null,
+            "2026-08-30": { newestRun: "not a run" },
+            "2026-08-29": { measured: { uncoveredLines: 5, runId: 0 } },
+            "2026-08-28": { measured: 5 },
           },
         }),
       );
       const store = new CoverageDebtStore(file);
       await store.load();
       expect(store.get("2026-09-01")).toBeUndefined();
-      expect(store.get("2026-09-02")?.uncoveredLines).toBe(5);
+      expect(store.get("2026-09-02")?.measured?.uncoveredLines).toBe(5);
+      expect(store.get("2026-08-31")).toBeUndefined();
+      expect(store.get("2026-08-30")).toBeUndefined();
+      expect(store.get("2026-08-29")).toBeUndefined();
+      expect(store.get("2026-08-28")).toBeUndefined();
+
+      // A `days` that is a list rather than a record of days reads as a
+      // record whose keys are indices, and no index is a day.
+      const listed = join(directory, "listed.json");
+      await Deno.writeTextFile(
+        listed,
+        JSON.stringify({ version: 1, days: ["2026-09-02"] }),
+      );
+      const fromList = new CoverageDebtStore(listed);
+      await fromList.load();
+      expect(fromList.get("2026-09-02")).toBeUndefined();
+
+      const notDays = join(directory, "not-days.json");
+      await Deno.writeTextFile(
+        notDays,
+        JSON.stringify({ version: 1, days: "none" }),
+      );
+      const fromNothing = new CoverageDebtStore(notDays);
+      await fromNothing.load();
+      expect(fromNothing.get("2026-09-02")).toBeUndefined();
 
       const other = join(directory, "other.json");
       await Deno.writeTextFile(
@@ -483,11 +510,36 @@ describe("coverage-debt-history", () => {
       expect(second.error).toBeUndefined();
     });
 
+    it("says so and carries on when the history cannot be written", async () => {
+      // A store that cannot persist still answers from memory: losing the file
+      // costs the next start its cache, not this refresh its numbers.
+      const logged: unknown[] = [];
+      const error = console.error;
+      console.error = (...parts: unknown[]) => void logged.push(parts[0]);
+      try {
+        const history = await refreshCoverageDebt({
+          token: "t",
+          days: 1,
+          now: NOW,
+          github: fakeGitHub({
+            "2026-09-02": [{ id: 101, metrics: metrics(78166) }],
+          }),
+          store: new CoverageDebtStore(join(directory, "gone", "history.json")),
+        });
+        expect(history.samples).toEqual([
+          { day: "2026-09-02", uncoveredLines: 78166, runId: 101 },
+        ]);
+      } finally {
+        console.error = error;
+      }
+      expect(logged).toEqual(["coverage debt: could not persist history:"]);
+    });
+
     it("keeps the days of the window it was given and drops the rest", async () => {
       const store = new CoverageDebtStore(file);
       await store.load();
       const old = utcDay(NOW - 30 * DAY_MS);
-      store.set(old, { uncoveredLines: 90000, runId: 1 });
+      store.set(old, { measured: { uncoveredLines: 90000, runId: 1 } });
       const history = await refreshCoverageDebt({
         token: "t",
         days: 2,
