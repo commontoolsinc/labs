@@ -97,14 +97,16 @@ a focused browser regression with a plain Deno unit test for any extracted
 policy or state machine, because code executed inside Chrome does not enter
 Deno's V8 coverage profile.
 
-### Running a test under the server-execution ON arm
+### Running a test under a server-execution posture
 
-`serverExecution` is off by default, and CI runs the ON arm as its own lanes on
-a toolshed binary built with `EXPERIMENTAL_SERVER_EXECUTION=true`.
-[EXPERIMENTAL_OPTIONS.md](EXPERIMENTAL_OPTIONS.md#serverexecution) covers the
-flag itself.
+`serverExecution` is currently ON by default. CI keeps stable `default` and
+`opposite` roles; `tasks/server-execution-ci.ts` derives their actual ON/OFF
+posture from the first-party default constant. The opposite toolshed binary is
+built with an explicit inverse so its browser shell, server, and test processes
+stay aligned. [EXPERIMENTAL_OPTIONS.md](EXPERIMENTAL_OPTIONS.md#serverexecution)
+covers the flag itself.
 
-Running one of those tests locally means putting the flag on every process the
+Running an explicit posture locally means putting the flag on every process the
 test spans, not only the one `deno test` starts. A pattern integration test
 drives a runtime in the test process and commits through a toolshed, and the
 per-class commit admission rows are enforced by the memory server under the
@@ -148,9 +150,9 @@ worth avoiding here.
 None of this reaches a test that opens a browser. The shell's half of the
 posture is a build-time define that the local dev servers do not carry:
 `/api/meta` reports `shellServerExecutionDefine` as null whatever the toolshed
-was started with, where CI's ON lane requires `"true"`. So this recipe covers a
-browser-free test, whose whole posture is the test process and the toolshed. A
-browser test on a faithful ON arm needs the built binary.
+was started with. That is faithful only to the default role, whose shell follows
+the first-party constant. A browser test on the opposite role needs a binary
+built with the same explicit flag as the server and test process.
 
 ### Tests that start Deno
 

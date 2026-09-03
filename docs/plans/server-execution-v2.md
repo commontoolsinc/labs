@@ -32,15 +32,27 @@ tables with the v2 basis index — and partly a build. The spec §5
 deletion list is enforced by deleting on main and *not rebuilding*,
 with the survival test as the gate on anything that feels needed.
 
-## Coordination state (2026-08-28) — read this first
+## Coordination state (2026-09-02) — read this first
 
 The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
+**Delta 2026-09-02 (post-flip toggle hygiene): #6535 is MERGED and the soak
+is running with the default ON. This follow-up keeps that behavior unchanged
+while replacing the hard-coded ON-default/OFF-guard workflow inversion with
+stable `default` and `opposite` roles resolved by
+`tasks/server-execution-ci.ts`. The binary define, server/test environment,
+posture probes, ON skip placement, OFF authored coverage, topology capability,
+and non-default record variant now follow that one mapping. Once it lands, a
+default rollback is the constant change plus its current-status documentation;
+the workflow does not need another role swap. #6552 remains available as the
+pre-hygiene emergency rollback and can be superseded by that smaller follow-up
+when appropriate.**
+
 **Delta 2026-08-28, last updated 2026-08-29 (the FLIP PR —
-[#6535](https://github.com/commontoolsinc/labs/pull/6535), OPEN, the
-owner merges it personally; the soak starts at ITS merge): `SERVER_EXECUTION_DEFAULT_ENABLED` →
+[#6535](https://github.com/commontoolsinc/labs/pull/6535), now MERGED; the
+soak started at its merge): `SERVER_EXECUTION_DEFAULT_ENABLED` →
 `true`, with every ordered gate met on main at the base (22c93b540 —
 rebased onto it 2026-08-29, from e16780fca and originally 4e02f75c4;
 the gate claims re-verified at each new base): the
@@ -58,14 +70,14 @@ one). The OFF-world half of those same findings landed separately on
 main as
 [#6545](https://github.com/commontoolsinc/labs/pull/6545) — the GitHub
 connector host adopting the deployment's posture, and the pattern
-shard selectors failing loudly on an empty selection — which is the
-base this branch now sits on. The PR carries,
+shard selectors failing loudly on an empty selection — which landed before
+the flip. The PR carries,
 beside the one-liner and the absolute pin's re-tense: the LANE-ROLE SWAP
 (default lanes = the ON arm, probed serving-loop-present +
-shell-define-unset, carrying the empty ON skip list; the pre-flip
-explicit-`true` lanes become the explicit-`false` OFF regression guard
-on `build-toolshed-off` — the inversion of `build-toolshed-on` — with
-variant `server-execution-off`, per testing.md §2's identity contract);
+shell-define-unset, carrying the empty ON skip list; the opposite lanes
+are the explicit-`false` OFF regression guard on
+`build-toolshed-opposite`, with variant `server-execution-off`, per
+testing.md §2's identity contract);
 the DEPLOYED-TOPOLOGY obligation discharged (the Phase 7 table row):
 a new `deployed-topology-gate` job runs the REAL `bg-piece-service`
 binary (startup posture log line asserted; clean SIGTERM) and
@@ -1311,7 +1323,7 @@ client's only computational commit (spec §3.6).
 | Phase 3 ON — events down (D-v2-1) | unchanged | SpaceServer, reacting to the event commit / ONLY the event append; the local run is speculative echo, and the client handler-write commit path DELETES (events.md §7 — F10's interim ends) | unchanged | handler consequences land in the ACTING principal's instances, resolved from the server-stamped `firedAt` (scopes.md §5, protocol.md §2) | commits nothing but intent: event appends + UI-binding writes; echo via overlay |
 | Phase 4 ON — effect channel | unchanged | unchanged | external effects: server only; session effects (navigate): the server COMPUTES the intent, the client ENACTS and acks by nonce (protocol.md §5) | the effects doc is itself a session-scoped instance; the ack is written into the session's own instance (protocol.md §5) | adds the effects-doc subscription and the enact/ack duty (the ack is an authored write) |
 | Phase 5 ON — cross-space | home SpaceServer over foreign reads, under the piece's granted authority / commits HOME only — never derived into a foreign space (protocol.md §2b) | unchanged; cross-space mutation leaves ONLY as outbox event appends; `.inSpace` provisioning lands authored-class, foreign-first, under the event's acting principal | unchanged; the outbox also carries the cross-space appends | foreign reads name their instance explicitly, lease-holder-only (protocol.md §2's read row) | unchanged |
-| Phase 7 flip (FLIP-READY landed DARK 2026-08-16 by owner ruling: the mechanism is in, `SERVER_EXECUTION_DEFAULT_ENABLED = false`, the ON posture selectable by explicit `true`; the flip itself is a separate one-line PR after the ordered gates below; OFF path KEPT as the rollback lever through the soak; removal is the split-out post-soak PR) | SpaceServer only once flipped; today the OFF baseline by default, the ON arm selectable by explicit `true` | SpaceServer / events only | server, plus the client-enacted channel | unchanged from Phase 5; session-data GC is the remaining owed design (scopes.md §8 item 2); OW17's replica per-instance keying is the flip's blocker at scoped cardinality ≥ 2 | final: speculate freely, commit only intent; flag retires after the soak |
+| Phase 7 flip (FLIP-READY landed DARK 2026-08-16; #6535 flipped the first-party default ON after the ordered gates and began the soak; explicit `false` remains the rollback lever; removal is the split-out post-soak PR) | SpaceServer by default; the explicit OFF arm retains the client baseline | SpaceServer / events only | server, plus the client-enacted channel | unchanged from Phase 5; session-data GC is the remaining owed design (scopes.md §8 item 2) | final: speculate freely, commit only intent; flag retires after the soak |
 
 A surface a milestone has not yet landed (navigateTo before
 Phase 4, cross-space before Phase 5) has no defined interim
@@ -1935,19 +1947,17 @@ Success criteria:
 
 ## Phase 7 — Flip and retire
 
-**Scoping (coordinator, 2026-08-15; OWNER RULED 2026-08-16): this
-phase delivers FLIP-READY, LANDED DARK — the mechanism merges with the
-first-party default `false`; THE FLIP IS ITS OWN SEPARATE ONE-LINE PR
-(repo convention: a flip is reverted by reverting the PR that only
-flips), owed AFTER the ON posture works and is performant. Task 2's
-OFF-path REMOVAL stays SPLIT OUT into a separate post-flip, post-soak
-PR** — stacked PRs get no CI matrix, so the soak can only start once the
-flip merges to main, and the flag must remain the rollback lever through
-the soak. The plan is NOT archived here (task 3 is close-out after the
-soak). Ruling rationale (the independent review's verdict, adopted): with
+**Current scoping (updated 2026-09-02): Phase 7's flip is DONE — #6535
+changed the first-party default to `true` after the ordered gates, merged,
+and began the ON soak. Explicit `false` remains the rollback lever. Stable
+`default` and `opposite` CI roles now follow the one default constant, so a
+deliberate rollback changes that value and current-status prose without
+rewiring the workflow. Task 2's OFF-path removal stays split into a separate
+post-soak PR, and task 3 remains the final archive.** The original 2026-08-16
+ruling landed the mechanism dark first because, at that time, with
 the constant `true` the REQUIRED default CI lanes went red on merge
 (two two-browser gates stall 300 s under the full ON posture, neither
-skip-listed), the ON posture today breaks every two-user browser
+skip-listed), the ON posture at that time broke every two-user browser
 journey (OW32's client-side non-settling loop, unattributed) and the
 piece-creation/compiler surfaces (OW28), and "flip-ready (true) and hold
 the merge" parks the train behind several stages of work; landing dark
@@ -2001,25 +2011,22 @@ Preconditions (all RULED 2026-08-15, all landed with this phase):
 
 Tasks:
 
-- [ ] **Default ON — FLIP-READY LANDED DARK (2026-08-16, owner ruling);
-      the flip itself is a separate one-line PR, NOT yet landed.** What
-      is in: the ONE first-party default `SERVER_EXECUTION_DEFAULT_
-      ENABLED` (`packages/memory/v2/server-execution-default.ts`) — value
-      `false` today — resolved by the `productionServer` / `remoteClient`
+- [x] **Default ON — #6535 merged and the soak is in progress.** The ONE
+      first-party default `SERVER_EXECUTION_DEFAULT_ENABLED`
+      (`packages/memory/v2/server-execution-default.ts`) is `true` today,
+      resolved by the `productionServer` / `remoteClient`
       presets, the shell define fallback, and toolshed's serving-host
       gate + memory ACL principal lists (the DELEGATING class since
       OW31's build); explicit `true` = the ON arm,
       explicit `false` = the OFF arm; the single-process presets keep the
-      OFF baseline by construction (EXPERIMENTAL_OPTIONS.md); the ONE
-      absolute pin (`packages/toolshed/lib/server-execution-flag.test.
-      ts`) states the current default so a silent flip either way cannot
-      hide behind the relative pins. CI (testing.md §2): the DEFAULT
-      lanes are the OFF posture (a probe pins server-not-serving + shell
-      define unset), the explicit-`true` ON lanes run on `build-toolshed-
-      on` (shell define baked `true`) with the FULL ON posture verified
-      before each suite (`/api/meta.shellServerExecutionDefine === "true"`,
-      `/api/health/stats.servingLoop` present) and the Deno-side test
-      clients declaring the posture from the env (uniform, not mixed);
+      OFF baseline by construction (EXPERIMENTAL_OPTIONS.md). CI
+      (testing.md §2) now uses stable `default` and `opposite` roles:
+      default is ON today with its shell define unset, and opposite is the
+      explicit-`false` OFF regression guard on `build-toolshed-opposite`.
+      Both postures are verified before each suite: `/api/meta` must match
+      the resolved role and `/api/health/stats.servingLoop` must be present
+      exactly on the ON arm. Deno-side test clients declare the posture from
+      the environment (uniform, not mixed);
       the ON skip list — made EFFECTIVE by the fixer (it had been inert
       since Phase 4: `deno test --ignore` never applied to explicitly
       listed files) — held `phase-7` entries at this ruling's date:
@@ -2031,9 +2038,8 @@ Tasks:
       OW33) *— since lifted arc-by-arc: the ON-skip registry is EMPTY
       across all four suites (#6528, the ruled-3b-close lift — the
       Coordination-state delta above), so gate (5)'s list-EMPTY half
-      below is MET*. **THE FLIP PR (one line: the constant → `true`, plus the
-      absolute pin, the lane roles + probes, EXPERIMENTAL_OPTIONS.md)
-      lands only after these ORDERED GATES, in this order:** (1) OW32 —
+      below is MET*. **The flip PR landed only after these ORDERED GATES,
+      in this order:** (1) OW32 —
       the client-side scheduler-non-settling loop TRIAGED and fixed (the
       two two-browser gates green 5/5 fresh-store under the full ON
       posture) — *triaged 2026-08-16 (a client speculation
@@ -2091,12 +2097,11 @@ Tasks:
       cf-harness's fabric session; the CLI lanes probed as `cf`'s gate
       via posture adoption; `PiecesController` hosts on the default
       package/pattern lanes)*;
-      then (6) the flip PR, and the soak starts at ITS merge — **IN
-      PROGRESS 2026-08-28: the flip PR is
-      [#6535](https://github.com/commontoolsinc/labs/pull/6535), OPEN
-      (the coordination-state delta above carries its contents; the
-      owner reads and merges it personally — the soak starts at that
-      merge, and the OFF path stays the rollback lever through it).
+      then (6) the flip PR, and the soak starts at ITS merge — **DONE:
+      [#6535](https://github.com/commontoolsinc/labs/pull/6535) is MERGED
+      and the soak is in progress (the coordination-state delta above
+      carries its contents; the OFF path stays the rollback lever through
+      the soak).
       Its first board surfaced ONE owner-court STOP — RULED AND BUILT,
       no longer standing: the verb DECLARED-RESULT surface was absent
       under ON, because receipts went unwritten under the flag by
@@ -2121,9 +2126,8 @@ Tasks:
 - [ ] Retire the flag; OFF path removed; `EXPERIMENTAL_OPTIONS.md` entry
       closed out — **SPLIT OUT: the post-soak removal PR** (named here as
       the flip's follow-up; it also removes the OFF regression-guard CI
-      lanes and the OFF-built binary job — `build-toolshed-off`, which
-      the flip PR introduced by inverting the pre-flip
-      `build-toolshed-on` — while the `deployed-topology-gate` job
+      lanes and the opposite-built binary job —
+      `build-toolshed-opposite` — while the `deployed-topology-gate` job
       STAYS: it gates the surviving default posture, not the OFF path).
 - [ ] Archive this plan to `docs/history/plans/` per the lifecycle
       (close-out, after the soak and the removal PR).

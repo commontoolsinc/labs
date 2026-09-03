@@ -19,13 +19,14 @@ A test's identity has three required parts: **kind** (`unit`, `browser`,
 (the owning workspace member, or `repo`), and **name** (whatever the test's
 own runner reports — a bdd describe chain, a pattern file path, a task name,
 a script step). An optional **variant** separates the same test running
-in a non-default configuration. The default configuration is unmarked. Since
-the server-execution flip (2026-08-28) the default deployed-topology lanes
-run the ON posture unmarked — continuing the history of the previously
-unmarked default jobs — and the surviving explicit OFF regression-guard jobs
-use `server-execution-off`. The pre-flip explicit-ON jobs'
-`server-execution` marker is retired; their history stays queryable under
-it. The single-process default jobs (the unit suites, `cf test`, the
+in a non-default configuration. The default configuration is unmarked. The
+server-execution deployed-topology lanes use stable `default` and `opposite`
+roles. `default` follows the first-party constant and stays unmarked;
+`opposite` uses `server-execution` when it resolves ON and
+`server-execution-off` when it resolves OFF. Since the 2026-08-28 flip, that
+means unmarked ON and marked OFF; the pre-flip explicit-ON history remains
+queryable under `server-execution`. The single-process default jobs (the unit
+suites, `cf test`, the
 no-server pattern-unit lane) never read that default and stay ambient-OFF,
 so they are unmarked for the older reason: the flip does not reach them
 (`docs/specs/test-records.md`). One record is one JSON line; one uploaded
@@ -233,9 +234,12 @@ nothing authored by anyone else; other fork runs still run their tests
 normally and simply ship no records. Re-running the relay, or
 dispatching it with a run id, re-ships idempotently.
 
-The shared `test-records-ship` action accepts an optional `variant` input.
-It applies the value to every spooled and JUnit-derived record in that job.
-Leave it unset for the default configuration.
+The shared `test-records-ship` action accepts an optional `variant` input and
+also reads the CI-only `CF_TEST_RECORDS_VARIANT` fallback. An explicit input
+wins. This lets a workflow resolve a stable role to a variant once at job scope
+without duplicating that expression at every shipping step. The action applies
+the resolved value to every spooled and JUnit-derived record in that job; leave
+both surfaces unset for the default configuration.
 
 The relay runs its parser from the default branch. Land parser, relay, reader,
 and action support for a new optional record field before any test workflow

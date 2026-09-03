@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
+import { serverExecutionCiLane } from "../server-execution-ci.ts";
 import { loadBinarySuites } from "./binaries.ts";
 import type { Suite } from "./suite.ts";
 
@@ -19,21 +20,22 @@ describe("the binary build suites", () => {
     // The same build under a different compile-time define, which is
     // what a variant is. One configuration's record must never stand in
     // for the other's.
-    const off = byId("binaries-off");
-    expect(off.variant).toBe("server-execution-off");
-    expect(off.units).toEqual(["toolshed"]);
+    const oppositeLane = serverExecutionCiLane("opposite");
+    const opposite = byId("binaries-opposite");
+    expect(opposite.variant).toBe(oppositeLane.recordVariant);
+    expect(opposite.units).toEqual(["toolshed"]);
     expect(
-      off.locate({
+      opposite.locate({
         test: { k: "gate", s: "repo", n: "build-binary toolshed" },
       }),
     ).toBeUndefined();
     expect(
-      off.locate({
+      opposite.locate({
         test: {
           k: "gate",
           s: "repo",
           n: "build-binary toolshed",
-          v: "server-execution-off",
+          v: oppositeLane.recordVariant,
         },
       }),
     ).toEqual({ level: "unit", unit: "toolshed" });
@@ -64,11 +66,14 @@ describe("the binary build suites", () => {
   });
 
   it("builds the server-execution shell with the define set", () => {
-    return byId("binaries-off").command(
+    const opposite = serverExecutionCiLane("opposite");
+    return byId("binaries-opposite").command(
       [{ unit: "toolshed", skip: [] }],
       { root: "/repo", outputDir: "/out" },
     ).then((made) => {
-      expect(made[0]!.env?.EXPERIMENTAL_SERVER_EXECUTION).toBe("false");
+      expect(made[0]!.env?.EXPERIMENTAL_SERVER_EXECUTION).toBe(
+        String(opposite.enabled),
+      );
     });
   });
 });

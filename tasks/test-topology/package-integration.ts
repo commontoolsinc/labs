@@ -1,8 +1,8 @@
 /**
  * The package integration suites: the runner, the runtime client and the
- * shell, each driving a real Toolshed server, and the same three again
- * with server execution explicitly off. The deployed-topology suite owns
- * the background service and cf-harness gates that exercise the default-ON
+ * shell, each driving a real Toolshed server, and the same three again in
+ * the posture opposite the first-party default. The deployed-topology suite
+ * owns the background service and cf-harness gates that exercise the default
  * production construction paths.
  *
  * One runner does not imply one scope here. The three packages share a
@@ -15,13 +15,13 @@ import {
   SERVER_EXECUTION_ON_SKIPS,
   type ServerExecutionSuite,
 } from "../server-execution-on-skips.ts";
+import { serverExecutionCiLane } from "../server-execution-ci.ts";
 import {
   type FilePart,
   fileSuite,
   type Suite,
   unavailableFrom,
 } from "./suite.ts";
-import { SERVER_EXECUTION_OFF_VARIANT } from "./patterns.ts";
 
 /** The packages the suite spans, and what each one's tests need. */
 const PACKAGES: ReadonlyArray<
@@ -55,18 +55,21 @@ async function integrationFiles(
   return found.sort();
 }
 
-/** The default-ON suite, its explicit-OFF arm, and the deployed-topology gate. */
+/** The default suite, its explicit opposite, and the deployed-topology gate. */
 export async function loadPackageIntegrationSuites(
   root: string,
+  defaultEnabled = serverExecutionCiLane("default").enabled,
 ): Promise<Suite[]> {
   const defaults: FilePart[] = [];
-  const off: FilePart[] = [];
+  const opposites: FilePart[] = [];
+  const defaultLane = serverExecutionCiLane("default", defaultEnabled);
+  const oppositeLane = serverExecutionCiLane("opposite", defaultEnabled);
   for (const { scope, headless } of PACKAGES) {
     const packageDir = `packages/${scope}`;
     const files = await integrationFiles(root, packageDir);
     const junit = { kind: "integration", scope, filePrefix: packageDir };
     const env: Record<string, string> = headless ? { HEADLESS: "1" } : {};
-    const { whole, unavailable } = unavailableFrom(
+    const on = unavailableFrom(
       SERVER_EXECUTION_ON_SKIPS[scope],
       packageDir,
     );
@@ -75,15 +78,23 @@ export async function loadPackageIntegrationSuites(
       flags: ["-A"],
       env,
       junit,
-      files: files.filter((file) => !whole.has(file)),
-      unavailable,
+      files: defaultLane.enabled
+        ? files.filter((file) => !on.whole.has(file))
+        : files,
+      unavailable: defaultLane.enabled ? on.unavailable : [],
     });
-    off.push({
+    opposites.push({
       packageDir,
       flags: ["-A"],
-      env: { ...env, EXPERIMENTAL_SERVER_EXECUTION: "false" },
+      env: {
+        ...env,
+        EXPERIMENTAL_SERVER_EXECUTION: String(oppositeLane.enabled),
+      },
       junit,
-      files,
+      files: oppositeLane.enabled
+        ? files.filter((file) => !on.whole.has(file))
+        : files,
+      unavailable: oppositeLane.enabled ? on.unavailable : [],
     });
   }
   const backgroundPostureGate =
@@ -128,10 +139,10 @@ export async function loadPackageIntegrationSuites(
       parts: defaults,
     }),
     fileSuite({
-      id: "package-integration-off",
-      variant: SERVER_EXECUTION_OFF_VARIANT,
-      needs: ["deno", "toolshed-baked-off", "browser"],
-      parts: off,
+      id: "package-integration-opposite",
+      variant: oppositeLane.recordVariant,
+      needs: ["deno", "toolshed-baked-opposite", "browser"],
+      parts: opposites,
     }),
     deployedTopology,
   ];

@@ -13,6 +13,7 @@
 import * as path from "@std/path";
 import { PATTERN_TREES } from "../pattern-files.ts";
 import { SERVER_EXECUTION_ON_SKIPS } from "../server-execution-on-skips.ts";
+import { serverExecutionCiLane } from "../server-execution-ci.ts";
 import {
   fileSuite,
   type Invocation,
@@ -20,9 +21,6 @@ import {
   type Suite,
   unavailableFrom,
 } from "./suite.ts";
-
-/** The variant the explicit server-execution OFF arms mark their records with. */
-export const SERVER_EXECUTION_OFF_VARIANT = "server-execution-off";
 
 /** Test files directly inside a directory, repository-relative and sorted. */
 async function filesIn(
@@ -73,7 +71,10 @@ async function patternTestFiles(root: string): Promise<string[]> {
 }
 
 /** The integration suites over `packages/patterns/integration/`. */
-async function patternIntegrationSuites(root: string): Promise<Suite[]> {
+async function patternIntegrationSuites(
+  root: string,
+  defaultEnabled: boolean,
+): Promise<Suite[]> {
   const packageDir = "packages/patterns";
   const files = await filesIn(root, `${packageDir}/integration`);
   const flags = [
@@ -87,6 +88,8 @@ async function patternIntegrationSuites(root: string): Promise<Suite[]> {
     filePrefix: packageDir,
   };
   const on = unavailableFrom(SERVER_EXECUTION_ON_SKIPS.patterns, packageDir);
+  const defaultLane = serverExecutionCiLane("default", defaultEnabled);
+  const oppositeLane = serverExecutionCiLane("opposite", defaultEnabled);
   return [
     fileSuite({
       id: "pattern-integration",
@@ -96,20 +99,33 @@ async function patternIntegrationSuites(root: string): Promise<Suite[]> {
         flags,
         env: { HEADLESS: "1" },
         junit,
-        files: files.filter((file) => !on.whole.has(file)),
-        unavailable: on.unavailable,
+        files: defaultLane.enabled
+          ? files.filter((file) => !on.whole.has(file))
+          : files,
+        unavailable: defaultLane.enabled ? on.unavailable : [],
       }],
     }),
     fileSuite({
-      id: "pattern-integration-off",
-      variant: SERVER_EXECUTION_OFF_VARIANT,
-      needs: ["deno", "toolshed-baked-off", "browser", "compile-cache"],
+      id: "pattern-integration-opposite",
+      variant: oppositeLane.recordVariant,
+      needs: [
+        "deno",
+        "toolshed-baked-opposite",
+        "browser",
+        "compile-cache",
+      ],
       parts: [{
         packageDir,
         flags,
-        env: { HEADLESS: "1", EXPERIMENTAL_SERVER_EXECUTION: "false" },
+        env: {
+          HEADLESS: "1",
+          EXPERIMENTAL_SERVER_EXECUTION: String(oppositeLane.enabled),
+        },
         junit,
-        files,
+        files: oppositeLane.enabled
+          ? files.filter((file) => !on.whole.has(file))
+          : files,
+        unavailable: oppositeLane.enabled ? on.unavailable : [],
       }],
     }),
   ];
@@ -227,9 +243,12 @@ async function generatedPatternSuite(root: string): Promise<Suite> {
 }
 
 /** Every pattern suite, read from the working tree. */
-export async function loadPatternSuites(root: string): Promise<Suite[]> {
+export async function loadPatternSuites(
+  root: string,
+  defaultEnabled = serverExecutionCiLane("default").enabled,
+): Promise<Suite[]> {
   return [
-    ...await patternIntegrationSuites(root),
+    ...await patternIntegrationSuites(root, defaultEnabled),
     patternReloadSuite(),
     await patternUnitSuite(root),
     await generatedPatternSuite(root),

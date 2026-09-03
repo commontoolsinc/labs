@@ -5,10 +5,9 @@
 // server: the admission-side observer (plane b) activates spaces, lease
 // writes ride the direct engine plane (plane c), and the serving
 // runtimes' storage sessions are in-process loopback connections with the
-// SAME signed session-open production clients present (plane a). OFF (the
-// explicit-`false` rollback arm; the first-party default is ON since the
-// Phase 7 flip), nothing here runs and toolshed is byte-identical to the
-// pre-v2 behavior.
+// SAME signed session-open production clients present (plane a). OFF,
+// whether selected by the default or an explicit override, nothing here
+// runs and toolshed is byte-identical to the pre-v2 behavior.
 
 import {
   type EnvReader,
