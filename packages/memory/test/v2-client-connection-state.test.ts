@@ -38,6 +38,16 @@ const openOk = (requestId: string): FabricValue => ({
   },
 });
 
+const retriableDenial = (requestId: string): FabricValue => ({
+  type: "response",
+  requestId,
+  error: {
+    name: "AuthorizationError",
+    message: "memory session.open challenge expired",
+    retriable: true,
+  },
+});
+
 /** What a reconnect's `hello` receives, which is what decides whether that
  *  reconnect completes, stalls, or is given up on. */
 type ReconnectHello = "ok" | "mismatch" | "silence";
@@ -52,9 +62,14 @@ class SeverableTransport implements Transport {
   /** Runs at the top of each `session.open`, the mount's included. */
   onSessionOpen: () => void = () => {};
 
+  /** Whether to deny the reopen a reconnect performs, retriably. The mount's
+   *  own open is always answered, so a test reaches this by severing. */
+  denyReopen = false;
+
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
   #helloCount = 0;
+  #openCount = 0;
   readonly #reconnectHello: ReconnectHello;
 
   constructor(reconnectHello: ReconnectHello) {
@@ -86,8 +101,13 @@ class SeverableTransport implements Transport {
         this.#respondToHello();
         return Promise.resolve();
       case "session.open":
+        this.#openCount += 1;
         this.onSessionOpen();
-        this.#respond(openOk(message.requestId!));
+        this.#respond(
+          this.denyReopen && this.#openCount > 1
+            ? retriableDenial(message.requestId!)
+            : openOk(message.requestId!),
+        );
         return Promise.resolve();
       default:
         throw new Error(`Unhandled message: ${message.type}`);
@@ -203,6 +223,66 @@ describe("Client", () => {
         } finally {
           await client.close();
         }
+      });
+
+      it("moves back to `reconnecting` when reopening a session fails", async () => {
+        const { transport, client } = await connectSeverable("ok");
+        transport.denyReopen = true;
+
+        try {
+          const severed = client.whenStateChanged();
+          transport.sever();
+          await severed;
+
+          // The handshake succeeds, so the client is connected again before
+          // it reopens its sessions. The reopen is then denied for a reason a
+          // retry can change, which drops it back without a fresh close.
+          const reconnected = client.whenStateChanged();
+          await reconnected;
+          expect(client.connectionState).toBe("connected");
+
+          const lost = client.whenStateChanged();
+          await lost;
+
+          expect(client.connectionState).toBe("reconnecting");
+          expect(client.isConnected()).toBe(false);
+        } finally {
+          await client.close();
+        }
+      });
+
+      it("moves to `closed` when a failed client is closed", async () => {
+        const { transport, client } = await connectSeverable("mismatch");
+
+        const severed = client.whenStateChanged();
+        transport.sever();
+        await severed;
+        const gaveUp = client.whenStateChanged();
+        await gaveUp;
+        expect(client.connectionState).toBe("failed");
+
+        const closed = client.whenStateChanged();
+        await client.close();
+        await closed;
+
+        expect(client.connectionState).toBe("closed");
+      });
+
+      it("wakes a waiter on a closed client when it is closed again", async () => {
+        // The wakeup is unconditional rather than conditioned on the state
+        // having moved. Suppressing it would need a second copy of the state
+        // to compare against, and a notification missed at any write site
+        // would then leave that copy stale, turning a missed wakeup into a
+        // suppressed later one.
+
+        const { client } = await connectSeverable("ok");
+        await client.close();
+
+        const changed = client.whenStateChanged();
+        await client.close();
+        await changed;
+
+        expect(client.connectionState).toBe("closed");
       });
 
       it("moves to `closed` when the client is closed", async () => {

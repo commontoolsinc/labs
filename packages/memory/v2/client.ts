@@ -426,9 +426,11 @@ export class Client {
    * A wakeup carrying no change is harmless for the same reason: the loop
    * re-tests and waits again. Calling `close()` on a closed client is one.
    *
-   * The bound on it: `failed` and `closed` are terminal, so once the client
-   * reaches either, this never resolves and a loop of the shape above never
-   * leaves. Test for those states rather than waiting through them.
+   * The bound on it: `closed` is the one state nothing follows. Closing an
+   * already-closed client still wakes a waiter, which reads `closed` again,
+   * so a loop waiting for any other state never leaves. `failed` is left
+   * only by `close()`, never by a reconnect. Test for both rather than
+   * waiting through them.
    */
   whenStateChanged(): Promise<void> {
     this.#stateChanged ??= Promise.withResolvers<void>();
@@ -650,6 +652,7 @@ export class Client {
           return;
         } catch (error) {
           this.#connected = false;
+          this.#noteStateChange();
           const err = error instanceof Error ? error : new Error(String(error));
           if (isPermanentConnectionFailure(err)) {
             // A handshake the server refuses identically every time (a
