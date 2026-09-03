@@ -15,6 +15,7 @@ import type { CellScope } from "@commonfabric/api";
 import {
   type NormalizedLLMFriendlyRef,
   normalizeLLMFriendlyRef,
+  validatePieceSegment,
 } from "@commonfabric/cli/lib/llm-friendly-ref";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import {
@@ -183,13 +184,12 @@ export function placeAtSpaceRoot(space: MemorySpace): Place {
  * facet are containers and render without one, which is what keeps a
  * container's own rendering from resolving as a piece whose slug happens to
  * match. What holds of a rendering is one property and not a list: `cd` may
- * refuse it, but it never reads one as some other cell. Several things reach
- * the first half — a `#` anywhere, which the reference grammar reserves, and
- * a piece outside the slug and handle vocabularies — and enumerating them
- * here would be a claim that goes stale as the vocabularies move. A piece or
- * segment holding a newline would reach the second half, by splitting the
- * position line into a shorter reference, which is why one is refused before
- * it can reach a place rather than handled here.
+ * refuse it, but it never reads one as some other cell. A `#` reaches the
+ * first half wherever it sits, the reference grammar reserving that character
+ * for the `#argument` suffix. A piece or segment holding a newline would reach
+ * the second half, by splitting the position line into a shorter reference,
+ * which is why one is refused before it can reach a place rather than handled
+ * here.
  *
  * The scope is written on the piece even when it is the base, which is what
  * makes "read from anywhere" true rather than nearly so. Scope is part of a
@@ -291,6 +291,8 @@ export class CurrentPlace {
           `so ${fault.so}.`,
       ));
     }
+    const outside = outsideVocabulary(move.piece);
+    if (outside !== undefined) return this.#commit(outside);
     return this.#commit(land({
       position: {
         kind: "piece",
@@ -612,6 +614,8 @@ function moveIntoPiece(
   }
   const fault = unnameablePiece(scoped.id);
   if (fault !== undefined) return refuseUnnameable(operand, fault);
+  const outside = outsideVocabulary(scoped.id);
+  if (outside !== undefined) return outside;
   return land({
     position: {
       kind: "piece",
@@ -657,6 +661,8 @@ function enterTarget(
         `${badSegment.so}.`,
     );
   }
+  const outside = outsideVocabulary(target.piece);
+  if (outside !== undefined) return outside;
   return land({
     ...place,
     position: {
@@ -785,12 +791,12 @@ function unnameableSegment(segment: PathSegment): Fault | undefined {
  * segment is the suffix and nothing else, so the split finds no id in front of
  * it and the parse refuses the whole reference.
  *
- * The rules that are not the newline answer to {@link NO_SUCH_NAME}
- * instead, which is a
- * weaker claim than the segment rules make and the honest one. This door is
- * the only check for a handle-shaped piece; for an empty one and for anything
- * slug-shaped the parse refuses already, so refusing here moves the refusal
- * earlier and names the vocabulary where the parse names only the failure.
+ * The rules that are not the newline answer to {@link NO_SUCH_NAME} instead,
+ * which is a weaker claim than the segment rules make and the honest one.
+ * {@link outsideVocabulary} runs after this door and refuses an empty piece
+ * and every colon-less name that is no slug on its own account. What this door
+ * adds is the handle-shaped piece: `isPieceHandle` is a length rule, so a
+ * trailing space and an `@` both ride past it and are refused here.
  */
 function unnameablePiece(piece: string): Fault | undefined {
   if (piece.includes("\n")) {
@@ -823,6 +829,28 @@ function firstUnnameableSegment(
  */
 function refuseUnnameable(operand: string, fault: Fault): Step {
   return refuse(`\`${operand}\` has ${fault.what}, so ${fault.so}.`);
+}
+
+/**
+ * Helper for the movers, which refuses `piece` where it is in neither
+ * vocabulary a piece is named by, and returns nothing where it is in one of
+ * them. Every door runs it after its own rendering rules, so a part no
+ * rendering names back is reported as that rather than as a name outside a
+ * vocabulary.
+ *
+ * The rule is `validatePieceSegment`'s
+ * (`packages/cli/lib/llm-friendly-ref.ts`), called rather than copied, so that
+ * a piece any door admits is one a reference could have named and one name
+ * gets one reason whichever door refused it. Its sentence reaches the reader
+ * unaltered.
+ */
+function outsideVocabulary(piece: string): Step | undefined {
+  try {
+    validatePieceSegment(piece);
+  } catch (error) {
+    return refuse(messageOf(error));
+  }
+  return undefined;
 }
 
 /** Helper for the movers, which builds a refusal carrying `reason`. */

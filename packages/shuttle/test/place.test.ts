@@ -13,18 +13,20 @@
  * settling either needs a connection to resolve against. Their cases pin what
  * gets handed on, and that the place did not move.
  *
- * A refusal's text is pinned whole, and three of them are somebody else's
+ * A refusal's text is pinned whole, and four of them are somebody else's
  * words. Shuttle consumes the reference grammar rather than forking it, so a
  * rooted operand's diagnostics come from that layer and reach the reader
  * unaltered — the space-mismatch sentence and the unknown-suffix sentence from
- * `normalizeLLMFriendlyRef` and `splitArgumentSuffix`, and the no-piece-handle
- * sentence from `parseReferenceParts`. Each is marked at its case as relayed.
+ * `normalizeLLMFriendlyRef` and `splitArgumentSuffix`, the no-piece-handle
+ * sentence from `parseReferenceParts`, and the not-a-slug sentence from
+ * `validatePieceSegment`, which every door relays and not the reference alone.
+ * Each is marked at its case as relayed.
  * When one moves upstream, the fix is to copy the new sentence here, never to
  * match a fragment of it: the whole sentence is what pins that the diagnostic
  * arrives intact, and a substring would let a rewording through that says
  * something else. Other diagnostics from that layer reach a reader without a
- * case here — a bad space segment, a piece segment that is neither slug nor
- * handle, a bad scope suffix on a reference — and pinning three of them is
+ * case here — a bad space segment, a piece segment that is no handle and holds
+ * a colon, a bad scope suffix on a reference — and pinning four of them is
  * enough to hold the relay itself, since all of them travel the same path.
  *
  * Every other refusal in this file is shuttle's own, and two of those
@@ -939,6 +941,25 @@ describe("place", () => {
             });
           });
 
+          it("refuses a piece segment that is in neither vocabulary", () => {
+            // Relayed: `validatePieceSegment`'s own sentence, which the walk
+            // calls rather than copies.
+
+            expect(inSlugs().cd("Board")).toEqual({
+              kind: "refused",
+              reason: '"Board" is not a slug: a slug is lowercase letters, ' +
+                "numbers, and single hyphens between words.",
+            });
+          });
+
+          it("gives a piece segment the reason a reference's gets", () => {
+            // Which is the whole of the ruling: a piece is held to the two
+            // vocabularies whichever door reached it, so a name a listing
+            // cannot print as an operand is one no door takes.
+
+            expect(inSlugs().cd("Board")).toEqual(atSpaceRoot().cd("/Board"));
+          });
+
           it("reads a canonical index inside a piece as a number", () => {
             const place = atPiece();
             place.cd("topics/3");
@@ -1407,6 +1428,21 @@ describe("place", () => {
           });
         });
 
+        it("refuses a target whose piece is in neither vocabulary", () => {
+          // Relayed: `validatePieceSegment`'s own sentence.
+
+          expect(
+            atSpaceRoot().enter(
+              { space: SPACE, piece: "Board", path: [] },
+              "#favorites",
+            ),
+          ).toEqual({
+            kind: "refused",
+            reason: '"Board" is not a slug: a slug is lowercase letters, ' +
+              "numbers, and single hyphens between words.",
+          });
+        });
+
         it("refuses a target whose piece holds a line break", () => {
           expect(
             atSpaceRoot().enter(
@@ -1589,6 +1625,27 @@ describe("place", () => {
             kind: "refused",
             reason: `The reference naming space \`estuary\` has a segment ` +
               `ending in whitespace, so a rendering of the place would name a different cell.`,
+          });
+          expect(place.place).toEqual(placeAtSpaceRoot(SPACE));
+        });
+
+        it("refuses a move whose piece is in neither vocabulary", () => {
+          // Relayed: `validatePieceSegment`'s own sentence. A move `cd` minted
+          // carries a piece the reference grammar already held to the two
+          // vocabularies; one a caller assembled carries whatever it was
+          // given, and this door holds that to them too.
+
+          const place = atSpaceRoot();
+          expect(place.settle({
+            kind: "space-by-name",
+            name: "estuary",
+            piece: "Board",
+            path: [],
+            scope: "space",
+          }, SPACE)).toEqual({
+            kind: "refused",
+            reason: '"Board" is not a slug: a slug is lowercase letters, ' +
+              "numbers, and single hyphens between words.",
           });
           expect(place.place).toEqual(placeAtSpaceRoot(SPACE));
         });
