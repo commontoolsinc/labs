@@ -35,6 +35,7 @@
 // seal; the durable outbound-append rows deliver and retire through
 // the outbox; `memo.*`/`outbox.*` counters are live.
 
+import { toCompactDebugString } from "@commonfabric/data-model";
 import {
   type AdmittedCommitNotice,
   type Server as MemoryServer,
@@ -3061,7 +3062,9 @@ export class SpaceServer implements TransactionSealDestination {
           if (viewEntry?.eventId !== entry.eventId) {
             logger.warn("event-view-lag", () => [
               `drain deferring ${entry.eventId}: replica view holds ` +
-              `${JSON.stringify(viewEntry)} at index ${index}; ` +
+              `${
+                toCompactDebugString(viewEntry, { maxLength: 200 })
+              } at index ${index}; ` +
               "later-arrived events wait behind it",
             ]);
             // The same barrier as above: the deferred entry's

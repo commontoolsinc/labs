@@ -42,6 +42,8 @@ import { parseArgs } from "@std/cli/parse-args";
 import { ensureDir } from "@std/fs";
 import { isAbsolute, join } from "@std/path";
 
+import { toCompactDebugString } from "@commonfabric/data-model";
+
 import type { ConsolePolicyReport } from "../console/policy.ts";
 import type {
   HarnessChatEventEnvelope,
@@ -967,7 +969,7 @@ export class ConsoleClient {
       return {
         kind: "refused",
         reason: `the index answered with no results array: ${
-          JSON.stringify(answer).slice(0, 200)
+          toCompactDebugString(answer, { maxLength: 200 })
         }`,
       };
     }

@@ -38,7 +38,10 @@ import {
 } from "@commonfabric/test-support/records";
 
 import { internSchema } from "@commonfabric/data-model-schema";
-import { toCompactDebugString } from "@commonfabric/data-model";
+import {
+  toCompactDebugString,
+  toDebugKindString,
+} from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
@@ -1367,7 +1370,7 @@ export async function runTestPattern(
     if (!Array.isArray(testSteps)) {
       throw new Error(
         "Test pattern must return { [TESTS]: TestStep[] }. Got: " +
-          toCompactDebugString(typeof testSteps),
+          toDebugKindString(testSteps),
       );
     }
 

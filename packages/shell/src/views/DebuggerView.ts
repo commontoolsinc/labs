@@ -1,3 +1,8 @@
+import {
+  type DebugValueOptions,
+  toCompactDebugString,
+  toIndentedDebugString,
+} from "@commonfabric/data-model";
 import type {
   LoggerMetadata,
   RuntimeTelemetryMarkerResult,
@@ -13,6 +18,46 @@ import { ResizableDrawerController } from "../lib/resizable-drawer-controller.ts
 import "./SchedulerGraphView.ts";
 
 import type { Logger, LoggerBreakdown } from "@commonfabric/utils/logger";
+
+/**
+ * Most properties of an object the debugger renders before standing in a
+ * count for the whole object. The renderer bounds depth, arrays, and
+ * strings, but walks every property of an object within those bounds, and
+ * the search renders every marker on each keystroke; a wide object is cut
+ * off before the walk rather than after it.
+ */
+const MAX_MARKER_OBJECT_KEYS = 20;
+
+/**
+ * Rendering options for a value shown in the debugger: a bounded glimpse,
+ * since a marker can hold anything a cell can. The replacer keeps an
+ * action's metadata, which it carries as enumerable properties on the
+ * function, and stands a count in for an object wider than
+ * `MAX_MARKER_OBJECT_KEYS`.
+ */
+const DEBUGGER_VALUE_OPTIONS: DebugValueOptions = {
+  maxDepth: 3,
+  maxArrayLength: 5,
+  maxStringLength: 200,
+  replacer: (value) => {
+    if (typeof value === "function") {
+      return { name: value.name || "[anonymous]", ...value };
+    } else if (isObjectOrArray(value) && !Array.isArray(value)) {
+      const count = Object.keys(value).length;
+      if (count > MAX_MARKER_OBJECT_KEYS) {
+        return `[Object with ${count} keys]`;
+      }
+    }
+    return value;
+  },
+};
+
+/**
+ * Longest text an expanded marker's detail shows. The indented rendering has
+ * no length option of its own, and a marker with many keys at every level
+ * within the depth limit still runs long, so the display bounds itself.
+ */
+const MAX_MARKER_DETAIL_LENGTH = 10000;
 
 /**
  * Hierarchical topic definitions for filtering telemetry events.
@@ -1104,12 +1149,27 @@ export class XDebuggerView extends LitElement {
     return false;
   }
 
+  /**
+   * Renders the detail an expanded marker shows: the indented rendering, cut
+   * to `MAX_MARKER_DETAIL_LENGTH` with a trailing `...` when it runs longer.
+   */
+  private markerDetail(marker: RuntimeTelemetryMarkerResult): string {
+    const text = toIndentedDebugString(marker, DEBUGGER_VALUE_OPTIONS);
+    return (text.length > MAX_MARKER_DETAIL_LENGTH)
+      ? `${text.slice(0, MAX_MARKER_DETAIL_LENGTH - 3)}...`
+      : text;
+  }
+
   private matchesSearch(marker: RuntimeTelemetryMarkerResult): boolean {
     if (!this.searchText) return true;
 
     const searchLower = this.searchText.toLowerCase();
-    // Use truncated stringify to avoid serializing huge objects on every search
-    const markerStr = this.safeJsonStringify(marker, 5000).toLowerCase();
+    // A bounded rendering, so that a search does not render a huge marker
+    // whole each keystroke.
+    const markerStr = toCompactDebugString(marker, {
+      ...DEBUGGER_VALUE_OPTIONS,
+      maxLength: 5000,
+    }).toLowerCase();
     return markerStr.includes(searchLower);
   }
 
@@ -1265,7 +1325,10 @@ export class XDebuggerView extends LitElement {
                 ? value.toString()
                 : typeof value === "number"
                 ? value.toString()
-                : this.safeJsonStringify(value, 100)}</span>
+                : toCompactDebugString(value, {
+                  ...DEBUGGER_VALUE_OPTIONS,
+                  maxLength: 100,
+                })}</span>
             </div>
           `);
         }
@@ -1273,95 +1336,6 @@ export class XDebuggerView extends LitElement {
     }
 
     return details;
-  }
-
-  /**
-   * Safely stringify a value with size limits to prevent context blowout.
-   * Truncates large strings, arrays, and objects.
-   */
-  private safeJsonStringify(
-    value: unknown,
-    maxLength: number,
-    indent?: number,
-  ): string {
-    const truncatedValue = this.truncateValue(value, 3); // Max depth 3
-    try {
-      const json = JSON.stringify(truncatedValue, null, indent);
-      if (json.length > maxLength) {
-        return json.slice(0, maxLength - 3) + "...";
-      }
-      return json;
-    } catch {
-      return "[Unable to serialize]";
-    }
-  }
-
-  /**
-   * Recursively truncate a value to prevent huge objects from being serialized.
-   * Replaces functions, large strings, large arrays, and deep objects with summaries.
-   */
-  private truncateValue(value: unknown, maxDepth: number): unknown {
-    if (maxDepth <= 0) {
-      return "[...]";
-    }
-
-    if (value === null || value === undefined) {
-      return value;
-    }
-
-    if (typeof value === "function") {
-      // Serialize functions as objects with name + all enumerable properties
-      const fn = value as unknown as
-        & { name?: string }
-        & Record<string, unknown>;
-      const result: Record<string, unknown> = {
-        name: fn.name || "[anonymous]",
-      };
-      // Copy enumerable properties (actions often have metadata attached)
-      for (const key of Object.keys(fn)) {
-        result[key] = this.truncateValue(fn[key], maxDepth - 1);
-      }
-      return result;
-    }
-
-    if (typeof value === "string") {
-      if (value.length > 200) {
-        return value.slice(0, 197) + "...";
-      }
-      return value;
-    }
-
-    if (typeof value === "number" || typeof value === "boolean") {
-      return value;
-    }
-
-    if (Array.isArray(value)) {
-      if (value.length > 10) {
-        return [
-          ...value.slice(0, 5).map((v) => this.truncateValue(v, maxDepth - 1)),
-          `[... ${value.length - 5} more items]`,
-        ];
-      }
-      return value.map((v) => this.truncateValue(v, maxDepth - 1));
-    }
-
-    if (typeof value === "object") {
-      const obj = value as Record<string, unknown>;
-      const keys = Object.keys(obj);
-
-      // Skip huge objects entirely (likely cell values or function metadata)
-      if (keys.length > 20) {
-        return `[Object with ${keys.length} keys]`;
-      }
-
-      const result: Record<string, unknown> = {};
-      for (const key of keys) {
-        result[key] = this.truncateValue(obj[key], maxDepth - 1);
-      }
-      return result;
-    }
-
-    return String(value);
   }
 
   //
@@ -2743,7 +2717,7 @@ export class XDebuggerView extends LitElement {
                         Copy Full
                       </button>
                     </div>
-                    <pre>${this.safeJsonStringify(marker, 10000, 2)}</pre>
+                    <pre>${this.markerDetail(marker)}</pre>
                   </div>
                 `
                 : ""}

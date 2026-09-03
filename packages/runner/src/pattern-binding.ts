@@ -3,6 +3,7 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   FabricInstance,
   FabricPrimitive,
+  toCompactDebugString,
   valueEqual,
 } from "@commonfabric/data-model";
 import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model-schema";
@@ -48,6 +49,13 @@ import type {
 } from "./builder/types.ts";
 import { isCellScope, scopeRank } from "./scope.ts";
 import { getServerExecutionConfig } from "@commonfabric/memory/v2";
+
+/**
+ * Longest rendering of a binding an error message carries. A binding can
+ * hold anything a cell can, and the message names it rather than carrying
+ * it.
+ */
+const MAX_BINDING_RENDER = 200;
 
 type SendValueToBindingOptions = {
   narrowestReadScope?: CellScope;
@@ -266,7 +274,9 @@ function sendValueToBindingInner<T>(
       const alias = binding.$alias;
       if ((alias.defer ?? 0) > 0) {
         throw new Error(
-          `Cannot write to deferred alias: ${JSON.stringify(binding)}`,
+          `Cannot write to deferred alias: ${
+            toCompactDebugString(binding, { maxLength: MAX_BINDING_RENDER })
+          }`,
         );
       }
       if (alias.partialCause !== undefined) {
@@ -285,7 +295,9 @@ function sendValueToBindingInner<T>(
         );
       } else if (typeof alias.cell !== "string") {
         throw new Error(
-          "Invalid pseudo-alias cell: " + JSON.stringify(binding),
+          `Invalid pseudo-alias cell: ${
+            toCompactDebugString(binding, { maxLength: MAX_BINDING_RENDER })
+          }`,
         );
       } else {
         // Certain strings have special meaning as the cell id
