@@ -73,6 +73,14 @@ describe("ETag HTTP Responses", () => {
     const response = await app.request(TEST_ASSET_PATH);
     expect(response.headers.get("Content-Type")).toBe(getMimeType(TEST_ASSET));
   });
+
+  it("sets `Content-Length` to the size of the body", async () => {
+    const response = await app.request(TEST_ASSET_PATH);
+    const body = await response.arrayBuffer();
+    expect(response.headers.get("Content-Length")).toBe(
+      String(body.byteLength),
+    );
+  });
 });
 
 describe("Caching Behavior", () => {

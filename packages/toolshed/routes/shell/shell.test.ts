@@ -273,7 +273,7 @@ describe("StaticResponse", () => {
 
   // In-memory file set so StaticResponse can be exercised without touching
   // disk.
-  const files: Record<string, Uint8Array> = {
+  const files: Record<string, Uint8Array<ArrayBuffer>> = {
     "/root/index.html": encoder.encode(INDEX_HTML),
     "/root/app.js": encoder.encode(APP_JS),
   };
@@ -295,8 +295,21 @@ describe("StaticResponse", () => {
     const response = res.response();
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Type")).toBe("text/javascript");
+    expect(response.headers.get("Content-Length")).toBe(
+      String(files["/root/app.js"].byteLength),
+    );
     expect(response.headers.get("ETag")).toBe(res.etag);
     expect(await response.text()).toBe(APP_JS);
+  });
+
+  it("serves the content as read, after the source bytes are overwritten", async () => {
+    const source = encoder.encode(APP_JS);
+    const res = await StaticResponse.fromFile("/root/app.js", {
+      ...deps,
+      readFile: () => Promise.resolve(source),
+    });
+    source.fill(0);
+    expect(await res.response().text()).toBe(APP_JS);
   });
 
   it("returns 304 with no body when the ETag matches If-None-Match", async () => {

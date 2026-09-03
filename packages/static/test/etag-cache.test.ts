@@ -4,7 +4,6 @@ import {
   createCacheHeaders,
   generateETag,
 } from "@commonfabric/static/etag";
-import { decode } from "@commonfabric/utils/encoding";
 import {
   createTestStaticCache,
   TEST_ASSET,
@@ -113,11 +112,11 @@ Deno.test("Cache Headers - includes ETag header", () => {
   assertEquals(headers["ETag"], etag);
 });
 
-Deno.test("StaticCache ETag - getWithETag returns both buffer and ETag", async () => {
+Deno.test("StaticCache ETag - getWithETag returns both blob and ETag", async () => {
   const cache = createTestStaticCache();
   const result = await cache.getWithETag(TEST_ASSET);
 
-  assert(result.buffer instanceof Uint8Array);
+  assert(result.blob instanceof Blob);
   assertEquals(typeof result.etag, "string");
   assert(result.etag.startsWith('"') && result.etag.endsWith('"'));
 });
@@ -132,21 +131,35 @@ Deno.test("StaticCache ETag - returns same ETag for same asset (caching works)",
   assert(result1 === result2 || result1.etag === result2.etag);
 });
 
-Deno.test("StaticCache ETag - get() method still works (backward compatibility)", async () => {
+Deno.test("StaticCache ETag - get() returns the content without its ETag", async () => {
   const cache = createTestStaticCache();
-  const buffer = await cache.get(TEST_ASSET);
+  const blob = await cache.get(TEST_ASSET);
 
-  assert(buffer instanceof Uint8Array);
-  const text = decode(buffer);
+  assert(blob instanceof Blob);
+  const text = await blob.text();
   assert(text.includes(TEST_ASSET_CONTENT));
+});
+
+Deno.test("StaticCache ETag - bytes read from the content are a copy, so writing to them leaves the cached content as it was", async () => {
+  const cache = createTestStaticCache();
+  const { blob } = await cache.getWithETag(TEST_ASSET);
+
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const original = bytes[0];
+  bytes[0] = original ^ 0xff;
+
+  const again = new Uint8Array(await blob.arrayBuffer());
+  assertEquals(again[0], original);
 });
 
 Deno.test("StaticCache ETag - ETag is consistent for same content", async () => {
   const cache = createTestStaticCache();
   const result = await cache.getWithETag(TEST_ASSET);
 
-  // Generate ETag directly from the buffer
-  const expectedETag = await generateETag(result.buffer);
+  // Generate ETag directly from the content
+  const expectedETag = await generateETag(
+    new Uint8Array(await result.blob.arrayBuffer()),
+  );
   assertEquals(result.etag, expectedETag);
 });
 
