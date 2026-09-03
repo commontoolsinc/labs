@@ -29,9 +29,8 @@ import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-sk
 
 // The RAW env posture, read only to key the skip guard below (testing.md
 // §2): the `opposite` lane sets EXPERIMENTAL_SERVER_EXECUTION explicitly
-// to the inverse of the first-party default (`true` while the default is
-// rolled back to OFF); the `default` lanes leave it unset and resolve the
-// constant. This value is therefore undefined on the default lane — NOT the
+// to the inverse of the first-party default; the `default` lanes leave it
+// unset and resolve the constant. This value is therefore undefined on the default lane — NOT the
 // resolved posture. The test's runtime posture is not taken from here:
 // `MultiRuntimeHarness` resolves it env-else-first-party-default and picks
 // its backend accordingly.

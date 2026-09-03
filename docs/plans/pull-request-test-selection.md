@@ -306,8 +306,8 @@ workspace package, and the package integration command spans `runner`,
 the suite declares the configuration in which every one of its items runs.
 Default suites omit it. The server-execution `opposite` suites derive their
 variant from the posture they actually exercise: `server-execution` for ON or
-`server-execution-off` for OFF. The current default is OFF (rolled back on
-2026-09-03), so today the opposite suites use `server-execution`.
+`server-execution-off` for OFF. The registry's summary table states the
+current default; the opposite suites' variant follows it.
 
 `enumerate()` is what makes a new test visible without a workflow edit. It
 reads the working tree — usually a file glob, sometimes a list parsed out

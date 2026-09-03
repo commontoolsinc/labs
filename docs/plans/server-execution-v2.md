@@ -2028,16 +2028,17 @@ Tasks:
 - [ ] **Default ON — #6535 merged and the soak began; ROLLED BACK on
       2026-09-03 by the data-only rollback PR, so this box reopens until the
       re-flip.** The ONE first-party default `SERVER_EXECUTION_DEFAULT_ENABLED`
-      (`packages/memory/v2/server-execution-default.ts`) is `false` today,
-      resolved by the `productionServer` / `remoteClient`
+      (`packages/memory/v2/server-execution-default.ts`; the registry's
+      summary table states its current value) is resolved by the
+      `productionServer` / `remoteClient`
       presets, the shell define fallback, and toolshed's serving-host
       gate + memory ACL principal lists (the DELEGATING class since
       OW31's build); explicit `true` = the ON arm,
       explicit `false` = the OFF arm; the single-process presets keep the
       OFF baseline by construction (EXPERIMENTAL_OPTIONS.md). CI
       (testing.md §2) now uses stable `default` and `opposite` roles:
-      default is OFF today with its shell define unset, and opposite is the
-      explicit-`true` ON arm on `build-toolshed-opposite`.
+      default follows the constant with its shell define unset, and
+      opposite is the explicit inverse on `build-toolshed-opposite`.
       Both postures are verified before each suite: `/api/meta` must match
       the resolved role and `/api/health/stats.servingLoop` must be present
       exactly on the ON arm. Deno-side test clients declare the posture from

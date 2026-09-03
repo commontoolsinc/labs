@@ -77,10 +77,10 @@ export const EXPERIMENTAL = {
   modernCellRep: flagValue(EXPERIMENTAL_MODERN_CELL_REP_DEFINE),
   computedCellIds: flagValue(EXPERIMENTAL_COMPUTED_CELL_IDS_DEFINE),
   // Server-execution v2 (docs/specs/server-side-execution/): the
-  // first-party default (the constant — `false` again since the rollback
-  // of the Phase 7 flip), overridable by the build define either way (CI's
-  // `opposite` lane bakes the inverse of the constant into its shell). The
-  // worker refuses to
+  // first-party default (the constant; the registry states its current
+  // value), overridable by the build define either way (CI's `opposite`
+  // lane bakes the inverse of the constant into its shell). The worker
+  // refuses to
   // initialize if its resolved posture disagrees with this declaration
   // (runtime-client's posture agreement).
   serverExecution: flagValue(EXPERIMENTAL_SERVER_EXECUTION_DEFINE) ??

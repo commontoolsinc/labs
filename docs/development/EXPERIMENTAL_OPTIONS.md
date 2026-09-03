@@ -71,10 +71,11 @@ are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
 `contentAddressedSchemas`, `plainResultReceipts`, `computedCellIds`,
 `lazyMaterialization` and `readerSchemaPrecedence` default on;
 `serverExecution` resolves an unset flag to the ONE first-party default
-`SERVER_EXECUTION_DEFAULT_ENABLED` in the deployed-topology presets — `false`
-again since the 2026-09-03 rollback of the Phase 7 flip (2026-08-28; its
-section), with an explicit `true` selecting the ON arm (the single-process
-presets read no default and stay OFF — the section says how); the other flags in
+`SERVER_EXECUTION_DEFAULT_ENABLED` in the deployed-topology presets (the
+summary table above states its current value and its section carries the
+dated history), with an explicit value selecting either arm regardless (the
+single-process presets read no default and stay OFF — the section says how);
+the other flags in
 this category default off unless their section says otherwise.
 
 The mapping from environment variable to flag is defined once, canonically, as
@@ -318,8 +319,7 @@ server](#clients-that-are-not-built-alongside-their-server).
   states, no shippable intermediates (spec README §3.4); deliberately named
   unlike v1's `SERVER_PRIMARY_EXECUTION` so the archived v1 documents never
   alias it. Both states, defined:
-  - **OFF (the DEFAULT again since the rollback PR returned the constant to
-    `false`; explicit `false` selects it regardless of the constant): the
+  - **OFF (explicit `false` selects it regardless of the constant): the
     pre-v2 behavior, byte-for-byte.** Every client
     runtime runs and commits derivations exactly as it does today, and every
     client commit is `authored`-class — `derived` is never claimed off the
@@ -328,8 +328,8 @@ server](#clients-that-are-not-built-alongside-their-server).
     is enforced from it, and `stream-data` behaves as today. Any OFF-arm
     behavioral diff from a v2 stage is a phase-gate failure by itself
     (testing.md §2).
-  - **ON (the default from the flip PR's `true` (2026-08-28) until the
-    rollback; explicit `true` selects it regardless): the v2 posture.** With stages A–F landed
+  - **ON (explicit `true` selects it regardless of the constant): the v2
+    posture.** With stages A–F landed
     this means: the per-class admission rows of protocol.md §2 are enforced
     — the `derived` row is the stage-B lease equality check PLUS stage F's
     derived-envelope defense-in-depth (the producing session must BE the
