@@ -28,6 +28,24 @@ import {
 const HOLDS_STANDARD_ERROR =
   "exec 3<&0; cat <&3 >/dev/null & echo started; wait";
 
+// A developer-tools endpoint that answers `/json/version` with `protocol` as
+// the version it speaks, and the port it listens on. Astral reads that answer
+// before it opens a websocket, so a version it does not speak is a connection
+// that fails at once rather than one that waits.
+function fakeEndpoint(
+  protocol: string,
+): { server: Deno.HttpServer; port: number } {
+  const server = Deno.serve(
+    { port: 0, onListen: () => {} },
+    () =>
+      Response.json({
+        "Protocol-Version": protocol,
+        webSocketDebuggerUrl: "ws://127.0.0.1:1/devtools/browser/none",
+      }),
+  );
+  return { server, port: (server.addr as Deno.NetAddr).port };
+}
+
 // A stand-in for a browser binary: a directory holding a shell script that
 // writes `printed` to its standard error and exits with `code`, never naming
 // an endpoint, and the launch options that point at it. The caller removes the
@@ -77,6 +95,19 @@ describe("browser-process", () => {
       await stopBrowserProcess(child, closed);
 
       expect((await child.status).code).toBe(0);
+    });
+
+    it("rethrows a kill failure that is not the process having gone", async () => {
+      const refused = new Error("Operation not permitted (os error 1)");
+      const child = {
+        kill: () => {
+          throw refused;
+        },
+        status: Promise.resolve({ success: false, code: 1, signal: null }),
+      };
+
+      await expect(stopBrowserProcess(child, Promise.resolve())).rejects
+        .toThrow("Operation not permitted");
     });
 
     it("returns after a process that outlived the one it was given has exited", async () => {
@@ -135,6 +166,21 @@ describe("browser-process", () => {
             "missing system dependencies",
           );
 
+          await Deno.remove(directory, { recursive: true });
+        });
+
+        it("stops a browser that starts and then cannot be connected to", async () => {
+          const { server, port } = fakeEndpoint("0.0");
+          const { directory, options } = await fakeBrowser(
+            `DevTools listening on ws://127.0.0.1:${port}/devtools/browser/x`,
+            0,
+          );
+
+          await expect(BrowserProcess.start(options)).rejects.toThrow(
+            "Differing protocol versions",
+          );
+
+          await server.shutdown();
           await Deno.remove(directory, { recursive: true });
         });
 

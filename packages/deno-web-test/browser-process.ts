@@ -69,7 +69,7 @@ export function standardErrorClosed(child: Deno.ChildProcess): Promise<void> {
  * doing nothing.
  */
 export async function stopBrowserProcess(
-  child: Deno.ChildProcess,
+  child: Pick<Deno.ChildProcess, "kill" | "status">,
   closed: Promise<void>,
 ): Promise<void> {
   try {
