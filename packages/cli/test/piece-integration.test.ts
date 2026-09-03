@@ -245,6 +245,18 @@ describe("cf cell get (integration)", { ignore: !API_URL }, () => {
     expect(JSON.parse(stdout.join(""))).toBe("updated-while-stopped");
   });
 
+  it("steps and reads an input path of an unstarted piece", async () => {
+    // The input side of the same fork: the stepped read starts the piece and
+    // pulls the requested input path, without the whole-result pull.
+    const sessionFlags =
+      `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${staleSessionResultPieceId}`;
+    const { code, stdout, stderr } = await integrationCf(
+      `cell get ${sessionFlags} values --input --step`,
+    );
+    expect(code, stderr.join("\n")).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toEqual(["updated-while-stopped"]);
+  });
+
   it("list and inspect expose the running pattern reference", async () => {
     const listed = await listPieces(spaceConfig);
     const listedPiece = listed.find((piece) => piece.id === pieceId);
