@@ -43,6 +43,7 @@ import {
 import {
   atomsOutsideCeiling,
   cfcLabelViewForCell,
+  setLinkCfcLabelView,
 } from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { StorageManager as WorkerStorageManager } from "@commonfabric/runner/storage/cache";
@@ -2275,6 +2276,33 @@ describe("runtime-processor", () => {
   });
 
   describe("RuntimeProcessor CFC label IPC", () => {
+    /**
+     * Mints a cell carrying a label view whose one caveat names a source, the
+     * shape the display redaction exists to rewrite. A read hands the response
+     * path live cells like this one, and the conversion attaches each cell's
+     * carried view to the link it mints for it.
+     */
+    function cellCarryingSourcedView(
+      runtime: Runtime,
+      id: string,
+    ): Cell<unknown> {
+      const link = runtime.getCell(cfcSigner.did(), id).getAsLink();
+      setLinkCfcLabelView(link, {
+        version: 1,
+        entries: [{
+          path: [],
+          label: {
+            confidentiality: [{
+              type: CFC_ATOM_TYPE.Caveat,
+              kind: "derived-from",
+              source: "did:key:alice",
+            }],
+          },
+        }],
+      } as CfcLabelView);
+      return runtime.getCellFromLink(link);
+    }
+
     it('fails closed on the raw meta:"cfc" seam (inv-12 Stage 0 / SC-25)', () => {
       const ref: CellRef = {
         id: "of:cfc-raw-meta-cell" as CellRef["id"],
@@ -2426,74 +2454,64 @@ describe("runtime-processor", () => {
       expect("source" in atom).toBe(false);
     });
 
-    it("redacts Caveat.source in sigil label views inside handleCellGet values", () => {
-      // Inv-12 Stage 0, step 3: the display redaction applied to the top-level
-      // cfcLabel at the three IPC response sites also covers the cfcLabelView
-      // copies riding sigil links INSIDE response values (attached by
-      // convertCellsToLinks includeCfcLabelView). Safe now that the worker
-      // neither persists nor re-imports inbound views (steps 1–2).
-
-      const ref: CellRef = {
-        id: "of:cfc-value-view-cell" as CellRef["id"],
-        space: "did:key:test" as CellRef["space"],
-        scope: "space",
-        path: [],
-      };
-      const linkWithView = {
-        "/": {
-          "link@1": {
-            id: "of:cfc-value-view-linked",
-            space: "did:key:test",
-            path: [],
-            cfcLabelView: {
-              version: 1,
-              entries: [{
-                path: [],
-                label: {
-                  confidentiality: [{
-                    type: CFC_ATOM_TYPE.Caveat,
-                    kind: "derived-from",
-                    source: "did:key:alice",
-                  }],
-                },
-              }],
-            },
+    it("redacts Caveat.source in the label views carried by cells inside handleCellGet values", async () => {
+      const storageManager = StorageManager.emulate({ as: cfcSigner });
+      const runtime = new Runtime({
+        apiUrl: new URL("https://toolshed.test"),
+        storageManager,
+      });
+      try {
+        const ref: CellRef = {
+          id: "of:cfc-value-view-cell" as CellRef["id"],
+          space: "did:key:test" as CellRef["space"],
+          scope: "space",
+          path: [],
+        };
+        const carrier = cellCarryingSourcedView(
+          runtime,
+          "cfc-value-view-linked",
+        );
+        const processor = {
+          runtime: {
+            getCellFromLink: () => ({
+              get: () => ({ nested: carrier }),
+            }),
           },
-        },
-      };
-      const processor = {
-        runtime: {
-          getCellFromLink: () => ({
-            get: () => ({ nested: linkWithView }),
-          }),
-        },
-      } as unknown as RuntimeProcessor;
+        } as unknown as RuntimeProcessor;
 
-      const response = RuntimeProcessor.prototype.handleCellGet.call(
-        processor,
-        {
-          type: RequestType.CellGet,
-          cell: ref,
-        },
-      );
-      const responseLink = (response.value as {
-        nested: {
-          "/": {
-            "link@1": {
-              cfcLabelView: {
-                entries: Array<
-                  { label: { confidentiality: Array<Record<string, unknown>> } }
-                >;
+        const response = RuntimeProcessor.prototype.handleCellGet.call(
+          processor,
+          {
+            type: RequestType.CellGet,
+            cell: ref,
+          },
+        );
+        const responseLink = (response.value as {
+          nested: {
+            "/": {
+              "link@1": {
+                cfcLabelView: {
+                  entries: Array<
+                    {
+                      label: {
+                        confidentiality: Array<Record<string, unknown>>;
+                      };
+                    }
+                  >;
+                };
               };
             };
           };
-        };
-      }).nested["/"]["link@1"];
-      const atom =
-        responseLink.cfcLabelView.entries[0].label.confidentiality[0];
-      expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
-      expect(atom.kind).toBe("derived-from");
-      expect("source" in atom).toBe(false);
+        }).nested["/"]["link@1"];
+        const atom =
+          responseLink.cfcLabelView.entries[0].label.confidentiality[0];
+        expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
+        expect(atom.kind).toBe("derived-from");
+        expect("source" in atom).toBe(false);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
     });
 
     it("returns the read cell's schema-bearing ref when includeRef is set", () => {
@@ -2583,87 +2601,83 @@ describe("runtime-processor", () => {
       expect(response.value).toBe("plain value");
     });
 
-    it("redacts Caveat.source in sigil label views inside subscription updates", async () => {
-      const ref: CellRef = {
-        id: "of:cfc-subscribe-view-cell" as CellRef["id"],
-        space: "did:key:test" as CellRef["space"],
-        scope: "space",
-        path: [],
-        schema: { type: "object", additionalProperties: true },
-      };
-      const linkWithView = {
-        "/": {
-          "link@1": {
-            id: "of:cfc-subscribe-view-linked",
-            space: "did:key:test",
-            path: [],
-            cfcLabelView: {
-              version: 1,
-              entries: [{
-                path: [],
-                label: {
-                  confidentiality: [{
-                    type: CFC_ATOM_TYPE.Caveat,
-                    kind: "derived-from",
-                    source: "did:key:alice",
-                  }],
-                },
-              }],
-            },
-          },
-        },
-      };
-      const processor = {
-        subscriptions: new Map(),
-        runtime: {
-          getCellFromLink: () => ({
-            sink: (
-              callback: (value: unknown, cfcLabel: unknown) => void,
-            ) => {
-              callback({ nested: linkWithView }, undefined);
-              return () => {};
-            },
-          }),
-        },
-      } as unknown as RuntimeProcessor;
-
-      const posted: Array<{ value?: unknown }> = [];
-      const orig = self.postMessage;
-      (self as { postMessage: unknown }).postMessage = (
-        m: { value?: unknown },
-      ) =>
-        posted.push(
-          fabricFromRealmValue(m as never) as { value?: unknown },
-        );
+    it("redacts Caveat.source in the label views carried by cells inside subscription updates", async () => {
+      const storageManager = StorageManager.emulate({ as: cfcSigner });
+      const runtime = new Runtime({
+        apiUrl: new URL("https://toolshed.test"),
+        storageManager,
+      });
       try {
-        RuntimeProcessor.prototype.handleCellSubscribe.call(processor, {
-          type: RequestType.CellSubscribe,
-          cell: ref,
-        });
-        // The sink posts from a microtask.
-        await Promise.resolve();
-      } finally {
-        (self as { postMessage: unknown }).postMessage = orig;
-      }
+        const ref: CellRef = {
+          id: "of:cfc-subscribe-view-cell" as CellRef["id"],
+          space: "did:key:test" as CellRef["space"],
+          scope: "space",
+          path: [],
+          schema: { type: "object", additionalProperties: true },
+        };
+        const carrier = cellCarryingSourcedView(
+          runtime,
+          "cfc-subscribe-view-linked",
+        );
+        const processor = {
+          subscriptions: new Map(),
+          runtime: {
+            getCellFromLink: () => ({
+              sink: (
+                callback: (value: unknown, cfcLabel: unknown) => void,
+              ) => {
+                callback({ nested: carrier }, undefined);
+                return () => {};
+              },
+            }),
+          },
+        } as unknown as RuntimeProcessor;
 
-      expect(posted.length).toBe(1);
-      const notifiedLink = (posted[0].value as {
-        nested: {
-          "/": {
-            "link@1": {
-              cfcLabelView: {
-                entries: Array<
-                  { label: { confidentiality: Array<Record<string, unknown>> } }
-                >;
+        const posted: Array<{ value?: unknown }> = [];
+        const orig = self.postMessage;
+        (self as { postMessage: unknown }).postMessage = (
+          m: { value?: unknown },
+        ) =>
+          posted.push(
+            fabricFromRealmValue(m as never) as { value?: unknown },
+          );
+        try {
+          RuntimeProcessor.prototype.handleCellSubscribe.call(processor, {
+            type: RequestType.CellSubscribe,
+            cell: ref,
+          });
+          // The sink posts from a microtask.
+          await Promise.resolve();
+        } finally {
+          (self as { postMessage: unknown }).postMessage = orig;
+        }
+
+        expect(posted.length).toBe(1);
+        const notifiedLink = (posted[0].value as {
+          nested: {
+            "/": {
+              "link@1": {
+                cfcLabelView: {
+                  entries: Array<
+                    {
+                      label: {
+                        confidentiality: Array<Record<string, unknown>>;
+                      };
+                    }
+                  >;
+                };
               };
             };
           };
-        };
-      }).nested["/"]["link@1"];
-      const atom =
-        notifiedLink.cfcLabelView.entries[0].label.confidentiality[0];
-      expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
-      expect("source" in atom).toBe(false);
+        }).nested["/"]["link@1"];
+        const atom =
+          notifiedLink.cfcLabelView.entries[0].label.confidentiality[0];
+        expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
+        expect("source" in atom).toBe(false);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
     });
 
     it("redacts Caveat.source in label views on response cell refs", () => {
