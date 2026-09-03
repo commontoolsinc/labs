@@ -24,7 +24,7 @@ string says which:
 ```text
 //<space>/<piece>[@<qualifier>…][/<path>][#argument]     complete
 /<piece>[@<qualifier>…][/<path>][#argument]              space-relative
-[./]<path>                                               piece-relative
+[.[@<qualifier>…]/]<path>                                piece-relative
 ```
 
 A complete reference names its whole location. A space-relative one takes its
@@ -258,7 +258,8 @@ requirements, and the shell-safe alphabet below is smaller than it looks.
 | `~0`, `~1`             | RFC 6901, via the path                | escapes for `~` and `/` inside a path key                                                                                                                                    |
 | `:`                    | the identifiers                       | inside a DID and a handle (`did:key:…`, `of:fid1:…`); a segment holding one is an identifier, one without is a name                                                          |
 | `=`                    | this grammar, inside a qualifier      | separates a qualifier's name from its value                                                                                                                                  |
-| `.`, `..`              | this grammar, in a relative reference | the context's position and its parent, each as a whole segment                                                                                                               |
+| `.`, `..`              | this grammar, in a relative reference | the context's position and its parent, each as a whole segment; `.` is where a relative reference takes a qualifier                                                          |
+| `%`                    | this grammar, in a path key           | percent-encoding: `%23` for `#` in a form that names a piece, `%25` for `%` itself ([D6](#d6-the-fragment-selects-a-secondary-cell))                                         |
 | `,` and a trailing `@` | the projection grammar                | list separator, and the address marker on a projected position                                                                                                               |
 | a leading `@`          | `--schema`                            | its `@file` form; the projection's own document records the interaction with the trailing marker                                                                             |
 
@@ -336,12 +337,16 @@ piece — a layer with a larger tree above the piece may continue the walk on it
 own terms. At a position that is a piece's root, the common case, "against the
 position" and "from the piece's root" coincide.
 
-A relative reference names a path and nothing else. It carries no qualifier and
-no fragment: the scope and the cell are the context's, by construction, since
-the path is inside the context's cell. `@` and `#` in one are ordinary
-characters of a key. The `./` form exists so that a relative reference can be
-written where a bare word is read as something else — a slug on `--cell` — and
-means exactly what the bare form means.
+A relative reference carries no fragment, and takes a qualifier only on the `.`
+that stands for the context's piece: `.@user/items` is the context's piece at
+scope `user`, then `items`, and `.@user` alone is the position at that scope.
+Everywhere else in a relative reference `@` and `#` are ordinary characters of a
+key — `items@user` is a key named `items@user` — and `..` takes no qualifier, so
+a scope move that also climbs is written `.@user/../title`, one spelling rather
+than two. The cell is the context's by construction, since the path is inside
+it. The `./` form exists so that a relative reference can be written where a
+bare word is read as something else — a slug on `--cell` — and means exactly
+what the bare form means.
 
 Serves R4, R5, R7, R8, R12. Taking `@` off the space is what gives `@` one
 meaning ([D2](#d2--is-the-qualifier-introducer-and-nothing-else)); it also ends
@@ -397,7 +402,8 @@ anywhere.
 that piece is meant, without changing _what_ is meant. Which instance (scope)
 and which version (pin) are the two the grammar registers. A qualifier is
 written `@name=value` and attaches to the piece segment on its left; several are
-written one after another. A relative reference names no piece and takes none.
+written one after another. In a relative reference the `.` that stands for the
+context's piece is the one segment that takes one.
 
 Serves R4, R7. One meaning, one position, and a name rather than a character per
 qualifier.
@@ -510,7 +516,10 @@ read. That is percent-encoding, the answer D4 already gives a qualifier value
 and the one `parseFabricUrl` already decodes, and it is what lets the writer of
 D7 write every part against the empty context: today `createLLMFriendlyLink`
 writes such a key raw and `splitArgumentSuffix` in
-`packages/cli/lib/llm-friendly-ref.ts` refuses it on the way back.
+`packages/cli/lib/llm-friendly-ref.ts` refuses it on the way back. Completion
+offers such a key already encoded where the target names a piece and literally
+where it is relative, so the encoding is something a person sees rather than
+something they have to know.
 
 In the location a context holds, the cell sits between the piece and the path —
 writing a piece resets it to the result unless `#argument` is written — even
@@ -542,8 +551,9 @@ The consequences, in the order they arise:
   exactly: `/X/items` for a base-scoped cell, `/X@user/items` for a user-scoped
   one.
 - **A context that knows the piece and its scope** → piece-relative when the
-  cell is in that piece at that scope, `items/0` or `../1/title`; otherwise the
-  next level up. On inequality a writer falls back a level and never refuses: a
+  cell is in that piece: `items/0` or `../1/title` at the context's scope, and
+  `.@session/items/0` when only the scope differs; a different piece is the next
+  level up. On inequality a writer falls back a level and never refuses: a
   more-qualified form is always correct in the same context, and a listing that
   mixes levels is fine because the head of each string says its level (R3).
 - **A relative path with a segment written `.` or `..`** is not produced — those
@@ -749,7 +759,7 @@ Refused, and why:
 | `//bakery`                            | a space and no piece — refused as a cell reference; accepted as a context ([D10](#d10-reader-and-writer-share-one-context)) |
 | `/glaze-tracker#items`                | not the one fragment                                                                                                        |
 | `items/0`, read with no context piece | a relative reference and nothing to resolve it against                                                                      |
-| `..`, at a piece's root               | above the piece; this grammar has nothing there                                                                             |
+| `..@user/title`                       | a qualifier on `..`; the scope move is written `.@user/../title`                                                            |
 
 ## Translation to the sibling grammars
 
@@ -793,9 +803,9 @@ source. Then it is placed by asking, in order:
 
 A requirement that survives all five is the case for a new structural character,
 and the [measured table](#shell-behavior-measured) says which characters there
-are to spend: `: % , + -`, of which `:` is inside every identifier and `,` is
-the projection's. That is the whole reason the grammar spends names rather than
-characters.
+are to spend: `: , + -`, of which `:` is inside every identifier and `,` is the
+projection's; `%` is spent on percent-encoding. That is the whole reason the
+grammar spends names rather than characters.
 
 This is what makes the mechanism reasonable rather than merely tidy. Four
 independent uses of `@` sit on the `cf` surface — the space, the scope, the
@@ -919,11 +929,11 @@ D10's two rules — the first location part written cuts the context off below i
 the scope is the string's when written and the context's when not — produce this
 table:
 
-| Level          | From the string              | From the context                                       |
-| -------------- | ---------------------------- | ------------------------------------------------------ |
-| complete       | space, piece, path, fragment | scope, when the string omits it                        |
-| space-relative | piece, path, fragment        | space; scope, when omitted                             |
-| piece-relative | a path against the position  | space, piece, scope; the position's path as the anchor |
+| Level          | From the string                                         | From the context                                                                      |
+| -------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| complete       | space, piece, path, fragment                            | scope, when the string omits it                                                       |
+| space-relative | piece, path, fragment                                   | space; scope, when omitted                                                            |
+| piece-relative | a path against the position, and a qualifier on its `.` | space, piece; the scope unless `.@scope` writes it; the position's path as the anchor |
 
 The string's parts are never overridden by the context, and the context's parts
 are never read for a slot the string fills. That is what "defaulting is
