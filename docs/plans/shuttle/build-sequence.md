@@ -184,11 +184,12 @@ Landed:
   `listSpaceSlugs`, `listPieces` and `listCellKeys`, each of which takes that
   connection as `deps.loadPieces`. A row that failed on its own account is
   still a row and carries what went wrong; a read that failed outright raises.
-  `slugs/` says what it is a listing of. Its index is a record of the names
-  assigned since it existed, which bounds the slugs that resolve in neither
-  direction: one assigned before it is not listed and resolves, and one listed
-  may no longer resolve — nothing removes an index entry, so a slug whose piece
-  is gone stays named — which is why a row carries its error. A slug stands in a place unresolved and the read resolves
+  `slugs/` says what it is a listing of. Its index records the names assigned
+  since it existed, which is not the set of slugs that resolve: one assigned
+  before the index is not listed, and one that is listed may no longer resolve,
+  nothing removing an entry once made. So `ls slugs/` does not enumerate what
+  resolves, and a row carries its own error where the name it lists reaches
+  nothing. A slug stands in a place unresolved and the read resolves
   it the way `--cell` does, which is what makes a slug typed back off a listing
   reach its piece.
 

@@ -579,15 +579,26 @@ describe("listing", () => {
       let named = 0;
       let unnamed = 0;
       let reported = 0;
+      let reportedWithoutOperand = 0;
 
       /**
        * Helper for this case, which holds the property over one row and the
        * line it printed, `standing` being a place at the row's own level.
        */
       function check(standing: CurrentPlace, row: ListingRow, line: string) {
+        // Everything true of every line goes above the branch. A row's error
+        // is printed whether or not the row has an operand, and this branch
+        // has twice been where a dimension reached one arm and not the other:
+        // the arm that returns early reads whatever someone remembered to add
+        // to it. Asserting the common half first is what stops the next
+        // dimension from landing on one side.
+        expect(/ <error: [^\n]*>$/.test(line)).toBe(row.error !== undefined);
+        if (row.error !== undefined) reported++;
+
         if (row.operand === undefined) {
           expect(line.startsWith("<")).toBe(true);
           unnamed++;
+          if (row.error !== undefined) reportedWithoutOperand++;
           return;
         }
         expect(line.startsWith("<")).toBe(false);
@@ -603,7 +614,6 @@ describe("listing", () => {
         expect(standing.cd(tokens[0]).kind).toBe("moved");
         expect(standing.place).toEqual(childOf(from, row.name));
         named++;
-        if (row.error !== undefined) reported++;
       }
 
       const sources: {
@@ -664,6 +674,7 @@ describe("listing", () => {
       expect(named).toBeGreaterThan(0);
       expect(unnamed).toBeGreaterThan(0);
       expect(reported).toBeGreaterThan(0);
+      expect(reportedWithoutOperand).toBeGreaterThan(0);
     });
   });
 });

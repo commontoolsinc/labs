@@ -322,9 +322,16 @@ listing prints names rather than routes. Everything on a listed line that is
 not a name is written between angle brackets. A name holding an angle bracket
 is printed quoted, the grammar reserving it, so a line opening with `<` carries
 no name — while a marker's own payload is not escaped, those brackets
-delimiting for a reader and not for a parser. Nothing parses a listed line. A row is one line, so a name carrying a line break
-is described rather than written, and a message carrying one has it written
-as a space.
+delimiting for a reader and not for a parser. Nothing parses a listed line.
+
+A row is one line, and the lines are separated by a newline, so a name holding
+one is described rather than written and a message holding one has it written
+as a space. Nothing else is rewritten. A carriage return, the Unicode line and
+paragraph separators and every other control character are printed as they
+stand, because a name is printed to be typed back and a rewritten one no
+longer names its row — a carriage return returns a terminal's cursor to the
+start of the line, and that is a thing a terminal does rather than a thing the
+name says, the same bound the rendering of a place is held to.
 
 Large collections appear everywhere (a space's pieces, an array of
 thousands). `ls` prints one height-fit page — what the terminal shows

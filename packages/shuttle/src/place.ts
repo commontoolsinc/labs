@@ -883,6 +883,21 @@ function unnameableSegment(segment: PathSegment): Fault | undefined {
 }
 
 /**
+ * The characters the reference grammar reads inside an id segment: the `@` a
+ * scope suffix rides on (`parseScopedIdSegment`), and the `#` an argument
+ * suffix does (`splitArgumentSuffix`). Neither vocabulary holds one — a slug
+ * is lowercase letters, numbers and hyphens, and a handle is base64url — but
+ * `isPieceHandle` is a length rule rather than an alphabet one, so a long
+ * enough piece carries either past the vocabulary check.
+ *
+ * The separator and the escape are deliberately not here. A rendering escapes
+ * both, `/` becoming `~1` and `~` becoming `~0`, so a piece holding one is
+ * read back whole; refusing it would be an alphabet this module does not own,
+ * against a canonical check that owns one and declines to apply it.
+ */
+const READ_INSIDE_AN_ID = ["@", "#"];
+
+/**
  * Helper for the movers, which names what stops a piece from being one a place
  * may stand on, and returns nothing when nothing does.
  *
@@ -899,7 +914,11 @@ function unnameableSegment(segment: PathSegment): Fault | undefined {
  * {@link outsideVocabulary} runs after this door and refuses an empty piece
  * and every colon-less name that is no slug on its own account. What this door
  * adds is the handle-shaped piece: `isPieceHandle` is a length rule, so a
- * trailing space and an `@` both ride past it and are refused here.
+ * trailing space and either of {@link READ_INSIDE_AN_ID} ride past it and are
+ * refused here. Other characters no vocabulary holds ride past it too — a `.`
+ * or an escaped separator — and are admitted, their renderings reading back
+ * whole; what is refused here is what a rendering would lose or a reading
+ * would take.
  */
 function unnameablePiece(piece: string): Fault | undefined {
   if (piece.includes("\n")) {
@@ -909,8 +928,10 @@ function unnameablePiece(piece: string): Fault | undefined {
   if (piece !== piece.trimEnd()) {
     return { what: "a piece ending in whitespace", so: NO_SUCH_NAME };
   }
-  if (piece.includes("@")) {
-    return { what: "a piece holding `@`", so: NO_SUCH_NAME };
+  for (const character of READ_INSIDE_AN_ID) {
+    if (piece.includes(character)) {
+      return { what: `a piece holding \`${character}\``, so: NO_SUCH_NAME };
+    }
   }
   return undefined;
 }

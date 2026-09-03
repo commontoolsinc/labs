@@ -1498,6 +1498,27 @@ describe("place", () => {
           });
         });
 
+        it("refuses a target whose piece holds `#` though its length passes for a handle", () => {
+          // The `@` case below is the same defect and the same rule. Both
+          // characters are read inside an id segment, and `isPieceHandle` is a
+          // length rule, so a piece long enough to pass for a handle carries
+          // either past the vocabulary check — and a `#` costs the place its
+          // own rendering, which `cd` then refuses as an argument suffix.
+
+          expect(
+            atSpaceRoot().enter(
+              { space: SPACE, piece: "of:fid1:abcdefghij#k", path: [] },
+              "#favorites",
+            ),
+          ).toEqual({
+            kind: "refused",
+            reason: "`#favorites` resolves to a piece holding `#`, so no " +
+              "piece carries that name: a slug is lowercase letters, " +
+              "numbers, and single hyphens between words, and a handle is " +
+              "`of:fid1:` and unpadded base64url.",
+          });
+        });
+
         it("refuses a target whose piece is in neither vocabulary", () => {
           // Relayed: `validatePieceSegment`'s own sentence.
 
