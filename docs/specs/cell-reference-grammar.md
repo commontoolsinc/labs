@@ -27,11 +27,12 @@ string says which:
 [./]<path>                                               piece-relative
 ```
 
-A complete reference names everything. A space-relative one takes its space from
-the reader's context; a piece-relative one takes its space and piece from the
-context and names a path against the context's position. Parsing never needs the
-context — the head decides the level — and only resolving a relative reference
-does.
+A complete reference names its whole location. A space-relative one takes its
+space from the reader's context; a piece-relative one takes its space and piece
+from the context and names a path against the context's position. The scope,
+when omitted, is the context's at every level, and the empty context's scope is
+the base. Parsing never needs the context — the head decides the level — and
+only resolving does.
 
 Three characters carry structure, and each carries exactly one meaning:
 
@@ -122,8 +123,8 @@ four are writable.
 Source: [Scoped cell instances](scoped-cell-instances.md#goals) requires scope
 to be "expressible in TypeScript authoring, generated schema, normalized links,
 and serialized sigil links". The runner's `createLLMFriendlyLink` renders any
-`NormalizedFullLink`, so a scope the renderer can write is a scope the parser
-must read.
+`NormalizedFullLink`, so a scope the writer can write is a scope the reader must
+read.
 
 ### R3 — The string decides its own shape
 
@@ -195,15 +196,15 @@ reassembly, no flag beside it, no part of it read out and passed separately.
 Source: `packages/cli/README.md`, "Every address this CLI publishes is that one
 string".
 
-### R10 — Absence is defined per layer; a printed reference relies on none
+### R10 — Absence means the context's, and the empty context is the base
 
-A reference that omits a part has a defined meaning for the omission, and the
-canonical layer's definition is the base: no space means the reader's space, no
-scope means `space`. A layer that reads an omission relatively — a reader with a
-position may take an absent scope from it — writes every part it does not want
-read that way. So a shared or printed reference is fully qualified, and the
-relative reading is a convenience for typing, never a property of a string in
-flight.
+A reference that omits a part means the context's value for that part — at every
+level, for every part, the scope included. A reader with no context reads
+against the empty one, whose scope is the base: no space means the space the
+link is resolved in, no scope means `space`. A writer against the empty context
+writes every part, so a string that has to be read anywhere is written against
+it, and the relative reading stays a convenience for what a person types rather
+than a property of a string in flight.
 
 Source: `createLLMFriendlyLink` writes the space only when it differs from the
 context and the scope only when it is not the base; `linksEqual` compares
@@ -218,9 +219,9 @@ pasted text, tool output, and documents in this tree. A grammar change therefore
 lands, wherever it can, on a form nothing emits, and a form that is emitted
 today stays readable.
 
-Source: `createLLMFriendlyLink` is the one renderer, and it takes a
-`MemorySpace` (a DID) — so every rendered space is a DID, and a name-shaped
-space exists only where a person typed one.
+Source: `createLLMFriendlyLink` is the one writer, and it takes a `MemorySpace`
+(a DID) — so every rendered space is a DID, and a name-shaped space exists only
+where a person typed one.
 
 ### R12 — Relative to a context, at each level
 
@@ -298,7 +299,7 @@ and the existing decisions it confirms or replaces.
 ### D1. Qualification is positional: the URL's three levels
 
 ```text
-//<space>/<piece>…      complete: nothing is read from the context
+//<space>/<piece>…      complete: the location is all its own
 /<piece>…               space-relative: the space is the context's
 <path>  or  ./<path>    piece-relative: the space and piece are the context's,
                         and the path is against the context's position
@@ -312,16 +313,18 @@ and one without is a name only a session-holding reader can resolve — which is
 the rule `parseReferenceParts` already applies to the piece segment, now applied
 to both.
 
-A **context** is a position: a space, a piece, a path inside it, and a scope.
-Whatever holds one — the runner's base cell, `cf`'s `--space` and `--cell` —
-supplies the parts a reference omits, and a reader holding less than a reference
-needs refuses it: a piece-relative reference read with a space and no piece
-names nothing. A relative reference is written against the position's path the
-way a relative URL is written against the page: `.` is the position, `..` its
-parent, and a `..` that would leave the piece is refused by this grammar, which
-has nothing above a piece — a layer with a larger tree above the piece may
-continue the walk on its own terms. At a position that is a piece's root, the
-common case, "against the position" and "from the piece's root" coincide.
+A **context** is a cell address with parts missing — a space, a piece, a path
+inside it, and a scope, in the shape
+[D10](#d10-reader-and-writer-share-one-context) gives it. Whatever holds one —
+the runner's base cell, `cf`'s `--space` and `--cell` — supplies the parts a
+reference omits, and a reader holding less than a reference needs refuses it: a
+piece-relative reference read with a space and no piece names nothing. A
+relative reference is written against the position's path the way a relative URL
+is written against the page: `.` is the position, `..` its parent, and a `..`
+that would leave the piece is refused by this grammar, which has nothing above a
+piece — a layer with a larger tree above the piece may continue the walk on its
+own terms. At a position that is a piece's root, the common case, "against the
+position" and "from the piece's root" coincide.
 
 A relative reference names a path and nothing else. It carries no qualifier and
 no fragment: the scope and the cell are the context's, by construction, since
@@ -424,7 +427,7 @@ knows.
 ```text
 @user          ≡  @scope=user
 @session       ≡  @scope=session
-@space         ≡  @scope=space       (the base; the renderer omits it)
+@space         ≡  @scope=space       (the base; omitted if the context matches)
 @inherit       ≡  @scope=inherit
 ```
 
@@ -444,8 +447,8 @@ unchanged).
 
 **On `inherit`.** In a stored link, `inherit` means "the containing cell's
 scope", and `parseLink` resolves it against its base before a full link exists,
-which is why the renderer has never had one to write. As a written qualifier it
-is the explicit form of the relative reading R10 describes: a context-holding
+which is why the writer has never had one to write. As a written qualifier it is
+the explicit form of the relative reading R10 describes: a context-holding
 reader that reads an absent scope from its position has a way to say so on a
 printed line, and a canonical reader that has no context refuses it rather than
 guessing.
@@ -495,6 +498,10 @@ else. It is the one fragment. Any other is refused, and a path key containing
 positional path that `splitArgumentSuffix` in
 `packages/cli/lib/llm-friendly-ref.ts` sends such a key to.
 
+In the location a context holds, the cell sits between the piece and the path —
+writing a piece resets it to the result unless `#argument` is written — even
+though the string writes it last.
+
 Serves R4 (a fragment is not a qualifier: it changes _what_ cell is named, not
 _which_ instance of it), R8.
 
@@ -502,18 +509,56 @@ _which_ instance of it), R8.
 is [recorded](#shell-behavior-measured) and not decided here; a reference
 carrying `#argument` has the `#` mid-word, where only `extendedglob` touches it.
 
-### D7. What a renderer writes
+### D7. What a writer writes
 
-A renderer writes the space only when it differs from the reader's, the scope
-only when it is not the base, and every other qualifier whenever it holds one.
-It never writes a piece-relative reference: it knows the reader's space and not
-the reader's position. So the common case renders as `/<piece>/<path>` and
-nothing else, and a _fully qualified_ rendering — every slot written — is what a
-shared link and any string meant to be read from somewhere else carries.
+A writer takes the context the requester gives it and writes exactly what
+distinguishes the cell from that context: every part the context has no opinion
+about, and every part whose value differs from the context's. It omits a part
+only on equality, and it measures equality against the context _after_ the
+cutoff [D10](#d10-reader-and-writer-share-one-context) describes — once it has
+written the piece, the context's path is nothing to be relative to.
 
-Serves R9, R10, R11.
+The consequences, in the order they arise:
 
-**Confirms.** `createLLMFriendlyLink`'s two omission rules.
+- **No context → complete and fully qualified**: `//S/X@space/items`, the
+  `@space` written because the empty context has no opinion about it. This is
+  the form for anything that leaves the requester's context — a shared link, a
+  printed address, a string handed to another session.
+- **A context that knows the space and holds scope `space`** → today's output
+  exactly: `/X/items` for a base-scoped cell, `/X@user/items` for a user-scoped
+  one.
+- **A context that knows the piece and its scope** → piece-relative when the
+  cell is in that piece at that scope, `items/0` or `../1/title`; otherwise the
+  next level up. On inequality a writer falls back a level and never refuses: a
+  more-qualified form is always correct in the same context, and a listing that
+  mixes levels is fine because the head of each string says its level (R3).
+- **A relative path with a segment written `.` or `..`** is not produced — those
+  are tokens in a relative reference and keys everywhere else — so a key by
+  either name renders space-relative.
+
+The writer assumes the reader has the same context it was given, and writes
+nothing more. The requester owns the difference between the context it passes
+and the context the string is actually read in; a requester that does not want a
+piece assumed does not supply one.
+
+Serves R9, R10, R11, R12.
+
+**Confirms.** `createLLMFriendlyLink`'s two omission rules, as the case of a
+one-part context whose scope is `space`.
+
+**Replaces.** The writer's no-context default, which omits the space:
+`createLLMFriendlyLink(link)` writes `/of:X`, a space-relative form against a
+context nobody stated. Under this decision the same call writes the complete
+form, and the placeholder space `packages/cf-harness/src/handle-table.ts` passes
+to defeat the omission is no longer needed.
+
+**Rejected.**
+
+- A writer that always fully qualifies, leaving callers to strip — every caller
+  re-implements the cutoff, and each gets the scope wrong in its own way.
+- A writer that takes a requested _level_ rather than a context — the context
+  already is the request: pass less, get more. The fallback on inequality is
+  what makes a refusal unnecessary.
 
 ### D8. The space segment's vocabulary
 
@@ -539,6 +584,103 @@ grammar refuses the requirements that are not addressing.
 
 **Confirms.** `packages/cli/README.md`: "No schema is inlined and no
 write-redirect flag rides along."
+
+### D10. Reader and writer share one context
+
+A **context** is a cell address with parts missing, and both halves of the
+grammar take one: a reader fills a string's omitted parts from it, a writer
+omits the parts it supplies. The contract between them is one law:
+
+```text
+read(write(link, C), C) = link      for every context C, â included
+```
+
+**Shape.** A context has two axes. Its _location_ is a prefix of
+`space → piece → cell → path`: any suffix may be missing, and nothing may be
+skipped — no path without a piece, no piece without a space, no `#argument`
+without a piece. Its _scope_ sits beside the location, known or unknown,
+whatever the location's depth. "Missing" and "unknown" are one thing: the
+context has no opinion, and a writer writes what the context has no opinion
+about.
+
+| Context                                 | Location                        | Scope   |
+| --------------------------------------- | ------------------------------- | ------- |
+| ∅                                       | none                            | unknown |
+| `//bakery`                              | space                           | unknown |
+| `//bakery/glaze-tracker`                | space, piece, result cell, root | unknown |
+| `//bakery/glaze-tracker@user`           | the same                        | `user`  |
+| `//bakery/glaze-tracker@user/items/0`   | …, path `items/0`               | `user`  |
+| `//bakery/glaze-tracker/items#argument` | …, arguments cell, path `items` | unknown |
+
+**Text and structure.** Structurally a context is the address part of a sigil
+link — `id`, `space`, `path`, `scope` — with any prefix of it present;
+`ReferenceParts` is the same shape. Textually it is a complete reference at the
+matching level, with one admission: a space alone, `//bakery`, is a valid
+_context_ though not a valid _cell reference_ — the same parser, a different
+acceptance, the way a session-holding reader accepts a name a pattern cannot. A
+context travels beside a reference and never inside one
+([D9](#d9-the-reference-names-a-cell-not-how-to-read-it)): output that carries
+relative references states, once, the context they are relative to, in this
+form.
+
+**Location: the first part written cuts the context off below it.** A reference
+that names a piece ignores the context's piece, cell, and path — its path is
+from the piece's root, and its cell is the result unless it writes `#argument`.
+A reference that names a space ignores everything below the space. A
+piece-relative reference names no location part, so it takes space, piece, and
+cell from the context and anchors its path at the context's path.
+
+**Scope: written → the reference's; omitted → the context's.** The scope is not
+cut off when a piece or a space is written, because it is not a level of the
+location: it asks _which instance_, and that question is the same in every
+piece. `/X/items` read against a `@user` context is `X@user/items`; the same
+string against `@space` is `X@space/items`.
+
+**The empty context.** For a writer, ∅ has no opinion about anything, so
+`write(link, ∅)` writes every part — `//S/X@space/items`, `@space` included —
+and the result names the same cell in every reader's context. For a reader, an
+omitted scope with no context is `space`, the base; an omitted space is left for
+the base cell that resolves the link, as the runner's `parseLink` does today; an
+omitted piece is refused. The law never leans on the reader's defaults: under ∅
+the writer wrote everything out. They fire only when a string written against a
+richer context is read against none — the requester's case under
+[D7](#d7-what-a-writer-writes) — and then they are the canonical reading.
+
+**Worked.** Context `//S/Y@user/items/0`; the cell to write is `S/X@user/items`.
+
+| Step                 | Result             | Why                                                                    |
+| -------------------- | ------------------ | ---------------------------------------------------------------------- |
+| writer: space        | omitted            | equal                                                                  |
+| writer: piece        | written, `/X`      | differs; cuts off the context's cell and path                          |
+| writer: path         | `items`, from root | the cutoff: nothing left to be relative to                             |
+| writer: scope        | omitted            | equal to the context's, and the scope is not cut off                   |
+| **the string**       | `/X/items`         |                                                                        |
+| reader, same context | `S/X@user/items`   | piece written → space from context, path from root, scope from context |
+| reader, no context   | `S/X@space/items`  | a different cell — the requester's difference, not the writer's        |
+
+**Library.** One module owns both halves and the context between them: a reader
+`(text, context?) → parts`, a writer `(link, context?) → text`, and the same
+pair for a context's own text. `parseReferenceParts` is the reader's grammar
+today and grows the context argument; the writer is its inverse.
+`parseLLMFriendlyLink` and `createLLMFriendlyLink` become wrappers over that
+pair, kept for their callers — the name records an audience, and the grammar is
+for every reader.
+
+Serves R3 (the shape is the string's; the values are the context's), R9, R10,
+R12.
+
+**Confirms.** `parseLLMFriendlyLink(target, space?)` and
+`parseLink(value, base)` on the read side,
+`createLLMFriendlyLink(link, contextSpace?)` on the write side: each is this
+decision with a one-part context. `HANDLE_REF_CONTEXT_SPACE` in
+`packages/cf-harness/src/handle-table.ts` — a placeholder space passed to force
+the real DID out — is the empty context, written by hand because none exists.
+
+**Rejected.** A single chain in which the scope is a level below the piece, so
+that writing a piece resets the scope to the base. It would make `/X` at a
+`@user` position name someone else's `X`, and it would make every cross-piece
+reference in a user-scoped session re-write `@user`, against the minimality D7
+asks for.
 
 ## Examples
 
@@ -573,17 +715,17 @@ the same cells. The relative rows at the end need a context, and theirs is
 
 Refused, and why:
 
-| Written                               | Refusal                                                                     |
-| ------------------------------------- | --------------------------------------------------------------------------- |
-| `/@bakery/glaze-tracker`              | a name-shaped `@` space: the message names `//bakery/…`                     |
-| `/glaze-tracker@owner`                | not a scope value: the message names `@name=value` and the registered names |
-| `/glaze-tracker@user@user`            | a name written twice                                                        |
-| `/glaze-tracker@color=pink`           | a name not on the table                                                     |
-| `//bakery`                            | a space and no piece                                                        |
-| `/glaze-tracker#items`                | not the one fragment                                                        |
-| `items/0`, read with no context piece | a relative reference and nothing to resolve it against                      |
-| `./items@user`                        | a qualifier on a relative reference, which names no piece                   |
-| `..`, at a piece's root               | above the piece; this grammar has nothing there                             |
+| Written                               | Refusal                                                                                                                     |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `/@bakery/glaze-tracker`              | a name-shaped `@` space: the message names `//bakery/…`                                                                     |
+| `/glaze-tracker@owner`                | not a scope value: the message names `@name=value` and the registered names                                                 |
+| `/glaze-tracker@user@user`            | a name written twice                                                                                                        |
+| `/glaze-tracker@color=pink`           | a name not on the table                                                                                                     |
+| `//bakery`                            | a space and no piece — refused as a cell reference; accepted as a context ([D10](#d10-reader-and-writer-share-one-context)) |
+| `/glaze-tracker#items`                | not the one fragment                                                                                                        |
+| `items/0`, read with no context piece | a relative reference and nothing to resolve it against                                                                      |
+| `./items@user`                        | a qualifier on a relative reference, which names no piece                                                                   |
+| `..`, at a piece's root               | above the piece; this grammar has nothing there                                                                             |
 
 ## Translation to the sibling grammars
 
@@ -639,8 +781,8 @@ is as cheap to add to and cannot collide with the last one.
 
 ## Migration
 
-Nothing durable stores a reference string (R11), so the migration is in parsers,
-renderers, and prose, in this order. Each step is a separate change that leaves
+Nothing durable stores a reference string (R11), so the migration is in readers,
+writers, and prose, in this order. Each step is a separate change that leaves
 the tree consistent.
 
 1. **Read the new forms.** `parseReferenceParts` reads `//<space>/`,
@@ -651,17 +793,25 @@ the tree consistent.
    `/@<name>/` is refused with a message naming `//<name>/`: nothing has ever
    rendered it. `parseFabricUrl` reads `//<space>/` alongside the alias. The
    CLI's `validateEmbeddedSpaces` and completion providers follow the same
-   split. A reader that holds a position reads the piece-relative form; `cf`'s
-   positional path is one already, and gains only `./` and `..`.
-2. **Write the new forms.** `createLLMFriendlyLink` writes `//<space>/` and its
-   qualifiers under [D7](#d7-what-a-renderer-writes). From here every address
+   split. The reader takes a context
+   ([D10](#d10-reader-and-writer-share-one-context)) and reads the
+   piece-relative form against it; `cf`'s positional path is one already, and
+   gains only `./` and `..`.
+2. **Write the new forms.** The writer is the reader's inverse, in the same
+   module, and takes the same context; `createLLMFriendlyLink` becomes a wrapper
+   over it that passes a context holding its `contextSpace` and scope `space`,
+   so every caller that passes a space today keeps its output. A call that
+   passes no space today gets the complete form under
+   [D7](#d7-what-a-writer-writes) instead of `/of:X`; each such caller is
+   visited, and the placeholder space in
+   `packages/cf-harness/src/handle-table.ts` retires. From here every address
    the CLI publishes is in this grammar.
 3. **Documents and tests.** The live documents that quote the form: the grammar
    line in `packages/cli/README.md` and `docs/common/verbs/over-the-cli.md`; the
    examples in `docs/tutorial/06-workflow.md`; the doc comment on
    `packages/cli/lib/llm-friendly-ref.ts`; and the `/@my-space/` rows in
    `docs/plans/cli-surface-shape.md`. Tests and pattern baselines that hold a
-   rendered reference follow the renderer.
+   rendered reference follow the writer.
 4. **The specifier's pin.** When [pattern imports](pattern-imports/README.md)
    next changes its specifier syntax, its bare `@<pin>` becomes `@pin=`, or it
    records why the specifier keeps a bare form the reference does not.
@@ -673,19 +823,20 @@ retire it once rendered markdown from before step 2 is judged old enough.
 
 ## Relationship to existing decisions
 
-| Decision                                                                        | Where                                                                 | This document                                                                                          |
-| ------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| The reference is the one syntax; the bare form is an alias that never leads     | `packages/cli/README.md`; `llm-friendly-ref.ts` doc comment           | confirms (R1)                                                                                          |
-| Space by slash depth; leading `@` namespace rejected                            | [Pattern imports](pattern-imports/README.md#alternatives-considered)  | confirms and extends to the reference (D1)                                                             |
-| `@` reserved for the trailing qualifier; the pin lives there                    | [Pattern imports](pattern-imports/README.md#specifier-syntax)         | confirms (D2); asks the pin to take a name (D5, migration step 4)                                      |
-| Scope is expressible in every layer, on a `space < user < session` lattice      | [Scoped cell instances](scoped-cell-instances.md)                     | confirms, and gives `inherit` its written form (D3)                                                    |
-| The space rides in front only when it differs; the scope only when not the base | `createLLMFriendlyLink`; `packages/cli/README.md`                     | confirms (D7)                                                                                          |
-| The positional path is a path against the target cell and never begins with `/` | `packages/cli/README.md`, "Writing the target"                        | confirms as the piece-relative form (R12, D1)                                                          |
-| A stored link with no `id` is the base cell's document, path from its root      | `parseLink` in `packages/runner/src/link-types.ts`                    | confirms as the stored form's own rule; a renderer writes it space-relative, never piece-relative (D7) |
-| `#argument` is the one fragment, last, before anything else parses              | `splitArgumentSuffix`                                                 | confirms (D6)                                                                                          |
-| The projection grammar is its own; `--schema @` is the file form                | `packages/cli/README.md`, "Asking for an address instead of contents" | confirms as out of scope; records the borrowed characters                                              |
-| The space is written `/@<space>/`                                               | `parseReferenceParts`; `createLLMFriendlyLink`                        | **replaces** (D1)                                                                                      |
-| A bare `@word` is the whole qualifier vocabulary                                | `parseScopedIdSegment`, `CELL_SCOPE_VALUES`                           | **replaces** with the named form; the bare form survives as the scope's abbreviation (D2, D3)          |
+| Decision                                                                                                                 | Where                                                                   | This document                                                                                 |
+| ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| The reference is the one syntax; the bare form is an alias that never leads                                              | `packages/cli/README.md`; `llm-friendly-ref.ts` doc comment             | confirms (R1)                                                                                 |
+| Space by slash depth; leading `@` namespace rejected                                                                     | [Pattern imports](pattern-imports/README.md#alternatives-considered)    | confirms and extends to the reference (D1)                                                    |
+| `@` reserved for the trailing qualifier; the pin lives there                                                             | [Pattern imports](pattern-imports/README.md#specifier-syntax)           | confirms (D2); asks the pin to take a name (D5, migration step 4)                             |
+| Scope is expressible in every layer, on a `space < user < session` lattice                                               | [Scoped cell instances](scoped-cell-instances.md)                       | confirms, and gives `inherit` its written form (D3)                                           |
+| The space rides in front only when it differs; the scope only when not the base                                          | `createLLMFriendlyLink`; `packages/cli/README.md`                       | confirms, as the case of a context that knows the space and holds scope `space` (D7, D10)     |
+| The positional path is a path against the target cell and never begins with `/`                                          | `packages/cli/README.md`, "Writing the target"                          | confirms as the piece-relative form (R12, D1)                                                 |
+| A stored link with no `id` is the base cell's document, path from its root                                               | `parseLink` in `packages/runner/src/link-types.ts`                      | confirms as a reader with a one-part context: the base cell (D10)                             |
+| A link's space is embedded only when it differs from the context, so a caller with no context passes a placeholder space | `HANDLE_REF_CONTEXT_SPACE` in `packages/cf-harness/src/handle-table.ts` | **replaces**: the empty context writes every part, and the placeholder retires (D7)           |
+| `#argument` is the one fragment, last, before anything else parses                                                       | `splitArgumentSuffix`                                                   | confirms (D6)                                                                                 |
+| The projection grammar is its own; `--schema @` is the file form                                                         | `packages/cli/README.md`, "Asking for an address instead of contents"   | confirms as out of scope; records the borrowed characters                                     |
+| The space is written `/@<space>/`                                                                                        | `parseReferenceParts`; `createLLMFriendlyLink`                          | **replaces** (D1)                                                                             |
+| A bare `@word` is the whole qualifier vocabulary                                                                         | `parseScopedIdSegment`, `CELL_SCOPE_VALUES`                             | **replaces** with the named form; the bare form survives as the scope's abbreviation (D2, D3) |
 
 ## Open questions
 
@@ -722,20 +873,27 @@ while the reader still gets to be terse.
 
 ### What a context holds
 
-A context is up to four parts, and any suffix of the list may be absent:
+A context has the shape [D10](#d10-reader-and-writer-share-one-context) gives it
+— a location prefix and a scope beside it — and an interactive reader is the
+reader most likely to hold all of it:
 
-| Part  | Absent when                                              |
-| ----- | -------------------------------------------------------- |
-| space | the reader has no connection                             |
-| piece | the position is at a space, not inside any piece         |
-| path  | the position is a piece's root                           |
-| scope | never: a reader inside a piece is at some instance of it |
+| Part  | Missing when                                                                              |
+| ----- | ----------------------------------------------------------------------------------------- |
+| space | the reader has no connection                                                              |
+| piece | the position is at a space, not inside any piece                                          |
+| cell  | never, once there is a piece: the result unless the position is inside the arguments cell |
+| path  | the position is a piece's root                                                            |
+| scope | the reader has taken no position at an instance; inside a piece it always has             |
 
 Where the parts come from is the reader's business: flags and environment
 (`--space`, `CF_SPACE`, `--cell`), a stored position that navigation moves, or
-the base cell of a stored link. The grammar sees only the four values.
+the base cell of a stored link. The grammar sees only the values.
 
 ### Reading each level against it
+
+D10's two rules — the first location part written cuts the context off below it;
+the scope is the string's when written and the context's when not — produce this
+table:
 
 | Level          | From the string              | From the context                                       |
 | -------------- | ---------------------------- | ------------------------------------------------------ |
@@ -749,21 +907,21 @@ resolution" means in practice: the reader decides _values_, never _shape_.
 
 ### What absence means here, and canonically
 
-The one place an interactive reader may read a string differently from the
-canonical reader is the scope, and R10 is what makes that safe:
+The one place an interactive reader reads a string differently from a reader
+with no context is the scope, and D7's empty-context rule is what makes that
+safe:
 
-| Omitted part | Canonical reader            | Interactive reader                  |
-| ------------ | --------------------------- | ----------------------------------- |
-| space        | the reader's space          | the context's space                 |
-| piece        | refused: nothing to resolve | the context's piece (relative form) |
-| path         | the piece's root            | the position's path (relative form) |
-| scope        | `space`, the base           | the position's scope, if it chooses |
+| Omitted part | Empty context                     | Interactive reader's context        |
+| ------------ | --------------------------------- | ----------------------------------- |
+| space        | the space the link is resolved in | the context's space                 |
+| piece        | refused: nothing to resolve       | the context's piece (relative form) |
+| path         | the piece's root                  | the position's path (relative form) |
+| scope        | `space`, the base                 | the context's scope                 |
 
-A reader that takes the position's scope for an omitted one owes one thing in
-return: **every reference it prints carries the scope** (D7), so that nothing it
-hands out depends on where it was standing. A string that leaves the reader is
-fully qualified; the relative reading is for what the person types, not for what
-the reader shows.
+What an interactive reader hands out is written against the empty context
+([D7](#d7-what-a-writer-writes)), so nothing it prints depends on where it was
+standing, and a string that leaves it reads as the same cell everywhere. The
+relative reading is for what the person types, not for what the reader shows.
 
 ### Above the piece
 
