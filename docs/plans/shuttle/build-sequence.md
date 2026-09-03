@@ -184,8 +184,11 @@ Landed:
   `listSpaceSlugs`, `listPieces` and `listCellKeys`, each of which takes that
   connection as `deps.loadPieces`. A row that failed on its own account is
   still a row and carries what went wrong; a read that failed outright raises.
-  `slugs/` says what it is a listing of, its index being a lower bound on the
-  slugs that resolve. A slug stands in a place unresolved and the read resolves
+  `slugs/` says what it is a listing of. Its index is a record of the names
+  assigned since it existed, which bounds the slugs that resolve in neither
+  direction: one assigned before it is not listed and resolves, and one listed
+  may no longer resolve — nothing removes an index entry, so a slug whose piece
+  is gone stays named — which is why a row carries its error. A slug stands in a place unresolved and the read resolves
   it the way `--cell` does, which is what makes a slug typed back off a listing
   reach its piece.
 
@@ -197,9 +200,13 @@ Landed:
   strings. And every door holds a piece to the slug and handle vocabularies,
   `validatePieceSegment` being called rather than copied, so a walk, a resolved
   target and a settled move hold a piece to what a reference holds one to, and
-  give its reason. What the first ruling costs is one shape: a key whose first character
-  is `#` is reached from the piece it sits in by neither spelling, and a
-  listing prints no name for it. Which keys are spelled through one door and
+  give its reason. What the first ruling costs is one shape: a key whose first
+  character is `#` has no direct spelling — neither the name on its own nor a
+  reference names it — and a listing prints no name for it. A multi-segment
+  operand does reach it, `#` being data in every segment but the first, but
+  that is a route rather than a name, and a route through `..` reads the trail,
+  so it holds from a place reached one way and not from a place reached
+  another. Which keys are spelled through one door and
   not the other is pinned case by case in
   `packages/shuttle/test/place.test.ts`, each case under a mutation, so the
   record moves when the behavior does and not otherwise.

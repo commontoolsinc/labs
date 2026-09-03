@@ -117,22 +117,29 @@ export async function listPlace(
  * What `ls` prints for `listing`: one line per row, and one more for a bound.
  *
  * A name is the first thing on its line and is written as a token, so what a
- * reader copies off the front of a line is what `cd` takes. Everything else on
- * a line is written between angle brackets — the row no operand reaches, a
- * row's error, and the bound — and the printer quotes every value holding an
- * angle bracket, so a line opening with `<` carries no name.
+ * reader copies off the front of a line is what `cd` takes. A line that opens
+ * with `<` carries no name — and `quoteToken` is what holds that, not anything
+ * here: `<` is one of the characters the grammar reserves, so a name holding
+ * one is printed quoted and a printed name never opens with it.
  *
- * A row is one line, and lines are separated by a newline, so neither a name
- * nor a message may put one inside a row: a message carrying newlines has them
- * written as spaces, and a name carrying one is described rather than written.
- * Every other control character is written as it stands. Rewriting one inside
- * a name would leave a token `cd` no longer takes back to the row, which is
- * the guarantee the name is printed for, so what a terminal makes of it is not
- * something this can spend that on.
+ * Everything else on a line — the row no operand reaches, a row's error, and
+ * the bound — is written between angle brackets. Those brackets delimit for a
+ * reader and not for a parser: a payload may hold an angle bracket of its own
+ * and nothing escapes it. Nothing parses a listed line, and a form that could
+ * be parsed is a second output form rather than a rule for this one
+ * (`docs/plans/shuttle/futures.md`).
+ *
+ * A row is one line, and lines are separated by a newline, so nothing written
+ * on a line may put one inside it: a message and a bound each have their
+ * newlines written as spaces, and a name carrying one is described rather than
+ * written. Every other control character is written as it stands. Rewriting
+ * one inside a name would leave a token `cd` no longer takes back to the row,
+ * which is the guarantee the name is printed for, so what a terminal makes of
+ * it is not something this can spend that on.
  */
 export function renderListing(listing: Listing): string {
   const lines = listing.rows.map(lineFor);
-  if (listing.bound !== undefined) lines.push(marker(listing.bound));
+  if (listing.bound !== undefined) lines.push(marker(oneLine(listing.bound)));
   return lines.join("\n");
 }
 
@@ -242,7 +249,11 @@ function marker(text: string): string {
 
 /**
  * Helper for {@link renderListing}, which is `text` with each newline written
- * as a space, so that it takes one line.
+ * as a space, so that what is written on a line takes one line. The payloads
+ * that are a caller's own text go through it, the bound as much as an error —
+ * the two agreeing is what keeps "a row is one line" a rule rather than a
+ * habit of one of them. The marker for a row nothing reaches builds its own
+ * text and answers a break by describing the name instead of writing it.
  */
 function oneLine(text: string): string {
   return text.replaceAll("\n", " ");

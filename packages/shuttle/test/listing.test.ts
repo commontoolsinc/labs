@@ -421,6 +421,18 @@ describe("listing", () => {
       })).toBe("board <error: No piece. board>");
     });
 
+    it("returns a bound's line breaks written as spaces", () => {
+      // Nothing reaches this through `listPlace`, whose only bound is a module
+      // constant holding no break. `Listing` is a public type and this a
+      // public door, so the case drives the door rather than the path, and
+      // what it holds is that a bound answers to the same one-line rule an
+      // error does.
+
+      expect(renderListing({ rows: [], bound: "Two lines.\nboard" })).toBe(
+        "<Two lines. board>",
+      );
+    });
+
     it("returns the bound on a line of its own, after the rows", () => {
       expect(renderListing({
         rows: [{ name: "board", operand: "board" }],
@@ -434,6 +446,14 @@ describe("listing", () => {
     // prints as a name, `cd` takes back to the row it was printed for; and a
     // row `cd` cannot reach prints no name at all, so nothing on the surface
     // invites a reader to type a string that reaches somewhere else.
+    //
+    // A named row's line never opens with `<`, which is what keeps a name and
+    // a marker apart on one surface. `quoteToken` is the whole of that
+    // mechanism and it lives a module away: `<` is one of the characters the
+    // grammar reserves, so a name holding one is printed quoted and can never
+    // open with it. Nothing in this module would notice if that stopped being
+    // true, which is why the assertion is here and the mutation that reds it
+    // is in `line.ts`.
     //
     // The property is over the front of a printed line and not over the whole
     // of it. A row that carries an error prints the name and then a marker, so
@@ -508,18 +528,13 @@ describe("listing", () => {
      * open a second line with a name on it if the renderer wrote it as it
      * stands.
      *
-     * The break is written as an escape, and no gate would have said so had it
-     * been written as the byte. A quoted string holding a real break does not
-     * parse, so it would have had to become a template literal — and there
-     * `check-control-characters` skips the newline outright, the branch that
-     * counts a line running before the one that tests for a codepoint below
-     * `0x20`, so a literal break never reaches that test. The gate's other
-     * blind spot is the opposite one, and `MARKS` above is where this file met
-     * it: a no-break space and the Unicode line and paragraph separators are
-     * above `U+007F`, so every byte of them is at or above `0x80` and none can
-     * be a byte the test sees. Both holes are in the one gate, which is why a
-     * fixture writes an awkward character as an escape on its own account
-     * rather than on the gate's.
+     * The break is written as an escape, and deliberately.
+     * `check-control-characters` governs a literal control codepoint below
+     * `0x20` other than the newline, so a literal break passes it; and the
+     * characters `MARKS` above spells — a no-break space and the Unicode line
+     * and paragraph separators — sit outside that range altogether. An awkward
+     * character in a fixture is written as an escape on its own account rather
+     * than on a gate's.
      */
     const REPORTED = [
       undefined,
@@ -575,6 +590,7 @@ describe("listing", () => {
           unnamed++;
           return;
         }
+        expect(line.startsWith("<")).toBe(false);
         expect(line.startsWith(row.operand)).toBe(true);
         const rest = line.slice(row.operand.length);
         expect(rest === "").toBe(row.error === undefined);

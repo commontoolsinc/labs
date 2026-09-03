@@ -177,14 +177,21 @@ export function placeAtSpaceRoot(space: MemorySpace): Place {
 
 /**
  * The operand `cd` takes from `place` to the child of its position called
- * `child`, and nothing where no operand reaches that child.
+ * `child`, and nothing where neither spelling it offers reaches that child.
  *
  * Two spellings are offered, the shorter first. The name on its own is what
  * `cd` takes wherever `cd` reads that name as data. Where one of the readings
  * above takes it instead, the reference the child renders as reaches it
  * anyway: a reference reads none of them, and it escapes the separator where a
- * relative operand cannot. A child no rendering names back has neither
- * spelling, and that is what an absent answer means.
+ * relative operand cannot. An absent answer means neither of these reaches
+ * the child, which is narrower than nothing reaching it: a multi-segment
+ * operand can reach one that neither does, since a walk splits on the
+ * separator and reads a head reading only on the whole operand, so `#` is data
+ * in every segment but the first. None is looked for. Such an operand is a
+ * route rather than a name, and a route through `..` reads the trail, so it
+ * would reach the child from a place reached one way and not from a place
+ * reached another — which is the guarantee below, read as a rule about what
+ * may be offered rather than only about `-`.
  *
  * Each spelling is answered by making the move rather than by a second copy of
  * the readings, so what comes back is an operand `cd` took. The move is made

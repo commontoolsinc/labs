@@ -239,13 +239,18 @@ fragment. And inside a piece `#` is an ordinary character of a data key,
 under the rule above: the wish reading is decided on the whole operand, so
 it governs the head and nothing else.
 
-Those two readings between them leave one key with no spelling at all. A key
-whose *first* character is `#` is a wish target when it is the whole operand,
-and a reference carrying a `#` anywhere is refused, so neither door reaches it
-from the piece it sits in. A later segment does — `#` is data everywhere but
-the head — so the key is reachable from the facet above the piece and not from
-the piece itself. That is what the quoting ruling above costs, and a listing
-prints no name for such a row rather than one that means something else.
+Those two readings between them leave one key with no **direct** spelling. A
+key whose *first* character is `#` is a wish target when it is the whole
+operand, and a reference carrying a `#` anywhere is refused, so neither door
+names it on its own. A multi-segment operand still reaches it, `#` being data
+in every segment but the first: `slugs/board/#key` names it from the space
+root, and `../board/#key` names it from inside the piece — but only where the
+walk's own trail leads back, so the same string is refused from a piece a
+reference named. That is what the quoting ruling above costs, stated exactly:
+the key is reachable, by a route rather than by a name, and by a route that is
+not the same one from every place. A listing prints no name for such a row —
+a row's name is what it is called and not how to get to it — rather than a
+route, or a name that means something else.
 
 A container renders without the leading `/` that marks a reference, so a
 space root and a facet cannot be read back as a piece whose slug happens to

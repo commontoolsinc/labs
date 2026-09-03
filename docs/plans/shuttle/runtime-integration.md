@@ -211,9 +211,15 @@ running that command's inline action; and **`ls` composes `listSpaceSlugs`
 and `listPieces` (`lib/piece.ts`) with `listCellKeys`
 (`lib/cell-listing.ts`)**, handing each the held connection as
 `deps.loadPieces`. `listSlugsFromCommand` and `listPiecesFromCommand` are
-not that seam: each parses Cliffy options into its config, renders its rows
-to the process's own stdout, and passes the read no connection at all, so a
-caller holding one would open a second.
+not that seam, and not because they refuse a connection: each takes a `deps`
+with its lister and its renderer both injectable, so a caller can substitute
+a lister bound to a held one. It is what is left after that. The default
+lister is called with a config and no `deps`, so threading a connection means
+substituting the lister; the default renderer writes to the process's own
+stdout, so a caller drawing its own screen substitutes that too; and what the
+wrapper then contributes is `parseSpaceOptions` over a Cliffy options object
+and a `--json` flag. Shuttle builds its own `SpaceConfig` and has no such
+object, so nothing of the wrapper is left to call.
 
 ## Prerequisite work in `packages/cli`
 
