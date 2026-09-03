@@ -1053,10 +1053,11 @@ and `/@user/<handle>@session` is both at once — and space names are unvalidate
 rather than hypothetical. Shuttle cannot resolve it: decision 13 forbids
 inventing a spelling, and a second scope spelling would be worse than the
 ambiguity. Issue
-[#6775](https://github.com/commontoolsinc/labs/issues/6775) carries it. In
-v1 a space named by name is refused unless it resolves to the connected
-space, which is what keeps it dormant; multi-space sessions are where it
-wakes.
+[#6775](https://github.com/commontoolsinc/labs/issues/6775) carries it, and
+[the reference grammar](../../specs/reference-grammar.md) proposes the
+resolution. In v1 a space named by name is refused unless it resolves to the
+connected space, which is what keeps it dormant; multi-space sessions are
+where it wakes.
 
 The base-overlay spelling is settled above, and so is what the prompt shows
 where no slug is confirmed: the whole handle, for the reasons the Prompt
