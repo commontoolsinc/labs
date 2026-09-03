@@ -337,7 +337,7 @@ and the existing decisions it confirms or replaces.
 ```text
 //<space>/<piece>…      complete: the location is all its own
 /<piece>…               space-relative: the space is the context's
-<pointer> or ./<pointer>   piece-relative: the space and piece are the context's,
+<pointer> or ./<pointer>   piece-relative: space and piece are the context's,
                            and the pointer is against the context's position
 ```
 
