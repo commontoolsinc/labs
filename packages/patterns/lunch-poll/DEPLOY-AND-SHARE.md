@@ -53,8 +53,9 @@ url:    https://estuary.saga-castor.ts.net/team-lunch/fid1:gi7f-G8Z353Q_f_yLs_T3
 ```
 
 The **legacy name-keyed** poll is a read-only migration source. Its identity
-links are not portable through `cf get | cf set`; use only the link-free fields
-and stripped visit procedure in Option B. Treat its state as production data.
+links are not portable through `cf cell get | cf cell set`; use only the
+link-free fields and stripped visit procedure in Option B. Treat its state as
+production data.
 
 ```
 space:  team-lunch
@@ -328,12 +329,12 @@ deno task cf piece setsrc --piece "$MINE" -s "$SPACE" \
 
 # 4. Copy only link-free PerSpace fields. Roster, host, and votes start empty.
 for field in question options; do
-  deno task cf get --piece "$LEGACY_PIECE" -s "$SPACE" "$field" --input -q \
-    | deno task cf set -s "$SPACE" "$ARG/$field" -q
+  deno task cf cell get --piece "$LEGACY_PIECE" -s "$SPACE" "$field" --input -q \
+    | deno task cf cell set -s "$SPACE" "$ARG/$field" -q
 done
 
 # 5. Copy the visit log after deleting every identity link (see below).
-deno task cf get --piece "$LEGACY_PIECE" -s "$SPACE" visits --input -q \
+deno task cf cell get --piece "$LEGACY_PIECE" -s "$SPACE" visits --input -q \
   | deno eval '
       const v = JSON.parse(await new Response(Deno.stdin.readable).text());
       for (const e of v) {
@@ -352,18 +353,18 @@ deno task cf piece step --piece "$MINE" -s "$SPACE"
 deno task cf piece inspect --piece "$MINE" -s "$SPACE" --summary
 ```
 
-> **Why the copy writes to `$ARG` and not `cf set --input`.** A `cf set --input`
-> write validates the piece's whole input object, and this pattern's `viewer`
-> slot is a per-user allocation site rather than a plain value. Every field
-> fails on that slot rather than on the field being written, which bites any
-> lunch-poll piece, including one created seconds ago, and a nested path
-> (`users/0/name`) fails alongside a top-level one. A write addressed to the
-> argument document itself is not validated that way, which is what step 2
-> resolves and what the loop above uses. That escape hatch also permits
-> destructive clears, so it is not a general-purpose update path.
+> **Why the copy writes to `$ARG` and not `cf cell set --input`.** A
+> `cf cell set --input` write validates the piece's whole input object, and this
+> pattern's `viewer` slot is a per-user allocation site rather than a plain
+> value. Every field fails on that slot rather than on the field being written,
+> which bites any lunch-poll piece, including one created seconds ago, and a
+> nested path (`users/0/name`) fails alongside a top-level one. A write
+> addressed to the argument document itself is not validated that way, which is
+> what step 2 resolves and what the loop above uses. That escape hatch also
+> permits destructive clears, so it is not a general-purpose update path.
 
-> **A JSON link is not a restorable backup.** A value read by `cf get` can be
-> refused when written back, including into the piece that minted it, with
+> **A JSON link is not a restorable backup.** A value read by `cf cell get` can
+> be refused when written back, including into the piece that minted it, with
 > `source has no durable schema contract`. This is measured for roster profile
 > links. Never clear `users`, `host`, `votes`, or identity-bearing visits on the
 > theory that captured JSON can restore them. Treat that JSON as an audit
@@ -388,7 +389,7 @@ deno task cf piece inspect --piece "$MINE" -s "$SPACE" --summary
 > travel separately in `loggedByName` and `voter`, so deleting the legacy links
 > costs the "who logged this" navigation and nothing else — the "Recently eaten"
 > log and the "Lunch stats" tallies come across intact. Do not assume a later
-> profile-first-to-profile-first copy can preserve links: `cf get` does not
+> profile-first-to-profile-first copy can preserve links: `cf cell get` does not
 > carry the durable source contract required to write those links back. Prove
 > every link-bearing field on the disposable target or strip it.
 

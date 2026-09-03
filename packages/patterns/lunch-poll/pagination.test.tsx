@@ -3,7 +3,7 @@
  * every stored option remains reachable through the paging controls.
  */
 
-import { action, assert, pattern, TESTS, UI } from "commonfabric";
+import { action, assert, pattern, TESTS, UI, Writable } from "commonfabric";
 import {
   findElementByExactText,
   findNodeByProp,
@@ -21,10 +21,18 @@ const OPTIONS: Option[] = [
   { id: "option-6", title: "Restaurant 6", addedByName: "Host" },
   { id: "option-7", title: "Restaurant 7", addedByName: "Host" },
   { id: "option-8", title: "Restaurant 8", addedByName: "Host" },
+  { id: "option-9", title: "Restaurant 9", addedByName: "Host" },
+  { id: "option-10", title: "Restaurant 10", addedByName: "Host" },
+  { id: "option-11", title: "Restaurant 11", addedByName: "Host" },
+  { id: "option-12", title: "Restaurant 12", addedByName: "Host" },
+  { id: "option-13", title: "Restaurant 13", addedByName: "Host" },
+  { id: "option-14", title: "Restaurant 14", addedByName: "Host" },
+  { id: "option-15", title: "Restaurant 15", addedByName: "Host" },
 ];
 
 export default pattern(() => {
-  const poll = CozyPoll({ options: OPTIONS });
+  const options = Writable.of<Option[]>(OPTIONS);
+  const poll = CozyPoll({ options });
 
   const assert_first_page_is_bounded = assert(() =>
     findNodeByProp(poll[UI], "data-option-title", "Restaurant 1") !==
@@ -33,7 +41,7 @@ export default pattern(() => {
       undefined &&
     findNodeByProp(poll[UI], "data-option-title", "Restaurant 8") ===
       undefined &&
-    hasText(poll[UI], "Options 1–7 of 8 · shared view")
+    hasText(poll[UI], "Options 1–7 of 15 · shared view")
   );
 
   const action_next_page = action(() => {
@@ -49,7 +57,41 @@ export default pattern(() => {
       undefined &&
     findNodeByProp(poll[UI], "data-option-title", "Restaurant 8") !==
       undefined &&
+    findNodeByProp(poll[UI], "data-option-title", "Restaurant 14") !==
+      undefined &&
+    findNodeByProp(poll[UI], "data-option-title", "Restaurant 15") ===
+      undefined &&
+    hasText(poll[UI], "Options 8–14 of 15 · shared view")
+  );
+
+  const assert_third_page_is_reachable = assert(() =>
+    findNodeByProp(poll[UI], "data-option-title", "Restaurant 14") ===
+      undefined &&
+    findNodeByProp(poll[UI], "data-option-title", "Restaurant 15") !==
+      undefined &&
+    hasText(poll[UI], "Options 15–15 of 15 · shared view")
+  );
+
+  const action_remove_last_page = action(() => {
+    options.set(OPTIONS.slice(0, 8));
+  });
+
+  const assert_removed_page_clamps_to_last_page = assert(() =>
+    findNodeByProp(poll[UI], "data-option-title", "Restaurant 8") !==
+      undefined &&
+    findNodeByProp(poll[UI], "data-option-title", "Restaurant 15") ===
+      undefined &&
     hasText(poll[UI], "Options 8–8 of 8 · shared view")
+  );
+
+  const assert_first_page_after_removal = assert(() =>
+    findNodeByProp(poll[UI], "data-option-title", "Restaurant 1") !==
+      undefined &&
+    findNodeByProp(poll[UI], "data-option-title", "Restaurant 7") !==
+      undefined &&
+    findNodeByProp(poll[UI], "data-option-title", "Restaurant 8") ===
+      undefined &&
+    hasText(poll[UI], "Options 1–7 of 8 · shared view")
   );
 
   const action_previous_page = action(() => {
@@ -65,8 +107,12 @@ export default pattern(() => {
       { assertion: assert_first_page_is_bounded },
       { action: action_next_page },
       { assertion: assert_second_page_is_reachable },
+      { action: action_next_page },
+      { assertion: assert_third_page_is_reachable },
+      { action: action_remove_last_page },
+      { assertion: assert_removed_page_clamps_to_last_page },
       { action: action_previous_page },
-      { assertion: assert_first_page_is_bounded },
+      { assertion: assert_first_page_after_removal },
     ],
     poll,
   };

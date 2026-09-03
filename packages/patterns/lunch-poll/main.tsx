@@ -1419,7 +1419,13 @@ export default pattern<CozyPollInput, CozyPollOutput>(
       return `Options ${start}–${end} of ${count} · shared view`;
     });
     const previousOptionPage = action(() => {
-      optionPage.set(Math.max(0, optionPage.get() - 1));
+      const lastPage = Math.max(
+        0,
+        Math.ceil(options.length / OPTION_PAGE_SIZE) - 1,
+      );
+      optionPage.set(
+        Math.max(0, Math.min(optionPage.get(), lastPage) - 1),
+      );
     });
     const nextOptionPage = action(() => {
       const lastPage = Math.max(
@@ -2058,7 +2064,7 @@ export default pattern<CozyPollInput, CozyPollOutput>(
                       isAdmin={isAdmin}
                       requestRemove={requestRemoveOption}
                       requestArt={requestArt}
-                      usesSharedArtEditor={true}
+                      usesSharedArtEditor
                       castVote={boundCastVote}
                       logVisit={boundLogVisit}
                     />

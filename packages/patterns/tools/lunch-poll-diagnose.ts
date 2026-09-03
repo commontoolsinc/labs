@@ -83,7 +83,7 @@ interface DiagnosticsSummary {
   };
 }
 
-interface MatrixConfig {
+export interface MatrixConfig {
   program: string;
   optionCounts: readonly number[];
   userCounts: readonly number[];
@@ -837,9 +837,13 @@ export async function runCase(config: CaseConfig): Promise<CaseResult> {
   }
 }
 
-function numberArg(name: string, fallback: number): number {
+function numberArg(
+  name: string,
+  fallback: number,
+  args: readonly string[] = Deno.args,
+): number {
   const prefix = `--${name}=`;
-  const arg = Deno.args.find((entry) => entry.startsWith(prefix));
+  const arg = args.find((entry) => entry.startsWith(prefix));
   if (!arg) return fallback;
   const parsed = Number(arg.slice(prefix.length));
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
@@ -849,9 +853,10 @@ function numberListArg(
   name: string,
   fallback: readonly number[],
   minimum = 0,
+  args: readonly string[] = Deno.args,
 ): number[] {
   const prefix = `--${name}=`;
-  const arg = Deno.args.find((entry) => entry.startsWith(prefix));
+  const arg = args.find((entry) => entry.startsWith(prefix));
   if (!arg) return [...fallback];
   const values = arg.slice(prefix.length).split(",")
     .map((entry) => Number(entry.trim()));
@@ -866,9 +871,13 @@ function numberListArg(
   return values;
 }
 
-function stringArg(name: string, fallback: string): string {
+function stringArg(
+  name: string,
+  fallback: string,
+  args: readonly string[] = Deno.args,
+): string {
   const prefix = `--${name}=`;
-  const arg = Deno.args.find((entry) => entry.startsWith(prefix));
+  const arg = args.find((entry) => entry.startsWith(prefix));
   return arg ? arg.slice(prefix.length) : fallback;
 }
 
@@ -902,21 +911,26 @@ function validateUserCount(userCount: number, source: string): void {
   }
 }
 
-function matrixConfigFromArgs(): MatrixConfig {
-  const quick = Deno.args.includes("--quick");
-  const production = Deno.args.includes("--production");
+export function matrixConfigFromArgs(
+  args: readonly string[] = Deno.args,
+): MatrixConfig {
+  const quick = args.includes("--quick");
+  const production = args.includes("--production");
   return {
-    program: stringArg("program", "main.tsx"),
+    program: stringArg("program", "main.tsx", args),
     optionCounts: numberListArg(
       "options",
       production ? [14] : quick ? [1, 3] : [1, 3, 10],
+      0,
+      args,
     ),
     userCounts: numberListArg(
       "users",
       production ? [1] : quick ? [2] : [2, 5],
       1,
+      args,
     ),
-    voteRounds: numberArg("rounds", quick ? 1 : 3),
+    voteRounds: numberArg("rounds", quick ? 1 : 3, args),
   };
 }
 
