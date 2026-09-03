@@ -255,6 +255,18 @@ describe("module", () => {
         { src: "items", rendered: "[1,-2]" },
       ]);
     });
+
+    it("renders a deeply nested operand down to its leaf", () => {
+      // A view tree nests two levels per node, so a diagnostic for one soon
+      // runs past the renderer's default depth; the leaf here sits well past
+      // it.
+
+      let value: unknown = "leaf";
+      for (let i = 0; i < 30; i++) value = { children: [value] };
+      const [part] = assertRenderParts(false, [{ src: "tree", value }]);
+      expect(part.rendered).toContain('"leaf"');
+      expect(part.rendered).not.toContain("...");
+    });
   });
 
   describe("handler function", () => {
