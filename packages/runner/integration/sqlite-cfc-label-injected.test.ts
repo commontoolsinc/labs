@@ -355,7 +355,7 @@ async function runTest(base: URL, contractArrivesLate: boolean) {
         }
       }
 
-      // (e) The INSPECTION reader — what `cf piece get-label` calls — resolves
+      // (e) The INSPECTION reader — what `cf cell get-label` calls — resolves
       // the links the path crosses and reports the label a person asked about.
       // Selecting the column reports it at the selection; selecting the row
       // reports one entry per labeled column.

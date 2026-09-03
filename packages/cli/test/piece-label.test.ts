@@ -705,7 +705,7 @@ describe("cf piece CFC labels", () => {
    * The shape a labeled query result stores, built by hand: the row is its own
    * entity doc and carries the per-column label, the query doc only LINKS to
    * it, and the piece result links to the query doc. So `q/result/0/secret`
-   * crosses a link at `result/0` — the path `cf piece get-label` is asked
+   * crosses a link at `result/0` — the path `cf cell get-label` is asked
    * about on a sqlite-backed panel, and the one the reader has to resolve.
    */
   const buildCrossingChain = async (prefix: string) => {
