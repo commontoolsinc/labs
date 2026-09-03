@@ -180,15 +180,22 @@ describe("cli", () => {
   });
 
   describe("runAuditCli()", () => {
-    it("returns 0 over the clean fixture at the default threshold", async () => {
+    it("reports the fixture's known defects at the default threshold", async () => {
+      // The fixture is a captured run of a system with the gaps the Group E
+      // checks report, so a green exit here would be the audit failing to say
+      // what it knows. The Group A and Group C checks are what still find
+      // nothing: no clause about what the run DID is contradicted.
       const written: string[] = [];
 
       expect(
         await runAuditCli([FIXTURE_RUN_DIR], (text) => {
           written.push(text);
         }),
-      ).toBe(0);
-      expect(written.join("")).toContain("FAIL 0");
+      ).toBe(1);
+      const report = written.join("");
+      expect(report).toContain("AUD-20 label-consulting admission");
+      expect(report).toContain("AUD-21 prompt-slot binding");
+      expect(report).toContain("AUD-22 delegation ceiling");
     });
 
     it("marks a finding that rests on our judgment rather than the specification", () => {
@@ -215,18 +222,19 @@ describe("cli", () => {
       expect(rendered).toContain("states this requirement");
     });
 
-    it("returns 0 over the clean fixture asked for JSON", async () => {
+    it("cites a clause on every result it emits as JSON", async () => {
       const written: string[] = [];
 
       expect(
         await runAuditCli([FIXTURE_RUN_DIR, "--json"], (text) => {
           written.push(text);
         }),
-      ).toBe(0);
+      ).toBe(1);
+      const document = JSON.parse(written.join("")) as {
+        results: CheckResult[];
+      };
       expect(
-        (JSON.parse(written.join("")) as CheckResult[]).every((one) =>
-          one.citations.length > 0
-        ),
+        document.results.every((one) => one.citations.length > 0),
       ).toBe(true);
     });
 
@@ -258,9 +266,8 @@ describe("cli", () => {
       });
       const idsOf = (written: string[]) =>
         new Set(
-          (JSON.parse(written.join("")) as CheckResult[]).map((one) =>
-            one.checkId
-          ),
+          (JSON.parse(written.join("")) as { results: CheckResult[] }).results
+            .map((one) => one.checkId),
         );
       expect([...idsOf(plain)].filter((id) => id.startsWith("AUD-1"))).not
         .toContain("AUD-16");
@@ -299,9 +306,8 @@ describe("cli", () => {
         },
       );
       expect(
-        (JSON.parse(written.join("")) as CheckResult[]).some((one) =>
-          one.checkId === "AUD-18"
-        ),
+        (JSON.parse(written.join("")) as { results: CheckResult[] }).results
+          .some((one) => one.checkId === "AUD-18"),
       ).toBe(true);
     });
 
@@ -358,9 +364,11 @@ describe("cli", () => {
           written.push(text);
         },
       );
-      const toolshed = (JSON.parse(written.join("")) as CheckResult[]).find((
-        one,
-      ) => one.checkId === "AUD-17");
+      const toolshed =
+        (JSON.parse(written.join("")) as { results: CheckResult[] }).results
+          .find((
+            one,
+          ) => one.checkId === "AUD-17");
       expect(toolshed?.verdict).toBe("inconclusive");
     });
 

@@ -1,0 +1,374 @@
+/**
+ * The Group E checks: the defects we have found, each written as a check that
+ * fails today for a named reason and turns green when the defect is fixed.
+ *
+ * Group A asks whether a run did what the clauses require, and finds a
+ * regression when it stops. These ask a different question, and it is the one
+ * an operator actually asks: is the system still broken in the ways we already
+ * know about, and is that list getting shorter? A finding here is not news.
+ * Its value is the day it stops appearing.
+ *
+ * That makes the falsifiability discipline the whole of these checks' worth. A
+ * check that only ever fails is a constant wearing a check's clothes: it
+ * reports the same thing about a fixed system as about a broken one, so it can
+ * never say the work landed. Every check here is therefore seeded twice in
+ * `test/seeded-violations.test.ts` — once with the defect, where it fails, and
+ * once with the shape a fix would produce, where it passes — and the second
+ * seeding is the one that matters.
+ *
+ * Each names the obligation of the CFC specification's `CfcAgentHarnessProfile`
+ * checklist it reports on, and the issue the work is tracked under.
+ * `conformance-manifest.ts` holds the other side of that link: the obligation,
+ * its status, and the checks covering it, reconciled against these verdicts so
+ * a status nothing tests cannot be asserted.
+ */
+
+import type { HarnessSubagentRunManifest } from "../../src/contracts/subagent.ts";
+import type { PromptSlotBinding } from "../../src/contracts/prompt-slot.ts";
+import { extendsClause, requiredBy } from "../citations.ts";
+import type { RunEvidence } from "../evidence.ts";
+import type { CheckEvidence } from "../report.ts";
+import {
+  activitiesOf,
+  type AuditCheck,
+  count,
+  decisionsOf,
+  executedSideEffects,
+  isEnforcing,
+  notReadable,
+  runStateOf,
+} from "./structural.ts";
+
+//
+// AUD-20 label-consulting admission (H9)
+//
+
+/**
+ * The issue each known defect is tracked under, so a finding carries the place
+ * the work is, and the manifest and the expected-failures ledger cite one
+ * string rather than three copies of it.
+ */
+export const KNOWN_DEFECT_ISSUES = {
+  "AUD-20": "CT-2175",
+  "AUD-21": "CT-2178",
+  "AUD-22": "CT-2178",
+} as const;
+
+/**
+ * Whether any decision recorded for `toolCallId` consulted a label.
+ *
+ * The predicate is the `release` record, and it is chosen because it is the
+ * only thing in an artifact tree that tells the two kinds of decision apart. A
+ * boundary that measured a flow against a sink writes one; the prompt loop's
+ * own gate does not, because it has nothing to write — it turns on the tool
+ * descriptor's static `effectClass` crossed with whether the run carries
+ * direct-command evidence, and records its verdict before the tool runs.
+ *
+ * Not the reason codes. Every `cfc_*` code comes from that one authority
+ * switch, so counting them would report an authority allow as a label
+ * consultation — the trap `AUD-16` documents at length and for the same
+ * reason. Not the invocation context's `cfcInputLabels` either: labels
+ * carried into a call are labels the call transported, and transporting a
+ * label is not the same act as a decision turning on one.
+ */
+const labelConsultingDecisions = (
+  run: RunEvidence,
+): ReadonlySet<string> => {
+  const consulted = new Set<string>();
+  for (const decision of decisionsOf(run)?.decisions ?? []) {
+    if (decision.release !== undefined) {
+      consulted.add(decision.toolCallId);
+    }
+  }
+  return consulted;
+};
+
+const labelConsultingAdmission: AuditCheck = {
+  id: "AUD-20",
+  title: "label-consulting admission",
+  // The clause wants a side-effect request to carry the influence labels its
+  // profile requires. It does not say the decision admitting the request must
+  // turn on one, which is what this check reports, so the finding is ours and
+  // says so. The clause that does state it is §18.3.3's last bullet of the
+  // CFC specification, which is another repository's document and cannot be
+  // quoted here under the drift test's guarantee.
+  citations: extendsClause("AH-CFC-9"),
+  falsifiedBy:
+    "an executed side effect under an enforcing mode whose every recorded decision turns on authority — no decision on its `toolCallId` carries a `release` record, which is the only thing a boundary that consulted a label writes",
+  inspect(run) {
+    if (run.runState.status !== "present") {
+      return notReadable("run-state.json", run.runState);
+    }
+    // The side effects are in the run report, and the decisions that admitted
+    // them are read from the first of trace, report and run state that loaded
+    // — which the guard above established. Without the report the tool
+    // activity reads as empty, and a run with no side effects passes by
+    // knowing nothing about the ones it made.
+    if (run.runReport.status !== "present") {
+      return notReadable("run-report.json", run.runReport);
+    }
+    const mode = runStateOf(run)!.cfcEnforcementMode;
+    const effects = executedSideEffects(run);
+    if (effects.length === 0) {
+      return {
+        verdict: "not-applicable",
+        message: "this run executed no side effect, so nothing was admitted",
+      };
+    }
+    if (!isEnforcing(mode)) {
+      return {
+        verdict: "not-applicable",
+        message:
+          `this run claims \`${mode}\`, which admits a side effect without claiming to have decided about it`,
+      };
+    }
+    const consulted = labelConsultingDecisions(run);
+    const unconsulted = effects.filter((activity) =>
+      !consulted.has(activity.toolCallId)
+    );
+    if (unconsulted.length === 0) {
+      return {
+        verdict: "pass",
+        message: `every one of this run's ${
+          count(effects.length, "side effect", "side effects")
+        } was admitted by a decision that consulted a label`,
+      };
+    }
+    const byTool = new Map<string, number>();
+    for (const activity of unconsulted) {
+      byTool.set(activity.toolId, (byTool.get(activity.toolId) ?? 0) + 1);
+    }
+    const evidence: CheckEvidence[] = [...byTool.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([toolId, total]) => ({
+        artifact: "run-report.json",
+        pointer: "toolActivity",
+        detail: `\`${toolId}\`: ${
+          count(total, "executed side effect", "executed side effects")
+        } admitted with no label-consulting decision`,
+      }));
+    return {
+      verdict: "fail",
+      message: `${
+        count(unconsulted.length, "side effect", "side effects")
+      } of ${effects.length} were admitted on authority alone, with no decision that could have consulted a label (${
+        KNOWN_DEFECT_ISSUES["AUD-20"]
+      })`,
+      evidence,
+    };
+  },
+};
+
+//
+// AUD-21 prompt-slot binding (H2)
+//
+
+/** Every distinct prompt-slot binding this run's artifacts carry. */
+const promptSlotBindings = (
+  run: RunEvidence,
+): readonly {
+  where: string;
+  artifact: string;
+  binding: PromptSlotBinding;
+}[] => {
+  const found: {
+    where: string;
+    artifact: string;
+    binding: PromptSlotBinding;
+  }[] = [];
+  const seen = new Set<string>();
+  const add = (
+    artifact: string,
+    where: string,
+    binding?: PromptSlotBinding,
+  ) => {
+    if (binding === undefined) return;
+    const key = JSON.stringify(binding);
+    if (seen.has(key)) return;
+    seen.add(key);
+    found.push({ artifact, where, binding });
+  };
+  add(
+    "run-state.json",
+    "promptSlotBinding",
+    runStateOf(run)?.promptSlotBinding,
+  );
+  for (const activity of activitiesOf(run)) {
+    add(
+      "run-report.json",
+      `toolActivity[${activity.sequence}].promptSlot`,
+      activity.promptSlot,
+    );
+  }
+  for (const decision of decisionsOf(run)?.decisions ?? []) {
+    add(
+      "policy-trace.json",
+      `decisions[${decision.sequence}].promptSlot`,
+      decision.promptSlot,
+    );
+  }
+  return found;
+};
+
+/**
+ * What AH-CFC-3 requires of a binding and this one does not carry.
+ *
+ * `subject` is read as the clause reads it — an authenticated subject — and
+ * the only form of one an artifact can be held to is a DID. A workspace path
+ * and a resume-run id are both run-scoping facts that occupy the field without
+ * naming anybody, and a check that accepted any non-empty string would pass on
+ * exactly the shape the obligation is open against.
+ */
+const missingBindingFields = (
+  binding: PromptSlotBinding,
+): readonly string[] => {
+  const missing: string[] = [];
+  const present = (value: unknown): boolean =>
+    typeof value === "string" && value.trim() !== "";
+  if (!present(binding.kernelName)) missing.push("a kernel name");
+  if (!present(binding.surface)) missing.push("a named surface");
+  if (!present(binding.subject)) {
+    missing.push("an authenticated subject");
+  } else if (!binding.subject!.startsWith("did:")) {
+    missing.push(
+      `an authenticated subject (\`${binding.subject}\` names no principal)`,
+    );
+  }
+  if (!present(binding.valueDigest)) {
+    missing.push("a digest of the exact value carrying the authority");
+  }
+  return missing;
+};
+
+const promptSlotBindingEvidence: AuditCheck = {
+  id: "AUD-21",
+  title: "prompt-slot binding",
+  citations: requiredBy("AH-CFC-3"),
+  falsifiedBy:
+    "a `direct-command` prompt-slot binding that carries no value digest, or whose subject is absent or is something other than a principal — a workspace path, a resume-run id, or any other run-scoping fact occupying the field",
+  inspect(run) {
+    if (run.runState.status !== "present") {
+      return notReadable("run-state.json", run.runState);
+    }
+    const bindings = promptSlotBindings(run).filter(({ binding }) =>
+      binding.role === "direct-command"
+    );
+    if (bindings.length === 0) {
+      return {
+        verdict: "not-applicable",
+        message:
+          "this run recorded no `direct-command` prompt-slot binding, so it minted no authority for a binding to carry",
+      };
+    }
+    const evidence: CheckEvidence[] = [];
+    for (const { artifact, where, binding } of bindings) {
+      const missing = missingBindingFields(binding);
+      if (missing.length === 0) continue;
+      evidence.push({
+        artifact,
+        pointer: where,
+        detail:
+          `a \`direct-command\` binding on \`${binding.surface}\` carrying no ${
+            missing.join("; no ")
+          }`,
+      });
+    }
+    if (evidence.length === 0) {
+      return {
+        verdict: "pass",
+        message: `every one of this run's ${
+          count(
+            bindings.length,
+            "`direct-command` binding binds",
+            "`direct-command` bindings bind",
+          )
+        } a kernel name, an authenticated subject, a named surface and a digest of the value`,
+      };
+    }
+    return {
+      verdict: "fail",
+      message: `${
+        count(evidence.length, "binding mints", "bindings mint")
+      } direct-command authority without binding what AH-CFC-3 requires it to bind (${
+        KNOWN_DEFECT_ISSUES["AUD-21"]
+      })`,
+      evidence,
+    };
+  },
+};
+
+//
+// AUD-22 delegation ceiling (H8)
+//
+
+/**
+ * The field a delegation would carry its child's confidentiality ceiling in.
+ *
+ * Read off the record rather than off the type, because the type has no such
+ * field: nothing in `HarnessSubagentProfileConfig` represents a ceiling today,
+ * which is the defect. An audit reads what a tree holds, so naming the field
+ * here is what lets the check turn green the day a delegation starts writing
+ * one, without an audit change landing alongside the fix.
+ */
+const CEILING_FIELD = "confidentialityCeiling";
+
+const recordsCeiling = (manifest: HarnessSubagentRunManifest): boolean => {
+  const value = (manifest as unknown as Record<string, unknown>)[CEILING_FIELD];
+  return value !== undefined && value !== null;
+};
+
+const delegationCeiling: AuditCheck = {
+  id: "AUD-22",
+  title: "delegation ceiling",
+  citations: requiredBy("AH-CFC-12a"),
+  falsifiedBy:
+    "a delegation whose recorded manifest carries no confidentiality ceiling — which is every delegation today, because nothing in the subagent profile represents one",
+  inspect(run) {
+    if (run.runState.status !== "present") {
+      return notReadable("run-state.json", run.runState);
+    }
+    const delegations = runStateOf(run)?.subagentRuns ?? [];
+    if (delegations.length === 0) {
+      return {
+        verdict: "not-applicable",
+        message: "this run delegated nothing, so no child profile arises",
+      };
+    }
+    const uncapped = delegations.filter((delegation) =>
+      !recordsCeiling(delegation.manifest)
+    );
+    if (uncapped.length === 0) {
+      return {
+        verdict: "pass",
+        message: `every one of this run's ${
+          count(delegations.length, "delegation", "delegations")
+        } bound its child a confidentiality ceiling`,
+      };
+    }
+    // AH-CFC-12a states the ceiling as a SHOULD, so the finding carries the
+    // clause's own weight rather than one chosen to look urgent. The nightly
+    // audit runs at `--fail-on warn`, so this is a failing job either way, and
+    // a reader comparing the finding to the clause finds them agreeing.
+    return {
+      verdict: "warn",
+      message: `${
+        count(uncapped.length, "delegation records", "delegations record")
+      } no confidentiality ceiling, so nothing bounds what the child may observe through the handles and arguments it inherits (${
+        KNOWN_DEFECT_ISSUES["AUD-22"]
+      })`,
+      evidence: uncapped.map((delegation) => ({
+        artifact: "run-state.json",
+        pointer: `subagentRuns[${delegation.childRunId}].manifest`,
+        detail:
+          `the \`${delegation.manifest.profile}\` profile binds tools, skills and a turn budget, and no \`${CEILING_FIELD}\``,
+      })),
+    };
+  },
+};
+
+/** Every known-defect check, in id order. */
+export const KNOWN_DEFECT_CHECKS: readonly AuditCheck[] = [
+  labelConsultingAdmission,
+  promptSlotBindingEvidence,
+  delegationCeiling,
+];

@@ -367,9 +367,12 @@ export const runAuditCli = async (
     return 2;
   }
   if (options.expectedFailures === undefined) {
+    // One document, so a caller parsing `--json` gets the same top level
+    // whichever flags were passed and a field it does not read is absent
+    // rather than the whole document being a different kind of thing.
     write(
       options.json
-        ? JSON.stringify(results, null, 2)
+        ? JSON.stringify({ results }, null, 2)
         : renderAuditReport(results, options.failOn),
     );
     return results.some((result) =>

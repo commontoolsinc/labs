@@ -91,7 +91,7 @@ type UnreadableArtifact = Exclude<
 >;
 
 /** The outcome for a check whose subject artifact was not readable. */
-const notReadable = (
+export const notReadable = (
   artifact: string,
   state: UnreadableArtifact,
 ): CheckOutcome => ({
@@ -102,7 +102,7 @@ const notReadable = (
   evidence: [{ artifact, detail: state.status }],
 });
 
-const runStateOf = (run: RunEvidence): HarnessRunState | undefined =>
+export const runStateOf = (run: RunEvidence): HarnessRunState | undefined =>
   run.runState.status === "present" ? run.runState.value : undefined;
 
 /**
@@ -111,7 +111,7 @@ const runStateOf = (run: RunEvidence): HarnessRunState | undefined =>
  * The trace is the artifact whose subject they are; the report and the run
  * state carry the same list, so a tree missing the trace can still be read.
  */
-const decisionsOf = (
+export const decisionsOf = (
   run: RunEvidence,
 ):
   | { source: string; decisions: readonly HarnessPolicyDecisionRecord[] }
@@ -134,7 +134,9 @@ const decisionsOf = (
     : { source: "run-state.json", decisions: state.policyDecisions ?? [] };
 };
 
-const activitiesOf = (run: RunEvidence): readonly HarnessToolActivity[] =>
+export const activitiesOf = (
+  run: RunEvidence,
+): readonly HarnessToolActivity[] =>
   run.runReport.status === "present"
     ? run.runReport.value.toolActivity ?? []
     : [];
@@ -214,7 +216,7 @@ const modelContextOf = (
 const handleTableOf = (run: RunEvidence): HarnessHandleTable | undefined =>
   runStateOf(run)?.handleTable;
 
-const isEnforcing = (mode: CfcEnforcementMode): boolean =>
+export const isEnforcing = (mode: CfcEnforcementMode): boolean =>
   mode === "enforce-explicit" || mode === "enforce-strict";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -230,8 +232,11 @@ const parsedToolContent = (message: HarnessToolTranscriptMessage): unknown => {
 };
 
 /** The number, and the singular or plural word for it. */
-const count = (total: number, singular: string, plural: string): string =>
-  `${total} ${total === 1 ? singular : plural}`;
+export const count = (
+  total: number,
+  singular: string,
+  plural: string,
+): string => `${total} ${total === 1 ? singular : plural}`;
 
 //
 // AUD-1 posture consistency
@@ -441,7 +446,7 @@ const modeOfReasonCode = (
 };
 
 /** The side effects this run actually executed, which need transport evidence. */
-const executedSideEffects = (
+export const executedSideEffects = (
   run: RunEvidence,
 ): readonly HarnessToolActivity[] =>
   activitiesOf(run).filter((activity) =>
