@@ -193,7 +193,7 @@ describe("cfcLabelViewForResolvedCellWithStatus", () => {
   });
 
   it("reports no label, and no failure, for a cell without a runtime", async () => {
-    await withRuntime(async (runtime) => {
+    await withRuntime((runtime) => {
       // A link with nothing to resolve it against: without a runtime there is
       // no doc to read, which is an absent label rather than a failed read.
       const link = runtime.getCell<string>(space, "resolved-no-runtime")
@@ -202,6 +202,7 @@ describe("cfcLabelViewForResolvedCellWithStatus", () => {
       const status = cfcLabelViewForResolvedCellWithStatus(detached);
       expect(status.readFailed).toBe(false);
       expect(status.view).toBeUndefined();
+      return Promise.resolve();
     });
   });
 });
