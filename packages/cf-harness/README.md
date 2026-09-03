@@ -2332,29 +2332,39 @@ reads as coverage.
    back and requires the quote to still be in it. A rewording breaks the suite,
    which is the notice that the check resting on it needs rewriting too.
 
-2. **The location — not pinned here.** A check names where it reads, and AUD-16
-   is the sharp case: it counts release refusals in `policy-trace.json` at
-   `decisions[].release`, and that pointer appears in its findings. Nothing in
-   this package fails if that channel moves. It is not a hypothetical — CT-2200
-   relocated exactly this channel — and a check reading a relocated channel
-   finds nothing there and reports nothing wrong, which is indistinguishable
-   from a corpus that had nothing to report. The guard is a property test that
-   pins the pointer, so a channel move breaks the property rather than passing
-   quietly; it arrives with the deterministic property suite, and until then
-   nothing here notices.
+2. **The location — pinned.** A check names where it reads, and AUD-16 is the
+   sharp case: it counts release refusals in `policy-trace.json` at
+   `decisions[].release`. `P-deny-egress` asserts that AUD-16's evidence carries
+   that artifact and that pointer, so a channel move breaks the property rather
+   than passing quietly. That guard exists because the move happened: CT-2200
+   relocated exactly this channel while the property suite was being written,
+   and a check reading a relocated channel finds nothing there and reports
+   nothing wrong — which is indistinguishable, in every line the audit prints,
+   from a corpus that had nothing to report.
 
-3. **The shape — not pinned anywhere.** A field can keep its name and its place
-   and change what it carries, and no check would notice. AUD-16's own reading
-   turns on `release` being written only by a boundary that consulted a label,
-   and AUD-20's turns on the same fact; neither would fail if something else
-   started writing that field, and both would go on reporting confidently about
-   a distinction that had stopped existing. Nothing pins the meaning of any
-   field the audit depends on.
+3. **The shape — not pinned.** A field can keep its name and its place and
+   change what it carries, and no check would notice. AUD-16's own reading turns
+   on `release` being written only by a boundary that consulted a label, and
+   AUD-21's turns on the same fact; neither would fail if something else started
+   writing that field, and both would go on reporting confidently about a
+   distinction that had stopped existing. Nothing pins the meaning of any field
+   the audit depends on.
+
+   `audit/test/regenerate-fixtures.ts` is the closest thing to a pin and is not
+   one: it builds the committed fixture from the real harness through the real
+   artifact store, precisely so the tree cannot drift from what the harness
+   persists — but regenerating is a manual act, so a shape that moves is noticed
+   only when somebody happens to run it.
 
 The third is stated here as a gap rather than described as covered, and
 deliberately: an honest gap in a document is worth more than a rule nobody
 implemented, and a reader deciding how much weight a green audit carries needs
 to know which of the three pins is holding it up.
+
+This is the same family as the two rules below — "a consistency check cannot
+detect a consistent wrong answer" and "a test that passes needs a reason". All
+three are about a check that has stopped testing its subject while still
+reporting on it, and each names a different way that happens.
 
 ## Testing
 
