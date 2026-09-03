@@ -121,18 +121,24 @@ exits are. [The full argument](./inverting-the-physics-of-trust.md)
 is the physics and the hardware.
 
 Most of what is here is early, and all of it is readable. What runs
-today: the compiler, the checker — rejecting at explicit boundaries, the
-third of four rungs — a hundred-odd patterns, and machines that prove
-which runtime they are before your data arrives. What does not: label
-propagation defaults to off and is rolling out, strict-by-default is the
-current work, a space still has a host that can revoke a participant,
-and robustness and performance are not there yet. The claim is never
-perfection. It is checkability: here is the mechanism, here is how to
-check it, here is what it does not cover. A promise of perfection is
-destroyed by its first counterexample; a guarantee built to be checked
-survives being found wanting. The people who came before us settled
-arguments like this one by writing code rather than papers, and we
-would rather be judged the same way.
+today: the compiler; the checker, rejecting at explicit boundaries — the
+third of four rungs — in every host and test, with no flag set; a
+hundred and twenty-odd patterns with recorded baselines; labels that
+survive into the store in the browser shell; row-level clearance on
+shared tables; and access control on spaces, enforced on the production
+server. Every dial the flow checker has is built, and the harness that
+dogfoods it runs the full set. What is left is mostly wiring: the
+stricter dials are off in the core preset while they roll out,
+strict-by-default is the current work, a space still has a host that
+can revoke a participant, and the machine that would prove which
+runtime it is before your data arrives is provisioned but not yet
+proving anything. Robustness and performance are not there yet. The
+claim is never perfection. It is checkability: here is the mechanism,
+here is how to check it, here is what it does not cover. A promise of
+perfection is destroyed by its first counterexample; a guarantee built
+to be checked survives being found wanting. The people who came before
+us settled arguments like this one by writing code rather than papers,
+and we would rather be judged the same way.
 
 Nothing here needs a token, a chain, or a consensus mechanism — only
 that trust be checkable by anyone, from evidence.
