@@ -1005,12 +1005,9 @@ Deno.test("server-execution CI uses stable default and opposite roles", async ()
         runStep,
       ]
     ) {
-      assert(
-        !withoutComments(stepBlock(job, stepName)).includes(
-          "EXPERIMENTAL_SERVER_EXECUTION=false",
-        ),
-        `${jobId}: "${stepName}" must inherit the shared opposite posture`,
-      );
+      // The selecting steps exist under these names and, like every other
+      // step (asserted over the whole workflow below), carry no literal arm.
+      stepBlock(job, stepName);
     }
     assertStringIncludes(
       job,
@@ -1023,6 +1020,20 @@ Deno.test("server-execution CI uses stable default and opposite roles", async ()
       `${jobId}: the opposite lane runs the opposite-built binary`,
     );
   }
+
+  // No step anywhere selects an arm by literal: every assignment of the flag
+  // is the resolve step's output, so a flip of the default moves both roles
+  // together and a value pinned by hand cannot turn a flip into a mixed
+  // posture. Comments are stripped so a note naming a value is not read as
+  // setting it; the CLI lane's `${EXPERIMENTAL_SERVER_EXECUTION:-…}` is a
+  // read, not an assignment, and does not match.
+  const literal = withoutComments(contents).match(
+    /EXPERIMENTAL_SERVER_EXECUTION\s*[:=]\s*"?(?:true|false)/,
+  );
+  assert(
+    literal === null,
+    `deno.yml selects a server-execution arm by literal: ${literal?.[0]}`,
+  );
 
   const buildOpposite = jobBlock(contents, "build-toolshed-opposite");
   assertStringIncludes(

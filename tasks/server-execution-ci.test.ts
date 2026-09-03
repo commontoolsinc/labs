@@ -1,6 +1,7 @@
 /** Tests the stable server-execution CI role mapping. */
 
 import { expect } from "@std/expect";
+import { fromFileUrl } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
@@ -29,8 +30,42 @@ describe("server-execution-ci", () => {
       line.startsWith("| [`serverExecution`](#serverexecution)")
     );
     expect(summary).toBeDefined();
+    // The whole status cell, so the posture word, the constant's value and
+    // the rollback arm cannot drift apart from each other or from the code.
+    const enabled = SERVER_EXECUTION_DEFAULT_ENABLED;
     expect(summary!).toContain(
-      `SERVER_EXECUTION_DEFAULT_ENABLED = ${SERVER_EXECUTION_DEFAULT_ENABLED}`,
+      `| **${enabled ? "on" : "off"}** ` +
+        `(\`SERVER_EXECUTION_DEFAULT_ENABLED = ${enabled}\`; ` +
+        `explicit \`${!enabled}\` = rollback) |`,
+    );
+  });
+
+  it("runs as the program the workflow invokes, with no permissions", async () => {
+    // CI's resolve and probe steps run the adapter as a program
+    // (`deno run tasks/server-execution-ci-command.ts …`, no flags), so it is
+    // exercised the same way: it needs no permission, prints exactly the
+    // library's lines, and turns a bad role into a failing step.
+    const adapter = fromFileUrl(
+      new URL("./server-execution-ci-command.ts", import.meta.url),
+    );
+    const run = (...args: string[]) =>
+      new Deno.Command(Deno.execPath(), {
+        args: ["run", adapter, ...args],
+        cwd: fromFileUrl(new URL("..", import.meta.url)),
+        stdout: "piped",
+        stderr: "piped",
+      }).output();
+
+    const env = await run("env", "opposite");
+    expect(env.success).toBe(true);
+    expect(new TextDecoder().decode(env.stdout)).toBe(
+      `${serverExecutionCiEnvironment("opposite").join("\n")}\n`,
+    );
+
+    const bad = await run("env", "sideways");
+    expect(bad.code).toBe(1);
+    expect(new TextDecoder().decode(bad.stderr)).toContain(
+      "Expected server-execution CI role",
     );
   });
 

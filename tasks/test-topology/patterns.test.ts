@@ -214,12 +214,19 @@ describe("enumerating a tree that cannot be read", () => {
     // Passing over a missing directory is right; passing over one that
     // cannot be read would take tests out of the topology without a
     // word, and the drift guard would then report success over a
-    // shorter list than the tree holds.
-    const root = await obstructed(
-      "packages/connectors/agents/debug-view",
-    );
-    await expect(loadPatternSuites(root)).rejects.toThrow();
-    await Deno.remove(root, { recursive: true });
+    // shorter list than the tree holds. Both readers are held to it: the
+    // integration directory is read flat and the pattern trees are
+    // walked, and each has its own rethrow.
+    for (
+      const directory of [
+        "packages/patterns/integration",
+        "packages/connectors/agents/debug-view",
+      ]
+    ) {
+      const root = await obstructed(directory);
+      await expect(loadPatternSuites(root)).rejects.toThrow();
+      await Deno.remove(root, { recursive: true });
+    }
   });
 
   it("raises for a package integration directory it cannot read", async () => {
