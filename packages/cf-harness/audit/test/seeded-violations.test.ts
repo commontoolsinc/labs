@@ -666,6 +666,34 @@ describe("seeded violations", () => {
       });
     });
 
+    it("has nothing to say about a run that minted no direct-command authority", () => {
+      // AH-CFC-3 binds what direct-command authority must rest on, so a run
+      // that minted none is outside the clause rather than failing it. The
+      // distinction matters because `not-applicable` and `pass` are different
+      // answers here: this run did not satisfy the obligation, it never
+      // reached it.
+
+      turnsOnly("AUD-22", "not-applicable", (root) => {
+        const demote = (binding: Mutable<PromptSlotBinding> | undefined) => {
+          if (binding === undefined) return;
+          binding.role = "context";
+        };
+        demote(stateOf(root).promptSlotBinding);
+        for (const activity of reportOf(root).toolActivity) {
+          demote(activity.promptSlot);
+        }
+        for (const decision of traceOf(root).decisions) {
+          demote(decision.promptSlot);
+        }
+        for (const context of stateOf(root).cfcInvocationContexts ?? []) {
+          demote(context.promptSlot);
+        }
+        for (const context of traceOf(root).cfcInvocationContexts ?? []) {
+          demote(context.promptSlot);
+        }
+      });
+    });
+
     it("fails a binding carrying a digest but still no principal", () => {
       // The two halves are separately required, so a fix landing one of them
       // must not read as the obligation closing.
