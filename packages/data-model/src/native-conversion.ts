@@ -222,6 +222,12 @@ export function shallowFabricFromNativeObjectElseUndefined(
       // (fully-`FabricValue`) one uses the deep `fabricFromNativeValue()`,
       // which rebuilds those slots; the cell write paths do so at the points
       // where they treat a `FabricError` as an atomic leaf.
+      //
+      // The identity converter is a type lie: it says the values it hands
+      // back are `FabricValue`s, and they are whatever the native error held.
+      // TODO(danfuzz): Address this type lie, for example by giving the deep
+      // walk an error arm of its own so that no shallow instance is ever
+      // built.
       return Object.freeze(FabricError.fromNativeError(value as Error, {
         convert: (nested) => nested as FabricValue,
       }));
