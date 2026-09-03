@@ -102,6 +102,15 @@ describe("value-debug", () => {
         );
       });
 
+      it("renders past the default depth given `Infinity`", () => {
+        let value: unknown = "leaf";
+        for (let i = 0; i < 20; i++) value = { o: value };
+        expect(toCompactDebugString(value, { maxDepth: Infinity }))
+          .toContain('"leaf"');
+        expect(toIndentedDebugString(value, { maxDepth: Infinity }))
+          .toContain('"leaf"');
+      });
+
       it("throws given a `maxDepth` that is not a positive integer", () => {
         expect(() => toCompactDebugString({}, { maxDepth: 0 }))
           .toThrow("`maxDepth` must be a positive integer, `Infinity`, or");
