@@ -1,7 +1,9 @@
 import {
   type DebugValueOptions,
   type FabricPlainObject,
+  FabricSpecialObject,
   type FabricValue,
+  isWalkableObjectOrArray,
   toCompactDebugString,
   valueEqual,
 } from "@commonfabric/data-model";
@@ -13,7 +15,6 @@ import {
 } from "@commonfabric/data-model/codec-data-uri";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import type {
   IAttestation,
@@ -206,13 +207,11 @@ export const resolve = (
 
   while (++at < path.length) {
     const key = path[at];
-    // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, so descending
-    // into one lands in this arm and reads `undefined` instead of reaching
-    // the `TypeMismatchError` arm below the way a scalar does. The caller
-    // then treats the slot as absent-but-writable, and a path into a
-    // `FabricInstance`'s codec contents reads as missing rather than being
-    // refused or resolved.
-    if (isObjectOrArray(value)) {
+    // A special object takes the mismatch arm below alongside the scalars: a
+    // path does not address anything inside one, so reporting the slot
+    // absent-but-writable would invite a write onto a value that holds no
+    // such slot.
+    if (isWalkableObjectOrArray(value)) {
       const record = value as FabricPlainObject;
       value = Object.hasOwn(record, key) ? record[key] : undefined;
     } else {
@@ -223,8 +222,14 @@ export const resolve = (
           error: NotFound(source, address, path.slice(0, Math.max(0, at))),
         };
       }
-      // Type mismatch - trying to access property on non-object
-      const actualType = value === null ? "null" : typeof value;
+      // Type mismatch - trying to access property on non-object. A special
+      // object names its class, `typeof` "object" being no help in saying
+      // which value refused the path.
+      const actualType = value === null
+        ? "null"
+        : value instanceof FabricSpecialObject
+        ? value.constructor.name
+        : typeof value;
       return {
         error: TypeMismatchError(
           { ...address, path: path.slice(0, at + 1) },

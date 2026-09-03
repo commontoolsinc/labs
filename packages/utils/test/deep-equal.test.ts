@@ -301,4 +301,68 @@ describe("deepEqual()", () => {
       expect(deepEqual(plain, nullProto)).toBe(false);
     });
   });
+
+  describe("with an `objectEqual` comparator", () => {
+    // The knowledge this walk cannot have on its own arrives here. A class
+    // whose state is private reads as an empty record to a property walk, so
+    // without the comparator every two of them compare equal; `data-model`
+    // supplies one deciding exactly that case for fabric values.
+    class Opaque {
+      readonly #value: number;
+      constructor(value: number) {
+        this.#value = value;
+      }
+      get value(): number {
+        return this.#value;
+      }
+    }
+
+    const byOpaqueValue = (a: object, b: object): boolean | undefined =>
+      a instanceof Opaque && b instanceof Opaque
+        ? a.value === b.value
+        : undefined;
+
+    it("returns `true` for two private-state instances without one", () => {
+      expect(deepEqual(new Opaque(1), new Opaque(2))).toBe(true);
+    });
+
+    it("decides the arguments themselves", () => {
+      expect(deepEqual(new Opaque(1), new Opaque(2), byOpaqueValue))
+        .toBe(false);
+      expect(deepEqual(new Opaque(1), new Opaque(1), byOpaqueValue)).toBe(true);
+    });
+
+    it("decides a pair reached under a record key", () => {
+      expect(
+        deepEqual({ v: new Opaque(1) }, { v: new Opaque(2) }, byOpaqueValue),
+      ).toBe(false);
+    });
+
+    it("decides a pair reached at an array index", () => {
+      expect(deepEqual([new Opaque(1)], [new Opaque(2)], byOpaqueValue))
+        .toBe(false);
+    });
+
+    it("decides a pair reached under an array's named property", () => {
+      const withNamed = (value: number) => {
+        const array: unknown[] & { extra?: unknown } = [1];
+        array.extra = new Opaque(value);
+        return array;
+      };
+      expect(deepEqual(withNamed(1), withNamed(2), byOpaqueValue)).toBe(false);
+      expect(deepEqual(withNamed(1), withNamed(1), byOpaqueValue)).toBe(true);
+    });
+
+    it("leaves a declined pair to the property comparison", () => {
+      expect(deepEqual({ a: 1 }, { a: 1 }, byOpaqueValue)).toBe(true);
+      expect(deepEqual({ a: 1 }, { a: 2 }, byOpaqueValue)).toBe(false);
+    });
+
+    it("skips the constructor check for a pair it settles", () => {
+      // A `true` answer stands even where the property walk would have
+      // refused the pair outright.
+      const alwaysEqual = () => true;
+      expect(deepEqual({ a: 1 }, [1, 2, 3], alwaysEqual)).toBe(true);
+    });
+  });
 });

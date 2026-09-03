@@ -1,5 +1,5 @@
 import type { CellKind, LinkScope } from "@commonfabric/api";
-import { taggedHashStringOf } from "@commonfabric/data-model";
+import { fabricAwareEqual, taggedHashStringOf } from "@commonfabric/data-model";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   applyPieceSourceTransition,
@@ -1819,12 +1819,7 @@ function linkMatchesCommittedState(
     ...basePath,
     ...suppliedLink.path,
   ]);
-  // TODO(danfuzz): `deepEqual` compares class instances by enumerable
-  // own-props, of which a `FabricLink` has none — under the modern cell rep
-  // any two `FabricLink`s compare equal, so a link pointing somewhere else
-  // entirely passes as "restoring committed bytes" and skips the rebuild
-  // rules. Fails open; `valueEqual` is the fabric-aware comparison.
-  return deepEqual(committed, suppliedLink.value);
+  return fabricAwareEqual(committed, suppliedLink.value);
 }
 
 /** Wrap a per-concern failure in the uniform supplied-link rejection. */

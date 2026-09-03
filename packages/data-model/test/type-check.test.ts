@@ -26,6 +26,8 @@ import {
   isValidFabricPlainObject,
   isValidFabricValue,
   isValidFabricValueLayer,
+  isWalkableObjectNotArray,
+  isWalkableObjectOrArray,
 } from "@/type-check.ts";
 import type { FabricValue } from "@/interface.ts";
 import { VALUE_TAGS } from "@/VALUE_TAGS.ts";
@@ -34,8 +36,14 @@ import { codecClasses } from "@/fabric-primitives/index.ts";
 import { shallowFabricFromNativeValue } from "@/native-conversion.ts";
 import { LAYER_CORPUS, PlainClass } from "./fabric-value-corpus.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
+import { FabricLink } from "@/fabric-instances/FabricLink.ts";
+import { FabricMap } from "@/fabric-instances/FabricMap.ts";
+import { FabricSet } from "@/fabric-instances/FabricSet.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 
 describe("type-check", () => {
   describe("isValidFabricValueLayer()", () => {
@@ -1118,6 +1126,106 @@ describe("type-check", () => {
           );
         });
       }
+    });
+  });
+
+  describe("isWalkableObjectOrArray()", () => {
+    describe("given a container a walk may read by property name", () => {
+      it("returns `true` for a plain object", () => {
+        expect(isWalkableObjectOrArray({})).toBe(true);
+        expect(isWalkableObjectOrArray({ a: 1, b: "two" })).toBe(true);
+      });
+
+      it("returns `true` for a null-prototype object", () => {
+        expect(isWalkableObjectOrArray(Object.create(null))).toBe(true);
+      });
+
+      it("returns `true` for an array", () => {
+        expect(isWalkableObjectOrArray([])).toBe(true);
+        expect(isWalkableObjectOrArray([1, 2, 3])).toBe(true);
+      });
+
+      it("returns `true` for a non-fabric class instance", () => {
+        // The predicate subtracts exactly the fabric special objects from
+        // `isObjectOrArray()`; it is not the narrower plain-container question.
+        expect(isWalkableObjectOrArray(new Date())).toBe(true);
+        expect(isWalkableObjectOrArray(new Map())).toBe(true);
+        expect(isWalkableObjectOrArray(/regex/)).toBe(true);
+      });
+    });
+
+    describe("given a `FabricSpecialObject`", () => {
+      it("returns `false` for each `FabricPrimitive` kind", () => {
+        expect(isWalkableObjectOrArray(new FabricBytes(new Uint8Array([1, 2]))))
+          .toBe(false);
+        expect(isWalkableObjectOrArray(new FabricEpochNsec(1n))).toBe(false);
+        expect(isWalkableObjectOrArray(new FabricEpochDay(1n))).toBe(false);
+        expect(isWalkableObjectOrArray(new FabricRegExp("es2025", "a+", "g")))
+          .toBe(false);
+        expect(
+          isWalkableObjectOrArray(
+            new FabricHash(new Uint8Array([1, 2]), "fid1"),
+          ),
+        ).toBe(false);
+      });
+
+      it("returns `false` for each `FabricInstance` kind", () => {
+        expect(
+          isWalkableObjectOrArray(FabricError.fromNativeError(new Error("x"))),
+        )
+          .toBe(false);
+        expect(isWalkableObjectOrArray(new FabricMap(new Map([["a", 1]]))))
+          .toBe(false);
+        expect(isWalkableObjectOrArray(new FabricSet(new Set([1])))).toBe(
+          false,
+        );
+        expect(isWalkableObjectOrArray(new FabricLink({ id: "of:fid1:abc" })))
+          .toBe(false);
+      });
+    });
+
+    describe("given a value with no contents to walk", () => {
+      it("returns `false` for `null` and `undefined`", () => {
+        expect(isWalkableObjectOrArray(null)).toBe(false);
+        expect(isWalkableObjectOrArray(undefined)).toBe(false);
+      });
+
+      it("returns `false` for a scalar", () => {
+        expect(isWalkableObjectOrArray(1)).toBe(false);
+        expect(isWalkableObjectOrArray("a")).toBe(false);
+        expect(isWalkableObjectOrArray(true)).toBe(false);
+        expect(isWalkableObjectOrArray(42n)).toBe(false);
+        expect(isWalkableObjectOrArray(Symbol.for("s"))).toBe(false);
+      });
+
+      it("returns `false` for a function", () => {
+        expect(isWalkableObjectOrArray(() => {})).toBe(false);
+      });
+    });
+  });
+
+  describe("isWalkableObjectNotArray()", () => {
+    it("returns `true` for a plain object", () => {
+      expect(isWalkableObjectNotArray({})).toBe(true);
+      expect(isWalkableObjectNotArray({ a: 1 })).toBe(true);
+    });
+
+    it("returns `false` for an array", () => {
+      expect(isWalkableObjectNotArray([])).toBe(false);
+      expect(isWalkableObjectNotArray([1, 2, 3])).toBe(false);
+    });
+
+    it("returns `false` for a `FabricSpecialObject`", () => {
+      expect(isWalkableObjectNotArray(new FabricBytes(new Uint8Array([1]))))
+        .toBe(false);
+      expect(isWalkableObjectNotArray(new FabricMap(new Map([["a", 1]]))))
+        .toBe(false);
+    });
+
+    it("returns `false` for a value with no contents to walk", () => {
+      expect(isWalkableObjectNotArray(null)).toBe(false);
+      expect(isWalkableObjectNotArray(undefined)).toBe(false);
+      expect(isWalkableObjectNotArray(1)).toBe(false);
     });
   });
 });

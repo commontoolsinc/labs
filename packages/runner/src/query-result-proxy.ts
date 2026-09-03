@@ -1,4 +1,7 @@
-import { FabricPrimitive } from "@commonfabric/data-model";
+import {
+  FabricPrimitive,
+  isWalkableObjectOrArray,
+} from "@commonfabric/data-model";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { isStreamValue } from "./builder/types.ts";
@@ -801,15 +804,10 @@ export function isCellResult(value: any): value is CellResult<any> {
 export function snapshotQueryResult<T>(value: T): T {
   const seen = new WeakMap<object, unknown>();
   const snapshot = (current: unknown): unknown => {
-    // TODO(danfuzz): the leaf test covers `FabricPrimitive` but not
-    // `FabricInstance`, so an instance (live traffic — the fetch builtins
-    // store a `FabricError` result) falls to the `Object.keys` rebuild below
-    // and snapshots as `{}`, its codec contents lost. It wants the same
-    // leaf-through treatment until a codec-contents walk exists.
-    if (
-      current === null || typeof current !== "object" ||
-      current instanceof FabricPrimitive
-    ) return current;
+    // A special object leafs through whole. It has no own properties for the
+    // rebuild below to copy, so snapshotting one by its keys would answer
+    // `{}` and lose the value.
+    if (!isWalkableObjectOrArray(current)) return current;
     const existing = seen.get(current);
     if (existing !== undefined) return existing;
     if (Array.isArray(current)) {

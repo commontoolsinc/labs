@@ -1,11 +1,8 @@
+import { isWalkableObjectOrArray } from "@commonfabric/data-model";
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import {
-  isObjectNotArray,
-  isObjectOrArray,
-  isReadonlyObjectOrArray,
-} from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import type { JSONSchema, JSONSchemaObj } from "../builder/types.ts";
 import { forEachSubschema } from "../schema-walk.ts";
@@ -502,11 +499,9 @@ const mergeRequired = (
   return merged;
 };
 
-// TODO(danfuzz): `isReadonlyObjectOrArray` admits a `FabricSpecialObject` on either
-// side, and the spread copies zero properties from one — so two fabric
-// defaults merge to `{}`, and a plain-record `existing` plus a fabric
-// `candidate` silently drops the candidate's value. Wants a
-// `FabricSpecialObject` test taking the `candidate` arm.
+// A fabric-valued default on either side takes the `candidate` arm: a special
+// object has no properties for the spread to copy, so merging one yields `{}`
+// and loses whichever side held the value.
 const mergeDefaults = (
   existing: JSONSchemaObj["default"],
   candidate: JSONSchemaObj["default"],
@@ -517,7 +512,7 @@ const mergeDefaults = (
   if (candidate === undefined) {
     return existing;
   }
-  if (isReadonlyObjectOrArray(existing) && isReadonlyObjectOrArray(candidate)) {
+  if (isWalkableObjectOrArray(existing) && isWalkableObjectOrArray(candidate)) {
     return { ...existing, ...candidate };
   }
   return candidate;

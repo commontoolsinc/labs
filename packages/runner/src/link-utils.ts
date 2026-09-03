@@ -2,6 +2,7 @@ import {
   deepFreeze,
   type FabricValue,
   isDeepFrozen,
+  isWalkableObjectOrArray,
   toCompactDebugString,
 } from "@commonfabric/data-model";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
@@ -655,16 +656,18 @@ function recursiveStripAsCellFromSchema(
   // Recursively process all object properties
   //
   // TODO(danfuzz): this loop filters by key name only, so it also descends
-  // into `default` and `examples` VALUES, and the recursion's shallow copy
-  // (`{ ...schema }` above) rebuilds whatever it meets: a fabric-valued
-  // default (which `Cell.of()` embeds into schemas) comes out as `{}` in the
-  // sanitized schema that rides on links. Value-bearing keys want to be
+  // into `default` and `examples` VALUES, and rewrites whatever schema
+  // keywords it finds spelled inside one. Value-bearing keys want to be
   // carried by reference, the way `simplifySchemaForContext` preserves them.
   for (const [key, value] of Object.entries(result)) {
     // Skip $ref - it's just a string pointer, not a schema to process
     if (key === "$ref") continue;
 
-    if (value && typeof value === "object") {
+    // A fabric value is carried by reference: the rebuild below reads it by
+    // property name and would answer `{}`, so a fabric-valued default (which
+    // `Cell.of()` embeds into schemas) would be lost from the sanitized
+    // schema that rides on links.
+    if (isWalkableObjectOrArray(value)) {
       if (key === "$defs") {
         // Process each definition in $defs (they contain schemas that may have asCell/asStream)
         const processedDefs: Record<string, any> = {};
@@ -673,7 +676,7 @@ function recursiveStripAsCellFromSchema(
             value as Record<string, any>,
           )
         ) {
-          if (defSchema && typeof defSchema === "object") {
+          if (isWalkableObjectOrArray(defSchema)) {
             processedDefs[defName] = recursiveStripAsCellFromSchema(
               defSchema,
               context,
@@ -687,7 +690,7 @@ function recursiveStripAsCellFromSchema(
       } else if (Array.isArray(value)) {
         // Handle arrays
         result[key] = value.map((item) =>
-          typeof item === "object" && item !== null
+          isWalkableObjectOrArray(item)
             ? recursiveStripAsCellFromSchema(
               item,
               context,

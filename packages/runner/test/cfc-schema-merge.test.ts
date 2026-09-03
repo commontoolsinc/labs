@@ -6,6 +6,7 @@ import {
   mergeCfcSchemaEnvelopes,
 } from "../src/cfc/schema-merge.ts";
 import { storedSchemaCoversCandidateEnvelope } from "../src/cfc/prepare.ts";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 describe("mergeCfcSchemaEnvelopes", () => {
   describe("observes through a merge", () => {
@@ -1413,5 +1414,48 @@ describe("cfcSchemaMergeIssue", () => {
     expect(mergeArrayIdentities).toThrow(
       "writeAuthorizedBy must remain stable",
     );
+  });
+});
+
+// A fabric-valued default has no properties for a schema comparison to read,
+// so a comparison built on a property walk calls two schemas that differ only
+// there equal -- and coverage=true skips the merge, discarding the candidate's
+// default.
+describe("schema comparison over a fabric-valued default", () => {
+  const withDefault = (bytes: readonly number[]) => ({
+    type: "object",
+    properties: {
+      a: {
+        type: "object",
+        default: new FabricBytes(new Uint8Array(bytes)) as never,
+      },
+    },
+  } as const);
+
+  it("does not judge differing fabric defaults covered", () => {
+    expect(
+      storedSchemaCoversCandidateEnvelope(
+        withDefault([1, 2]),
+        withDefault([3]),
+      ),
+    ).toBe(false);
+  });
+
+  it("still judges equal fabric defaults covered", () => {
+    expect(
+      storedSchemaCoversCandidateEnvelope(
+        withDefault([1, 2]),
+        withDefault([1, 2]),
+      ),
+    ).toBe(true);
+  });
+
+  it("merges a fabric default onto a plain one rather than to `{}`", () => {
+    const merged = mergeCfcSchemaEnvelopes({
+      type: "object",
+      properties: { a: { type: "object", default: { x: 1 } } },
+    }, withDefault([7])) as JSONSchemaObj;
+    const properties = merged.properties as Record<string, JSONSchemaObj>;
+    expect(properties.a.default).toBeInstanceOf(FabricBytes);
   });
 });

@@ -1,4 +1,4 @@
-import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { fabricAwareEqual } from "@commonfabric/data-model";
 import type { FabricValue } from "@commonfabric/api";
 import type { IExtendedStorageTransaction } from "../storage/interface.ts";
 import { createFrozenRequestSnapshot } from "./request-snapshot.ts";
@@ -74,13 +74,7 @@ export function verifySinkRequestRelease(
     return `missing sink-request policy input for ${sink}`;
   }
 
-  // TODO(danfuzz): `deepEqual` compares class instances by enumerable
-  // own-props, so two same-class `FabricPrimitive`s (or `FabricInstance`s)
-  // compare equal regardless of contents — a request differing from its
-  // policy-checked snapshot only in fabric content passes this release gate.
-  // Fails open; `valueEqual` from `data-model` is the fabric-aware
-  // comparison.
-  if (!deepEqual(match.request, request)) {
+  if (!fabricAwareEqual(match.request, request)) {
     return `sink-request policy input mismatch for ${sink}`;
   }
 

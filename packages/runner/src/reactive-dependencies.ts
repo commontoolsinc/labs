@@ -1,5 +1,9 @@
-import { isObjectOrArray, isPlainContainer } from "@commonfabric/utils/types";
-import { type FabricValue, valueEqual } from "@commonfabric/data-model";
+import { isPlainContainer } from "@commonfabric/utils/types";
+import {
+  type FabricValue,
+  isWalkableObjectOrArray,
+  valueEqual,
+} from "@commonfabric/data-model";
 import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { isPrimitiveCellLink } from "./link-utils.ts";
 import { normalizeCellScope } from "./scope.ts";
@@ -147,17 +151,19 @@ export function determineTriggeredActions(
   const beforeValues: FabricValue[] = [before];
   const afterValues: FabricValue[] = [after];
 
-  // *LastObject: Last key-able object along currentPath
+  // *LastObject: Last key-able object along currentPath. A special object is
+  // not key-able: its state sits behind no property name, so the descent stops
+  // at one and a path continuing below reads as unreachable rather than as
+  // present-and-empty.
   //
-  // TODO(danfuzz): `isObjectOrArray` counts a `FabricSpecialObject` as key-able, so
-  // the descent below indexes into one: every key reads `undefined` (or, via
-  // the prototype chain, an accessor result) on both the before and after
-  // side, so a subscriber path continuing below a `FabricInstance` compares
-  // equal-by-vacancy and its action never triggers, however the instance's
-  // contents changed. The `shallowEqual` marker at the bottom of this file
-  // covers the leaf comparison; this is the descent's half of the same gap.
-  let beforeLastObject = isObjectOrArray(before) ? 0 : -1;
-  let afterLastObject = isObjectOrArray(after) ? 0 : -1;
+  // TODO(danfuzz): stopping is the right answer for a `FabricPrimitive` and
+  // an incomplete one for a `FabricInstance`. A subscriber path continuing
+  // below an instance is unreachable on both sides at the same depth, so its
+  // action still never triggers however the instance's contents changed. The
+  // `shallowEqual` marker at the bottom of this file covers the leaf
+  // comparison; this is the descent's half of the same gap.
+  let beforeLastObject = isWalkableObjectOrArray(before) ? 0 : -1;
+  let afterLastObject = isWalkableObjectOrArray(after) ? 0 : -1;
 
   while (subscribers.length > 0) {
     // Pull the next path from the queue
@@ -177,13 +183,15 @@ export function determineTriggeredActions(
     for (let i = overlap; i < targetPath.length; i++) {
       if (i <= beforeLastObject) {
         beforeValues[i + 1] = (beforeValues[i] as Keyable)[targetPath[i]!];
-        if (isObjectOrArray(beforeValues[i + 1])) beforeLastObject = i + 1;
-        else beforeLastObject = i;
+        if (isWalkableObjectOrArray(beforeValues[i + 1])) {
+          beforeLastObject = i + 1;
+        } else beforeLastObject = i;
       }
       if (i <= afterLastObject) {
         afterValues[i + 1] = (afterValues[i] as Keyable)[targetPath[i]!];
-        if (isObjectOrArray(afterValues[i + 1])) afterLastObject = i + 1;
-        else afterLastObject = i;
+        if (isWalkableObjectOrArray(afterValues[i + 1])) {
+          afterLastObject = i + 1;
+        } else afterLastObject = i;
       }
     }
     currentPath = targetPath;

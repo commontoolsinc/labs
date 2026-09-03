@@ -2680,24 +2680,8 @@ export class CellImpl<T extends FabricValue>
       throw new Error("Can't remove from non-array value");
     }
     const array = got as ElemT[];
-    // TODO(danfuzz): `typeof ref === "object"` routes a `FabricPrimitive`
-    // (or `FabricInstance`) ref to `areLinksSame`, which parses both
-    // operands as links and returns `false` when either is not one — so a
-    // fabric-valued ref matches only by reference identity, never by value,
-    // and the call otherwise silently no-ops. The sibling `removeByValue`
-    // has the right shape: link comparison for cells, `valueEqual` (which
-    // has a fabric arm) for everything else.
     const index = typeof ref === "object"
-      ? array.findIndex((item) =>
-        areLinksSame(
-          item,
-          ref,
-          this as unknown as Cell<any>,
-          true, // resolveBeforeComparing
-          this.tx,
-          this.runtime,
-        )
-      )
+      ? array.findIndex((item) => this.refMatchesElement(ref, item))
       // Primitives match by `Object.is` (`NaN` is findable; `0` and `-0` are
       // distinct), unlike `indexOf`'s `===`.
       : array.findIndex((item) => Object.is(item, ref));
@@ -2721,24 +2705,42 @@ export class CellImpl<T extends FabricValue>
       throw new Error("Can't remove from non-array value");
     }
     const array = got as ElemT[];
-    // TODO(danfuzz): same gap as `remove()` above — a fabric-valued `ref`
-    // reaches `areLinksSame` and matches only by reference identity, never
-    // by value, so the call otherwise silently no-ops.
     // Cast needed: TS can't prove ElemT[] reconstitutes to T
     const newArray = array.filter((item) =>
       typeof ref === "object"
-        ? !areLinksSame(
-          item,
-          ref,
-          this as unknown as Cell<any>,
-          true, // resolveBeforeComparing
-          this.tx,
-          this.runtime,
-        )
+        ? !this.refMatchesElement(ref, item)
         // As in `remove()`: primitives match by `Object.is`.
         : !Object.is(item, ref)
     ) as unknown as T;
     this.set(newArray);
+  }
+
+  /**
+   * Whether an object-valued `remove()`/`removeAll()` argument names the given
+   * array element. A cell or a link names its element by link, which is what
+   * `areLinksSame()` decides. A `FabricSpecialObject` keeps its state in
+   * private fields, so a link comparison can only tell whether the two are the
+   * same object -- and two equal fabric values written at different times never
+   * are. Those name their element by content, the way `removeByValue()`
+   * matches.
+   */
+  private refMatchesElement(ref: unknown, element: unknown): boolean {
+    if (
+      areLinksSame(
+        element,
+        ref,
+        this as unknown as Cell<any>,
+        true, // resolveBeforeComparing
+        this.tx,
+        this.runtime,
+      )
+    ) {
+      return true;
+    }
+
+    return ref instanceof FabricSpecialObject &&
+      element instanceof FabricSpecialObject &&
+      valueEqual(element, ref);
   }
 
   equals(other: any): boolean {

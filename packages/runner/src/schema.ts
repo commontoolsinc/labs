@@ -5,10 +5,12 @@ import {
 } from "@commonfabric/api";
 import {
   cloneIfNecessary,
+  fabricAwareEqual,
   FabricInstance,
   FabricPrimitive,
   type FabricValue,
   isDeepFrozen,
+  isWalkableObjectOrArray,
   shallowMutableClone,
 } from "@commonfabric/data-model";
 import {
@@ -43,13 +45,8 @@ import {
   externalResolutionMissCount,
   onSchemaRegistryClear,
 } from "./schema-registry.ts";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
-import {
-  isObjectNotArray,
-  isObjectOrArray,
-  isReadonlyObjectOrArray,
-} from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import { type JSONSchema, type SchemaScope } from "./builder/types.ts";
@@ -289,18 +286,14 @@ const matchesConcreteValue = (
   if (!canBranchMatch(resolved, value)) {
     return false;
   }
-  // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this
-  // validation path today, but will in the not-too-distant future; at that
-  // point these `deepEqual(const/enum, value)` checks mishandle a
-  // `FabricValue` (same-class `FabricPrimitive`s compare equal regardless of
-  // value). Mark ahead of that; use a Fabric-aware equality when the path
-  // becomes live.
-  if (resolved.const !== undefined && !deepEqual(resolved.const, value)) {
+  if (
+    resolved.const !== undefined && !fabricAwareEqual(resolved.const, value)
+  ) {
     return false;
   }
   if (
     Array.isArray(resolved.enum) &&
-    !resolved.enum.some((candidate) => deepEqual(candidate, value))
+    !resolved.enum.some((candidate) => fabricAwareEqual(candidate, value))
   ) {
     return false;
   }
@@ -866,17 +859,12 @@ export function mergeDefaults(
 
   // TODO(seefeld): What's the right thing to do for arrays?
   //
-  // TODO(danfuzz): `isReadonlyObjectOrArray` admits a `FabricSpecialObject` on
-  // either side, and the spread copies zero properties from one, so a
-  // fabric-valued default here merges to `{}` (or silently drops the other
-  // side's contribution). Reachable: the schema generator emits
-  // `{ type: "object" }` for the fabric-backed natives (`Date`, `RegExp`,
-  // `Uint8Array`), so a `Cell` of one of those with an object default in its
-  // schema takes the spread arm. Wants a `FabricSpecialObject` test choosing
-  // the `defaultValue` arm.
+  // A fabric-valued default on either side takes the `defaultValue` arm: a
+  // special object has no properties for the spread to copy, so merging one
+  // yields `{}` and loses whichever side held the value.
   const mergedDefault = base.type === "object" &&
-      isReadonlyObjectOrArray(base.default) &&
-      isReadonlyObjectOrArray(defaultValue)
+      isWalkableObjectOrArray(base.default) &&
+      isWalkableObjectOrArray(defaultValue)
     ? { ...base.default, ...defaultValue } as JSONValue
     : defaultValue as JSONValue;
 

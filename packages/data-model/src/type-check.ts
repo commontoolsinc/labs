@@ -25,6 +25,7 @@ import {
 import {
   isPlainContainer,
   isPlainObject,
+  type ReadonlyRecord,
   unsafeObjectKeyIn,
 } from "@commonfabric/utils/types";
 
@@ -42,6 +43,74 @@ import { VALUE_TAGS } from "./VALUE_TAGS.ts";
 import { tagFromNativeBuiltinClass } from "./tagFromNativeBuiltinClass.ts";
 import { BaseFabricInstance } from "./fabric-bases/BaseFabricInstance.ts";
 import { BaseFabricPrimitive } from "./fabric-bases/BaseFabricPrimitive.ts";
+
+/**
+ * Indicates whether a value's contents are reachable by property name: a
+ * non-`null` object, an array included, that is not a `FabricSpecialObject`.
+ *
+ * This is the question a structural walk asks before it reads, rebuilds,
+ * merges, or descends a value by its keys, and it is the question
+ * `isObjectOrArray()` answers wrong. A `FabricSpecialObject` keeps its state in
+ * private fields and has no own properties at all, so `isObjectOrArray()`
+ * accepts it and the walk then works on an empty record: it merges to `{}`,
+ * compares vacuously equal, descends and finds nothing, or grafts a property
+ * onto a frozen value. Every one of those loses the value the model does hold.
+ *
+ * A `false` answer for a special object tells the walk to stop and carry the
+ * value whole. That is the complete story for a `FabricPrimitive`, which is a
+ * leaf: no path addresses anything inside one, so stopping leaves nothing
+ * unvisited. A `FabricInstance` is a container whose contents are reachable
+ * only through its codec, so stopping there does leave those contents
+ * unvisited -- but property-name access never reached them either, and the
+ * sites that must not pass one by refuse it outright rather than walk it (see
+ * "Flag-gated tripwires" in `docs/development/EXPERIMENTAL_OPTIONS.md`).
+ *
+ * This is the walk-side half of admitting special objects; the compare-side
+ * half is `fabricAwareEqual()`. One keeps a special object out of walks
+ * that would decompose it, the other out of comparisons that would conflate it.
+ *
+ * `isFabricPlainContainer()` asks this same question of a value the type
+ * system already says is a `FabricValue`, and where a caller holds one that is
+ * the predicate to reach for. This one takes `unknown`, which is what the
+ * walks in `runner` hold: a schema node, a pattern binding, a builder
+ * artifact. The two differ on exactly the values a `FabricValue` cannot be --
+ * a `Cell`, a `Date`, a `Map`, a query-result proxy over one -- which this
+ * admits and `isFabricPlainContainer()` refuses. Neither answer is wrong;
+ * subtracting only the fabric special objects is what leaves a walk's
+ * treatment of everything else where it found it.
+ *
+ * Like its `utils` counterparts, the name settles the array question, and the
+ * sibling `isWalkableObjectNotArray()` is the same test with arrays removed.
+ * This is a structural predicate, so it narrows in one direction only and is
+ * overloaded accordingly; see the header of `@commonfabric/utils/types` for
+ * what that means. The narrowed type is read-only: the walks this serves
+ * rebuild containers rather than write through them.
+ */
+export function isWalkableObjectOrArray(value: ReadonlyRecord): boolean;
+export function isWalkableObjectOrArray(
+  value: unknown,
+): value is ReadonlyRecord;
+export function isWalkableObjectOrArray(value: unknown): boolean {
+  return typeof value === "object" && value !== null &&
+    !(value instanceof FabricSpecialObject);
+}
+
+/**
+ * Indicates whether a value's contents are reachable by property name and it is
+ * not an array: {@link isWalkableObjectOrArray} with arrays removed, and
+ * `isObjectNotArray()` with the fabric special objects removed.
+ *
+ * A walk asks this one where an array is not merely a different shape but
+ * something it must not treat as a record -- a property merge, a
+ * record-versus-array container reset.
+ */
+export function isWalkableObjectNotArray(value: ReadonlyRecord): boolean;
+export function isWalkableObjectNotArray(
+  value: unknown,
+): value is ReadonlyRecord;
+export function isWalkableObjectNotArray(value: unknown): boolean {
+  return isWalkableObjectOrArray(value) && !Array.isArray(value);
+}
 
 /**
  * Indicates whether the value is a `FabricValue`, accepting

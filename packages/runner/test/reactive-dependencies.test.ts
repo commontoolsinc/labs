@@ -1,8 +1,9 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import type { FabricValue } from "@commonfabric/data-model";
+import { type FabricValue } from "@commonfabric/data-model";
 import { FabricMap } from "@commonfabric/data-model/fabric-instances";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 
 import {
@@ -1975,6 +1976,39 @@ describe("determineTriggeredActions", () => {
       expect(result).toEqual([action]);
     });
 
+    it("does not trigger a read below a special object that was replaced", () => {
+      // A special object is not key-able: no property name reaches its state,
+      // so the descent stops at one and a read below it is unreachable on
+      // both sides rather than present-and-empty.
+
+      const action = createAction("readBelowSpecialObject");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a", "b"]]],
+      ]);
+      const before = { value: { a: new FabricBytes(new Uint8Array([1])) } };
+      const after = { value: { a: new FabricBytes(new Uint8Array([2])) } };
+
+      const result = determineTriggeredActions(dependencies, before, after);
+      expect(result).toEqual([]);
+    });
+
+    it("does not trigger a read below a scalar that became a special object", () => {
+      // The reachability verdict follows the value's kind and not its
+      // `typeof`: `value.a.b` was absent before and is absent after, because
+      // a path does not address anything inside a leaf, whatever kind of leaf
+      // it is.
+
+      const action = createAction("scalarBecameSpecialObject");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a", "b"]]],
+      ]);
+      const before = { value: { a: 1 } };
+      const after = { value: { a: new FabricBytes(new Uint8Array([1])) } };
+
+      const result = determineTriggeredActions(dependencies, before, after);
+      expect(result).toEqual([]);
+    });
+
     it("propagates the failure from a value it cannot compare", () => {
       // A non-recursive read compares an opaque leaf by value, and a class
       // whose comparison is an unimplemented stub cannot answer. The failure is
@@ -2000,6 +2034,24 @@ describe("determineTriggeredActions", () => {
           { nonRecursive: true },
         )
       ).toThrow("not yet implemented");
+    });
+
+    it("triggers on a special object replaced at the read's own path", () => {
+      const action = createAction("nonRecursiveSpecialLeaf");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a"]]],
+      ]);
+      const before = { value: { a: new FabricBytes(new Uint8Array([1])) } };
+      const after = { value: { a: new FabricBytes(new Uint8Array([2])) } };
+
+      const result = determineTriggeredActions(
+        dependencies,
+        before,
+        after,
+        ["value", "a"],
+        { nonRecursive: true },
+      );
+      expect(result).toEqual([action]);
     });
 
     it("triggers on same-path write for non-recursive reads", () => {
