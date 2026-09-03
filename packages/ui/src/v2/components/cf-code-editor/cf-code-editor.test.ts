@@ -89,7 +89,7 @@ describe("CFCodeEditor", () => {
 });
 
 describe("CFCodeEditor backlink disposal handling", () => {
-  // createBacklinkFromPattern issues an IPC createPage during a [[mention]]
+  // createBacklinkFromPattern issues an IPC createPiece during a [[mention]]
   // gesture. On a disposal race (logout, runtime swap) that rejects with the
   // standard AbortError; the catch must treat it as cancellation, not log it.
   // Exercised against a minimal `this` so no CodeMirror/DOM is constructed.
@@ -109,7 +109,7 @@ describe("CFCodeEditor backlink disposal handling", () => {
       pattern: {
         runtime: () => ({
           signal: { aborted },
-          createPage: () =>
+          createPiece: () =>
             Promise.reject(new DOMException("aborted", "AbortError")),
         }),
         get: () => "{}",

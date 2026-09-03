@@ -29,7 +29,7 @@ import type { LoggerFlagsBreakdown } from "@commonfabric/utils/logger";
 import { backtickQuote } from "@commonfabric/utils/markdown";
 
 import { isCellRef } from "@/protocol/mod.ts";
-import { CellRef, type LoggerFlagsData, PageRef } from "@/protocol/types.ts";
+import { CellRef, type LoggerFlagsData, PieceRef } from "@/protocol/types.ts";
 
 /**
  * Converts a value arriving over the connection into the form the worker
@@ -225,7 +225,7 @@ export function createCellRef(cell: Cell<unknown>, schema?: unknown): CellRef {
   return cellRef;
 }
 
-export function createPageRef(cell: Cell<unknown>): PageRef {
+export function createPieceRef(cell: Cell<unknown>): PieceRef {
   return {
     cell: createCellRef(cell),
   };

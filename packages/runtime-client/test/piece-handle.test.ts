@@ -1,17 +1,17 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { DID } from "@commonfabric/identity";
-import { PageHandle } from "@/page-handle.ts";
+import { PieceHandle } from "@/piece-handle.ts";
 import { $conn, type RuntimeClient } from "@/runtime-client.ts";
 import { type CellRef, RequestType } from "@/protocol/mod.ts";
 
-describe("PageHandle start/stop space threading", () => {
-  // Federation PR2: PageHandle.start/stop carry their cell's space so a handle
-  // for a foreign-space page routes to that space's piece context (a home-space
+describe("PieceHandle start/stop space threading", () => {
+  // Federation PR2: PieceHandle.start/stop carry their cell's space so a handle
+  // for a foreign-space piece routes to that space's piece context (a home-space
   // handle carries the home space, which resolves to the same context as the
   // no-space form).
 
-  const space = "did:key:z6Mk-page-handle-space" as DID;
+  const space = "did:key:z6Mk-piece-handle-space" as DID;
 
   function makeHandle() {
     const requests: Array<Record<string, unknown>> = [];
@@ -23,12 +23,12 @@ describe("PageHandle start/stop space threading", () => {
     };
     const client = { [$conn]: () => conn } as unknown as RuntimeClient;
     const ref: CellRef = {
-      id: "of:fid1-page-handle-probe" as CellRef["id"],
+      id: "of:fid1-piece-handle-probe" as CellRef["id"],
       space,
       scope: "space",
       path: [],
     };
-    const handle = new PageHandle(client, { cell: ref });
+    const handle = new PieceHandle(client, { cell: ref });
     return { handle, requests };
   }
 
@@ -36,8 +36,8 @@ describe("PageHandle start/stop space threading", () => {
     const { handle, requests } = makeHandle();
     await expect(handle.start()).resolves.toBe(true);
     expect(requests).toEqual([{
-      type: RequestType.PageStart,
-      pageId: "fid1-page-handle-probe",
+      type: RequestType.PieceStart,
+      pieceId: "fid1-piece-handle-probe",
       space,
     }]);
   });
@@ -46,8 +46,8 @@ describe("PageHandle start/stop space threading", () => {
     const { handle, requests } = makeHandle();
     await expect(handle.stop()).resolves.toBe(true);
     expect(requests).toEqual([{
-      type: RequestType.PageStop,
-      pageId: "fid1-page-handle-probe",
+      type: RequestType.PieceStop,
+      pieceId: "fid1-piece-handle-probe",
       space,
     }]);
   });

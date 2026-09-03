@@ -1,22 +1,22 @@
 import { NAME, UI } from "@commonfabric/runner/shared";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
-import { PageRef, RequestType } from "./protocol/mod.ts";
+import { PieceRef, RequestType } from "./protocol/mod.ts";
 import { InitializedRuntimeConnection } from "./client/connection.ts";
 import { VNode } from "./vnode-types.ts";
 import { CellHandle } from "./cell-handle.ts";
 
-export type PageType = {
+export type PieceType = {
   [NAME]?: CellHandle<string> | string;
   [UI]?: CellHandle<VNode> | VNode;
 };
 
-export class PageHandle<T = PageType> {
+export class PieceHandle<T = PieceType> {
   #conn: InitializedRuntimeConnection;
   #cell: CellHandle<T>;
 
   constructor(
     rt: RuntimeClient,
-    ref: PageRef,
+    ref: PieceRef,
   ) {
     this.#conn = rt[$conn]();
     this.#cell = new CellHandle<T>(rt, ref.cell);
@@ -47,10 +47,10 @@ export class PageHandle<T = PageType> {
   }
 
   async start(): Promise<boolean> {
-    const res = await this.#conn.request<RequestType.PageStart>({
-      type: RequestType.PageStart,
-      pageId: this.id(),
-      // The page's cell knows its space — start/stop route to that
+    const res = await this.#conn.request<RequestType.PieceStart>({
+      type: RequestType.PieceStart,
+      pieceId: this.id(),
+      // The piece's cell knows its space — start/stop route to that
       // space's piece context.
       space: this.#cell.space(),
     });
@@ -58,17 +58,11 @@ export class PageHandle<T = PageType> {
   }
 
   async stop(): Promise<boolean> {
-    const res = await this.#conn.request<RequestType.PageStop>({
-      type: RequestType.PageStop,
-      pageId: this.id(),
+    const res = await this.#conn.request<RequestType.PieceStop>({
+      type: RequestType.PieceStop,
+      pieceId: this.id(),
       space: this.#cell.space(),
     });
     return res.value;
   }
-}
-
-export function isPageHandle<T = unknown>(
-  value: unknown,
-): value is PageHandle<T> {
-  return value instanceof PageHandle;
 }

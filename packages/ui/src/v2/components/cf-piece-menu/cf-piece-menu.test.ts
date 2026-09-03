@@ -3167,8 +3167,8 @@ function statefulPiece(
     result = {},
     argument: initialArgument = {} as unknown,
     argumentRef,
-    getPageFails = false,
-    deferGetPage = false,
+    getPieceFails = false,
+    deferGetPiece = false,
     sendFails = false,
     pieceSchema = { type: "object" } as Record<string, unknown>,
   }: {
@@ -3178,10 +3178,10 @@ function statefulPiece(
     /** When set, the argument read also returns this schema-bearing ref. */
     argumentRef?: CellRef;
 
-    getPageFails?: boolean;
+    getPieceFails?: boolean;
 
-    /** When true, getPage stays pending until `resolveGetPage()` is called. */
-    deferGetPage?: boolean;
+    /** When true, getPiece stays pending until `resolveGetPiece()` is called. */
+    deferGetPiece?: boolean;
 
     sendFails?: boolean;
     pieceSchema?: Record<string, unknown>;
@@ -3219,21 +3219,21 @@ function statefulPiece(
     },
     signal: { aborted: false },
   };
-  const pendingPages: Array<() => void> = [];
+  const pendingPieces: Array<() => void> = [];
   const rt = {
     [$conn]: () => conn,
     signal: { aborted: false },
     getPieceSource: () => Promise.resolve(SOURCE),
-    getPage: (..._args: unknown[]) => {
-      if (getPageFails) {
-        return Promise.reject(new Error("no page for this piece"));
+    getPiece: (..._args: unknown[]) => {
+      if (getPieceFails) {
+        return Promise.reject(new Error("no piece handle for this piece"));
       }
-      if (deferGetPage) {
+      if (deferGetPiece) {
         return new Promise((resolve) => {
-          pendingPages.push(() => resolve(page));
+          pendingPieces.push(() => resolve(pieceHandle));
         });
       }
-      return Promise.resolve(page);
+      return Promise.resolve(pieceHandle);
     },
   } as unknown as RuntimeClient;
 
@@ -3244,10 +3244,10 @@ function statefulPiece(
     schema: pieceSchema,
   } as unknown as CellRef;
   const cell = new CellHandle(rt, pieceRef, result);
-  const page = { cell: () => cell };
+  const pieceHandle = { cell: () => cell };
 
-  /** Resolve the oldest still-pending deferred getPage call. */
-  const resolveGetPage = () => pendingPages.shift()?.();
+  /** Resolve the oldest still-pending deferred getPiece call. */
+  const resolveGetPiece = () => pendingPieces.shift()?.();
 
   /** A nested handler stream whose own ref schema carries the stream tag. */
   const streamHandle = (name: string): CellHandle =>
@@ -3277,7 +3277,7 @@ function statefulPiece(
     counters,
     streamHandle,
     handlerHandle,
-    resolveGetPage,
+    resolveGetPiece,
     rt,
   };
 }
@@ -3329,11 +3329,11 @@ describe("the data panel", () => {
   });
 
   it("reports a data read that failed", async () => {
-    const piece = statefulPiece({ getPageFails: true });
+    const piece = statefulPiece({ getPieceFails: true });
     const menu = openMenu(piece.cell);
     await menu.showPanel("data");
 
-    expect(shows(menu)).toContain("no page for this piece");
+    expect(shows(menu)).toContain("no piece handle for this piece");
   });
 });
 
@@ -3556,7 +3556,7 @@ describe("the actions panel", () => {
 
 describe("piece-state read lifecycle", () => {
   it("a refresh during a pending read drops the older read entirely", async () => {
-    const piece = statefulPiece({ deferGetPage: true });
+    const piece = statefulPiece({ deferGetPiece: true });
     await piece.cell.set({ value: "current" });
     const menu = openMenu(piece.cell);
 
@@ -3564,9 +3564,9 @@ describe("piece-state read lifecycle", () => {
     menu.refreshData();
     // The OLDER read resolves after the refresh started a newer one; it must
     // not install a second subscription or overwrite anything.
-    piece.resolveGetPage();
+    piece.resolveGetPiece();
     await first;
-    piece.resolveGetPage();
+    piece.resolveGetPiece();
     await Promise.resolve();
 
     expect(piece.counters.subscribes).toBe(1);
@@ -3575,12 +3575,12 @@ describe("piece-state read lifecycle", () => {
   });
 
   it("a read resolving after disconnect installs nothing", async () => {
-    const piece = statefulPiece({ deferGetPage: true });
+    const piece = statefulPiece({ deferGetPiece: true });
     const menu = openMenu(piece.cell);
 
     const pending = menu.showPanel("data");
     menu.disconnectedCallback();
-    piece.resolveGetPage();
+    piece.resolveGetPiece();
     await pending;
 
     expect(piece.counters.subscribes).toBe(0);

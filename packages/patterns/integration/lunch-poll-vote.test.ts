@@ -217,7 +217,7 @@ describe("lunch poll: two users vote on a shared option", () => {
       // ShellIntegration.goto() waits for URL/login state, while RootView
       // resolves the named space and AppView loads its active pattern
       // independently. A runtime can report idle during that handoff, with the
-      // previous or provisional root still rendered. Wait for the PageHandle
+      // previous or provisional root still rendered. Wait for the PieceHandle
       // on each browser to belong to this poll's space before interacting with
       // either surface.
       await timer.run(

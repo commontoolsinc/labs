@@ -1020,7 +1020,7 @@ export class CFPieceMenu extends BaseElement {
    */
   #dataGeneration = 0;
 
-  /** The schema-bearing handle the page read resolved, for addressing streams. */
+  /** The schema-bearing handle the piece read resolved, for addressing streams. */
   #pieceCell: CellHandle | undefined;
 
   /** The schema-bearing handle of the piece's argument cell, when resolved. */
@@ -1721,7 +1721,7 @@ export class CFPieceMenu extends BaseElement {
   /**
    * Read the piece's argument and result. The menu's own cell addresses the
    * piece but carries no result schema, and stream fields only keep their
-   * `asCell` tags under a schema'd read, so the page read resolves one —
+   * `asCell` tags under a schema'd read, so the piece read resolves one —
    * running the piece if it was not already.
    */
   async #readPieceState(cell: CellHandle): Promise<void> {
@@ -1729,9 +1729,9 @@ export class CFPieceMenu extends BaseElement {
     const fresh = () => generation === this.#dataGeneration;
     try {
       const rt = cell.runtime();
-      const page = await rt.getPage(cell.id(), cell.space(), true);
+      const piece = await rt.getPiece(cell.id(), cell.space(), true);
       if (!fresh()) return;
-      const pieceCell = (page?.cell() as CellHandle | undefined) ?? cell;
+      const pieceCell = (piece?.cell() as CellHandle | undefined) ?? cell;
       this.#pieceCell = pieceCell;
       this.#cancelResult = pieceCell.subscribe((value) => {
         if (!fresh()) return;

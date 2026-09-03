@@ -194,7 +194,7 @@ Rules:
   key subscriptions or caches on scheme-stripped ids. `toURI(value, kind)`
   throws when handed a kind alongside an already-schemed string — an
   existing identity is never re-schemed. The one sanctioned stripped form
-  is `PageHandle.id()` (runtime-client): a piece-root ROUTING/DISPLAY
+  is `PieceHandle.id()` (runtime-client): a piece-root ROUTING/DISPLAY
   accessor whose consumers are shell URLs, `cf-piece` lookups, and
   favorites equality against URL-derived bare pieceIds. It strips `of:`
   only (a `computed:` scheme stays visible), and piece roots are minted

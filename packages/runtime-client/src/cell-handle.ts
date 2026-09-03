@@ -154,7 +154,7 @@ export class CellHandle<T = unknown> {
    * so the URI scheme is the only thing distinguishing a computed doc from
    * a state sibling of the same cause; this accessor never strips it. For
    * the piece-root routing/display form (bare, `of:`-stripped), use
-   * `PageHandle.id()` — see docs/specs/computed-cell-identity.md.
+   * `PieceHandle.id()` — see docs/specs/computed-cell-identity.md.
    */
   id(): string {
     return this.#ref.id;

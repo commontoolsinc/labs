@@ -68,7 +68,7 @@ export class WebWorkerRuntimeTransport
     // back-link before a prop arrives, and `CellHandle.serialize()` rebuilds a
     // record rather than aliasing it. What is exposed is a value handed to the
     // connection without passing through one of those, of which
-    // `PageCreateRequest.argument` is the field to know about.
+    // `PieceCreateRequest.argument` is the field to know about.
     this.#worker.postMessage(realmFromFabricValue(data));
   }
 

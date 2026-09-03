@@ -114,7 +114,7 @@ const runtimeSynced = async (): Promise<boolean> => {
 // RootView resolves a named view space independently of URL/login state, and
 // AppView then loads that space's active root asynchronously. A previous root
 // can remain interactive during that handoff, so readiness means the rendered
-// active PageHandle itself belongs to the expected space.
+// active PieceHandle itself belongs to the expected space.
 const activeSpaceRootReady = (
   _probe: ProbeApi,
   expectedSpace: string,

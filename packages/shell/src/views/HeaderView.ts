@@ -691,11 +691,11 @@ export class XHeaderView extends BaseView {
           // Names come from the persisted result cells — do NOT start every
           // piece in the space just to label a menu (CT-1623: that cost ~10s
           // of dependency collection per reload or on first interaction).
-          const page = await rt.getPattern(space, id, { start: false });
-          await page.cell().sync();
+          const piece = await rt.getPattern(space, id, { start: false });
+          await piece.cell().sync();
           return {
-            id: page.id(),
-            name: page.name() ?? `Piece #${page.id().slice(0, 6)}`,
+            id: piece.id(),
+            name: piece.name() ?? `Piece #${piece.id().slice(0, 6)}`,
           };
         }),
       );

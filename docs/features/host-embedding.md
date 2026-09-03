@@ -188,7 +188,7 @@ effective ACL capability is `OWNER` also gets controls backed by
 The runtime uses `ACLManager` for these mutations, so the memory server remains
 the authority that accepts owner changes and preserves a concrete owner.
 
-Calling `RuntimeClient.createPage()` with an HTTP or HTTPS `URL` creates a
+Calling `RuntimeClient.createPiece()` with an HTTP or HTTPS `URL` creates a
 followed piece. The runtime records the canonical URL and retained initial
 source in one creation transaction. Calling it with a source string or
 `Program` creates a detached piece when that source can be retained.

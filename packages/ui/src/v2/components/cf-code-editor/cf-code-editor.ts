@@ -901,19 +901,19 @@ export class CFCodeEditor extends BaseElement {
         content: "",
         noteId: generateNoteId(),
       };
-      const page = await rt.createPage(
+      const piece = await rt.createPiece(
         JSON.parse(program),
         this.pattern.space(),
         inputs,
       );
-      if (!page) throw new Error("Could not create piece.");
+      if (!piece) throw new Error("Could not create piece.");
 
       // The piece exists whether or not its token survived, so the host hears
       // about it either way and can register it.
       this.emit("backlink-create", {
         text: label,
-        pieceId: page.id(),
-        piece: page.cell(),
+        pieceId: piece.id(),
+        piece: piece.cell(),
         navigate: false,
       });
 
@@ -922,7 +922,7 @@ export class CFCodeEditor extends BaseElement {
       // entry no key in the document reaches.
       if (!this._findRefToken(key)) return;
 
-      const destination = page.cell() as unknown as CellHandle<unknown>;
+      const destination = piece.cell() as unknown as CellHandle<unknown>;
       this.references?.key(key).set(
         { destination, modifiedTitle: false } as unknown as MentionRef,
       );
@@ -1160,12 +1160,12 @@ export class CFCodeEditor extends BaseElement {
       };
 
       // The note is created in the same space as the pattern it backlinks
-      // from — creation, like every page op, names its space.
-      const page = await rt.createPage(pattern, this.pattern.space(), inputs);
-      if (!page) {
+      // from — creation, like every piece op, names its space.
+      const piece = await rt.createPiece(pattern, this.pattern.space(), inputs);
+      if (!piece) {
         throw new Error("Could not create piece.");
       }
-      const pieceId = page.id();
+      const pieceId = piece.id();
 
       // Insert the ID into the text if we have an editor
       if (this._editorView && pieceId) {
@@ -1175,7 +1175,7 @@ export class CFCodeEditor extends BaseElement {
       this.emit("backlink-create", {
         text: backlinkText,
         pieceId,
-        piece: page.cell(),
+        piece: piece.cell(),
         navigate,
       });
     } catch (error) {

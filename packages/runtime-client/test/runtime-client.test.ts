@@ -334,7 +334,7 @@ describe("RuntimeClient", () => {
         request: (message: unknown) => {
           requests.push(message);
           return Promise.resolve({
-            page: {
+            piece: {
               cell: {
                 id: "of:fid1:clone",
                 space: destinationSpace,
@@ -371,7 +371,7 @@ describe("RuntimeClient", () => {
         request: (message: unknown) => {
           requests.push(message);
           return Promise.resolve({
-            page: {
+            piece: {
               cell: {
                 id: "of:fid1:clone",
                 space: destinationSpace,

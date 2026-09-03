@@ -60,7 +60,7 @@ export type CellRef = NormalizedFullLink & {
 };
 
 /** A piece as this connection names it, by the cell that holds it. */
-export type PageRef = {
+export type PieceRef = {
   /**
    * The cell holding the piece.
    */
@@ -228,7 +228,7 @@ export enum RequestType {
   ResolveEventAttention = "runtime:resolveEventAttention",
 
   /**
-   * Waits for every opened space to finish syncing. {@link PageSynced} is the
+   * Waits for every opened space to finish syncing. {@link PieceSynced} is the
    * same wait narrowed to one space.
    */
   RuntimeSynced = "runtime:synced",
@@ -358,7 +358,7 @@ export enum RequestType {
    */
   UploadBlob = "runtime:uploadBlob",
 
-  // Page operations (main -> worker)
+  // Piece operations (main -> worker)
 
   /**
    * Answers with a space's root pattern, creating it if the space has none.
@@ -372,34 +372,34 @@ export enum RequestType {
    * Creates a piece in a space from a URL or a program, optionally running it
    * once created.
    */
-  PageCreate = "page:create",
+  PieceCreate = "piece:create",
 
   /** Reads a piece by id, optionally running it. */
-  PageGet = "page:get",
+  PieceGet = "piece:get",
 
   /** Reads a piece's slug, which a piece need not have. */
-  PageGetSlug = "page:getSlug",
+  PieceGetSlug = "piece:getSlug",
 
   /** Removes a piece from its space's list. */
-  PageRemove = "page:remove",
+  PieceRemove = "piece:remove",
 
   /** Starts a piece running. */
-  PageStart = "page:start",
+  PieceStart = "piece:start",
 
   /** Stops a running piece. */
-  PageStop = "page:stop",
+  PieceStop = "piece:stop",
 
   /**
    * Answers with a ref to the cell holding a space's piece registry. The
    * pieces themselves are read from that cell, not carried here.
    */
-  PageGetAll = "page:getAll",
+  PieceGetAll = "piece:getAll",
 
   /**
    * Waits for one space's pieces to finish syncing, {@link RuntimeSynced}
    * being the same wait across every opened space.
    */
-  PageSynced = "page:synced",
+  PieceSynced = "piece:synced",
 
   /** Reads a piece's current source. */
   PieceGetSource = "piece:getSource",
@@ -1425,7 +1425,7 @@ export type ResolveEventAttentionRequest = BaseRequest & {
 
 /**
  * Await storage/piece-manager convergence for EVERY space this worker
- * has opened. Genuinely spaceless — like Idle — unlike PageSynced,
+ * has opened. Genuinely spaceless — like Idle — unlike PieceSynced,
  * which awaits one named space's piece context.
  */
 export type RuntimeSyncedRequest = BaseRequest & {
@@ -1996,11 +1996,11 @@ export type LoggerFlagsData = Record<
 >;
 
 /**
- * The {@link RequestType.PageCreate} request. `source` names a URL or a
+ * The {@link RequestType.PieceCreate} request. `source` names a URL or a
  * program, never both.
  */
-export type PageCreateRequest = BaseRequest & {
-  type: RequestType.PageCreate;
+export type PieceCreateRequest = BaseRequest & {
+  type: RequestType.PieceCreate;
 
   /** The space the piece is created in — part of its address. */
   space: DID;
@@ -2048,12 +2048,12 @@ export type PageCreateRequest = BaseRequest & {
 };
 
 /**
- * Page operations resolve against one space's piece context, and every
+ * Piece operations resolve against one space's piece context, and every
  * request names its space explicitly — there is no implicit/default
  * space at this layer. The worker lazily builds a piece context per
  * space, sharing the one runtime/storage connection.
  */
-export type PageGetSpaceDefault = BaseRequest & {
+export type GetSpaceRootPatternRequest = BaseRequest & {
   type: RequestType.GetSpaceRootPattern;
 
   /**
@@ -2086,16 +2086,16 @@ export type RecreateSpaceRootPatternRequest = BaseRequest & {
 };
 
 /**
- * The {@link RequestType.PageGet} request. `runIt` starts the piece as part of
+ * The {@link RequestType.PieceGet} request. `runIt` starts the piece as part of
  * the read.
  */
-export type PageGetRequest = BaseRequest & {
-  type: RequestType.PageGet;
+export type PieceGetRequest = BaseRequest & {
+  type: RequestType.PieceGet;
 
   /**
    * The piece to read.
    */
-  pageId: string;
+  pieceId: string;
 
   /**
    * Start the piece as part of the read.
@@ -2108,14 +2108,14 @@ export type PageGetRequest = BaseRequest & {
   space: DID;
 };
 
-/** The {@link RequestType.PageGetSlug} request. */
-export type PageGetSlugRequest = BaseRequest & {
-  type: RequestType.PageGetSlug;
+/** The {@link RequestType.PieceGetSlug} request. */
+export type PieceGetSlugRequest = BaseRequest & {
+  type: RequestType.PieceGetSlug;
 
   /**
    * The piece whose slug to read.
    */
-  pageId: string;
+  pieceId: string;
 
   /**
    * The space the piece lives in.
@@ -2123,14 +2123,14 @@ export type PageGetSlugRequest = BaseRequest & {
   space: DID;
 };
 
-/** The {@link RequestType.PageRemove} request. */
-export type PageRemoveRequest = BaseRequest & {
-  type: RequestType.PageRemove;
+/** The {@link RequestType.PieceRemove} request. */
+export type PieceRemoveRequest = BaseRequest & {
+  type: RequestType.PieceRemove;
 
   /**
    * The piece to remove.
    */
-  pageId: string;
+  pieceId: string;
 
   /**
    * The space to remove it from.
@@ -2138,14 +2138,14 @@ export type PageRemoveRequest = BaseRequest & {
   space: DID;
 };
 
-/** The {@link RequestType.PageStart} request. */
-export type PageStartRequest = BaseRequest & {
-  type: RequestType.PageStart;
+/** The {@link RequestType.PieceStart} request. */
+export type PieceStartRequest = BaseRequest & {
+  type: RequestType.PieceStart;
 
   /**
    * The piece to start.
    */
-  pageId: string;
+  pieceId: string;
 
   /**
    * The space the piece lives in.
@@ -2153,14 +2153,14 @@ export type PageStartRequest = BaseRequest & {
   space: DID;
 };
 
-/** The {@link RequestType.PageStop} request. */
-export type PageStopRequest = BaseRequest & {
-  type: RequestType.PageStop;
+/** The {@link RequestType.PieceStop} request. */
+export type PieceStopRequest = BaseRequest & {
+  type: RequestType.PieceStop;
 
   /**
    * The piece to stop.
    */
-  pageId: string;
+  pieceId: string;
 
   /**
    * The space the piece lives in.
@@ -2168,9 +2168,9 @@ export type PageStopRequest = BaseRequest & {
   space: DID;
 };
 
-/** The {@link RequestType.PageGetAll} request. */
-export type PageGetAllRequest = BaseRequest & {
-  type: RequestType.PageGetAll;
+/** The {@link RequestType.PieceGetAll} request. */
+export type PieceGetAllRequest = BaseRequest & {
+  type: RequestType.PieceGetAll;
 
   /**
    * The space whose pieces to list.
@@ -2178,9 +2178,9 @@ export type PageGetAllRequest = BaseRequest & {
   space: DID;
 };
 
-/** The {@link RequestType.PageSynced} request. */
-export type PageSyncedRequest = BaseRequest & {
-  type: RequestType.PageSynced;
+/** The {@link RequestType.PieceSynced} request. */
+export type PieceSyncedRequest = BaseRequest & {
+  type: RequestType.PieceSynced;
 
   /**
    * The space whose pieces to wait for.
@@ -2823,16 +2823,16 @@ export type IPCClientRequest =
   | SetWriteStackTraceMatchersRequest
   | IdleRequest
   | FlushCompileCacheWritesRequest
-  | PageCreateRequest
-  | PageGetSpaceDefault
+  | PieceCreateRequest
+  | GetSpaceRootPatternRequest
   | RecreateSpaceRootPatternRequest
-  | PageGetRequest
-  | PageGetSlugRequest
-  | PageRemoveRequest
-  | PageStartRequest
-  | PageStopRequest
-  | PageGetAllRequest
-  | PageSyncedRequest
+  | PieceGetRequest
+  | PieceGetSlugRequest
+  | PieceRemoveRequest
+  | PieceStartRequest
+  | PieceStopRequest
+  | PieceGetAllRequest
+  | PieceSyncedRequest
   | PieceGetSourceRequest
   | PieceGetSourceRevisionRequest
   | PieceCloneRequest
@@ -2934,11 +2934,11 @@ export type CfcLabelViewResponse = {
 };
 
 /** A reference to one piece. */
-export type PageResponse = {
+export type PieceResponse = {
   /**
    * The piece in question.
    */
-  page: PageRef;
+  piece: PieceRef;
 };
 
 /** A piece's slug, `undefined` where the piece has none. */
@@ -3307,7 +3307,7 @@ export type RemoteResponse =
   | ActionRunTraceResponse
   | TriggerTraceResponse
   | WriteStackTraceResponse
-  | PageResponse
+  | PieceResponse
   | PieceSourceResponse
   | PieceSourceRevisionResponse
   | PieceUpdateSourceResponse
@@ -3540,13 +3540,13 @@ export type Commands = {
     request: SqliteExecRequest;
     response: EmptyResponse;
   };
-  // Page requests
-  [RequestType.PageCreate]: {
-    request: PageCreateRequest;
-    response: PageResponse;
+  // Piece requests
+  [RequestType.PieceCreate]: {
+    request: PieceCreateRequest;
+    response: PieceResponse;
   };
-  [RequestType.PageSynced]: {
-    request: PageSyncedRequest;
+  [RequestType.PieceSynced]: {
+    request: PieceSyncedRequest;
     response: EmptyResponse;
   };
   [RequestType.RuntimeSynced]: {
@@ -3561,28 +3561,28 @@ export type Commands = {
     request: RegisterSpaceHostRequest;
     response: BooleanResponse;
   };
-  [RequestType.PageGet]: {
-    request: PageGetRequest;
-    response: PageResponse | NullResponse;
+  [RequestType.PieceGet]: {
+    request: PieceGetRequest;
+    response: PieceResponse | NullResponse;
   };
-  [RequestType.PageGetSlug]: {
-    request: PageGetSlugRequest;
+  [RequestType.PieceGetSlug]: {
+    request: PieceGetSlugRequest;
     response: SlugResponse;
   };
-  [RequestType.PageRemove]: {
-    request: PageRemoveRequest;
+  [RequestType.PieceRemove]: {
+    request: PieceRemoveRequest;
     response: BooleanResponse;
   };
-  [RequestType.PageStart]: {
-    request: PageStartRequest;
+  [RequestType.PieceStart]: {
+    request: PieceStartRequest;
     response: BooleanResponse;
   };
-  [RequestType.PageStop]: {
-    request: PageStopRequest;
+  [RequestType.PieceStop]: {
+    request: PieceStopRequest;
     response: BooleanResponse;
   };
-  [RequestType.PageGetAll]: {
-    request: PageGetAllRequest;
+  [RequestType.PieceGetAll]: {
+    request: PieceGetAllRequest;
     response: CellResponse;
   };
   [RequestType.PieceGetSource]: {
@@ -3595,7 +3595,7 @@ export type Commands = {
   };
   [RequestType.PieceClone]: {
     request: PieceCloneRequest;
-    response: PageResponse;
+    response: PieceResponse;
   };
   [RequestType.PieceUpdateSource]: {
     request: PieceUpdateSourceRequest;
@@ -3614,12 +3614,12 @@ export type Commands = {
     response: SpaceAclResponse;
   };
   [RequestType.GetSpaceRootPattern]: {
-    request: PageGetSpaceDefault;
-    response: PageResponse;
+    request: GetSpaceRootPatternRequest;
+    response: PieceResponse;
   };
   [RequestType.RecreateSpaceRootPattern]: {
     request: RecreateSpaceRootPatternRequest;
-    response: PageResponse;
+    response: PieceResponse;
   };
   // Diagnosis requests
   [RequestType.DetectNonIdempotent]: {
