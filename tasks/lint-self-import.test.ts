@@ -230,6 +230,65 @@ describe("lint-self-import", () => {
     expect(messages).toEqual([]);
   });
 
+  it("reports a type written as an inline `import(...)`", () => {
+    const messages = fixture(RUNNER).diagnose(
+      "src/runtime.ts",
+      `type T = import("@commonfabric/runner").Runtime;`,
+    );
+    expect(messages.length).toBe(1);
+    expect(messages[0]).toContain(BARREL);
+  });
+
+  it("reads a second file against the package it already resolved", () => {
+    // The owning package is cached per directory, so the second file in a
+    // directory takes a different path to the same answer than the first.
+    const pkg = fixture(RUNNER);
+    const first = pkg.diagnose(
+      "src/runtime.ts",
+      `import { Runtime } from "@commonfabric/runner";`,
+    );
+    const second = pkg.diagnose(
+      "src/schema.ts",
+      `import { walk } from "@commonfabric/runner/traverse";`,
+    );
+    expect(first.length).toBe(1);
+    expect(first[0]).toContain(BARREL);
+    expect(second.length).toBe(1);
+    expect(second[0]).toContain("Import `./traverse.ts` instead.");
+  });
+
+  it("prefers deno.json to deno.jsonc, as Deno itself does", () => {
+    // Deno takes deno.json whole and ignores the other file, so a name in the
+    // ignored one is not the package's name.
+    const pkg = fixture({ name: "@commonfabric/ignored" });
+    Deno.writeTextFileSync(
+      resolve(pkg.root, "deno.json"),
+      JSON.stringify(RUNNER),
+    );
+    const messages = pkg.diagnose(
+      "src/runtime.ts",
+      `import { Runtime } from "@commonfabric/runner";`,
+    );
+    expect(messages.length).toBe(1);
+    expect(messages[0]).toContain(BARREL);
+  });
+
+  it("throws when a package configuration cannot be read at all", () => {
+    // A configuration that is unreadable is not a package without a name: Deno
+    // fails on the same file, and swallowing it here would quietly stop the
+    // rule from checking anything under that directory.
+    const root = Deno.makeTempDirSync({ prefix: "lint-self-import-" });
+    fixtureRoots.push(root);
+    Deno.mkdirSync(resolve(root, "deno.json"));
+    expect(() =>
+      Deno.lint.runPlugin(
+        plugin,
+        resolve(root, "src/main.ts"),
+        `import { Runtime } from "@commonfabric/runner";`,
+      )
+    ).toThrow();
+  });
+
   it("reports a package that names itself in a bare exports string", () => {
     const messages = fixture({
       name: "@commonfabric/leb128",

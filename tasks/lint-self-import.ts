@@ -19,6 +19,12 @@
  *     back, so the same file arrives under two spellings, and the shorter one
  *     stops being a reliable way to find who depends on what.
  *
+ * The rule reads every form that names a module: the `import` and `export ...
+ * from` declarations, a dynamic `import()`, and a type written
+ * `import("...").Name`. That last one is reported for completeness rather than
+ * because it is expected — `cf-imports/no-inline-type-import` rejects the form
+ * outright, so one reaches here only in a file that has suppressed that rule.
+ *
  * A file under a package's `test/` or `integration/` directory is exempt, as is
  * one named `*.test.ts` or `*.bench.ts` anywhere in the package. A test that
  * names its own package is reaching for the surface a consumer sees, which is
@@ -41,6 +47,17 @@ const TEST_DIRECTORY_NAMES: ReadonlySet<string> = new Set([
 
 /** The file names that are a test wherever in a package they sit. */
 const TEST_FILE_PATTERN = /\.(?:test|bench)\.tsx?$/;
+
+/** Either separator `relative()` can return, the host deciding which. */
+const PATH_SEPARATOR = /[/\\]/;
+
+/**
+ * A type written `import("...").Name`, which holds its specifier inside a
+ * literal type rather than directly as the declaration forms do.
+ */
+interface InlineTypeImport {
+  readonly argument?: { readonly literal?: { readonly value?: unknown } };
+}
 
 /** The package a file belongs to, as much of it as this rule reads. */
 interface OwningPackage {
@@ -127,7 +144,7 @@ function computeOwner(directory: string): OwningPackage | null {
 
 /** True when `filename` is one of its package's tests rather than its source. */
 function isTestFile(root: string, filename: string): boolean {
-  const parts = relative(root, filename).split("/");
+  const parts = relative(root, filename).split(PATH_SEPARATOR);
   const base = parts.pop() ?? "";
   return TEST_FILE_PATTERN.test(base) ||
     parts.some((part) => TEST_DIRECTORY_NAMES.has(part));
@@ -135,7 +152,7 @@ function isTestFile(root: string, filename: string): boolean {
 
 /** The specifier that reaches `to` from the file at `from`. */
 function relativeSpecifier(from: string, to: string): string {
-  const path = relative(dirname(from), to);
+  const path = relative(dirname(from), to).replaceAll("\\", "/");
   return path.startsWith(".") ? path : `./${path}`;
 }
 
@@ -207,6 +224,11 @@ export default {
           ExportAllDeclaration: (node) => check(node, node.source),
           ExportNamedDeclaration: (node) => check(node, node.source),
           ImportExpression: (node) => check(node, node.source),
+          TSImportType: (node) =>
+            check(
+              node,
+              (node as unknown as InlineTypeImport).argument?.literal,
+            ),
         };
       },
     },
