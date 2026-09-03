@@ -41,8 +41,10 @@ Seven nouns, each one thing, in the order a reference names them.
 - **Value** — what a cell holds: the JSON at its position. Reading a reference
   returns its value.
 - **Path** — the way from a document's root to a cell, as JSON Pointer segments
-  (RFC 6901): the `path` field of every link and address. A reference is never
-  called a path; the whole string is a **reference**.
+  (RFC 6901): the `path` field of every link and address. A stored path is an
+  array of segments; RFC 6901's `~0` and `~1` escapes belong to the rendered
+  string alone. A reference is never called a path; the whole string is a
+  **reference**.
 - **Scope** — which instance of a document: `space`, `user`, or `session`. A
   stored link may also say `inherit`, the containing cell's scope.
 
@@ -339,6 +341,7 @@ received:
 | `/board@user`, `//space/board`                                            | passes                    | passes               | passes    |                                                                                                   |
 | `/board:user`, `/board%user`, `/board,user`, `/board+user`, `/board=user` | passes                    | passes               | passes    |                                                                                                   |
 | `items/0`, `./items`, `../title`, `.`                                     | passes                    | passes               | passes    | the relative forms                                                                                |
+| `/board/a~1b`, `/board/a~0b`                                              | passes                    | passes               | passes    | the path escapes, mid-word                                                                        |
 | `/board!user`                                                             | error, `event not found`  | error                | error     | history expansion at a typed prompt; passes only in a script or a `-c` string                     |
 
 Available to the grammar unquoted, then: `@ : % , + = . - /`. Not available: `$`
@@ -368,7 +371,10 @@ structural character be written at all, and it is the grammar's own: the writer
 applies it, the reader removes it, and the string round-trips under D10's law
 with the escape inside it. The grammar has one escape table, the path's — RFC
 6901's `~0` for `~` and `~1` for `/` — and nothing else in the string is ever
-escaped. `#` and `%` are data in a path.
+escaped. `#` and `%` are data in a path. The escapes are a property of the
+rendered string: a stored path is an array of segments and holds none. A
+mid-word `~` is shell-safe under every measured configuration, so the escape
+adds no quoting burden.
 
 **Quoting** is not part of the string. It is what a transport needs so that its
 own reading does not consume the string on the way through — a shell's quotes
