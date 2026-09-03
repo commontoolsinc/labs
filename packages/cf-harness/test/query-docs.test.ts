@@ -360,6 +360,9 @@ describe("query-docs", () => {
                 ? JSON.stringify({ answer: "Dip once.", citations: [] })
                 : "Done.",
             },
+            // The explore turn spends tokens like any other, and they are
+            // counted beside a delegation's rather than as the run's own.
+            ...(turn === 2 ? { usage: { totalTokens: 12 } } : {}),
           });
         },
       };
@@ -382,6 +385,7 @@ describe("query-docs", () => {
       });
 
       const result = await loop.runPrompt({ prompt: "Look up glazing." });
+      expect(result.totalUsage?.totalTokens).toBe(12);
       const toolMessage = result.transcript.find((message) =>
         message.role === "tool"
       );
