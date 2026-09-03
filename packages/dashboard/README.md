@@ -559,13 +559,72 @@ on the costs endpoint.
 
 Powers the Anthropic share of **model spend**. Needs an **Admin** key
 (`sk-ant-admin01-…`), created by an org admin/owner; a normal API key is rejected
-by the cost-report endpoint.
+by the cost-report endpoint. Console admin keys have no selectable scopes — they
+carry full Admin API access, so guard one like a root credential.
 
-1. **console.anthropic.com → Settings → Admin keys**.
-2. **Create key**, name it, **Create**.
-3. Copy the `sk-ant-admin01-…` secret (shown once). Console admin keys have no
-   selectable scopes — they carry full Admin API access, so guard it like a root
-   credential.
+1. Open [Claude Console → Settings → Admin keys](https://platform.claude.com/settings/admin-keys).
+   You must be an organization admin.
+
+2. Click **Create key**, name it `dashboard-reader`, and choose an expiration.
+   The key must begin with `sk-ant-admin01-`. Copy it immediately; Anthropic
+   shows it only once.
+   [Anthropic instructions](https://platform.claude.com/docs/en/manage-claude/admin-api-keys)
+
+   The dashboard does not rotate this key automatically. A longer lifetime
+   reduces how often an operator must replace the secret and restart the
+   dashboard. Record the expiration and replace the key before that date.
+
+3. Store it without putting it in shell history:
+
+   ```zsh
+   read -s "new_anthropic_key?Paste the new key: "
+   echo
+   if [[ "$new_anthropic_key" != sk-ant-admin01-* ]]; then
+     echo "The key must begin with sk-ant-admin01-." >&2
+   else
+     printf %s "$new_anthropic_key" |
+       gcloud secrets versions add \
+         k8s-stage-dashboard-anthropic-admin-key \
+         --project=commontools-core \
+         --data-file=-
+   fi
+   unset new_anthropic_key
+   ```
+
+4. Confirm that `kubectl` addresses the stage cluster:
+
+   ```zsh
+   kubectl config current-context
+   ```
+
+   It must print
+   `gke_commontools-core_us-central1_gke-cluster-stage`. Then force the
+   Kubernetes secret to refresh:
+
+   ```zsh
+   kubectl annotate externalsecret dev-dashboard-anthropic \
+     -n dev-dashboard \
+     force-sync="$(date +%s)" \
+     --overwrite
+   ```
+
+5. Watch the ExternalSecret and wait for its `REFRESHED` timestamp to change.
+   Stop the watch with Control-C after it reports `READY` as `True`:
+
+   ```zsh
+   kubectl get externalsecret dev-dashboard-anthropic \
+     -n dev-dashboard \
+     --watch \
+     -o 'custom-columns=REFRESHED:.status.refreshTime,READY:.status.conditions[0].status'
+   ```
+
+6. Restart the dashboard so its environment reloads, then wait for the rollout
+   to finish:
+
+   ```zsh
+   kubectl rollout restart deployment/dev-dashboard -n dev-dashboard
+   kubectl rollout status deployment/dev-dashboard -n dev-dashboard
+   ```
 
 ### `OPENROUTER_KEY`
 
