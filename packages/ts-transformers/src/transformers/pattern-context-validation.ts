@@ -65,8 +65,10 @@ import {
 import {
   classifyRestrictedReactiveComputation,
   classifyUnsupportedExpressionSiteCallRoot,
+  classifyUnsupportedPlainArrayMapCall,
   findInlineCallbackCarrierSite,
   findLowerableExpressionSite,
+  type UnsupportedPlainArrayMapDecision,
 } from "./expression-site-policy.ts";
 import {
   isDeclaredWithinFunction,
@@ -157,6 +159,78 @@ function objectMemberMessage(kind: ObjectMemberKind): string {
 
 export class PatternContextValidationTransformer
   extends HelpersOnlyTransformer {
+  /**
+   * Map calls already reported as unsupported plain-array map wrapper sites.
+   * The decision is a property of the map call, not of any one expression in
+   * its callback, so each call reports once however many reactive
+   * computations the callback holds, and the per-read diagnostics defer to
+   * that report for everything inside the callback.
+   */
+  private reportedPlainArrayMapCalls = new WeakSet<ts.Node>();
+
+  private reportUnsupportedPlainArrayMap(
+    decision: UnsupportedPlainArrayMapDecision,
+    context: TransformationContext,
+  ): void {
+    if (this.reportedPlainArrayMapCalls.has(decision.call)) {
+      return;
+    }
+    this.reportedPlainArrayMapCalls.add(decision.call);
+
+    const message = decision.reason === "reactive-jsx-escapes-render"
+      ? `This plain-array map collects view nodes whose props or children ` +
+        `carry reactive values, and the collected array leaves the render ` +
+        `path. An ordinary consumer reads through a view node to those ` +
+        `members the same way it reads through an object literal, and a ` +
+        `reactive member is an object that is truthy whatever it ` +
+        `represents. Keep the collected nodes on the render path — ` +
+        `rendered as JSX children — or move the consuming computation ` +
+        `into computed(() => ...).`
+      : decision.reason === "result-not-direct-jsx"
+      ? `This plain-array map callback returns a reactive value, so the ` +
+        `collected array holds cells rather than values, and only a ` +
+        `direct JSX child rendering can read them. An ordinary consumer ` +
+        `of the mapped array would interpret the cell objects instead. ` +
+        `Make the map the JSX child, move conditional or logical selection ` +
+        `inside a concrete returned JSX node, or move the whole consuming ` +
+        `computation into computed(() => ...).`
+      : decision.reason === "reactive-this-arg"
+      ? `This plain-array map passes a reactive value alongside its ` +
+        `callback, where it binds as \`this\` and can reach the collected ` +
+        `array without appearing in the callback's own body flows. Capture ` +
+        `the value in the callback body instead of passing it as a map ` +
+        `argument.`
+      : decision.reason === "async-callback"
+      ? `An async plain-array map callback resumes outside pattern ` +
+        `construction, so it cannot own reactive computations. Keep the ` +
+        `render callback synchronous or move deferred work into an ` +
+        `explicit supported owner.`
+      : `Array.map() does not execute a generator callback body, so the ` +
+        `generator cannot own reactive computations. Use a synchronous ` +
+        `render callback or an explicit supported owner.`;
+    context.reportDiagnostic({
+      severity: "error",
+      type: "pattern-context:computation",
+      message,
+      node: decision.call,
+    });
+  }
+
+  /**
+   * True when `node` sits inside the callback of a plain-array map call this
+   * pass already reported. The map-level diagnostic owns everything the
+   * callback would collect, so per-read diagnostics inside it defer rather
+   * than restate the same escape.
+   */
+  private isInsideReportedPlainArrayMap(
+    node: ts.Node,
+    context: TransformationContext,
+  ): boolean {
+    const callbackContext = context.getEnclosingCallbackContext(node);
+    return callbackContext !== undefined &&
+      this.reportedPlainArrayMapCalls.has(callbackContext.call);
+  }
+
   transform(context: TransformationContext): ts.SourceFile {
     const checker = context.checker;
     const analyze = context.getDataFlowAnalyzer();
@@ -241,6 +315,7 @@ export class PatternContextValidationTransformer
           isPartOfOptionalChainCallee(node);
         if (
           !optionalCallTargetHandledByCallRootPolicy &&
+          !this.isInsideReportedPlainArrayMap(node, context) &&
           isInRestrictedReactiveContext(node, checker, context) &&
           !findLowerableExpressionSite(node, context, analyze) &&
           !findInlineCallbackCarrierSite(node, context, analyze)
@@ -267,6 +342,19 @@ export class PatternContextValidationTransformer
         // patternTool's first argument must be a pattern() (CT-1655)
         this.#validatePatternToolFirstArgument(node, context, checker);
 
+        // A plain-array map that would collect reactive values outside a
+        // supported flow is diagnosed once here, at the call. The visitor
+        // reaches the map before anything inside its callback, so the
+        // per-read diagnostics below can defer to this report.
+        const unsupportedMap = classifyUnsupportedPlainArrayMapCall(
+          node,
+          context,
+          analyze,
+        );
+        if (unsupportedMap) {
+          this.reportUnsupportedPlainArrayMap(unsupportedMap, context);
+        }
+
         const unsupportedCallRoot = classifyUnsupportedExpressionSiteCallRoot(
           node,
           context,
@@ -274,6 +362,7 @@ export class PatternContextValidationTransformer
         );
         if (
           unsupportedCallRoot === "restricted-get-call" &&
+          !this.isInsideReportedPlainArrayMap(node, context) &&
           !findLowerableExpressionSite(node, context, analyze)
         ) {
           // A cell read needs a lowerable expression site to carry it: the
@@ -336,6 +425,11 @@ export class PatternContextValidationTransformer
       analyze,
     );
     if (decision.kind !== "requires-computed") {
+      if (decision.kind === "allowed") {
+        return;
+      }
+
+      this.reportUnsupportedPlainArrayMap(decision, context);
       return;
     }
 

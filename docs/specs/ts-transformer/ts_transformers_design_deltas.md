@@ -86,21 +86,32 @@ landed after the snapshot above:
     `builder-call-hoisting.ts`; no transformer emits it and no fixture expects
     it. See `packages/ts-transformers/docs/derive-to-lift-design.md`.
 
-### Addendum 4 (a plain-array `map` callback carries pattern-owned sites)
+### Addendum 4 (a supported synchronous plain-array `map` carries sites)
 
-A `map` callback on an ordinary JavaScript array inside a pattern body now
-carries pattern-owned expression sites, the same ones the pattern body carries.
-`supportsPatternOwnedWrapperCallbackSite` (`policy/callback-boundary.ts`)
-admits the `plain-array-value` boundary for that callback role, which
-`isCollectingPlainArrayMethodCallback` (`ast/call-kind.ts`) decides.
+A synchronous `map` callback on an ordinary JavaScript array inside a pattern
+body carries pattern-owned expression sites when its collected values stay on
+the render path. What the callback returns decides how far the result may
+travel: a render-collecting callback — directly returning JSX, `null`, the
+global `undefined` value, or a literal constant — embeds every lowered value in
+its view nodes, and its result may flow anywhere while those nodes carry no
+reactive content (nodes that do are classified like records; see below); a
+value-collecting callback
+can return a lowered value, so its map call must be the JSX child itself or the
+direct return of a synchronous IIFE — concise arrow body or explicit `return`
+— whose call is the child.
+`supportsPatternOwnedWrapperCallbackSite`
+(`policy/callback-boundary.ts`) admits the `plain-array-value` boundary for
+that callback and result-flow shape, which
+`isRenderSafePlainArrayMapCallback` (`ast/call-kind.ts`) decides.
 
 The callback runs eagerly during pattern build, so its statements are pattern
 body statements that happen to be written once and executed several times. A
 value binding in one is therefore a pattern-body binding, and a reactive
 computation bound there lowers to its own lift-applied call per iteration.
 
-The permission stops at the callback's role, because the boundary kind alone is
-too coarse to carry it. `plain-array-value` also covers `filter`, `find`,
+The permission stops at both the callback's role and the collected result's
+flow, because the boundary kind alone is too coarse to carry it.
+`plain-array-value` also covers `filter`, `find`,
 `some`, `every`, `sort`, `flatMap`, and `reduce`, and each of those reads what
 the callback returns while it runs — as a boolean, a number, an array test, or
 the next accumulator. `map` is the one that merely collects. A lift returned to
@@ -111,20 +122,83 @@ includes the configured default-library `Array`/`ReadonlyArray` declaration, so
 a comparator in a later argument position, a same-named source or ambient type,
 and a `map` belonging to some other type are all excluded.
 
+Collection by `map` is necessary but insufficient for a value-collecting
+callback. A native consumer of its result can interpret the collected cells:
+`.map(...).filter(Boolean)` sees each cell as a truthy object, and the same
+mistake survives when the map result flows through a local first. That result
+therefore has to stay on the uninterpreted render path rather than become an
+operand of a later call or a stored intermediate, and each unsupported map
+call reports one `pattern-context:computation` diagnostic, anchored on the
+call. The escape test is applied at the map call itself over the callback's
+own returns, so it reaches every reactive spelling the same way: a
+computation, a bare read of a reactive or lowered local, an explicit reactive
+construction, or a projection from one. Local aliases are followed through
+their initializers and assignments regardless of `const`/`let`; this is a
+may-escape check, so mutability adds possible values rather than proving a
+binding safe. There is no syntax-based artifact exemption. Resource-producing
+maps instead make their collection ownership explicit with a reactive receiver
+(and therefore `mapWithPattern`), while handler-producing render loops attach
+the handler directly to the JSX node that owns it.
+
+Which maps the test claims is decided by the receiver's provenance rather than
+its declared type. Validation runs at stage 4 and the closure stage that
+rewrites a reactive `.map()` into `mapWithPattern` runs at stage 13, so the
+`lowered` flag is necessarily still false at decision time. A receiver
+declared as a plain array can nonetheless carry a reactive collection, and
+there the lowering collects through a sub-pattern, so nothing reactive is ever
+stored in a native array and the diagnostic would be describing a shape that
+does not exist. The check asks the same two questions the closure stage asks —
+`hasReactiveCollectionProvenance`, and whether the receiver is a site-lifted
+collection local — which is also why `getSiteLiftedCollectionLocalSymbol`
+lives beside the expression-site policy that answers the second one.
+
+An object or array literal is not exempt as a whole either. Its own
+truthiness is never in question, but an ordinary consumer reads through it —
+`map((v) => ({ v, flag })).filter(({ flag }) => flag)` interprets the member,
+not the record — so every member is classified the way the whole return is.
+Computed property names are included because native record construction must
+interpret them too. A returned view node is itself classified like a record:
+one whose props or children carry reactive values may travel only the render
+path — the map call in a JSX-child position, or a `const` binding whose every
+reference sits in one, read through conditional and logical selection and
+synchronous JSX-local IIFE returns — because an ordinary consumer reads
+through a node to its members exactly as it reads through an object literal.
+A node with no reactive content stays ordinary data. A rejected-flow map whose returns are all plain collects
+ordinary data; a reactive computation inside one is a standard
+non-escaping site and keeps the standard "wrap it in `computed()`"
+classification instead. A
+render-collecting callback has no such exposure — its collected view nodes
+are ordinary data — so no flow restriction applies to it. Conditional and
+logical return roots are value-collecting even when their branches are JSX
+or nullish, because expression-site lowering rewrites the selection itself
+to a reactive helper cell. Async callbacks containing reactive work are
+excluded because that work resumes after the construction frame, and generator
+callbacks containing reactive work because `map` never executes their bodies;
+those checks are independent of the value the callback returns.
+The restriction is about pattern-owned wrapper sites: a map in a standalone or
+explicit compute-owned helper remains ordinary JavaScript, even when its result
+is stored or consumed.
+
 Two behaviors change:
 
 - A binding such as `const isToday = weekDates?.[colIdx] === todayDate` inside
-  `COLUMN_INDICES.map((colIdx) => …)` lowers. Previously the comparison was
+  a supported `COLUMN_INDICES.map((colIdx) => …)` lowers — rendered inline or
+  named in a local first, when the callback returns view nodes. Previously
+  the comparison was
   emitted raw, so it ran on the reactive proxies rather than their values and
   froze to `false`. Reading the binding as a JSX condition then rendered the
   wrong branch with no diagnostic, because the JSX exemption in
   `isInRestrictedReactiveContext` suppresses the "wrap it in `computed()`"
   errors that the same binding draws outside JSX.
 - `pattern-context:get-call` and `pattern-context:optional-chaining` no longer
-  fire for a read that a `map` callback's own value sites can carry, so
-  `["-", "+"].map((sep) => rows.get().join(sep))` compiles to an array of
-  per-separator lifts instead of being rejected. Both still fire in the
-  result-interpreting callbacks.
+  fire for a read that a supported synchronous `map` callback's own
+  value sites can carry, so rendering
+  `["-", "+"].map((sep) => <span>{rows.get().join(sep)}</span>)` compiles to
+  per-separator lifts instead of being rejected. Both still fire in
+  result-interpreting callbacks. In a value-collecting map whose result
+  escapes the render path, the map-level `pattern-context:computation`
+  diagnostic owns the whole callback and the per-read diagnostics inside it
+  defer to that single report.
 
 A reactive array-method callback keeps the older, stricter rule, and the
 difference is structural rather than stylistic: that callback is lowered into a

@@ -2,14 +2,19 @@ import ts from "typescript";
 import {
   classifyArrayMethodCall,
   classifyArrayMethodCallSite,
+  classifyPlainArrayMapWrapperSite,
   detectCallKind,
   getCallArgumentPosition,
+  getOwnReturnExpressions,
+  getSynchronousIifeCall,
   getTypeAtLocationWithFallback,
   hasAuthoredSourceSite,
+  hasReactiveCollectionProvenance,
   isCollectionType,
   isEventHandlerJsxAttribute,
   isFunctionLikeExpression,
   isInRestrictedReactiveContext,
+  isReactiveOriginExpression,
   isReactiveOriginTaggedTemplate,
   isSyntheticNode,
   type ReactiveContextInfo,
@@ -110,7 +115,19 @@ export type RestrictedReactiveComputationDecision =
   }
   | {
     kind: "requires-computed";
-  };
+  }
+  | UnsupportedPlainArrayMapDecision;
+
+export interface UnsupportedPlainArrayMapDecision {
+  kind: "unsupported-plain-array-map";
+  reason:
+    | "result-not-direct-jsx"
+    | "reactive-jsx-escapes-render"
+    | "reactive-this-arg"
+    | "async-callback"
+    | "generator-callback";
+  call: ts.CallExpression;
+}
 
 export function containsLogicalBinaryOperator(expr: ts.Expression): boolean {
   if (ts.isBinaryExpression(expr)) {
@@ -1481,11 +1498,835 @@ export function findPreferredNestedLowerableExpressionSite(
   return nestedSite;
 }
 
+/**
+ * True when the callback can hand `map` a reactive value. Plain `Array.map`
+ * stores that value as-is, so an ordinary downstream consumer observes the
+ * wrapper object rather than the value it represents.
+ *
+ * Object and array literals are classified member by member. Their own
+ * truthiness is not in question, but an ordinary consumer reads through them:
+ * `map((v) => ({ v, flag })).filter(({ flag }) => flag)` interprets the
+ * member, not the record. Computed property names are evaluated while the
+ * record is created and must be plain for the same reason.
+ *
+ * Identifiers are followed to their local initializers and assignments. This
+ * deliberately does not distinguish `const` from `let`: mutability changes
+ * how many possible values a binding has, not whether any of them can escape.
+ */
+function plainArrayMapCollectsEscapingReactiveValues(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  return getOwnReturnExpressions(callback).some((returnExpression) =>
+    collectedValueEscapes(
+      returnExpression,
+      callback,
+      context,
+      analyze,
+      new Set(),
+    )
+  );
+}
+
+function collectedValueEscapes(
+  expression: ts.Expression,
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+  seenBindings: ReadonlySet<ts.Symbol>,
+): boolean {
+  const value = unwrapExpression(expression);
+
+  if (ts.isObjectLiteralExpression(value)) {
+    return value.properties.some((property) => {
+      if (
+        property.name && ts.isComputedPropertyName(property.name) &&
+        collectedValueEscapes(
+          property.name.expression,
+          callback,
+          context,
+          analyze,
+          seenBindings,
+        )
+      ) {
+        return true;
+      }
+      if (ts.isPropertyAssignment(property)) {
+        return collectedValueEscapes(
+          property.initializer,
+          callback,
+          context,
+          analyze,
+          seenBindings,
+        );
+      }
+      if (ts.isShorthandPropertyAssignment(property)) {
+        return collectedValueEscapes(
+          property.name,
+          callback,
+          context,
+          analyze,
+          seenBindings,
+        );
+      }
+      if (ts.isSpreadAssignment(property)) {
+        return collectedValueEscapes(
+          property.expression,
+          callback,
+          context,
+          analyze,
+          seenBindings,
+        );
+      }
+      // A method or accessor is a function, not a collected value.
+      return false;
+    });
+  }
+
+  if (ts.isArrayLiteralExpression(value)) {
+    return value.elements.some((element) => {
+      if (ts.isOmittedExpression(element)) {
+        return false;
+      }
+      return collectedValueEscapes(
+        ts.isSpreadElement(element) ? element.expression : element,
+        callback,
+        context,
+        analyze,
+        seenBindings,
+      );
+    });
+  }
+
+  if (
+    ts.isTaggedTemplateExpression(value) &&
+    isReactiveOriginTaggedTemplate(value, context.checker)
+  ) {
+    return true;
+  }
+
+  if (isReactiveOriginExpression(value, context.checker)) {
+    return true;
+  }
+
+  if (
+    ts.isIdentifier(value) &&
+    localBindingCanCarryReactiveValue(
+      value,
+      callback,
+      context,
+      analyze,
+      seenBindings,
+    )
+  ) {
+    return true;
+  }
+
+  return analyze(value).containsReactive;
+}
+
+/**
+ * Whether a binding referenced in collected content can hold a reactive
+ * value: its initializer carries one, or a statement in the callback stores
+ * one into it by assignment or by call.
+ *
+ * Stores are resolved by the binding named at the store site. An alias of a
+ * member — `const values = record.values; values.push(active)` — names the
+ * alias, not `record`, so that store is not visible from `record`: the scan
+ * follows no alias edges.
+ */
+function localBindingCanCarryReactiveValue(
+  identifier: ts.Identifier,
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+  seenBindings: ReadonlySet<ts.Symbol>,
+): boolean {
+  const symbol = context.checker.getSymbolAtLocation(identifier);
+  if (!symbol || seenBindings.has(symbol)) {
+    return false;
+  }
+
+  const nextSeenBindings = new Set(seenBindings);
+  nextSeenBindings.add(symbol);
+
+  for (const declaration of symbol.declarations ?? []) {
+    if (
+      ts.isVariableDeclaration(declaration) && declaration.initializer &&
+      collectedValueEscapes(
+        declaration.initializer,
+        callback,
+        context,
+        analyze,
+        nextSeenBindings,
+      )
+    ) {
+      return true;
+    }
+  }
+
+  let reactiveWrite = false;
+  const visit = (node: ts.Node): void => {
+    if (reactiveWrite || ts.isFunctionLike(node)) {
+      return;
+    }
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+      node.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
+      assignmentTargetsSymbol(node.left, symbol, context.checker) &&
+      collectedValueEscapes(
+        node.right,
+        callback,
+        context,
+        analyze,
+        nextSeenBindings,
+      )
+    ) {
+      reactiveWrite = true;
+      return;
+    }
+    if (
+      ts.isCallExpression(node) &&
+      callCanPutValueInBinding(node, symbol, context.checker) &&
+      node.arguments.some((argument) =>
+        collectedValueEscapes(
+          argument,
+          callback,
+          context,
+          analyze,
+          nextSeenBindings,
+        )
+      )
+    ) {
+      reactiveWrite = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(callback.body, visit);
+  return reactiveWrite;
+}
+
+/**
+ * Whether a call could put one of its arguments into `symbol`.
+ *
+ * An assignment is not the only way a reactive value reaches a collected
+ * aggregate: `record.push(active)` stores one without ever naming `record` on
+ * a left-hand side, and `store(record, active)` or
+ * `store(record.values, active)` can do the same out of sight. All of these
+ * count — the binding as the call's receiver, or at the base of any
+ * argument's member path — because this is a may-escape check and none of
+ * them can be shown not to store.
+ */
+function callCanPutValueInBinding(
+  call: ts.CallExpression,
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+): boolean {
+  const callee = unwrapExpression(call.expression);
+  if (
+    ts.isPropertyAccessExpression(callee) ||
+    ts.isElementAccessExpression(callee)
+  ) {
+    const receiver = unwrapExpression(getLeftmostMemberBase(callee.expression));
+    if (
+      ts.isIdentifier(receiver) &&
+      checker.getSymbolAtLocation(receiver) === symbol
+    ) {
+      return true;
+    }
+  }
+  return call.arguments.some((argument) => {
+    const value = unwrapExpression(
+      getLeftmostMemberBase(unwrapExpression(argument)),
+    );
+    return ts.isIdentifier(value) &&
+      checker.getSymbolAtLocation(value) === symbol;
+  });
+}
+
+/**
+ * Whether an assignment can put a value into the binding.
+ *
+ * `flag = value` writes the binding itself. `bag.flag = value` and
+ * `bag[key] = value` write into `bag`, which is equally a way for a reactive
+ * value to reach a collected aggregate, so the base receiver counts. The
+ * subscript does not: `key` is read to address the slot, never written, and
+ * scanning the whole left-hand side for a mention would misread it as
+ * rebound. A destructuring pattern has no single target, so it keeps the
+ * reference scan.
+ */
+function assignmentTargetsSymbol(
+  target: ts.Expression,
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+): boolean {
+  const current = unwrapExpression(target);
+  if (ts.isIdentifier(current)) {
+    return checker.getSymbolAtLocation(current) === symbol;
+  }
+  if (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)
+  ) {
+    return assignmentTargetsSymbol(current.expression, symbol, checker);
+  }
+  return expressionReferencesSymbol(current, symbol, checker);
+}
+
+function expressionReferencesSymbol(
+  expression: ts.Expression,
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+): boolean {
+  let referencesSymbol = false;
+  const visit = (node: ts.Node): void => {
+    if (
+      !referencesSymbol && ts.isIdentifier(node) &&
+      checker.getSymbolAtLocation(node) === symbol
+    ) {
+      referencesSymbol = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(expression);
+  return referencesSymbol;
+}
+
+/**
+ * True when a returned JSX tree carries reactive content: a prop or child
+ * expression the analyzer reports as reactive, a spread prop that does, or a
+ * function-valued prop, which lowering turns into an applied handler — a
+ * reactive artifact sitting in the collected node's props.
+ *
+ * The scan stops at nested functions: the function itself is the collected
+ * content; what its body reads is its own concern.
+ */
+function jsxReturnsCarryReactiveContent(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  analyze: AnalyzeFn,
+): boolean {
+  return getOwnReturnExpressions(callback).some((returnExpression) => {
+    const value = unwrapExpression(returnExpression);
+    if (
+      !ts.isJsxElement(value) && !ts.isJsxSelfClosingElement(value) &&
+      !ts.isJsxFragment(value)
+    ) {
+      return false;
+    }
+    let reactive = false;
+    const inspect = (expression: ts.Expression): void => {
+      if (reactive) return;
+      const inner = unwrapExpression(expression);
+      if (ts.isArrowFunction(inner) || ts.isFunctionExpression(inner)) {
+        reactive = true;
+        return;
+      }
+      if (analyze(inner).containsReactive) {
+        reactive = true;
+      }
+    };
+    const walk = (node: ts.Node): void => {
+      if (reactive) return;
+      if (ts.isJsxExpression(node) && node.expression) {
+        inspect(node.expression);
+        return;
+      }
+      if (ts.isJsxSpreadAttribute(node)) {
+        inspect(node.expression);
+        return;
+      }
+      ts.forEachChild(node, walk);
+    };
+    walk(value);
+    return reactive;
+  });
+}
+
+/**
+ * Whether the map call's collected result is consumed only by rendering.
+ *
+ * The call sitting in a render position settles it directly. Stored in a
+ * `const`, the binding's references decide: every one must sit in a render
+ * position itself. A mutable binding is not followed — what it holds at a
+ * use is not what the declaration says — and a destructured one has no
+ * single name to follow.
+ */
+function mapResultStaysOnRenderPath(
+  call: ts.CallExpression,
+  context: TransformationContext,
+): boolean {
+  let current: ts.Expression = call;
+  while (
+    current.parent &&
+    (
+      ts.isParenthesizedExpression(current.parent) ||
+      ts.isAsExpression(current.parent) ||
+      ts.isTypeAssertionExpression(current.parent) ||
+      ts.isSatisfiesExpression(current.parent) ||
+      ts.isNonNullExpression(current.parent)
+    ) && current.parent.expression === current
+  ) {
+    current = current.parent;
+  }
+  const parent = current.parent;
+  if (
+    parent && ts.isVariableDeclaration(parent) &&
+    parent.initializer === current
+  ) {
+    const declarationList = parent.parent;
+    if (
+      !ts.isVariableDeclarationList(declarationList) ||
+      (declarationList.flags & ts.NodeFlags.Const) === 0 ||
+      !ts.isIdentifier(parent.name)
+    ) {
+      return false;
+    }
+    const symbol = context.checker.getSymbolAtLocation(parent.name);
+    if (!symbol) {
+      return false;
+    }
+    let scope: ts.Node | undefined = parent;
+    while (scope && !ts.isFunctionLike(scope) && !ts.isSourceFile(scope)) {
+      scope = scope.parent;
+    }
+    if (!scope) {
+      return false;
+    }
+    let offRenderPath = false;
+    const visit = (node: ts.Node): void => {
+      if (offRenderPath) return;
+      if (
+        ts.isIdentifier(node) && node !== parent.name &&
+        context.checker.getSymbolAtLocation(node) === symbol &&
+        !expressionStaysOnRenderPath(node)
+      ) {
+        offRenderPath = true;
+        return;
+      }
+      ts.forEachChild(node, visit);
+    };
+    ts.forEachChild(scope, visit);
+    return !offRenderPath;
+  }
+  return expressionStaysOnRenderPath(call);
+}
+
+/**
+ * Whether an expression's value flows to a JSX child, read through the
+ * positions rendering owns: transparent wrappers, conditional and logical
+ * selection, and the direct return of a synchronous JSX-local IIFE. A JSX
+ * attribute is not a render position — props leave through the applicator to
+ * whatever reads them.
+ */
+function expressionStaysOnRenderPath(expression: ts.Expression): boolean {
+  let current: ts.Expression = expression;
+  while (true) {
+    while (
+      current.parent &&
+      (
+        ts.isParenthesizedExpression(current.parent) ||
+        ts.isAsExpression(current.parent) ||
+        ts.isTypeAssertionExpression(current.parent) ||
+        ts.isSatisfiesExpression(current.parent) ||
+        ts.isNonNullExpression(current.parent)
+      ) && current.parent.expression === current
+    ) {
+      current = current.parent;
+    }
+
+    const parent = current.parent;
+    if (!parent) {
+      return false;
+    }
+    if (
+      ts.isJsxExpression(parent) && parent.expression === current &&
+      (ts.isJsxElement(parent.parent) || ts.isJsxFragment(parent.parent))
+    ) {
+      return true;
+    }
+    if (ts.isConditionalExpression(parent)) {
+      if (parent.whenTrue === current || parent.whenFalse === current) {
+        current = parent;
+        continue;
+      }
+      return false;
+    }
+    if (ts.isBinaryExpression(parent)) {
+      const operator = parent.operatorToken.kind;
+      if (
+        operator === ts.SyntaxKind.AmpersandAmpersandToken &&
+        parent.right === current
+      ) {
+        current = parent;
+        continue;
+      }
+      if (
+        (operator === ts.SyntaxKind.BarBarToken ||
+          operator === ts.SyntaxKind.QuestionQuestionToken) &&
+        (parent.left === current || parent.right === current)
+      ) {
+        current = parent;
+        continue;
+      }
+      return false;
+    }
+    if (ts.isReturnStatement(parent) && parent.expression === current) {
+      let owner: ts.Node | undefined = parent.parent;
+      while (owner && !ts.isFunctionLike(owner)) {
+        owner = owner.parent;
+      }
+      const iifeCall = owner && getSynchronousIifeCall(owner);
+      if (!iifeCall) {
+        return false;
+      }
+      current = iifeCall;
+      continue;
+    }
+    if (ts.isArrowFunction(parent) && parent.body === current) {
+      const iifeCall = getSynchronousIifeCall(parent);
+      if (!iifeCall) {
+        return false;
+      }
+      current = iifeCall;
+      continue;
+    }
+    return false;
+  }
+}
+
+function plainArrayMapDecisionNeedsDiagnostic(
+  decision: Exclude<
+    ReturnType<typeof classifyPlainArrayMapWrapperSite>,
+    undefined | "supported"
+  >,
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  if (decision === "async-callback" || decision === "generator-callback") {
+    return callbackContainsReactiveValue(callback, context, analyze);
+  }
+  return plainArrayMapCollectsEscapingReactiveValues(
+    callback,
+    context,
+    analyze,
+  );
+}
+
+function callbackContainsReactiveValue(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  let containsReactiveValue = false;
+  const visit = (node: ts.Node): void => {
+    if (containsReactiveValue || ts.isFunctionLike(node)) {
+      return;
+    }
+    if (
+      ts.isExpression(node) &&
+      (isReactiveOriginExpression(node, context.checker) ||
+        (ts.isTaggedTemplateExpression(node) &&
+          isReactiveOriginTaggedTemplate(node, context.checker)) ||
+        analyze(node).containsReactive)
+    ) {
+      containsReactiveValue = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(callback.body);
+  return containsReactiveValue;
+}
+
+/**
+ * Classifies a call expression as an unsupported plain-array map when its
+ * callback can hand a reactive value to `map` outside a supported flow.
+ *
+ * The per-expression classification below reaches only the expression shapes
+ * validation visits — computations, `.get()` reads, optional chains. A bare
+ * reactive read bound to a local and returned is none of those, yet the
+ * collected array still holds reactive values that an ordinary consumer would
+ * interpret as objects. This call-level check asks the flow question once for
+ * the map itself: an unsupported wrapper-site decision, a pattern-owned
+ * context, and either an own return carrying escaping reactive content or
+ * reactive work inside an async/generator callback.
+ */
+export function classifyUnsupportedPlainArrayMapCall(
+  call: ts.CallExpression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): UnsupportedPlainArrayMapDecision | undefined {
+  const [firstArgument] = call.arguments;
+  if (!firstArgument) {
+    return undefined;
+  }
+  const callback = unwrapExpression(firstArgument);
+  if (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback)) {
+    return undefined;
+  }
+
+  const decision = classifyPlainArrayMapWrapperSite(
+    callback,
+    context.checker,
+    (sourceFile) => context.isSourceFileDefaultLibrary(sourceFile),
+  );
+  if (decision === undefined) {
+    return undefined;
+  }
+
+  const reactiveContext = context.getReactiveContext(callback);
+  if (
+    reactiveContext.kind !== "pattern" ||
+    hasEnclosingComputeLikeCallback(callback, context)
+  ) {
+    return undefined;
+  }
+
+  if (mapReceiverHasReactiveCollectionProvenance(call, context)) {
+    return undefined;
+  }
+
+  // Every check below reads the callback's parameters and body, so a
+  // reactive value bound as `this` through the call's second argument would
+  // reach the collected array without any of them seeing it. Any reactive
+  // extra argument therefore fails the map outright.
+  if (
+    call.arguments.slice(1).some((argument) =>
+      analyze(argument).containsReactive
+    )
+  ) {
+    return {
+      kind: "unsupported-plain-array-map",
+      reason: "reactive-this-arg",
+      call,
+    };
+  }
+
+  if (decision === "supported") {
+    // A render-collecting callback earns its unrestricted flow because the
+    // collected array holds view nodes — but a view node whose props or
+    // children carry reactive values is itself a record an ordinary consumer
+    // can read through, the same way it reads through an object literal. Such
+    // a map is safe exactly while its result stays on the render path.
+    if (
+      jsxReturnsCarryReactiveContent(callback, analyze) &&
+      !mapResultStaysOnRenderPath(call, context)
+    ) {
+      return {
+        kind: "unsupported-plain-array-map",
+        reason: "reactive-jsx-escapes-render",
+        call,
+      };
+    }
+    return undefined;
+  }
+
+  if (
+    !plainArrayMapDecisionNeedsDiagnostic(
+      decision,
+      callback,
+      context,
+      analyze,
+    )
+  ) {
+    return undefined;
+  }
+  return { kind: "unsupported-plain-array-map", reason: decision, call };
+}
+
+/**
+ * Whether the receiver is a reactive collection by provenance, whatever its
+ * static type says.
+ *
+ * This validation runs at stage 4, and the closure stage that rewrites a
+ * reactive `.map()` into `mapWithPattern` runs at stage 13, so the
+ * `lowered` flag `classifyPlainArrayMapWrapperSite` consults is necessarily
+ * still false here and cannot distinguish the two. Deciding from the static
+ * type alone claims receivers that are declared as plain arrays but carry a
+ * reactive collection — `gmailImporter.emails` is declared `Email[]` — and
+ * for those the diagnostic's premise is wrong: the lowering collects through
+ * a sub-pattern, so no cell is ever stored in a native array.
+ *
+ * Asking the same provenance question the lowering asks keeps the diagnostic
+ * to the receivers that really do stay native. The stage-13 registries are
+ * empty this early, so provenance an earlier stage has not recorded yet is
+ * not visible; a miss in that direction lets a diagnostic through on a map
+ * the closure stage will still lower, inventing a false positive, so the
+ * guard narrows that class rather than eliminating it. The opposite failure
+ * — claiming provenance that is not there and withholding a true diagnostic
+ * — needs a site-lifted local reassigned to a plain array, which the type
+ * system rejects.
+ */
+function mapReceiverHasReactiveCollectionProvenance(
+  call: ts.CallExpression,
+  context: TransformationContext,
+): boolean {
+  const target = unwrapExpression(call.expression);
+  if (!ts.isPropertyAccessExpression(target)) {
+    return false;
+  }
+  const receiver = unwrapExpression(target.expression);
+  if (
+    hasReactiveCollectionProvenance(receiver, context.checker, {
+      typeRegistry: context.state.typeRegistry,
+      syntheticReactiveCollectionRegistry:
+        context.state.syntheticReactiveCollectionRegistry,
+    })
+  ) {
+    return true;
+  }
+  // A binding whose initializer is site-lifted holds a Reactive at runtime,
+  // which is the other half of what the closure stage admits.
+  if (getSiteLiftedCollectionLocalSymbol(receiver, context) !== undefined) {
+    return true;
+  }
+  // A chained receiver — `items.filter(...).map(...)` — reads as a call,
+  // not a binding. The closure stage rewrites such a chain inside out: the
+  // inner link lowers first and registers its result as a reactive
+  // collection, so the outer call sees provenance when its turn comes.
+  // Mirror that walk: an unlowered array-method link inherits the
+  // provenance of its own receiver.
+  if (ts.isCallExpression(receiver)) {
+    const chainLink = classifyArrayMethodCall(receiver);
+    if (chainLink && !chainLink.lowered) {
+      return mapReceiverHasReactiveCollectionProvenance(receiver, context);
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether the receiver is a pattern-scope variable whose initializer the
+ * expression-site machinery lifts — `const view = rows.get().filter(...)`,
+ * `const linksView = asArray(links.get()).filter((l) => l)`. The lift is
+ * created by PatternOwnedExpressionSiteLowering, which runs AFTER the closure
+ * stage (C-002), so at decision time the binding still reads as its authored
+ * initializer and no registry entry can exist yet — the same decision-time
+ * race CT-1778 records for helper-call results. The cure is the same: decide
+ * from the shape that will exist, by asking the site machinery itself whether
+ * the initializer classifies as a lowerable site. A binding whose initializer
+ * is site-lifted holds a Reactive at runtime, so an array method over it must
+ * take the WithPattern form or the runtime rejects it.
+ */
+export function getSiteLiftedCollectionLocalSymbol(
+  mapTarget: ts.Expression,
+  context: TransformationContext,
+): ts.Symbol | undefined {
+  const target = unwrapExpression(mapTarget);
+  if (!ts.isIdentifier(target)) {
+    return undefined;
+  }
+
+  const originalTarget = ts.getOriginalNode(target);
+  const symbol = context.checker.getSymbolAtLocation(target) ??
+    (
+      originalTarget !== target && ts.isIdentifier(originalTarget)
+        ? context.checker.getSymbolAtLocation(originalTarget)
+        : undefined
+    );
+  const declaration = symbol?.valueDeclaration;
+  if (
+    !declaration || !ts.isVariableDeclaration(declaration) ||
+    !declaration.initializer
+  ) {
+    return undefined;
+  }
+
+  const initializer = declaration.initializer;
+  if (context.getReactiveContext(initializer).kind !== "pattern") {
+    return undefined;
+  }
+
+  // Only bindings in the pattern-builder callback body itself are
+  // site-lifted. A local inside a JSX IIFE is owned by the IIFE
+  // decomposition, and a local inside any other callback by that callback's
+  // own lowering — treating either as already-reactive here would misroute
+  // it.
+  let enclosing: ts.Node | undefined = declaration.parent;
+  while (enclosing && !ts.isFunctionLike(enclosing)) {
+    enclosing = enclosing.parent;
+  }
+  if (
+    !enclosing ||
+    !(ts.isArrowFunction(enclosing) || ts.isFunctionExpression(enclosing))
+  ) {
+    return undefined;
+  }
+  const builderPosition = getCallArgumentPosition(enclosing);
+  if (!builderPosition) {
+    return undefined;
+  }
+  const builderKind = detectCallKind(builderPosition.call, context.checker);
+  if (
+    builderKind?.kind !== "builder" ||
+    (builderKind.builderName !== "pattern" &&
+      builderKind.builderName !== "render")
+  ) {
+    return undefined;
+  }
+
+  const analyze = context.getDataFlowAnalyzer();
+  const decision = classifyExpressionSiteHandling(
+    initializer,
+    "variable-initializer",
+    context,
+    analyze,
+  );
+  return decision.kind !== "skip" && decision.lowerable ? symbol : undefined;
+}
+
 export function classifyRestrictedReactiveComputation(
   expression: ts.Expression,
   context: TransformationContext,
   analyze: AnalyzeFn,
 ): RestrictedReactiveComputationDecision {
+  const callbackContext = context.getEnclosingCallbackContext(expression);
+  if (callbackContext) {
+    const reactiveContext = context.getReactiveContext(expression);
+    const mapSiteDecision = classifyPlainArrayMapWrapperSite(
+      callbackContext.callback,
+      context.checker,
+      (sourceFile) => context.isSourceFileDefaultLibrary(sourceFile),
+    );
+    // The same provenance guard the call-level check applies: a receiver
+    // the closure stage will lower reactively is not a plain map, whatever
+    // its static type says. The rewrite turns the callback into a
+    // sub-pattern whose computations the reactive machinery owns — the same
+    // end state a reactive-typed receiver reaches — so validation stands
+    // aside for the whole callback.
+    if (
+      mapSiteDecision !== undefined &&
+      mapReceiverHasReactiveCollectionProvenance(callbackContext.call, context)
+    ) {
+      return { kind: "allowed" };
+    }
+    if (
+      mapSiteDecision !== undefined && mapSiteDecision !== "supported" &&
+      reactiveContext.kind === "pattern" &&
+      !hasEnclosingComputeLikeCallback(expression, context) &&
+      plainArrayMapDecisionNeedsDiagnostic(
+        mapSiteDecision,
+        callbackContext.callback,
+        context,
+        analyze,
+      )
+    ) {
+      const analysis = analyze(expression);
+      return analysis.containsReactive && analysis.requiresRewrite
+        ? {
+          kind: "unsupported-plain-array-map",
+          reason: mapSiteDecision,
+          call: callbackContext.call,
+        }
+        : { kind: "allowed" };
+    }
+  }
+
   if (!isInRestrictedReactiveContext(expression, context.checker, context)) {
     return { kind: "allowed" };
   }

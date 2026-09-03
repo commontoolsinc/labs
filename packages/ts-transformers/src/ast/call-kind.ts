@@ -896,44 +896,56 @@ export function classifyArrayCallbackContainerCall(
 const COLLECTING_ARRAY_METHOD_NAMES = new Set(["map"]);
 
 /**
- * True when `callback` is the callback of an ordinary eager Array method that
- * collects results rather than interpreting them — the one shape whose body may
- * carry pattern-owned wrapper sites, because a lifted callback-local can be
- * returned from it without changing what the method does.
+ * How a plain-array `map` callback relates to pattern-owned wrapper sites.
+ * `map` stores each callback result without reading it, so what the collected
+ * array can safely feed depends on what the callback returns:
  *
- * Three things must hold, and each rules out a shape that would otherwise slip
- * through method-name matching alone: the callback is argument zero, so a
- * comparator or an `initialValue` in another position does not qualify; the
- * resolved owner symbol includes the configured default-library
- * `Array`/`ReadonlyArray` declaration, so a same-named source or ambient type
- * and a `map` of some other type do not qualify; and the receiver is a plain
- * array that no reactive lowering owns, so the reactive collection operators
- * keep their own structural treatment.
+ * - A render-collecting callback directly returns JSX, `null`, the global
+ *   `undefined` value, or a literal constant. Every lowered value it creates is
+ *   embedded in returned view nodes, so the collected array holds view nodes
+ *   and plain values — ordinary data whose result may flow anywhere.
+ * - A value-collecting callback can return a lowered value itself. The
+ *   collected array then holds reactive cells, and only the JSX-child
+ *   lowering path knows how to read those: an ordinary consumer (`filter`,
+ *   `find`, a reduction, or the same flow through a local) would interpret
+ *   the cell object rather than its value. Such a map must be the JSX child
+ *   itself, or the direct return of a synchronous IIFE that is the child.
+ *
+ * The callback must also be argument zero, belong to the configured
+ * default-library `Array`/`ReadonlyArray`, and run synchronously. Async callbacks
+ * resume after pattern construction, while generator callbacks are never run by
+ * `map`, so neither can own construction-time wrapper sites.
  */
-export function isCollectingPlainArrayMethodCallback(
+export type PlainArrayMapWrapperSiteDecision =
+  | "supported"
+  | "result-not-direct-jsx"
+  | "async-callback"
+  | "generator-callback";
+
+export function classifyPlainArrayMapWrapperSite(
   callback: ts.ArrowFunction | ts.FunctionExpression,
   checker: ts.TypeChecker,
   isSourceFileDefaultLibrary: (sourceFile: ts.SourceFile) => boolean,
-): boolean {
+): PlainArrayMapWrapperSiteDecision | undefined {
   const position = getCallArgumentPosition(callback);
   if (!position || position.index !== 0) {
-    return false;
+    return undefined;
   }
 
   const call = position.call;
   const callSite = classifyArrayMethodCallSite(call, checker);
   if (!callSite || callSite.ownership !== "plain" || callSite.lowered) {
-    return false;
+    return undefined;
   }
 
   const declaration = checker.getResolvedSignature(call)?.declaration;
   if (!declaration) {
-    return false;
+    return undefined;
   }
 
   const owner = findOwnerDeclaration(declaration);
   if (!owner?.name || !ARRAY_OWNER_NAMES.has(owner.name.text)) {
-    return false;
+    return undefined;
   }
 
   const ownerSymbol = checker.getSymbolAtLocation(owner.name);
@@ -943,12 +955,259 @@ export function isCollectingPlainArrayMethodCallback(
       isSourceFileDefaultLibrary(candidate.getSourceFile())
     )
   ) {
-    return false;
+    return undefined;
   }
 
   const { name } = declaration as { readonly name?: ts.Node };
-  return !!name && ts.isIdentifier(name) &&
-    COLLECTING_ARRAY_METHOD_NAMES.has(name.text);
+  if (
+    !name || !ts.isIdentifier(name) ||
+    !COLLECTING_ARRAY_METHOD_NAMES.has(name.text)
+  ) {
+    return undefined;
+  }
+
+  if (
+    callback.modifiers?.some((modifier) =>
+      modifier.kind === ts.SyntaxKind.AsyncKeyword
+    )
+  ) {
+    return "async-callback";
+  }
+  if (
+    ts.isFunctionExpression(callback) && callback.asteriskToken !== undefined
+  ) {
+    return "generator-callback";
+  }
+  if (
+    plainArrayMapCallbackCollectsRenderValues(
+      callback,
+      checker,
+      isSourceFileDefaultLibrary,
+    )
+  ) {
+    return "supported";
+  }
+  return flowsDirectlyToJsxChild(call) ? "supported" : "result-not-direct-jsx";
+}
+
+export function isRenderSafePlainArrayMapCallback(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  checker: ts.TypeChecker,
+  isSourceFileDefaultLibrary: (sourceFile: ts.SourceFile) => boolean,
+): boolean {
+  return classifyPlainArrayMapWrapperSite(
+    callback,
+    checker,
+    isSourceFileDefaultLibrary,
+  ) === "supported";
+}
+
+/**
+ * True when every value the callback can hand to `map` is render content: a
+ * JSX element or fragment, `null`, the global `undefined` value, or a literal
+ * constant. A lowered computation inside such a callback is embedded in the
+ * returned view nodes, so the collected array never holds a bare cell and the
+ * map result needs no flow restriction.
+ *
+ * Conditional and logical return roots are value-collecting even when their
+ * branches are view content: expression-site lowering rewrites the selection
+ * itself to a reactive helper, so `map` collects a cell. Only the JSX-child
+ * path may collect that cell.
+ */
+function plainArrayMapCallbackCollectsRenderValues(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  checker: ts.TypeChecker,
+  isSourceFileDefaultLibrary: (sourceFile: ts.SourceFile) => boolean,
+): boolean {
+  return getOwnReturnExpressions(callback).every((expression) =>
+    isRenderCollectedValue(expression, checker, isSourceFileDefaultLibrary)
+  );
+}
+
+/**
+ * The expressions `callback` can hand back to its caller: a concise arrow
+ * body, or the expressions of the return statements belonging to the callback
+ * itself. Returns inside nested functions belong to those functions and are
+ * not included; bare `return;` statements hand back `undefined` and carry no
+ * expression to include.
+ */
+export function getOwnReturnExpressions(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+): ts.Expression[] {
+  const body = callback.body;
+  if (!ts.isBlock(body)) {
+    return [body];
+  }
+
+  const returns: ts.Expression[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isFunctionLike(node)) {
+      return;
+    }
+    if (ts.isReturnStatement(node)) {
+      if (node.expression !== undefined) {
+        returns.push(node.expression);
+      }
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(body, visit);
+  return returns;
+}
+
+function isRenderCollectedValue(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  isSourceFileDefaultLibrary: (sourceFile: ts.SourceFile) => boolean,
+): boolean {
+  let current = expression;
+  while (
+    ts.isParenthesizedExpression(current) ||
+    ts.isAsExpression(current) ||
+    ts.isTypeAssertionExpression(current) ||
+    ts.isSatisfiesExpression(current) ||
+    ts.isNonNullExpression(current)
+  ) {
+    current = current.expression;
+  }
+
+  if (
+    ts.isJsxElement(current) || ts.isJsxSelfClosingElement(current) ||
+    ts.isJsxFragment(current)
+  ) {
+    return true;
+  }
+  if (current.kind === ts.SyntaxKind.NullKeyword) {
+    return true;
+  }
+  if (
+    ts.isIdentifier(current) && current.text === "undefined" &&
+    isGlobalUndefinedIdentifier(
+      current,
+      checker,
+      isSourceFileDefaultLibrary,
+    )
+  ) {
+    return true;
+  }
+  if (
+    ts.isStringLiteralLike(current) || ts.isNumericLiteral(current) ||
+    current.kind === ts.SyntaxKind.TrueKeyword ||
+    current.kind === ts.SyntaxKind.FalseKeyword
+  ) {
+    return true;
+  }
+  // Conditional and logical roots lower to reactive helper calls at supported
+  // pattern-owned expression sites. The returned map element is therefore a
+  // cell regardless of whether its branches are render content.
+  if (ts.isConditionalExpression(current) || ts.isBinaryExpression(current)) {
+    return false;
+  }
+  return false;
+}
+
+function isGlobalUndefinedIdentifier(
+  identifier: ts.Identifier,
+  checker: ts.TypeChecker,
+  isSourceFileDefaultLibrary: (sourceFile: ts.SourceFile) => boolean,
+): boolean {
+  const symbol = checker.getSymbolAtLocation(identifier);
+  if (!symbol) {
+    // `undefined` is intrinsic in no-lib/minimal programs and may have no
+    // declaration. A shadowing binding always has a source symbol.
+    return true;
+  }
+  const declarations = symbol.declarations ?? [];
+  if (declarations.length === 0) {
+    return true;
+  }
+  return declarations.some((declaration) =>
+    isSourceFileDefaultLibrary(declaration.getSourceFile())
+  );
+}
+
+function flowsDirectlyToJsxChild(expression: ts.Expression): boolean {
+  const original = ts.getOriginalNode(expression);
+  let current = ts.isExpression(original) && original.parent
+    ? original
+    : expression;
+
+  while (true) {
+    while (
+      current.parent &&
+      (
+        ts.isParenthesizedExpression(current.parent) ||
+        ts.isAsExpression(current.parent) ||
+        ts.isTypeAssertionExpression(current.parent) ||
+        ts.isSatisfiesExpression(current.parent) ||
+        ts.isNonNullExpression(current.parent)
+      ) && current.parent.expression === current
+    ) {
+      current = current.parent;
+    }
+
+    const parent = current.parent;
+    if (
+      parent && ts.isJsxExpression(parent) && parent.expression === current &&
+      (ts.isJsxElement(parent.parent) || ts.isJsxFragment(parent.parent))
+    ) {
+      return true;
+    }
+
+    if (
+      parent && ts.isReturnStatement(parent) && parent.expression === current
+    ) {
+      let owner: ts.Node | undefined = parent.parent;
+      while (owner && !ts.isFunctionLike(owner)) {
+        owner = owner.parent;
+      }
+      const iifeCall = owner && getSynchronousIifeCall(owner);
+      if (!iifeCall) {
+        return false;
+      }
+      current = iifeCall;
+      continue;
+    }
+
+    if (parent && ts.isArrowFunction(parent) && parent.body === current) {
+      const iifeCall = getSynchronousIifeCall(parent);
+      if (!iifeCall) {
+        return false;
+      }
+      current = iifeCall;
+      continue;
+    }
+
+    return false;
+  }
+}
+
+export function getSynchronousIifeCall(
+  owner: ts.Node,
+): ts.CallExpression | undefined {
+  if (
+    (!ts.isArrowFunction(owner) && !ts.isFunctionExpression(owner)) ||
+    owner.modifiers?.some((modifier) =>
+      modifier.kind === ts.SyntaxKind.AsyncKeyword
+    ) ||
+    (ts.isFunctionExpression(owner) && owner.asteriskToken !== undefined)
+  ) {
+    return undefined;
+  }
+
+  let callee: ts.Expression = owner;
+  while (
+    callee.parent && ts.isParenthesizedExpression(callee.parent) &&
+    callee.parent.expression === callee
+  ) {
+    callee = callee.parent;
+  }
+
+  const call = callee.parent;
+  return call && ts.isCallExpression(call) && call.expression === callee
+    ? call
+    : undefined;
 }
 
 export function classifyArrayMethodResultSinkCall(

@@ -62,7 +62,8 @@ Each construct family is classified as one of:
 | Reactive property access in JSX or helper-owned expressions | Supported | Authored reactive reads like `state.user.name` should remain natural and lower to explicit reactive access as needed |
 | Reactive element access with static or known-symbol keys | Supported | Forms like `items[0]`, `item[NAME]`, `state["foo"]` should lower predictably when the access path is statically representable |
 | Reactive ternary control flow in supported lowered value-expression sites | Supported | Authored `cond ? x : y` should preserve JavaScript branch meaning in JSX, top-level pattern-body value sites, and callback-local values inside supported collection callbacks |
-| Callback-local value bindings inside a plain-array `map` callback | Supported | A plain-array `map` callback in a pattern body runs during pattern build and its result is collected rather than read, so its value-expression sites are pattern-body value sites: a binding such as `const isToday = weekDates?.[colIdx] === todayDate` inside `COLUMN_INDICES.map(...)` lowers to a per-iteration lift-applied computation, and reads the same as the equivalent binding written directly in the pattern body |
+| Callback-local value bindings inside a supported synchronous plain-array `map` callback | Supported | A standard-library plain-array `map` callback runs during pattern build and collects its result. A render-collecting callback — one directly returning JSX, `null`, the global `undefined` value, or a literal constant — embeds every lowered value in its view nodes, and its value-expression sites are pattern-body value sites. A collected node with no reactive props or children is ordinary data and may flow anywhere; one carrying reactive content may travel only the render path — the map call as a JSX child, or a `const` binding every one of whose references sits in a JSX-child position, read through conditional/logical selection and synchronous JSX-local IIFE returns: a binding such as `const isToday = weekDates?.[colIdx] === todayDate` inside `COLUMN_INDICES.map(...)` lowers to a per-iteration lift-applied computation. A conditional or logical return root is value-collecting because expression-site lowering rewrites the selection itself to a reactive helper cell. A value-collecting callback keeps the same sites when the map call is the JSX child itself or the direct return of a synchronous JSX-local IIFE, concise or block-bodied |
+| Reactive callback-local values inside an escaping value-collecting, async, or generator plain-array `map` | Unsupported | A value-collecting callback returns a reactive value — through a computation, a bare read of a reactive or lowered local, a conditional/logical selection root, an explicit reactive construction, or a projection from one — so the mapped array holds cells that only direct JSX-child rendering can read: an ordinary consumer of the array interprets the cell objects, including after the array flows through a local. Collected view nodes whose props or children carry reactive values are read through the same way, so their maps are held to the render path. Local aliases are followed through their initializers and assignments regardless of `const`/`let`. Collected object and array literals are classified member by member, including computed property names, because native JavaScript evaluates and reads through those members. Resource-producing collections use a reactive receiver and its structurally rewritten map; handler-producing render loops attach handlers directly to their JSX owners. Async callbacks containing reactive work resume outside pattern construction, and generator callbacks containing reactive work are not executed by `map`; both are rejected independently of their return shape. Keep the map result as the JSX child, move conditional/logical selection inside a concrete returned JSX node, use a reactive collection operator for per-element resources, or move the whole computation into an explicit supported owner |
 | Callback-local value bindings inside a result-interpreting array callback | Unsupported | `filter`, `find`, `some`, `every`, `sort`, `flatMap`, and `reduce` read what their callback returns while they run — as a boolean, a number, an array test, or the next accumulator. A lifted binding returned from one of those is a cell rather than the value the method expects, so these callbacks carry no pattern-owned wrapper site and a reactive computation in one still moves into `computed(...)` |
 | Reactive logical control flow in supported lowered pattern-owned expression sites (`&&`, `||`, `??`) | Supported | Reactive short-circuiting should preserve authored JavaScript meaning where the expression-site policy admits lowering |
 | Authored helper control flow (`ifElse`, `when`, `unless`) | Supported | These are first-class reactive control-flow forms, not mere implementation helpers |
@@ -110,7 +111,8 @@ Those container kinds appear to authors in three main buckets:
    property values, variable initializers, call arguments, array elements, and
    direct function return expressions
 3. callback-local value-expression sites inside supported collection
-   callbacks, both the reactive operators and plain-array `map` callbacks
+   callbacks, both the reactive operators and render-owned synchronous
+   plain-array `map` callbacks
 
 Explicit computation callbacks such as `computed`, `action`, `lift`, and
 `handler` are important boundaries, but their bodies are **not** blanket
@@ -275,9 +277,19 @@ Why:
 ### Supported Collection Callbacks
 
 Callbacks for supported reactive collection operators are their own authored
-expression context. A plain-array `map` callback shares it: it runs during
-pattern build and `map` collects what it returns without reading it, so a value
-site in one is a pattern-body value site.
+expression context. A synchronous standard-library plain-array `map` callback
+shares it: it runs during pattern build, `map` collects what it returns
+without reading it, and a value site in one is a pattern-body value site. What
+the callback returns decides how far the collected result may travel. A
+render-collecting callback — directly returning JSX, `null`, the global
+`undefined` value, or a literal constant — embeds every lowered value in its
+view nodes, so the collected array is ordinary data and may flow anywhere. A
+conditional or logical return root is value-collecting even when its branches
+are JSX or nullish, because expression-site lowering rewrites the selection
+itself to a reactive helper cell. A value-collecting callback can return a
+lowered value, so its collected array holds cells and must itself be the JSX
+child — directly, or as the direct return of a synchronous JSX-local IIFE,
+concise or block-bodied.
 
 **Good here**
 
@@ -299,8 +311,16 @@ Why:
   and nested JSX-local expressions are valid here
 - inner plain arrays stay plain JS and are not implicitly promoted into
   pattern-owned collection operators
-- a plain-array `map` callback's own value sites lower too, so naming a value
-  there reads the same as writing the expression where the name is used
+- a supported synchronous plain-array `map` callback's own value sites lower
+  too, so naming a value there reads the same as writing the expression where
+  the name is used
+- a render-collecting map result may be stored in a local, selected by a
+  conditional, or passed onward: the collected view nodes are ordinary data
+- a value-collecting map result consumed by ordinary JavaScript, including
+  after storage in a local, carries no such sites: the consumer would see
+  cells rather than their values. Async and generator callbacks carry none
+  either. Plain maps in standalone or explicit compute-owned helpers retain
+  ordinary JavaScript semantics and request no pattern-owned sites
 - the array callbacks that read their result as they run — `filter`, `find`,
   `some`, `every`, `sort`, `flatMap`, `reduce` — do not lower callback-local
   value sites. A lift returned to one of them is a cell where the method wants
@@ -353,8 +373,12 @@ pattern(({ rows }) => ({
 
 A read that already has a site needs no relocation — `{ value: count.get() }`,
 `const total = rows.get().length`,
-`["-", "+"].map((sep) => rows.get().join(sep))`, and
+`["-", "+"].map((sep) => <li>{rows.get().join(sep)}</li>)`, and
 `{ifElse(show, count.get(), 0)}` are all part of the language as written.
+A plain map that carries such a read into a collected value rather than into
+returned JSX is the exception: its result must be the JSX child itself, so
+`const joined = ["-", "+"].map((sep) => rows.get().join(sep))` moves into
+`computed(() => ...)` instead.
 
 ### Bare Dynamic Key Access -> JSX, Callback, Or Structural Binding
 
@@ -632,10 +656,13 @@ The intended split is:
      - statement position: `count.get();`
      - a reactive array-method callback: `rows.map((row) => row.cell.get())`,
        whose callback becomes a sub-pattern over per-element cells
-   - a plain-array `map` callback is not an example: it runs during pattern
-     build and collects what it returns, so its value sites carry the read the
-     way the pattern body's own sites do. Its result-interpreting siblings
-     (`filter`, `find`, `sort`, and the rest) remain examples
+   - a supported synchronous plain-array `map` callback is not an example: it
+     runs during pattern build, so its value sites carry the read the way the
+     pattern body's own sites do — anywhere for a render-collecting callback,
+     and at a direct JSX child for a value-collecting one. A value-collecting
+     map whose result escapes to ordinary code, an async or generator map,
+     and the result-interpreting siblings (`filter`, `find`, `sort`, and the
+     rest) remain examples
 5. **`.get()` on ordinary opaque/reactive values**
    - not part of the target language
    - examples:

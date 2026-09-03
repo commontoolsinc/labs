@@ -109,6 +109,20 @@ function createProgramAndContext(
   return { sourceFile, checker: program.getTypeChecker(), context, program };
 }
 
+function findMapCallback(
+  sourceFile: ts.SourceFile,
+): ts.ArrowFunction | ts.FunctionExpression {
+  return findFirstNode(
+    sourceFile,
+    (node): node is ts.ArrowFunction | ts.FunctionExpression =>
+      (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
+      !!node.parent && ts.isCallExpression(node.parent) &&
+      node.parent.arguments[0] === node &&
+      ts.isPropertyAccessExpression(node.parent.expression) &&
+      node.parent.expression.name.text === "map",
+  );
+}
+
 function findFirstNode<T extends ts.Node>(
   sourceFile: ts.SourceFile,
   predicate: (node: ts.Node) => node is T,
@@ -139,7 +153,7 @@ Deno.test(
     const { sourceFile, checker, context } = createProgramAndContext(
       `
       const items = [1, 2, 3];
-      const result = items.map((item) => item + 1);
+      const result = <div>{items.map((item) => <span>{item + 1}</span>)}</div>;
     `,
       { withDefaultLibrary: true },
     );
@@ -166,7 +180,7 @@ Deno.test(
     const { sourceFile, checker, context } = createProgramAndContext(
       `
       const items: readonly number[] = [1, 2, 3];
-      const result = items.map((item) => item + 1);
+      const result = <div>{items.map((item) => <span>{item + 1}</span>)}</div>;
     `,
       { withDefaultLibrary: true },
     );
@@ -185,7 +199,7 @@ Deno.test(
     const { sourceFile, checker, context, program } = createProgramAndContext(
       `
       const items = [1, 2, 3];
-      const result = items.map((item) => item + 1);
+      const result = <div>{items.map((item) => <span>{item + 1}</span>)}</div>;
     `,
       { withVirtualLibrary: true },
     );
@@ -209,7 +223,7 @@ Deno.test(
     const { sourceFile, checker, context, program } = createProgramAndContext(
       `
       const items = [1, 2, 3];
-      const result = items.map((item) => item + 1);
+      const result = <div>{items.map((item) => <span>{item + 1}</span>)}</div>;
     `,
       { withAmbientArrayDeclaration: true },
     );
@@ -302,7 +316,7 @@ Deno.test(
       }
 
       declare const grid: Grid<number>;
-      const result = grid.map((cell) => cell + 1);
+      const result = <div>{grid.map((cell) => <span>{cell + 1}</span>)}</div>;
     `);
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
@@ -321,7 +335,7 @@ Deno.test(
       }
 
       const items = new Array<number>();
-      const result = items.map((item) => item + 1);
+      const result = <div>{items.map((item) => <span>{item + 1}</span>)}</div>;
     `);
 
     const callback = findFirstNode(sourceFile, ts.isArrowFunction);
@@ -341,7 +355,9 @@ Deno.test(
       }
 
       const items = [1, 2, 3];
-      const result = items.map((item) => item + 1, (item) => item * 2);
+      const result = (
+        <div>{items.map((item) => item + 1, (item) => item * 2)}</div>
+      );
     `,
       { withDefaultLibrary: true },
     );
@@ -363,6 +379,377 @@ Deno.test(
         .supportsPatternOwnedWrapperCallbackSite,
       false,
     );
+  },
+);
+
+Deno.test(
+  "Callback support policy: a nullish-returning map callback is render-collecting",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const rows = items.map(() => null);
+      const result = <div>{rows}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    // `null` renders nothing and is never a cell, so the collected array is
+    // ordinary data and the result may leave the render path.
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a literal-returning map callback is render-collecting",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const flags = items.map(() => true);
+      const result = <div>{flags}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    // A literal constant carries no lowered value, so nothing can escape.
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
+  "Callback support policy: parentheses around a JSX-child map do not change the decision",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const result = <div>{(items.map((item) => item + 1))}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    // Parentheses are spelling: the value-collecting map still reaches the
+    // JSX child, so it keeps the wrapper site the bare spelling gets.
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a map result stored in a local carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const mapped = items.map((item) => item + 1);
+      const result = <div>{mapped}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a consumed map result carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const result = <div>{items.map((item) => item + 1).filter(Boolean)}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: an async map callback carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const result = <div>{items.map(async (item) => item + 1)}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findFirstNode(sourceFile, ts.isArrowFunction);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a generator map callback carries no wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const result = <div>{items.map(function* (item) { yield item + 1; })}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findFirstNode(sourceFile, ts.isFunctionExpression);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a value-collecting map returned from a concise-body IIFE child carries a wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const result = <div>{(() => items.map((item) => item + 1))()}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a value-collecting map returned from a block-body IIFE child carries a wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const result = (
+        <div>{(() => { return items.map((item) => item + 1); })()}</div>
+      );
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a render-collecting map stored in a local carries a wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const rows = items.map((item) => <span>{item + 1}</span>);
+      const result = <div>{rows}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a render-collecting map consumed by ordinary code keeps its wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const rows = items.map((item) => <span>{item + 1}</span>).filter(Boolean);
+      const result = <div>{rows}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a render-collecting map in a JSX conditional carries a wrapper site",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const ready = true;
+      const result = (
+        <div>{ready ? items.map((item) => <span>{item}</span>) : null}</div>
+      );
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a logical selection over JSX stays on the direct render path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const rows = items.map((item) => item > 1 && <span>{item}</span>);
+      const result = <div>{rows}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a conditional selection over JSX stays on the direct render path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const rows = items.map((item) => item > 1 ? <span>{item}</span> : null);
+      const result = <div>{rows}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: the global undefined value is render-collecting",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const rows = items.map(() => undefined).filter(Boolean);
+      const result = <div>{rows}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a local named undefined is value-collecting",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const rows = items.map((item) => {
+        const undefined = item + 1;
+        return undefined;
+      }).filter(Boolean);
+      const result = <div>{rows}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a literal-branch selection carries no wrapper site off the render path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const marks = items.map((item) => item > 1 ? "T" : "-");
+      const result = <div>{marks}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
+  },
+);
+
+Deno.test(
+  "Callback support policy: mixed returns carry no wrapper site off the render path",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const rows = items.map((item) => {
+        if (item > 1) {
+          return <b>{item}</b>;
+        }
+        return item;
+      });
+      const result = <div>{rows}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, false);
   },
 );
 

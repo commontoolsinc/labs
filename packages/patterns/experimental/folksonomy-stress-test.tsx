@@ -545,22 +545,6 @@ export default pattern(() => {
     { count: 10000, scopeCount: 100, tagsPerScope: 200, label: "10K" },
   ];
 
-  // Create handler bindings for each scale
-  const loadActions = scales.map((s) =>
-    loadScale({
-      eventsCell,
-      count: s.count,
-      scopeCount: s.scopeCount,
-      tagsPerScope: s.tagsPerScope,
-      statusText,
-      genMs,
-      loadMs,
-      loadedCount,
-      loadedScopes,
-      loadedTags,
-    })
-  );
-
   const clearAction = clearAll({
     eventsCell,
     statusText,
@@ -608,7 +592,18 @@ export default pattern(() => {
               <button
                 key={i}
                 type="button"
-                onClick={loadActions[i]}
+                onClick={loadScale({
+                  eventsCell,
+                  count: s.count,
+                  scopeCount: s.scopeCount,
+                  tagsPerScope: s.tagsPerScope,
+                  statusText,
+                  genMs,
+                  loadMs,
+                  loadedCount,
+                  loadedScopes,
+                  loadedTags,
+                })}
                 style={{
                   padding: "8px 16px",
                   borderRadius: "6px",

@@ -61,11 +61,26 @@ This document focuses on reactive collection calls that `ClosureTransformer`
 rewrites. An ordinary eager `Array.map()` or `ReadonlyArray.map()` call remains
 plain JavaScript, but a callback in a pattern body can still carry pattern-owned
 value sites that stage 13 lowers. That permission is narrower than the
-`plain-array-value` callback boundary: `isCollectingPlainArrayMethodCallback`
-admits only argument zero of a `map` whose owner symbol includes the configured
-TypeScript default-library `Array`/`ReadonlyArray` declaration. Same-named
-source and ambient types do not qualify, and neither do result-interpreting
-methods such as `filter`, `find`, `sort`, `flatMap`, or `reduce`.
+`plain-array-value` callback boundary: `isRenderSafePlainArrayMapCallback`
+admits only a synchronous argument-zero callback of a `map` whose owner symbol
+includes the configured TypeScript default-library `Array`/`ReadonlyArray`
+declaration. Same-named source and ambient types do not qualify, and neither do
+async or generator callbacks. The callback's returns then set the flow rule: a
+render-collecting callback directly returns JSX, `null`, the global `undefined`
+value, or a literal constant and embeds every lowered value in its view nodes,
+so its result may flow anywhere. A value-collecting callback can return a
+lowered value — including a conditional or logical helper cell — so its map call
+must be the JSX child itself or the direct return of a synchronous JSX-local
+IIFE, and a result stored or consumed by ordinary JavaScript carries no sites.
+That escape classification includes explicit reactive constructions and their
+property projections, follows local initializers and assignments regardless of
+`const`/`let`, and walks collected aggregate members plus computed property
+names. Resource-producing maps use an explicitly reactive receiver so they lower
+to a reactive collection operator; render loops attach per-element handlers
+directly to the JSX node that owns them. The result-interpreting methods such as
+`filter`, `find`, `sort`, `flatMap`, and `reduce` remain excluded too. This
+restriction applies to pattern-owned wrapper sites; maps inside standalone or
+explicit compute-owned helpers remain ordinary JavaScript.
 
 ## What `ClosureTransformer` does for `.map`s
 

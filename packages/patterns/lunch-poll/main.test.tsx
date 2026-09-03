@@ -158,15 +158,6 @@ export default pattern(() => {
 
   // Participant names with shared prefixes use distinct current-day vote labels.
   // Each label preserves complete displayed characters.
-  const collidingPeople = COLLIDING_INITIAL_PEOPLE.map((
-    [name, color],
-    index,
-  ) => ({
-    name,
-    color,
-    profile: Writable.of<LunchProfile>({ name }),
-    voteType: COLLIDING_VOTE_COLORS[index] ?? "green",
-  }));
   const initialsPoll = CozyPoll({
     options: [COLLIDING_INITIAL_OPTION],
     users: collidingUsers,
@@ -207,6 +198,19 @@ export default pattern(() => {
       voteType: "green",
       castAt: now - 86_400_000,
     }]);
+    // Minted here rather than in the pattern body: the body may neither
+    // loop nor collect cells through a native map callback, while a handler
+    // owns its imperative work — and the profiles are only ever read through
+    // the users and votes this same action seeds.
+    const collidingPeople = COLLIDING_INITIAL_PEOPLE.map((
+      [name, color],
+      index,
+    ) => ({
+      name,
+      color,
+      profile: Writable.of<LunchProfile>({ name }),
+      voteType: COLLIDING_VOTE_COLORS[index] ?? "green",
+    }));
     collidingUsers.set(
       collidingPeople.map(({ name, color, profile }) => ({
         profile,
