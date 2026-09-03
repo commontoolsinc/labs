@@ -1704,16 +1704,19 @@ const omissionAccounting: AuditCheck = {
  * What a ledger entry for this finding would need. See {@link
  * KnownDefectRegistration}.
  *
- * The check reports a real gap and the question it turns on is open, which is
- * what CT-2210 carries: whether AH-CFC-16 wants a recorded read from a run
- * that touched no cell, or whether "nobody asked" is the honest answer there.
+ * CT-2210 is the record. Its substance was that AH-CFC-16's enumeration does
+ * not include a cell-labels read, so AUD-9 demanding one under a `required-by`
+ * citation was the check overclaiming rather than the harness underdelivering
+ * — which is closed by this split rather than by any change to what a run
+ * records. What the split leaves is this check, and the question of whether
+ * its remaining half is worth reporting at all.
  */
 const CELL_LABELS_REGISTRATION: KnownDefectRegistration = {
   detail: "recorded no read of its space's cell labels",
   runShape:
     "a run that minted no handle, so the engine never read a cell label for it",
   why:
-    "The engine reads a space's cell labels only for the refs its handle table holds, so a run that minted no handle records no read at all. Whether AH-CFC-16 wants a recorded read from a run that touched no cell, or whether `nobody asked` is the honest answer there, is the open question.",
+    "CT-2210's substance — AH-CFC-16 enumerates six artifacts and a cell-labels read is not among them, so AUD-9 was overclaiming — is closed by the split that produced this check, not by a change to what a run records. What is left open is narrower and is this check's own: the engine reads a space's cell labels only for the refs its handle table holds, so a run that minted no handle has nothing to record, and whether an audit should report that at all is undecided. Until it is, the check states the fact as `extends` and names where the question sits.",
   issue: "CT-2210",
 };
 
