@@ -291,6 +291,7 @@ describe("StaticResponse", () => {
     const res = await StaticResponse.fromFile("/root/app.js", deps);
     expect(res.mimeType).toBe("text/javascript");
     expect(res.etag).toBe(`"len-${files["/root/app.js"].byteLength}"`);
+    expect(await res.blob.text()).toBe(APP_JS);
 
     const response = res.response();
     expect(response.status).toBe(200);
