@@ -1066,14 +1066,16 @@ const writeIsPatternSetupInitialization = (
 // What reading a label needs of a stored envelope beyond its being one:
 // entries it can iterate, each carrying the path a resolution matches
 // against and the label a consumer reads clauses out of. `isCfcMetadata`
-// settles the envelope, this settles its entries. Both clause arrays are
-// optional, and an entry that omits one carries none of that kind; one
-// that holds something other than an array is an entry no consumer can
-// read.
+// settles the envelope, this settles its entries. Records, not arrays: an
+// array carries neither clause field, so one standing where an entry or a
+// label belongs reads as an entry that labels nothing rather than as the
+// unreadable envelope it is. Both clause arrays are optional, and an entry
+// that omits one carries none of that kind; one that holds something other
+// than an array is an entry no consumer can read.
 const isWalkableLabelMap = (metadata: CfcMetadata): boolean =>
   metadata.labelMap.entries.every((entry) =>
-    isObjectOrArray(entry) && Array.isArray(entry.path) &&
-    isObjectOrArray(entry.label) &&
+    isObjectNotArray(entry) && Array.isArray(entry.path) &&
+    isObjectNotArray(entry.label) &&
     (entry.label.confidentiality === undefined ||
       Array.isArray(entry.label.confidentiality)) &&
     (entry.label.integrity === undefined ||
