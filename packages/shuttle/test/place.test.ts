@@ -1499,11 +1499,21 @@ describe("place", () => {
         });
 
         it("refuses a target whose piece holds `#` though its length passes for a handle", () => {
-          // The `@` case below is the same defect and the same rule. Both
-          // characters are read inside an id segment, and `isPieceHandle` is a
-          // length rule, so a piece long enough to pass for a handle carries
-          // either past the vocabulary check — and a `#` costs the place its
-          // own rendering, which `cd` then refuses as an argument suffix.
+          // `isPieceHandle` is a length rule, so a piece long enough to
+          // pass for a handle carries either character of
+          // `READ_INSIDE_AN_ID` past the vocabulary check — and a `#` then
+          // costs the place its own rendering, which `cd` refuses as an
+          // argument suffix.
+          //
+          // One case per character, not one per character per door. The rule
+          // is a single loop inside `unnameablePiece`, which every door
+          // calls, so a character dropped from it is refused nowhere and
+          // reds wherever that character is driven. `#` is driven at this
+          // door because a walk refuses a `#` earlier, naming the suffix,
+          // and so never reaches the rule holding one; `@` is driven through
+          // a walk. That each door calls the rule at all is a separate axis
+          // with cases of its own, and each frames the one `Fault` it gets
+          // back in its own sentence.
 
           expect(
             atSpaceRoot().enter(

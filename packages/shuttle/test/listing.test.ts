@@ -666,11 +666,15 @@ describe("listing", () => {
         }
       }
 
-      // Every outcome has to occur, or the property above holds for want of
-      // anything to hold over. The named row that also carries an error is the
-      // one the count is here for: it is the only shape where the printed line
-      // and the operand are different strings, so a construction that stopped
-      // building one would leave the line assertions above holding trivially.
+      // Every outcome has to occur, or the property holds for want of anything
+      // to hold over. The error clause above the branch is the strong one: it
+      // holds of every line, named or not, so a row that prints an error it
+      // does not carry, or drops one it does, reds it in either arm. What the
+      // counts add is that both arms are reached and that an error reaches
+      // each of them — `named` and `unnamed` for the arms, `reported` for an
+      // error anywhere, and `reportedWithoutOperand` for the combination that
+      // reaches the marker arm, which is the shape this case twice computed
+      // and did not read.
       expect(named).toBeGreaterThan(0);
       expect(unnamed).toBeGreaterThan(0);
       expect(reported).toBeGreaterThan(0);
