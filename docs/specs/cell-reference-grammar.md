@@ -658,13 +658,24 @@ richer context is read against none — the requester's case under
 | reader, same context | `S/X@user/items`   | piece written → space from context, path from root, scope from context |
 | reader, no context   | `S/X@space/items`  | a different cell — the requester's difference, not the writer's        |
 
-**Library.** One module owns both halves and the context between them: a reader
-`(text, context?) → parts`, a writer `(link, context?) → text`, and the same
-pair for a context's own text. `parseReferenceParts` is the reader's grammar
-today and grows the context argument; the writer is its inverse.
-`parseLLMFriendlyLink` and `createLLMFriendlyLink` become wrappers over that
-pair, kept for their callers — the name records an audience, and the grammar is
-for every reader.
+**Library.** One module, `packages/runner/src/cell-reference.ts`, owns both
+halves and the context between them:
+
+```text
+parseCellReference(text, context?): ReferenceParts     the reader
+renderCellReference(link, context?): string            the writer
+parseReferenceContext(text): ReferenceContext          a context from its text
+renderReferenceContext(context): string                and back
+ReferenceContext                                       a cell address with parts missing
+```
+
+The prose says _reader_ and _writer_; the code says `parse` and `render`,
+because `render` is what this tree already calls structure-to-text and `write`
+is what it calls a store operation. `parseReferenceParts` is the reader today,
+without the context argument, and is folded into `parseCellReference`.
+`parseLLMFriendlyLink` and `createLLMFriendlyLink` become wrappers over the
+pair, kept for their callers â the name records an audience, and the grammar
+is for every reader.
 
 Serves R3 (the shape is the string's; the values are the context's), R9, R10,
 R12.
@@ -797,11 +808,11 @@ the tree consistent.
    ([D10](#d10-reader-and-writer-share-one-context)) and reads the
    piece-relative form against it; `cf`'s positional path is one already, and
    gains only `./` and `..`.
-2. **Write the new forms.** The writer is the reader's inverse, in the same
-   module, and takes the same context; `createLLMFriendlyLink` becomes a wrapper
-   over it that passes a context holding its `contextSpace` and scope `space`,
-   so every caller that passes a space today keeps its output. A call that
-   passes no space today gets the complete form under
+2. **Write the new forms.** `renderCellReference` is the reader's inverse, in
+   the same module, and takes the same context; `createLLMFriendlyLink` becomes
+   a wrapper over it that passes a context holding its `contextSpace` and scope
+   `space`, so every caller that passes a space today keeps its output. A call
+   that passes no space today gets the complete form under
    [D7](#d7-what-a-writer-writes) instead of `/of:X`; each such caller is
    visited, and the placeholder space in
    `packages/cf-harness/src/handle-table.ts` retires. From here every address
