@@ -47,7 +47,6 @@ import {
   type URI,
   type Variant,
 } from "@commonfabric/memory/interface";
-import { BaseMemoryAddress } from "@commonfabric/runner/traverse";
 import type { Immutable } from "@commonfabric/utils/types";
 
 import { Cell } from "../cell.ts";
@@ -77,6 +76,7 @@ import type {
 } from "../cfc/mod.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
 import { RAW_META_WRITE } from "../meta-seam.ts";
+import { BaseMemoryAddress } from "../traverse.ts";
 export type { DID, MediaType, MemorySpace, Result, Signer, State, Unit, URI };
 export type ChangeGroup = unknown;
 

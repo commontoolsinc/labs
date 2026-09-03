@@ -86,7 +86,6 @@ import {
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
 import { NameSchema, rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import { linkRefPayload } from "@commonfabric/runner/shared";
-import { RemoteResponse } from "@commonfabric/runtime-client";
 import {
   getLogger,
   getLoggerCountsBreakdown,
@@ -218,7 +217,7 @@ import {
   type WriteStackTraceResponse,
 } from "@/protocol/mod.ts";
 
-import type { VDomOp } from "@/protocol/types.ts";
+import type { RemoteResponse, VDomOp } from "@/protocol/types.ts";
 import {
   normalizeOrigin,
   normalizeSpaceHostMap,

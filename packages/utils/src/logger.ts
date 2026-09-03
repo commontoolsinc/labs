@@ -174,7 +174,7 @@
  * ```
  */
 
-import { isDeno } from "@commonfabric/utils/env";
+import { isDeno } from "./env.ts";
 
 /**
  * A message argument: either the value to log, or a function returning it,

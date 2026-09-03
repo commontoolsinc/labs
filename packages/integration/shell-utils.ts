@@ -4,14 +4,6 @@ import { ConsoleEvent, PageErrorEvent } from "@astral/astral";
 import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
 import { Identity } from "@commonfabric/identity";
 import {
-  Browser,
-  dismissDialogs,
-  env,
-  Page,
-  pipeConsole,
-  type PresentationParticipant,
-} from "@commonfabric/integration";
-import {
   AppView,
   appViewToUrlPath,
   isAppViewEqual,
@@ -21,11 +13,15 @@ import {
   type SerializedIdentity,
 } from "@commonfabric/shell/app-state";
 
+import { Browser } from "./browser.ts";
 import { describeThrown } from "./describe-thrown.ts";
+import * as env from "./env.ts";
+import { dismissDialogs, Page, pipeConsole } from "./page.ts";
 import {
   collectPatternCoverage,
   enablePatternCoverage,
 } from "./pattern-coverage.ts";
+import type { PresentationParticipant } from "./presentation/config.ts";
 import { getPresentationSession } from "./presentation/session.ts";
 import {
   assertShellDocument,

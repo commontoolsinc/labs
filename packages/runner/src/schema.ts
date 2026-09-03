@@ -43,16 +43,6 @@ import {
   externalResolutionMissCount,
   onSchemaRegistryClear,
 } from "./schema-registry.ts";
-import {
-  canBranchMatch,
-  combineOptionalSchema,
-  combineSchema,
-  combineSchemaForLink,
-  createDefaultTraversalContext,
-  IObjectCreator,
-  mergeAnyOfMatches,
-  SchemaObjectTraverser,
-} from "@commonfabric/runner/traverse";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
@@ -83,6 +73,16 @@ import { ignoreReadForScheduling } from "./scheduler.ts";
 import { arrayMatchesPositionally } from "./schema-match.ts";
 import { canFollowScopedLink, isCellScope } from "./scope.ts";
 import { internalVerifierRead } from "./storage/reactivity-log.ts";
+import {
+  canBranchMatch,
+  combineOptionalSchema,
+  combineSchema,
+  combineSchemaForLink,
+  createDefaultTraversalContext,
+  IObjectCreator,
+  mergeAnyOfMatches,
+  SchemaObjectTraverser,
+} from "./traverse.ts";
 
 const logger = getLogger("validateAndTransform", {
   enabled: true,

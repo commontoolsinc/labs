@@ -20,7 +20,6 @@ import {
   setCommitPreconditionsConfig,
   setServerExecutionConfig,
 } from "@commonfabric/memory/v2";
-import { RuntimeTelemetry } from "@commonfabric/runner";
 import {
   getContentAddressedSchemasConfig,
   setContentAddressedSchemasConfig,
@@ -165,7 +164,7 @@ import {
   type RuntimeWritePolicyAuthorization,
   runtimeWritePolicyAuthorized,
 } from "./cfc/types.ts";
-import type { NonIdempotentReport } from "./telemetry.ts";
+import { type NonIdempotentReport, RuntimeTelemetry } from "./telemetry.ts";
 import {
   createUnsafeHostTrustToken,
   type UnsafeHostTrust,
