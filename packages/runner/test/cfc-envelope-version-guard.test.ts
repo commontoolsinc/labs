@@ -127,10 +127,11 @@ describe("CFC envelope version guard", () => {
 
   it("rejects an enforcing write that READ a document whose envelope shape it cannot walk", async () => {
     // The version is one this build interprets and the label map is not: no
-    // entries to walk, or an entry with no path to match a read against.
-    // Reading a label is what meets these, so the refusal has to be reached
-    // by every transaction that read the document, not only by one whose
-    // write target declares a requirement.
+    // entries to walk, an entry with no path to match a read against, an
+    // entry with no label to read clauses out of, or clauses that are not a
+    // list. Reading a label is what meets these, so the refusal has to be
+    // reached by every transaction that read the document, not only by one
+    // whose write target declares a requirement.
     const shapes = {
       "no-label-map": { version: 1, schemaHash: SEED_ENVELOPE_SCHEMA_HASH },
       "no-entries": {
@@ -142,6 +143,19 @@ describe("CFC envelope version guard", () => {
         version: 1,
         schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
         labelMap: { version: 1, entries: [{ label: {} }] },
+      },
+      "labelless-entry": {
+        version: 1,
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+        labelMap: { version: 1, entries: [{ path: ["secret"] }] },
+      },
+      "unreadable-clauses": {
+        version: 1,
+        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+        labelMap: {
+          version: 1,
+          entries: [{ path: ["secret"], label: { confidentiality: "secret" } }],
+        },
       },
     };
     for (const [name, envelope] of Object.entries(shapes)) {

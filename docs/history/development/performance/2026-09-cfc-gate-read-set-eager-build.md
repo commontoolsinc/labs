@@ -117,6 +117,15 @@ measurement changes no decision — which
 `packages/runner/test/cfc-prefix-provenance-stats.test.ts` states and pins,
 but only over a protected write, where the set is assembled either way.
 
+Validating the shape turned up a third case, neither a regression nor
+reachable from the gate: an entry carrying a path and no `label`, or clauses
+that are not a list, committed both before and after this change. Nothing
+walks it on the enforcing path — the label join reads `entry.label?` — while
+`collectConsumedLabel` reads `entry.label.confidentiality` unguarded and is
+reached only when an egress or a flow join asks. So the same envelope
+committed quietly on one path and crashed on another. The validator covers it
+because it is the same unchecked cast, one level down.
+
 Neither defect was caught by the 172-file CFC suite.
 `cfc-envelope-version-guard.test.ts` put the read and the write on the same
 document, where `loadStoredCfcEnvelope` catches an unreadable envelope
