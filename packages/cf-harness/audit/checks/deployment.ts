@@ -52,18 +52,35 @@ export type ToolshedMeta =
 const everyRun = (audit: DeploymentAudit): readonly RunEvidence[] =>
   audit.families.flatMap((family) => [...familyRuns(family)]);
 
+/**
+ * The run's policy decisions, from the first artifact that carries a list of
+ * them.
+ *
+ * An artifact that parsed but holds no `decisions` array is not a run that
+ * decided nothing: it is an artifact this reader cannot answer from, and
+ * falling through to the next one is what keeps a refusal held in the report
+ * or the run state from disappearing behind a truncated trace. `undefined`
+ * where no artifact carries one.
+ */
 const decisionsOf = (
   run: RunEvidence,
-): readonly HarnessPolicyDecisionRecord[] => {
-  if (run.policyTrace.status === "present") {
-    return run.policyTrace.value.decisions ?? [];
+): readonly HarnessPolicyDecisionRecord[] | undefined => {
+  if (
+    run.policyTrace.status === "present" &&
+    Array.isArray(run.policyTrace.value.decisions)
+  ) {
+    return run.policyTrace.value.decisions;
   }
-  if (run.runReport.status === "present") {
-    return run.runReport.value.policyDecisions ?? [];
+  if (
+    run.runReport.status === "present" &&
+    Array.isArray(run.runReport.value.policyDecisions)
+  ) {
+    return run.runReport.value.policyDecisions;
   }
-  return run.runState.status === "present"
-    ? run.runState.value.policyDecisions ?? []
-    : [];
+  return run.runState.status === "present" &&
+      Array.isArray(run.runState.value.policyDecisions)
+    ? run.runState.value.policyDecisions
+    : undefined;
 };
 
 const snapshotOf = (
@@ -110,101 +127,124 @@ const count = (total: number, singular: string, plural: string): string =>
 /**
  * A release refusal, as a run writes one down.
  *
- * The boundary records these as structured `policyRefusal` objects on a tool
- * output — `gates` naming what refused (`sink-ceiling` is an egress whose
- * confidentiality ceiling the flow exceeded, `writer-fit` a write whose target
- * does not admit what it carries), beside the offending atoms and the input
- * keys that carried them in. That is the channel where a label deciding an
- * outcome is legible.
+ * The boundary that refused records a `release` decision in `policy-trace.json`
+ * — the same record every tool-policy decision is written as, carrying the
+ * gate that refused (`sink-ceiling` is an egress whose confidentiality ceiling
+ * the flow exceeded, `writer-fit` a write whose target does not admit what it
+ * carries), the sink and ceiling it was fitted against, the offending atoms,
+ * and the input keys that carried them in. That is the channel where a label
+ * deciding an outcome is legible.
  *
- * The policy-decision reason codes are NOT that channel, and reading them for
- * this is the mistake to avoid. Every `cfc_*` code comes from one switch in
+ * The policy-decision REASON CODES alone are NOT that channel, and reading
+ * them for this is the mistake to avoid. Every `cfc_observe_*`,
+ * `cfc_enforce_*` and `cfc_disabled` code comes from one switch in
  * `prompt-loop.ts` that turns on the tool descriptor's static `effectClass`
  * and on whether the invocation carries direct-command evidence — authority,
  * not a label — and the loop records its allow-side decision before the tool
- * runs, so a refusal the boundary raises inside the tool cannot appear there
- * as a denial at all.
+ * runs. What tells a release decision apart is the `release` record on it,
+ * which only a boundary that consulted a label writes.
  */
 interface ReleaseRefusal {
   runId: string;
-  fileName: string;
+  source: string;
+  sequence: number;
   gates: readonly string[];
   sinks: readonly string[];
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-
-const stringsOf = (value: unknown): readonly string[] =>
-  Array.isArray(value) ? value.filter((one) => typeof one === "string") : [];
+/**
+ * Every release refusal one run's decisions record.
+ *
+ * A decision that measured the boundary and released, and one an observe-stage
+ * posture measured without acting on, are decisions too — they are what says
+ * the boundary ran — but neither is a refusal, so neither is counted here.
+ */
+const releaseRefusalsOf = (
+  run: RunEvidence,
+): readonly ReleaseRefusal[] =>
+  (decisionsOf(run) ?? [])
+    .filter((decision) =>
+      decision.release !== undefined && decision.decision === "denied"
+    )
+    .map((decision) => ({
+      runId: run.runId,
+      source: sourceOf(run),
+      sequence: decision.sequence,
+      gates: decision.release?.refusal?.gates ?? [],
+      sinks: sinksOf(decision.release!),
+    }));
 
 /**
- * Every `policyRefusal` a tool output carries, wherever it sits in it.
- *
- * A walk rather than a path: the refusal rides on the tool-output envelope
- * whose shape has moved between generations, and a reader that knew only
- * today's path would silently find none in an older tree — which is the
- * failure this whole check exists to avoid.
+ * The sinks a decision refused at: the ones the refusal names, and otherwise
+ * the one the harness fitted against. A commit refusal names its own; a
+ * release refusal the harness measured carries the sink on the decision.
  */
-const releaseRefusalsIn = (
-  runId: string,
-  fileName: string,
-  value: unknown,
-): readonly ReleaseRefusal[] => {
-  const found: ReleaseRefusal[] = [];
-  const walk = (node: unknown): void => {
-    if (Array.isArray(node)) {
-      for (const one of node) walk(one);
-      return;
-    }
-    if (!isRecord(node)) return;
-    const refusal = node.policyRefusal;
-    if (isRecord(refusal)) {
-      found.push({
-        runId,
-        fileName,
-        gates: stringsOf(refusal.gates),
-        sinks: stringsOf(refusal.sinks),
-      });
-    }
-    for (const one of Object.values(node)) walk(one);
-  };
-  walk(value);
-  return found;
+const sinksOf = (
+  release: NonNullable<HarnessPolicyDecisionRecord["release"]>,
+): readonly string[] => {
+  const named = release.refusal?.sinks ?? [];
+  return named.length > 0
+    ? named
+    : release.sink === undefined
+    ? []
+    : [release.sink];
 };
 
 /** Every release refusal the corpus recorded. */
 const labelDrivenRefusals = (
   audit: DeploymentAudit,
-): readonly ReleaseRefusal[] =>
-  everyRun(audit).flatMap((run) =>
-    run.toolOutputs.status === "present"
-      ? run.toolOutputs.entries.flatMap((entry) =>
-        entry.value === undefined
-          ? []
-          : releaseRefusalsIn(run.runId, entry.fileName, entry.value)
-      )
-      : []
+): readonly ReleaseRefusal[] => everyRun(audit).flatMap(releaseRefusalsOf);
+
+/** Release measurements that refused nothing, which say the boundary ran. */
+const releasesMeasured = (audit: DeploymentAudit): number =>
+  everyRun(audit).reduce(
+    (total, run) =>
+      total +
+      (decisionsOf(run) ?? []).filter((decision) =>
+        decision.release !== undefined && decision.decision !== "denied"
+      ).length,
+    0,
   );
 
-/** Every denial of the corpus, whatever decided it. */
+/** Every denial of the corpus an authority rather than a label decided. */
 const allDenials = (audit: DeploymentAudit): number =>
   everyRun(audit).reduce(
     (total, run) =>
       total +
-      decisionsOf(run).filter((decision) => decision.decision === "denied")
-        .length,
+      (decisionsOf(run) ?? []).filter((decision) =>
+        decision.decision === "denied" && decision.release === undefined
+      ).length,
     0,
   );
 
-/** Runs whose tool outputs this host could not read. */
-const unreadableOutputs = (audit: DeploymentAudit): readonly RunEvidence[] =>
-  everyRun(audit).filter((run) => run.toolOutputs.status === "unparseable");
+/** Which artifact a run's decisions were read from, for a finding to cite. */
+const sourceOf = (run: RunEvidence): string =>
+  run.policyTrace.status === "present" &&
+    Array.isArray(run.policyTrace.value.decisions)
+    ? "policy-trace.json"
+    : run.runReport.status === "present" &&
+        Array.isArray(run.runReport.value.policyDecisions)
+    ? "run-report.json"
+    : "run-state.json";
+
+/**
+ * Runs whose decisions this host could not read from any artifact.
+ *
+ * A run that answers `undefined` to {@link decisionsOf} said nothing about
+ * its decisions anywhere — every artifact that would carry them is missing,
+ * unparseable, or parsed without the list. None of those is an empty channel,
+ * and reporting them as one would answer "no refusal here" to a question this
+ * host cannot see the evidence for.
+ */
+const unreadableDecisions = (
+  audit: DeploymentAudit,
+): readonly RunEvidence[] =>
+  everyRun(audit).filter((run) => decisionsOf(run) === undefined);
 
 const refusalLiveness = (audit: DeploymentAudit): CheckResult => {
   const refusals = labelDrivenRefusals(audit);
   const runs = everyRun(audit);
-  const unreadable = unreadableOutputs(audit);
+  const unreadable = unreadableDecisions(audit);
   const notAttested = runs.filter((run) =>
     snapshotOf(run)?.cfc.substrateStatus === "not-attested"
   );
@@ -217,13 +257,24 @@ const refusalLiveness = (audit: DeploymentAudit): CheckResult => {
     .sort();
   const evidence: CheckEvidence[] = [
     {
-      artifact: "tool-outputs/",
-      pointer: "policyRefusal",
+      artifact: "policy-trace.json",
+      pointer: "decisions[].release",
       detail: `${
         count(refusals.length, "release refusal", "release refusals")
       } across ${count(runs.length, "run", "runs")}${
         gates.length === 0 ? "" : ` (gates: ${gates.join(", ")})`
       }${sinks.length === 0 ? "" : ` (sinks: ${sinks.join(", ")})`}`,
+    },
+    {
+      artifact: "policy-trace.json",
+      pointer: "decisions[].release",
+      detail: `${
+        count(
+          releasesMeasured(audit),
+          "release the same boundary measured and did not refuse",
+          "releases the same boundary measured and did not refuse",
+        )
+      }`,
     },
     {
       detail: `${
@@ -254,9 +305,9 @@ const refusalLiveness = (audit: DeploymentAudit): CheckResult => {
       "refusal liveness",
       extendsClause("AH-CFC-11", "AH-CFC-15"),
       "inconclusive",
-      `the tool outputs of ${
+      `the policy decisions of ${
         count(unreadable.length, "run", "runs")
-      } could not be listed, so whether this corpus holds a release refusal is not established`,
+      } could not be read, so whether this corpus holds a release refusal is not established`,
       evidence,
     );
   }

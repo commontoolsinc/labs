@@ -15,6 +15,7 @@ import {
   type CfcRefusalDetail,
   type CfcRefusalGate,
   describeSinkReleaseRefusal,
+  renderCfcAtom,
   selectReferencedCfcSchemaDefs,
   validateAgainstSchema,
 } from "@commonfabric/runner/cfc";
@@ -30,6 +31,12 @@ import {
   type PiecesController,
 } from "@commonfabric/piece/ops";
 import { isObjectNotArray } from "@commonfabric/utils/types";
+import {
+  HARNESS_POLICY_REFUSAL_SCHEMA,
+  type HarnessPolicyRefusal,
+  type HarnessReleaseBoundary,
+  type HarnessReleaseDecision,
+} from "../contracts/policy-refusal.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import { keylessInstantiation } from "../fabric-instantiations.ts";
 import {
@@ -103,6 +110,17 @@ export interface RunPatternToolSuccessOutput {
   resultRef: string;
 
   /**
+   * What the release boundary decided about this call's own result: released,
+   * observed, or withheld, with the sink and ceiling it was fitted against
+   * and what the fit refused. Artifact-only, like `releaseObservation`: the
+   * prompt loop strips it from the model-facing rendering and appends it to
+   * the run's policy trace, where a decision a label drove sits beside the
+   * decisions authority drove. Absent on a run that asked for no values,
+   * since nothing was measured.
+   */
+  releaseDecision?: HarnessReleaseDecision;
+
+  /**
    * What the release measurement refused, on a run the enforcement ladder did
    * not reject it on. Artifact-only, like the other fields the prompt loop
    * strips: the values went out, so the model has nothing to act on, while an
@@ -110,7 +128,7 @@ export interface RunPatternToolSuccessOutput {
    * start withholding. Absent, like `policyRefusal`, on a run that asked for
    * no values, since nothing was measured.
    */
-  releaseObservation?: RunPatternPolicyRefusal;
+  releaseObservation?: HarnessPolicyRefusal;
 
   /**
    * What the answer's own sink refused to release and which of this call's
@@ -120,7 +138,7 @@ export interface RunPatternToolSuccessOutput {
    * is the values alone. `valueError` states the same refusal as an
    * instruction.
    */
-  policyRefusal?: RunPatternPolicyRefusal;
+  policyRefusal?: HarnessPolicyRefusal;
 
   /**
    * The compiled pattern's result schema — the shape of whatever
@@ -215,67 +233,6 @@ export interface RunPatternPublicationReport {
   syntheticInputsComplete: boolean;
 }
 
-/**
- * What a boundary refused, in terms the caller can act on: the boundary that
- * refused, the label atoms outside it, and the keys of this
- * call's own `inputs` that carried those atoms in. When `attribution` is
- * `complete`, a run without those keys meets the boundary.
- *
- * Everything here reaches the model as it stands — the model-facing
- * rendering strips `rawValue`, `rawCauseMessage`, `pieceId` and
- * `resultRefSchema` and scrubs the free-text fields, and a structured field
- * passes through untouched. So nothing here is a document id, a space, or a
- * path into a document: an offending read that no input key accounts for is
- * counted rather than named.
- */
-export interface RunPatternPolicyRefusal {
-  /**
-   * The rules that refused, deduplicated. `sink-ceiling` is an egress whose
-   * confidentiality ceiling the flow exceeded; `writer-fit` is a write whose
-   * target does not admit what the write carries.
-   */
-  gates: readonly CfcRefusalGate[];
-
-  /**
-   * The sinks whose ceilings refused, deduplicated. Empty when what refused
-   * was a write rather than an egress.
-   */
-  sinks: readonly string[];
-
-  /**
-   * The label atoms outside what the boundary admits, rendered as the
-   * boundary renders them.
-   */
-  offendingAtoms: readonly string[];
-
-  /**
-   * Offending atoms left out of `offendingAtoms`. A structured atom can
-   * carry the principal that introduced it, and there is no seam that
-   * redacts a rendered atom, so it is counted rather than named.
-   */
-  withheldAtomCount?: number;
-
-  /**
-   * The keys of this call's own `inputs` whose values carried the offending
-   * atoms in — the inputs to drop and retry without.
-   */
-  inputKeys: readonly string[];
-
-  /**
-   * Offending reads that no key of this call's `inputs` accounts for,
-   * counted by document.
-   */
-  unattributedInputCount?: number;
-
-  /**
-   * Whether `inputKeys` is the whole remedy. `complete` — every offending
-   * atom came in through them, so a run without them proceeds. `partial` —
-   * dropping them narrows the flow without necessarily clearing it. `none` —
-   * nothing was attributed to an input of this call.
-   */
-  attribution: CfcRefusalAttribution;
-}
-
 export interface RunPatternToolErrorOutput {
   outputId: string;
   status: "compile-error" | "error" | "cancelled";
@@ -302,7 +259,15 @@ export interface RunPatternToolErrorOutput {
    * this — the result landed and its reference is returned — so it rides on
    * the success output instead.
    */
-  policyRefusal?: RunPatternPolicyRefusal;
+  policyRefusal?: HarnessPolicyRefusal;
+
+  /**
+   * What the commit boundary decided, on the error a refused commit produces.
+   * Artifact-only on the same terms as the success output's, and the same
+   * shape: a refusal the runner raised is a decision of the same kind as one
+   * the harness measured.
+   */
+  releaseDecision?: HarnessReleaseDecision;
 }
 
 export type RunPatternToolOutput =
@@ -316,34 +281,6 @@ export const isRunPatternToolSuccessOutput = (
   "status" in output && output.status === "ok" &&
   "resultRef" in output && typeof output.resultRef === "string" &&
   "resultRefSchema" in output;
-
-/** `RunPatternPolicyRefusal`, as the output schema states it. */
-const RUN_PATTERN_POLICY_REFUSAL_SCHEMA = {
-  type: "object",
-  properties: {
-    gates: {
-      type: "array",
-      items: { type: "string", enum: ["sink-ceiling", "writer-fit"] },
-    },
-    sinks: { type: "array", items: { type: "string" } },
-    offendingAtoms: { type: "array", items: { type: "string" } },
-    withheldAtomCount: { type: "integer", minimum: 0 },
-    inputKeys: { type: "array", items: { type: "string" } },
-    unattributedInputCount: { type: "integer", minimum: 0 },
-    attribution: {
-      type: "string",
-      enum: ["complete", "partial", "none"],
-    },
-  },
-  required: [
-    "gates",
-    "sinks",
-    "offendingAtoms",
-    "inputKeys",
-    "attribution",
-  ],
-  additionalProperties: false,
-} satisfies JSONSchema;
 
 export const runPatternToolDescriptor: HarnessToolDescriptor = {
   toolId: "run_pattern",
@@ -407,7 +344,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         value: {},
         linkedStringCount: { type: "integer", minimum: 0 },
         valueError: { type: "string" },
-        policyRefusal: RUN_PATTERN_POLICY_REFUSAL_SCHEMA,
+        policyRefusal: HARNESS_POLICY_REFUSAL_SCHEMA,
         rawValue: {},
         patternPublication: {
           type: "object",
@@ -460,7 +397,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         message: { type: "string" },
         pieceId: { type: "string" },
         rawCauseMessage: { type: "string" },
-        policyRefusal: RUN_PATTERN_POLICY_REFUSAL_SCHEMA,
+        policyRefusal: HARNESS_POLICY_REFUSAL_SCHEMA,
       },
       required: ["outputId", "status", "message"],
       additionalProperties: false,
@@ -738,7 +675,7 @@ const namableRefusalAtom = (rendered: string): boolean => {
 export const runPatternPolicyRefusal = (
   refusals: readonly CfcRefusalDetail[],
   inputKeysFor: (read: CfcAddress) => readonly string[],
-): RunPatternPolicyRefusal | undefined =>
+): HarnessPolicyRefusal | undefined =>
   nonEmpty(refusals) ? foldPolicyRefusals(refusals, inputKeysFor) : undefined;
 
 /** Whether `items` has a first element, narrowing to the tuple that says so. */
@@ -749,7 +686,7 @@ const nonEmpty = <T>(items: readonly T[]): items is readonly [T, ...T[]] =>
 const foldPolicyRefusals = (
   refusals: readonly [CfcRefusalDetail, ...CfcRefusalDetail[]],
   inputKeysFor: (read: CfcAddress) => readonly string[],
-): RunPatternPolicyRefusal => {
+): HarnessPolicyRefusal => {
   const gates: CfcRefusalGate[] = [];
   const sinks: string[] = [];
   const offendingAtoms: string[] = [];
@@ -805,21 +742,13 @@ const quoteAll = (values: readonly string[]): string =>
   values.map((value) => `"${value}"`).join(", ");
 
 /**
- * Which boundary a refusal came from, which decides what the caller is told
- * became of the result: a refused commit landed no result, while a refused
- * release has one, in the space under its own labels, whose reference the
- * caller holds with the values withheld.
- */
-export type RunPatternRefusalBoundary = "commit" | "release";
-
-/**
  * The refusal stated as an instruction: what refused, which of the caller's
  * inputs carried what it refused, and whether dropping those inputs is the
  * whole remedy or only narrows the flow.
  */
 export const policyRefusalMessage = (
-  refusal: RunPatternPolicyRefusal,
-  boundaryRefused: RunPatternRefusalBoundary,
+  refusal: HarnessPolicyRefusal,
+  boundaryRefused: HarnessReleaseBoundary,
 ): string => {
   const boundary = refusal.sinks.length > 0
     ? `the sink${refusal.sinks.length > 1 ? "s" : ""} ${
@@ -1008,10 +937,22 @@ export const runPatternTool: HarnessToolDefinition<
   descriptor: runPatternToolDescriptor,
   async invoke(context, input) {
     const outputId = context.nextOutputId("run_pattern");
+    /**
+     * What the release boundary decided, once it has decided. Declared here
+     * so {@link errorOutput} can carry it: every exit below the fit is an
+     * exit the boundary already decided at, and an exit that had to remember
+     * to attach the decision is an exit that can forget to.
+     */
+    let releaseDecision: HarnessReleaseDecision | undefined = undefined;
     const errorOutput = (
       status: RunPatternToolErrorOutput["status"],
       message: string,
-    ): RunPatternToolErrorOutput => ({ outputId, status, message });
+    ): RunPatternToolErrorOutput => ({
+      outputId,
+      status,
+      message,
+      ...(releaseDecision !== undefined ? { releaseDecision } : {}),
+    });
 
     /**
      * `detail` is what the cancellation left behind that the caller would
@@ -1488,7 +1429,7 @@ export const runPatternTool: HarnessToolDefinition<
      */
     const describeRefusal = async (
       details: readonly [CfcRefusalDetail, ...CfcRefusalDetail[]],
-    ): Promise<RunPatternPolicyRefusal> => {
+    ): Promise<HarnessPolicyRefusal> => {
       let argumentHash: string | undefined;
       try {
         argumentHash = comparableEntityHash(
@@ -1522,6 +1463,9 @@ export const runPatternTool: HarnessToolDefinition<
       details: readonly CfcRefusalDetail[],
       rawCauseMessage: string,
     ) => {
+      // The commit boundary's own decision, and not the release measurement
+      // beside it: nothing landed, so what the ceiling would have admitted of
+      // a result that does not exist is not a decision about this run.
       recordOutcome("run_failed");
       const policyRefusal = nonEmpty(details)
         ? await describeRefusal(details)
@@ -1536,6 +1480,18 @@ export const runPatternTool: HarnessToolDefinition<
         pieceId: piece.id,
         rawCauseMessage,
         ...(policyRefusal !== undefined ? { policyRefusal } : {}),
+        // The commit boundary states no sink or ceiling of its own: the
+        // runner refused at the pattern's own sink requests, which the
+        // refusal names, rather than at a fit this tool performed. Stated
+        // after the spread above, so it stands in place of the release
+        // measurement's own decision where both exist: nothing landed, so
+        // what the ceiling would have admitted of a result that does not
+        // exist is not a decision about this run.
+        releaseDecision: {
+          reasonCode: "cfc_commit_refused",
+          boundary: "commit",
+          ...(policyRefusal !== undefined ? { refusal: policyRefusal } : {}),
+        } satisfies HarnessReleaseDecision,
       };
     };
 
@@ -1628,6 +1584,48 @@ export const runPatternTool: HarnessToolDefinition<
       stopPiece(piece.getCell());
       return cancelledOutput();
     }
+
+    // The measurement is read HERE, before the exits below, because every
+    // one of them is an exit the boundary already decided at: a run whose
+    // result fails to settle after the fit still had the fit performed, and a
+    // decision left behind at such an exit is the very decision the trace was
+    // missing. What it found goes one of two ways. Where the ladder
+    // rejects, the values are withheld and the refusal reaches the model as
+    // data and as an instruction, with its reason kept for the artifact.
+    // Where it does not, the values go out and the measurement is still an
+    // answer about this run, which only the artifact can carry.
+    const withheldRefusal = releaseGateRejects ? releaseRefusal : undefined;
+    const withheld = withheldRefusal === undefined
+      ? undefined
+      : await describeRefusal([withheldRefusal]);
+    const releaseObservation =
+      releaseGateRejects || releaseRefusal === undefined
+        ? undefined
+        : await describeRefusal([releaseRefusal]);
+    const measured = withheld ?? releaseObservation;
+    /**
+     * The same measurement said as a decision, which is what reaches the
+     * run's policy trace. Present exactly where a measurement happened — a
+     * call that asked for no values measured nothing, and a decision about a
+     * boundary nothing crossed would be a record of an event that did not
+     * occur.
+     *
+     * The ceiling is stated whichever way the decision went. A released
+     * answer and a withheld one differ in what the same ceiling admitted, and
+     * an operator reading only the refusals would be reading the ladder's
+     * effect without its terms.
+     */
+    releaseDecision = parsedResultSchema === undefined ? undefined : {
+      reasonCode: withheld !== undefined
+        ? "cfc_release_withheld"
+        : releaseObservation !== undefined
+        ? "cfc_release_observed"
+        : "cfc_release_allowed",
+      boundary: "release",
+      sink: RUN_PATTERN_ANSWER_SINK,
+      ceiling: RUN_PATTERN_ANSWER_CEILING.map(renderCfcAtom),
+      ...(measured !== undefined ? { refusal: measured } : {}),
+    };
 
     let value: unknown;
     let linkedStringCount: number | undefined;
@@ -1756,20 +1754,6 @@ export const runPatternTool: HarnessToolDefinition<
     if (valueError === undefined) {
       recordOutcome("run_succeeded");
     }
-    // What the measurement found goes one of two ways. Where the ladder
-    // rejects, the values are withheld and the refusal reaches the model as
-    // data and as an instruction, with its reason kept for the artifact.
-    // Where it does not, the values go out and the measurement is still an
-    // answer about this run, which only the artifact can carry.
-    const withheldRefusal = releaseGateRejects ? releaseRefusal : undefined;
-    const withheld = withheldRefusal === undefined
-      ? undefined
-      : await describeRefusal([withheldRefusal]);
-    const releaseObservation =
-      releaseGateRejects || releaseRefusal === undefined
-        ? undefined
-        : await describeRefusal([releaseRefusal]);
-
     /**
      * The render gate: what the pattern's own `$UI` does before the pattern
      * is contributed to the index.
@@ -2029,6 +2013,7 @@ export const runPatternTool: HarnessToolDefinition<
         }),
       ...(rawValue !== undefined ? { rawValue } : {}),
       ...(releaseObservation !== undefined ? { releaseObservation } : {}),
+      ...(releaseDecision !== undefined ? { releaseDecision } : {}),
       ...(publication !== undefined ? { patternPublication: publication } : {}),
       ...(retainedCauses.length > 0
         ? { rawCauseMessage: retainedCauses.join("\n\n") }

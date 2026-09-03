@@ -1114,6 +1114,13 @@ describe("run-pattern", () => {
       expect(output.message).not.toContain("of:doc");
       expect(output.rawCauseMessage).toContain("of:doc");
       expect(output.pieceId).toBeDefined();
+      // The decision the run's policy trace carries: the commit boundary
+      // refused, and it states no sink or ceiling of its own, since the
+      // runner refused at the pattern's own sink requests.
+      expect(output.releaseDecision).toEqual({
+        reasonCode: "cfc_commit_refused",
+        boundary: "commit",
+      });
     });
 
     it("names the clause and the gate when the refused commit carried structured refusals", async () => {
@@ -1151,6 +1158,8 @@ describe("run-pattern", () => {
       // Document identifiers stay out of the model-facing message either way.
       expect(output.message).not.toContain("of:ledger");
       expect(output.rawCauseMessage).toContain("of:ledger");
+      expect(output.releaseDecision?.reasonCode).toBe("cfc_commit_refused");
+      expect(output.releaseDecision?.refusal).toEqual(output.policyRefusal);
     });
 
     it("returns an error naming the policy refusal when the answer carries a label the model may not read", async () => {
@@ -1533,6 +1542,15 @@ describe("run-pattern", () => {
         // the rung would refuse is recorded for whoever is staging it.
         expect(output.releaseObservation?.offendingAtoms).toEqual(['"secret"']);
         expect(output.releaseObservation?.inputKeys).toEqual(["source"]);
+        // The measurement said as a decision: it did not reject, and it
+        // carries the same attribution the observation does.
+        expect(output.releaseDecision).toEqual({
+          reasonCode: "cfc_release_observed",
+          boundary: "release",
+          sink: "run_pattern",
+          ceiling: [],
+          refusal: output.releaseObservation,
+        });
       } finally {
         await dispose();
       }
@@ -1569,6 +1587,15 @@ describe("run-pattern", () => {
         const output = result.output as RunPatternToolSuccessOutput;
         expect(output.status).toBe("ok");
         expect((output.value as { total: number }).total).toBe(3);
+        // The boundary ran and admitted the flow, which the trace records as
+        // readily as a refusal: an operator reading only refusals cannot tell
+        // a gate that passed from one that never ran.
+        expect(output.releaseDecision).toEqual({
+          reasonCode: "cfc_release_allowed",
+          boundary: "release",
+          sink: "run_pattern",
+          ceiling: [],
+        });
       } finally {
         await dispose();
       }
@@ -1658,6 +1685,9 @@ describe("run-pattern", () => {
         expect(output.valueError).toBeUndefined();
         expect(output.policyRefusal).toBeUndefined();
         expect(output.releaseObservation).toBeUndefined();
+        // Nothing was measured, so the trace records no decision about a
+        // boundary this call never reached.
+        expect(output.releaseDecision).toBeUndefined();
         // The result did derive from the labeled input: the reference names
         // exactly what the ceiling withholds as a value.
         expect((output.rawValue as { totalSpending: number }).totalSpending)
@@ -1703,8 +1733,67 @@ describe("run-pattern", () => {
         );
         expect(output.policyRefusal?.gates).toEqual(["sink-ceiling"]);
         expect(output.policyRefusal?.offendingAtoms).toEqual(['"finance"']);
+        expect(output.releaseDecision).toEqual({
+          reasonCode: "cfc_release_withheld",
+          boundary: "release",
+          sink: "run_pattern",
+          ceiling: [],
+          refusal: output.policyRefusal,
+        });
+        expect(output.releaseDecision?.refusal?.inputKeys).toEqual(["account"]);
         expect((output.rawValue as { totalSpending: number }).totalSpending)
           .toBe(145);
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("keeps the withheld decision on a run that fails to settle after the fit", async () => {
+      // The fit runs before the result is read for its value, so a run that
+      // exits at a settle failure is a run the boundary already decided at.
+      // The decision is attached to that exit too: dropping it there would
+      // lose the trace's record of exactly the refusals a failing run
+      // provoked.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const sourceRef = await seedLabelledSecret(
+          runtime,
+          space,
+          "release-decision-settle-failure",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: [
+              "import { computed, pattern, Reactive } from 'commonfabric';",
+              "interface Source { secret: string; }",
+              "interface Input { amount: number; source: Reactive<Source>; }",
+              "interface Output { total: number; boom: number; }",
+              "export default pattern<Input, Output>(({ amount, source }) => ({",
+              "  total: computed(() => amount + (source.secret ?? '').length),",
+              "  boom: computed(() => { throw new Error('boom in lift'); }),",
+              "}));",
+              "",
+            ].join("\n"),
+            inputs: { amount: 2, source: sourceRef },
+            resultSchema: {
+              type: "object",
+              properties: {
+                total: { type: "number" },
+                boom: { type: "number" },
+              },
+              required: ["total", "boom"],
+            },
+          },
+        );
+        const output = result.output as RunPatternToolErrorOutput;
+        expect(output.status).toBe("error");
+        expect(output.message).toContain("failed while settling");
+        expect(output.releaseDecision?.reasonCode).toBe("cfc_release_withheld");
+        expect(output.releaseDecision?.refusal?.offendingAtoms).toEqual([
+          '"secret"',
+        ]);
+        expect(output.releaseDecision?.refusal?.inputKeys).toEqual(["source"]);
       } finally {
         await dispose();
       }

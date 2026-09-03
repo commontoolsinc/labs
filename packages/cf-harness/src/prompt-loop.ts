@@ -36,6 +36,10 @@ import {
   type ObservationDenied,
 } from "./contracts/observation.ts";
 import {
+  harnessReleaseDecisionOf,
+  harnessReleaseDecisionOutcome,
+} from "./contracts/policy-refusal.ts";
+import {
   createHarnessPolicyTrace,
   type HarnessPolicyDecisionReasonCode,
 } from "./contracts/policy-trace.ts";
@@ -3802,6 +3806,31 @@ export class CfHarnessPromptLoop {
       throw error;
     }
     this.#recordPatternSearchResult(toolId, result.output);
+    // A confidentiality boundary inside the tool decided about the tool's own
+    // result, so its decision is appended AFTER the allow-side decision above
+    // and after the output it belongs to is persisted. The allow-side
+    // decision answers whether the call may run and is recorded before it
+    // does; a boundary that refuses inside the call cannot appear there at
+    // all, which is why the trace showed a run in which policy never said no.
+    // The order in the trace is the order the two were decided in, and the
+    // result reference joins the second to the artifact it decided about.
+    const releaseDecision = harnessReleaseDecisionOf(result.output);
+    if (releaseDecision !== undefined) {
+      await this.engine.recordPolicyDecision({
+        toolActivitySequence: sequence,
+        toolCallId: toolCall.id,
+        toolId,
+        effectClass: tool.descriptor.effectClass,
+        cfcEnforcementMode: this.engine.getRunState().cfcEnforcementMode,
+        decision: harnessReleaseDecisionOutcome(releaseDecision.reasonCode),
+        reasonCodes: [releaseDecision.reasonCode],
+        ...(promptSlotBinding !== undefined
+          ? { promptSlot: promptSlotBinding }
+          : {}),
+        release: releaseDecision,
+        resultRef: result.resultRef,
+      });
+    }
     // Before the outbound swap, so the token it mints for the result cell
     // already carries the shape the compiler knew.
     await this.#recordRunPatternResultShape(
@@ -3972,7 +4001,10 @@ export class CfHarnessPromptLoop {
       // redundant with `resultRef` since the piece cell is the result cell.
       // It also keeps the pattern's result schema, which reaches the model
       // through `describe_handle` on the minted token rather than inline.
-      // The model sees `resultRef` and the schema-sanitized `value`.
+      // The model sees `resultRef` and the schema-sanitized `value`. The
+      // boundary decision goes the same way: the policy trace is where a
+      // decision about this result is read, and restating it to the model
+      // beside `policyRefusal` would say the same thing twice.
       // Free-text diagnostic fields can embed compiler-generated bare
       // fabric identifiers the handle boundary never swaps, so those fields
       // are scrubbed here; the artifact keeps the raw text.
@@ -3982,6 +4014,7 @@ export class CfHarnessPromptLoop {
         pieceId: _pieceId,
         resultRefSchema: _resultRefSchema,
         releaseObservation: _releaseObservation,
+        releaseDecision: _releaseDecision,
         ...publicOutput
       } = output;
       const scrubbed: Record<string, unknown> = { ...publicOutput };

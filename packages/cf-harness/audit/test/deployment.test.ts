@@ -112,7 +112,11 @@ const familyRefusing = (
 };
 
 /**
- * The fixture family with a `policyRefusal` seeded onto a tool output.
+ * The fixture family with a release refusal seeded onto its policy trace.
+ *
+ * The refusal is seeded ONLY there, and the fixture's tool outputs are left
+ * as they are: the check reads the decision channel, and a case that seeded
+ * both could not tell which one it read.
  *
  * `attested` additionally clears the two fields that weaken a posture, so the
  * only difference between the two positive arms is the thing that arm is
@@ -124,34 +128,32 @@ const familyRefusingRelease = (
   attested = false,
 ): RunFamily => {
   const root = structuredClone(family.root);
-  if (root.toolOutputs.status !== "present") {
-    throw new Error("the fixture's tool outputs did not load");
+  if (root.policyTrace.status !== "present") {
+    throw new Error("the fixture's policy trace did not load");
   }
-  const [first] = root.toolOutputs.entries;
-  if (first === undefined) {
-    throw new Error("the fixture recorded no tool output");
-  }
-  root.toolOutputs = {
-    ...root.toolOutputs,
-    entries: [
-      {
-        ...first,
-        value: {
-          outputId: first.fileName,
-          status: "error",
-          message: "refused",
-          policyRefusal: {
-            gates,
-            sinks,
-            offendingAtoms: ["medical"],
-            inputKeys: ["patient"],
-            attribution: "complete",
-          },
+  const trace = root.policyTrace.value as unknown as {
+    decisions: Record<string, unknown>[];
+  };
+  trace.decisions = [
+    ...trace.decisions,
+    {
+      decision: "denied",
+      reasonCodes: ["cfc_release_withheld"],
+      release: {
+        reasonCode: "cfc_release_withheld",
+        boundary: "release",
+        sink: sinks[0] ?? "run_pattern",
+        ceiling: [],
+        refusal: {
+          gates,
+          sinks,
+          offendingAtoms: ["medical"],
+          inputKeys: ["patient"],
+          attribution: "complete",
         },
       },
-      ...root.toolOutputs.entries.slice(1),
-    ],
-  };
+    },
+  ];
   if (attested && root.policySnapshot.status === "present") {
     const snapshot = root.policySnapshot.value as {
       cfc: { substrateStatus?: string; absenceBehavior?: string };
@@ -228,10 +230,11 @@ describe("Group D deployment checks", () => {
       ).toBe("fail");
     });
 
-    it("counts a sink-ceiling refusal a tool output recorded", () => {
-      // The channel a release refusal is actually written to: the boundary
-      // records it on the tool output, naming the gate that refused and the
-      // sink whose ceiling the flow exceeded.
+    it("counts a sink-ceiling refusal present only in the policy trace", () => {
+      // The channel a release refusal is written to: a decision in the trace
+      // carrying a `release` record, naming the gate that refused and the
+      // sink whose ceiling the flow exceeded. The fixture's tool outputs hold
+      // no refusal at all, so a count of one is a count of the trace.
       const results = auditDeployment({
         families: [familyRefusingRelease(["sink-ceiling"], ["fetchText"])],
         paths: [FIXTURE_RUNS_DIR],
@@ -283,7 +286,7 @@ describe("Group D deployment checks", () => {
       });
       expect(verdictOf(results, "AUD-16")).toBe("fail");
       expect(
-        results.find((result) => result.checkId === "AUD-16")?.evidence[1]
+        results.find((result) => result.checkId === "AUD-16")?.evidence[2]
           ?.detail,
       ).toContain("decide on authority rather than on a label");
     });
@@ -312,18 +315,54 @@ describe("Group D deployment checks", () => {
           families: [{ root, children: [] }],
           paths: [FIXTURE_RUNS_DIR],
           expectRefusals: false,
-        }).find((result) => result.checkId === "AUD-16")?.evidence[1]?.detail,
+        }).find((result) => result.checkId === "AUD-16")?.evidence[2]?.detail,
       ).toContain("1 tool-policy denial");
     });
 
-    it("is inconclusive when a run's tool outputs could not be listed", () => {
+    it("is inconclusive when the trace parsed without a decisions array and no other artifact carries one", () => {
+      // A truncated trace is not a run that decided nothing. Reading its
+      // missing list as an empty one would answer "no refusal here" to a
+      // question this host cannot see the evidence for.
+      const root = structuredClone(
+        familyRefusingRelease(
+          ["sink-ceiling"],
+          ["run_pattern"],
+        ).root,
+      );
+      if (
+        root.policyTrace.status !== "present" ||
+        root.runReport.status !== "present" ||
+        root.runState.status !== "present"
+      ) {
+        throw new Error("the fixture's policy artifacts did not load");
+      }
+      delete (root.policyTrace.value as { decisions?: unknown }).decisions;
+      delete (root.runReport.value as { policyDecisions?: unknown })
+        .policyDecisions;
+      delete (root.runState.value as { policyDecisions?: unknown })
+        .policyDecisions;
+      expect(
+        verdictOf(
+          auditDeployment({
+            families: [{ root, children: [] }],
+            paths: [FIXTURE_RUNS_DIR],
+            expectRefusals: true,
+          }),
+          "AUD-16",
+        ),
+      ).toBe("inconclusive");
+    });
+
+    it("is inconclusive when a run's decisions could not be read anywhere", () => {
       // An unreadable channel is not an empty one, and must not report as one.
+      // All three artifacts that carry the decisions have to be gone, since
+      // the reader drops to the next one it can read.
       const root = structuredClone(family.root);
-      root.toolOutputs = {
-        status: "unparseable",
-        path: root.toolOutputs.path,
-        detail: "could not be listed",
-      };
+      const unparseable = (path: string) =>
+        ({ status: "unparseable", path, detail: "could not be read" }) as const;
+      root.policyTrace = unparseable(root.policyTrace.path);
+      root.runReport = unparseable(root.runReport.path);
+      root.runState = unparseable(root.runState.path);
       expect(
         verdictOf(
           auditDeployment({

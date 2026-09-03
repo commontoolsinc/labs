@@ -729,7 +729,12 @@ const denialsOf = (run: RunEvidence): readonly DenialRecord[] => {
   };
   const found = decisionsOf(run);
   for (const decision of found?.decisions ?? []) {
-    if (decision.decision === "denied") {
+    // A release refusal denied the VALUES of a result, not the call: the call
+    // completed and answered with a reference to the result it withheld, so
+    // there is no denied call for the typed deny channel to carry and no
+    // withheld observation for a message to leak. AUD-16 is where those are
+    // counted. A decision carrying no `release` denied the call itself.
+    if (decision.decision === "denied" && decision.release === undefined) {
       remember({
         toolCallId: decision.toolCallId,
         artifact: found!.source,
