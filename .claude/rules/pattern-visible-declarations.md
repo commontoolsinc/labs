@@ -10,16 +10,18 @@ paths:
 
 # The declarations a pattern compiles against
 
-`packages/api/index.ts` is the whole of the `commonfabric` module's type. What
-the sandbox hands the pattern compiler is
-`packages/static/assets/types/commonfabric.d.ts`, which
-`scripts/generate-commonfabric-types.ts` builds from it -- so an edit here needs
-`deno task gen-commonfabric-types` in `packages/static`, and
-`check-commonfabric-types` fails the build until it has been run. The generator
-inlines the one module `index.ts` imports for its declarations rather than
-following the specifier out, because the compiler that reads the result resolves
-none. Anything else it describes, it describes by declaring
-a second copy of the shape by hand, and the implementation is in
+`packages/api/index.ts` is the whole of the `commonfabric` module's type, and
+what the sandbox hands the pattern compiler is
+`packages/static/assets/types/commonfabric.d.ts`, generated from it by
+`packages/static/scripts/generate-commonfabric-types.ts`. So an edit to the
+declarations takes `deno task gen-commonfabric-types` in `packages/static` with
+it, and `check-commonfabric-types` fails the build until it has been run. The
+generator inlines the modules `index.ts` draws its declarations from rather than
+following a specifier out of them, because the compiler that reads the result
+resolves none.
+
+Anything that file describes and does not implement, it describes by declaring a
+second copy of the shape by hand, and the implementation is in
 `packages/runner/src/builder`, `packages/data-model`, or
 `packages/memory/v2/sqlite`.
 
@@ -43,9 +45,9 @@ Three kinds of failure show up at the object literal in `factory.ts`:
   declaration.
 - A property whose type does not match is drift. The declaration is what pattern
   authors were compiled against, so fix whichever side is wrong on its merits.
-- An excess property is a binding nothing declares. Either declare it, or add it
-  to the members `BuilderFunctionsAndConstants` writes out for itself — the ones
-  a pattern cannot name, which the interface lists with why.
+- An excess property is a binding nothing declares. Either declare it, or add
+  it to the members `BuilderFunctionsAndConstants` writes out for itself — the
+  ones a pattern cannot name, which the interface lists with why.
 
 Two lists in that file are the whole of what escapes this. `DriftingBindings`
 names the bindings that cannot satisfy their declarations today, each with what
