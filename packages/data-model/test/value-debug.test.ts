@@ -19,7 +19,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import type { CompactDebugStringOptions, DebugValueOptions } from "@/api.ts";
+import type {
+  CompactDebugStringOptions,
+  DebugValueOptions,
+} from "@/interface.ts";
 import {
   toCompactDebugString,
   toDebugKindString,

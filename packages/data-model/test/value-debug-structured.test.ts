@@ -18,7 +18,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import type { DebugValueOptions } from "@/api.ts";
+import type { DebugValueOptions } from "@/interface.ts";
 import { toStructuredDebugValue } from "@/value-debug.ts";
 import { isValidFabricValue } from "@/type-check.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";

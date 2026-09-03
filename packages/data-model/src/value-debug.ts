@@ -4,8 +4,9 @@ import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
-import type { CompactDebugStringOptions, DebugValueOptions } from "./api.ts";
 import {
+  type CompactDebugStringOptions,
+  type DebugValueOptions,
   FabricInstance,
   type FabricPlainObject,
   FabricPrimitive,

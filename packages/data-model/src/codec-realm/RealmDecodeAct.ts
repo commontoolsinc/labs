@@ -2,9 +2,9 @@ import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import type { FabricValue } from "@/interface.ts";
-import { toCompactDebugString } from "@/value-debug.ts";
 import { BaseDecodeAct } from "@/codec-common/BaseDecodeAct.ts";
 import { ProblematicStateError } from "@/codec-common/ProblematicStateError.ts";
+import { quotedDebugString } from "@/codec-common/quotedDebugString.ts";
 import {
   REALM_FORMAT_VERSION,
   type RealmCodecValue,
@@ -47,7 +47,7 @@ export class RealmDecodeAct
     if (!Array.isArray(data) || (data.length !== 2)) {
       throw new ProblematicStateError(
         "",
-        toCompactDebugString(data, { maxLength: 50 }),
+        data,
         "not a value this format emits: expected a two-element outer envelope",
       );
     }
@@ -57,7 +57,7 @@ export class RealmDecodeAct
     if (!marker) {
       throw new ProblematicStateError(
         "",
-        toCompactDebugString(data, { maxLength: 50 }),
+        data,
         `not a value this format emits: expected an outer envelope headed by a ${
           backtickQuote(REALM_FORMAT_VERSION)
         } marker`,
@@ -96,7 +96,7 @@ export class RealmDecodeAct
     if ((typeof data === "symbol") || (typeof data === "function")) {
       return this.reportMalformed(
         "",
-        toCompactDebugString(data, { maxLength: 50 }),
+        data,
         `Cannot decode ${typeof data}: not a form this format emits.`,
       );
     }
@@ -130,7 +130,7 @@ export class RealmDecodeAct
         "",
         data,
         `Cannot decode ${
-          backtickQuote(toCompactDebugString(data, { maxLength: 50 }))
+          quotedDebugString(data)
         }: not a form this format emits.`,
       );
     } finally {

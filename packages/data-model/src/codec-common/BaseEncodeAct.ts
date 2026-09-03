@@ -2,7 +2,6 @@ import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import { FabricSpecialObject, type FabricValue } from "@/interface.ts";
-import { toCompactDebugString } from "@/value-debug.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
 import type {
   CodecForFormat,
@@ -11,6 +10,7 @@ import type {
 } from "@/codec-interface/interface.ts";
 import { BaseCodecAct } from "./BaseCodecAct.ts";
 import { SELF_REP } from "./CodecRegistry.ts";
+import { quotedDebugString } from "./quotedDebugString.ts";
 
 /**
  * One act of encoding: what {@link BaseCodecAct} holds, the walk that turns a
@@ -140,7 +140,7 @@ export abstract class BaseEncodeAct<Encoded, SerializedForm = Encoded>
       const label = (typeName === "object") ? "instance" : typeName;
       throw new Error(
         `Cannot encode ${label} ${
-          backtickQuote(toCompactDebugString(value, { maxLength: 50 }))
+          quotedDebugString(value)
         }: no applicable codec.`,
       );
     }
