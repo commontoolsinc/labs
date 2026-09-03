@@ -125,6 +125,54 @@ describe("CFC envelope version guard", () => {
     }
   });
 
+  it("rejects an enforcing write to a document whose own envelope shape it cannot walk", async () => {
+    // The write TARGET's envelope, where the read-source cases below cover the
+    // documents a transaction consumed. This one reaches the commit path
+    // through `loadStoredCfcEnvelope`, which classifies an envelope it cannot
+    // interpret as unreadable and records the reason rather than letting the
+    // read throw out of the boundary pass.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    try {
+      const id = parseLink(
+        runtime.getCell(space, "shape-guard-target").getAsLink(),
+      ).id!;
+      const seed = runtime.edit();
+      writeSeedEnvelopeDoc(seed, space);
+      seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+        value: { secret: "sealed" },
+        cfc: {
+          version: 1,
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+          labelMap: { version: 1, entries: [{ path: ["secret"] }] },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      const cell = runtime.getCell(space, "shape-guard-target", {
+        type: "object",
+        properties: {
+          secret: { type: "string", ifc: { confidentiality: ["vaulted"] } },
+        },
+        required: ["secret"],
+      }, tx);
+      cell.set({ secret: "updated" });
+      tx.prepareCfc();
+      const result = await tx.commit();
+      expect(result.error?.message).toContain(
+        "carries no label map this build can read",
+      );
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
   it("rejects an enforcing write that READ a document whose envelope shape it cannot walk", async () => {
     // The version is one this build interprets and the label map is not: no
     // entries to walk, an entry with no path to match a read against, an
