@@ -434,9 +434,8 @@ or a bare `typeof value === "object"` gets the wrong answer: it sees an empty
 record and then merges the value to `{}`, rebuilds it as `{}`, descends into it
 and finds nothing, or writes a property onto it.
 
-Three functions from `@commonfabric/data-model` are the whole of
-what a walk needs, and using them is not optional in code that can meet a
-stored value:
+These are the whole of what a walk needs, and using them is not optional in
+code that can meet a stored value:
 
 - `isWalkableObjectOrArray(value)` is the container question, and it separates
   the two special-object arms because they differ on exactly that question. A

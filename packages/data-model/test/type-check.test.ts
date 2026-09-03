@@ -29,6 +29,7 @@ import {
   isWalkableObjectNotArray,
   isWalkableObjectOrArray,
 } from "@/type-check.ts";
+import { FabricSpecialObject } from "@/interface.ts";
 import type { FabricValue } from "@/interface.ts";
 import { VALUE_TAGS } from "@/VALUE_TAGS.ts";
 import { tagFromNativeValue } from "@/native-type-tags.ts";
@@ -1167,6 +1168,18 @@ describe("type-check", () => {
             new FabricHash(new Uint8Array([1, 2]), "fid1"),
           ),
         ).toBe(false);
+      });
+
+      it("returns `false` for a direct subclass that is neither arm", () => {
+        // The `false` arm is every special object other than an instance, and
+        // not the `FabricPrimitive` half of the pair alone. A subclass this
+        // module knows nothing else about still has no own properties, so it
+        // is a leaf as far as keys go.
+
+        class DirectSpecialObject extends FabricSpecialObject {}
+
+        expect(isWalkableObjectOrArray(new DirectSpecialObject())).toBe(false);
+        expect(isWalkableObjectNotArray(new DirectSpecialObject())).toBe(false);
       });
 
       it("throws for each `FabricInstance` kind", () => {

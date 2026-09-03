@@ -22,10 +22,9 @@
  * Outside the `FabricValue` type it subtracts nothing: a `Date`, a `Map`, a
  * `Cell` and a query-result proxy over one all still answer `true`, which is
  * what leaves a walk's treatment of them where it found it. Inside the type it
- * separates the two special-object arms, which differ on exactly the question
- * being asked: a `FabricPrimitive` is a leaf and answers `false`, while a
+ * separates the special objects by the question being asked: a
  * `FabricInstance` is a container no walk can descend yet and is refused
- * rather than answered.
+ * rather than answered, and every other special object answers `false`.
  */
 
 import { backtickQuote } from "@commonfabric/utils/markdown";
@@ -47,7 +46,6 @@ import {
   FabricInstance,
   type FabricNativeObject,
   type FabricPlainObject,
-  FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
@@ -60,18 +58,20 @@ import { BaseFabricPrimitive } from "./fabric-bases/BaseFabricPrimitive.ts";
 
 /**
  * Indicates whether a value's contents are reachable by property name: a
- * non-`null` object, an array included, that is not a `FabricPrimitive`.
+ * non-`null` object, an array included, that is not a `FabricSpecialObject`.
  *
  * This is the question a structural walk asks before it reads, rebuilds,
  * merges, or descends a value by its keys, and it is the question
- * `isObjectOrArray()` answers wrong. A `FabricPrimitive` keeps its state in
+ * `isObjectOrArray()` answers wrong. A special object keeps its state in
  * private fields and has no own properties at all, so `isObjectOrArray()`
  * calls it a record and the walk then works on an empty one: it merges to
  * `{}`, compares vacuously equal, descends and finds nothing, or grafts a
  * property onto a frozen value. Every one of those loses the value the model
  * does hold. A `false` answer tells the walk to stop and carry it whole, which
  * is the complete story for a leaf: no path addresses anything inside one, so
- * stopping leaves nothing unvisited.
+ * stopping leaves nothing unvisited. Every special object gets that answer
+ * except the one arm below. A `FabricPrimitive` is a leaf by design, and any
+ * other subclass is a leaf as far as keys go, having none.
  *
  * A `FabricInstance` gets neither answer, and is refused. It is a container --
  * it holds other `FabricValue`s, and a walk is *supposed* to descend it -- so
@@ -117,7 +117,7 @@ export function isWalkableObjectOrArray(value: unknown): boolean {
   if (value instanceof FabricInstance) {
     refuseFabricInstance(value, "in a structural walk");
   }
-  return !(value instanceof FabricPrimitive);
+  return !(value instanceof FabricSpecialObject);
 }
 
 /**
