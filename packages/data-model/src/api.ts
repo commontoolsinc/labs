@@ -1,8 +1,9 @@
 /**
- * Pattern-visible declarations for the fabric value type system, in the form
- * that `@commonfabric/api` re-exports to patterns. Everything here is an
- * interface, a type, or a `declare const`, except for the one brand-key
- * constant, so the module's only runtime footprint is that constant.
+ * Pattern-visible declarations for the fabric value type system, and for the
+ * options of the debug renderers over it, in the form that `@commonfabric/api`
+ * re-exports to patterns. Everything here is an interface, a type, or a
+ * `declare const`, except for the one brand-key constant, so the module's only
+ * runtime footprint is that constant.
  *
  * The canonical implementations live in this module's siblings --
  * `interface.ts`, `fabric-primitives/FabricHash.ts`,
@@ -23,6 +24,13 @@
  * re-exports it to patterns, and the script that builds the type file the
  * sandbox is served inlines this text rather than following a specifier out of
  * it, so a specifier named here would reach a compiler that resolves none.
+ *
+ * Apart from the drift guards, which each compare an implementation against
+ * the declaration here by name and so import it from here under an `Api`
+ * alias, two modules import this one: `interface.ts`, which re-exports these
+ * declarations to the rest of this package, and `@commonfabric/api`, which
+ * re-exports them to patterns. Every other module in this package takes them
+ * from `interface.ts`.
  */
 
 /**
@@ -416,3 +424,37 @@ export interface FabricArray extends ReadonlyArray<FabricValue> {}
  */
 export interface FabricPlainObject
   extends Readonly<Record<string, FabricValue>> {}
+
+/**
+ * Options accepted by `toStructuredDebugValue()`, and by the debug-string
+ * renderers built on it.
+ */
+export interface DebugValueOptions {
+  /**
+   * Maximum depth of result nesting, a positive integer. An item which would
+   * require further nesting is instead converted into a form suggestive of the
+   * elided information. When absent, the depth is the default of the function
+   * called: as deep as reasonably possible for a structured value, and ten
+   * levels for a debug string. A large value is capped; there is no guarantee
+   * about the _actual_ possible maximum depth.
+   */
+  readonly maxDepth?: number;
+
+  /**
+   * Replacer function, called on every value and sub-value encountered, to get
+   * a replacement value to use. A replacer which does not want to replace a
+   * value returns the value it receives, and one which throws is taken to have
+   * declined to replace.
+   */
+  readonly replacer?: (value: any) => any;
+}
+
+/** Options accepted by `toCompactDebugString()`. */
+export interface CompactDebugStringOptions extends DebugValueOptions {
+  /**
+   * Maximum length of the result. When the rendering runs longer, the result
+   * is truncated to this length, which includes a trailing ASCII ellipsis of
+   * `...`. A length below three is taken as three.
+   */
+  readonly maxLength?: number;
+}

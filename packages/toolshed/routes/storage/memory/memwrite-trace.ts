@@ -105,7 +105,7 @@ export function formatMemWriteTrace(
   // Render via the canonical Fabric debug formatter (handles special
   // primitives/instances, bigints, non-finite numbers; never throws).
   const rendered = hasValue
-    ? toCompactDebugString(valueSource, VALUE_DISPLAY_LEN)
+    ? toCompactDebugString(valueSource, { maxLength: VALUE_DISPLAY_LEN })
     : "";
   return `${base} val=${rendered}`;
 }

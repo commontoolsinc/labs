@@ -114,7 +114,7 @@ describe("value-debug-cases", () => {
       const value = evaluateExpression(recorded.expression);
       const actual = {
         indented: toIndentedDebugString(value),
-        compact: toCompactDebugString(value, COMPACT_MAX_LENGTH),
+        compact: toCompactDebugString(value, { maxLength: COMPACT_MAX_LENGTH }),
       };
 
       if (UPDATE_GOLDENS) {

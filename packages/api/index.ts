@@ -6,6 +6,8 @@
  */
 
 import type {
+  CompactDebugStringOptions,
+  DebugValueOptions,
   FabricBytes,
   FabricHash,
   FabricValue,
@@ -3260,9 +3262,12 @@ export interface PatternEnvironment {
 export type GetPatternEnvironmentFunction = () => PatternEnvironment;
 export type ToCompactDebugStringFunction = (
   value: unknown,
-  maxLength?: number,
+  options?: CompactDebugStringOptions,
 ) => string;
-export type ToIndentedDebugStringFunction = (value: unknown) => string;
+export type ToIndentedDebugStringFunction = (
+  value: unknown,
+  options?: DebugValueOptions,
+) => string;
 
 /**
  * Compare two cells or values for equality after resolving, i.e. after

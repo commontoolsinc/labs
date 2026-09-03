@@ -253,7 +253,9 @@ export class RuntimeClients {
         // names nothing -- and renders a `FabricPrimitive` as `{}`.
         throw new Error(
           `Invalid IPC request: ${
-            toCompactDebugString(message, MAX_INVALID_REQUEST_RENDER)
+            toCompactDebugString(message, {
+              maxLength: MAX_INVALID_REQUEST_RENDER,
+            })
           }`,
         );
       }

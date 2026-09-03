@@ -45,8 +45,9 @@ runs:
         if [ -n "$SHIP_SHARD" ]; then
           args+=(--shard "$SHIP_SHARD")
         fi
-        if [ -n "$SHIP_VARIANT" ]; then
-          args+=(--variant "$SHIP_VARIANT")
+        RESOLVED_VARIANT="${SHIP_VARIANT:-${CF_TEST_RECORDS_VARIANT:-}}"
+        if [ -n "$RESOLVED_VARIANT" ]; then
+          args+=(--variant "$RESOLVED_VARIANT")
         fi
         while IFS= read -r spec; do
           if [ -n "$spec" ]; then

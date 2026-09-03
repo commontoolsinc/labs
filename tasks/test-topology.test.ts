@@ -9,6 +9,7 @@ import {
   topologyUnits,
 } from "./test-topology.ts";
 import { CAPABILITIES } from "./ci-capabilities.ts";
+import { serverExecutionCiLane } from "./server-execution-ci.ts";
 
 const suites = await loadTopology(
   new URL("..", import.meta.url).pathname.replace(/\/$/, ""),
@@ -35,14 +36,18 @@ describe("the test topology", () => {
   });
 
   it("lets a default suite and a variant suite hold one source file", () => {
-    const on = suites.find((suite) => suite.id === "package-integration")!;
-    const off = suites.find((suite) => suite.id === "package-integration-off")!;
+    const defaults = suites.find((suite) =>
+      suite.id === "package-integration"
+    )!;
+    const opposite = suites.find((suite) =>
+      suite.id === "package-integration-opposite"
+    )!;
     // Pinned to a runner-scope file rather than whichever unit sorts
     // first: a record's scope has to match the part that holds the file,
     // and taking the first shared unit would make this fail for the
     // wrong reason the day a whole-file skip changes the order.
-    const shared = on.units.filter((unit) =>
-      off.units.includes(unit) && unit.startsWith("packages/runner/")
+    const shared = defaults.units.filter((unit) =>
+      opposite.units.includes(unit) && unit.startsWith("packages/runner/")
     );
     expect(shared.length > 0).toBe(true);
     // They are distinct execution surfaces, so the same file being a unit
@@ -58,9 +63,12 @@ describe("the test topology", () => {
       expect(
         claimsFor(suites, {
           ...record,
-          test: { ...record.test, v: "server-execution-off" },
+          test: {
+            ...record.test,
+            v: serverExecutionCiLane("opposite").recordVariant,
+          },
         }).map((claim) => claim.suite.id),
-      ).toEqual(["package-integration-off"]);
+      ).toEqual(["package-integration-opposite"]);
     }
   });
 

@@ -16,15 +16,15 @@
  * the OW38(ii) benchmark bar ruled met); `false` is the pre-flip behavior
  * byte-for-byte. An explicit `EXPERIMENTAL_SERVER_EXECUTION=true|false`
  * (or `experimental.serverExecution`) selects an arm regardless of this
- * value: an explicit `false` is the ROLLBACK LEVER (and CI's OFF
- * regression guard, run on an OFF-built binary) and stays selectable
- * through the post-flip soak. Un-flipping is reverting the flip PR (repo
- * convention: a flip is reverted by reverting the PR that only flips),
- * never a hand edit here; the flip PR changes this value AND the absolute
- * pin in
- * `packages/toolshed/lib/server-execution-flag.test.ts` (which states the
- * current default so a silent flip either way cannot hide behind
- * relative pins), the CI lane roles, and EXPERIMENTAL_OPTIONS.md together.
+ * value. CI's stable `default` / `opposite` roles derive both postures
+ * from this resolver, so both arms stay guarded without role renames or
+ * source edits. While the default is ON, explicit `false` is the rollback
+ * lever (and the relationship reverses symmetrically if the default flips).
+ * To change the first-party default, update this value and the status row
+ * in `docs/development/EXPERIMENTAL_OPTIONS.md` in the same PR; a test
+ * intentionally pins that pair so an isolated one-token change fails.
+ * Do not rewrite role names, build jobs, or tests for a flip: they all
+ * follow the default through `tasks/server-execution-ci.ts`.
  * After the soak, the post-soak removal PR (Phase 7's split-out task)
  * retires the flag, the OFF path, and the OFF guard lanes.
  *
