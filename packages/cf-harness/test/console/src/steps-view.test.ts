@@ -317,5 +317,44 @@ describe("console/src/steps-view", () => {
       expect(text).toContain("longest numeric run 32");
       expect(text).toContain("Open subagent run");
     });
+
+    it("marks a withheld release beside the CFC line of a step that succeeded", () => {
+      const step: ConsoleStep = {
+        index: 0,
+        kind: "tool",
+        toolName: "run_pattern",
+        toolCallId: "call-1",
+        output: { status: "ok" },
+        handlesIntroduced: [],
+        handlesInScope: [],
+        status: "ok",
+        policy: {
+          decision: "withheld",
+          effectClass: "side-effect",
+          reasonCodes: ["cfc_release_withheld"],
+        },
+        policyEvents: [],
+        withheld: {
+          status: "recorded",
+          locations: [{
+            rule: "artifact-only",
+            artifactPath: "/run/output.json",
+            jsonPointer: "/value",
+            value: "retained",
+            available: true,
+          }],
+        },
+      };
+      const view = new TestConsoleSteps();
+      view.steps = [step];
+
+      const text = templateText(view.view());
+      // The badge names the boundary's own outcome and the marker beside it
+      // counts what the retrospective holds back, so the step reads as the
+      // success it was rather than as a denied call.
+      expect(text).toContain("withheld");
+      expect(text).toContain("withheld from the model \u00b7 1");
+      expect(text).not.toContain("denied");
+    });
   });
 });

@@ -250,8 +250,12 @@ describe("run_pattern release decisions in the policy trace", () => {
       expect(allowSide.decision).toBe("allowed");
       expect(allowSide.release).toBeUndefined();
       expect(release.sequence).toBeGreaterThan(allowSide.sequence);
-      expect(release.decision).toBe("denied");
+      // The outcome and the reason code state one fact and are read together:
+      // an operator counting withheld releases off the outcome and an audit
+      // keying on the reason code must not be able to disagree.
+      expect(release.decision).toBe("withheld");
       expect(release.reasonCodes).toEqual(["cfc_release_withheld"]);
+      expect(release.release?.reasonCode).toBe("cfc_release_withheld");
       expect(release.release?.boundary).toBe("release");
       expect(release.release?.sink).toBe("run_pattern");
       expect(release.release?.ceiling).toEqual([]);
@@ -264,7 +268,10 @@ describe("run_pattern release decisions in the policy trace", () => {
       // The decision joins to the artifact it decided about.
       expect(release.resultRef?.toolId).toBe("run_pattern");
       expect(release.resultRef?.artifactPath).toContain("tool-outputs");
-      expect(trace.decisionCounts.denied).toBe(1);
+      // The call ran and answered with the reference to its result, so nothing
+      // here was denied.
+      expect(trace.decisionCounts.withheld).toBe(1);
+      expect(trace.decisionCounts.denied).toBe(0);
       const releaseRef = release.resultRef;
       if (releaseRef?.artifactPath === undefined) {
         throw new Error("expected release decision artifact reference");
@@ -322,16 +329,17 @@ describe("run_pattern release decisions in the policy trace", () => {
   });
 
   it("gives each reason code the decision it states", () => {
-    // Two of the four rejected and two did not, and the trace's `denied`,
-    // `warned` and `allowed` counts are read straight off this mapping — an
-    // observed measurement counted as a denial would report an enforcement
-    // that never happened.
+    // The trace's counts are read straight off this mapping. An observed
+    // measurement counted as a denial would report an enforcement that never
+    // happened, and a withheld release counted as one would report a call that
+    // never ran — it ran, and answered with the reference to its result.
+    // Only a refused commit landed no result, which is what `denied` is.
     expect(harnessReleaseDecisionOutcome("cfc_release_allowed"))
       .toBe("allowed");
     expect(harnessReleaseDecisionOutcome("cfc_release_observed"))
       .toBe("warned");
     expect(harnessReleaseDecisionOutcome("cfc_release_withheld"))
-      .toBe("denied");
+      .toBe("withheld");
     expect(harnessReleaseDecisionOutcome("cfc_commit_refused"))
       .toBe("denied");
   });

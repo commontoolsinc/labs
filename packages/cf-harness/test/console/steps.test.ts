@@ -694,6 +694,58 @@ describe("console/steps CFC and disclosure", () => {
     expect(steps[0].policyEvents).toHaveLength(0);
   });
 
+  it("reads a step whose release was withheld as the ok its own answer states", () => {
+    const steps = consoleRunSteps(
+      [
+        call("c1", "run_pattern", { sourceText: "x" }),
+        result("c1", "run_pattern", {
+          status: "ok",
+          resultRef: { outputId: "out-1" },
+          valueError: "the values are withheld; resultRef still names them",
+        }),
+      ],
+      [
+        {
+          type: "cf-harness.policy-decision",
+          sequence: 1,
+          runId: "run-withheld",
+          at: "2026-01-01T00:00:00.000Z",
+          toolActivitySequence: 1,
+          toolCallId: "c1",
+          toolId: "run_pattern",
+          cfcEnforcementMode: "enforce-explicit",
+          decision: "allowed",
+          reasonCodes: ["cfc_enforce_explicit_direct_command"],
+        },
+        {
+          type: "cf-harness.policy-decision",
+          sequence: 2,
+          runId: "run-withheld",
+          at: "2026-01-01T00:00:00.000Z",
+          toolActivitySequence: 1,
+          toolCallId: "c1",
+          toolId: "run_pattern",
+          cfcEnforcementMode: "enforce-explicit",
+          decision: "withheld",
+          reasonCodes: ["cfc_release_withheld"],
+          release: {
+            reasonCode: "cfc_release_withheld",
+            boundary: "release",
+            sink: "run_pattern",
+            ceiling: [],
+          },
+        },
+      ],
+    );
+
+    // The call ran and answered with the reference to its result, so the step
+    // is the success its answer states; the boundary shows as the decision the
+    // CFC line carries, and not as a denial of the call.
+    expect(steps[0].status).toBe("ok");
+    expect(steps[0].policy?.decision).toBe("withheld");
+    expect(steps[0].policy?.reasonCodes).toEqual(["cfc_release_withheld"]);
+  });
+
   it("measures the longest numeric run a result let across as value", () => {
     const bytes = Array.from({ length: 40 }, (_, index) => index);
     const steps = consoleRunSteps([

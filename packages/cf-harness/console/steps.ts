@@ -446,6 +446,10 @@ const statusOf = (
   if (decision?.decision === "invalid") {
     return "error";
   }
+  // A `withheld` decision is deliberately not read here. The call ran and
+  // answered with the reference to the result whose values the boundary held
+  // back, so the step's outcome is the one its own answer states, below; the
+  // boundary shows as the withheld marker beside the CFC line instead.
   const record = typeof output === "object" && output !== null
     ? output as Record<string, unknown>
     : undefined;

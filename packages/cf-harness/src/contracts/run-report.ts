@@ -30,12 +30,19 @@ import type { HarnessCredentialOwnerRef } from "./run-manifest.ts";
  * which never reached a policy question at all. It is kept in this union so
  * every tool activity carries an outcome, and told apart from `denied` so a
  * malformed call is not counted as a mediated refusal.
+ *
+ * `withheld` is a confidentiality boundary's answer about a call's own
+ * result: the call ran, it answered with the reference to the result, and
+ * only the values were held back. `denied` is reserved for a call that did
+ * not run.
  */
 export type HarnessToolPolicyDecision =
   | "allowed"
   | "warned"
   | "denied"
-  | "invalid";
+  | "invalid"
+  | "withheld";
+
 export type HarnessToolExecutionStatus = "completed" | "failed" | "not-run";
 export type HarnessRunTimelineKind =
   | "run_started"

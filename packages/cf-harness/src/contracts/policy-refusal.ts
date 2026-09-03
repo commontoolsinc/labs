@@ -182,16 +182,23 @@ export interface HarnessReleaseDecision {
 }
 
 /**
- * The decision a reason code states, which is the whole of the mapping: a
- * withheld release and a refused commit rejected, an observed one did not.
+ * The decision a reason code states, which is the whole of the mapping.
+ *
+ * A withheld release has its own outcome because the call it belongs to ran
+ * and answered: the result exists in the space under its own labels and the
+ * caller holds its reference, with only the values held back. `denied` is
+ * what a call that did not run gets, which is what a refused commit is — the
+ * runner refused the write, so no result landed.
  */
 export const harnessReleaseDecisionOutcome = (
   reasonCode: HarnessReleaseDecisionReasonCode,
-): "allowed" | "warned" | "denied" =>
+): "allowed" | "warned" | "withheld" | "denied" =>
   reasonCode === "cfc_release_allowed"
     ? "allowed"
     : reasonCode === "cfc_release_observed"
     ? "warned"
+    : reasonCode === "cfc_release_withheld"
+    ? "withheld"
     : "denied";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>

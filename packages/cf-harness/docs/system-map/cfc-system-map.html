@@ -669,7 +669,7 @@
     // ------------------------------------------------------------------ layout data
     // The state of this repository the map describes. Bump both when the
     // map is re-verified; the stamp is drawn in the canvas's top-left corner.
-    const SNAPSHOT = { date: "2026-09-03", sha: "220c2567e1" };
+    const SNAPSHOT = { date: "2026-09-04", sha: "38ef88a585" };
     const W = 2760, H = 1840;
     const bands = [
       {
@@ -2191,7 +2191,7 @@
       },
       t8: {
         body:
-          `<p>Every release-boundary decision reaches <code>policy-trace.json</code>: released, observed, values withheld, commit refused, each naming its boundary, sink and ceiling. The ones that refused carry the refusal too — its gates, its atoms, and the input key that carried the label — and a decision that released refuses nothing, so it carries none. Each is appended after the allow-side tool decision for the same call, which the prompt loop records before the tool runs, so the order in the trace is the order the two were decided in. AUD-16 counts the refusals in that channel, and an operator reading policy evidence alone now sees the gate decide.</p>`,
+          `<p>Every release-boundary decision reaches <code>policy-trace.json</code>: released, observed, values withheld, commit refused, each naming its boundary, sink and ceiling. The ones that refused carry the refusal too — its gates, its atoms, and the input key that carried the label — and a decision that released refuses nothing, so it carries none. Each is appended after the allow-side tool decision for the same call, which the prompt loop records before the tool runs, so the order in the trace is the order the two were decided in. A withheld release states the outcome <code>withheld</code>, counted in its own bucket: the call ran and answered with the reference to the result, so the console renders that step as the success its answer states with a withheld marker beside the CFC line, and <code>denied</code> names a call that did not run. AUD-16 counts the refusals in that channel, and an operator reading policy evidence alone now sees the gate decide.</p>`,
         where: ["runner", "artifacts", "audit", "g_release"],
       },
       t9: {
