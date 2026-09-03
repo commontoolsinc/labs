@@ -2093,6 +2093,23 @@ second copy would be a second encoding rather than more coverage:
   postures the harness is willing to emit, so it cannot reach a non-conforming
   matrix point at all without the same seeded mutation.
 
+One caveat on AUD-9 before its numbers are quoted anywhere. AH-CFC-16 enumerates
+what a run must retain — prompt-slot evidence, invocation-context references,
+mediation dispositions, policy events, model-context influence state, and
+side-effect decisions — and a cell-labels read is not among them. The snapshot
+is worth having and is the CT-2076/E3 bridge, but it is our requirement rather
+than the specification's, so AUD-9 today carries two subjects under two
+authorities: the same shape the citation discriminator exposed in AUD-15.
+CT-2210 splits it, AUD-9 keeping the enumerated six as `required-by` and a
+companion carrying the snapshot as `extends`.
+
+The consequence is worth knowing in advance, because it moves a headline: **113
+of the 239 historic runs that fail AUD-9 fail only on its cell-labels
+component**, so they pass the spec-backed check once the split lands. The
+retention gap against the specification is narrower than today's number
+suggests. The history documents are not edited for this — they record the
+checker as it stood, and a later run disagreeing with them is what they are for.
+
 No check fails on a fresh permitted run. Two did when this suite was first
 pointed at one — AUD-3 counted the `run-pattern-source` sidecar as an unrecorded
 effect, and AUD-9 demanded an invocation context from a side effect that reaches
