@@ -172,10 +172,46 @@ does — a positional address, or `--cell` — carrying the suffix like any othe
 `cf piece apply` replaces a piece's whole input rather than one path within it.
 It validates the document against the pattern's `argumentSchema` and re-executes
 the pattern with it, so a field the schema requires and the document omits is
-refused before anything is written. `cf cell set` writes at one path and
-validates only that path, which makes the two different operations on the same
-cell: reach for `apply` when the new input is a whole document, and for `set`
-when it is one value in a document that is otherwise correct.
+refused before anything is written. `cf cell set` names one path instead. On a
+result-cell write it validates that selected path, which makes `set` the right
+operation for changing one result value.
+
+An input-cell write is currently sharper:
+`cf cell set --piece <id> --input
+<path>` resolves that path through the piece's
+input contract and revalidates the complete input document. It can therefore be
+refused over an unrelated allocated field. Addressing the raw argument cell by
+id avoids that whole-document check, but it is an unsafe recovery tool: it can
+erase link-bearing data that a later `cf cell set` will refuse to restore
+because the serialized link has no durable source contract. The superseded
+`cf set` spelling mounts this same command and has identical validation
+behavior.
+
+## Updating piece source
+
+Run `cf piece setsrc --check` before every source update to a piece whose state
+matters. It compiles the complete candidate package, compares it with the exact
+piece named on the command line, leaves that piece unchanged, and exits nonzero
+on refusal. Candidate compilation does persist unattached, content-addressed
+module and source documents in the space; it does not move the piece's source
+pointer, restage its arguments, or create a source revision. The target, entry,
+root, export, test, data-file, and repository flags on the check must match the
+apply.
+
+```bash
+cf piece setsrc --cell fid1:piece --root packages/patterns \
+  --check packages/patterns/example/main.tsx
+cf piece setsrc --cell fid1:piece --root packages/patterns \
+  packages/patterns/example/main.tsx
+cf piece render --cell fid1:piece >/dev/null
+```
+
+The source commit and refresh of the running piece are separate operations. If
+the commit lands but refresh fails, `setsrc` prints the commit receipt on
+stdout, prints the failure and recovery checks on stderr, and exits nonzero.
+That status means “source changed, running deploy unverified,” not rollback: use
+`piece render`, `piece inspect`, and `piece getsrc` to determine the live state.
+A receipt alone is never proof that the updated piece starts.
 
 ## Piece discovery
 

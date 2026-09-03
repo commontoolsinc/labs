@@ -186,6 +186,13 @@ export const bob = pattern<{ setup: Setup }>(({ setup }) => {
       { assertion: assert_is_host_now },
       { label: "bob-claimed-host" },
     ],
+    // A vote is a read-modify-write over the shared list, so two viewers
+    // writing at once conflict and the loser retries — the scheduler logs
+    // "commit failed transiently; backing off". That retry IS the designed
+    // behavior here (identity is a cell, which cannot key a mergeable
+    // per-vote write), and every assertion above holds after it, so the
+    // warning is expected rather than a defect.
+    allowConsoleWarnings: true,
   };
 });
 

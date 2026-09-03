@@ -1,3 +1,16 @@
+/**
+ * Headless lunch-poll scaling probe.
+ *
+ * Use `--production` for the current 14-option single-viewer shape, `--quick`
+ * for a smoke check, or `--cases=<options>x<users>,...` for an explicit
+ * matrix. Diagnostics go to stderr and the machine-readable result is the one
+ * JSON document written to stdout.
+ *
+ * The probe runs the server-execution OFF arm unless
+ * `EXPERIMENTAL_SERVER_EXECUTION` is set explicitly: it is a headless
+ * measurement of the pattern's own graph, not of a deployed topology.
+ */
+
 import { parseLink } from "@commonfabric/runner";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
@@ -74,7 +87,7 @@ interface DiagnosticsSummary {
   };
 }
 
-interface MatrixConfig {
+export interface MatrixConfig {
   program: string;
   optionCounts: readonly number[];
   userCounts: readonly number[];
@@ -828,9 +841,13 @@ export async function runCase(config: CaseConfig): Promise<CaseResult> {
   }
 }
 
-function numberArg(name: string, fallback: number): number {
+function numberArg(
+  name: string,
+  fallback: number,
+  args: readonly string[] = Deno.args,
+): number {
   const prefix = `--${name}=`;
-  const arg = Deno.args.find((entry) => entry.startsWith(prefix));
+  const arg = args.find((entry) => entry.startsWith(prefix));
   if (!arg) return fallback;
   const parsed = Number(arg.slice(prefix.length));
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
@@ -840,9 +857,10 @@ function numberListArg(
   name: string,
   fallback: readonly number[],
   minimum = 0,
+  args: readonly string[] = Deno.args,
 ): number[] {
   const prefix = `--${name}=`;
-  const arg = Deno.args.find((entry) => entry.startsWith(prefix));
+  const arg = args.find((entry) => entry.startsWith(prefix));
   if (!arg) return [...fallback];
   const values = arg.slice(prefix.length).split(",")
     .map((entry) => Number(entry.trim()));
@@ -857,17 +875,22 @@ function numberListArg(
   return values;
 }
 
-function stringArg(name: string, fallback: string): string {
+function stringArg(
+  name: string,
+  fallback: string,
+  args: readonly string[] = Deno.args,
+): string {
   const prefix = `--${name}=`;
-  const arg = Deno.args.find((entry) => entry.startsWith(prefix));
+  const arg = args.find((entry) => entry.startsWith(prefix));
   return arg ? arg.slice(prefix.length) : fallback;
 }
 
 function explicitCasesArg(
   config: MatrixConfig,
+  args: readonly string[],
 ): CaseConfig[] | undefined {
   const prefix = "--cases=";
-  const arg = Deno.args.find((entry) => entry.startsWith(prefix));
+  const arg = args.find((entry) => entry.startsWith(prefix));
   if (!arg) return undefined;
   const cases = arg.slice(prefix.length).split(",").flatMap((entry) => {
     const match = entry.trim().match(/^(\d+)x(\d+)$/);
@@ -893,18 +916,37 @@ function validateUserCount(userCount: number, source: string): void {
   }
 }
 
-function matrixConfigFromArgs(): MatrixConfig {
-  const quick = Deno.args.includes("--quick");
+export function matrixConfigFromArgs(
+  args: readonly string[] = Deno.args,
+): MatrixConfig {
+  const quick = args.includes("--quick");
+  const production = args.includes("--production");
+  if (quick && production) {
+    throw new Error("--quick and --production cannot be combined");
+  }
   return {
-    program: stringArg("program", "main.tsx"),
-    optionCounts: numberListArg("options", quick ? [1, 3] : [1, 3, 10]),
-    userCounts: numberListArg("users", quick ? [2] : [2, 5], 1),
-    voteRounds: numberArg("rounds", quick ? 1 : 3),
+    program: stringArg("program", "main.tsx", args),
+    optionCounts: numberListArg(
+      "options",
+      production ? [14] : quick ? [1, 3] : [1, 3, 10],
+      0,
+      args,
+    ),
+    userCounts: numberListArg(
+      "users",
+      production ? [1] : quick ? [2] : [2, 5],
+      1,
+      args,
+    ),
+    voteRounds: numberArg("rounds", quick ? 1 : 3, args),
   };
 }
 
-function casesFromConfig(config: MatrixConfig): CaseConfig[] {
-  const explicit = explicitCasesArg(config);
+export function casesFromConfig(
+  config: MatrixConfig,
+  args: readonly string[] = Deno.args,
+): CaseConfig[] {
+  const explicit = explicitCasesArg(config, args);
   if (explicit) return explicit;
   const cases: CaseConfig[] = [];
   for (const optionCount of config.optionCounts) {
@@ -921,9 +963,18 @@ function casesFromConfig(config: MatrixConfig): CaseConfig[] {
 }
 
 async function run(): Promise<void> {
-  const config = matrixConfigFromArgs();
+  // A headless probe measures the derive-and-commit graph of the pattern and
+  // hosts its own in-process memory server, which has no serving loop. Under
+  // the ON posture the harness instead targets the integration environment's
+  // toolshed (`env.API_URL`) and, with none running, waits on it forever. So
+  // when the caller has not chosen a posture, pin the OFF arm for this
+  // process; an explicit `EXPERIMENTAL_SERVER_EXECUTION` still wins.
+  if (Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION") === undefined) {
+    Deno.env.set("EXPERIMENTAL_SERVER_EXECUTION", "false");
+  }
+  const config = matrixConfigFromArgs(Deno.args);
   matrixProgram = config.program;
-  const cases = casesFromConfig(config);
+  const cases = casesFromConfig(config, Deno.args);
   const startedAt = performance.now();
   const results: ({ ok: true; result: CaseResult } | {
     ok: false;

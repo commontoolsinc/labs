@@ -2645,6 +2645,7 @@ describe("cli piece parsing", () => {
     const rendered: string[] = [];
     const warned: string[] = [];
     const hinted: string[] = [];
+    const exitCodes: number[] = [];
 
     await applyPieceSourceCommandAction(
       {
@@ -2665,6 +2666,7 @@ describe("cli piece parsing", () => {
         render: (message) => rendered.push(message),
         warn: (message) => warned.push(message),
         hint: (message) => hinted.push(message),
+        setExitCode: (code) => exitCodes.push(code),
       },
     );
 
@@ -2674,16 +2676,16 @@ describe("cli piece parsing", () => {
       `Revision: revision-2)`,
     ]);
     expect(warned).toEqual([]);
+    expect(exitCodes).toEqual([]);
     expect(hinted).toHaveLength(1);
     expect(hinted[0]).toContain(`${API_URL}/${SPACE}/${PIECE}`);
   });
 
-  it("reports a setsrc refresh failure without negating its commit", async () => {
+  it("reports a setsrc refresh failure and exits nonzero", async () => {
     // A refresh failure does not undo the commit, so the command still
-    // succeeds and still reports what committed — the warning is additional,
-    // never a replacement. Both halves are asserted here because reporting
-    // only one of them is a distinct wrong answer: the warning alone reads as
-    // a failed deploy, the success line alone hides a piece that will not run.
+    // reports what committed while returning a failing process status. Both
+    // halves matter: the warning alone loses the durable receipt, while exit 0
+    // lets an automation mistake the source commit for a healthy deploy.
     const update = {
       status: "committed" as const,
       ref: { identity: "B".repeat(43), symbol: "default" },
@@ -2696,6 +2698,8 @@ describe("cli piece parsing", () => {
     };
     const rendered: string[] = [];
     const warned: string[] = [];
+    const hinted: string[] = [];
+    const exitCodes: number[] = [];
 
     await applyPieceSourceCommandAction(
       {
@@ -2718,7 +2722,8 @@ describe("cli piece parsing", () => {
           }),
         render: (message) => rendered.push(message),
         warn: (message) => warned.push(message),
-        hint: () => {},
+        hint: (message) => hinted.push(message),
+        setExitCode: (code) => exitCodes.push(code),
       },
     );
 
@@ -2732,6 +2737,10 @@ describe("cli piece parsing", () => {
       `cf:module/${"B".repeat(43)}#default, but refreshing the running ` +
       `piece failed: dependency unavailable`,
     ]);
+    expect(hinted).toHaveLength(1);
+    expect(hinted[0]).toContain("this deploy is not healthy");
+    expect(hinted[0]).toContain("cf piece render");
+    expect(exitCodes).toEqual([1]);
   });
 
   it("sends the setsrc refresh warning to stderr", async () => {
@@ -2741,9 +2750,11 @@ describe("cli piece parsing", () => {
     // injected one, since the default is the thing that can regress.
     const errors: string[] = [];
     const originalError = console.error;
+    const originalExitCode = Deno.exitCode;
     console.error = (...args: unknown[]) => {
       errors.push(args.join(" "));
     };
+    Deno.exitCode = 0;
 
     try {
       await applyPieceSourceCommandAction(
@@ -2778,8 +2789,10 @@ describe("cli piece parsing", () => {
           hint: () => {},
         },
       );
+      expect(Deno.exitCode).toBe(1);
     } finally {
       console.error = originalError;
+      Deno.exitCode = originalExitCode;
     }
 
     expect(errors.filter((line) => line.includes("refreshing the running")))
