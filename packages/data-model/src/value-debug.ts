@@ -35,6 +35,15 @@ const ABSOLUTE_MAX_DEPTH = 100;
 const DEFAULT_STRING_MAX_DEPTH = 10;
 
 /**
+ * Number of array elements a conversion stops at whatever its options say, so
+ * that a result is bounded in size whatever the input.
+ */
+const ABSOLUTE_MAX_ARRAY_LENGTH = 10000;
+
+/** Number of array elements a conversion stops at, when its options do not say. */
+const DEFAULT_MAX_ARRAY_LENGTH = 100;
+
+/**
  * What a `FabricPrimitive`'s codec hands back to be rendered: the
  * realm-crossing encoding of a terminal codec, or the expansion of a
  * nonterminal one into other `FabricValue`s.
@@ -64,6 +73,7 @@ function classNameOf(value: object): string {
 class DebugConverter {
   readonly #value: any;
   readonly #maxDepth: number;
+  readonly #maxArrayLength: number;
   readonly #replacer: undefined | ((value: any) => any);
   readonly #nestingStack = new Map<object, number>();
 
@@ -75,11 +85,14 @@ class DebugConverter {
     value: unknown,
     /** Maximum nesting depth. */
     maxDepth: number,
+    /** Maximum number of array elements to convert. */
+    maxArrayLength: number,
     /** Replacer function. */
     replacer?: (value: any) => any,
   ) {
     this.#value = value;
     this.#maxDepth = maxDepth;
+    this.#maxArrayLength = maxArrayLength;
     this.#replacer = replacer;
   }
 
@@ -108,18 +121,30 @@ class DebugConverter {
 
   /**
    * Converts an array, which is known to be at the indicated nesting depth.
+   * An array with more elements than the maximum array length has the
+   * elements at indices below that limit converted, and at the limit's index
+   * a `/...` form carrying the array's length in place of the rest. That form
+   * nests two levels, so a result holding one can run one level past the
+   * maximum nesting depth.
    */
   #convertArray(value: any, depth: number): FabricValue {
+    const length: number = value.length;
+    const maxLength = this.#maxArrayLength;
     const result: FabricValue[] = [];
     // An array is indexable by property name directly, so the index names
     // `Object.keys()` yields are used as they come.
     const byName = result as unknown as Record<string, FabricValue>;
 
-    result.length = value.length;
+    result.length = Math.min(length, maxLength);
     for (const key of Object.keys(value)) {
       if (!isArrayIndexPropertyName(key)) {
         // It's a named property. Intentionally skipped as part of conforming to
         // `FabricValue`.
+        continue;
+      }
+
+      if (Number(key) >= maxLength) {
+        // It's an element past the limit, which the length form stands for.
         continue;
       }
 
@@ -128,6 +153,10 @@ class DebugConverter {
       } catch (e) {
         byName[key] = DebugConverter.#makeUnconvertibleResult(e);
       }
+    }
+
+    if (length > maxLength) {
+      result.push({ "/...": { "/length": length } });
     }
 
     return result;
@@ -354,6 +383,8 @@ class DebugStringifier {
 
     // Iterated by index rather than by element, so that a hole is noticed. A
     // run of holes renders as a single part which says how long the run is.
+    // The length form the conversion leaves at the end of a truncated array is
+    // an element like any other, so a run of holes ends at it.
     for (let i = 0; i < value.length; i++) {
       if (i in value) {
         parts.push(this.#renderSubvalue(value[i], inner));
@@ -653,8 +684,15 @@ class DebugStringifier {
       }
 
       case "...": {
-        // The depth-limit marker. What kind of value was elided is left
-        // out of the rendering.
+        // The elision marker: the array-length form when its payload carries
+        // a `/length`, and otherwise the depth-limit form, whose payload --
+        // what kind of value was elided -- is left out of the rendering.
+        const inner = isPlainObject(payload)
+          ? DebugStringifier.#taggedFormOf(payload as FabricPlainObject)
+          : undefined;
+        if ((inner?.tag === "length") && (typeof inner.payload === "number")) {
+          return `... length: ${inner.payload}`;
+        }
         return "...";
       }
 
@@ -736,17 +774,12 @@ class DebugStringifier {
 }
 
 /**
- * Helper for the entry points, which validates `options` and returns the
- * maximum nesting depth they call for: their `maxDepth` when present, and
- * `defaultMaxDepth` when not, either one capped at `ABSOLUTE_MAX_DEPTH`.
+ * Helper for the entry points, which validates `options` as a whole. What each
+ * option holds is validated as it is read, by `checkedLimit()`.
  *
- * @throws {Error} if `options` is not a plain object, or if its `maxDepth` is
- * neither a positive integer nor `Infinity`.
+ * @throws {Error} if `options` is not a plain object.
  */
-function checkedMaxDepth(
-  options: DebugValueOptions | undefined,
-  defaultMaxDepth: number,
-): number {
+function checkOptions(options: DebugValueOptions | undefined): void {
   if ((options !== undefined) && !isPlainObject(options)) {
     const badOptions = backtickQuote(
       toCompactDebugString(options, { maxLength: 20 }),
@@ -755,29 +788,42 @@ function checkedMaxDepth(
       `\`options\` must be a plain object or \`undefined\`; got ${badOptions}`,
     );
   }
+}
 
-  const maxDepth = options?.maxDepth;
-
-  switch (typeof maxDepth) {
+/**
+ * Helper for the entry points, which validates one of the limit options and
+ * returns the limit it calls for: `value` when present, and `defaultValue`
+ * when not, either one capped at `cap`. `name` is the option's name, for the
+ * error.
+ *
+ * @throws {Error} if `value` is none of a positive integer, `Infinity`, or
+ * `undefined`.
+ */
+function checkedLimit(
+  name: string,
+  value: number | undefined,
+  defaultValue: number,
+  cap: number,
+): number {
+  switch (typeof value) {
     case "number": {
       if (
-        (Number.isSafeInteger(maxDepth) && (maxDepth > 0)) ||
-        (maxDepth === Infinity)
+        (Number.isSafeInteger(value) && (value > 0)) || (value === Infinity)
       ) {
-        return Math.min(maxDepth, ABSOLUTE_MAX_DEPTH);
+        return Math.min(value, cap);
       }
       break;
     }
     case "undefined": {
-      return Math.min(defaultMaxDepth, ABSOLUTE_MAX_DEPTH);
+      return Math.min(defaultValue, cap);
     }
   }
 
-  const badDepth = backtickQuote(
-    toCompactDebugString(maxDepth, { maxLength: 20 }),
+  const badValue = backtickQuote(
+    toCompactDebugString(value, { maxLength: 20 }),
   );
   throw new Error(
-    `\`maxDepth\` must be a positive integer, \`Infinity\`, or \`undefined\`; got ${badDepth}`,
+    `\`${name}\` must be a positive integer, \`Infinity\`, or \`undefined\`; got ${badValue}`,
   );
 }
 
@@ -793,9 +839,24 @@ function renderDebugString(
   options: DebugValueOptions | undefined,
   indent?: number,
 ): string {
+  checkOptions(options);
+
+  // Both limits are resolved here, ahead of the `try`, so that an invalid one
+  // is refused rather than rendered as unrenderable.
   const converterOptions: DebugValueOptions = {
     ...options,
-    maxDepth: checkedMaxDepth(options, DEFAULT_STRING_MAX_DEPTH),
+    maxDepth: checkedLimit(
+      "maxDepth",
+      options?.maxDepth,
+      DEFAULT_STRING_MAX_DEPTH,
+      ABSOLUTE_MAX_DEPTH,
+    ),
+    maxArrayLength: checkedLimit(
+      "maxArrayLength",
+      options?.maxArrayLength,
+      DEFAULT_MAX_ARRAY_LENGTH,
+      ABSOLUTE_MAX_ARRAY_LENGTH,
+    ),
   };
 
   try {
@@ -833,7 +894,9 @@ function renderDebugString(
  * * arrays with holes.
  *
  * The rendering stops at the nesting depth given in `options`, ten levels
- * when not given, below which a value is elided.
+ * when not given, below which a value is elided. It likewise stops at the
+ * array length given in `options`, one hundred elements when not given, and
+ * says the array's actual length in place of the elements past it.
  *
  * How any of these renders is _not_ a contract. The rendering is meant for a
  * human reading a diagnostic, and it changes as that reading is improved;
@@ -919,9 +982,11 @@ export function toDebugKindString(value: unknown): string {
  * `codec-json` encoding form, and with as little chance for ambiguity as can
  * be reasonably achieved.
  *
- * The nesting limit of the result and a replacer to consult are the
- * `maxDepth` and `replacer` of `options`. When there is no limit given, the
- * result nests as deep as reasonably possible.
+ * The nesting limit of the result, the number of elements of an array it
+ * represents, and a replacer to consult are the `maxDepth`, `maxArrayLength`,
+ * and `replacer` of `options`. When there is no nesting limit given, the
+ * result nests as deep as reasonably possible; when there is no array length
+ * given, an array is represented to one hundred elements.
  *
  * If the conversion could not be completed (stack overflow, object
  * `toJSON()` conversion error, etc.), this function returns the literal value
@@ -935,9 +1000,27 @@ export function toStructuredDebugValue(
   /** Conversion options, if desired. */
   options?: DebugValueOptions,
 ): FabricValue {
-  const maxDepth = checkedMaxDepth(options, ABSOLUTE_MAX_DEPTH);
+  checkOptions(options);
+
+  const maxDepth = checkedLimit(
+    "maxDepth",
+    options?.maxDepth,
+    ABSOLUTE_MAX_DEPTH,
+    ABSOLUTE_MAX_DEPTH,
+  );
+  const maxArrayLength = checkedLimit(
+    "maxArrayLength",
+    options?.maxArrayLength,
+    DEFAULT_MAX_ARRAY_LENGTH,
+    ABSOLUTE_MAX_ARRAY_LENGTH,
+  );
 
   // We subtract one from `maxDepth` because the "suggestive forms" for elided
   // data all use one layer of depth.
-  return new DebugConverter(value, maxDepth - 1, options?.replacer).convert();
+  return new DebugConverter(
+    value,
+    maxDepth - 1,
+    maxArrayLength,
+    options?.replacer,
+  ).convert();
 }
