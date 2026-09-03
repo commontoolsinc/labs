@@ -421,6 +421,34 @@ describe("piece-describe", () => {
       space: "home",
     };
 
+    it("starts the addressed piece without starting the space root", async () => {
+      // Discovery reads the addressed piece and nothing else: the space
+      // root's bootstrap is dispatch's concern (a verb that creates a piece
+      // registers it with the root), not a description's.
+      const getCalls: unknown[][] = [];
+      let ensureCalls = 0;
+      const manager = {
+        ensureDefaultPattern: () => {
+          ensureCalls++;
+          return Promise.resolve();
+        },
+        get: (...args: unknown[]) => {
+          getCalls.push(args);
+          return Promise.resolve(pieceDouble());
+        },
+        getSpace: () => "home",
+      };
+
+      const description = await describePiece(config, {
+        loadPieces: () => Promise.resolve(manager as never),
+      });
+
+      expect(ensureCalls).toBe(0);
+      expect(getCalls).toEqual([[config.piece, true, undefined, undefined]]);
+      expect(description.name).toBe("Work tracker");
+      expect(description.verbs.map((verb) => verb.name)).toEqual(["addItem"]);
+    });
+
     it("assembles name, purpose, fields, and verbs from one piece", async () => {
       const description = await describePiece(config, {
         loadPieces: () => Promise.resolve({} as never),

@@ -81,11 +81,14 @@ const LINK_MARKER_KEY = "$link";
  */
 const CONCISE_ADDRESS_SUFFIX = "@";
 
-/** A selection phase in the command's trace, under its own prefix. */
+/** A phase of `deriveSelectedValue`, named for the operation like every other
+ * label. The six are strict siblings, so they add up; what they must not be
+ * added to is whichever phase encloses the selection — `getCellValue.selection`
+ * on `cf cell get`, and on `cf piece call` and `cf wish` nothing yet. */
 const timeSelectionPhase = <T>(
   label: string,
   run: () => T | Promise<T>,
-): Promise<T> => timeCliPhase(`cellSelection.${label}`, run);
+): Promise<T> => timeCliPhase(`deriveSelectedValue.${label}`, run);
 
 /**
  * The address a marked position accumulates as the walk descends, which is

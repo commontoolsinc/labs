@@ -60,10 +60,14 @@ as `cf cell get`, so a survey can be narrowed on the way out.
 
 ## Orienting on one piece
 
-`cf piece describe` is the first call to make against an unfamiliar piece. It
-prints the piece's man page — what it is, what it holds, what a caller supplies,
-and what it can do — with every sentence compiled from the pattern's own doc
-comments:
+`cf piece verbs --json` is the first call to make against an unfamiliar piece:
+it names the deployed pattern and lists every callable verb with its prose and
+the schemas a payload is judged against, which is what a caller needs to act.
+Each of the reads below is its own cold CLI process that starts the piece, so
+they are not a preflight to run together; reach for the others when the
+question they answer comes up. `cf piece describe` prints the piece's man page
+— what it is, what it holds, what a caller supplies, and what it can do — with
+every sentence compiled from the pattern's own doc comments:
 
 ```bash
 cf piece describe --cell <piece>
@@ -99,10 +103,14 @@ it does not:
 | `cf piece verbs --json --all` | the same, plus the wrapper-tier and deprecated verbs the default view withholds |
 | `cf piece call <verb> --help --json` | one verb, in full |
 
-`describe` is where to start and rarely where to stop: it summarizes each verb
-in a line and does not carry the schema a payload has to satisfy. Build a
-payload from the `verbs` listing or from a verb's own help page, both of which
-report the schema the dispatcher will judge the payload against.
+The `describe` page summarizes each verb in a line and does not carry the
+schema a payload has to satisfy; `describe --json` carries the same verb rows
+the listing does, schemas included, so prefer `verbs --json` over it for payload
+size, not because `describe` lacks the schema. Build a payload from the `verbs`
+listing or from a verb's own help page, both of which report the schema the
+dispatcher will judge the payload against. Of the two, prefer the listing you
+already have: a verb's help page is served through the dispatch path, which
+also starts the space root, so it is the most expensive read on this ladder.
 
 **Both listings hide wrapper-tier and deprecated verbs by default**, and both
 say so rather than hiding them silently: `--json` carries a `hidden` object
