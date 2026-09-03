@@ -435,6 +435,15 @@ describe("listing", () => {
     // row `cd` cannot reach prints no name at all, so nothing on the surface
     // invites a reader to type a string that reaches somewhere else.
     //
+    // The property is over the front of a printed line and not over the whole
+    // of it. A row that carries an error prints the name and then a marker, so
+    // the two are one string for some rows and not for others; and an error is
+    // text the fabric wrote, which may hold an odd quote and leave the line as
+    // a whole refusing to split. What holds of every named row is that the
+    // line opens with the name, that the name is one token `cd` takes back to
+    // the row, and that anything after it is separated from it — which is what
+    // "copied off the front" means and all it can mean.
+    //
     // What varies is as load-bearing as the property. Both kinds of row a
     // listing can name vary — the piece a facet lists and the key a piece
     // holds — and each candidate is driven through the read that produces that
@@ -487,6 +496,27 @@ describe("listing", () => {
     }
 
     /**
+     * Helper for the case below, which is what a listing reports against the
+     * candidate at `index`, and nothing where it reports nothing.
+     *
+     * A row carrying one is the only shape where the printed line and the
+     * operand are different strings, so a construction with none of them says
+     * nothing about the rows the naming rule has most to say about. Two of
+     * these are chosen for what they do to a line rather than for what they
+     * say: one holds an odd quote, so the line as a whole does not split and
+     * only its front can be copied, and one holds a line break — written as an
+     * escape, which `deno task check-control-characters` would not have caught
+     * as a literal — which would open a second line, with a name on it, if the
+     * renderer wrote it as it stands.
+     */
+    const REPORTED = [
+      undefined,
+      "No piece carries that name.",
+      "It's gone.",
+      "Two lines.\nboard",
+    ];
+
+    /**
      * Helper for the case below, which is the place one level inside `place`
      * called `name` — the row's own cell, built from the levels a position
      * names rather than from any operand.
@@ -521,6 +551,7 @@ describe("listing", () => {
     it("prints a name `cd` takes back to the row, and no name for a row it cannot reach", async () => {
       let named = 0;
       let unnamed = 0;
+      let reported = 0;
 
       /**
        * Helper for this case, which holds the property over one row and the
@@ -532,6 +563,10 @@ describe("listing", () => {
           unnamed++;
           return;
         }
+        expect(line.startsWith(row.operand)).toBe(true);
+        const rest = line.slice(row.operand.length);
+        expect(rest === "").toBe(row.error === undefined);
+        if (rest !== "") expect(rest.startsWith(" <")).toBe(true);
         const from = standing.place;
         const split = splitLine(row.operand);
         expect(split.kind).toBe("split");
@@ -540,6 +575,7 @@ describe("listing", () => {
         expect(standing.cd(tokens[0]).kind).toBe("moved");
         expect(standing.place).toEqual(childOf(from, row.name));
         named++;
+        if (row.error !== undefined) reported++;
       }
 
       const sources: {
@@ -549,12 +585,20 @@ describe("listing", () => {
       }[] = [
         {
           standing: () => inFacet("slugs"),
-          deps: (names) => slugIndex(names.map((slug) => ({ slug }))),
+          deps: (names) =>
+            slugIndex(names.map((slug, index) => ({
+              slug,
+              error: REPORTED[index % REPORTED.length],
+            }))),
           names: candidates("boa", "rd"),
         },
         {
           standing: () => inFacet("pieces"),
-          deps: (names) => spacePieces(names.map((id) => ({ id }))),
+          deps: (names) =>
+            spacePieces(names.map((id, index) => ({
+              id,
+              error: REPORTED[index % REPORTED.length],
+            }))),
           names: candidates(HANDLE.slice(0, 10), HANDLE.slice(10)),
         },
         {
@@ -584,10 +628,14 @@ describe("listing", () => {
         }
       }
 
-      // Both outcomes have to occur, or the property above holds for want of
-      // anything to hold over.
+      // Every outcome has to occur, or the property above holds for want of
+      // anything to hold over. The named row that also carries an error is the
+      // one the count is here for: it is the only shape where the printed line
+      // and the operand are different strings, so a construction that stopped
+      // building one would leave the line assertions above holding trivially.
       expect(named).toBeGreaterThan(0);
       expect(unnamed).toBeGreaterThan(0);
+      expect(reported).toBeGreaterThan(0);
     });
   });
 });

@@ -306,7 +306,15 @@ written as a token by the rule above — a slug, a handle and an ordinary key
 each print as themselves. A row whose name's own characters are readings —
 a key called `..` or `-`, one holding the separator, one beginning with `@` —
 prints the reference that names it instead, which reads none of them and
-unescapes `~1`. A row nothing reaches prints a marker in place of a name:
+unescapes `~1`.
+
+The name is the first thing on its line, and the whole of it where the row
+has nothing else to report. What a reader copies off the front is therefore
+what `cd` takes, and that is the claim rather than anything about the whole
+line: an error written after a name is text the fabric produced, and an odd
+quote in it leaves the line as a whole refusing to split.
+
+A row nothing reaches prints a marker in place of a name:
 everything on a listed line that is not a name is written between angle
 brackets, and the printer quotes every value holding one, so a line opening
 with `<` carries no name. A row is one line, so a name carrying a line break
