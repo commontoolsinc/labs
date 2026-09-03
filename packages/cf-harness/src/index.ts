@@ -47,6 +47,7 @@ export * from "./contracts/run-manifest.ts";
 export * from "./contracts/invalid-tool-call.ts";
 export * from "./contracts/observation.ts";
 export * from "./contracts/policy.ts";
+export * from "./contracts/policy-refusal.ts";
 export * from "./contracts/policy-trace.ts";
 export * from "./contracts/run-report.ts";
 export * from "./contracts/skill.ts";

@@ -669,7 +669,7 @@
     // ------------------------------------------------------------------ layout data
     // The state of this repository the map describes. Bump both when the
     // map is re-verified; the stamp is drawn in the canvas's top-left corner.
-    const SNAPSHOT = { date: "2026-09-03", sha: "c5a138a11b" };
+    const SNAPSHOT = { date: "2026-09-03", sha: "890911a59b" };
     const W = 2760, H = 1840;
     const bands = [
       {
@@ -1595,7 +1595,7 @@
       {
         id: "t8",
         n: 8,
-        c: "upcoming",
+        c: "guarded",
         x: 1120,
         y: 1470,
         t: "A refusal the decision channel cannot see",
@@ -1991,7 +1991,6 @@
           6757,
         ]],
         close: [
-          "Release refusals are structured in tool outputs and AUD-16 counts them there, but they remain absent from <code>policy-trace.json</code> (CT-2200).",
           "The retrospective transcript does not show what the prompt loop withheld or compressed (CT-2198).",
           "The artifact root is readable from the sandbox (CT-2117).",
         ],
@@ -2000,7 +1999,7 @@
         kind: "Evidence · verifier",
         band: "evidence",
         body:
-          `<p>Runs over any recorded run and grades AUD-1 to AUD-9, AUD-13 to AUD-15a, and deployment checks AUD-16 to AUD-19 as pass, fail, warn or inconclusive against quoted spec clauses; inconclusive is never pass. It reads the shared posture record every surface publishes, checks its total sink registry, and evaluates dial tuples against the enforcement rules in <code>audit/matrix.ts</code>. For AUD-3, files under <code>tool-outputs/</code> stamped <code>cf-harness.subagent-raw-return</code> or <code>cf-harness.run-pattern-source</code> are not tool effects; AUD-9 requires an invocation context only for a side effect that reached the substrate under AUD-2's classifier, and warns when a run recorded no context at all because its artifacts cannot distinguish host-side effects from lost evidence. AUD-16 counts structured <code>policyRefusal</code> records in tool outputs; CT-2200 moves those release decisions into <code>policy-trace.json</code>.</p><p>It verifies; it never enforces. Missing evidence is a finding, not proof that a gate ran.</p>`,
+          `<p>Runs over any recorded run and grades AUD-1 to AUD-9, AUD-13 to AUD-15a, and deployment checks AUD-16 to AUD-19 as pass, fail, warn or inconclusive against quoted spec clauses; inconclusive is never pass. It reads the shared posture record every surface publishes, checks its total sink registry, and evaluates dial tuples against the enforcement rules in <code>audit/matrix.ts</code>. For AUD-3, files under <code>tool-outputs/</code> stamped <code>cf-harness.subagent-raw-return</code> or <code>cf-harness.run-pattern-source</code> are not tool effects; AUD-9 requires an invocation context only for a side effect that reached the substrate under AUD-2's classifier, and warns when a run recorded no context at all because its artifacts cannot distinguish host-side effects from lost evidence. AUD-16 counts the refusals among the release decisions <code>policy-trace.json</code> carries — the ones that denied — and reports the releases the same boundary measured and admitted or merely observed beside them, which is what tells a gate that passed from a gate that never ran.</p><p>It verifies; it never enforces. Missing evidence is a finding, not proof that a gate ran.</p>`,
         links: [["spec-anchored CFC checker", 6749], [
           "shared posture record, total sink registry, matrix-backed audit checks",
           6755,
@@ -2090,7 +2089,6 @@
         links: [["ceiling gates values, not the handle", 6759]],
         close: [
           "The fit skips the runner's policy evaluation, so no exchange rule can discharge <code>finance</code> here yet. Policy A vs policy B (released under one, refused under the other) is the smallest honest experiment (CT-2175).",
-          "Record each release refusal in <code>policy-trace.json</code>, then make AUD-16 read that decision channel instead of tool outputs (CT-2200).",
         ],
         threats: ["t8", "t19"],
       },
@@ -2183,10 +2181,8 @@
         where: ["thirdparty", "connectors", "sqlite", "g_conn"],
       },
       t8: {
-        plan:
-          "CT-2200 records every release refusal in policy-trace.json and makes AUD-16 count that decision channel; AUD-16 counts policyRefusal records in tool outputs today; attribution fixed in #6759.",
         body:
-          `<p>Release refusals are structured in tool outputs today: each <code>policyRefusal</code> names its gates, sinks, atoms, and the input that carried the label, and AUD-16 counts those records. They are absent from <code>policy-trace.json</code> because the prompt loop records its allow-side tool decision before the release boundary runs. CT-2200 moves every release decision into that trace and makes AUD-16 read the decision channel. A gate whose decision is missing from the trace is invisible to an operator reading policy evidence alone.</p>`,
+          `<p>Every release-boundary decision reaches <code>policy-trace.json</code>: released, observed, values withheld, commit refused, each naming its boundary, sink and ceiling. The ones that refused carry the refusal too — its gates, its atoms, and the input key that carried the label — and a decision that released refuses nothing, so it carries none. Each is appended after the allow-side tool decision for the same call, which the prompt loop records before the tool runs, so the order in the trace is the order the two were decided in. AUD-16 counts the refusals in that channel, and an operator reading policy evidence alone now sees the gate decide.</p>`,
         where: ["runner", "artifacts", "audit", "g_release"],
       },
       t9: {
@@ -2366,7 +2362,7 @@
             ],
             sel: "audit",
             h: "7 · Prove it",
-            t: "Labels and decisions are written with the outcome. The checker grades the record, shared posture, sink registry and deployment matrix against quoted spec clauses; inconclusive is never pass. AUD-16 counts release refusals in tool outputs today; CT-2200 moves them into the policy trace.",
+            t: "Labels and decisions are written with the outcome. The checker grades the record, shared posture, sink registry and deployment matrix against quoted spec clauses; inconclusive is never pass. AUD-16 counts the refusals among the release decisions the policy trace carries, and reports the admitted releases beside them.",
           },
           {
             f: [
@@ -2391,7 +2387,7 @@
             ],
             sel: "g_release",
             h: "8 · Where the circuit is still open",
-            t: "Policy discharge at the release gate and a door for records (CT-2175). The prose delegation brief. Web and browser tools without label input, and bridge networking in the sandbox. A pattern's llm calls uncapped. The sandbox reading the run's own artifacts (CT-2117). Connector rows unlabeled (CT-2189). Refusals absent from policy-trace (CT-2200). Projected posture, store identity, console concurrency, stale session policy, and substrate liveness remain tracked. Program diagnostics and retrospective omissions are unlabeled boundaries (CT-2199, CT-2198). The display ceiling is off. Operator access is unaudited.",
+            t: "Policy discharge at the release gate and a door for records (CT-2175). The prose delegation brief. Web and browser tools without label input, and bridge networking in the sandbox. A pattern's llm calls uncapped. The sandbox reading the run's own artifacts (CT-2117). Connector rows unlabeled (CT-2189). Projected posture, store identity, console concurrency, stale session policy, and substrate liveness remain tracked. Program diagnostics and retrospective omissions are unlabeled boundaries (CT-2199, CT-2198). The display ceiling is off. Operator access is unaudited.",
           },
         ],
       },
@@ -2563,7 +2559,7 @@
             ],
             sel: "audit",
             h: "The attempt is on the record",
-            t: "Skill provenance, the tool proposals, the refusal. AUD-16 counts the refusal in tool outputs today. Open: CT-2200 moves it into the policy trace, and the ingest stamp still needs to be read at the egress gate.",
+            t: "Skill provenance, the tool proposals, the refusal. AUD-16 counts the refusal where the policy trace records it. Open: the ingest stamp still needs to be read at the egress gate.",
           },
         ],
       },

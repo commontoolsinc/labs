@@ -1,9 +1,14 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { HarnessCfcInvocationContext } from "./cfc-invocation-context.ts";
+import type {
+  HarnessReleaseDecision,
+  HarnessReleaseDecisionReasonCode,
+} from "./policy-refusal.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
 import type { HarnessToolEffectClass } from "./tool-descriptor.ts";
 import type { HarnessToolInputSummary } from "./policy.ts";
 import type { HarnessToolPolicyDecision } from "./run-report.ts";
+import type { ToolResultRef } from "./tool-result.ts";
 
 export type HarnessPolicyDecisionReasonCode =
   | "tool_not_allowed"
@@ -25,7 +30,8 @@ export type HarnessPolicyDecisionReasonCode =
   | "write_file_enforce_strict_requires_direct_command"
   | "subagent_profile_allowed"
   | "subagent_profile_not_allowed"
-  | "invalid_tool_call";
+  | "invalid_tool_call"
+  | HarnessReleaseDecisionReasonCode;
 
 export interface HarnessPolicyDecisionRecord {
   type: "cf-harness.policy-decision";
@@ -44,6 +50,24 @@ export interface HarnessPolicyDecisionRecord {
   toolInputSummary?: HarnessToolInputSummary;
   policyEventIndexes?: readonly number[];
   subagentProfile?: string;
+
+  /**
+   * What a confidentiality boundary decided about the call's own result, on
+   * the decision that records it. A label decided this one; every other
+   * decision in the trace turns on authority, and the two are told apart by
+   * this field rather than by reading a reason code for a shape it does not
+   * carry.
+   */
+  release?: HarnessReleaseDecision;
+
+  /**
+   * The tool result the decision belongs to, as the tool activity names it:
+   * the output id and, where the run persists artifacts, the path of the
+   * tool-output file. Present on a decision made from a result rather than
+   * before one existed, which is every release decision and no allow-side
+   * one.
+   */
+  resultRef?: ToolResultRef;
 }
 
 export interface HarnessPolicyDecisionCounts {
@@ -112,6 +136,8 @@ export const createHarnessPolicyDecisionRecord = (
   ...(options.subagentProfile !== undefined
     ? { subagentProfile: options.subagentProfile }
     : {}),
+  ...(options.release !== undefined ? { release: options.release } : {}),
+  ...(options.resultRef !== undefined ? { resultRef: options.resultRef } : {}),
 });
 
 export const countHarnessPolicyDecisions = (
