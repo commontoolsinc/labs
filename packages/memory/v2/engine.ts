@@ -1356,9 +1356,9 @@ export const DEFAULT_OPERATION_CHECKPOINT_INTERVAL = 100;
  *
  * Sized to keep one active corpus's working set resident, measured on a copy
  * of the production Topics board (129 topics, 2026-09-02): a full board page
- * load reads 13,371 documents whose retained encoded size is 98 MB (135
- * topic piece docs at ~66 KB, thousands of computed cells at ~10 KB, every
- * topic's internals), costing about 250 MB of heap. Under the earlier bound
+ * load reads 13,313 documents whose retained encoded size is 17.7 MB (135
+ * topic piece docs at ~55 KB, ~800 computed cells at ~10 KB, every topic's
+ * internals, mostly tiny). Under the earlier bound
  * (256 entries, cleared wholesale when full) no walk over that set ever found
  * a document cached, and every walk paid decode plus deep-freeze for every
  * document: about a second of server time per walk, most of it in the
