@@ -444,8 +444,10 @@ from a later update preserves an existing unambiguous class.
 
 The path is followed through the links it crosses, as `get-label` reads it, so
 the update lands on the doc that holds the value rather than the doc the path
-started in. The classes it is checked against are that doc's: asking for `shape`
-where the resolved doc declares `value` is refused rather than replacing it.
+started in. The classes it is checked against are the effective ones, which
+merge both documents: the resolved doc's stored classes, and any the selected
+slot's own schema declares. Asking for `shape` where either declares `value` is
+refused rather than replacing it.
 
 ## Invocation sessions
 

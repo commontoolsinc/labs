@@ -67,7 +67,6 @@ import {
 } from "@commonfabric/runner";
 import {
   type CfcLabelView,
-  cfcLabelViewForCellWithStatus,
   cfcLabelViewForResolvedCellWithStatus,
   cfcLabelViewFromSchema,
   cfcSchemaChildRoot,
@@ -279,21 +278,20 @@ export function parseCellCfcLabelUpdate(
 }
 
 /**
- * `resolveLinks` is for an INSPECTION read, where the caller asked what the
- * label at a path is and a path that crosses a link part way through must not
- * answer "none" for a value that carries one. A read that feeds a WRITE keeps
- * the unresolved view: the observation classes a label update preserves are the
- * ones declared on the selected cell, not ones inherited from whatever doc its
- * value happens to live in.
+ * The label view both label commands answer from, read through the RESOLVED
+ * reader — the doc the selected path lands in once its links are followed.
+ *
+ * Each command needs that doc for its own reason. An INSPECTION read must not
+ * answer "none" for a value carrying a label behind a link the path crosses
+ * part way through. A read that feeds a WRITE needs it because the write
+ * resolves too: `applyCfcSchemaToExistingValue` follows the same links, so the
+ * doc this view describes is the doc the update lands in.
  */
 function cfcLabelViewForCommand(
   cell: unknown,
   path: readonly (string | number)[],
-  options: { resolveLinks?: boolean } = {},
 ): CfcLabelView | null {
-  const { view, readFailed } = options.resolveLinks
-    ? cfcLabelViewForResolvedCellWithStatus(cell)
-    : cfcLabelViewForCellWithStatus(cell);
+  const { view, readFailed } = cfcLabelViewForResolvedCellWithStatus(cell);
   if (readFailed) {
     const location = path.length === 0 ? "<root>" : path.join("/");
     throw new Error(`Could not read CFC labels at "${location}".`);
@@ -4511,7 +4509,7 @@ export async function getCellCfcLabel(
     await (options.input ? piece.input.getCell() : piece.result.getCell());
   const targetCell = rootCell.key(...path);
   await targetCell.pull();
-  return cfcLabelViewForCommand(targetCell, path, { resolveLinks: true });
+  return cfcLabelViewForCommand(targetCell, path);
 }
 
 /**
@@ -4547,16 +4545,12 @@ export async function setCellCfcLabel(
     await (options.input ? piece.input.getCell() : piece.result.getCell());
   const targetCell = rootCell.key(...path);
   await targetCell.pull();
-  // Resolved, because the WRITE below is. `applyCfcSchemaToExistingValue`
-  // resolves through the links the path crosses, so a declared update at
-  // `q/result/0/secret` lands in the ROW doc. Reading the guard's "what
-  // classes already exist here" question against the unresolved doc asked it
-  // about a doc the write never touches: the row doc's `observes` was invisible
-  // to it, so the update silently REPLACED a value-class entry with a
-  // class-less one, and the command returned null while having written a label.
-  const currentView = cfcLabelViewForCommand(targetCell, path, {
-    resolveLinks: true,
-  });
+  // The guard's "what classes already exist here" question is asked of the doc
+  // the write lands in. Asked of the unresolved doc it was asked about a doc
+  // the write never touches: the row doc's `observes` was invisible to it, so
+  // the update silently REPLACED a value-class entry with a class-less one,
+  // and the command returned null while having written a label.
+  const currentView = cfcLabelViewForCommand(targetCell, path);
   const value = targetCell.getRaw();
   if (value === undefined) {
     const location = path.length === 0 ? "<root>" : path.join("/");
@@ -4631,7 +4625,7 @@ export async function setCellCfcLabel(
   await pieces.synced();
 
   noteWroteTo(config.space);
-  return cfcLabelViewForCommand(targetCell, path, { resolveLinks: true });
+  return cfcLabelViewForCommand(targetCell, path);
 }
 
 export async function getCellValue(
