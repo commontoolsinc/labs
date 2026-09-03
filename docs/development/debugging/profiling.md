@@ -356,6 +356,21 @@ process:
   publication lock before evaluating. Flush passes hold that same lock, so
   a `transact` whose `lockWaitMs` dominates its elapsed time was queued
   behind fan-out, not expensive itself.
+- `documentCaches` — the memory server's decoded-document cache, one entry
+  per open space (`Engine.documentCache` in `packages/memory/v2/engine.ts`)
+  under the server's `totalBudgetBytes` (beside it the total `bytes`, and
+  `totalBudgetEvictions`: entries given up to hold that total rather than a
+  space's own bounds):
+  per space, `entries` and `bytes` against `budgetBytes` and `maxEntries`,
+  and the lifetime `hits`, `misses` and `evictions`. The occupancy figures
+  (`entries`, `bytes`, and which spaces appear at all) are a snapshot of the
+  moment — the one exception to the paragraph below; the three counters
+  accumulate. A corpus is read again by every
+  load and every refresh, so a space in good shape shows `hits` climbing
+  across loads and `misses` rising only with commits. `evictions` climbing
+  while a corpus is being walked means its working set does not fit the
+  budget, and every walk is paying decode and deep-freeze for it again — on
+  the Topics board that was most of a second of server time per walk.
 - `servingLoop` — the serving loop's counters
   ([`serving-loop.md` §7](../../specs/server-side-execution/serving-loop.md)),
   present only when this process serves. `settle.series` is a ready-made

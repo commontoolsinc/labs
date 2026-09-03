@@ -300,6 +300,36 @@ describe("v2 server slow queries", () => {
     }
   });
 
+  it("keeps the last hundred slow entries and drops the oldest", async () => {
+    // The ring holds a hundred entries; the hundred-and-first push evicts
+    // the oldest. Every clock read advances the clock, so each query is
+    // slow without sleeping, and the ring already holds whatever earlier
+    // tests recorded — hence the first query gets a space of its own, so
+    // that its eviction is what the assertion sees.
+    const server = createServer("memory://slow-query-ring");
+    try {
+      performance.now = () => {
+        nowOffsetMs += 150;
+        return realNow() + nowOffsetMs;
+      };
+      const query = (space: string) =>
+        server.evaluateGraphQuery(space, {
+          roots: [{ id: "of:doc:ring", selector: { path: [], schema: true } }],
+        });
+      const first = "did:key:z6Mk-slow-query-ring-first";
+      const rest = "did:key:z6Mk-slow-query-ring-rest";
+      await query(first);
+      expect(getSlowQueries().some((slow) => slow.space === first)).toBe(true);
+      for (let n = 0; n < 100; n++) await query(rest);
+      const entries = getSlowQueries();
+      expect(entries.length).toBe(100);
+      expect(entries.some((slow) => slow.space === first)).toBe(false);
+      expect(entries.filter((slow) => slow.space === rest).length).toBe(100);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("sums the roots of every branch group a slow watch.set evaluated", async () => {
     const space = "did:key:z6Mk-slow-query-watch-set-groups";
     const server = createServer("memory://slow-query-watch-set-groups");

@@ -374,7 +374,7 @@ export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
  *   are an ORDERING witness, not a delivered-frame metric.
  * All-zero in the OFF arm by construction: only the serving loop's wave
  * commits classify dirty keys as derived. Registered by the Server
- * instance (last registration wins — one co-hosted server per process);
+ * instance (the newest live server is reported; close() withdraws it);
  * surfaced under the health route's `servingLoop.push` block.
  */
 export type PushPriorityStats = {
@@ -383,10 +383,54 @@ export type PushPriorityStats = {
   mixedFlushes: number;
 };
 
-let pushPriorityStatsProvider: (() => PushPriorityStats) | undefined;
+/** Live servers' push-priority providers in construction order; a server
+ * withdraws its own on close(), so the newest LIVE server is the one
+ * reported, and closing one hands back to the one registered before it. */
+const pushPriorityStatsProviders: (() => PushPriorityStats)[] = [];
 
 export const getPushPriorityStats = (): PushPriorityStats | undefined =>
-  pushPriorityStatsProvider?.();
+  pushPriorityStatsProviders.at(-1)?.();
+
+/** Withdraw one server's health-route provider, leaving every other's. */
+const withdrawProvider = <T>(providers: T[], provider: T): void => {
+  const index = providers.indexOf(provider);
+  if (index >= 0) providers.splice(index, 1);
+};
+
+/** Every open engine's decoded-document cache, keyed by space, under the
+ * total budget this server holds across them: `bytes` is the total retained
+ * now and `totalBudgetEvictions` what holding it has cost, lifetime. */
+export type DocumentCachesDiagnostics = {
+  totalBudgetBytes: number;
+  bytes: number;
+  totalBudgetEvictions: number;
+  spaces: Record<string, Engine.DocumentCacheDiagnostics>;
+};
+
+/**
+ * Default bound on decoded documents retained across every space one Server
+ * serves: twice the per-space default, room for two active corpora at their
+ * full per-space allowance (a Topics-board page load retains 17.7 MB; see
+ * DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES for the sizing). Held by the server's
+ * `Engine.DocumentCacheCoordinator` on every cache access, least recently
+ * used space first and oldest entries first within it. Per Server instance,
+ * not per process: the toolshed hosts one memory server, so in deployment
+ * this is the process's bound, while a second live server (tests construct
+ * them) keeps its own total under its own budget.
+ */
+export const DOCUMENT_CACHE_TOTAL_BUDGET_BYTES = 256 * 1024 * 1024;
+
+/** Live servers' providers in construction order; a server removes its own
+ * on close(), so the newest LIVE server is always the one reported. */
+const documentCachesDiagnosticsProviders: (() => DocumentCachesDiagnostics)[] =
+  [];
+
+/** The co-hosted memory server's document-cache counters for the health
+ * route — the most recently constructed server still open; undefined when
+ * none is. */
+export const getDocumentCachesDiagnostics = ():
+  | DocumentCachesDiagnostics
+  | undefined => documentCachesDiagnosticsProviders.at(-1)?.();
 
 const randomHex = (bytes: number): string => {
   const data = crypto.getRandomValues(new Uint8Array(bytes));
@@ -1349,6 +1393,10 @@ export class Server {
   // The resolved-engine index for the SYNC cross-engine lease lookup
   // (server-execution v2 Phase 5; see openEngine / #liveCoHostedLeaseSpaceFor).
   #resolvedEngines = new Map<string, Engine.Engine>();
+
+  /** Holds `documentCacheTotalBudgetBytes` across this server's engines and
+   * keeps their recency; every engine this server opens reports to it. */
+  #documentCacheCoordinator: Engine.DocumentCacheCoordinator;
   // Synthesized session state for direct out-of-band document writes, such as blob uploads.
   #directSessionId = `server:${crypto.randomUUID()}`;
   #directLocalSeq = 0;
@@ -1456,6 +1504,16 @@ export class Server {
        * retained at all. */
       queryEvaluationCacheBudget?: number;
 
+      /** Bounds for each space's decoded-document cache, handed to
+       * Engine.open (see DEFAULT_DOCUMENT_CACHE_BUDGET_BYTES there). */
+      documentCacheBudgetBytes?: number;
+      documentCacheMaxEntries?: number;
+
+      /** Bound on decoded documents retained across every space this
+       * server serves (default DOCUMENT_CACHE_TOTAL_BUDGET_BYTES; per
+       * instance, see there), held least-recently-used space first. */
+      documentCacheTotalBudgetBytes?: number;
+
       authorizeSessionOpen: (
         message: SessionOpenRequest,
         context: SessionOpenAuthContext,
@@ -1530,10 +1588,47 @@ export class Server {
     this.#store = options.store;
     this.#operationCodecs = options.operationCodecs ??
       createDefaultOperationCodecRegistry();
-    // Push-priority counters (Phase 6): module-level provider for the
-    // health route, same last-registration-wins posture as the runner's
-    // serving-loop stats registry (one co-hosted server per process).
-    pushPriorityStatsProvider = () => this.pushPriorityStats();
+    // Every document-cache bound is checked here, where it is configured,
+    // not at the first request that opens a space (Engine.open checks the
+    // per-space pair again for its own callers) — and before this server
+    // registers anything a throw would leave behind.
+    Engine.validateDocumentCacheBounds({
+      documentCacheBudgetBytes: options.documentCacheBudgetBytes,
+      documentCacheMaxEntries: options.documentCacheMaxEntries,
+      documentCacheTotalBudgetBytes: options.documentCacheTotalBudgetBytes,
+    });
+    this.#documentCacheCoordinator = new Engine.DocumentCacheCoordinator(
+      options.documentCacheTotalBudgetBytes ??
+        DOCUMENT_CACHE_TOTAL_BUDGET_BYTES,
+    );
+    // Module-level providers for the health route (push-priority counters,
+    // Phase 6; document caches): the newest live server is reported, and
+    // close() withdraws exactly this server's.
+    pushPriorityStatsProviders.push(this.#pushPriorityStatsProvider);
+    documentCachesDiagnosticsProviders.push(
+      this.#documentCachesDiagnosticsProvider,
+    );
+  }
+
+  /** This server's health-route providers, kept so close() can withdraw
+   * exactly them and no other server's. */
+  #pushPriorityStatsProvider = () => this.pushPriorityStats();
+  #documentCachesDiagnosticsProvider = () => this.documentCachesDiagnostics();
+
+  /** Every open engine's document-cache counters, keyed by space. A peek:
+   * nothing is opened by asking. */
+  documentCachesDiagnostics(): DocumentCachesDiagnostics {
+    const spaces: Record<string, Engine.DocumentCacheDiagnostics> = {};
+    for (const [space, engine] of this.#resolvedEngines) {
+      spaces[space] = Engine.documentCacheDiagnostics(engine);
+    }
+    const coordinator = this.#documentCacheCoordinator;
+    return {
+      totalBudgetBytes: coordinator.budgetBytes,
+      bytes: coordinator.bytes,
+      totalBudgetEvictions: coordinator.evictions,
+      spaces,
+    };
   }
 
   memoryProtocolFlags(): MemoryProtocolFlags {
@@ -2025,6 +2120,17 @@ export class Server {
   }
 
   async close(): Promise<void> {
+    // Withdraw this server's health-route providers so a closed server is
+    // neither reported nor kept alive by the route; synchronous, ahead of
+    // the first await, so an un-awaited close still withdraws them at once.
+    withdrawProvider(
+      pushPriorityStatsProviders,
+      this.#pushPriorityStatsProvider,
+    );
+    withdrawProvider(
+      documentCachesDiagnosticsProviders,
+      this.#documentCachesDiagnosticsProvider,
+    );
     this.#cancelScheduledRefresh();
     await this.#refreshing;
     await this.#drainSpacePublicationLocks();
@@ -6706,6 +6812,9 @@ export class Server {
         url,
         operationCodecs: this.#operationCodecs,
         operationCheckpointInterval: this.options.operationCheckpointInterval,
+        documentCacheBudgetBytes: this.options.documentCacheBudgetBytes,
+        documentCacheMaxEntries: this.options.documentCacheMaxEntries,
+        documentCacheCoordinator: this.#documentCacheCoordinator,
       });
     })();
     // The SYNC engine view (server-execution v2 Phase 5): the read-row
