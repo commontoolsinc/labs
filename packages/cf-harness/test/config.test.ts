@@ -1,4 +1,5 @@
 import { checkoutDocsCorpusRoots } from "../src/docs-corpus/corpus.ts";
+import { resolveHarnessSkillsRoot } from "../src/skills/root.ts";
 import { assertEquals, assertThrows } from "@std/assert";
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
@@ -164,6 +165,62 @@ Deno.test("resolveCfcEnforcementModeSource treats null like absent mode values",
   );
 });
 
+Deno.test("resolveCfcEnforcementMode follows a fabric session raised to strict", () => {
+  const strictSession = {
+    apiUrl: "https://fabric.test",
+    identityKeyPath: "/keys/identity.pkcs8",
+    space: "demo",
+    cfcEnforcementMode: "enforce-strict" as const,
+  };
+
+  // Nobody set the harness dial, so it follows the session rather than the
+  // harness default, and says where it came from.
+  assertEquals(
+    resolveCfcEnforcementMode({ fabricSession: strictSession }),
+    "enforce-strict",
+  );
+  assertEquals(
+    resolveCfcEnforcementModeSource({ fabricSession: strictSession }),
+    "fabric-session",
+  );
+
+  // A dial already at least as strict stands, and keeps its own source.
+  assertEquals(
+    resolveCfcEnforcementModeSource({
+      fabricSession: strictSession,
+      cfcEnforcementModeOverride: "enforce-strict",
+    }),
+    "override",
+  );
+
+  // Only strict raises: the session's preset pins enforce-explicit whether
+  // asked for or not, and a weaker loop under it is an ordinary configuration.
+  assertEquals(
+    resolveCfcEnforcementMode({
+      fabricSession: { ...strictSession, cfcEnforcementMode: undefined },
+      cfcEnforcementModeOverride: "observe",
+    }),
+    "observe",
+  );
+});
+
+Deno.test("resolveCfcEnforcementMode refuses a harness dial weaker than a strict session", () => {
+  assertThrows(
+    () =>
+      resolveCfcEnforcementMode({
+        fabricSession: {
+          apiUrl: "https://fabric.test",
+          identityKeyPath: "/keys/identity.pkcs8",
+          space: "demo",
+          cfcEnforcementMode: "enforce-strict",
+        },
+        cfcEnforcementModeOverride: "enforce-explicit",
+      }),
+    Error,
+    "--cfc-enforcement-mode enforce-explicit is weaker than the enforce-strict",
+  );
+});
+
 Deno.test("resolveGatewayAuthMode prefers explicit override", () => {
   assertEquals(
     resolveGatewayAuthMode({
@@ -206,7 +263,12 @@ Deno.test("resolveHarnessConfig preserves legacy gateway fields for openai-codex
       source: "checkout-default",
       roots: checkoutDocsCorpusRoots(),
     },
+    // The skills tree resolves the same way and in the same place, so a
+    // caller that names neither gets both from the checkout it runs out of.
+    skillsRoot: resolveHarnessSkillsRoot()?.hostPath,
+    skillsRootRecord: resolveHarnessSkillsRoot(),
   });
+  assertEquals(config.skillsRootRecord?.source, "checkout-default");
   assertThrows(
     () =>
       resolveHarnessConfig({

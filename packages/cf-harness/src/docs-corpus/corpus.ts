@@ -12,7 +12,9 @@
  */
 
 import { utf8Compare } from "@commonfabric/utils/utf8";
-import { basename, dirname, fromFileUrl, join } from "@std/path";
+import { basename, join } from "@std/path";
+
+import { harnessCheckoutRootFrom } from "../checkout.ts";
 
 import {
   type HarnessDocsCorpusRecord,
@@ -77,14 +79,6 @@ export const namedCorpusRoots = (
 
 const isMarkdownPath = (path: string): boolean =>
   path.toLowerCase().endsWith(".md");
-
-const isDirectory = (path: string): boolean => {
-  try {
-    return Deno.statSync(path).isDirectory;
-  } catch {
-    return false;
-  }
-};
 
 interface WalkState {
   sections: HarnessDocsCorpusSection[];
@@ -219,47 +213,18 @@ export const loadHarnessDocsCorpus = async (
  * The reference trees of the labs checkout the harness is running out of, or
  * an empty list when it is not running out of one.
  *
- * A console started with no documentation configuration is a console whose
- * children cannot find the documentation they need, which is the failure this
- * corpus exists to end. The walk goes up from the directory `moduleUrl` names
- * looking for a directory carrying all three of `docs/common`,
- * `docs/development` and `skills`, so a checkout answers and a package
- * installed from the registry does not.
- *
- * Synchronous because the answer decides a tool surface: every surface that
- * states its tool policy has to reach the same one, and one of them states it
- * before any run exists.
+ * This is what keeps a console started with no documentation configuration
+ * from being one whose children cannot find the documentation they need.
  */
 export const checkoutDocsCorpusRootsFrom = (
   moduleUrl: string,
 ): readonly string[] => {
-  // A module addressed by anything but a file URL — a compiled binary, an
-  // `https:` import — sits in no checkout, and asking `fromFileUrl` about it
-  // throws. This runs inside configuration resolution, where a throw would
-  // take down every surface, so anything that is not a file URL answers "no
-  // checkout" instead.
-  let directory: string;
-  try {
-    const parsed = new URL(moduleUrl);
-    if (parsed.protocol !== "file:") {
-      return [];
-    }
-    directory = dirname(fromFileUrl(parsed));
-  } catch {
-    return [];
-  }
-  const checkoutRoots = ["docs/common", "docs/development", "skills"];
-  while (true) {
-    const candidates = checkoutRoots.map((root) => join(directory, root));
-    if (candidates.every(isDirectory)) {
-      return candidates;
-    }
-    const parent = dirname(directory);
-    if (parent === directory) {
-      return [];
-    }
-    directory = parent;
-  }
+  const checkout = harnessCheckoutRootFrom(moduleUrl);
+  return checkout === undefined
+    ? []
+    : ["docs/common", "docs/development", "skills"].map((root) =>
+      join(checkout, root)
+    );
 };
 
 /** {@link checkoutDocsCorpusRootsFrom} for this module's own location. */

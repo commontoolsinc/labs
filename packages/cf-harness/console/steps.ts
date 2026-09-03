@@ -440,6 +440,12 @@ const statusOf = (
   ) {
     return "denied";
   }
+  // A call rejected for its arguments ran nothing, and its answer carries no
+  // status field of its own to read that from. It is an error rather than a
+  // denial: policy refused it nothing.
+  if (decision?.decision === "invalid") {
+    return "error";
+  }
   const record = typeof output === "object" && output !== null
     ? output as Record<string, unknown>
     : undefined;

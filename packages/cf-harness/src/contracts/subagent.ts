@@ -30,6 +30,15 @@ export const WEB_SEARCH_SUBAGENT_MODEL = "gemini-3.5-flash" as const;
  * name for the model and carries no routing prefix.
  */
 export const EXPLORE_SUBAGENT_MODEL = "gemini-3.5-flash" as const;
+
+/**
+ * The explore model on the Codex Responses transport, which serves only its
+ * own models. An explore turn is one bounded reply over sections the caller
+ * already holds, so the dial is cost: this is the cheapest model that
+ * transport answers with.
+ */
+export const EXPLORE_SUBAGENT_CODEX_MODEL = "gpt-5.6-luna" as const;
+
 export const DEFAULT_SUBAGENT_MAX_MODEL_TURNS = 8;
 export const MAX_SUBAGENT_MAX_MODEL_TURNS = 64;
 export const MAX_DELEGATE_PATTERN_REFS = 8;

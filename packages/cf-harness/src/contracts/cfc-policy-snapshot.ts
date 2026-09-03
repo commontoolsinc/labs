@@ -17,6 +17,8 @@ export type HarnessCfcEnforcementModeSource =
   | "override"
   | "explicit-config"
   | "inherited"
+  /** Derived from the mode the run's fabric session enforces at. */
+  | "fabric-session"
   | "run-manifest"
   | "default";
 

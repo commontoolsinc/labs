@@ -672,10 +672,21 @@ const countsAgree = (
   declared.total === computed.total &&
   declared.allowed === computed.allowed &&
   declared.warned === computed.warned &&
-  declared.denied === computed.denied;
+  declared.denied === computed.denied &&
+  // A run recorded before the `invalid` outcome existed declares no count for
+  // it, and its decisions hold none: absent and zero are the same reading, so
+  // reading absent as zero keeps such a run conclusive rather than failing it
+  // for a field it could not have written. Absent means absent, though — a
+  // count that is present and not the number beside it is a disagreement,
+  // whatever it holds.
+  (declared.invalid === undefined
+    ? computed.invalid === 0
+    : declared.invalid === computed.invalid);
 
 const describeCounts = (counts: HarnessPolicyDecisionCounts): string =>
-  `total ${counts.total}, allowed ${counts.allowed}, warned ${counts.warned}, denied ${counts.denied}`;
+  `total ${counts.total}, allowed ${counts.allowed}, warned ${counts.warned}, denied ${counts.denied}, invalid ${
+    counts.invalid ?? 0
+  }`;
 
 const decisionCoverage: AuditCheck = {
   id: "AUD-3",
@@ -938,8 +949,13 @@ const denialChannel: AuditCheck = {
         .map((event) => event.toolCallId),
     );
     const evidence: CheckEvidence[] = [];
+    // One denial can fail this check twice — no policy event AND an untyped
+    // answer — so the denials that failed are counted rather than the evidence
+    // rows, which is what makes the numerator a subset of the denominator.
+    const failed = new Set<string>();
     for (const denial of denials) {
       if (!evented.has(denial.toolCallId)) {
+        failed.add(denial.toolCallId);
         evidence.push({
           artifact: denial.artifact,
           pointer: denial.pointer,
@@ -949,6 +965,7 @@ const denialChannel: AuditCheck = {
       }
       const paired = answered.get(denial.toolCallId);
       if (paired === undefined) {
+        failed.add(denial.toolCallId);
         evidence.push({
           artifact: denial.artifact,
           pointer: denial.pointer,
@@ -960,6 +977,7 @@ const denialChannel: AuditCheck = {
       const [index, message] = paired;
       const defect = deniedMessageDefect(message);
       if (defect !== undefined) {
+        failed.add(denial.toolCallId);
         evidence.push({
           artifact: "transcript.json",
           pointer: `[${index}]`,
@@ -971,7 +989,7 @@ const denialChannel: AuditCheck = {
     if (evidence.length > 0) {
       return {
         verdict: "fail",
-        message: `${evidence.length} of ${
+        message: `${failed.size} of ${
           count(denials.length, "denial", "denials")
         } did not reach the model through the typed deny channel`,
         evidence,

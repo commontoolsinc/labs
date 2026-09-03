@@ -72,19 +72,26 @@ The current package provides:
   no boundary policy evaluation, so it sits outside the posture's caveat policy:
   the corpus is trusted for confidentiality, which is what makes a sink with no
   ceiling the right shape for it and also the whole of what holds it — the
-  endorsement is an integrity claim and gates nothing on the way out;
+  endorsement is an integrity claim and gates nothing on the way out. Which
+  cheap model answers is resolved from the run's transport, since a transport
+  serves only its own models, and a call that ended with no answer is counted on
+  the run, its children's included, and printed in the operator summary;
 - schema-validated, sanitized child returns with raw child evidence retained
   outside the ordinary parent return channel;
 - image inputs and structured top-level batch results;
-- explicit skill preload, indexed supporting-resource reads, and exact
-  allowlisted Deno/Bash skill scripts;
+- a skills registry over `--skills-root`, defaulting for a run out of a labs
+  checkout to that checkout's own `skills/` tree, with the resolved tree and its
+  source recorded in run state and printed in operator output; skill preload by
+  name, indexed supporting-resource reads, and exact allowlisted Deno/Bash skill
+  scripts (which run in the sandbox, and so still ask for the flag);
 - recoverable rejection of a malformed tool call: a name no tool answers to,
   arguments that are not a JSON object, or a `delegate_task` argument of the
   wrong shape comes back as a `cf-harness.invalid-tool-call` tool result naming
   the field and the shape expected of it — never the value it rejected — and the
-  run carries on; the call is recorded as a denied policy decision, a `not-run`
-  tool activity, and an `invalid_tool_call` failure record. Only what the model
-  cannot correct — transport, engine invariants, artifact persistence,
+  run carries on; the call is recorded as a policy decision with the outcome
+  `invalid` rather than `denied` — nothing about policy refused it — plus a
+  `not-run` tool activity and an `invalid_tool_call` failure record. Only what
+  the model cannot correct — transport, engine invariants, artifact persistence,
   cancellation, the turn cap — ends the run;
 - transcript-based resume and durable run artifacts, with retrospective omission
   joins kept outside the transcript and provider context;
@@ -209,7 +216,9 @@ The current package provides:
   runner's named posture bundle (every staged enforcement dial on, the standard
   prompt-caveat policy loaded, public-only ceilings on the network-fetch sinks),
   with the two per-dial flags applying over it — these are the fabric session's
-  dials, independent of the harness's own `--cfc-enforcement-mode`, and the
+  dials, independent of the harness's own `--cfc-enforcement-mode` up to one tie
+  — under a session raised to `enforce-strict` a harness dial nobody set follows
+  the session, and one stated weaker refuses startup naming both flags — and the
   resolved posture (each dial's value and whether the operator, the named
   bundle, or the default supplied it) is recorded as `fabricSessionCfc` in run
   state and the run report, and printed in the operator summary — the whole

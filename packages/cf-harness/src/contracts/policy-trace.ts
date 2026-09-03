@@ -75,6 +75,13 @@ export interface HarnessPolicyDecisionCounts {
   allowed: number;
   warned: number;
   denied: number;
+
+  /**
+   * Calls rejected for their arguments rather than by policy. Absent on a run
+   * recorded before the outcome existed, which is why every reader of this
+   * field reads it as `?? 0` rather than as a number.
+   */
+  invalid?: number;
 }
 
 export interface HarnessPolicyTrace {
@@ -149,6 +156,8 @@ export const countHarnessPolicyDecisions = (
   warned: decisions.filter((decision) => decision.decision === "warned")
     .length,
   denied: decisions.filter((decision) => decision.decision === "denied")
+    .length,
+  invalid: decisions.filter((decision) => decision.decision === "invalid")
     .length,
 });
 

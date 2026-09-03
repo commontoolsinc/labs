@@ -1,4 +1,5 @@
 import { checkoutDocsCorpusRoots } from "../src/docs-corpus/corpus.ts";
+import { resolveHarnessSkillsRoot } from "../src/skills/root.ts";
 import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import { normalize } from "@std/path/posix";
 import type { HarnessArtifactStore } from "../src/artifacts.ts";
@@ -142,6 +143,7 @@ Deno.test("CfHarnessEngine builds a default docker-runsc sandbox when given a wo
       source: "checkout-default",
       roots: checkoutDocsCorpusRoots(),
     },
+    skillsRoot: resolveHarnessSkillsRoot(),
     modelProvider: "openai-compatible-gateway",
     modelAuthSource: "api-key",
     policyEvents: [],

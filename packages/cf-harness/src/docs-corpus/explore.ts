@@ -10,6 +10,7 @@
 
 import {
   EXPLORE_RETURN_SCHEMA,
+  EXPLORE_SUBAGENT_CODEX_MODEL,
   EXPLORE_SUBAGENT_MODEL,
   MAX_EXPLORE_ANSWER_LENGTH,
   MAX_EXPLORE_CITATIONS,
@@ -163,9 +164,23 @@ export const readExploreQueryReply = (
 };
 
 /**
- * An explore runner over `modelClient`. The model is the profile's own
- * override rather than the run's: which model answers a documentation question
- * is an operator's choice about cost, not a caller's about the question.
+ * Which model answers an explore turn on `providerId`.
+ *
+ * The profile names a cheap model rather than the run's, because which model
+ * answers a documentation question is an operator's choice about cost and not
+ * a caller's about the question. That name is a gateway name, and a transport
+ * serves only its own models — sending it to one that does not is a refused
+ * request, not a fallback — so each transport answers with the model it has.
+ */
+export const exploreQueryModel = (providerId: string): string =>
+  providerId === "openai-codex"
+    ? EXPLORE_SUBAGENT_CODEX_MODEL
+    : EXPLORE_SUBAGENT_MODEL;
+
+/**
+ * An explore runner over `modelClient`, on the model that client's transport
+ * serves. What was sent is recorded on the reply, so the model that answered
+ * is read off the artifact rather than assumed from the profile.
  */
 export const createExploreQueryRunner = (options: {
   modelClient: HarnessModelClient;
@@ -182,12 +197,13 @@ async (request) => {
     { role: "system", content: EXPLORE_SYSTEM_PROMPT },
     { role: "user", content: exploreQueryPrompt(request) },
   ] as const satisfies readonly HarnessTranscriptMessage[];
+  const model = exploreQueryModel(options.modelClient.providerId);
   const sent: HarnessExploreQuerySent = {
-    model: EXPLORE_SUBAGENT_MODEL,
+    model,
     messages: messages.map((message) => ({ ...message })),
   };
   const result = await options.modelClient.complete({
-    model: EXPLORE_SUBAGENT_MODEL,
+    model,
     transcript: messages,
     tools: [],
     nativeModelToolIds: [],

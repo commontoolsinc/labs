@@ -101,9 +101,11 @@ import {
   parseAllowedSkillScriptSpec,
   uniqueAllowedSkillScripts,
 } from "./skills/scripts.ts";
-import type {
-  HarnessAllowedSkillScript,
-  HarnessSkillScriptExecutionTarget,
+import { resolveHarnessSkillsRoot } from "./skills/root.ts";
+import {
+  describeHarnessSkillsRoot,
+  type HarnessAllowedSkillScript,
+  type HarnessSkillScriptExecutionTarget,
 } from "./contracts/skill.ts";
 import {
   digestJsonValue,
@@ -1257,7 +1259,7 @@ export const parseCfHarnessCliArgs = async (
   const focusRoot = typeof args["focus-root"] === "string"
     ? resolve(workspace, args["focus-root"])
     : undefined;
-  const skillsRoot = typeof args["skills-root"] === "string"
+  const configuredSkillsRoot = typeof args["skills-root"] === "string"
     ? resolvePathWithinAllowedHostRoots(
       allowedHostRoots,
       workspace,
@@ -1265,14 +1267,25 @@ export const parseCfHarnessCliArgs = async (
       "--skills-root",
     ).hostPath
     : undefined;
-  const skillsRootSandboxPath = skillsRoot !== undefined
+  // The named tree is addressed inside the sandbox because it was resolved
+  // against the roots the sandbox mounts. The checkout's own tree was not: it
+  // is read on the host, where the registry scan runs, and a tool that needs
+  // the sandbox path — a skill script — still needs the flag.
+  const skillsRootSandboxPath = configuredSkillsRoot !== undefined
     ? resolvePathWithinAllowedHostRoots(
       allowedHostRoots,
       workspace,
-      skillsRoot,
+      configuredSkillsRoot,
       "--skills-root",
     ).sandboxPath
     : undefined;
+  // Naming no skills tree is not the same as wanting none: a run with no
+  // registry gives a `pattern-author` child no authoring skill at all, which
+  // is not what an operator who passed no flag asked for. The default is the
+  // checkout the harness runs out of, as the documentation corpus resolves its
+  // own.
+  const skillsRootRecord = resolveHarnessSkillsRoot(configuredSkillsRoot);
+  const skillsRoot = skillsRootRecord?.hostPath;
   // Naming no root is not the same as wanting none: the default comes from the
   // checkout the harness runs out of, applied where every surface resolves its
   // configuration, so a console started with no documentation flag is not
@@ -1306,7 +1319,10 @@ export const parseCfHarnessCliArgs = async (
   const allowedSkillScripts = parseAllowedSkillScripts(
     args["allow-skill-script"] as string | readonly string[] | undefined,
   );
-  if (allowedSkillScripts.length > 0 && skillsRoot === undefined) {
+  if (allowedSkillScripts.length > 0 && configuredSkillsRoot === undefined) {
+    // A skill script runs in the sandbox and is addressed by the sandbox path
+    // only a named tree has, so this one asks for the flag rather than for a
+    // tree.
     throw new Error("--allow-skill-script requires --skills-root");
   }
   const skillScriptExecutionTarget = parseSkillScriptExecutionTarget(
@@ -1364,10 +1380,10 @@ export const parseCfHarnessCliArgs = async (
   if (resumeRun !== undefined && imagePaths.length > 0) {
     throw new Error("--image is not supported with --resume-run");
   }
-  if (skillsRoot !== undefined) {
+  if (configuredSkillsRoot !== undefined) {
     await assertSkillsRootRealPathWithinAllowedHostRoots(
       allowedHostRoots,
-      skillsRoot,
+      configuredSkillsRoot,
     );
   }
   const artifactRoot = resolve(
@@ -1858,6 +1874,7 @@ export const parseCfHarnessCliArgs = async (
       ? { systemPrompt: args["system-prompt"] }
       : {}),
     ...(skillsRoot !== undefined ? { skillsRoot } : {}),
+    ...(skillsRootRecord !== undefined ? { skillsRootRecord } : {}),
     ...(docsCorpus !== undefined ? { docsCorpus } : {}),
     ...(skillsRootSandboxPath !== undefined ? { skillsRootSandboxPath } : {}),
     skillNames,
@@ -2617,6 +2634,18 @@ export const formatCfHarnessCliResult = (
       ? "docsCorpus: none — query_docs is absent and children cannot look documentation up"
       : `docsCorpus: ${docsCorpus.source} ${docsCorpus.roots.join(", ")}`,
   );
+  const skillsRoot = result.runState.skillsRoot;
+  lines.push(
+    skillsRoot === undefined
+      ? "skillsRoot: none — this run scanned no skills tree, so no profile preloads any skill"
+      : `skillsRoot: ${describeHarnessSkillsRoot(skillsRoot)}`,
+  );
+  const docsQueryFailures = result.runState.docsQueryFailures ?? 0;
+  if (docsQueryFailures > 0) {
+    lines.push(
+      `docsQueryFailures: ${docsQueryFailures} — query_docs calls in this run or its children that ended with no answer`,
+    );
+  }
   if (
     result.runState.wellKnownGrants !== undefined &&
     result.runState.wellKnownGrants.length > 0

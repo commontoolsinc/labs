@@ -195,7 +195,8 @@ What works today:
   reasoning effort and GPT-5.6 gateway implicit/explicit cache-mode controls
 - transcript-based resumability
 - package-local operator CLI
-- explicit Agent Skills preload via `--skills-root` and repeatable `--skill`
+- an Agent Skills registry over `--skills-root`, defaulting to the checkout's
+  own `skills/` tree, with repeatable `--skill` preloading by name
 - runtime-generated supporting-resource indexes in `skill-registry.json`
 - text-first supporting-resource reads through `read_skill_resource`, recorded
   in `skill-resource-reads.json`
@@ -1096,6 +1097,18 @@ cannot walk the payload into the parent transcript. The scrub is deliberately no
 more than that — the child exists to act on the skill, so what it did because of
 the text is its ordinary, policy-mediated output.
 
+The tree the registry scans comes from `--skills-root`, or, when the run names
+none and is running out of a labs checkout, from that checkout's own `skills/`
+directory — the same resolution the documentation corpus makes, and for the same
+reason: a run started with no skills flag is not a run whose `pattern-author`
+children were meant to author patterns with no authoring guidance. A named tree
+is held to the sandbox-path rules (it must exist and stay within the workspace
+or a host mount, and it is addressed inside the sandbox by that resolution); the
+checkout default is read on the host only, so `--allow-skill-script`, whose
+scripts run in the sandbox, still asks for the flag. Either way the resolved
+tree and where it came from are recorded in `run-state.json` under `skillsRoot`
+and printed in operator output as a `skillsRoot:` line.
+
 A handle-delivered skill bypasses the registry entirely: it is transient run
 state from a cell, the untrusted-acquisition complement to the trusted operator
 `--skills-root`, and for the delegated path it retires selection by name — the
@@ -1159,10 +1172,19 @@ all, one turn, handed the selected sections and nothing else. It is one model
 call rather than a child run, so no subagent is spawned and the depth-one
 invariant is untouched; the call is recorded like every other, as a model
 attempt in the run report and with its tokens in the run's descendant usage.
-What was sent — the model, the question, each section by path and heading with
-the endorsement atoms it carries, and the two messages verbatim — is kept on the
-tool-output artifact under the call's output id as `exploreRecord`, and stripped
-before the answer reaches the caller.
+Which cheap model answers is the run's transport's to say — a transport serves
+only its own models, and a name it does not serve is a refused request rather
+than a fallback — so the gateway answers on `gemini-3.5-flash` and the Codex
+Responses transport on `gpt-5.6-luna`. The model that answered is on the
+artifact, in `exploreRecord.model`. A call that ended with no answer — the
+provider refused it, or what came back was not a reply the tool could read — is
+counted on the run, its children's included, and printed in operator output as a
+`docsQueryFailures:` line: the model reads an ordinary tool error and carries
+on, so without that count a documentation-blind run leaves no trace an operator
+sees. What was sent — the model, the question, each section by path and heading
+with the endorsement atoms it carries, and the two messages verbatim — is kept
+on the tool-output artifact under the call's output id as `exploreRecord`, and
+stripped before the answer reaches the caller.
 
 A citation is a path and a heading. It carries no text and no handle, so
 following one is a separate `read_file`. A citation naming a section the corpus
@@ -1231,7 +1253,12 @@ two per-dial flags still apply over the bundle, so
 --fabric-cfc-enforcement-mode enforce-strict`
 is the full-strictness configuration. These dials govern the fabric session's
 runtime only — `--cfc-enforcement-mode` remains the harness's own dial for tool
-policy and the sandbox, and the two are set independently.
+policy and the sandbox. The two are set independently up to one tie: under a
+session raised to `enforce-strict`, a harness dial nobody set follows the
+session rather than the harness default (recorded as source `fabric-session`),
+and a harness dial stated weaker than the session refuses startup naming both
+flags. Nothing else about the two families is derived; `--fabric-cfc-posture`
+sets the flow-label dial, not the enforcement mode.
 
 A run states both postures rather than leaving them to be inferred: the resolved
 fabric-session posture — each dial's value and whether the operator configured
@@ -1721,8 +1748,8 @@ of the references it was handed. It receives neither `write_file` nor
 the deliverable is a result reference rather than a file. When the run has a
 skill registry, the child preloads the `pattern-dev`, `pattern-schema`, and
 `pattern-ui` skills from it. That preload is best-effort — a run whose skills
-root does not carry them, or that configures no skills root at all, still gets
-the same child with the same tools, just without the preloaded guidance.
+root does not carry them, or that resolved no skills root at all, still gets the
+same child with the same tools, just without the preloaded guidance.
 
 The child's job is author, run, and hand back a reference: a pattern it did not
 run is not an answer, and source never crosses back in any form. Its guidance
@@ -1898,7 +1925,8 @@ Current caveat:
 - confirm the intended gateway/auth mode for the environment you are testing
   against
 - skills support is explicit preload only for now:
-  - `--skill` requires `--skills-root`
+  - `--skill` names a skill in the resolved tree, which is `--skills-root` or
+    the checkout default; a run that resolves neither refuses the flag
   - skill preload is not supported with `--resume-run`
   - dynamic `load_skill` activation is still planned
 
@@ -2095,6 +2123,11 @@ it, which only a boundary that consulted a label writes. A check that counted
 `cfc_`-prefixed codes on denials would report capability denials as release
 refusals, including ones where the `cfc_` code present is the allow-side one
 that passed.
+
+A call the loop rejected for its arguments is not a denied call either: nothing
+about policy refused it, so its decision is recorded with the outcome `invalid`
+and the reason code `invalid_tool_call`, and AUD-4 does not ask it for a policy
+event or a typed deny observation.
 
 A release refusal is also not a denied CALL, and AUD-4 leaves it alone for that
 reason: the call completed and answered with a reference to the result whose

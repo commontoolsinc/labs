@@ -3057,14 +3057,26 @@ export class CfHarnessPromptLoop {
     // Installing the runner here rather than at construction is what puts that
     // turn in the same two records every other model call lands in: an attempt
     // in the run report, and its tokens beside a delegation's.
-    this.engine.setExploreQueryRunner(
-      createExploreQueryRunner({
-        modelClient: this.modelClient,
-        runId: this.engine.getRunState().runId,
-        onAttempt: recordModelAttempt,
-        onUsage: (usage) => descendantUsage.push(usage),
-      }),
-    );
+    const runExploreQuery = createExploreQueryRunner({
+      modelClient: this.modelClient,
+      runId: this.engine.getRunState().runId,
+      onAttempt: recordModelAttempt,
+      onUsage: (usage) => descendantUsage.push(usage),
+    });
+    this.engine.setExploreQueryRunner(async (request) => {
+      try {
+        return await runExploreQuery(request);
+      } catch (error) {
+        // Every way this ends without an answer counts the same, because what
+        // the count is for is the same either way: the caller asked and got
+        // nothing back. A provider that refused and a reply the tool could not
+        // read leave the child equally without documentation, and the tool
+        // turns both into an error the model reads and carries on from, which
+        // is right for the model and invisible to the operator.
+        this.engine.recordDocsQueryFailures(1);
+        throw error;
+      }
+    });
     await this.engine.ensureDiagnosticsInitialized();
     this.engine.startRun();
     if (options.promptSlotBinding !== undefined) {
@@ -3481,7 +3493,7 @@ export class CfHarnessPromptLoop {
         ? { effectClass: options.effectClass }
         : {}),
       cfcEnforcementMode: runState.cfcEnforcementMode,
-      policyDecision: "denied",
+      policyDecision: "invalid",
       executionStatus: "not-run",
       ...(options.promptSlotBinding !== undefined
         ? { promptSlot: options.promptSlotBinding }
@@ -3500,7 +3512,11 @@ export class CfHarnessPromptLoop {
         ? { effectClass: options.effectClass }
         : {}),
       cfcEnforcementMode: runState.cfcEnforcementMode,
-      decision: "denied",
+      // Not `denied`: nothing about the run's policy refused this call. The
+      // loop could not read its arguments, so no policy question was ever put,
+      // and recording it as a denial would put an unmediated refusal in the
+      // trace that no policy event can account for.
+      decision: "invalid",
       reasonCodes: ["invalid_tool_call"],
       detail: invalid.detail,
       ...(options.promptSlotBinding !== undefined
@@ -4538,8 +4554,14 @@ export class CfHarnessPromptLoop {
       cwd: profileConfig.hostToolIds.length > 0
         ? this.engine.workspaceMountPath
         : parentRunState.currentDir,
+      // The record, not just the path: a child that inherits the checkout
+      // default inherits that it was a default, rather than recording the
+      // tree as one an operator named.
       ...(this.engine.config.skillsRoot !== undefined
         ? { skillsRoot: this.engine.config.skillsRoot }
+        : {}),
+      ...(this.engine.config.skillsRootRecord !== undefined
+        ? { skillsRootRecord: this.engine.config.skillsRootRecord }
         : {}),
       // The child asks the same corpus the parent does: documentation a run is
       // provisioned with is the run's, not one context's within it.
@@ -4880,6 +4902,12 @@ export class CfHarnessPromptLoop {
       }
     }
     const childRunState = childEngine.getRunState();
+    // The child's documentation failures are the family's, and the operator
+    // reads one summary: the root's. Counted here rather than beside the
+    // child's return, because a child that failed after asking is exactly the
+    // run whose docs channel the operator most needs to hear about — and this
+    // is the one place both endings pass through, so nothing is counted twice.
+    this.engine.recordDocsQueryFailures(childRunState.docsQueryFailures ?? 0);
     const subagent: HarnessSubagentResult = {
       type: "cf-harness.subagent-result",
       childRunId,

@@ -24,7 +24,18 @@ import type {
 } from "../config.ts";
 import type { HarnessCredentialOwnerRef } from "./run-manifest.ts";
 
-export type HarnessToolPolicyDecision = "allowed" | "warned" | "denied";
+/**
+ * How policy answered one tool call. `invalid` is not one of policy's answers
+ * about authority: it records a call whose arguments the loop could not read,
+ * which never reached a policy question at all. It is kept in this union so
+ * every tool activity carries an outcome, and told apart from `denied` so a
+ * malformed call is not counted as a mediated refusal.
+ */
+export type HarnessToolPolicyDecision =
+  | "allowed"
+  | "warned"
+  | "denied"
+  | "invalid";
 export type HarnessToolExecutionStatus = "completed" | "failed" | "not-run";
 export type HarnessRunTimelineKind =
   | "run_started"

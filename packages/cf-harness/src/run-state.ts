@@ -29,6 +29,7 @@ import type {
   HarnessSkillRegistry,
   HarnessSkillResourceReads,
   HarnessSkillScriptExecutions,
+  HarnessSkillsRootRecord,
 } from "./contracts/skill.ts";
 import type {
   HarnessSubagentLineage,
@@ -172,10 +173,21 @@ export interface HarnessRunState {
   cellLabelsPath?: string;
   handleTable?: HarnessHandleTable;
   docsCorpus?: HarnessDocsCorpusRecord;
+  skillsRoot?: HarnessSkillsRootRecord;
   wellKnownGrants?: HarnessWellKnownGrant[];
   inputCells?: HarnessInputCell[];
   policyEvents: HarnessPolicyEvent[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
+
+  /**
+   * How many `query_docs` calls in this run and its descendants ended with no
+   * answer — the model that answers them was unreachable, or what came back
+   * was not a reply the tool could read. A run whose documentation channel is
+   * down still answers every call, with an error the model reads and the
+   * operator never sees, so the count is kept where a summary can state it.
+   */
+  docsQueryFailures?: number;
+
   toolOutputs: ToolResultRef[];
   lineage?: HarnessSubagentLineage;
   subagentRuns?: HarnessSubagentRunRef[];
@@ -223,9 +235,11 @@ export interface CreateHarnessRunStateOptions {
   cellLabelsPath?: string;
   handleTable?: HarnessHandleTable;
   docsCorpus?: HarnessDocsCorpusRecord;
+  skillsRoot?: HarnessSkillsRootRecord;
   wellKnownGrants?: HarnessWellKnownGrant[];
   inputCells?: HarnessInputCell[];
   policyDecisions?: HarnessPolicyDecisionRecord[];
+  docsQueryFailures?: number;
   lineage?: HarnessSubagentLineage;
   subagentRuns?: HarnessSubagentRunRef[];
   failureRecords?: HarnessFailureRecord[];
@@ -343,6 +357,9 @@ export const createHarnessRunState = (
     ...(options.docsCorpus !== undefined
       ? { docsCorpus: structuredClone(options.docsCorpus) }
       : {}),
+    ...(options.skillsRoot !== undefined
+      ? { skillsRoot: structuredClone(options.skillsRoot) }
+      : {}),
     ...(options.wellKnownGrants !== undefined
       ? { wellKnownGrants: structuredClone(options.wellKnownGrants) }
       : {}),
@@ -355,6 +372,9 @@ export const createHarnessRunState = (
     policyEvents: [],
     ...(options.policyDecisions !== undefined
       ? { policyDecisions: [...options.policyDecisions] }
+      : {}),
+    ...(options.docsQueryFailures !== undefined
+      ? { docsQueryFailures: options.docsQueryFailures }
       : {}),
     toolOutputs: [],
     ...(options.subagentRuns !== undefined
@@ -470,6 +490,21 @@ export const setHarnessSubagentRun = (
   }
   return patchHarnessRunState(state, { subagentRuns }, now);
 };
+
+/**
+ * The run with `count` more failed documentation queries against it. Called
+ * once for each explore turn a provider refused, and once more with a child's
+ * whole count when a delegation returns, so the number a summary reads covers
+ * the family rather than one run of it.
+ */
+export const addHarnessDocsQueryFailures = (
+  state: HarnessRunState,
+  count: number,
+  now = new Date().toISOString(),
+): HarnessRunState =>
+  count <= 0 ? state : patchHarnessRunState(state, {
+    docsQueryFailures: (state.docsQueryFailures ?? 0) + count,
+  }, now);
 
 export const appendHarnessFailureRecord = (
   state: HarnessRunState,

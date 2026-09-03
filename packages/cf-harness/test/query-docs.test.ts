@@ -22,6 +22,8 @@ import {
   isOperatorProvisionedReferenceAtom,
 } from "../src/contracts/docs-corpus.ts";
 import {
+  EXPLORE_SUBAGENT_CODEX_MODEL,
+  EXPLORE_SUBAGENT_MODEL,
   EXPLORE_SUBAGENT_PROFILE_CONFIG,
   MAX_EXPLORE_ANSWER_LENGTH,
   PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS,
@@ -358,6 +360,9 @@ describe("query-docs", () => {
                 ? JSON.stringify({ answer: "Dip once.", citations: [] })
                 : "Done.",
             },
+            // The explore turn spends tokens like any other, and they are
+            // counted beside a delegation's rather than as the run's own.
+            ...(turn === 2 ? { usage: { totalTokens: 12 } } : {}),
           });
         },
       };
@@ -380,6 +385,7 @@ describe("query-docs", () => {
       });
 
       const result = await loop.runPrompt({ prompt: "Look up glazing." });
+      expect(result.totalUsage?.totalTokens).toBe(12);
       const toolMessage = result.transcript.find((message) =>
         message.role === "tool"
       );
@@ -421,6 +427,147 @@ describe("query-docs", () => {
           }],
         }],
       }]);
+    });
+
+    it("counts an explore turn the provider refused, so the operator's summary can say so", async () => {
+      let turn = 0;
+      const modelClient: HarnessModelClient = {
+        providerId: "test-provider",
+        complete: (request) => {
+          if (request.tools.length === 0) {
+            // The explore turn: no tools, and this provider will not serve it.
+            return Promise.reject(new Error("request failed (400)"));
+          }
+          turn += 1;
+          if (turn === 1) {
+            return Promise.resolve({
+              assistant: {
+                role: "assistant" as const,
+                content: "",
+                toolCalls: [{
+                  id: "call-query-docs-down",
+                  type: "function" as const,
+                  function: {
+                    name: "query_docs",
+                    arguments: JSON.stringify({ question: "glazing" }),
+                  },
+                }],
+              },
+            });
+          }
+          return Promise.resolve({
+            assistant: { role: "assistant" as const, content: "Done." },
+          });
+        },
+      };
+      const loop = new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId: `query-docs-down-${crypto.randomUUID()}`,
+          model: "test-model",
+          cfcEnforcementMode: "disabled",
+          docsCorpus: {
+            type: "cf-harness.docs-corpus-record",
+            source: "configured",
+            roots: [root],
+          },
+        }),
+        modelClient,
+        allowedToolIds: ["query_docs"],
+      });
+
+      const result = await loop.runPrompt({ prompt: "Look up glazing." });
+
+      // The model reads a tool error and carries on, which is why the count is
+      // the only place the run says its documentation channel was down.
+      const toolMessage = result.transcript.find((message) =>
+        message.role === "tool"
+      );
+      expect(toolMessage?.content).toContain('"status":"error"');
+      expect(result.runState.status).toBe("completed");
+      expect(result.runState.docsQueryFailures).toBe(1);
+    });
+
+    it("counts a failed child's documentation queries on the parent, however the delegation ended", async () => {
+      let childTurns = 0;
+      const modelClient: HarnessModelClient = {
+        providerId: "test-provider",
+        complete: (request) => {
+          if (request.tools.length === 0) {
+            // The explore turn, which this provider will not serve.
+            return Promise.reject(new Error("request failed (400)"));
+          }
+          const child = request.runId.includes(".subagent.");
+          if (!child) {
+            return Promise.resolve(
+              request.transcript.some((message) => message.role === "tool")
+                ? {
+                  assistant: { role: "assistant" as const, content: "Done." },
+                }
+                : {
+                  assistant: {
+                    role: "assistant" as const,
+                    content: "",
+                    toolCalls: [{
+                      id: "call-delegate-docs-down",
+                      type: "function" as const,
+                      function: {
+                        name: "delegate_task",
+                        arguments: JSON.stringify({
+                          goal: "Look up glazing.",
+                          profile: "pattern-author",
+                        }),
+                      },
+                    }],
+                  },
+                },
+            );
+          }
+          childTurns += 1;
+          if (childTurns === 1) {
+            return Promise.resolve({
+              assistant: {
+                role: "assistant" as const,
+                content: "",
+                toolCalls: [{
+                  id: "call-child-query-docs",
+                  type: "function" as const,
+                  function: {
+                    name: "query_docs",
+                    arguments: JSON.stringify({ question: "glazing" }),
+                  },
+                }],
+              },
+            });
+          }
+          // The child asked, got nothing, and then died. Its count has to
+          // reach the parent from the failure path or it reaches nobody.
+          return Promise.reject(new Error("the child's transport failed"));
+        },
+      };
+      const loop = new CfHarnessPromptLoop({
+        engine: new CfHarnessEngine({
+          sandboxRuntime: new FakeSandboxRuntime(),
+          runId: `query-docs-child-down-${crypto.randomUUID()}`,
+          model: "test-model",
+          cfcEnforcementMode: "disabled",
+          docsCorpus: {
+            type: "cf-harness.docs-corpus-record",
+            source: "configured",
+            roots: [root],
+          },
+        }),
+        modelClient,
+        allowedToolIds: ["delegate_task", "query_docs"],
+        allowedSubagentProfiles: ["pattern-author"],
+      });
+
+      const result = await loop.runPrompt({ prompt: "Delegate a lookup." });
+
+      // The delegation failed, so the success path never ran; the count still
+      // reaches the parent, and exactly once.
+      expect(result.runState.subagentRuns?.at(-1)).toBeDefined();
+      expect(result.runState.docsQueryFailures).toBe(1);
     });
 
     it("refuses when the run configures no corpus root", async () => {
@@ -515,6 +662,52 @@ describe("query-docs", () => {
         "user",
       ]);
       expect(reply.sent.messages[1].content).toContain("docs/glazing.md");
+    });
+
+    it("asks each transport for a model it serves, and records which answered", async () => {
+      const asked: string[] = [];
+      const runnerOn = (providerId: string) =>
+        createExploreQueryRunner({
+          modelClient: {
+            providerId,
+            complete: (request) => {
+              asked.push(request.model);
+              return Promise.resolve({
+                assistant: {
+                  role: "assistant",
+                  content: JSON.stringify({
+                    answer: "Dip once.",
+                    citations: [],
+                  }),
+                },
+              });
+            },
+          },
+          runId: "explore-transport-test",
+        });
+      const request = {
+        question: "glazing",
+        sections: [{
+          path: "docs/glazing.md",
+          heading: "Glazing",
+          text: "Dip once.",
+          integrity: [],
+        }],
+      };
+
+      const gateway = await runnerOn("openai-compatible-gateway")(request);
+      const codex = await runnerOn("openai-codex")(request);
+
+      // The gateway's own name for the cheap model is not a name the Codex
+      // Responses transport serves, and sending it there is a refused request
+      // rather than a fallback.
+      expect(asked).toEqual([
+        EXPLORE_SUBAGENT_MODEL,
+        EXPLORE_SUBAGENT_CODEX_MODEL,
+      ]);
+      expect(EXPLORE_SUBAGENT_CODEX_MODEL).not.toEqual(EXPLORE_SUBAGENT_MODEL);
+      expect(gateway.sent.model).toBe(EXPLORE_SUBAGENT_MODEL);
+      expect(codex.sent.model).toBe(EXPLORE_SUBAGENT_CODEX_MODEL);
     });
   });
 

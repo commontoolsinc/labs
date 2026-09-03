@@ -83,6 +83,7 @@ import {
   type HarnessSessionConfig,
   harnessSessionEngineOptions,
 } from "../src/session-assembly.ts";
+import { resolveHarnessSkillsRoot } from "../src/skills/root.ts";
 import {
   createHarnessInteractiveChatService,
   type CreateHarnessInteractiveChatServiceOptions,
@@ -565,12 +566,14 @@ export const resolveConsoleConfig = async (
       : {}),
   };
 
-  // The repo's skills/ tree gives the pattern-author subagent its preloaded
-  // pattern-dev + pattern-schema skills; without a skills root the parent
-  // model authors patterns blind and burns turns on idiom errors.
-  const skillsRootFlag = flag("skills-root") ??
-    nonEmpty(env.CF_HARNESS_CONSOLE_SKILLS_ROOT) ??
-    resolve(cwd, join(moduleDir, "../../../skills"));
+  // The checkout's skills/ tree gives the pattern-author subagent its
+  // preloaded pattern-dev + pattern-schema skills; without a skills root the
+  // parent model authors patterns blind and burns turns on idiom errors. The
+  // default is found the same way the CLI finds it, so the two surfaces scan
+  // one tree.
+  const skillsRootRecord = resolveHarnessSkillsRoot(
+    flag("skills-root") ?? nonEmpty(env.CF_HARNESS_CONSOLE_SKILLS_ROOT),
+  );
 
   const patternIndexUrl = flag("pattern-index-url") ??
     nonEmpty(env.CF_HARNESS_PATTERN_INDEX_URL);
@@ -633,7 +636,9 @@ export const resolveConsoleConfig = async (
     // native library can still do.
     ...(sessionDb === "none" ? {} : { sessionDbPath: resolve(cwd, sessionDb) }),
     maxModelTurns: positiveInteger(maxModelTurns, "--max-model-turns"),
-    skillsRoot: skillsRootFlag,
+    ...(skillsRootRecord !== undefined
+      ? { skillsRoot: skillsRootRecord.hostPath, skillsRootRecord }
+      : {}),
     ...(systemPromptFile !== undefined
       ? { systemPrompt: readSystemPromptFile(systemPromptFile, cwd) }
       : {}),

@@ -174,6 +174,25 @@ export interface HarnessSkillRecord {
   diagnostics: HarnessSkillDiagnostic[];
 }
 
+/** Where the skills tree a run scanned came from. */
+export type HarnessSkillsRootSource = "configured" | "checkout-default";
+
+/**
+ * The skills tree a run scanned, and how it was arrived at. A run that names
+ * no tree still gets one, so which tree a child's skills came from is a fact
+ * about the run rather than a restatement of the operator's flags.
+ */
+export interface HarnessSkillsRootRecord {
+  type: "cf-harness.skills-root-record";
+  source: HarnessSkillsRootSource;
+  hostPath: string;
+}
+
+/** A skills-root record as an operator message names it. */
+export const describeHarnessSkillsRoot = (
+  record: HarnessSkillsRootRecord,
+): string => `${record.source} ${record.hostPath}`;
+
 export interface HarnessSkillRegistry {
   type: typeof HARNESS_SKILL_REGISTRY_TYPE;
   version: 1;

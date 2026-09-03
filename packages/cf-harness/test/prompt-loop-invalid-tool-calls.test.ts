@@ -555,8 +555,11 @@ describe("prompt-loop invalid tool calls", () => {
     expect(failure?.toolId).toEqual("delegate_task");
     expect(failure?.toolCallId).toEqual("call-recorded");
 
+    // `invalid`, not `denied`: policy refused nothing here, and an audit that
+    // reads a denial expects a policy event and a typed deny observation this
+    // rejection has neither of.
     const decision = result.runState.policyDecisions?.at(-1);
-    expect(decision?.decision).toEqual("denied");
+    expect(decision?.decision).toEqual("invalid");
     expect(decision?.reasonCodes).toEqual(["invalid_tool_call"]);
     expect(decision?.toolCallId).toEqual("call-recorded");
 
@@ -565,7 +568,7 @@ describe("prompt-loop invalid tool calls", () => {
     const activity = report?.toolActivity.at(-1);
     expect(activity?.toolId).toEqual("delegate_task");
     expect(activity?.executionStatus).toEqual("not-run");
-    expect(activity?.policyDecision).toEqual("denied");
+    expect(activity?.policyDecision).toEqual("invalid");
     expect(typeof activity?.errorDetail).toBe("string");
   });
 
