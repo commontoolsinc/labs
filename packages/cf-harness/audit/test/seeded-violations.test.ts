@@ -745,6 +745,18 @@ describe("seeded violations", () => {
       });
     });
 
+    it("reports an unreadable output file rather than narrowing what it read", () => {
+      // A file the loader could not parse says nothing about the call it
+      // belongs to, so a directory listing one cannot answer which calls
+      // produced a result. Reading the rest and calling that the answer is the
+      // same silent narrowing an absent directory would be.
+      turnsOnly("AUD-21", "inconclusive", (root) => {
+        const outputs = root.toolOutputs;
+        if (outputs.status !== "present") throw new Error("no outputs");
+        delete (outputs.entries[0] as { value?: unknown }).value;
+      });
+    });
+
     it("skips an output entry that names no call", () => {
       // A file under `tool-outputs/` that parsed but carries no `outputId`
       // belongs to no call, so it says nothing about whether one produced a

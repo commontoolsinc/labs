@@ -95,6 +95,10 @@ export const KNOWN_DEFECT_REGISTRATIONS = {
  * is the only one it can have, and reading that absence as an ungated path
  * reports a compile error as a missing gate.
  *
+ * A failure that carries a `releaseDecision` is the exception, and is NOT
+ * resultless: `errorOutput` attaches the decision where the boundary already
+ * decided, so such a call reached it and belongs in the measured set.
+ *
  * Read from the call's own recorded output rather than from its execution
  * status, which is `completed` for a call that ran and answered with a
  * failure.
@@ -107,6 +111,11 @@ const resultlessCalls = (run: RunEvidence): ReadonlySet<string> | undefined => {
   const resultless = new Set<string>();
   const failed = new Set<string>();
   for (const entry of run.toolOutputs.entries) {
+    // An entry the loader could not parse says nothing about the call it
+    // belongs to, and a directory that lists one cannot answer which calls
+    // produced a result. One unreadable file makes the whole reading unread
+    // rather than silently narrowing it.
+    if (entry.value === undefined) return undefined;
     const value = entry.value as
       | { outputId?: unknown; status?: unknown }
       | undefined;

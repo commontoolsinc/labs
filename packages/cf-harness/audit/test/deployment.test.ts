@@ -190,6 +190,30 @@ const verdictOf = (
 
 describe("Group D deployment checks", () => {
   describe("AUD-16 reads the release reason, not the decision word", () => {
+    it("does not throw on a decision persisted with an empty release", () => {
+      // `null` is a shape a record can hold and a dereference cannot. A check
+      // that throws produces no verdict at all, which is worse than the wrong
+      // one: the run goes unreported rather than reported badly.
+      const withRefusal = familyRefusingRelease(
+        ["sink-ceiling"],
+        ["run_pattern"],
+      );
+      const trace = withRefusal.root.policyTrace;
+      if (trace.status !== "present") throw new Error("no trace");
+      const decisions =
+        (trace.value as unknown as { decisions: Record<string, unknown>[] })
+          .decisions;
+      decisions[decisions.length - 1]!.release = null;
+
+      const refusal = auditDeployment({
+        families: [withRefusal],
+        paths: [FIXTURE_RUNS_DIR],
+        expectRefusals: false,
+      }).find((one) => one.checkId === "AUD-16");
+      expect(refusal).toBeDefined();
+      expect(refusal?.message).not.toContain("1 release refusal");
+    });
+
     it("does not count a release record whose boundary names neither", () => {
       // The contract exports its reason codes so a record read off disk is
       // checked against them rather than asserted into them. A persisted shape

@@ -673,17 +673,20 @@ const isHostAuthoredOutputFile = (fileName: string): boolean => {
  * audit that could only read the fields it was built with would go quiet on
  * exactly the runs worth reading.
  */
-/**
- * What a counts object says about `withheld`, in the three readings that
- * differ: a trace written before the outcome existed declares nothing, a trace
- * written after declares a number, and a field that is present and is not a
- * number is neither.
- */
+/** The three readings of a `withheld` count that differ. */
 type WithheldCount =
   | { kind: "absent" }
   | { kind: "number"; value: number }
   | { kind: "malformed" };
 
+/**
+ * What a counts object says about `withheld`.
+ *
+ * A trace written before the outcome existed declares nothing, a trace written
+ * after declares a number, and a field that is present and is not a number is
+ * neither — which is why the three are told apart rather than collapsed into
+ * an optional number.
+ */
 const withheldIn = (
   counts: HarnessPolicyDecisionCounts | Record<string, unknown> | undefined,
 ): WithheldCount => {
