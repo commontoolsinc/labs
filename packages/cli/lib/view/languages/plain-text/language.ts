@@ -23,6 +23,7 @@ export const plainTextLanguage: Language = {
     filenamePatterns: [/^(?:LICENSE|NOTICE)\..+$/i],
     aliases: ["text", "plaintext"],
     interpreters: [],
+    sharedExtensions: [],
   },
 
   parseDocument: (text) => plainTextDocument(text),

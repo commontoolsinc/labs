@@ -4,6 +4,11 @@
  * {@link Language} contract. JSON Lines uses the same tokenizer with fresh
  * lexical state for each record.
  *
+ * The JSON language also claims the surveyed JSON-shaped names that no `.json`
+ * suffix announces: web manifests, TLDraw documents, Deno lock files, editor
+ * workspace files, Swift package resolutions, and the `.cfg` files whose
+ * source shows a JSON object.
+ *
  * JSON has no semantic layer (no types or cross-file definitions to resolve),
  * so it omits `createSemantics`/`createDiffSemantics`. A single JSON or JSONC
  * value contributes a node tree of object keys. One-record JSON Lines input
@@ -24,17 +29,33 @@ import {
   jsonLinesHighlightLines,
 } from "./json.ts";
 
+/**
+ * The evidence a `.cfg` file gives for JSON. TLC configuration opens with a
+ * directive or a `\*` comment, and an INI section header opens with `[`, so
+ * only an opening brace selects JSON.
+ */
+const JSON_SHAPED_CONFIGURATION = /^\s*\{/;
+
 export const jsonLanguage: Language = {
   id: "json",
 
   input: { kind: "text", decoder: utf8Decoder },
 
   metadata: {
-    extensions: [".json", ".jsonc"],
-    filenames: [],
+    extensions: [
+      ".json",
+      ".jsonc",
+      ".webmanifest",
+      ".tldr",
+      ".code-workspace",
+    ],
+    filenames: ["deno.lock", "Package.resolved"],
     filenamePatterns: [/\.jsonc?\.example$/i],
     aliases: ["jsonc"],
     interpreters: [],
+    sharedExtensions: [
+      { extension: ".cfg", content: JSON_SHAPED_CONFIGURATION },
+    ],
   },
 
   parseDocument: (text) => jsonDocument(text),
@@ -60,6 +81,7 @@ export const jsonLinesLanguage: Language = {
     filenamePatterns: [],
     aliases: ["jsonl", "ndjson"],
     interpreters: [],
+    sharedExtensions: [],
   },
 
   parseDocument: (text) => jsonLinesDocument(text),

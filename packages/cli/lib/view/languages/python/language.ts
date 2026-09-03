@@ -26,6 +26,7 @@ export const pythonLanguage: Language = {
       /^python(?:\d+(?:\.\d+)*)?$/,
       /^pypy(?:\d+(?:\.\d+)*)?$/,
     ],
+    sharedExtensions: [],
   },
 
   parseDocument: (text) => pythonDocument(text),

@@ -3,9 +3,9 @@
  * color, navigate, edit and (optionally) reason about it, plus selecting the
  * right language and byte decoder for a file. A language is a stateless
  * strategy object: one instance describes each supported syntax. Selection
- * combines explicit language choices, filename or shebang metadata, and byte
- * content detection. Once selected, the pager dispatches every operation
- * through that object's methods.
+ * combines explicit language choices, filename, shared-extension, or shebang
+ * metadata, and byte content detection. Once selected, the pager dispatches
+ * every operation through that object's methods.
  *
  * Per-file mutable state (a warm incremental parse, a language service) is not
  * held on the language; the language is a factory for the small stateful
@@ -192,10 +192,26 @@ export interface HunkStructureContext {
 export type InterpreterPattern = string | RegExp;
 
 /**
+ * An extension that several syntaxes use, such as `.cfg`. The language claims
+ * a name ending in {@link extension} only when the source also matches
+ * {@link content}, so selection that has no source text leaves the name to
+ * another language or to plain text.
+ */
+export interface SharedExtension {
+  /** The extension, including its leading dot, compared without case. */
+  readonly extension: string;
+
+  /** The evidence this language requires from the complete source. */
+  readonly content: RegExp;
+}
+
+/**
  * Declarative names that select a language. Extensions include their leading
  * dot and compare without case. Exact filenames and regular-expression
  * patterns match a path's basename. Aliases name explicit language overrides.
- * Interpreters match executable basenames extracted from shebangs.
+ * Interpreters match executable basenames extracted from shebangs. Shared
+ * extensions name syntaxes that one extension cannot tell apart, and pair each
+ * with the source evidence that settles it.
  */
 export interface LanguageMetadata {
   readonly extensions: readonly string[];
@@ -203,6 +219,7 @@ export interface LanguageMetadata {
   readonly filenamePatterns: readonly RegExp[];
   readonly aliases: readonly string[];
   readonly interpreters: readonly InterpreterPattern[];
+  readonly sharedExtensions: readonly SharedExtension[];
 }
 
 /**
@@ -219,7 +236,8 @@ export interface Language {
   /** Decoding and, for byte languages, incremental rendering behavior. */
   readonly input: LanguageInput;
 
-  /** Filename, explicit-name, and shebang selectors for this language. */
+  /** Filename, shared-extension, explicit-name, and shebang selectors for
+   * this language. */
   readonly metadata: LanguageMetadata;
 
   /** Parse `text` into the full document model: colored lines, a structure
@@ -452,6 +470,20 @@ export function metadataMatchesFilename(
   );
 }
 
+/** Whether metadata claims a shared extension that this source confirms. */
+export function metadataMatchesSharedExtension(
+  metadata: LanguageMetadata,
+  fileName: string | undefined,
+  text: string,
+): boolean {
+  if (fileName === undefined) return false;
+  const lower = basename(fileName).toLowerCase();
+  return metadata.sharedExtensions.some((shared) =>
+    lower.endsWith(shared.extension.toLowerCase()) &&
+    regularExpressionMatches(shared.content, text)
+  );
+}
+
 /** The language selected by filename metadata, with plain text as fallback. */
 export function languageForFile(fileName: string | undefined): Language {
   return languageMatchingFilename(fileName) ?? plainTextLanguage;
@@ -487,6 +519,7 @@ export function decodeLanguageInput(
     }
   }
   return decodeTextInput(
+    fileName,
     byFilename,
     bytes,
     allLanguages().find((language) => language.input.kind === "bytes"),
@@ -494,6 +527,7 @@ export function decodeLanguageInput(
 }
 
 function decodeTextInput(
+  fileName: string | undefined,
   selectedLanguage: Language | undefined,
   bytes: Uint8Array,
   byteFallback: Language | undefined,
@@ -511,7 +545,8 @@ function decodeTextInput(
     };
   }
   return {
-    language: selectedLanguage ?? languageForShebang(source.text) ??
+    language: selectedLanguage ??
+      languageMatchingSource(fileName, source.text) ??
       plainTextLanguage,
     source,
   };
@@ -526,9 +561,21 @@ function languageMatchingFilename(
   return undefined;
 }
 
+/** The language a shared extension or a shebang selects from source content. */
+function languageMatchingSource(
+  fileName: string | undefined,
+  text: string,
+): Language | undefined {
+  const shared = allLanguages().find((language) =>
+    metadataMatchesSharedExtension(language.metadata, fileName, text)
+  );
+  return shared ?? languageForShebang(text);
+}
+
 /**
  * Select a language for complete source. A recognized filename takes
- * precedence. A filename with no metadata match can defer to a shebang.
+ * precedence. A shared extension takes the source evidence its metadata names,
+ * and a filename with no metadata match can defer to a shebang.
  */
 export function languageForSource(
   fileName: string | undefined,
@@ -536,7 +583,8 @@ export function languageForSource(
 ): Language {
   const byFilename = languageMatchingFilename(fileName);
   if (byFilename !== undefined) return byFilename;
-  return languageForShebang(text.replace(/^\uFEFF/, "")) ?? plainTextLanguage;
+  const source = text.replace(/^\uFEFF/, "");
+  return languageMatchingSource(fileName, source) ?? plainTextLanguage;
 }
 
 let languagesByName: ReadonlyMap<string, Language> | undefined;

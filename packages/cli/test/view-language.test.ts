@@ -24,6 +24,7 @@ import {
   type LanguageMetadata,
   languageNames,
   metadataMatchesFilename,
+  metadataMatchesSharedExtension,
   renderedLinesFor,
 } from "../lib/view/languages/language.ts";
 import { type LanguageDecoder } from "../lib/view/languages/decoder.ts";
@@ -71,6 +72,7 @@ Deno.test("language metadata matches extensions, exact names, and compound patte
     filenamePatterns: [/^Dockerfile\..+$/i],
     aliases: ["example"],
     interpreters: ["example-runner"],
+    sharedExtensions: [{ extension: ".shared", content: /^demo:/ }],
   };
 
   assert(metadataMatchesFilename(metadata, "/repo/source.DEMO"));
@@ -80,6 +82,32 @@ Deno.test("language metadata matches extensions, exact names, and compound patte
   assert(!metadataMatchesFilename(metadata, "/repo/build"));
   assert(!metadataMatchesFilename(metadata, "/repo/demo"));
   assert(!metadataMatchesFilename(metadata, undefined));
+});
+
+Deno.test("language metadata claims a shared extension only with its evidence", () => {
+  const metadata: LanguageMetadata = {
+    extensions: [],
+    filenames: [],
+    filenamePatterns: [],
+    aliases: [],
+    interpreters: [],
+    sharedExtensions: [{ extension: ".shared", content: /^demo:/ }],
+  };
+
+  assert(!metadataMatchesFilename(metadata, "/repo/source.shared"));
+  assert(
+    metadataMatchesSharedExtension(metadata, "/repo/source.shared", "demo:"),
+  );
+  assert(
+    metadataMatchesSharedExtension(metadata, "/repo/source.SHARED", "demo:"),
+  );
+  assert(
+    !metadataMatchesSharedExtension(metadata, "/repo/source.shared", "other"),
+  );
+  assert(
+    !metadataMatchesSharedExtension(metadata, "/repo/source.other", "demo:"),
+  );
+  assert(!metadataMatchesSharedExtension(metadata, undefined, "demo:"));
 });
 
 Deno.test("languageForFile: named JavaScript uses the TypeScript-family parser", () => {
@@ -186,6 +214,7 @@ describe("language byte decoding", () => {
     const byteFallback = { ...binaryLanguage, id: "byte-fallback" };
 
     const decoded = languageInternals.decodeTextInput(
+      "source.ts",
       typeScriptLanguage,
       bytes,
       byteFallback,
@@ -195,6 +224,7 @@ describe("language byte decoding", () => {
     expect(decoded.source.encode(decoded.source.text)).toEqual(bytes);
 
     const fallback = languageInternals.decodeTextInput(
+      "source.selected",
       selectedLanguage,
       bytes,
       byteFallback,
@@ -204,6 +234,7 @@ describe("language byte decoding", () => {
 
     expect(() =>
       languageInternals.decodeTextInput(
+        "source.selected",
         selectedLanguage,
         bytes,
         undefined,

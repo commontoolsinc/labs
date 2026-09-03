@@ -6,15 +6,22 @@ Unknown named files and filename-free source without a recognized shebang use
 plain text, while filename-free transformed compiler output keeps its TypeScript
 default. Piped source can select a language directly or through a virtual
 filename. Declarative metadata can now describe extensions, exact names,
-compound patterns, explicit aliases, and direct interpreter shebangs. JSON Lines
-and NDJSON use the JSON tokenizer with independent lexical state for each record.
-Python files with recognized extensions now have syntax highlighting.
+compound patterns, explicit aliases, direct interpreter shebangs, and
+extensions that several syntaxes share. JSON Lines and NDJSON use the JSON
+tokenizer with independent lexical state for each record. JSON also covers the
+surveyed names that no `.json` suffix announces: web manifests, TLDraw
+documents, Deno lock files, editor workspace files, Swift package resolutions,
+and the `.cfg` files whose source opens a JSON object. Python files with
+recognized extensions now have syntax highlighting.
 
 Automatic container detection is limited to structurally identified raw unified
-diffs and standard Git commit output. Recognized shebangs and transformed
-compiler headers remain explicit source selectors. Binary is a supported,
-read-only language with raw-byte decoding and a hex-dump rendered view. Known
-binary filenames, NUL-containing input, and invalid UTF-8 select it before text
+diffs and standard Git commit output. Source evidence otherwise settles only an
+extension that several syntaxes share. Each of those extensions is paired in
+metadata with the evidence one language claims it on, and a view with no source
+text leaves such a name unclaimed. Recognized shebangs and transformed compiler
+headers remain explicit source selectors. Binary is a supported, read-only
+language with raw-byte decoding and a hex-dump rendered view. Known binary
+filenames, NUL-containing input, and invalid UTF-8 select it before text
 decoding. Interactive binary views use a bounded preview, while redirected
 output streams the complete dump. Text saves use the encoder paired with the
 decoded source, including preservation of a UTF-8 byte order mark. Binary files
@@ -108,7 +115,7 @@ relative value. Record the reason in this plan.
 - [x] Represent extensions, exact filenames, compound filename patterns,
   aliases, and shebang interpreters as language metadata.
 - [x] Keep content detection only for unambiguous containers such as unified
-  diffs.
+  diffs, and for the evidence a shared extension pairs with one language.
 - [x] Detect known binary files and NUL-containing input before source
   decoding.
 - [x] Build a fixture corpus with direct-file, diff, incomplete-edit, and
@@ -264,9 +271,23 @@ contains 40 path-change events on current JSON Lines paths since February 18,
 2026. This activity and the existing tokenizer reuse keep Stage 1 ahead of new
 grammar work.
 
+A September 2, 2026 check read the JSON-shaped special cases in the local
+`labs`, `loom`, `gvisor`, `common-cluster`, `infra`, and `specs` checkouts. All
+three surveyed web manifests are there, one in Labs and two in Loom, along with
+the Labs TLDraw document, the Labs and Loom Deno lock files, and the gVisor
+syzkaller `.cfg`. Each of those files opens a JSON object. The check also read
+the two syntaxes that `.cfg` has to be told apart from. TLC configuration in
+Labs and Common Cluster opens with a `\*` comment or a directive, and the
+Ansible configuration in Infra opens with a `[defaults]` section header. An
+opening brace is therefore the evidence for claiming a `.cfg` file as JSON, and
+an opening bracket is not. These six checkouts hold neither the surveyed editor
+workspace file nor the surveyed Swift package resolution, so those two names
+rest on the survey alone. The check confirms the recorded forms in the
+repositories it covers; it does not refresh any count.
+
 - [x] Reuse the JSON tokenizer for `.jsonl` and `.ndjson`.
 - [x] Isolate malformed lines so one line cannot affect the next.
-- [ ] Recognize `.webmanifest`, `.tldr`, Deno lock files, JSON-shaped `.cfg`
+- [x] Recognize `.webmanifest`, `.tldr`, Deno lock files, JSON-shaped `.cfg`
   files, VS Code workspace files, and Swift `Package.resolved`.
 - [ ] Add Jupyter notebook container recognition for `.ipynb`.
 - [ ] Leave notebook cell-language delegation for the matching language phase.
