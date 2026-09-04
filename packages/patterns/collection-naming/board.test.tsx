@@ -1,12 +1,12 @@
 /**
  * Pattern tests for the exemplar board and its item: allocation on create,
  * density, a name never reused, a name kept whatever happens to its item, the
- * backfill and its idempotence, index rows and the default an unnamed
- * member's row reads as, the item reading its own name out of the board's
- * table, the declaration, the bound on what a read of the namespace expands,
- * and the rejections. Every rejection here is a thrown verb, so the runtime
- * errors are required, and the count is exact: a guard quietly reverting to
- * a silent return fails the suite.
+ * backfill and its idempotence, index rows that are the members and the
+ * default an unnamed member's `shortName` reads as, the item reading its own
+ * name out of the board's table, the declaration, the bound on what a read of
+ * the namespace expands, and the rejections. Every rejection here is a thrown
+ * verb, so the runtime errors are required, and the count is exact: a guard
+ * quietly reverting to a silent return fails the suite.
  */
 
 import {
@@ -21,9 +21,9 @@ import {
   Writable,
 } from "commonfabric";
 import { findElement, hasText } from "../test/vnode-helpers.ts";
-import Board, { indexRowsOf, type ItemDemand } from "./board.tsx";
+import Board, { type ItemDemand } from "./board.tsx";
 import Item from "./item.tsx";
-import { backfillNames, type NamesMap } from "./naming.ts";
+import { backfillNames, nameOf, type NamesMap } from "./naming.ts";
 
 export default pattern(() => {
   const items = new Writable<ItemDemand[] | Default<[]>>([]);
@@ -42,8 +42,9 @@ export default pattern(() => {
     findElement(board[UI], "cf-badge") === undefined
   );
 
-  // Allocation on create: the created item is reachable at `names["1"]`,
-  // and its index row and its names-table row both carry the name.
+  // Allocation on create: the created item is reachable at `names["1"]`, its
+  // index row — the item itself — reads the name as `shortName` once the
+  // item's own lookup has run, and its names-table row carries the name.
   const action_add_first = action(() => {
     board.addItem.send({
       title: "  First item  ",
@@ -54,10 +55,10 @@ export default pattern(() => {
   const assert_first_is_named_one = assert(() =>
     board.itemCount === 1 &&
     board.items?.[0]?.title === "First item" &&
-    board.index?.[0]?.name === "1" &&
+    board.index?.[0]?.shortName === "1" &&
     board.index?.[0]?.title === "First item" &&
     (board.index?.[0]?.createdAt ?? 0) > 0 &&
-    equals(board.index?.[0]?.member as object, board.items?.[0] as object) &&
+    equals(board.index?.[0] as object, board.items?.[0] as object) &&
     equals(
       ((board.names ?? {}) as NamesMap)["1"] as object,
       board.items?.[0] as object,
@@ -74,8 +75,8 @@ export default pattern(() => {
   });
   const assert_second_is_named_two = assert(() =>
     board.itemCount === 2 &&
-    board.index?.[0]?.name === "1" &&
-    board.index?.[1]?.name === "2" &&
+    board.index?.[0]?.shortName === "1" &&
+    board.index?.[1]?.shortName === "2" &&
     Object.keys((board.names ?? {}) as NamesMap).join(",") === "1,2" &&
     board[NAME] === "Items (2)"
   );
@@ -98,7 +99,7 @@ export default pattern(() => {
   });
   const assert_third_follows_the_largest = assert(() =>
     board.itemCount === 3 &&
-    board.index?.[2]?.name === "8" &&
+    board.index?.[2]?.shortName === "8" &&
     (board.namesTable ?? []).length === 4 &&
     Object.keys((board.names ?? {}) as NamesMap).join(",") === "1,2,7,8"
   );
@@ -111,7 +112,7 @@ export default pattern(() => {
   });
   const assert_renamed_item_keeps_its_name = assert(() =>
     board.index?.[0]?.title === "First item, renamed" &&
-    board.index?.[0]?.name === "1"
+    board.index?.[0]?.shortName === "1"
   );
   const action_remove_second = action(() => {
     items.removeByValue(items.key(1));
@@ -119,7 +120,7 @@ export default pattern(() => {
   const assert_removed_item_keeps_its_entry = assert(() =>
     board.itemCount === 2 &&
     (board.index ?? []).length === 2 &&
-    board.index?.[1]?.name === "8" &&
+    board.index?.[1]?.shortName === "8" &&
     (board.namesTable ?? []).length === 4 &&
     Object.keys((board.names ?? {}) as NamesMap).join(",") === "1,2,7,8"
   );
@@ -128,14 +129,15 @@ export default pattern(() => {
   });
   const assert_fourth_does_not_reuse_two = assert(() =>
     board.itemCount === 3 &&
-    board.index?.[2]?.name === "9" &&
+    board.index?.[2]?.shortName === "9" &&
     Object.keys((board.names ?? {}) as NamesMap).join(",") === "1,2,7,8,9"
   );
 
   // The bound: a read of the namespace carries links and nothing behind
   // them. The stray entry is a cell with a title, so a title in the
-  // serialization would mean a member was expanded. The index carries its
-  // copied scalars and, likewise, nothing behind its references.
+  // serialization would mean a member was expanded. The index is the items
+  // through the row schema, so it carries their titles and names and nothing
+  // the schema does not name — no body, no verbs, no rendered view.
   const assert_namespace_read_expands_no_member = assert(() => {
     const serialized = JSON.stringify(board.names);
     return Object.keys((board.names ?? {}) as NamesMap).length === 5 &&
@@ -147,8 +149,8 @@ export default pattern(() => {
     const serialized = JSON.stringify(board.index);
     return (board.index ?? []).length === 3 &&
       serialized.includes('"title"') &&
+      serialized.includes('"shortName"') &&
       !serialized.includes('"body"') &&
-      !serialized.includes('"shortName"') &&
       !serialized.includes("vnode");
   });
 
@@ -173,14 +175,6 @@ export default pattern(() => {
     hasText(wired[UI], "Wired item") &&
     hasText(wired[UI], "No body yet.")
   );
-  // The index skips a member with nothing behind it yet — one appended a
-  // moment ago, still mid-sync, which reads as `undefined` — and rows the
-  // rest.
-  const midSyncNeighbor = new Writable({ title: "Settled", createdAt: 4 });
-  const assert_index_skips_a_mid_sync_member = assert(() =>
-    indexRowsOf([undefined, midSyncNeighbor], []).length === 1
-  );
-
   const solo = Item({ title: "Solo item", body: "A body of its own." });
   const assert_solo_item_has_no_name = assert(() =>
     solo.shortName === undefined &&
@@ -198,23 +192,31 @@ export default pattern(() => {
 
   // The backfill, on a board that held items before it numbered anything.
   // The items are pushed straight into the list, past `addItem`, which is
-  // how a board from before the namespace holds its members.
+  // how a board from before the namespace holds its members. These two carry
+  // the board's table because a name reaches a row only through the member's
+  // own wiring: they stand for members an operator has link-bound, the step
+  // the README pairs with a backfill, done here at construction because a
+  // pattern cannot reach a member's argument.
   const legacyItems = new Writable<ItemDemand[] | Default<[]>>([]);
   const legacyNames = new Writable<NamesMap>({});
   const legacy = Board({ items: legacyItems, names: legacyNames });
   const assigned = new Writable<string[]>([]);
 
   const action_file_two_unnamed = action(() => {
-    legacyItems.push(Item({ title: "Older one", createdAt: 1 }));
-    legacyItems.push(Item({ title: "Older two", createdAt: 2 }));
+    legacyItems.push(
+      Item({ title: "Older one", createdAt: 1, boardNames: legacy.namesTable }),
+    );
+    legacyItems.push(
+      Item({ title: "Older two", createdAt: 2, boardNames: legacy.namesTable }),
+    );
   });
   // An unnamed member's row reads its name as the default, so the board
   // reads whole before anything names it.
   const assert_unnamed_rows_read_the_default = assert(() =>
     legacy.itemCount === 2 &&
     (legacy.index ?? []).length === 2 &&
-    legacy.index?.[0]?.name === "" &&
-    legacy.index?.[1]?.name === "" &&
+    legacy.index?.[0]?.shortName === "" &&
+    legacy.index?.[1]?.shortName === "" &&
     legacy.index?.[1]?.title === "Older two" &&
     (legacy.namesTable ?? []).length === 0
   );
@@ -225,8 +227,8 @@ export default pattern(() => {
   });
   const assert_backfill_named_in_filing_order = assert(() =>
     assigned.get().join(",") === "1,2" &&
-    legacy.index?.[0]?.name === "1" &&
-    legacy.index?.[1]?.name === "2" &&
+    legacy.index?.[0]?.shortName === "1" &&
+    legacy.index?.[1]?.shortName === "2" &&
     equals(
       ((legacy.names ?? {}) as NamesMap)["1"] as object,
       legacy.items?.[0] as object,
@@ -258,6 +260,9 @@ export default pattern(() => {
   const action_create_a_named_item = action(() => {
     legacy.addItem.send({ title: "Named by create", agentName: "Sol" });
   });
+  // And one that stands for a member the link-bind never reached. Its row
+  // keeps reading the default however the map names it — the cost the README
+  // states — while the name itself is real, and `namesTable` is where it is.
   const action_file_a_late_unnamed = action(() => {
     legacyItems.push(Item({ title: "Older three", createdAt: 3 }));
   });
@@ -266,10 +271,11 @@ export default pattern(() => {
   });
   const assert_backfill_skips_the_named = assert(() =>
     legacy.itemCount === 4 &&
-    legacy.index?.[2]?.name === "3" &&
+    legacy.index?.[2]?.shortName === "3" &&
     legacy.index?.[2]?.title === "Named by create" &&
-    legacy.index?.[3]?.name === "4" &&
+    legacy.index?.[3]?.shortName === "" &&
     legacy.index?.[3]?.title === "Older three" &&
+    nameOf(legacyItems.key(3), legacy.namesTable ?? []) === "4" &&
     Object.keys((legacy.names ?? {}) as NamesMap).join(",") === "1,2,3,4"
   );
 
@@ -280,7 +286,11 @@ export default pattern(() => {
   const twinNames = new Writable<NamesMap>({});
   const twinBoard = Board({ items: twinItems, names: twinNames });
   const action_list_one_item_twice = action(() => {
-    const twin = Item({ title: "Twin", createdAt: 1 });
+    const twin = Item({
+      title: "Twin",
+      createdAt: 1,
+      boardNames: twinBoard.namesTable,
+    });
     twinItems.push(twin);
     twinItems.push(twin);
   });
@@ -293,8 +303,8 @@ export default pattern(() => {
     assigned.get().join(",") === "1" &&
     Object.keys((twinBoard.names ?? {}) as NamesMap).join(",") === "1" &&
     (twinBoard.namesTable ?? []).length === 1 &&
-    twinBoard.index?.[0]?.name === "1" &&
-    twinBoard.index?.[1]?.name === "1"
+    twinBoard.index?.[0]?.shortName === "1" &&
+    twinBoard.index?.[1]?.shortName === "1"
   );
 
   // A board given no namespace at all — the shape of one deployed before it
@@ -321,7 +331,7 @@ export default pattern(() => {
     bare.namesTable?.[0]?.name === "1"
   );
   const assert_bare_board_materialized_its_map = assert(() =>
-    bare.index?.[0]?.name === "1" &&
+    bare.index?.[0]?.shortName === "1" &&
     equals(
       ((bare.names ?? {}) as NamesMap)["1"] as object,
       bare.items?.[0] as object,
@@ -385,7 +395,6 @@ export default pattern(() => {
       { assertion: assert_wired_item_reads_its_name },
       { render: wired[UI] },
       { assertion: assert_wired_item_renders_its_badge },
-      { assertion: assert_index_skips_a_mid_sync_member },
       { assertion: assert_solo_item_has_no_name },
       { render: solo[UI] },
       { assertion: assert_solo_item_renders_no_badge },
