@@ -1,11 +1,11 @@
 # Choosing which tests a pull request runs
 
-Status: in progress. Part one is built apart from the manifest retention,
-the one-off bootstrap dispatch, and two dashboard tiles; part two is built
-apart from its continuous-integration configuration and the coverage work;
-part three has not started. [The work](#the-work) carries the detail. The
-record store this plan consumes is live and holds the data the design
-needs; the gaps it does not yet hold are listed under [What the store is
+Status: in progress. Part one is built apart from the one-off bootstrap
+dispatch and one dashboard tile; part two is built apart from its
+continuous-integration configuration and the coverage work; part three has
+not started. [The work](#the-work) carries the detail. The record store
+this plan consumes is live and holds the data the design needs; the gaps
+it does not yet hold are listed under [What the store is
 missing](#what-the-store-is-missing) and closed by the first part of the
 work.
 
@@ -1148,17 +1148,17 @@ nothing: their identity is the path already.
 The record schema already carries the field, so no format changes, and
 nothing downstream of the store has to know this happened.
 
-**Compaction is live now, and was not when this was written.** The
-compactor's identity was provisioned on 2026-08-31 and its daily workflow
-has rolled up 2026-08-19 through 2026-08-26. The floor is where the store's
-records begin and the ceiling is the seven-day lag, so that range is every
-day it can touch. Compaction collapses a day of raw records
+**Compaction is live.** The compactor's identity was provisioned on
+2026-08-31 and its daily workflow has rolled up every day from 2026-08-19
+up to the newest day it has reached. The floor is where the store's
+records begin. The ceiling moves with the daily run, which only touches
+days that closed a week ago. Compaction collapses a day of raw records
 into a manifest and a few tens of shards, which is the difference between
 reading 15,000 objects for a historical day and reading a manifest and
-seventeen shards. A day is a manifest and shards rather than a single object: a
-day of records is over a gigabyte of NDJSON, against a maximum string
-length of about half that, and an object has to fit in a string both to be
-written and to be read.
+seventeen shards. A day is a manifest and shards rather than a single
+object: a day of records is over a gigabyte of NDJSON, against a maximum
+string length of about half that, and an object has to fit in a string
+both to be written and to be read.
 
 **A re-run's earlier attempts can be stored a second time.** An object's
 day partition comes from the run's start time, and GitHub reports that
@@ -2058,8 +2058,8 @@ fourth part only when a variant is present.
 The manifest is untrusted input to the lane runner, and is validated the
 same way record lines are: a malformed manifest is rejected whole, and a
 manifest whose schema version the runner does not know is treated as
-absent. Retention is a bucket lifecycle rule deleting manifests after 30
-days, which the infra change adds.
+absent. Retention is a bucket lifecycle rule deleting manifests after 45
+days.
 
 ## The publisher
 
@@ -2126,14 +2126,14 @@ a window expands. It does not make a steady-state publisher switch a date
 from raw objects to a rollup seven days later, after the raw
 contributions are already in its aggregate.
 
-The publisher needs a writer credential for its own prefix. That is a new
-service account with `objectCreator` on `labs/test-selection/`, reached
-through a Workload Identity provider pinned to exactly this workflow file
-on `main` — the same pattern, and the same security argument, as the relay
-already uses. Nothing else needs a credential: a lane reads the manifest
-it resolves and writes nothing. These are infra-repository changes under `tofu/test-records`, and they must land and be applied before
-these workflows can write. They are the prerequisites [the work](#the-work)
-has that are not ours.
+The publisher needs a writer credential for its own prefix. That is the
+`test-selection-labs` service account with `objectCreator` on
+`labs/test-selection/`, reached through a Workload Identity provider
+pinned to exactly this workflow file on `main` — the same pattern, and
+the same security argument, as the relay already uses. The infra
+repository owns the account and the provider under `tofu/test-records`,
+and both are applied. Nothing else needs a credential: a lane reads the
+manifest it resolves and writes nothing.
 
 When the publisher fails, nothing breaks: the previous manifest is still
 the newest and lanes keep using it. A manifest going stale degrades
@@ -3078,7 +3078,7 @@ tape measure.
 | `ENVIRONMENTAL_MIN_SOURCES` | 5 | sources | Chosen | How many distinct sources a failure spans inside that window before it reads as the environment. Up when a genuinely broad regression is written off; down when a broken runner's failures still count as catches. |
 | `BREADTH_SATURATION` | 2 | sources | Chosen | Where the breadth term reaches half its ceiling. Up when four sources should outrank one by more; down when one source should already be worth nearly all of it. |
 | `CHURN_WINDOW_DAYS` | 60 | days | Chosen | How far back the decayed counts are read. Past this the weight is under one part in sixteen, so this is a performance decision rather than a policy one. |
-| `SAME_COMMIT_REACH_DAYS` | 2 | days | Chosen | How far back the fold remembers a commit's outcomes, so that a rerun landing in a later batch than the run it repeats is still read as the test disagreeing with itself. Up when reruns land far enough behind that their disagreement is counted as a catch; down when the fold's memory is what will not fit. It costs the number of identities that have failed times the number of commits, so it is the first dial to look at when a publisher run runs out of memory. |
+| `SAME_COMMIT_REACH_DAYS` | 2 | days | Chosen | How far back the fold remembers a commit's outcomes, so that a re-run landing in a later batch than the run it repeats is still read as the test disagreeing with itself. Up when re-runs land far enough behind that their disagreement is counted as a catch; down when the fold's memory is what will not fit. It costs the number of identities that have failed times the number of commits, so it is the first dial to look at when a publisher run runs out of memory. |
 | `FLAKE_COMMIT_REACH` | 8 | commits | Chosen | How many of the most recently observed commits the fold keeps outcomes at, alongside the span above. Moves for the same two reasons and against the same cost. |
 | `FLAKE_WINDOW_DAYS` | 60 | days | Chosen | Up when a flake rate swings about on too little evidence; down when a test since fixed stays excluded. |
 | `COST_WINDOW_DAYS` | 7 | days | Chosen | Up when cost estimates are noisy; down when durations drift faster than the estimate follows. |
@@ -3118,19 +3118,21 @@ three reasons that look like they force one turn out not to.
 
 ### The prerequisites that are not ours
 
-The publisher needs a writer credential: a `test-selection` service
-account with `objectCreator` on the manifest and state prefixes and a
-Workload Identity provider pinned to `.github/workflows/test-selection.yml`
-on `main`. Manifest and state objects expire after 30 days, and that
-lifecycle rule is what a lane's resolution rests on: a commit resolves the
-newest manifest at or before its own date, so the manifests a run may need
-have to outlive the window in which GitHub still permits that run to be
-re-run. Where the rerun window is the longer of the two, the retention is
-what to raise. The same infra change provisions the compactor principal. These are
-infra-repository changes under `tofu/test-records`, and they must land and
-be applied before anything here can publish. They are predecessors rather
-than a reason to split this work, and they are the only hard ordering
-outside this repository.
+The publisher needs a writer credential: the `test-selection-labs` service
+account with `objectCreator` on the manifest and state prefixes, and a
+Workload Identity provider pinned to
+`.github/workflows/test-selection.yml` on `main`. Manifest and state
+objects expire after 45 days, and that lifecycle rule is what a lane's
+resolution rests on: a commit resolves the newest manifest at or before
+its own date, so the manifests a run may need have to outlive the window
+in which GitHub still permits that run to be re-run. Where the re-run
+window is the longer of the two, the retention is what to raise. The same
+infra root provisions the compactor principal.
+
+All of that lives in the infra repository under `tofu/test-records`, and
+all of it is applied: the accounts, the grants, the pinned providers, and
+the lifecycle rule. Nothing outside this repository has to happen before
+the work here publishes, so this is not a reason to split it.
 
 ### Proving the topology before merging, not after
 
@@ -3202,7 +3204,7 @@ answers somewhere people can see them.
       offline against recorded manifests.
 - [x] `tasks/test-selection-publish.ts` and
       `.github/workflows/test-selection.yml`, on a four-hourly cron.
-- [ ] Hold manifest retention above the window in which GitHub still
+- [x] Hold manifest retention above the window in which GitHub still
       permits a run to be re-run. A lane resolves the newest manifest at or
       before the commit's date, so the answer is the same for every lane
       and every later attempt as long as the object it names still exists.
@@ -3400,9 +3402,9 @@ exercised on the branch on its own.
 
 ### What would force a split, and what to split first
 
-Nothing mechanical does. The infra credential is a predecessor rather than
-a stage, the topology can be proven on the branch with `ci: full`, and the
-window before the first manifest is one `main` run that the lane fallback
+Nothing mechanical does. The infra credential is already in place, the
+topology can be proven on the branch with `ci: full`, and the window
+before the first manifest is one `main` run that the lane fallback
 already covers.
 
 What could force one is review. This is a large change to the way the
