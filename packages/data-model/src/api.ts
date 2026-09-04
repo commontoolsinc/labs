@@ -471,9 +471,23 @@ export interface DebugValueOptions {
    * integer, or `Infinity` for as long as the conversion allows. A longer
    * string is converted to a form suggestive of the elision, which carries an
    * excerpt of the string up to the limit and the string's actual length.
-   * When absent, the limit is two hundred. A large value is capped.
+   * When absent, the limit is two hundred, or as long as the conversion
+   * allows when `maxStringLines` is present. A large value is capped.
    */
   readonly maxStringLength?: number;
+
+  /**
+   * Maximum number of lines of a string which is represented whole: a
+   * positive integer, or `Infinity` for as many as the conversion allows. A
+   * line break is a newline, a carriage return, or the two together; one at
+   * the end of the string ends its last line rather than starting another. A
+   * string with more lines is converted to the same form a string past
+   * `maxStringLength` is, carrying an excerpt of the string up to the limit
+   * and the string's actual length; when both limits apply, the excerpt is
+   * the shorter of the two. When absent, the limit is five. A large value is
+   * capped.
+   */
+  readonly maxStringLines?: number;
 
   /**
    * Replacer function, called on every value and sub-value encountered, to get

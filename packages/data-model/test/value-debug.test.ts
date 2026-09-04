@@ -178,6 +178,31 @@ describe("value-debug", () => {
       });
     });
 
+    describe("with `maxStringLines`", () => {
+      it("renders the string's first lines, and the string's length after them", () => {
+        expect(toCompactDebugString("a\nb\nc", { maxStringLines: 2 }))
+          .toBe('"a\\nb" + ... length: 5');
+        expect(toCompactDebugString({ s: "a\nb\nc" }, { maxStringLines: 2 }))
+          .toBe('{s:"a\\nb" + ... length: 5}');
+      });
+
+      it("renders a string whose line count is the limit whole", () => {
+        expect(toCompactDebugString("a\nb", { maxStringLines: 2 }))
+          .toBe('"a\\nb"');
+      });
+
+      it("renders no more than 5 lines when the limit is not given", () => {
+        expect(toCompactDebugString("a\nb\nc\nd\ne\nf"))
+          .toBe('"a\\nb\\nc\\nd\\ne" + ... length: 11');
+      });
+
+      it("throws given a `maxStringLines` that is not a positive integer", () => {
+        expect(() => toCompactDebugString("", { maxStringLines: 0 })).toThrow(
+          "`maxStringLines` must be a positive integer, `Infinity`, or",
+        );
+      });
+    });
+
     describe("with a `replacer`", () => {
       it("renders the replacement in place of the original value", () => {
         const options: CompactDebugStringOptions = {
@@ -231,6 +256,11 @@ describe("value-debug", () => {
     it("renders a string's excerpt and length in the string's place", () => {
       expect(toIndentedDebugString({ s: "abcdefgh" }, { maxStringLength: 5 }))
         .toBe('{\n  s: "abcde" + ... length: 8\n}');
+    });
+
+    it("renders a string's first lines and length in the string's place", () => {
+      expect(toIndentedDebugString({ s: "a\nb\nc" }, { maxStringLines: 2 }))
+        .toBe('{\n  s: "a\\nb" + ... length: 5\n}');
     });
 
     it("renders the replacement in place of the original value", () => {

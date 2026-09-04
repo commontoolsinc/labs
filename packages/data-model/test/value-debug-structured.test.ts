@@ -582,6 +582,80 @@ describe("toStructuredDebugValue()", () => {
     });
   });
 
+  describe("with `maxStringLines`", () => {
+    it("returns `/partialString` with the length and the first lines for a string past the limit", () => {
+      expect(toStructuredDebugValue("a\nb\nc\nd", { maxStringLines: 2 }))
+        .toEqual({ "/partialString": { length: 7, excerpt: "a\nb" } });
+    });
+
+    it("returns a string whose line count is the limit whole", () => {
+      expect(toStructuredDebugValue("a\nb", { maxStringLines: 2 }))
+        .toBe("a\nb");
+    });
+
+    it("counts a newline, a carriage return, and the two together as one line break each", () => {
+      expect(toStructuredDebugValue("a\r\nb\rc\nd", { maxStringLines: 3 }))
+        .toEqual({ "/partialString": { length: 8, excerpt: "a\r\nb\rc" } });
+    });
+
+    it("counts a final line break as ending the last line rather than starting another", () => {
+      expect(toStructuredDebugValue("a\nb\n", { maxStringLines: 2 }))
+        .toBe("a\nb\n");
+      expect(toStructuredDebugValue("a\nb\n\n", { maxStringLines: 2 }))
+        .toEqual({ "/partialString": { length: 5, excerpt: "a\nb" } });
+    });
+
+    it("returns whichever excerpt of the two limits is shorter", () => {
+      const value = "abcdefgh\nij";
+      const options = { maxStringLines: 1, maxStringLength: 5 };
+      expect(toStructuredDebugValue(value, options))
+        .toEqual({ "/partialString": { length: 11, excerpt: "abcde" } });
+      expect(
+        toStructuredDebugValue(value, { ...options, maxStringLength: 100 }),
+      )
+        .toEqual({ "/partialString": { length: 11, excerpt: "abcdefgh" } });
+    });
+
+    it("returns a line-cut excerpt whole even when it ends in a high surrogate", () => {
+      expect(toStructuredDebugValue("a\ud800\nb", { maxStringLines: 1 }))
+        .toEqual({ "/partialString": { length: 4, excerpt: "a\ud800" } });
+    });
+
+    it("returns a string of any length whole when only the line limit is given", () => {
+      const value = "x".repeat(250);
+      expect(toStructuredDebugValue(value, { maxStringLines: 1 })).toBe(value);
+    });
+
+    it("returns no more than 5 lines when the limit is not given", () => {
+      const value = "a\nb\nc\nd\ne\nf";
+      expect(toStructuredDebugValue(value))
+        .toEqual({
+          "/partialString": { length: 11, excerpt: "a\nb\nc\nd\ne" },
+        });
+    });
+
+    it("returns no more than 1000 lines given a larger limit", () => {
+      const value = "x\n".repeat(1500) + "x";
+      for (const limit of [2000, Infinity]) {
+        const result = toStructuredDebugValue(
+          value,
+          { maxStringLines: limit },
+        ) as { "/partialString": { length: number; excerpt: string } };
+        expect(result["/partialString"].length).toBe(3001);
+        expect(result["/partialString"].excerpt).toBe("x\n".repeat(999) + "x");
+      }
+    });
+
+    it("throws given a `maxStringLines` that is not a positive integer", () => {
+      for (const bad of [0, -1, 1.5, -Infinity, NaN, "3", null, {}]) {
+        const options = { maxStringLines: bad as unknown as number };
+        expect(() => toStructuredDebugValue("", options)).toThrow(
+          "`maxStringLines` must be a positive integer, `Infinity`, or",
+        );
+      }
+    });
+  });
+
   describe("with `options` that are not a plain object", () => {
     it("throws, naming the offending value", () => {
       for (const bad of [100, "3", null, [], new Map()]) {

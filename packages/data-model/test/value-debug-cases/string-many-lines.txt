@@ -1,0 +1,11 @@
+(() => {
+  // A string of more lines than the default limit of 5 renders as an excerpt
+  // of that many lines, and then its actual length.
+  return { text: ["one", "two", "three", "four", "five", "six", "seven"].join("\n") };
+})()
+
+{
+  text: "one\ntwo\nthree\nfour\nfive" + ... length: 33
+}
+
+{text:"one\ntwo\nthree\nfour\nfive" + ... length: 33}

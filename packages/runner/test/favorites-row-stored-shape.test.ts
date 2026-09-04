@@ -58,7 +58,7 @@ function debugFormContains(value: unknown, text: string): boolean {
     toStructuredDebugValue(value, {
       maxDepth: 100,
       maxArrayLength: Infinity,
-      maxStringLength: Infinity,
+      maxStringLines: Infinity,
     }),
   );
 }
