@@ -1,5 +1,11 @@
 import type { CellScope } from "@commonfabric/api";
-import { createSession, DID, Identity, Session } from "@commonfabric/identity";
+import {
+  createSession,
+  DID,
+  Identity,
+  isDID,
+  Session,
+} from "@commonfabric/identity";
 import { CFC_CONCEPT_KIND, cfcAtom } from "@commonfabric/api/cfc";
 import type { FabricPlainObject } from "@commonfabric/data-model";
 import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
@@ -144,13 +150,19 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   /**
    * Populate the default render confidentiality ceiling (Epic H3a). When
    * true, the worker's display sinks gate labeled values against the
-   * §8.10.6 profile for this identity and author-supplied render-boundary
-   * declassification is denied. Dogfood flag, default off (= today's
-   * unbounded rendering). Expect over-blocking while exchange resolution
-   * (H3b) is not implemented.
+   * §8.10.6 profile for the acting identity and author-supplied
+   * render-boundary declassification is denied. Dogfood flag, default off
+   * (= today's unbounded rendering). Expect over-blocking while exchange
+   * resolution (H3b) is not implemented.
    */
   cfcRenderCeiling?: boolean;
 
+  /**
+   * The trust the worker runs against. Its `actingPrincipal` is the identity
+   * the runtime acts as, which is also the audience the render ceiling admits
+   * when `cfcRenderCeiling` is on. Omit it to run as the session identity;
+   * pass `null` to run against no snapshot at all.
+   */
   trustSnapshot?: RuntimeTrustSnapshot | null;
 
   /**
@@ -340,11 +352,23 @@ export function createRuntimeClientOptions({
   patternCoverage?: boolean;
   concurrentWatchRefresh?: boolean;
 }) {
+  // The identity the runtime acts and renders as. A delegated host names it
+  // in its own trust snapshot; a snapshot that names nobody leaves the
+  // session identity acting. A name that is not a DID is a host's own
+  // configuration error, and it surfaces here rather than as a ceiling built
+  // for somebody else: the runner reads this same field as a DID, and the
+  // ceiling's entries are identity atoms over one.
+  const namedPrincipal = trustSnapshot?.actingPrincipal;
+  if (namedPrincipal !== undefined && !isDID(namedPrincipal)) {
+    throw new Error(
+      `A trust snapshot's acting principal must be a DID: ${
+        JSON.stringify(namedPrincipal)
+      }`,
+    );
+  }
+  const actingPrincipal = namedPrincipal ?? session.as.did();
   const resolvedTrustSnapshot = trustSnapshot === undefined
-    ? {
-      id: `principal:${session.as.did()}`,
-      actingPrincipal: session.as.did(),
-    }
+    ? { id: `principal:${actingPrincipal}`, actingPrincipal }
     : trustSnapshot ?? undefined;
 
   return {
@@ -360,8 +384,9 @@ export function createRuntimeClientOptions({
     ...(cfcRenderCeiling
       ? {
         renderDeclassificationPolicy: "deny" as const,
+        // A display sink's audience is the identity the runtime renders as.
         renderConfidentialityCeiling: defaultRenderConfidentialityCeiling(
-          session.as.did(),
+          actingPrincipal,
         ),
       }
       : {}),

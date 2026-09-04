@@ -791,6 +791,94 @@ describe("RuntimeInternals", () => {
     expect(off.renderConfidentialityCeiling).toBeUndefined();
   });
 
+  it("builds the render ceiling for a host-supplied acting principal", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const session = await createSession({
+      identity,
+      spaceName: "lib-shell-cfc-render-ceiling-delegated",
+    });
+    const delegate = "did:key:z6MkDelegatedHost";
+
+    const options = createRuntimeClientOptions({
+      session,
+      apiUrl: new URL("http://shell.test/"),
+      // Stated rather than inherited from a host default: what this test is
+      // about is which principal the ceiling admits, not whether a host
+      // builds a ceiling at all.
+      cfcRenderCeiling: true,
+      trustSnapshot: { id: `principal:${delegate}`, actingPrincipal: delegate },
+    });
+
+    // A display sink's audience is whoever the runtime renders as, which a
+    // delegated host names in its own trust snapshot rather than in the
+    // session identity.
+    expect(options.renderConfidentialityCeiling).toEqual(
+      defaultRenderConfidentialityCeiling(delegate),
+    );
+    expect(options.renderConfidentialityCeiling?.atoms).not.toContainEqual({
+      type: "https://commonfabric.org/cfc/atom/User",
+      subject: session.as.did(),
+    });
+  });
+
+  it("falls back to the session identity when nobody is named", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const session = await createSession({
+      identity,
+      spaceName: "lib-shell-cfc-render-ceiling-fallback",
+    });
+    const sessionCeiling = defaultRenderConfidentialityCeiling(
+      session.as.did(),
+    );
+
+    // `null` asks for no trust snapshot at all, which is a different case
+    // from a snapshot that carries no acting principal. Neither names an
+    // audience, so the session identity is acting in both.
+    const withoutSnapshot = createRuntimeClientOptions({
+      session,
+      apiUrl: new URL("http://shell.test/"),
+      cfcRenderCeiling: true,
+      trustSnapshot: null,
+    });
+    expect(withoutSnapshot.trustSnapshot).toBeUndefined();
+    expect(withoutSnapshot.renderConfidentialityCeiling).toEqual(
+      sessionCeiling,
+    );
+
+    const withoutPrincipal = createRuntimeClientOptions({
+      session,
+      apiUrl: new URL("http://shell.test/"),
+      cfcRenderCeiling: true,
+      trustSnapshot: { id: "principal:loom-host" },
+    });
+    expect(withoutPrincipal.renderConfidentialityCeiling).toEqual(
+      sessionCeiling,
+    );
+  });
+
+  it("refuses an acting principal that is not a DID", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const session = await createSession({
+      identity,
+      spaceName: "lib-shell-cfc-render-ceiling-non-did",
+    });
+
+    // The ceiling's entries are identity atoms over a DID, and the runner
+    // reads the same field as a DID. Building the ceiling for the session
+    // identity instead would leave the host acting as one principal and
+    // rendering to another.
+    expect(() =>
+      createRuntimeClientOptions({
+        session,
+        apiUrl: new URL("http://shell.test/"),
+        trustSnapshot: {
+          id: "principal:loom-host",
+          actingPrincipal: "loom-host",
+        },
+      })
+    ).toThrow("acting principal must be a DID");
+  });
+
   it("allows hosts to override CFC policy and trust snapshot", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const session = await createSession({
