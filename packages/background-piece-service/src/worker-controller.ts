@@ -155,10 +155,6 @@ export class WorkerController extends EventTarget {
   /**
    * The two steps of this instance that a test drives directly: sending a
    * request to the worker, and receiving a message from it.
-   *
-   * The name is the documentation. Nothing here is part of what this class
-   * promises, and code that reaches through it is written against internals
-   * that are free to change.
    */
   get accessForTestingOnly(): {
     exec(type: WorkerIPCMessageType, data?: unknown): Promise<void>;
