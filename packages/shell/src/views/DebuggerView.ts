@@ -39,13 +39,6 @@ const DEBUGGER_VALUE_OPTIONS: DebugValueOptions = {
 };
 
 /**
- * Longest text an expanded marker's detail shows. The indented rendering has
- * no length option of its own, and a marker with many keys at every level
- * within the depth limit still runs long, so the display bounds itself.
- */
-const MAX_MARKER_DETAIL_LENGTH = 10000;
-
-/**
  * Hierarchical topic definitions for filtering telemetry events.
  * Topics can have subtopics for more granular filtering.
  */
@@ -1133,17 +1126,6 @@ export class XDebuggerView extends LitElement {
     }
 
     return false;
-  }
-
-  /**
-   * Renders the detail an expanded marker shows: the indented rendering, cut
-   * to `MAX_MARKER_DETAIL_LENGTH` with a trailing `...` when it runs longer.
-   */
-  private markerDetail(marker: RuntimeTelemetryMarkerResult): string {
-    const text = toIndentedDebugString(marker, DEBUGGER_VALUE_OPTIONS);
-    return (text.length > MAX_MARKER_DETAIL_LENGTH)
-      ? `${text.slice(0, MAX_MARKER_DETAIL_LENGTH - 3)}...`
-      : text;
   }
 
   private matchesSearch(marker: RuntimeTelemetryMarkerResult): boolean {
@@ -2703,7 +2685,10 @@ export class XDebuggerView extends LitElement {
                         Copy Full
                       </button>
                     </div>
-                    <pre>${this.markerDetail(marker)}</pre>
+                    <pre>${toIndentedDebugString(
+                      marker,
+                      DEBUGGER_VALUE_OPTIONS,
+                    )}</pre>
                   </div>
                 `
                 : ""}
