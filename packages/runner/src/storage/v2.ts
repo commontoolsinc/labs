@@ -939,14 +939,24 @@ export class StorageManager implements IStorageManager {
    * detached session resumable by its token for a TTL, so the next attempt
    * must present that token or be refused with "resume token is no longer
    * valid" — a wedge that hid the real error until the manager closed.
-   * Scoped to the route generation it was minted under: a token belongs
-   * to one host, and a replay after a route replacement must not present
-   * the old host's token to the new one. Consumed by the next attempt on
-   * the same route; cleared once a session is handed to the provider. */
+   * Recorded as soon as the manager-wide session is mounted (every later
+   * throw leaves it detached), deleted the moment a session is handed to
+   * the provider, and cleared by close(), which rotates the session id
+   * the entry names. Scoped to the route generation it was minted under:
+   * a token belongs to one host, and a replay after a route replacement
+   * must not present the old host's token to the new one. */
   #detachedSessionResumes = new Map<
     MemorySpace,
     { options: MemoryV2Client.MountOptions; routeGeneration: number }
   >();
+
+  /** Where each space's first mount stands on this manager: an attempt in
+   * flight (the registered document is being read), or a session handed to
+   * the provider (the document was consulted, or the space needed none). A
+   * genesisAcl registered in either state could never be the space's
+   * genesis, so registration refuses. A failed attempt leaves no entry — the
+   * caller may correct the document and retry — and close() clears it. */
+  #genesisPhase = new Map<MemorySpace, "in-flight" | "handed-off">();
 
   /** Seed map from Options — fixed for the manager's lifetime. */
   #seedHosts: Record<string, string>;
@@ -1140,6 +1150,15 @@ export class StorageManager implements IStorageManager {
         `registerSpaceIdentity(${space}): supply either owner or genesisAcl, ` +
           "not both — genesisAcl is the whole genesis document, and owner " +
           "only names the OWNER of the default one",
+      );
+    }
+    if (genesisAcl !== undefined && this.#genesisPhase.has(space)) {
+      // The document is read during the space's first mount; that mount is
+      // under way or done, without it.
+      throw new Error(
+        `registerSpaceIdentity(${space}): the space is already open on this ` +
+          "manager, so the supplied genesisAcl could never be its genesis — " +
+          "register the document before the first open",
       );
     }
     if (
@@ -1380,6 +1399,9 @@ export class StorageManager implements IStorageManager {
     };
     routeSignal.addEventListener("abort", closeActiveClients, { once: true });
     let completed = false;
+    if (this.#genesisPhase.get(space) !== "handed-off") {
+      this.#genesisPhase.set(space, "in-flight");
+    }
 
     try {
       assertCurrentRoute();
@@ -1398,18 +1420,72 @@ export class StorageManager implements IStorageManager {
           routeSignal,
         ),
       );
-      if (this.#sessionFactory.supportsAclBootstrap !== true) {
+      // The manager-wide session is mounted; from here until a session is
+      // handed to the provider, any throw leaves it resumable only by its
+      // token. Remember how, so the next attempt is not refused for want
+      // of the token (and so the next attempt's error is the real one).
+      // Also what the final user mount below resumes: the
+      // construction-wide manager session, never a replacement of that
+      // still-live id without its token.
+      const resumeNormal: MemoryV2Client.MountOptions = {
+        sessionId: normal.session.sessionId,
+        seenSeq: normal.session.serverSeq,
+        ...(normal.session.sessionToken !== undefined
+          ? { sessionToken: normal.session.sessionToken }
+          : {}),
+        ...this.#servingActingAs(),
+      };
+      this.#detachedSessionResumes.set(space, {
+        options: resumeNormal,
+        routeGeneration,
+      });
+      const handOff = (opened: OpenedSpaceSession): OpenedSpaceSession => {
+        this.#detachedSessionResumes.delete(space);
+        this.#genesisPhase.set(space, "handed-off");
         completed = true;
-        return normal;
+        return opened;
+      };
+      if (this.#sessionFactory.supportsAclBootstrap !== true) {
+        return handOff(normal);
       }
       const isHomeSpace = signer.did() === space;
       const spaceIdentity = isHomeSpace
         ? signer
         : this.#spaceIdentities.get(space);
       if (spaceIdentity === undefined) {
-        completed = true;
-        return normal;
+        return handOff(normal);
       }
+
+      // A caller's own genesis document (never the home arm's) is a
+      // demand, not a preference: this open proceeds only if the space is
+      // fresh (then the document is written) or already carries exactly
+      // that document (a reopen). Anything else — a space populated
+      // before genesis, a genesis another initializer won with a
+      // different ACL, in whichever window it landed — is not the space
+      // the caller asked for, and the reopen below would otherwise
+      // succeed under the winner's grant with nothing reported. Fail
+      // closed.
+      const registered = this.#spaceGenesisAcls.get(space);
+      const demanded = !isHomeSpace && registered?.supplied === true
+        ? registered.document
+        : undefined;
+      const assertDemandedDocumentStands = (stored: unknown): void => {
+        if (demanded !== undefined && !sameAcl(stored, demanded)) {
+          throw new Error(
+            `genesis of ${space} was claimed with a different ACL; the ` +
+              "supplied genesis document was not applied and the space is " +
+              "not the one the caller asked for",
+          );
+        }
+      };
+      const aclValueOf = (
+        entities: Array<
+          { id: string; scope?: string; document?: { value?: unknown } | null }
+        >,
+      ): unknown =>
+        entities.find((entity) =>
+          entity.id === aclId && (entity.scope ?? "space") === "space"
+        )?.document?.value ?? null;
 
       const openedServerSeq = normal.session.serverSeq;
       const aclId = aclDocId(space);
@@ -1423,34 +1499,15 @@ export class StorageManager implements IStorageManager {
       const aclNeverCreated = aclSnapshot?.seq === 0 &&
         aclSnapshot.document === null;
       if (!aclNeverCreated || (!isHomeSpace && openedServerSeq !== 0)) {
-        completed = true;
-        return normal;
+        assertDemandedDocumentStands(aclValueOf(aclResult.entities));
+        return handOff(normal);
       }
 
       // Do not reuse the bootstrap session for replica work: both it and the
       // replica allocate localSeq from 1, and named spaces must switch back from
       // the space signer to the active user before any user-scoped operation.
-      // Preserve the normal session token before detaching it so the final user
-      // mount resumes the construction-wide manager session instead of trying to
-      // replace that still-live id without its token.
-      const resumeNormal: MemoryV2Client.MountOptions = {
-        sessionId: normal.session.sessionId,
-        seenSeq: normal.session.serverSeq,
-        ...(normal.session.sessionToken !== undefined
-          ? { sessionToken: normal.session.sessionToken }
-          : {}),
-        ...this.#servingActingAs(),
-      };
       activeClients.delete(normal.client);
       await normal.client.close();
-      // From here until the resume below hands a session to the provider,
-      // a failure leaves the manager-wide session detached; remember how
-      // to resume it so the next attempt is not refused for want of the
-      // token (and so the next attempt's error is the real one).
-      this.#detachedSessionResumes.set(space, {
-        options: resumeNormal,
-        routeGeneration,
-      });
       assertCurrentRoute();
       let bootstrapSessionId = crypto.randomUUID();
       while (bootstrapSessionId === this.#sessionId) {
@@ -1479,11 +1536,15 @@ export class StorageManager implements IStorageManager {
         // case and must not be claimed. Home remains the explicit exception.
         const aclStillNeverCreated = snapshot?.seq === 0 &&
           snapshot.document === null;
-        const registered = this.#spaceGenesisAcls.get(space);
         if (
-          aclStillNeverCreated &&
-          (isHomeSpace || current.serverSeq === 0)
+          !aclStillNeverCreated ||
+          (!isHomeSpace && current.serverSeq !== 0)
         ) {
+          // Claimed (or populated) between the first inspection and this
+          // recheck: the default path reopens as the user below; a
+          // demanded document must already be what stands.
+          assertDemandedDocumentStands(aclValueOf(current.entities));
+        } else {
           try {
             // The HOME arm is untouched — a home space is its own
             // identity and owner, and no registered document reaches it.
@@ -1522,28 +1583,13 @@ export class StorageManager implements IStorageManager {
             }
             // Default path: reopening as the user below is the authoritative
             // outcome — it succeeds only if the winning ACL grants access.
-            // Supplied path: that reasoning inverts. The caller's purpose
-            // was a space born with exactly its document; if the winner
-            // wrote a different one (the wildcard default, say) the reopen
-            // would succeed under the winner's grant and nothing would
-            // report that the seal never landed. Fail closed: refuse unless
-            // the space carries exactly the supplied document.
-            if (!isHomeSpace && registered?.supplied === true) {
+            // A demanded document: the winner's must be exactly it.
+            if (demanded !== undefined) {
               const after = await bootstrap.session.queryGraph({
                 roots: [{ id: aclId, selector: { path: [], schema: false } }],
               });
               assertCurrentRoute();
-              const winner = after.entities.find((entity) =>
-                entity.id === aclId && (entity.scope ?? "space") === "space"
-              )?.document?.value;
-              if (!sameAcl(winner, registered.document)) {
-                throw new Error(
-                  `genesis of ${space} was claimed concurrently with a ` +
-                    "different ACL; the supplied genesis document was not " +
-                    "applied and the space is not the one the caller asked " +
-                    "for",
-                );
-              }
+              assertDemandedDocumentStands(aclValueOf(after.entities));
             }
           }
         }
@@ -1561,10 +1607,12 @@ export class StorageManager implements IStorageManager {
           routeSignal,
         ),
       );
-      completed = true;
-      return resumed;
+      return handOff(resumed);
     } finally {
       if (!completed) {
+        if (this.#genesisPhase.get(space) === "in-flight") {
+          this.#genesisPhase.delete(space);
+        }
         routeSignal.removeEventListener("abort", closeActiveClients);
         await Promise.allSettled(
           [...activeClients].map((client) => client.close()),
@@ -1574,6 +1622,10 @@ export class StorageManager implements IStorageManager {
   }
 
   async close(): Promise<void> {
+    // A detached-session resume names the session id this close rotates;
+    // presenting it afterwards would mount the OLD id under a stale token.
+    this.#detachedSessionResumes.clear();
+    this.#genesisPhase.clear();
     // The lease releases AFTER teardown drains: a queued sync frame applied
     // during provider destruction still registers its schema documents
     // inside this session's epoch, not after the clear.
@@ -1602,6 +1654,8 @@ export class StorageManager implements IStorageManager {
   }
 
   async closeNow(): Promise<void> {
+    this.#detachedSessionResumes.clear();
+    this.#genesisPhase.clear();
     try {
       if (this.#providers.size === 0) {
         return;

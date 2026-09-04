@@ -726,7 +726,7 @@ const observeOpen = async (
   }
 };
 
-Deno.test("a supplied genesis ACL is inert on a populated ACL-less named space (legacy public stays public)", async () => {
+Deno.test("a supplied genesis ACL on a populated ACL-less named space is refused, and the space is not claimed", async () => {
   const directory = await Deno.makeTempDir({
     prefix: "runner-acl-genesis-legacy-",
   });
@@ -745,12 +745,19 @@ Deno.test("a supplied genesis ACL is inert on a populated ACL-less named space (
     } finally {
       await seedServer.close();
     }
+    // Without a document the legacy-public rule stands, as before.
     const without = await observeOpen(
       store,
       user,
       spaceIdentity,
       "of:legacy-named" as URI,
     );
+    assertEquals(without.syncFailed, false, "legacy-public reads succeed");
+    assertEquals(without.acl, null, "the legacy space must not be claimed");
+    assertEquals(without.principals, [user.did()], "no bootstrap session");
+    // Red-first witnessed: with a document the open SUCCEEDED and the
+    // sealer was handed the legacy-public space with no error. The space
+    // is not the one the caller asked for; fail closed.
     const withAcl = await observeOpen(
       store,
       user,
@@ -758,20 +765,18 @@ Deno.test("a supplied genesis ACL is inert on a populated ACL-less named space (
       "of:legacy-named" as URI,
       { [space]: "OWNER" },
     );
-    assertEquals(withAcl, without);
-    assertEquals(without.syncFailed, false, "legacy-public reads succeed");
-    assertEquals(without.acl, null, "the legacy space must not be claimed");
-    assertEquals(without.principals, [user.did()], "no bootstrap session");
+    assertEquals(withAcl.syncFailed, true, "the sealer is refused");
+    assertEquals(withAcl.acl, null, "still not claimed");
+    assertEquals(withAcl.commits, without.commits, "nothing written");
+    assertEquals(withAcl.principals, [user.did()], "no bootstrap session");
   } finally {
     await Deno.remove(directory, { recursive: true });
   }
 });
 
-// Mutation note: the legacy-space test above reddens when the option is
-// let past the client's true-genesis preconditions (witnessed). This one
-// does not — a retracted ACL fails closed at the SERVER before any
-// bootstrap session can act, in both arms — so it pins that the option
-// changes no observable outcome there, not that a client guard exists.
+// A retracted ACL fails closed at the SERVER before any bootstrap session
+// can act, in both arms, so this pins that the option changes no
+// observable outcome there rather than exercising a client guard.
 Deno.test("a supplied genesis ACL is inert on a retracted named ACL (a tombstone is never recreated)", async () => {
   const directory = await Deno.makeTempDir({
     prefix: "runner-acl-genesis-retracted-",
@@ -932,17 +937,20 @@ Deno.test("a serving runtime refuses a supplied genesis ACL explicitly (OW31 pro
 class GatedGenesisSessionFactory extends RecordingLoopbackSessionFactory {
   readonly #space: string;
   readonly #gate: Promise<void>;
-  /** Resolves once the gated transact has been entered (past the recheck). */
+  readonly #method: "transact" | "queryGraph";
+  /** Resolves once the gated call has been entered. */
   readonly held: Promise<void>;
   #markHeld!: () => void;
   constructor(
     server: MemoryV2Server.Server,
     space: string,
     gate: Promise<void>,
+    method: "transact" | "queryGraph" = "transact",
   ) {
     super(server);
     this.#space = space;
     this.#gate = gate;
+    this.#method = method;
     this.held = new Promise<void>((resolve) => {
       this.#markHeld = resolve;
     });
@@ -954,14 +962,15 @@ class GatedGenesisSessionFactory extends RecordingLoopbackSessionFactory {
   ) {
     const opened = await super.create(space, signer, requested);
     if (signer?.did() === this.#space) {
-      const session = opened.session as unknown as {
-        transact: (...args: unknown[]) => Promise<unknown>;
-      };
-      const transact = session.transact.bind(session);
-      session.transact = async (...args: unknown[]) => {
+      const session = opened.session as unknown as Record<
+        string,
+        (...args: unknown[]) => Promise<unknown>
+      >;
+      const original = session[this.#method].bind(session);
+      session[this.#method] = async (...args: unknown[]) => {
         this.#markHeld();
         await this.#gate;
-        return await transact(...args);
+        return await original(...args);
       };
     }
     return opened;
@@ -1198,6 +1207,210 @@ Deno.test("registerSpaceIdentity refuses a genesis ACL on a manager whose sessio
     );
     // The owner option keeps its pre-existing, ignorable semantics.
     manager.registerSpaceIdentity(spaceIdentity, { owner: user.did() });
+  } finally {
+    await manager.close();
+    await server.close();
+  }
+});
+
+Deno.test("a manager reused after close() mounts its NEW session id (no stale detached resume survives close)", async () => {
+  const user = await Identity.fromPassphrase("acl genesis reuse user");
+  const spaceIdentity = await Identity.fromPassphrase(
+    "acl genesis reuse space",
+  );
+  const space = spaceIdentity.did();
+  const server = createServer("runner-acl-genesis-reuse");
+  const factory = new RecordingLoopbackSessionFactory(server);
+  const manager = TestStorageManager.overServer(
+    { as: user, spaceIdentity },
+    factory,
+  );
+  try {
+    // Plain default genesis — the path every client runs.
+    const first = await manager.open(space).sync(`of:${space}` as URI);
+    assert(!first.error, first.error?.message);
+    const firstId = manager.scopeKeyIdentity().sessionId;
+    await manager.close();
+    // Red-first witnessed: the reopen presented the pre-close session id and
+    // its pre-rotation token — "resume token is no longer valid".
+    const second = await manager.open(space).sync(`of:${space}` as URI);
+    assert(!second.error, second.error?.message);
+    const secondId = manager.scopeKeyIdentity().sessionId;
+    assert(firstId !== secondId, "close() rotates the session id");
+    assertEquals(
+      factory.sessions.at(-1)?.requested.sessionId,
+      secondId,
+      "the reopen mounts the manager's current session id",
+    );
+    assertEquals(factory.sessions.at(-1)?.actualSessionId, secondId);
+  } finally {
+    await manager.close();
+    await server.close();
+  }
+});
+
+Deno.test("a refused genesis, then close(), then a corrected document: the recovery mounts the NEW session id", async () => {
+  const daemon = await Identity.fromPassphrase(
+    "acl genesis close-recover daemon",
+  );
+  const spaceIdentity = await Identity.fromPassphrase(
+    "acl genesis close-recover space",
+  );
+  const space = spaceIdentity.did();
+  const server = createServer("runner-acl-genesis-close-recover");
+  const factory = new RecordingLoopbackSessionFactory(server);
+  const manager = TestStorageManager.overServer({ as: daemon }, factory);
+  manager.registerSpaceIdentity(spaceIdentity, {
+    genesisAcl: { "*": "OWNER", [daemon.did()]: "WRITE" },
+  });
+  try {
+    await assertRejects(
+      () => manager.ensureSpaceInitialized(space),
+      Error,
+      "concrete OWNER",
+    );
+    await manager.close();
+    const corrected = {
+      [space]: "OWNER" as const,
+      [daemon.did()]: "WRITE" as const,
+    };
+    manager.registerSpaceIdentity(spaceIdentity, { genesisAcl: corrected });
+    await manager.ensureSpaceInitialized(space);
+    // Red-first witnessed: the recovery succeeded but on the OLD session id
+    // while scopeKeyIdentity() reported the new one.
+    assertEquals(
+      factory.sessions.at(-1)?.actualSessionId,
+      manager.scopeKeyIdentity().sessionId,
+    );
+    assertEquals(
+      (await server.readDocument(space, `of:${space}`))?.value,
+      corrected,
+    );
+  } finally {
+    await manager.close();
+    await server.close();
+  }
+});
+
+Deno.test("a sealer that loses the race in the RECHECK window (before its commit) is told too", async () => {
+  const alice = await Identity.fromPassphrase("acl genesis recheck alice");
+  const bob = await Identity.fromPassphrase("acl genesis recheck bob");
+  const spaceIdentity = await Identity.fromPassphrase(
+    "acl genesis recheck space",
+  );
+  const space = spaceIdentity.did();
+  const server = createServer("runner-acl-genesis-recheck");
+  // Alice's bootstrap session is held at its RECHECK query, so Bob's default
+  // genesis lands between Alice's first inspection and her recheck.
+  const aliceGate = gate();
+  const aliceFactory = new GatedGenesisSessionFactory(
+    server,
+    space,
+    aliceGate.opened,
+    "queryGraph",
+  );
+  const aliceManager = TestStorageManager.overServer(
+    { as: alice },
+    aliceFactory,
+  );
+  const bobManager = TestStorageManager.overServer(
+    { as: bob, spaceIdentity },
+    new RecordingLoopbackSessionFactory(server),
+  );
+  aliceManager.registerSpaceIdentity(spaceIdentity, {
+    genesisAcl: { [space]: "OWNER", [alice.did()]: "WRITE" },
+  });
+  try {
+    const aliceOpen = aliceManager.ensureSpaceInitialized(space);
+    await aliceFactory.held;
+    const bobSync = await bobManager.open(space).sync("of:recheck-bob" as URI);
+    assert(!bobSync.error, bobSync.error?.message);
+    aliceGate.open();
+    // Red-first witnessed: the recheck found the ACL created, skipped the
+    // bootstrap arm with no conflict to catch, and Alice's open SUCCEEDED
+    // under Bob's wildcard.
+    await assertRejects(() => aliceOpen, Error, "different ACL");
+    assertEquals((await server.readDocument(space, `of:${space}`))?.value, {
+      [bob.did()]: "OWNER",
+      "*": "WRITE",
+    });
+  } finally {
+    await aliceManager.close();
+    await bobManager.close();
+    await server.close();
+  }
+});
+
+Deno.test("a sealer opening a space that already carries exactly its document proceeds (a reopen is not a conflict)", async () => {
+  const alice = await Identity.fromPassphrase("acl genesis reopen alice");
+  const spaceIdentity = await Identity.fromPassphrase(
+    "acl genesis reopen space",
+  );
+  const space = spaceIdentity.did();
+  const server = createServer("runner-acl-genesis-reopen");
+  const sealed = { [space]: "OWNER" as const, [alice.did()]: "WRITE" as const };
+  const first = TestStorageManager.overServer(
+    { as: alice },
+    new RecordingLoopbackSessionFactory(server),
+  );
+  first.registerSpaceIdentity(spaceIdentity, { genesisAcl: sealed });
+  const secondFactory = new RecordingLoopbackSessionFactory(server);
+  const second = TestStorageManager.overServer({ as: alice }, secondFactory);
+  second.registerSpaceIdentity(spaceIdentity, { genesisAcl: sealed });
+  try {
+    await first.ensureSpaceInitialized(space);
+    await first.close();
+    // A second manager (a restart, say) with the same document finds the
+    // space already sealed as asked: no genesis, no refusal.
+    const sync = await second.open(space).sync(`of:${space}` as URI);
+    assert(!sync.error, sync.error?.message);
+    assertEquals(secondFactory.principals, [alice.did()], "no bootstrap");
+    // But a different document on the same existing space is refused.
+    const third = TestStorageManager.overServer(
+      { as: alice },
+      new RecordingLoopbackSessionFactory(server),
+    );
+    third.registerSpaceIdentity(spaceIdentity, {
+      genesisAcl: { [space]: "OWNER" },
+    });
+    try {
+      await assertRejects(
+        () => third.ensureSpaceInitialized(space),
+        Error,
+        "different ACL",
+      );
+    } finally {
+      await third.close();
+    }
+  } finally {
+    await second.close();
+    await server.close();
+  }
+});
+
+Deno.test("registerSpaceIdentity refuses a genesis ACL once the space's provider exists (it could never be written)", async () => {
+  const user = await Identity.fromPassphrase("acl genesis late-register user");
+  const spaceIdentity = await Identity.fromPassphrase(
+    "acl genesis late-register space",
+  );
+  const space = spaceIdentity.did();
+  const server = createServer("runner-acl-genesis-late-register");
+  const manager = TestStorageManager.overServer(
+    { as: user },
+    new RecordingLoopbackSessionFactory(server),
+  );
+  try {
+    const sync = await manager.open(space).sync(`of:${space}` as URI);
+    assert(!sync.error, sync.error?.message);
+    // Red-first witnessed: accepted, never written — ACL null, no error.
+    assertThrows(
+      () =>
+        manager.registerSpaceIdentity(spaceIdentity, {
+          genesisAcl: { [space]: "OWNER" },
+        }),
+      Error,
+      "already open",
+    );
   } finally {
     await manager.close();
     await server.close();
