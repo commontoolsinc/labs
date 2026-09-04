@@ -9,6 +9,7 @@ import {
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
 import type { HarnessHandleTable } from "../../src/contracts/handle-table.ts";
 import type { HarnessCfcInvocationContext } from "../../src/contracts/cfc-invocation-context.ts";
+import type { HarnessPolicyDecisionRecord } from "../../src/contracts/policy-trace.ts";
 import { createToolOutputId } from "../../src/contracts/tool-result.ts";
 import {
   HARNESS_CELL_LABELS_TYPE,
@@ -744,6 +745,152 @@ describe("console/steps CFC and disclosure", () => {
     expect(steps[0].status).toBe("ok");
     expect(steps[0].policy?.decision).toBe("withheld");
     expect(steps[0].policy?.reasonCodes).toEqual(["cfc_release_withheld"]);
+  });
+
+  it("reads a legacy trace's withheld release off its reason code, not its outcome word", () => {
+    // A run recorded before the `withheld` outcome existed persisted `denied`
+    // beside a release that held values back. The reason code is the fact and
+    // does not move, so the console reads the step off that — the same field
+    // AUD-16 counts — and an old family reads alike whichever build opens it.
+    const steps = consoleRunSteps(
+      [
+        call("c1", "run_pattern", { sourceText: "x" }),
+        result("c1", "run_pattern", {
+          status: "ok",
+          resultRef: { outputId: "out-1" },
+          valueError: "the values are withheld; resultRef still names them",
+        }),
+      ],
+      [
+        {
+          type: "cf-harness.policy-decision",
+          sequence: 1,
+          runId: "run-legacy",
+          at: "2026-01-01T00:00:00.000Z",
+          toolActivitySequence: 1,
+          toolCallId: "c1",
+          toolId: "run_pattern",
+          cfcEnforcementMode: "enforce-explicit",
+          decision: "allowed",
+          reasonCodes: ["cfc_enforce_explicit_direct_command"],
+        },
+        {
+          type: "cf-harness.policy-decision",
+          sequence: 2,
+          runId: "run-legacy",
+          at: "2026-01-01T00:00:00.000Z",
+          toolActivitySequence: 1,
+          toolCallId: "c1",
+          toolId: "run_pattern",
+          cfcEnforcementMode: "enforce-explicit",
+          decision: "denied",
+          reasonCodes: ["cfc_release_withheld"],
+          release: {
+            reasonCode: "cfc_release_withheld",
+            boundary: "release",
+            sink: "run_pattern",
+            ceiling: [],
+          },
+        },
+      ],
+    );
+
+    expect(steps[0].status).toBe("ok");
+    expect(steps[0].policy?.decision).toBe("withheld");
+  });
+
+  it("keeps `denied` for a decision no boundary decided", () => {
+    // The other half of the rule: a call authority refused carries no release
+    // record, so nothing rewrites its word and the step stays denied.
+    const steps = consoleRunSteps(
+      [
+        call("c1", "write_file", { path: "x" }),
+        result("c1", "write_file", { status: "error" }),
+      ],
+      [{
+        type: "cf-harness.policy-decision",
+        sequence: 1,
+        runId: "run-denied",
+        at: "2026-01-01T00:00:00.000Z",
+        toolActivitySequence: 1,
+        toolCallId: "c1",
+        toolId: "write_file",
+        cfcEnforcementMode: "enforce-explicit",
+        decision: "denied",
+        reasonCodes: ["write_file_enforce_explicit_direct_command"],
+      }],
+    );
+
+    expect(steps[0].status).toBe("denied");
+    expect(steps[0].policy?.decision).toBe("denied");
+  });
+
+  it("keeps the persisted word when the release record answers neither closed set", () => {
+    // A trace is read back through JSON. A release record whose boundary or
+    // reason code is outside the contract's sets is a record the console
+    // cannot read, and an unreadable record is not evidence to rewrite a
+    // persisted outcome with — so the word the run recorded stands. `null` is
+    // the same reading, and would throw if it were dereferenced instead.
+    const legacy = {
+      type: "cf-harness.policy-decision",
+      sequence: 1,
+      runId: "run-malformed",
+      at: "2026-01-01T00:00:00.000Z",
+      toolActivitySequence: 1,
+      toolCallId: "c1",
+      toolId: "run_pattern",
+      cfcEnforcementMode: "enforce-explicit",
+      decision: "denied",
+      reasonCodes: ["cfc_release_withheld"],
+    } as const;
+    const transcript = [
+      call("c1", "run_pattern", { sourceText: "x" }),
+      result("c1", "run_pattern", { status: "ok" }),
+    ];
+    const malformed = [
+      // A boundary outside the set, beside a reason code inside it.
+      { reasonCode: "cfc_release_withheld", boundary: "egress" },
+      // A reason code outside the set, beside a boundary inside it.
+      { reasonCode: "cfc_release_maybe", boundary: "release" },
+      // No discriminant at all, and an empty record.
+      { sink: "run_pattern" },
+      null,
+    ];
+
+    for (const release of malformed) {
+      const steps = consoleRunSteps(transcript, [
+        { ...legacy, release } as unknown as HarnessPolicyDecisionRecord,
+      ]);
+      expect(steps[0].status).toBe("denied");
+      expect(steps[0].policy?.decision).toBe("denied");
+    }
+  });
+
+  it("reads a refused commit as denied, since it landed no result", () => {
+    // A release record does not by itself mean the call answered: the runner
+    // refused this write, so `cfc_commit_refused` keeps the denial.
+    const steps = consoleRunSteps(
+      [
+        call("c1", "run_pattern", { sourceText: "x" }),
+        result("c1", "run_pattern", { status: "ok" }),
+      ],
+      [{
+        type: "cf-harness.policy-decision",
+        sequence: 1,
+        runId: "run-commit",
+        at: "2026-01-01T00:00:00.000Z",
+        toolActivitySequence: 1,
+        toolCallId: "c1",
+        toolId: "run_pattern",
+        cfcEnforcementMode: "enforce-strict",
+        decision: "denied",
+        reasonCodes: ["cfc_commit_refused"],
+        release: { reasonCode: "cfc_commit_refused", boundary: "commit" },
+      }],
+    );
+
+    expect(steps[0].status).toBe("denied");
+    expect(steps[0].policy?.decision).toBe("denied");
   });
 
   it("measures the longest numeric run a result let across as value", () => {

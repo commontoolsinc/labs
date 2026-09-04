@@ -318,6 +318,57 @@ describe("console/src/steps-view", () => {
       expect(text).toContain("Open subagent run");
     });
 
+    it("marks a legacy trace's withheld release, whose persisted word is `denied`", () => {
+      // The whole path, from the record on disk to the badge: a run recorded
+      // before the outcome existed persisted `denied` beside a release that
+      // held values back, and the view must still show the boundary rather
+      // than a denial of a call that ran.
+      const steps = consoleRunSteps(
+        [
+          {
+            role: "assistant",
+            content: "",
+            toolCalls: [{
+              id: "c1",
+              type: "function",
+              function: { name: "run_pattern", arguments: "{}" },
+            }],
+          },
+          {
+            role: "tool",
+            toolCallId: "c1",
+            toolName: "run_pattern",
+            content: JSON.stringify({ status: "ok" }),
+          },
+        ],
+        [{
+          type: "cf-harness.policy-decision",
+          sequence: 1,
+          runId: "run-legacy",
+          at: "2026-01-01T00:00:00.000Z",
+          toolActivitySequence: 1,
+          toolCallId: "c1",
+          toolId: "run_pattern",
+          cfcEnforcementMode: "enforce-explicit",
+          decision: "denied",
+          reasonCodes: ["cfc_release_withheld"],
+          release: {
+            reasonCode: "cfc_release_withheld",
+            boundary: "release",
+            sink: "run_pattern",
+            ceiling: [],
+          },
+        }],
+      );
+      const view = new TestConsoleSteps();
+      view.steps = steps;
+
+      const text = templateText(view.view());
+      expect(steps[0].status).toBe("ok");
+      expect(text).toContain("withheld");
+      expect(text).not.toContain("denied");
+    });
+
     it("marks a withheld release beside the CFC line of a step that succeeded", () => {
       const step: ConsoleStep = {
         index: 0,
