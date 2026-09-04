@@ -46,7 +46,8 @@ import {
   type Move,
   operandForChild,
   placeAtSpaceRoot,
-} from "../src/place.ts";
+} from "../lib/shuttle/place.ts";
+import { RECORD_LABEL_WIDTH } from "../lib/shuttle/record.ts";
 
 const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;
 const OTHER_SPACE = "did:key:z6MkOtherSpace" as MemorySpace;
@@ -64,10 +65,15 @@ function inSlugs(): CurrentPlace {
   return place;
 }
 
-/** Helper for the cases below, which reads the position `pwd` printed. */
+/**
+ * Helper for the cases below, which reads the position `pwd` printed.
+ *
+ * It slices the width the format exports rather than the label it happens to
+ * write, so a change to either moves this with it.
+ */
 function printedPosition(place: CurrentPlace): string {
   const [position] = place.render().split("\n");
-  return position.slice("position  ".length);
+  return position.slice(RECORD_LABEL_WIDTH);
 }
 
 /** Helper for the cases below, which stands an instance at a named piece. */
@@ -458,6 +464,136 @@ describe("place", () => {
         const facet = place.place;
         expect(place.cd(printedPosition(place)).kind).toBe("refused");
         expect(place.place).toEqual(facet);
+      });
+    });
+  });
+
+  describe("label()", () => {
+    // The short form the prompt carries. What every case here turns on is
+    // that it says what the place holds and nothing else: the space is left
+    // out, and nothing that stays is abbreviated.
+
+    it("returns a space root as the separator alone, and the scope", () => {
+      expect(atSpaceRoot().label()).toBe("/ @space");
+    });
+
+    it("returns a facet with the separator that says it is one", () => {
+      expect(inSlugs().label()).toBe("/slugs/ @space");
+    });
+
+    it("returns a piece and its path without the space in front", () => {
+      const place = atPiece();
+      place.cd("topics/3");
+      expect(place.label()).toBe("board/topics/3 @space");
+    });
+
+    it("returns the scope the place reads through", () => {
+      const place = atPiece();
+      place.cd("@session");
+      expect(place.label()).toBe("board @session");
+    });
+
+    it("returns a piece named as the operand named it, cut down no further", () => {
+      // The prompt does no shortening beyond leaving the space out, so a
+      // handle prints whole. A prefix of one would print exactly as a whole
+      // handle does, and nothing in it would say which it was.
+
+      expect(atReferencedPiece().label()).toBe(`${HANDLE} @space`);
+    });
+
+    it("returns a key holding the separator as one segment", () => {
+      const place = atPiece();
+      place.cd("/board/a~1b");
+      expect(place.label()).toBe("board/a~1b @space");
+    });
+  });
+
+  describe("a part a terminal would act on", () => {
+    // The classification the doors turn on, pinned one character at a time.
+    // The matrix above sorts a refusal and a round trip into buckets and
+    // asserts only that each bucket has something in it, so a character moving
+    // between them leaves it green. What says which bucket a character is in
+    // is here.
+
+    const ACTED_ON: [string, string][] = [
+      ["\u0000", "a null"],
+      ["\t", "a tab"],
+      ["\u000b", "a vertical tab"],
+      ["\f", "a form feed"],
+      ["\r", "a carriage return"],
+      ["\u001b", "an escape"],
+      ["\u007f", "a delete"],
+      ["\u009b", "the C1 sequence introducer"],
+    ];
+
+    const PRINTED: [string, string][] = [
+      ["\u00a0", "a no-break space"],
+      ["\u2028", "the line separator"],
+      ["\u2029", "the paragraph separator"],
+    ];
+
+    it("refuses a segment holding one, whichever door reads it", () => {
+      for (const [mark] of ACTED_ON) {
+        const walked = atPiece();
+        expect(walked.cd(`b${mark}c`)).toEqual({
+          kind: "refused",
+          reason: `\`b${mark}c\` has a segment holding a control ` +
+            "character, so a terminal would act on it rather than print it.",
+        });
+        const entered = atSpaceRoot();
+        const move = entered.enter(
+          { space: SPACE, piece: HANDLE, path: [`b${mark}c`] },
+          "#x",
+        );
+        expect(move.kind).toBe("refused");
+        expect(entered.place).toEqual(placeAtSpaceRoot(SPACE));
+      }
+    });
+
+    it("refuses a piece holding one, which the handle rule's length test takes", () => {
+      // `isPieceHandle` counts characters rather than reading them, so a
+      // handle-shaped piece carries anything past the vocabulary check. The
+      // reason is that door's own: no slug holds one and base64url has none.
+
+      for (const [mark] of ACTED_ON) {
+        const piece = `of:fid1:aaaaaaaaaa${mark}aaaaaaaaa`;
+        expect(atSpaceRoot().cd(`/${piece}`)).toEqual({
+          kind: "refused",
+          reason: `\`/${piece}\` has a piece holding a control character, ` +
+            "so no piece carries that name: a slug is lowercase letters, " +
+            "numbers, and single hyphens between words, and a handle is " +
+            "`of:fid1:` and unpadded base64url.",
+        });
+      }
+    });
+
+    it("admits a separator a terminal prints rather than acts on", () => {
+      // These keep company with the others in habit rather than in any rule:
+      // a reader of text breaks a line on them and a terminal does not, and
+      // the printer quotes them, being whitespace to the split.
+
+      for (const [mark] of PRINTED) {
+        const at = atPiece();
+        expect(at.cd(`b${mark}c`).kind).toBe("moved");
+        expect(at.place.position).toEqual({
+          kind: "piece",
+          space: SPACE,
+          piece: "board",
+          path: [`b${mark}c`],
+        });
+      }
+    });
+
+    it("leaves a line break the reason it already had, which is not this one", () => {
+      // A break is acted on by a terminal too, and one door earlier it is
+      // refused for the older harm: the rendering would split and a shorter
+      // reference would name another cell. What a person is told is the reason
+      // that describes what would actually go wrong.
+
+      expect(atPiece().cd("b\nc")).toEqual({
+        kind: "refused",
+        reason: "`b\nc` has a segment holding a line break, so a rendering " +
+          "of the place would name a different cell.",
       });
     });
   });

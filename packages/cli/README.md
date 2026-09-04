@@ -90,6 +90,68 @@ generate-markdown | cf view --language markdown --rendered
 generate-bytes | cf view --language binary
 ```
 
+## Interactive shell
+
+`cf sh` opens shuttle: a prompt carrying a **place**, lines read against it, and
+one connection held open for the whole run. `cfsh` is a forward to the same
+command — the space elided, one name at two spellings — so `cfsh -s my-space`
+and `cf sh -s my-space` are one thing. Shuttle is what the thing is called; `sh`
+is what you type, the way Fabric is called Fabric and typed `cf`.
+
+It takes the three flags every command with a space and an identity takes —
+`--api-url`, `--identity`, `--space`, with `CF_API_URL`, `CF_IDENTITY` and
+`CF_SPACE` behind them — so a session that already exports those needs no flags.
+The design is
+[`docs/plans/shuttle/README.md`](../../docs/plans/shuttle/README.md).
+
+A place is the context that fills in the levels a reference leaves out: a space,
+optionally a piece, optionally a path inside it — and a **scope**, the
+per-identity overlay every read goes through. Both halves stick as you navigate,
+and both show in the prompt.
+
+```text
+shuttle / @space> cd slugs
+shuttle /slugs/ @space> cd board
+shuttle board @space> get title
+"verb contracts"
+```
+
+The prompt names shuttle rather than the command, the product being what a
+prompt says it is. It is the short surface: it leaves the space out, since one
+shuttle serves one space for its whole run, and shortens nothing else. `pwd` is
+the complete address — every level, the scope written even when it is the base —
+which is what to copy.
+
+| Verb           | What it does                                                                                                                                      |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cd <ref>`     | Moves the place. Takes relative segments, `..`, `-`, `/`, a scope-only `@scope`, rooted and complete references, slugs, and `#name` entry points. |
+| `ls`           | Lists what stands where you are: a space root's facets, the slugs the index records, the space's pieces, or the keys under a cell.                |
+| `pwd`          | The complete address of the place, both dimensions.                                                                                               |
+| `get [<ref>]`  | Reads the value at a cell, defaulting to where you stand. A trailing `#argument` reads the piece's arguments cell.                                |
+| `wish <#name>` | Resolves a named entry point, exactly as `cf wish` does.                                                                                          |
+| `where`        | The whole ambient record: the connection, and the place `pwd` prints.                                                                             |
+
+A line is split POSIX-style — whitespace separates, quotes group — so a value
+holding a space is one operand when it is quoted, and anything shuttle prints as
+an operand is quoted where it has to be. Every refusal carries its reason. A
+read that failed is different: it is reported and the prompt reads the next
+line, since a shell whose server went away is still a shell.
+
+The line editor is `lib/view`'s `EditBuffer` over its own key decoder, bound to
+Emacs keys: `ctrl-a`/`ctrl-e` and `home`/`end` for the ends of the line,
+`ctrl-b`/`ctrl-f` and the arrows for a character, `alt-b`/`alt-f` for a word,
+`backspace` and `delete`/`ctrl-d` to delete, `ctrl-w`/`alt-backspace` and
+`alt-d` to kill a word, `ctrl-k` and `ctrl-u` to kill to the end of the line and
+to kill the line, `ctrl-y`/`alt-y` to yank and cycle, `ctrl-c` to abandon the
+line, and `ctrl-d` on an empty line to end the session.
+
+The code is `lib/shuttle/`: `run.ts` composes a session, `place.ts` holds the
+place and what `cd` refuses, `connection.ts` the one `PiecesController` a
+process holds, `line.ts` the split and the printing that inverts it,
+`listing.ts` what `ls` reads, `verbs.ts` the dispatch — which writes nothing —
+`prompt.ts` the loop that does, `record.ts` the form `where` and `pwd` share,
+and `paint.ts` and `terminal.ts` the escape sequences and the raw mode under it.
+
 ## Cell references
 
 `cf cell` holds the commands that act on a cell: `get` and `set` for its value,
@@ -1247,8 +1309,8 @@ against a binary the workflow puts on `$GITHUB_PATH` — but it builds that PATH
 itself, and local runs of those same scripts set `CF_CLI_INTEGRATION_USE_LOCAL`
 to force the source CLI.)
 
-`bin/cf` is the install. It runs from source, so it never goes stale against the
-checkout:
+`bin/cf` is the install, with `bin/cfsh` beside it for the interactive shell.
+Both run from source, so neither goes stale against the checkout:
 
 ```bash
 # mise users: nothing to do. mise.toml puts this checkout's bin/ on PATH.
@@ -1258,11 +1320,13 @@ mise trust    # only if this checkout has not been trusted yet
 deno task install-cf              # --dry-run to see what it would do
 ```
 
-`install-cf` copies `bin/cf` to a directory already on your PATH — refusing to
-guess if there isn't one, since installing somewhere unreachable would reproduce
-the silent failure this exists to prevent. A copy rather than a link, because
-the lookup below travels with the script: no particular checkout has to survive
-for the install to keep working. Re-run it to upgrade. It never edits your shell
+`install-cf` copies `bin/cf` and `bin/cfsh` to a directory already on your PATH
+— refusing to guess if there isn't one, since installing somewhere unreachable
+would reproduce the silent failure this exists to prevent. A copy rather than a
+link, because the lookup below travels with the script: no particular checkout
+has to survive for the install to keep working. `cfsh` carries no lookup of its
+own — it forwards to `cf sh` and finds `cf` by name — so the copy needs nothing
+rewritten on the way through. Re-run it to upgrade. It never edits your shell
 rc; it prints the completion line for you to add.
 
 It copies **this** checkout's `bin/cf` — the one whose task you invoked, which
