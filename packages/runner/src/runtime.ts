@@ -39,6 +39,7 @@ import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
 import { getDirectTransactionReadActivities } from "./storage/transaction-inspection.ts";
 import type {
+  ACL,
   ChangeGroup,
   CommitError,
   DID,
@@ -3339,10 +3340,17 @@ export class Runtime {
    * mint a service-owned space (builtins.md §5; protocol.md §2b). On a
    * client the owner is omitted and the genesis names the manager's own
    * signer — the active user, byte-identical to before.
+   *
+   * `options.genesisAcl` is the exact ACL document the space is born with
+   * when this resolution creates it (its first and only commit — no
+   * world-writable default is ever written), validated by the memory
+   * server's genesis admission. It is inert on a space that already
+   * exists, and is refused together with `owner` (two descriptions of one
+   * document); see `IStorageManager.registerSpaceIdentity`.
    */
   async resolveSpaceName(
     name: string,
-    options?: { owner?: DID },
+    options?: { owner?: DID; genesisAcl?: ACL },
   ): Promise<MemorySpace> {
     const cached = this.resolveSpaceNameSync(name);
     if (cached !== undefined) return cached;
@@ -3366,7 +3374,14 @@ export class Runtime {
     if (session.spaceIdentity) {
       this.storageManager.registerSpaceIdentity?.(
         session.spaceIdentity,
-        options?.owner !== undefined ? { owner: options.owner } : undefined,
+        options?.owner !== undefined || options?.genesisAcl !== undefined
+          ? {
+            ...(options.owner !== undefined ? { owner: options.owner } : {}),
+            ...(options.genesisAcl !== undefined
+              ? { genesisAcl: options.genesisAcl }
+              : {}),
+          }
+          : undefined,
       );
     }
     const did = session.space as MemorySpace;

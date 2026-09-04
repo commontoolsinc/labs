@@ -31,6 +31,7 @@ import type { Cancel } from "../cancel.ts";
 import type { EntityId } from "../create-ref.ts";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
+  type ACL,
   type AuthorizationError as IAuthorizationError,
   type ConflictError as IConflictError,
   type ConnectionError as IConnectionError,
@@ -77,7 +78,17 @@ import type {
 import type { NormalizedFullLink } from "../link-types.ts";
 import { RAW_META_WRITE } from "../meta-seam.ts";
 import { BaseMemoryAddress } from "../traverse.ts";
-export type { DID, MediaType, MemorySpace, Result, Signer, State, Unit, URI };
+export type {
+  ACL,
+  DID,
+  MediaType,
+  MemorySpace,
+  Result,
+  Signer,
+  State,
+  Unit,
+  URI,
+};
 export type ChangeGroup = unknown;
 
 /**
@@ -269,8 +280,17 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * and names the ACTING user OWNER — the serving identity appears nowhere
    * in the ACL). Absent, the genesis owner is the manager's own signer —
    * the active user on a client, byte-identical to the pre-OW31 shape.
+   *
+   * `options.genesisAcl` is the exact document a fresh space is born with
+   * (its first and only commit; no intermediate default is ever written),
+   * validated by the memory server's genesis admission rather than here.
+   * It is inert outside true genesis and never reaches the home arm.
+   * Supplying it together with `owner` is refused.
    */
-  registerSpaceIdentity?(identity: Signer, options?: { owner?: string }): void;
+  registerSpaceIdentity?(
+    identity: Signer,
+    options?: { owner?: string; genesisAcl?: ACL },
+  ): void;
 
   /**
    * Force `space`'s provider session — and with it any fresh-space ACL
