@@ -97,10 +97,6 @@ export class FsTree {
   /**
    * The lookup index this tree keeps per annotated directory, which a test
    * drives directly.
-   *
-   * The name is the documentation. Nothing here is part of what this class
-   * promises, and code that reaches through it is written against internals
-   * that are free to change.
    */
   get accessForTestingOnly(): {
     cfcEntryIndexes: Map<bigint, Map<string, number>>;
