@@ -1349,14 +1349,13 @@ export function toDebugKindString(value: unknown): string {
  *
  * The limits of the result -- its nesting, the number of elements of an array
  * it represents, the number of properties of an object it represents, and the
- * length and number of lines of a string it carries whole -- and a replacer
- * to consult are the `maxDepth`, `maxArrayLength`, `maxProperties`,
- * `maxStringLength`, `maxStringLines`, and `replacer` of `options`. When
- * there is no nesting limit given, the result nests as deep as reasonably
- * possible; when there is no array length given, an array is represented to
- * one hundred elements; when there is no property count given, an object is
- * represented to one hundred properties; when there is no string line count
- * given, a string is
+ * length and number of lines of a string it carries whole -- and a replacer to
+ * consult are the `maxDepth`, `maxArrayLength`, `maxProperties`,
+ * `maxStringLength`, `maxStringLines`, and `replacer` of `options`. When there
+ * is no nesting limit given, the result nests as deep as reasonably possible;
+ * when there is no array length given, an array is represented to one hundred
+ * elements; when there is no property count given, an object is represented to
+ * one hundred properties; when there is no string line count given, a string is
  * carried whole to five lines; and when there is no string length given, a
  * string is carried whole to two hundred characters, or as long as the
  * conversion allows when a line count is given.

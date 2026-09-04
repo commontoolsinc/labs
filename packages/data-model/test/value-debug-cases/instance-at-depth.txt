@@ -42,7 +42,7 @@ instance under 8 levels:
               d: {
                 d: {
                   "/Data": {
-                    x: 1
+                    "/...": "object"
                   }
                 }
               }
