@@ -481,12 +481,13 @@ describe("load-errors", () => {
           }
         });
 
-        it("resolves a slug target before starting its piece", async () => {
+        it("resolves a slug reference before starting the piece it names", async () => {
           const restore = installBrowserGlobals();
           try {
             const { XAppView } = await import("../src/views/AppView.ts");
             const space = "did:key:z6Mk-shell-slug-target-error" as DID;
-            const calls: unknown[][] = [];
+            const resolved: unknown[][] = [];
+            const started: unknown[][] = [];
             const view = new XAppView();
             view.app = {
               identity: {},
@@ -496,8 +497,12 @@ describe("load-errors", () => {
             view.space = space;
             view.rt = {
               signal: new AbortController().signal,
+              resolveSlug: (...args: unknown[]) => {
+                resolved.push(args);
+                return Promise.resolve("fid1:slug-target");
+              },
               getPattern: (...args: unknown[]) => {
-                calls.push(args);
+                started.push(args);
                 return Promise.resolve({ id: () => "fid1:slug-target" });
               },
             } as never;
@@ -505,9 +510,8 @@ describe("load-errors", () => {
             view._selectedPattern.run();
             await view._selectedPattern.taskComplete;
 
-            expect(calls).toHaveLength(2);
-            expect(calls[0]?.[2]).toEqual({ start: false });
-            expect(calls[1]?.[2]).toBeUndefined();
+            expect(resolved).toEqual([[space, "broken-piece", undefined]]);
+            expect(started).toEqual([[space, "fid1:slug-target"]]);
           } finally {
             restore();
           }

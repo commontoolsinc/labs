@@ -546,20 +546,23 @@ inside it. Resolving the two together is what the split is for — the path is
 the part that says which member, so a resolver handed the address on its own
 has nothing to walk with.
 
-**4. Walk segments in the URL layer.** `parseFabricUrl`
-(`packages/runner/src/fabric-url.ts`) reads a trailing segment as a slug and the
-rest as a cell path. Resolution of `<space>/<collection>/<member>` follows from
-letting a resolved collection resolve the next segment, and the same step covers
-an item's collections. The slug grammar in `packages/runner/src/slugs.ts` does
-not change.
+**4. Walk segments in the URL layer.** Landed for the shell's page URLs.
+`urlToAppView` (`packages/navigation/src/view.ts`) reads the segment after a
+slug as the member name and carries it in the view, which serializes back to
+`<space>/<collection>/<member>`. Resolution is a separate worker round trip,
+`slug:resolve`
+(`packages/runtime-client/src/backends/runtime-processor.ts`), which hands the
+reference to the runner's walk and answers with the piece the shell then
+starts; a collection named with no member after it opens the piece holding the
+collection, the shell following the refusal that names it. The slug grammar in
+`packages/runner/src/slugs.ts` does not change.
 
-Where the walk lives has to be decided before it is written. `parseFabricUrl`
-states that it is deliberately pure and synchronous, and it names turning a
-space name into a DID as the kind of work that belongs outside it. Walking into
-a collection is that kind of work — it syncs and reads a cell — so the walk
-belongs beside the parse rather than inside it, or the function's contract
-changes deliberately. Reading the segments apart from resolving them is the
-split to preserve.
+Where the walk lives is what that split settles. `parseFabricUrl`
+(`packages/runner/src/fabric-url.ts`) is deliberately pure and synchronous, and
+names turning a space name into a DID as the kind of work that belongs outside
+it. Walking into a collection is that kind of work — it syncs and reads a cell
+— so the walk sits beside the parse rather than inside it, and every reader of
+these URLs keeps reading the segments apart from resolving them.
 
 **5. Add the prose layer.** Sigil parsing, canonicalize-on-write,
 context-computed rendering with round-trip verification, the two render modes,

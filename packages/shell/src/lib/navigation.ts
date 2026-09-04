@@ -140,6 +140,9 @@ function mapNavigationView(
     view = {
       ...("pieceId" in view ? { pieceId: view.pieceId } : undefined),
       ...("pieceSlug" in view ? { pieceSlug: view.pieceSlug } : undefined),
+      ...("pieceMember" in view
+        ? { pieceMember: view.pieceMember }
+        : undefined),
       ...("mode" in view ? { mode: view.mode } : undefined),
       spaceName: currentSpaceName,
     };

@@ -65,6 +65,8 @@ import {
   popFrame,
   pushFrame,
   resolveExternalRootRefForStructure,
+  resolveSlugReference,
+  resolveSlugTargetInPiece,
   Runtime,
   runtimePresets,
   RuntimeTelemetry,
@@ -196,6 +198,7 @@ import {
   type SettleStatsResponse,
   type SetTriggerTraceEnabledRequest,
   type SetWriteStackTraceMatchersRequest,
+  type SlugResolveRequest,
   type SlugResponse,
   type SpaceAclResponse,
   type SpaceGetAclRequest,
@@ -2219,6 +2222,48 @@ export class RuntimeProcessor {
     return { slug: typeof slug === "string" ? slug : undefined };
   }
 
+  /**
+   * The piece a slug reference names, unstarted: the piece the slug reaches
+   * when the reference stops there, and the member the collection holds when
+   * the reference names one. Starting and caching stay with
+   * {@link handlePieceGet}, which a caller reaches through this piece's id.
+   *
+   * Fails as the runner's resolution fails — `missing-member` for a member
+   * the collection does not hold, naming both, and `not-piece` for a target
+   * that is neither a piece nor a member of one.
+   */
+  async handleSlugResolve(
+    request: SlugResolveRequest,
+  ): Promise<PieceResponse> {
+    const cc = this.getSpaceCtx(request.space);
+    const space = cc.getSpace();
+    if (request.member === undefined) {
+      // A slug pointing inside a piece rather than at its root names a
+      // collection, and the runner refuses such a reference with no member
+      // after it, naming the piece that holds it. A page URL names a piece to
+      // render, so the refusal is followed to that piece — which is what
+      // `/<space>/top` opens — and the path from its root down to the
+      // collection is dropped, no page rendering a cell inside a piece.
+      const { piece } = await resolveSlugTargetInPiece(
+        this.runtime,
+        space,
+        request.slug,
+      );
+      return { piece: createPieceRef(piece) };
+    }
+    // The member segment is what the walk spends, so a collection leaves
+    // nothing after the piece. A slug naming a piece root spends nothing, and
+    // the segment stays a cell path inside it, dropped here as the URL layer
+    // drops the segments written after an id.
+    const { piece } = await resolveSlugReference(
+      this.runtime,
+      space,
+      request.slug,
+      [request.member],
+    );
+    return { piece: createPieceRef(piece) };
+  }
+
   async handlePieceRemove(
     request: PieceRemoveRequest,
   ): Promise<BooleanResponse> {
@@ -2764,6 +2809,8 @@ export class RuntimeProcessor {
         return await this.handlePieceGet(request);
       case RequestType.PieceGetSlug:
         return await this.handlePieceGetSlug(request);
+      case RequestType.SlugResolve:
+        return await this.handleSlugResolve(request);
       case RequestType.PieceRemove:
         return await this.handlePieceRemove(request);
       case RequestType.PieceStart:

@@ -10,6 +10,14 @@ const EMBED_PATH_PREFIX = ".embed";
 export type PieceViewRef = {
   pieceId?: string;
   pieceSlug?: string;
+
+  /**
+   * The member `pieceSlug` names, when that slug names a collection rather
+   * than a piece: `/<space>/top/42` holds the slug `top` and the member `42`.
+   * One segment reaches a member, so a member's own fields never compete for
+   * it, and a view carrying one without a slug addresses nothing.
+   */
+  pieceMember?: string;
 };
 
 export type AppViewModeRef = {
@@ -59,18 +67,30 @@ export function isAppView(view: unknown): view is AppView {
     return isAppBuiltInView(view.builtin) && !("mode" in view);
   }
   if (!isAppViewModeRef(view)) return false;
+  if (!isPieceViewRef(view)) return false;
   if ("spaceName" in view) {
-    return typeof view.spaceName === "string" && !!view.spaceName &&
-      !("pieceId" in view && "pieceSlug" in view);
+    return typeof view.spaceName === "string" && !!view.spaceName;
   }
   if ("spaceDid" in view) {
-    return isDID(view.spaceDid) && !("pieceId" in view && "pieceSlug" in view);
+    return isDID(view.spaceDid);
   }
   return false;
 }
 
 function isAppViewModeRef(view: object): view is AppViewModeRef {
   return !("mode" in view) || view.mode === "embed";
+}
+
+/**
+ * Whether a view's piece reference addresses one thing: an id or a slug but
+ * never both, and a member only under the slug whose collection holds it.
+ */
+function isPieceViewRef(view: object): view is PieceViewRef {
+  if ("pieceId" in view && "pieceSlug" in view) return false;
+  const member = "pieceMember" in view ? view.pieceMember : undefined;
+  const slug = "pieceSlug" in view ? view.pieceSlug : undefined;
+  return member === undefined ||
+    (typeof member === "string" && typeof slug === "string" && !!slug);
 }
 
 /**
@@ -122,23 +142,26 @@ export function appViewToUrlPath(view: AppView): `/${string}` {
         return `/`;
     }
   } else if ("spaceName" in view) {
-    const pieceSlug = "pieceSlug" in view ? view.pieceSlug : undefined;
-    const pieceId = "pieceId" in view ? view.pieceId : undefined;
-    return pieceSlug
-      ? `${prefix}/${view.spaceName}/${pieceSlug}`
-      : pieceId
-      ? `${prefix}/${view.spaceName}/${pieceId}`
-      : `${prefix}/${view.spaceName}`;
+    return `${prefix}/${view.spaceName}${pieceUrlSegments(view)}`;
   } else if ("spaceDid" in view) {
-    const pieceSlug = "pieceSlug" in view ? view.pieceSlug : undefined;
-    const pieceId = "pieceId" in view ? view.pieceId : undefined;
-    return pieceSlug
-      ? `${prefix}/${view.spaceDid}/${pieceSlug}`
-      : pieceId
-      ? `${prefix}/${view.spaceDid}/${pieceId}`
-      : `${prefix}/${view.spaceDid}`;
+    return `${prefix}/${view.spaceDid}${pieceUrlSegments(view)}`;
   }
   return `/`;
+}
+
+/**
+ * The segments a view's piece reference adds after its space, empty for a
+ * view naming no piece. A member follows the slug it belongs to; an id
+ * carries none, a member being a collection's name for one of its own.
+ */
+function pieceUrlSegments(view: PieceViewRef): string {
+  const pieceSlug = "pieceSlug" in view ? view.pieceSlug : undefined;
+  const pieceId = "pieceId" in view ? view.pieceId : undefined;
+  const pieceMember = "pieceMember" in view ? view.pieceMember : undefined;
+  if (pieceSlug) {
+    return pieceMember ? `/${pieceSlug}/${pieceMember}` : `/${pieceSlug}`;
+  }
+  return pieceId ? `/${pieceId}` : "";
 }
 
 export function urlToAppView(url: URL): AppView {
@@ -148,6 +171,12 @@ export function urlToAppView(url: URL): AppView {
   if (mode) segments.shift();
   const [first, pieceId] = [segments[0], segments[1]];
   const modeRef: AppViewModeRef = mode ? { mode } : {};
+  // The segment after a slug selects a member of the collection it names.
+  // Reading it apart from resolving it is what keeps this pure: whether the
+  // slug names a collection at all is the resolver's question. Exactly one
+  // segment reaches a member, so anything past it is no part of the address.
+  const member = segments[2] || undefined;
+  const memberRef: PieceViewRef = member ? { pieceMember: member } : {};
   // `?path=` is the piece deep link (e.g. a cabinet page Mobile Loom should
   // open). Captured here — the only place the query survives boot — and
   // delivered once by the shell after the piece loads.
@@ -160,12 +189,24 @@ export function urlToAppView(url: URL): AppView {
   if (isDID(first)) {
     if (!pieceId) return { spaceDid: first, ...modeRef, ...openRef };
     return isSlugAddress(pieceId)
-      ? { spaceDid: first, pieceSlug: pieceId, ...modeRef, ...openRef }
+      ? {
+        spaceDid: first,
+        pieceSlug: pieceId,
+        ...memberRef,
+        ...modeRef,
+        ...openRef,
+      }
       : { spaceDid: first, pieceId, ...modeRef, ...openRef };
   } else {
     if (!pieceId) return { spaceName: first, ...modeRef, ...openRef };
     return isSlugAddress(pieceId)
-      ? { spaceName: first, pieceSlug: pieceId, ...modeRef, ...openRef }
+      ? {
+        spaceName: first,
+        pieceSlug: pieceId,
+        ...memberRef,
+        ...modeRef,
+        ...openRef,
+      }
       : { spaceName: first, pieceId, ...modeRef, ...openRef };
   }
 }

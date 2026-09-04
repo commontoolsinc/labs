@@ -380,6 +380,12 @@ export enum RequestType {
   /** Reads a piece's slug, which a piece need not have. */
   PieceGetSlug = "piece:getSlug",
 
+  /**
+   * Answers with the piece a slug reference names, without starting it: the
+   * piece the slug reaches, or the member of the collection it names.
+   */
+  SlugResolve = "slug:resolve",
+
   /** Removes a piece from its space's list. */
   PieceRemove = "piece:remove",
 
@@ -2123,6 +2129,28 @@ export type PieceGetSlugRequest = BaseRequest & {
   space: DID;
 };
 
+/** The {@link RequestType.SlugResolve} request. */
+export type SlugResolveRequest = BaseRequest & {
+  type: RequestType.SlugResolve;
+
+  /**
+   * The slug to resolve.
+   */
+  slug: string;
+
+  /**
+   * The member to select out of the collection the slug names, absent where
+   * the reference stops at the slug. One member name, never a path: a
+   * member's own fields are addressed inside the piece it resolves to.
+   */
+  member?: string;
+
+  /**
+   * The space the slug is bound in.
+   */
+  space: DID;
+};
+
 /** The {@link RequestType.PieceRemove} request. */
 export type PieceRemoveRequest = BaseRequest & {
   type: RequestType.PieceRemove;
@@ -2828,6 +2856,7 @@ export type IPCClientRequest =
   | RecreateSpaceRootPatternRequest
   | PieceGetRequest
   | PieceGetSlugRequest
+  | SlugResolveRequest
   | PieceRemoveRequest
   | PieceStartRequest
   | PieceStopRequest
@@ -3568,6 +3597,10 @@ export type Commands = {
   [RequestType.PieceGetSlug]: {
     request: PieceGetSlugRequest;
     response: SlugResponse;
+  };
+  [RequestType.SlugResolve]: {
+    request: SlugResolveRequest;
+    response: PieceResponse;
   };
   [RequestType.PieceRemove]: {
     request: PieceRemoveRequest;

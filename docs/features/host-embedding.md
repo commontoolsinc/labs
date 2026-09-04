@@ -112,10 +112,16 @@ DOM). A host embeds by listening for:
   import type { DID } from "@commonfabric/identity";
 
   // Condensed from packages/navigation/src/view.ts
+  type PieceRef = {
+    pieceId?: string;
+    // A slug naming a collection, and the member it selects.
+    pieceSlug?: string;
+    pieceMember?: string;
+  };
   export type AppView =
     | { builtin: "home" }
-    | { spaceName: string; pieceId?: string; pieceSlug?: string; mode?: "embed" }
-    | { spaceDid: DID; pieceId?: string; pieceSlug?: string; mode?: "embed" };
+    | ({ spaceName: string; mode?: "embed" } & PieceRef)
+    | ({ spaceDid: DID; mode?: "embed" } & PieceRef);
   ```
 
 - **`cf-replace-navigation`** — same `AppView` detail; replaces the

@@ -174,6 +174,32 @@ describe("navigation", () => {
     );
   });
 
+  it("keeps the member when it names the space rather than its DID", () => {
+    withNavigation(
+      "http://common.test/my-space",
+      { view: { spaceName: "my-space" }, runtimeSpace: SPACE_DID as DID },
+      (_navigation, recorded) => {
+        globalThis.dispatchEvent(
+          new CustomEvent("cf-navigate", {
+            detail: {
+              spaceDid: SPACE_DID,
+              pieceSlug: "top",
+              pieceMember: "42",
+            },
+          }),
+        );
+        expect(recorded.push.at(-1)).toEqual({
+          state: {
+            pieceSlug: "top",
+            pieceMember: "42",
+            spaceName: "my-space",
+          },
+          url: "/my-space/top/42",
+        });
+      },
+    );
+  });
+
   it("keeps a DID that names a space other than the running one", () => {
     const otherDid = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
     withNavigation(

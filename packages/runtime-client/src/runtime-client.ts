@@ -734,6 +734,32 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return response.slug;
   }
 
+  /**
+   * The piece a slug reference names: the piece the slug reaches, or the
+   * member of the collection it names. The piece comes back unstarted —
+   * {@link getPiece}, addressed by its id, is what starts one.
+   *
+   * @param member One member name, absent where the reference stops at the
+   *   slug. A member's own fields are a cell path inside the piece it
+   *   resolves to, never a second member name.
+   * @throws When the slug does not resolve, when the collection holds no
+   *   such member, or when what the reference reaches is not a piece.
+   */
+  async resolveSlug<T = unknown>(
+    slug: string,
+    space: DID,
+    member?: string,
+  ): Promise<PieceHandle<T>> {
+    const response = await this.#conn.request<RequestType.SlugResolve>({
+      type: RequestType.SlugResolve,
+      slug,
+      member,
+      space,
+    });
+
+    return new PieceHandle<T>(this, response.piece);
+  }
+
   async removePiece(pieceId: string, space: DID): Promise<boolean> {
     const res = await this.#conn.request<RequestType.PieceRemove>({
       type: RequestType.PieceRemove,

@@ -30,6 +30,40 @@ describe("view", () => {
     );
   });
 
+  it("parses and serializes a collection member route", () => {
+    expect(urlToAppView(new URL("http://common.test/space/top/42"))).toEqual({
+      spaceName: "space",
+      pieceSlug: "top",
+      pieceMember: "42",
+    });
+    expect(urlToAppView(new URL(`http://common.test/${SPACE_DID}/top/42`)))
+      .toEqual({ spaceDid: SPACE_DID, pieceSlug: "top", pieceMember: "42" });
+    expect(
+      appViewToUrlPath({
+        spaceName: "space",
+        pieceSlug: "top",
+        pieceMember: "42",
+      }),
+    ).toBe("/space/top/42");
+    expect(
+      appViewToUrlPath({
+        spaceDid: SPACE_DID,
+        pieceSlug: "top",
+        pieceMember: "42",
+      }),
+    ).toBe(`/${SPACE_DID}/top/42`);
+  });
+
+  it("reads one segment after a slug as the member", () => {
+    // A member's own fields are a cell path inside the piece it resolves to,
+    // so nothing past the first segment is part of the address.
+    expect(urlToAppView(new URL("http://common.test/space/top/42/title")))
+      .toEqual({ spaceName: "space", pieceSlug: "top", pieceMember: "42" });
+    // An id names its piece outright, and member names belong to collections.
+    expect(urlToAppView(new URL("http://common.test/space/fid1:abc/42")))
+      .toEqual({ spaceName: "space", pieceId: "fid1:abc" });
+  });
+
   it("routes a bare origin to the home view", () => {
     expect(urlToAppView(new URL("http://common.test/"))).toEqual({
       builtin: "home",
@@ -146,6 +180,21 @@ describe("view", () => {
       isAppView({ spaceName: "space", pieceId: "fid1:abc", pieceSlug: "d" }),
     )
       .toBe(false);
+  });
+
+  it("rejects a member with no collection to belong to", () => {
+    expect(isAppView({ spaceName: "space", pieceMember: "42" })).toBe(false);
+    expect(
+      isAppView({ spaceName: "space", pieceId: "fid1:abc", pieceMember: "42" }),
+    ).toBe(false);
+    expect(
+      isAppView({ spaceName: "space", pieceSlug: "top", pieceMember: "42" }),
+    ).toBe(true);
+    // The shell carries a key through whether or not the view has a value
+    // for it, so a member key holding nothing reaches this the same way.
+    expect(
+      isAppView({ spaceName: "space", pieceMember: undefined }),
+    ).toBe(true);
   });
 
   it("compares two views by their contents", () => {

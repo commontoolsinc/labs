@@ -573,6 +573,26 @@ export class RuntimeInternals extends EventTarget {
     return await this.#client.getPieceSlug(id, space);
   }
 
+  /**
+   * The id of the piece a slug reference names: the piece the slug reaches,
+   * or the member of the collection it names. Not cached and not started —
+   * `getPattern` on the id this answers with is what does both, and keying
+   * that cache on the piece rather than on the reference is what lets a
+   * reference reaching a new piece load it.
+   *
+   * @throws When the slug does not resolve, when the collection holds no
+   *   such member, or when what the reference reaches is not a piece.
+   */
+  async resolveSlug(
+    space: DID,
+    slug: string,
+    member?: string,
+  ): Promise<string> {
+    this.#check();
+    const piece = await this.#client.resolveSlug(slug, space, member);
+    return piece.id();
+  }
+
   async removePiece(space: DID, id: string): Promise<boolean> {
     this.#check();
     return await this.#client.removePiece(id, space);

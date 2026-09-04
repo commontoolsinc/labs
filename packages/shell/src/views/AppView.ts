@@ -25,6 +25,21 @@ import { RuntimeInternals } from "../lib/runtime.ts";
 import { BaseView, createDefaultAppState } from "./BaseView.ts";
 import type { LoadError } from "./BodyView.ts";
 
+/**
+ * One live watch on a slug reference: the reference itself, the runtime and
+ * space it is read in, and the identity of the subscription it belongs to.
+ * `token` and `key` are what a callback arriving after a view change checks
+ * itself against.
+ */
+interface SlugWatch {
+  rt: RuntimeInternals;
+  space: DID;
+  slug: string;
+  member: string | undefined;
+  token: number;
+  key: string;
+}
+
 export class XAppView extends BaseView {
   static override styles = css`
     :host {
@@ -90,6 +105,15 @@ export class XAppView extends BaseView {
   #slugSubscriptionKey: string | undefined = undefined;
   #slugSubscriptionToken = 0;
   #slugTargetKey: string | undefined = undefined;
+
+  /**
+   * What the last resolution of the slug reference produced: the piece it
+   * reached, or the failure it reported. A reference that resolves to nothing
+   * is a target state like any other, and comparing against it is what
+   * notices a member arriving later.
+   */
+  #slugResolutionKey: string | undefined = undefined;
+
   #selectedPatternTargetId: string | undefined = undefined;
 
   #debuggerController = new DebuggerController(this);
@@ -160,10 +184,18 @@ export class XAppView extends BaseView {
       try {
         await prepareNamedSpace(app, rt, space);
         if ("pieceSlug" in app.view && app.view.pieceSlug) {
-          const pieceId = slugIdForSpace(space, app.view.pieceSlug);
-          const target = await rt.getPattern(space, pieceId, { start: false });
+          // The reference is resolved before the piece is asked for, because
+          // which piece a slug names is a question about the space and not
+          // about the piece: a slug into a collection names the member the
+          // path after it selects, and one into a piece at any other depth
+          // names the piece that holds it.
+          const pieceId = await rt.resolveSlug(
+            space,
+            app.view.pieceSlug,
+            "pieceMember" in app.view ? app.view.pieceMember : undefined,
+          );
           if (signal.aborted) return;
-          this.#selectedPatternTargetId = target.id();
+          this.#selectedPatternTargetId = pieceId;
           const pattern = await rt.getPattern(space, pieceId);
           if (!signal.aborted) this.#maybeDeliverOpenPath(pattern);
           return pattern;
@@ -239,32 +271,36 @@ export class XAppView extends BaseView {
     const slug = "pieceSlug" in this.app.view
       ? this.app.view.pieceSlug
       : undefined;
-    const key = rt && space && slug ? `${space}:${slug}` : undefined;
+    const member = "pieceMember" in this.app.view
+      ? this.app.view.pieceMember
+      : undefined;
+    // The member is part of what is watched: two references through the same
+    // slug reach different pieces, so one subscription cannot stand for both.
+    const key = rt && space && slug
+      ? `${space}:${slug}:${member ?? ""}`
+      : undefined;
 
     if (key === this.#slugSubscriptionKey) return;
     this.#clearSlugSubscription();
     if (!rt || !space || !slug || !key) return;
 
     this.#slugSubscriptionKey = key;
-    const token = ++this.#slugSubscriptionToken;
+    const watch: SlugWatch = {
+      rt,
+      space,
+      slug,
+      member,
+      token: ++this.#slugSubscriptionToken,
+      key,
+    };
     rt.getSlugCell(space, slug).then(async (cell) => {
-      if (
-        this.#slugSubscriptionToken !== token ||
-        this.#slugSubscriptionKey !== key
-      ) {
-        return;
-      }
+      if (!this.#isCurrentSlugWatch(watch)) return;
 
-      await this.#refreshSlugTarget(rt, space, slug, token, key, false);
-      if (
-        this.#slugSubscriptionToken !== token ||
-        this.#slugSubscriptionKey !== key
-      ) {
-        return;
-      }
+      await this.#refreshSlugTarget(watch, false);
+      if (!this.#isCurrentSlugWatch(watch)) return;
 
       this.#slugPollInterval = globalThis.setInterval(() => {
-        void this.#refreshSlugTarget(rt, space, slug, token, key, true);
+        void this.#refreshSlugTarget(watch, true);
       }, 1000);
 
       let sawInitialCallback = false;
@@ -273,13 +309,13 @@ export class XAppView extends BaseView {
           sawInitialCallback = true;
           return;
         }
-        void this.#refreshSlugTarget(rt, space, slug, token, key, true);
+        void this.#refreshSlugTarget(watch, true);
       });
     }).catch((error) => {
-      if (this.#slugSubscriptionToken !== token) return;
+      if (this.#slugSubscriptionToken !== watch.token) return;
       if (rt.signal.aborted) {
         // Reset the subscription key so a replacement runtime for the
-        // same space/slug re-subscribes instead of matching the stale key.
+        // same reference re-subscribes instead of matching the stale key.
         this.#clearSlugSubscription();
         return;
       }
@@ -297,64 +333,67 @@ export class XAppView extends BaseView {
     this.#slugPollInterval = undefined;
     this.#slugSubscriptionKey = undefined;
     this.#slugTargetKey = undefined;
+    this.#slugResolutionKey = undefined;
   }
 
-  async #refreshSlugTarget(
-    rt: RuntimeInternals,
-    space: DID,
-    slug: string,
-    token: number,
-    key: string,
-    notify: boolean,
-  ) {
-    if (
-      this.#slugSubscriptionToken !== token ||
-      this.#slugSubscriptionKey !== key
-    ) {
-      return;
-    }
+  /** Whether `watch` is still the subscription this view is running. */
+  #isCurrentSlugWatch(watch: SlugWatch): boolean {
+    return this.#slugSubscriptionToken === watch.token &&
+      this.#slugSubscriptionKey === watch.key;
+  }
 
-    let targetKey: string;
+  /**
+   * Re-resolve the reference `watch` follows, and reload the view when it
+   * reaches somewhere else than it did. `notify` is false for the first
+   * resolution, which records where the reference points without reloading a
+   * view already loading it.
+   */
+  async #refreshSlugTarget(watch: SlugWatch, notify: boolean) {
+    if (!this.#isCurrentSlugWatch(watch)) return;
+
+    let target: string | undefined;
+    let resolution: string;
     try {
-      const slugId = slugIdForSpace(space, slug);
-      rt.invalidatePattern(space, slugId);
-      const pattern = await rt.getPattern(space, slugId, { start: false });
-      targetKey = pattern.id();
+      target = await watch.rt.resolveSlug(
+        watch.space,
+        watch.slug,
+        watch.member,
+      );
+      resolution = target;
     } catch (error) {
-      if (rt.signal.aborted) {
+      if (watch.rt.signal.aborted) {
         // The runtime this subscription polls was disposed (logout,
         // teardown, worker replacement) — stop polling it; a new runtime
         // re-subscribes via #syncSlugSubscription.
-        if (
-          this.#slugSubscriptionToken === token &&
-          this.#slugSubscriptionKey === key
-        ) {
-          this.#clearSlugSubscription();
-        }
+        if (this.#isCurrentSlugWatch(watch)) this.#clearSlugSubscription();
         return;
       }
-      if (notify) {
-        console.error("[AppView] Failed to refresh slug target:", error);
-      }
-      return;
+      resolution = `unresolved: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
     }
-    if (targetKey === this.#slugTargetKey) return;
-    this.#slugTargetKey = targetKey;
+    if (!this.#isCurrentSlugWatch(watch)) return;
+    if (resolution === this.#slugResolutionKey) return;
+    this.#slugResolutionKey = resolution;
+    this.#slugTargetKey = target;
     if (notify) {
-      this.#handleSlugCellUpdate(rt, space, slug);
+      this.#handleSlugCellUpdate(watch);
     }
   }
 
-  #handleSlugCellUpdate(rt: RuntimeInternals, space: DID, slug: string) {
+  #handleSlugCellUpdate(watch: SlugWatch) {
+    const member = "pieceMember" in this.app.view
+      ? this.app.view.pieceMember
+      : undefined;
     if (
-      this.rt !== rt ||
+      this.rt !== watch.rt ||
       !("pieceSlug" in this.app.view) ||
-      this.app.view.pieceSlug !== slug
+      this.app.view.pieceSlug !== watch.slug ||
+      member !== watch.member
     ) {
       return;
     }
 
-    rt.invalidatePattern(space, slugIdForSpace(space, slug));
     this._slugRevision++;
   }
 
@@ -497,6 +536,31 @@ export class XAppView extends BaseView {
     }
   }
 
+  /**
+   * How the piece this view addresses is cited from anywhere:
+   * `/@<space>/<collection>/<member>`, the spelling every reader of a
+   * reference resolves. Only a member of a named collection has one — a piece
+   * reached by identity carries its own, and a collection's name with no
+   * member after it names no piece at all.
+   *
+   * The space is taken from the view rather than from the resolved DID: a
+   * space name derives that DID for everyone, so a name travels as far as the
+   * DID does and reads better where it lands.
+   */
+  #getPieceReference(): string | undefined {
+    const view = this.app.view;
+    if (!("pieceSlug" in view) || !view.pieceSlug) return;
+    const member = "pieceMember" in view ? view.pieceMember : undefined;
+    if (!member) return;
+    const space = "spaceName" in view
+      ? view.spaceName
+      : "spaceDid" in view
+      ? view.spaceDid
+      : undefined;
+    if (!space) return;
+    return `/@${space}/${view.pieceSlug}/${member}`;
+  }
+
   #getRuntimeLoadError(): LoadError | undefined {
     const event = this.runtimeLoadErrors.findLast((candidate) =>
       this.#runtimeErrorMatchesView(candidate)
@@ -607,6 +671,7 @@ export class XAppView extends BaseView {
             .keyStore="${this.keyStore}"
             .pieceTitle="${this.pieceTitle}"
             .pieceId="${pieceId}"
+            .pieceReference="${this.#getPieceReference()}"
             .isViewingDefaultPattern="${isViewingDefaultPattern}"
             .showDebuggerView="${config.showDebuggerView ?? false}"
           ></x-header-view>
