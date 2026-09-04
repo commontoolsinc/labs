@@ -1,4 +1,4 @@
-import type { FabricInstance } from "@commonfabric/data-model";
+import type { FabricInstance } from "./interface.ts";
 
 /**
  * Builds the refusal a `FabricInstance` gets from a walk that cannot yet

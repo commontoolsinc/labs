@@ -1,5 +1,9 @@
 import type { JSONSchemaObj } from "@commonfabric/api";
-import { hashStringOf, toCompactDebugString } from "@commonfabric/data-model";
+import {
+  hashStringOf,
+  isWalkableObjectOrArray,
+  toCompactDebugString,
+} from "@commonfabric/data-model";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
@@ -935,17 +939,15 @@ function assignComputedCellKinds(
       }
       return;
     }
-    // TODO(danfuzz): `isObjectOrArray` admits a `FabricInstance`, whose
-    // `Object.entries` are empty, so it takes this branch and collects
-    // nothing instead of falling to the fail-safe `collectAll()` below. A
-    // cell root reachable only through the instance's codec contents is
-    // then never disqualified from the `computed` tag — the ack-and-drop
-    // this function exists to prevent. (A `FabricPrimitive` passes the same
-    // gate, harmlessly: it holds no cell roots.)
-    if (isObjectOrArray(target) && !isReactive(target)) {
-      const properties = isObjectNotArray(schema.properties)
-        ? schema.properties
-        : undefined;
+    // A special object falls to the fail-safe `collectAll()` below: its
+    // contents are not reachable by property name, so walking one here would
+    // collect nothing and leave a cell root inside it undisqualified from the
+    // `computed` tag -- the ack-and-drop this function exists to prevent.
+    if (isWalkableObjectOrArray(target) && !isReactive(target)) {
+      const properties =
+        isObjectOrArray(schema.properties) && !Array.isArray(schema.properties)
+          ? schema.properties
+          : undefined;
       for (const [key, child] of Object.entries(target)) {
         const childSchema = properties !== undefined && key in properties
           ? properties[key]

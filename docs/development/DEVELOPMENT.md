@@ -423,6 +423,67 @@ function processData(data: Data) {
 }
 ```
 
+### Walking or comparing a value
+
+A value the runtime holds may be a `FabricSpecialObject` — a byte sequence, a
+temporal value, a content hash, a regular expression, an error, a link, a map,
+a set. Each of those keeps its state in private fields and has no own
+properties at all, so a walk that decides "may I read this by property name?"
+with `isObjectOrArray()`, `isObjectNotArray()`, `isReadonlyObjectOrArray()`,
+or a bare `typeof value === "object"` gets the wrong answer: it sees an empty
+record and then merges the value to `{}`, rebuilds it as `{}`, descends into it
+and finds nothing, or writes a property onto it.
+
+Four functions from `@commonfabric/data-model` are the whole of what a walk
+needs, and using them is not optional in code that can reach a stored value:
+
+- `isWalkableObjectOrArray(value)` is the container question. A
+  `FabricInstance` is refused, because it is a container a walk is *supposed*
+  to descend and cannot yet — `false` would claim it holds nothing, `true`
+  would send you into a property surface its codec does not speak for. Every
+  other `FabricSpecialObject` returns `false`, `FabricPrimitive` and any
+  further subclass alike: `false` says "carry this value whole", which is the
+  complete story for a value no path addresses anything inside of. Everything
+  outside the type is untouched: arrays and non-fabric class instances still
+  return `true`, so it is a drop-in wherever `isObjectOrArray()` was standing
+  in for the container question.
+- A walk that can meet an instance and has a better answer than a throw tests
+  for one first. `attestation.ts`'s `resolve()` reports the
+  `TypeMismatchError` its own signature already carries. A walk whose own
+  answer for a link differs from the container question's tests
+  `isPrimitiveCellLink()` first. That predicate speaks only about the sigil
+  form, which is written as a record, so a `FabricLink` reaches the refusal
+  like any other instance.
+  And `reactive-dependencies.ts` keeps descending one by property name through
+  its own `isKeyable()`: a throw there costs the rest of the notification being
+  delivered, and `false` would make an instance indistinguishable from a leaf,
+  so a read below one would stop triggering when the instance is deleted or
+  replaced by a scalar.
+- `isWalkableObjectNotArray(value)` is the same test with arrays removed, for a
+  walk to which an array is not merely a different shape but something it must
+  not treat as a record.
+- `isFabricPlainContainer(value)` asks the same container question of a value
+  the type system already says is a `FabricValue`, and is the one to reach for
+  where a caller holds one. The two differ only on values a `FabricValue`
+  cannot be — a `Cell`, a `Date`, a query-result proxy over one — which the
+  `isWalkable*` pair admits and this refuses.
+- `fabricAwareEqual(a, b)` is the comparison for operands that may hold a
+  `FabricValue` without being known to be one — a schema `const` against a
+  stored value, a schema default against a materialized one, a write against
+  the value it replaces, a request against the snapshot a policy was checked
+  over. It asks `valueEqual()` first and falls back to a structural walk that
+  still decides any special object by content, so the value model decides
+  wherever it can. Neither half serves alone: `valueEqual()`
+  throws on a `Cell` or any other non-fabric instance, and `deepEqual()`
+  compares by enumerable own properties, of which a special object has none.
+  Where both operands are known to be `FabricValue`s, use `valueEqual()`
+  directly instead.
+
+A walk that must not silently pass a `FabricInstance` by — one whose contents
+are reachable only through its codec — refuses it outright rather than walking
+it. Those refusals are discovery instruments; see "Flag-gated tripwires" in
+[EXPERIMENTAL_OPTIONS.md](EXPERIMENTAL_OPTIONS.md).
+
 ### Avoid representing invalid state
 
 Similarly, permissive interfaces (including nullable properties and

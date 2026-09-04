@@ -11,6 +11,8 @@ import {
   type FabricValue,
   hashStringOf,
   isDeepFrozen,
+  isWalkableObjectNotArray,
+  isWalkableObjectOrArray,
   toIndentedDebugString,
 } from "@commonfabric/data-model";
 import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
@@ -1629,16 +1631,11 @@ export function mergeAnyOfMatches<T>(
   // schema, but the address is ignored, and a second option where
   // address is set, and name is ignored, we want to include both.
   if (matches.length > 1) {
-    // If all our matches are non-array objects, merge the properties.
-    //
-    // TODO(danfuzz): `isObjectNotArray` admits a `FabricSpecialObject`, whose state
-    // lives in private fields, so `Object.assign` copies nothing from it: a
-    // `FabricPrimitive` that matches more than one branch (say, an `anyOf` of
-    // its specific type name and `"object"`, which the subtype rule also
-    // accepts) merges to a plain `{}` and the value is lost. The merge wants
-    // a `FabricSpecialObject` test ahead of this point, returning the value
-    // whole rather than merging it.
-    if (matches.every((v) => isObjectNotArray(v))) {
+    // If all our matches are non-array objects, merge the properties. A
+    // special object among them sends the whole set to the first-match return
+    // below: it has no properties for `Object.assign` to copy, so merging one
+    // yields `{}` and the value is lost.
+    if (matches.every((v) => isWalkableObjectNotArray(v))) {
       const unified: Record<string, T> = {};
       for (const match of matches) {
         for (const [key, value] of Object.entries(match as object)) {
@@ -1950,7 +1947,7 @@ export abstract class BaseObjectTraverser {
           };
           const val = this.traverseDAG(
             itemDoc,
-            isObjectNotArray(defaultValue)
+            isWalkableObjectNotArray(defaultValue)
               ? (defaultValue as JSONObject)[k]
               : undefined,
           )!;
@@ -2225,18 +2222,13 @@ export function getAtPath(
         },
         value: curDoc.value.length,
       };
-    } else if (isObjectOrArray(curDoc.value) && part in curDoc.value) {
-      // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, and `in`
-      // consults the prototype chain, so this arm descends a special object
-      // by its class surface rather than its codec contents: on a
-      // `FabricError` (live traffic — the fetch builtins store one),
-      // `"message"` resolves through a prototype accessor and `"slice"` on a
-      // `FabricBytes` yields a function as the next doc value, while the
-      // instance's actual contents are unreachable and fall to the debug-log
-      // arm below. The schema-declared-name descents elsewhere in this file
-      // use own-property checks for the same reason; this value-side descent
-      // wants that too, plus codec-contents addressing for a
-      // `FabricInstance`.
+    } else if (isWalkableObjectOrArray(curDoc.value) && part in curDoc.value) {
+      // A `FabricPrimitive` is not descended: `in` consults the prototype
+      // chain, which for one of these resolves the class surface rather than
+      // the value -- `"slice"` on a `FabricBytes` would name a function as the
+      // next doc value. Such a path falls to the arm below and reads as
+      // absent, which is what a path into a leaf is. A `FabricInstance` does
+      // not reach that arm at all: the predicate refuses one.
       const cursorObj = curDoc.value as Immutable<JSONObject>;
       curDoc = {
         ...curDoc,

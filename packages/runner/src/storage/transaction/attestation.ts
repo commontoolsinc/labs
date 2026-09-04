@@ -1,7 +1,10 @@
 import {
   type DebugValueOptions,
+  FabricInstance,
   type FabricPlainObject,
+  FabricSpecialObject,
   type FabricValue,
+  isWalkableObjectOrArray,
   toCompactDebugString,
   valueEqual,
 } from "@commonfabric/data-model";
@@ -13,7 +16,6 @@ import {
 } from "@commonfabric/data-model/codec-data-uri";
 import { LRUCache } from "@commonfabric/utils/cache";
 import { getLogger } from "@commonfabric/utils/logger";
-import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import type {
   IAttestation,
@@ -76,10 +78,13 @@ export const UnsupportedMediaTypeError = (
 /**
  * Reads requested `address` from the provided `source` attestation and either
  * succeeds with derived {@link IAttestation} with the given `address` or fails
- * with inconsistency error if resolving an `address` encounters a non-object
- * along the path. Note it will succeed with `undefined` if last component of
- * the path does not exist on the object. Below are some examples illustrating
- * read behavior
+ * with inconsistency error if resolving an `address` encounters a value it
+ * cannot address by key along the path. A non-object is one such value; so is
+ * a `FabricSpecialObject`, which holds its state behind no property name, and
+ * which therefore stops a resolution the way a scalar does rather than
+ * reporting the slot beneath it as absent. Note it will succeed with
+ * `undefined` if last component of the path does not exist on the object.
+ * Below are some examples illustrating read behavior
  *
  * ```ts
  * const address = {
@@ -177,7 +182,9 @@ export const claim = (
  * Attempts to resolve given `address` from the `source` attestation. Function
  * succeeds with derived attestation that will have provided `address` or fails
  * with a not found error if the path doesn't exist, or a type mismatch error if
- * resolving an address encounters non-object along the resolution path.
+ * resolving an address encounters a value it cannot address by key along the
+ * resolution path -- a non-object, or a `FabricSpecialObject`, whose state
+ * sits behind no property name.
  */
 export const resolve = (
   source: IAttestation,
@@ -206,13 +213,29 @@ export const resolve = (
 
   while (++at < path.length) {
     const key = path[at];
-    // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, so descending
-    // into one lands in this arm and reads `undefined` instead of reaching
-    // the `TypeMismatchError` arm below the way a scalar does. The caller
-    // then treats the slot as absent-but-writable, and a path into a
-    // `FabricInstance`'s codec contents reads as missing rather than being
-    // refused or resolved.
-    if (isObjectOrArray(value)) {
+    // A `FabricInstance` is tested for before the walk question is asked,
+    // because this function has a better answer than the refusal that question
+    // raises: it is declared to return a `TypeMismatchError`, and a path
+    // reaching a value it cannot address by key is what that error is for. The
+    // resolution stops either way; saying so in band lets a caller handle it
+    // like every other unresolvable address instead of unwinding.
+    //
+    // Live traffic arrives here: the fetch builtins store a `FabricError` as a
+    // result, and resolving a link whose path continues past one lands exactly
+    // on this. Before this test the slot read as absent AND writable, which
+    // invited a write onto a value holding no such slot.
+    if (value instanceof FabricInstance) {
+      return {
+        error: TypeMismatchError(
+          { ...address, path: path.slice(0, at + 1) },
+          value.constructor.name,
+          "read",
+        ),
+      };
+    }
+    // A `FabricPrimitive` takes the mismatch arm below alongside the scalars:
+    // a path does not address anything inside a leaf.
+    if (isWalkableObjectOrArray(value)) {
       const record = value as FabricPlainObject;
       value = Object.hasOwn(record, key) ? record[key] : undefined;
     } else {
@@ -223,8 +246,14 @@ export const resolve = (
           error: NotFound(source, address, path.slice(0, Math.max(0, at))),
         };
       }
-      // Type mismatch - trying to access property on non-object
-      const actualType = value === null ? "null" : typeof value;
+      // Type mismatch - trying to access property on non-object. A special
+      // object names its class, `typeof` "object" being no help in saying
+      // which value refused the path.
+      const actualType = value === null
+        ? "null"
+        : value instanceof FabricSpecialObject
+        ? value.constructor.name
+        : typeof value;
       return {
         error: TypeMismatchError(
           { ...address, path: path.slice(0, at + 1) },

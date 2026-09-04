@@ -1,5 +1,4 @@
 import {
-  deepEqual,
   extractDefaultValues,
   type JSONSchema,
   type Pattern,
@@ -15,7 +14,7 @@ import {
 } from "@commonfabric/runner/cfc";
 import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
 import { internSchema } from "@commonfabric/data-model-schema";
-import { type FabricValue, valueEqual } from "@commonfabric/data-model";
+import { fabricAwareEqual } from "@commonfabric/data-model";
 
 type SchemaObject = Exclude<JSONSchema, boolean>;
 type SchemaRole = "argument" | "result";
@@ -146,14 +145,6 @@ const SEMANTIC_EXTENSION_KEYS = [
   "scope",
   "writeOnly",
 ] as const;
-
-const fabricAwareEqual = (left: unknown, right: unknown): boolean => {
-  try {
-    return valueEqual(left as FabricValue, right as FabricValue);
-  } catch {
-    return deepEqual(left, right);
-  }
-};
 
 /**
  * The keys inside a `writeAuthorizedBy` writer claim's `__ctWriterIdentityOf`

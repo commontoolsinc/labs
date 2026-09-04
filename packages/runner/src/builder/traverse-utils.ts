@@ -1,6 +1,6 @@
 import { isObjectOrArray } from "@commonfabric/utils/types";
-import { FabricInstance, FabricPrimitive } from "@commonfabric/data-model";
-import { refuseFabricInstance } from "../fabric-special-object.ts";
+import { FabricInstance, FabricSpecialObject } from "@commonfabric/data-model";
+import { refuseFabricInstance } from "@commonfabric/data-model";
 import { type FactoryInput, isPattern, isReactive } from "./types.ts";
 import { noteDerivedCopy } from "./pattern-metadata.ts";
 import { isCell } from "../cell.ts";
@@ -49,16 +49,16 @@ export function traverseValue(
     );
   }
 
-  // Traverse value. A `FabricPrimitive` is an atomic value whose state lives in
-  // private fields (zero enumerable own-props); descending into one would
-  // rebuild it as `{}`, corrupting it. It has already been shown to `fn` above
-  // like any other leaf — here we just decline to descend, so the original
-  // instance passes through intact.
+  // Traverse value. A `FabricSpecialObject` is an atomic value whose state
+  // lives in private fields (zero enumerable own-props); descending into one
+  // would rebuild it as `{}`, corrupting it. It has already been shown to `fn`
+  // above like any other leaf — here we just decline to descend, so the
+  // original instance passes through intact.
   if (
     !isReactive(value) &&
     !isCell(value) &&
     !isCellResultForDereferencing(value) &&
-    !((value as object) instanceof FabricPrimitive) &&
+    !((value as object) instanceof FabricSpecialObject) &&
     (isObjectOrArray(value) || isPattern(value))
   ) {
     if (Array.isArray(value)) {

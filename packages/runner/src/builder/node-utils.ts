@@ -4,7 +4,7 @@ import { isObjectOrArray } from "@commonfabric/utils/types";
 import { isCell } from "../cell.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import type { CfcConfClause } from "../cfc/clause.ts";
-import { refuseFabricInstance } from "../fabric-special-object.ts";
+import { refuseFabricInstance } from "@commonfabric/data-model";
 import {
   getCellOrThrow,
   isCellResultForDereferencing,

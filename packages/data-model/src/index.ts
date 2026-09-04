@@ -44,6 +44,8 @@ export {
   isValidFabricPlainObject,
   isValidFabricValue,
   isValidFabricValueLayer,
+  isWalkableObjectNotArray,
+  isWalkableObjectOrArray,
 } from "./type-check.ts";
 
 export {
@@ -56,7 +58,9 @@ export {
   shallowFabricFromNativeValue,
 } from "./native-conversion.ts";
 
-export { valueEqual } from "./valueEqual.ts";
+export { refuseFabricInstance } from "./refuse-fabric-instance.ts";
+
+export { fabricAwareEqual, valueEqual } from "./valueEqual.ts";
 
 export {
   deepFreeze,

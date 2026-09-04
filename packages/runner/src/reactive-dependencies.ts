@@ -1,5 +1,10 @@
-import { isObjectOrArray, isPlainContainer } from "@commonfabric/utils/types";
-import { type FabricValue, valueEqual } from "@commonfabric/data-model";
+import { isPlainContainer } from "@commonfabric/utils/types";
+import {
+  FabricInstance,
+  type FabricValue,
+  isWalkableObjectOrArray,
+  valueEqual,
+} from "@commonfabric/data-model";
 import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { isPrimitiveCellLink } from "./link-utils.ts";
 import { normalizeCellScope } from "./scope.ts";
@@ -98,6 +103,20 @@ export function addressesToPathByEntity(
 }
 
 /**
+ * Whether the descent below may address `value` by key.
+ *
+ * This is {@link isWalkableObjectOrArray} with its refusal of a
+ * `FabricInstance` replaced by `true`. The descent reads an instance by
+ * property name, reaching the accessors a `FabricError` carries and finding
+ * nothing on a `FabricMap`. Answering `false` would make an instance
+ * indistinguishable from a leaf, and a read below one would then stop
+ * triggering when the instance is deleted or replaced by a scalar.
+ */
+function isKeyable(value: unknown): boolean {
+  return value instanceof FabricInstance || isWalkableObjectOrArray(value);
+}
+
+/**
  * Determines the actions that are triggered based on the changes to the data.
  *
  * Functionally equivalent looking for any `!deepEqual` for `getAtPath` for all
@@ -147,17 +166,20 @@ export function determineTriggeredActions(
   const beforeValues: FabricValue[] = [before];
   const afterValues: FabricValue[] = [after];
 
-  // *LastObject: Last key-able object along currentPath
+  // *LastObject: Last key-able object along currentPath. A `FabricPrimitive`
+  // is not key-able: its state sits behind no property name, so the descent
+  // stops at one and a path continuing below reads as unreachable rather than
+  // as present-and-empty.
   //
-  // TODO(danfuzz): `isObjectOrArray` counts a `FabricSpecialObject` as key-able, so
-  // the descent below indexes into one: every key reads `undefined` (or, via
-  // the prototype chain, an accessor result) on both the before and after
-  // side, so a subscriber path continuing below a `FabricInstance` compares
-  // equal-by-vacancy and its action never triggers, however the instance's
-  // contents changed. The `shallowEqual` marker at the bottom of this file
-  // covers the leaf comparison; this is the descent's half of the same gap.
-  let beforeLastObject = isObjectOrArray(before) ? 0 : -1;
-  let afterLastObject = isObjectOrArray(after) ? 0 : -1;
+  // TODO(danfuzz): a `FabricInstance` is descended by property name, which
+  // reaches what its class exposes that way and not what its codec holds. A
+  // subscriber path below a `FabricMap` or `FabricSet` therefore reads as
+  // present-and-empty on both sides, and its action never triggers however
+  // the contents changed. The `shallowEqual` marker at the bottom of this
+  // file covers the leaf comparison; this is the descent's half of the same
+  // gap.
+  let beforeLastObject = isKeyable(before) ? 0 : -1;
+  let afterLastObject = isKeyable(after) ? 0 : -1;
 
   while (subscribers.length > 0) {
     // Pull the next path from the queue
@@ -177,13 +199,15 @@ export function determineTriggeredActions(
     for (let i = overlap; i < targetPath.length; i++) {
       if (i <= beforeLastObject) {
         beforeValues[i + 1] = (beforeValues[i] as Keyable)[targetPath[i]!];
-        if (isObjectOrArray(beforeValues[i + 1])) beforeLastObject = i + 1;
-        else beforeLastObject = i;
+        if (isKeyable(beforeValues[i + 1])) {
+          beforeLastObject = i + 1;
+        } else beforeLastObject = i;
       }
       if (i <= afterLastObject) {
         afterValues[i + 1] = (afterValues[i] as Keyable)[targetPath[i]!];
-        if (isObjectOrArray(afterValues[i + 1])) afterLastObject = i + 1;
-        else afterLastObject = i;
+        if (isKeyable(afterValues[i + 1])) {
+          afterLastObject = i + 1;
+        } else afterLastObject = i;
       }
     }
     currentPath = targetPath;

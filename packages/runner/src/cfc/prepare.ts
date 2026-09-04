@@ -15,9 +15,11 @@ import {
 import {
   cloneForMutation,
   type CloneForMutationResult,
+  fabricAwareEqual,
   FabricInstance,
   FabricPrimitive,
   isFabricObjectOrArray,
+  isWalkableObjectOrArray,
   valueEqual,
 } from "@commonfabric/data-model";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
@@ -29,7 +31,7 @@ import { encodePointer } from "../../../memory/v2/path.ts";
 import type { JSONSchema } from "../builder/types.ts";
 import { ContextualFlowControl } from "../cfc.ts";
 import { entityKindOfIdString } from "../entity-kind.ts";
-import { refuseFabricInstance } from "../fabric-special-object.ts";
+import { refuseFabricInstance } from "@commonfabric/data-model";
 import {
   containsExternalSchemaRef,
   decomposeSchema,
@@ -1359,7 +1361,21 @@ const stripWriterIdentityStamp = (value: unknown): unknown => {
   if (Array.isArray(value)) {
     return value.map(stripWriterIdentityStamp);
   }
-  if (!isObjectOrArray(value)) {
+  // A sigil link is carried whole. It is a reference rather than a record of
+  // the writer's, so there is no stamp inside one to strip.
+  if (isPrimitiveCellLink(value)) {
+    return value;
+  }
+  // A fabric-valued node -- a schema `default`, say -- is carried by
+  // reference: rebuilding one by its properties would answer `{}` and erase
+  // the difference between two schemas that differ only there.
+  //
+  // TODO(danfuzz): this still rebuilds every plain record it meets, schema
+  // `default` VALUES included, so a default that happens to spell `file`
+  // beside `bundleId` has the stamp keys stripped out of it and compares
+  // equal to one that never carried them. Value-bearing keys want to be
+  // carried by reference too.
+  if (!isWalkableObjectOrArray(value)) {
     return value;
   }
 
@@ -1376,18 +1392,11 @@ const stripWriterIdentityStamp = (value: unknown): unknown => {
   return next;
 };
 
-// TODO(danfuzz): `stripWriterIdentityStamp` rebuilds every record node it
-// meets, including schema `default` VALUES, and a `FabricSpecialObject`
-// rebuilds as `{}` — so two schemas whose only difference is a
-// `FabricSpecialObject`-valued default compare equal here, and the candidate's
-// default is silently discarded by the merge-skip decisions this feeds. The
-// strip wants to carry value-bearing keys by reference and the comparison wants
-// a fabric-aware equality.
 const schemasEqualIgnoringWriterStamp = (
   left: JSONSchema,
   right: JSONSchema,
 ): boolean =>
-  deepEqual(
+  fabricAwareEqual(
     stripWriterIdentityStamp(left),
     stripWriterIdentityStamp(right),
   );
@@ -1912,19 +1921,16 @@ export const flowReadExcluded = (
 // non-link leaf (string, number, boolean, null) makes the value content.
 // Such writes get `structure` (shape-only) stamps instead of covering
 // `derived` ones — see `pureLinkContainerPaths`.
-// TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, whose
-// `Object.values` are empty and vacuously "all links" — so a `FabricBytes`
-// leaf, or a `FabricInstance` with real contents, classifies as pure link
-// structure and the write receives shape-only stamps in place of its content
-// label. Fails open. Wants a `FabricSpecialObject` test taking the
-// content-bearing (`false`) arm.
+// A `FabricSpecialObject` is a content leaf like any other: its state is
+// private, so enumerating it answers "no members" and would classify a byte
+// blob as pure structure.
 const isPureLinkStructure = (value: unknown): boolean => {
   if (value === undefined) return true;
   if (isPrimitiveCellLink(value)) return true;
   if (Array.isArray(value)) {
     return value.every((member) => isPureLinkStructure(member));
   }
-  if (isObjectOrArray(value)) {
+  if (isWalkableObjectOrArray(value)) {
     return Object.values(value).every((member) => isPureLinkStructure(member));
   }
   return false;
@@ -1956,11 +1962,9 @@ const pureLinkContainerPaths = (
     );
     return;
   }
-  // TODO(danfuzz): same `isObjectOrArray` gap as `isPureLinkStructure` above: a
-  // `FabricPrimitive` is pushed as if it were a container (a stamp path for
-  // an opaque leaf), and a `FabricInstance`'s codec contents are never
-  // enumerated, so nothing nested in one gets a per-slot stamp.
-  if (isObjectOrArray(value)) {
+  // A `FabricSpecialObject` mints no path here: it is a content leaf, not a
+  // container whose shape the writing transaction computed.
+  if (isWalkableObjectOrArray(value)) {
     out.push(path);
     for (const [key, member] of Object.entries(value)) {
       pureLinkContainerPaths(member, [...path, key], out);
@@ -3091,15 +3095,14 @@ const linkedWriteValueForPolicy = (
   });
 };
 
-// TODO(danfuzz): this descent (and `changedValuesAtPatternPath` below) gates on
-// `typeof value === "object"` and then `head in value`, both true-shaped for a
-// `FabricSpecialObject` — but no key of an instance's codec contents is an own
-// (or any) property, so a pattern path into one resolves to no values and the
-// policy condition it feeds is never evaluated for that content.
-// `changedValuesAtPatternPath`'s leaf case additionally compares with
-// `deepEqual`, which calls two same-class `FabricSpecialObject`s equal
-// regardless of contents, so a genuine change reads as "unchanged". Both fail
-// open.
+// A path segment never addresses anything inside a `FabricSpecialObject`, so
+// this descent and `changedValuesAtPatternPath` below both stop at one rather
+// than resolving the segment against its class surface.
+//
+// TODO(danfuzz): for a `FabricInstance` that is still an incomplete answer.
+// No key of its codec contents is reachable by property name, so a pattern
+// path into one resolves to no values and the policy condition it feeds is
+// never evaluated for that content. Fails open.
 const valuesAtPatternPath = (
   value: unknown,
   path: readonly string[],
@@ -3118,7 +3121,11 @@ const valuesAtPatternPath = (
     );
   }
 
-  if (value === null || value === undefined || typeof value !== "object") {
+  // A pattern path does not descend through a sigil link: the reference is
+  // the value at that slot, and what it points at is resolved elsewhere.
+  // Asked before the walk question, which reads a sigil link as the record it
+  // is written as and would descend into it.
+  if (isPrimitiveCellLink(value) || !isWalkableObjectOrArray(value)) {
     return [];
   }
   if (!(head in value)) {
@@ -3133,7 +3140,7 @@ const changedValuesAtPatternPath = (
   path: readonly string[],
 ): unknown[] => {
   if (path.length === 0) {
-    return deepEqual(value, previousValue) ? [] : [value];
+    return fabricAwareEqual(value, previousValue) ? [] : [value];
   }
 
   const [head, ...rest] = path;
@@ -3149,12 +3156,13 @@ const changedValuesAtPatternPath = (
     );
   }
 
-  if (value === null || value === undefined || typeof value !== "object") {
+  // As in `valuesAtPatternPath`: a link ends the descent, and the test comes
+  // before the walk question for the same reason.
+  if (isPrimitiveCellLink(value) || !isWalkableObjectOrArray(value)) {
     return [];
   }
-  const previousChild = previousValue !== null &&
-      previousValue !== undefined &&
-      typeof previousValue === "object"
+  const previousChild = !isPrimitiveCellLink(previousValue) &&
+      isWalkableObjectOrArray(previousValue)
     ? (previousValue as Record<string, unknown>)[head]
     : undefined;
   if (!(head in value)) {
@@ -3248,20 +3256,14 @@ const policySchemaMatchesValue = (
     }
     return policySchemaMatchesValue(resolved, value, schemaRoot);
   }
-  // TODO(danfuzz): these `deepEqual` checks call two same-class fabric
-  // values equal regardless of contents, so a fabric-valued `const`/`enum`
-  // condition matches the wrong value; and the `properties` arm below admits
-  // a `FabricSpecialObject` through `isObjectOrArray` and reads `undefined` for
-  // every key, matching vacuously. Each fails open — the ifc entry applies
-  // (or the policy passes) with nothing actually checked. `valueEqual` and a
-  // `FabricSpecialObject` gate are the fabric-aware shapes;
-  // `schemaTypeMatchesValue` below already carries the type half.
-  if (schema.const !== undefined && !deepEqual(schema.const, value)) {
+  if (
+    schema.const !== undefined && !fabricAwareEqual(schema.const, value)
+  ) {
     return false;
   }
   if (
     Array.isArray(schema.enum) &&
-    !schema.enum.some((candidate) => deepEqual(candidate, value))
+    !schema.enum.some((candidate) => fabricAwareEqual(candidate, value))
   ) {
     return false;
   }
@@ -3285,7 +3287,17 @@ const policySchemaMatchesValue = (
       policySchemaMatchesValue(branch, value, schemaRoot)
     );
   }
-  if (isObjectOrArray(value) && isObjectOrArray(schema.properties)) {
+  // A special object has no property for a `properties` condition to read, so
+  // it falls past this arm rather than matching every child vacuously.
+  // A sigil link matches by what it is, not by what a `properties` condition
+  // would read off the record it is written as. Descending one reaches values
+  // the walk question refuses, which is what a modern argument link arriving
+  // here does; `isPrimitiveCellLink()` speaks only about the sigil form, so a
+  // `FabricLink` reaching this arm is refused rather than matched.
+  if (
+    !isPrimitiveCellLink(value) && isWalkableObjectOrArray(value) &&
+    isObjectOrArray(schema.properties)
+  ) {
     return Object.entries(schema.properties).every(([key, childSchema]) =>
       value[key] === undefined ||
       policySchemaMatchesValue(childSchema, value[key], schemaRoot)
@@ -3474,11 +3486,7 @@ const ifcEntryAppliesToAttemptedWrite = (
     sawTargetWrite = true;
     const writePath = write.address.path.slice(1).map((entry) => String(entry));
     if (pathPatternMatches(path, writePath)) {
-      // TODO(danfuzz): `deepEqual` calls two same-class `FabricSpecialObject`s
-      // equal regardless of contents, so a genuine change to a slot holding
-      // one reads as "unchanged" and the ifc entry is skipped. Fails open;
-      // `valueEqual` is the fabric-aware comparison.
-      return !deepEqual(write.value, write.previousValue) &&
+      return !fabricAwareEqual(write.value, write.previousValue) &&
         wildcardPolicyMatchesValue(tx, target, schema, write.value, root);
     }
     if (concretePathHasPrefix(prefix, writePath)) {
@@ -4309,13 +4317,7 @@ const verifyExactCopyRequirements = (
       path: sourcePath,
     });
 
-    // TODO(danfuzz): `deepEqual` calls two same-class `FabricSpecialObject`s
-    // equal regardless of contents — under the modern cell rep even two
-    // `FabricLink`s to different documents — so an `exactCopyOf` claim over
-    // `FabricSpecialObject`-valued state verifies for values that are not
-    // copies, and the source label is carried anyway. Fails open; wants
-    // `valueEqual`.
-    if (!deepEqual(sourceValue, targetValue)) {
+    if (!fabricAwareEqual(sourceValue, targetValue)) {
       return `exactCopyOf failed at /${entry.path.join("/")}`;
     }
   }
@@ -4381,10 +4383,7 @@ const verifyProjectionRequirements = (
       path: sourcePath,
     });
 
-    // TODO(danfuzz): same `deepEqual` gap as `verifyExactCopyRequirements`
-    // above — fabric-valued state verifies as a projection when it is not
-    // one. Fails open; wants `valueEqual`.
-    if (!deepEqual(sourceValue, targetValue)) {
+    if (!fabricAwareEqual(sourceValue, targetValue)) {
       return `projection claim failed at /${entry.path.join("/")}`;
     }
   }

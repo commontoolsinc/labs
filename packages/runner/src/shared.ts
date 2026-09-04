@@ -4,7 +4,7 @@
  * /!\ interfaces and utilities.
  */
 
-export { refuseFabricInstance } from "./fabric-special-object.ts";
+export { refuseFabricInstance } from "@commonfabric/data-model";
 export {
   isStoredArgumentSchemaRefusal,
   STORED_ARGUMENT_SCHEMA_REFUSAL,

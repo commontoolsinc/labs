@@ -1,5 +1,8 @@
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
-import { isDeepFrozen } from "@commonfabric/data-model";
+import {
+  isDeepFrozen,
+  isWalkableObjectOrArray,
+} from "@commonfabric/data-model";
 import {
   hashSchema,
   internSchema,
@@ -383,16 +386,18 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       return byContent;
     }
     // TODO(danfuzz): this rebuild filters by key name only, so it also
-    // rebuilds `default`/`examples` VALUES: `isObjectOrArray` admits a
-    // `FabricSpecialObject` and `Object.entries` sees none of its state, so
-    // a fabric-valued default standardizes to `{}` — losing the value in the
-    // interned schema and making two schemas that differ only in such a
-    // default intern identically. Value-bearing keys want to pass through by
-    // reference.
+    // rebuilds `default`/`examples` VALUES, dropping an `asCell` that a
+    // default value happens to spell. Value-bearing keys want to pass
+    // through by reference.
+    //
+    // A fabric value passes through by reference either way: the rebuild
+    // reads a node by property name and would standardize one to `{}`,
+    // losing it from the interned schema and making two schemas that differ
+    // only in such a default intern identically.
     const traverse = (
       value: Readonly<any>,
     ): FabricValue => {
-      if (isObjectOrArray(value)) {
+      if (isWalkableObjectOrArray(value)) {
         if (Array.isArray(value)) {
           return value.map((val) => traverse(val));
         } else {

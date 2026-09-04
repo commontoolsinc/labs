@@ -1,5 +1,9 @@
 import type { FabricValue, SchemaPathSelector } from "@commonfabric/api";
-import { cloneIfNecessary, hashStringOf } from "@commonfabric/data-model";
+import {
+  cloneIfNecessary,
+  hashStringOf,
+  isWalkableObjectOrArray,
+} from "@commonfabric/data-model";
 import {
   hasDataUriScheme,
   valueFromDataUri,
@@ -2155,12 +2159,12 @@ export class StorageManager implements IStorageManager {
       return;
     }
 
-    // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, whose
-    // `Object.keys` are empty, so a cell link held inside a `FabricInstance`
-    // reconstructed from the data URI is never found here and its target
-    // document is never synced — the later read finds it absent. (A
-    // `FabricPrimitive` ends the walk harmlessly; it is a leaf.)
-    if (isObjectOrArray(value)) {
+    // TODO(danfuzz): the walk stops at a `FabricSpecialObject`, so a cell link
+    // held inside a `FabricInstance` reconstructed from the data URI is never
+    // found here and its target document is never synced — the later read
+    // finds it absent. (Stopping at a `FabricPrimitive` costs nothing; it is a
+    // leaf.)
+    if (isWalkableObjectOrArray(value)) {
       for (const key of Object.keys(value)) {
         const child = value[key];
         if (

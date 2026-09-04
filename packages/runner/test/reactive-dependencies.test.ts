@@ -1,8 +1,12 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import type { FabricValue } from "@commonfabric/data-model";
-import { FabricMap } from "@commonfabric/data-model/fabric-instances";
+import { type FabricValue } from "@commonfabric/data-model";
+import {
+  FabricError,
+  FabricMap,
+} from "@commonfabric/data-model/fabric-instances";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 
 import {
@@ -1975,14 +1979,45 @@ describe("determineTriggeredActions", () => {
       expect(result).toEqual([action]);
     });
 
-    it("propagates the failure from a value it cannot compare", () => {
-      // A non-recursive read compares an opaque leaf by value, and a class
-      // whose comparison is an unimplemented stub cannot answer. The failure is
-      // deliberately left to propagate rather than being caught and turned into
-      // "changed": a stub announcing itself loudly is worth more than a quiet
-      // answer derived from an unfinished class, and swallowing it would let
-      // that class shape behavior here. `FabricMap` stands in for any value
-      // whose comparison is unavailable.
+    it("does not trigger a read below a special object that was replaced", () => {
+      // A special object is not key-able: no property name reaches its state,
+      // so the descent stops at one and a read below it is unreachable on
+      // both sides rather than present-and-empty.
+
+      const action = createAction("readBelowSpecialObject");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a", "b"]]],
+      ]);
+      const before = { value: { a: new FabricBytes(new Uint8Array([1])) } };
+      const after = { value: { a: new FabricBytes(new Uint8Array([2])) } };
+
+      const result = determineTriggeredActions(dependencies, before, after);
+      expect(result).toEqual([]);
+    });
+
+    it("does not trigger a read below a scalar that became a special object", () => {
+      // The reachability verdict follows the value's kind and not its
+      // `typeof`: `value.a.b` was absent before and is absent after, because
+      // a path does not address anything inside a leaf, whatever kind of leaf
+      // it is.
+
+      const action = createAction("scalarBecameSpecialObject");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a", "b"]]],
+      ]);
+      const before = { value: { a: 1 } };
+      const after = { value: { a: new FabricBytes(new Uint8Array([1])) } };
+
+      const result = determineTriggeredActions(dependencies, before, after);
+      expect(result).toEqual([]);
+    });
+
+    it("propagates the failure from a leaf it cannot compare", () => {
+      // The descent ends quietly at a value it cannot address by key, but a
+      // read landing on such a value still has to compare it, and a class
+      // whose comparison is an unimplemented stub cannot answer. That failure
+      // is left to propagate rather than being caught and turned into
+      // "unchanged", which would report a changed value as unchanged.
 
       const action = createAction("nonRecursiveUncomparableLeaf");
       const dependencies = new Map<Action, SortedAndCompactPaths>([
@@ -1999,7 +2034,99 @@ describe("determineTriggeredActions", () => {
           ["value", "a"],
           { nonRecursive: true },
         )
-      ).toThrow("not yet implemented");
+      ).toThrow("`FabricMap`: not yet implemented");
+    });
+
+    it("triggers a read below an instance replaced by a scalar", () => {
+      // `value.a.b` is reachable while `a` is a container and absent once it
+      // is a scalar, so the two sides stop at different depths and the read
+      // is triggered. The same holds for each transition below.
+
+      const action = createAction("instanceToScalar");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a", "b"]]],
+      ]);
+      const before = { value: { a: new FabricMap(new Map([["b", 1]])) } };
+      const after = { value: { a: 5 } };
+
+      expect(determineTriggeredActions(dependencies, before, after))
+        .toEqual([action]);
+    });
+
+    it("triggers a read below an instance that was deleted", () => {
+      const action = createAction("instanceDeleted");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a", "b"]]],
+      ]);
+      const before = { value: { a: new FabricMap(new Map([["b", 1]])) } };
+      const after = { value: {} };
+
+      expect(determineTriggeredActions(dependencies, before, after))
+        .toEqual([action]);
+    });
+
+    it("triggers a read below a scalar replaced by an instance", () => {
+      const action = createAction("scalarToInstance");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a", "b"]]],
+      ]);
+      const before = { value: { a: 5 } };
+      const after = { value: { a: new FabricMap(new Map([["b", 1]])) } };
+
+      expect(determineTriggeredActions(dependencies, before, after))
+        .toEqual([action]);
+    });
+
+    it("triggers a read below an error that was deleted", () => {
+      const action = createAction("errorDeleted");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a", "message"]]],
+      ]);
+      const before = {
+        value: { a: FabricError.fromNativeError(new Error("boom")) },
+      };
+      const after = { value: {} };
+
+      expect(determineTriggeredActions(dependencies, before, after))
+        .toEqual([action]);
+    });
+
+    it("triggers a read of a property an error carries when it changes", () => {
+      // A `FabricInstance` is not stateless with respect to property names:
+      // `FabricError` reaches `message`, `name` and `type` through prototype
+      // accessors, so a descent through one reads values rather than vacancy.
+
+      const action = createAction("errorMessageChanged");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a", "message"]]],
+      ]);
+      const before = {
+        value: { a: FabricError.fromNativeError(new Error("boom one")) },
+      };
+      const after = {
+        value: { a: FabricError.fromNativeError(new Error("boom two")) },
+      };
+
+      expect(determineTriggeredActions(dependencies, before, after))
+        .toEqual([action]);
+    });
+
+    it("triggers on a special object replaced at the read's own path", () => {
+      const action = createAction("nonRecursiveSpecialLeaf");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a"]]],
+      ]);
+      const before = { value: { a: new FabricBytes(new Uint8Array([1])) } };
+      const after = { value: { a: new FabricBytes(new Uint8Array([2])) } };
+
+      const result = determineTriggeredActions(
+        dependencies,
+        before,
+        after,
+        ["value", "a"],
+        { nonRecursive: true },
+      );
+      expect(result).toEqual([action]);
     });
 
     it("triggers on same-path write for non-recursive reads", () => {

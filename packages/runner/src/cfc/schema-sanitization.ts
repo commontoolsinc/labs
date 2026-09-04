@@ -12,13 +12,12 @@ import {
 } from "@commonfabric/data-model-schema";
 import {
   cloneIfNecessary,
+  fabricAwareEqual,
   type FabricPlainObject,
   FabricPrimitive,
   type FabricValue,
   isFabricPlainObject,
-  valueEqual,
 } from "@commonfabric/data-model";
-import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
   isObjectNotArray,
   isObjectOrArray,
@@ -675,14 +674,6 @@ const isAbsentOptional = (
   (value as Record<string, unknown>)[key] === undefined &&
   !requiredKeys.has(key);
 
-const schemaValueEqual = (left: unknown, right: unknown): boolean => {
-  try {
-    return valueEqual(left as FabricValue, right as FabricValue);
-  } catch {
-    return deepEqual(left, right);
-  }
-};
-
 const SUPPORTED_SCHEMA_TYPES = new Set([
   "unknown",
   "string",
@@ -1114,7 +1105,7 @@ const validateSchemaDefinitionInternal = (
       for (let index = 0; index < schema.enum.length; index++) {
         if (
           schema.enum.slice(0, index).some((entry) =>
-            schemaValueEqual(entry, schema.enum![index])
+            fabricAwareEqual(entry, schema.enum![index])
           )
         ) {
           return `${path}.enum: values must be unique`;
@@ -1806,13 +1797,13 @@ const validateAgainstSchemaInternal = (
 
     if (
       Array.isArray(schema.enum) &&
-      !schema.enum.some((entry) => schemaValueEqual(entry, value))
+      !schema.enum.some((entry) => fabricAwareEqual(entry, value))
     ) {
       return mismatch("value is not in enum");
     }
     if (
       Object.hasOwn(schema, "const") &&
-      !schemaValueEqual(schema.const, value)
+      !fabricAwareEqual(schema.const, value)
     ) {
       return mismatch("value does not match const");
     }
@@ -2095,7 +2086,7 @@ function validateStrictSchemaConstraints(
         if (!Object.hasOwn(value, index)) continue;
         if (
           value.slice(0, index).some((entry) =>
-            schemaValueEqual(entry, value[index])
+            fabricAwareEqual(entry, value[index])
           )
         ) {
           return mismatch("array items are not unique");

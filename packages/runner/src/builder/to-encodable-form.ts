@@ -8,7 +8,7 @@ import {
   FabricPrimitive,
   shallowFabricFromNativeObjectElseUndefined,
 } from "@commonfabric/data-model";
-import { refuseFabricInstance } from "../fabric-special-object.ts";
+import { refuseFabricInstance } from "@commonfabric/data-model";
 import { type AliasBinding, isAliasBinding } from "../alias-binding.ts";
 import {
   type FabricExecPlainObject,

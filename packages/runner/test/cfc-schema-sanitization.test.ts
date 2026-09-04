@@ -1781,6 +1781,33 @@ describe("schema-based prompt injection sanitization compatibility", () => {
     });
   });
 
+  it("seals a `FabricSpecialObject` rather than showing it", () => {
+    // A special object holds its state behind no property name, so the record
+    // arm cannot measure it against the schema the way the unmodeled-key
+    // policy measures a record. Sealing is the fail-closed answer, and the
+    // one that policy already gives for a key it cannot model; passing the
+    // value through would show contents nothing had checked.
+
+    const schema = {
+      type: "object",
+      properties: { blob: { type: "object" } },
+      required: ["blob"],
+      additionalProperties: false,
+    } as const satisfies JSONSchema;
+
+    const sanitized = validateAndSanitizeSchemaValueWithOpaqueLinks({
+      schema,
+      value: { blob: new FabricBytes(new Uint8Array([1, 2, 3])) },
+      opaqueHandleId: "child-run-1",
+    });
+
+    expect(sanitized).toEqual({
+      value: { blob: { "@link": "opaque:child-run-1#/blob" } },
+      linkedStringCount: 0,
+      sealedPaths: [["blob"]],
+    });
+  });
+
   it("sanitizes tuple (prefixItems) elements against their slot schema", () => {
     // CT-1895: itemSchemaForIndex collected only `items` (+allOf), so tuple
     // elements sanitized against an unconstrained schema — a raw string in a

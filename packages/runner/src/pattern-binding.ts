@@ -1,8 +1,10 @@
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import {
+  fabricAwareEqual,
   FabricInstance,
   FabricPrimitive,
+  isWalkableObjectOrArray,
   toCompactDebugString,
   valueEqual,
 } from "@commonfabric/data-model";
@@ -449,12 +451,12 @@ function sendValueToBindingInner<T>(
         );
       }
     }
-    // TODO(danfuzz): Latent — schemas don't admit `Fabric*` values on this path
-    // today, but will in the not-too-distant future; at that point this
-    // guard-less walk keys a live `FabricValue` against the binding shape (a
-    // `FabricPrimitive` is decomposed, a `FabricInstance` is walked by internal
-    // slots rather than codec contents). Mark ahead of that.
-  } else if (isObjectOrArray(binding) && isObjectOrArray(value)) {
+    // A special object on either side is not keyed against the other: it is
+    // not a record, whatever its `typeof` says, so it falls to the constant
+    // comparison below rather than being decomposed key by key.
+  } else if (
+    isWalkableObjectOrArray(binding) && isWalkableObjectOrArray(value)
+  ) {
     for (const key of Object.keys(binding)) {
       if (key in value) {
         sendValueToBindingInner(
@@ -467,10 +469,14 @@ function sendValueToBindingInner<T>(
         );
       }
     }
-  } else if (!isObjectOrArray(binding) || Object.keys(binding).length !== 0) {
-    // `Object.is`, not `===`: a constant `NaN` binding legitimately matches a
-    // produced `NaN`, and `0` vs `-0` is a genuine mismatch.
-    if (!Object.is(binding, value)) {
+  } else if (
+    !isWalkableObjectOrArray(binding) || Object.keys(binding).length !== 0
+  ) {
+    // `fabricAwareEqual`, not `===`: it leads with `Object.is`, so a
+    // constant `NaN` binding legitimately matches a produced `NaN` and `0` vs
+    // `-0` is a genuine mismatch, and it compares a constant fabric binding by
+    // content rather than by identity.
+    if (!fabricAwareEqual(binding, value)) {
       throw new Error(`Got ${value} instead of ${binding}`);
     }
   }
@@ -875,17 +881,13 @@ export function findAllWriteRedirectCells<T>(
     } else if (Array.isArray(binding)) {
       // If the binding is an array, recurse into each element.
       for (const value of binding) find(value, baseCell);
-      // A `FabricPrimitive` reaches the `isObjectOrArray` branch below, and is
-      // harmless there. This walk collects write-redirect links, and a
-      // primitive is an opaque scalar: it can contain no redirect, and its
-      // state lives in private fields, so `Object.values()` yields nothing and
-      // the recursion ends immediately. Decomposition would matter to a walk
-      // that REBUILT its input; this one only reads.
+      // A special object ends the walk. A `FabricPrimitive` is an opaque
+      // scalar and can contain no redirect.
       //
-      // TODO(danfuzz): Latent — a `FabricInstance` is not harmless in the same
-      // way. It is a container reached by its codec contents rather than by
-      // property name, so a write redirect nested inside one is missed here.
-    } else if (isObjectOrArray(binding) && !isCellLink(binding)) {
+      // TODO(danfuzz): a `FabricInstance` can hold one, and its contents are
+      // reached by its codec rather than by property name, so a write redirect
+      // nested inside one is still missed here.
+    } else if (isWalkableObjectOrArray(binding) && !isCellLink(binding)) {
       // If the binding is an object, recurse into each value.
       for (const value of Object.values(binding)) find(value, baseCell);
     }

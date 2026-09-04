@@ -5,6 +5,7 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { DATA_URI_MEDIA_TYPE } from "@commonfabric/data-model/codec-data-uri";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 import "@commonfabric/utils/equal-ignoring-symbols";
 
@@ -623,6 +624,69 @@ describe("Cell commit callbacks", () => {
       expect(result.length).toBe(2);
       expect(result[0].name).toBe("bob");
       expect(result[1].name).toBe("alice-copy");
+    });
+
+    it("should remove a fabric element matching by content", () => {
+      // A special object keeps its state in private fields, so a link
+      // comparison can only tell whether two are the same object -- and a
+      // value read back out of the array never is. It matches by content, the
+      // way `removeByValue()` matches.
+      const frame = pushFrame();
+      const cell = runtime.getCell<FabricBytes[]>(
+        space,
+        "remove-fabric-test",
+        { type: "array" },
+        tx,
+      );
+
+      cell.set([
+        new FabricBytes(new Uint8Array([1, 2])),
+        new FabricBytes(new Uint8Array([3, 4])),
+      ]);
+      cell.remove(new FabricBytes(new Uint8Array([1, 2])));
+      popFrame(frame);
+
+      const result = cell.get();
+      expect(result.length).toBe(1);
+      expect(result[0].slice()).toEqual(new Uint8Array([3, 4]));
+    });
+
+    it("should remove all fabric elements matching by content", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<FabricBytes[]>(
+        space,
+        "removeall-fabric-test",
+        { type: "array" },
+        tx,
+      );
+
+      cell.set([
+        new FabricBytes(new Uint8Array([1, 2])),
+        new FabricBytes(new Uint8Array([3, 4])),
+        new FabricBytes(new Uint8Array([1, 2])),
+      ]);
+      cell.removeAll(new FabricBytes(new Uint8Array([1, 2])));
+      popFrame(frame);
+
+      const result = cell.get();
+      expect(result.length).toBe(1);
+      expect(result[0].slice()).toEqual(new Uint8Array([3, 4]));
+    });
+
+    it("should keep a fabric element whose content differs", () => {
+      const frame = pushFrame();
+      const cell = runtime.getCell<FabricBytes[]>(
+        space,
+        "remove-fabric-miss-test",
+        { type: "array" },
+        tx,
+      );
+
+      cell.set([new FabricBytes(new Uint8Array([1, 2]))]);
+      cell.remove(new FabricBytes(new Uint8Array([9, 9])));
+      popFrame(frame);
+
+      expect(cell.get().length).toBe(1);
     });
 
     it("should do nothing when removing element not in array", () => {

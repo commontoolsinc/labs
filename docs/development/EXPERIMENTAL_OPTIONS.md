@@ -1298,10 +1298,16 @@ site has:
 
 The second is the weaker claim, but it does not fail quietly, and that is the
 point. Add a production use of one of these values and the throw fires — at the
-moment the use is added, in the change that added it — leaving exactly two
-honest ways forward: implement the handling the throw names, or back the use
-out. So the tripwire is its own enforcement, which is why an ungated site is
-legitimate. What it is not is a flag, so do not cite this section as though one
+moment the use is added, in the change that added it. Three honest ways lead
+out of that: implement the handling the throw names, back the use out, or
+establish that the site was never one a refusal belonged at and give it the
+answer it owes. That third one is the rarest, and it carries the heaviest
+burden of proof, since a site that keeps its old answer records a gap instead
+of closing one. `reactive-dependencies.ts` is the worked example: its
+`isKeyable()` descends a `FabricInstance` by property name because refusing
+would cost the rest of a notification's changes and answering `false` would
+lose reachability the walk already reports. So the tripwire is its own
+enforcement, which is why an ungated site is legitimate. What it is not is a flag, so do not cite this section as though one
 stood behind every throw.
 
 Three obligations follow, and they are the reason this is recorded here rather

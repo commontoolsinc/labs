@@ -1,6 +1,6 @@
+import { isWalkableObjectOrArray } from "@commonfabric/data-model";
 import type { FabricValue } from "@commonfabric/api";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { isObjectOrArray } from "@commonfabric/utils/types";
 
 export type ReadPathOptions = {
   allowArrayLength?: boolean;
@@ -17,12 +17,12 @@ const hasOwnPathSegment = (
   segment: string | number,
 ): boolean => Object.hasOwn(value, segment);
 
-// TODO(danfuzz): both descents below treat a `FabricSpecialObject` as a
-// record with no own keys, so any path into a `FabricInstance`'s codec
-// contents reports absent / `undefined`. That answer is right for a
-// `FabricPrimitive` (a leaf) but accidental for an instance — and it
-// disagrees with `getAtPath` in `traverse.ts`, whose `in`-based descent
-// resolves the same address through the instance's prototype surface.
+// Both descents below stop at a `FabricPrimitive`, so a path into one reports
+// absent / `undefined` -- the same answer `getAtPath` in `traverse.ts` gives
+// for the same address, and the whole story for a leaf that no path addresses
+// anything inside of. A `FabricInstance` is refused rather than answered
+// about, by the same predicate and for the same reason it is refused
+// everywhere else.
 export const hasValueAtPath = (
   root: FabricValue | undefined,
   path: readonly string[],
@@ -45,7 +45,7 @@ export const hasValueAtPath = (
       current = current[index];
       continue;
     }
-    if (!isObjectOrArray(current)) {
+    if (!isWalkableObjectOrArray(current)) {
       return false;
     }
     const record = current as Record<string, unknown>;
@@ -79,7 +79,7 @@ export const readValueAtPath = (
       current = current[index];
       continue;
     }
-    if (!isObjectOrArray(current)) {
+    if (!isWalkableObjectOrArray(current)) {
       return undefined;
     }
     const record = current as Record<string, unknown>;

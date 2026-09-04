@@ -1,5 +1,4 @@
-import { valueEqual } from "@commonfabric/data-model";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isWalkableObjectOrArray, valueEqual } from "@commonfabric/data-model";
 
 /**
  * Read one path segment out of a data container WITHOUT falling through to the
@@ -46,15 +45,11 @@ export function setValueAtPath(
     // prototype member would otherwise look like an existing non-object and
     // get descended into rather than created.
     //
-    // TODO(danfuzz): a `FabricSpecialObject` at a spine slot passes this
-    // test — it is its parent's own value and `typeof` "object" — so the
-    // walk descends into it; the next segment then reads `undefined` off
-    // its empty own surface, and the assignment writes the intermediate
-    // onto the special object itself: a `TypeError` on a frozen value, a
-    // codec-invisible graft on an unfrozen instance. (`getValueAtPath` and
-    // `hasValueAtPath` below return `undefined`/`false` for any path into
-    // a `FabricInstance`'s codec contents.)
-    if (typeof ownSegment(parent, key) !== "object") {
+    // A special object at a spine slot is replaced rather than descended, the
+    // same as a scalar: it holds no slot for the next segment, so writing
+    // through it would raise a `TypeError` on a frozen value or graft a
+    // property its codec never reads onto an unfrozen one.
+    if (!isWalkableObjectOrArray(ownSegment(parent, key))) {
       parent[key] = typeof path[i + 1] === "number" ? [] : {};
     }
     parent = parent[key];
@@ -87,7 +82,10 @@ export function getValueAtPath(obj: any, path: readonly PropertyKey[]): any {
 export function hasValueAtPath(obj: any, path: PropertyKey[]): boolean {
   let current = obj;
   for (const key of path) {
-    if (!isObjectOrArray(current) || !Object.hasOwn(current, key as string)) {
+    if (
+      !isWalkableObjectOrArray(current) ||
+      !Object.hasOwn(current, key as string)
+    ) {
       return false;
     }
     current = (current as Record<PropertyKey, unknown>)[key];
