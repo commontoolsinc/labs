@@ -52,10 +52,6 @@ export class SpaceManager {
    * loop and the two steps it takes. A field this class reassigns is read and
    * written through this object as through the instance itself; the two
    * tables it never reassigns are handed over as they are.
-   *
-   * The name is the documentation. Nothing here is part of what this class
-   * promises, and code that reaches through it is written against internals
-   * that are free to change.
    */
   get accessForTestingOnly(): {
     activePiece: Cell<BGPieceEntry> | null;
