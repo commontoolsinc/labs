@@ -20,7 +20,7 @@ dist/
 .cf/
 .ct/
 .cf-harness-artifacts/
-.cf-harness-console/
+.cf-harness-console*/
 .cf-harness-hostile-demo*/
 .cf-harness-demo-*/
 claude-research.key

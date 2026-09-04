@@ -1460,6 +1460,57 @@ describe("console/server", () => {
     });
   });
 
+  describe("the live pane", () => {
+    it("hands the live pane the same token cookie the console page carries", async () => {
+      const response = await server.handle(getRequest("/live/session-1"));
+      await response.body?.cancel();
+
+      const setCookie = response.headers.get("set-cookie") ?? "";
+      expect(setCookie).toMatch(/^cf_harness_console_token=.+/);
+      expect(setCookie).toContain("SameSite=Strict");
+      expect(setCookie).toContain("HttpOnly");
+      expect(setCookie).toContain("Path=/");
+    });
+
+    it("confines the live pane with the page's content security policy", async () => {
+      const response = await server.handle(getRequest("/live/session-1"));
+      await response.body?.cancel();
+
+      const policy = response.headers.get("content-security-policy") ?? "";
+      expect(policy).toContain("default-src 'self'");
+      // The pane is opened at the top level of its own view, never framed.
+      expect(policy).toContain("frame-ancestors 'none'");
+    });
+
+    it("hands that cookie to a pane whose session id the address escaped", async () => {
+      const response = await server.handle(getRequest("/live/session%2F1"));
+      await response.body?.cancel();
+
+      expect(response.headers.get("set-cookie")).toMatch(
+        /^cf_harness_console_token=/,
+      );
+    });
+
+    it("answers 403 for a live pane request naming another host", async () => {
+      const response = await server.handle(
+        getRequest("/live/session-1", { host: "evil.test:8100" }),
+      );
+      await response.body?.cancel();
+
+      expect(response.status).toBe(403);
+    });
+
+    it("answers 404 without a token for a path below the session segment", async () => {
+      const response = await server.handle(
+        getRequest("/live/session-1/turn-1"),
+      );
+      await response.body?.cancel();
+
+      expect(response.status).toBe(404);
+      expect(response.headers.get("set-cookie")).toBeNull();
+    });
+  });
+
   describe("request authorization", () => {
     it("hands the page a strictly same-site token cookie", async () => {
       const response = await server.handle(getRequest("/"));

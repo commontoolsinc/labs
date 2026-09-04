@@ -147,6 +147,91 @@ export const withheldView = (step: ConsoleStep): TemplateResult => {
   `;
 };
 
+/**
+ * What CFC decided about one call, and any event it raised. A withheld
+ * release carries the retrospective's count of the positions it held back,
+ * which is what says the call itself succeeded.
+ */
+export const stepPolicyView = (
+  step: ConsoleStep,
+): TemplateResult | typeof nothing => {
+  const labelEntries = step.invocation?.cfcInputLabels?.entries ?? [];
+  if (
+    step.policy === undefined && step.policyEvents.length === 0 &&
+    labelEntries.length === 0
+  ) {
+    return nothing;
+  }
+  return html`
+    <div class="pane">
+      <div class="pane-head">cfc</div>
+      ${step.policy === undefined ? nothing : html`
+        <div class="cfc-line">
+          <span
+            class="badge ${step.policy.decision === "denied"
+              ? "denied"
+              : step.policy.decision === "invalid" ||
+                  step.policy.decision === "withheld"
+              ? "warn"
+              : "ok"}"
+          >${step.policy.decision}</span>
+          ${step.policy.effectClass === undefined ? nothing : html`
+            <span class="cfc-effect">${step.policy.effectClass}</span>
+          `}
+          <span class="cfc-reasons">
+            ${step.policy.reasonCodes.join(", ")}
+          </span>
+          ${step.policy.decision === "withheld"
+            ? html`
+              <span class="cfc-withheld">${withheldSummary(step)}</span>
+            `
+            : nothing}
+        </div>
+      `} ${step.policyEvents.map((event) =>
+        html`
+          <div class="cfc-line">
+            <span
+              class="badge ${event.severity === "denied" ? "denied" : "warn"}"
+            >${event.severity}</span>
+            <span class="cfc-reasons">${event.detail ?? ""}</span>
+          </div>
+        `
+      )} ${labelEntries.length === 0 ? nothing : html`
+        <table class="labels">
+          <tbody>
+            ${labelEntries.map((entry) =>
+              html`
+                <tr>
+                  <td class="label-path">
+                    ${entry.path.length === 0
+                      ? "(whole input)"
+                      : entry.path.join(".")}
+                  </td>
+                  <td class="label-atoms">
+                    ${atomNames(entry.label?.confidentiality).length === 0
+                      ? html`
+                        <span class="muted">no confidentiality atom</span>
+                      `
+                      : atomNames(entry.label?.confidentiality).map((name) =>
+                        html`
+                          <span class="atom conf">${name}</span>
+                        `
+                      )} ${atomNames(entry.label?.integrity).map((name) =>
+                        html`
+                          <span class="atom integ">${name}</span>
+                        `
+                      )}
+                  </td>
+                </tr>
+              `
+            )}
+          </tbody>
+        </table>
+      `}
+    </div>
+  `;
+};
+
 export class ConsoleSteps extends LitElement {
   static override properties = {
     steps: { attribute: false },
@@ -374,89 +459,6 @@ export class ConsoleSteps extends LitElement {
   }
 
   /**
-   * What CFC decided about this call, and any event it raised. A withheld
-   * release carries the retrospective's count of the positions it held back,
-   * which is what says the call itself succeeded.
-   */
-  #policy(step: ConsoleStep): TemplateResult | typeof nothing {
-    const labelEntries = step.invocation?.cfcInputLabels?.entries ?? [];
-    if (
-      step.policy === undefined && step.policyEvents.length === 0 &&
-      labelEntries.length === 0
-    ) {
-      return nothing;
-    }
-    return html`
-      <div class="pane">
-        <div class="pane-head">cfc</div>
-        ${step.policy === undefined ? nothing : html`
-          <div class="cfc-line">
-            <span
-              class="badge ${step.policy.decision === "denied"
-                ? "denied"
-                : step.policy.decision === "invalid" ||
-                    step.policy.decision === "withheld"
-                ? "warn"
-                : "ok"}"
-            >${step.policy.decision}</span>
-            ${step.policy.effectClass === undefined ? nothing : html`
-              <span class="cfc-effect">${step.policy.effectClass}</span>
-            `}
-            <span class="cfc-reasons">
-              ${step.policy.reasonCodes.join(", ")}
-            </span>
-            ${step.policy.decision === "withheld"
-              ? html`
-                <span class="cfc-withheld">${withheldSummary(step)}</span>
-              `
-              : nothing}
-          </div>
-        `} ${step.policyEvents.map((event) =>
-          html`
-            <div class="cfc-line">
-              <span
-                class="badge ${event.severity === "denied" ? "denied" : "warn"}"
-              >${event.severity}</span>
-              <span class="cfc-reasons">${event.detail ?? ""}</span>
-            </div>
-          `
-        )} ${labelEntries.length === 0 ? nothing : html`
-          <table class="labels">
-            <tbody>
-              ${labelEntries.map((entry) =>
-                html`
-                  <tr>
-                    <td class="label-path">
-                      ${entry.path.length === 0
-                        ? "(whole input)"
-                        : entry.path.join(".")}
-                    </td>
-                    <td class="label-atoms">
-                      ${atomNames(entry.label?.confidentiality).length === 0
-                        ? html`
-                          <span class="muted">no confidentiality atom</span>
-                        `
-                        : atomNames(entry.label?.confidentiality).map((name) =>
-                          html`
-                            <span class="atom conf">${name}</span>
-                          `
-                        )} ${atomNames(entry.label?.integrity).map((name) =>
-                          html`
-                            <span class="atom integ">${name}</span>
-                          `
-                        )}
-                    </td>
-                  </tr>
-                `
-              )}
-            </tbody>
-          </table>
-        `}
-      </div>
-    `;
-  }
-
-  /**
    * What the result let across as a value. The harness seals a string the
    * schema does not pin to an enum or a const, but never a number — so an
    * array of them is a channel as wide as its author cared to make it, and
@@ -514,7 +516,7 @@ export class ConsoleSteps extends LitElement {
           <span class="badge ${step.status}">${step.status}</span>
         </div>
       </div>
-      ${this.#handles(step)} ${this.#arguments(step)} ${this.#policy(
+      ${this.#handles(step)} ${this.#arguments(step)} ${stepPolicyView(
         step,
       )} ${this.#disclosure(step)}
       <div class="pane">

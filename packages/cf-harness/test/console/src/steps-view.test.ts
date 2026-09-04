@@ -1,8 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { nothing } from "lit";
 import {
   clampSelection,
   ConsoleSteps,
+  stepPolicyView,
   withheldSummary,
   withheldView,
 } from "../../../console/src/steps-view.ts";
@@ -46,6 +48,38 @@ describe("console/src/steps-view", () => {
 
     it("answers zero for a step before the first", () => {
       expect(clampSelection(-1, 9)).toBe(0);
+    });
+  });
+
+  describe("stepPolicyView", () => {
+    const step = (policy?: ConsoleStep["policy"]): ConsoleStep => ({
+      index: 1,
+      kind: "tool",
+      toolName: "read_file",
+      handlesIntroduced: [],
+      handlesInScope: [],
+      status: "ok",
+      policyEvents: [],
+      withheld: { status: "recorded", locations: [] },
+      ...(policy === undefined ? {} : { policy }),
+    });
+
+    it("renders nothing for a step whose run recorded no CFC decision", () => {
+      // A step with no decision, no event and no labels has no CFC pane to
+      // draw, and an empty one would read as a decision that was not made.
+      expect(stepPolicyView(step())).toBe(nothing);
+    });
+
+    it("renders the decision and its reasons for a step that carries one", () => {
+      const text = templateText(stepPolicyView(step({
+        decision: "allowed",
+        effectClass: "side-effect",
+        reasonCodes: ["cfc_enforce_explicit_direct_command"],
+      })));
+
+      expect(text).toContain("allowed");
+      expect(text).toContain("side-effect");
+      expect(text).toContain("cfc_enforce_explicit_direct_command");
     });
   });
 
