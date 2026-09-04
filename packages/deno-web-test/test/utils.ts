@@ -2,10 +2,9 @@ import * as path from "@std/path";
 import { AssertionError } from "@std/assert";
 import { copy } from "@std/fs";
 import { parse as parseJsonc } from "@std/jsonc";
-import { decode } from "@commonfabric/utils/encoding";
+import { removeDirectory } from "@commonfabric/utils/remove-directory";
 import { RECORDS_DIR_VARIABLE } from "@commonfabric/test-support/records";
-
-import { removeDirectory } from "../remove-directory.ts";
+import { decode } from "@commonfabric/utils/encoding";
 
 const dirname = import.meta.dirname as string;
 const CLI_PATH = path.join(dirname, "..", "cli.ts");

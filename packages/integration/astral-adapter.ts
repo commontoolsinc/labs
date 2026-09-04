@@ -1,5 +1,4 @@
 import {
-  type Browser as AstralBrowser,
   ElementHandle as AstralElementHandle,
   type Page as AstralPage,
   type WaitForSelectorOptions,
@@ -169,19 +168,6 @@ export interface ScreencastFrame {
 export function isChildProcessGone(error: unknown): boolean {
   return error instanceof TypeError &&
     error.message === "Child process has already terminated";
-}
-
-export async function closeAstralBrowser(
-  browser: Pick<AstralBrowser, "close">,
-): Promise<void> {
-  try {
-    await browser.close();
-  } catch (error) {
-    if (isChildProcessGone(error)) {
-      return;
-    }
-    throw error;
-  }
 }
 
 type CelestialBindings = ReturnType<

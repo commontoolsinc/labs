@@ -1,44 +1,43 @@
 import {
-  Browser as AstralBrowser,
-  launch,
   SandboxOptions,
   UserAgentOptions,
   WaitForOptions,
 } from "@astral/astral";
-import { astralBinaryPath, closeAstralBrowser } from "./astral-adapter.ts";
+
+import { removeDirectory } from "@commonfabric/utils/remove-directory";
+
+import { astralBinaryPath } from "./astral-adapter.ts";
+import { BrowserProcess } from "./browser-process.ts";
 import { Page } from "./page.ts";
 import { collectPatternCoverage } from "./pattern-coverage.ts";
 
 const DEFAULT_ASTRAL_TIMEOUT = 60_000;
 
+/**
+ * The name a browser's profile directory carries. A directory left behind by a
+ * process that was killed has nothing but its name to say what made it.
+ */
+export const PROFILE_DIRECTORY_PREFIX = "integration-browser-";
+
 // Wrapper around `@astral/astral`'s `Browser`.
+//
+// Each browser keeps its profile in a temporary directory of its own, which
+// `close()` removes once the browser and everything it started has exited. A
+// browser nothing closes leaves that directory behind, so a caller holds one
+// for as long as it holds the browser.
 export class Browser {
-  #browser: AstralBrowser | null;
+  #process: BrowserProcess | null;
+  #profileDir: string;
   #timeout: number;
 
   private constructor(
-    browser: AstralBrowser,
+    process: BrowserProcess,
+    profileDir: string,
     options: { timeout: number },
   ) {
-    this.#browser = browser;
+    this.#process = process;
+    this.#profileDir = profileDir;
     this.#timeout = options.timeout;
-  }
-
-  static async launch(
-    config?: { timeout?: number; headless?: boolean; args?: string[] },
-  ): Promise<Browser> {
-    const headless = config?.headless ?? true;
-    const args = config?.args ?? [];
-    const timeout = config?.timeout ?? DEFAULT_ASTRAL_TIMEOUT;
-
-    const browser = await launch({
-      args,
-      headless,
-      // `undefined` leaves the choice to astral, which is the answer when no
-      // system browser is installed.
-      path: astralBinaryPath(),
-    });
-    return new Browser(browser, { timeout });
   }
 
   // Passthru of `@astral/astral`'s `Browser#newPage`, applying
@@ -49,7 +48,7 @@ export class Browser {
   ): Promise<Page> {
     this.#checkIsOk();
     const page = new Page(
-      await this.#browser!.newPage(url, options),
+      await this.#process!.newPage(url, options),
       { timeout: this.#timeout },
     );
     // The worker's pattern-coverage hits live in the page's realm and go with
@@ -63,19 +62,65 @@ export class Browser {
   // via `cdp-profiler.ts`) can attach alongside Astral's.
   wsEndpoint(): string {
     this.#checkIsOk();
-    return this.#browser!.wsEndpoint();
+    return this.#process!.wsEndpoint();
   }
 
+  // Closes the browser and removes its profile directory.
+  //
+  // The removal follows the close rather than running beside it. Chrome
+  // recreates the directory `--user-data-dir` names, every missing parent
+  // included, whenever it writes into it, so a removal that overlapped one of
+  // the processes the browser started would put the directory back. A close
+  // that throws leaves both the browser and the directory where they are, so
+  // the caller can close again.
   async close(): Promise<void> {
     this.#checkIsOk();
-    const browser = this.#browser;
-    this.#browser = null;
-    await closeAstralBrowser(browser!);
+    await this.#process!.close();
+    this.#process = null;
+    await removeDirectory(this.#profileDir);
   }
 
   #checkIsOk() {
-    if (!this.#browser) {
+    if (!this.#process) {
       throw new Error("Browser is already closed.");
+    }
+  }
+
+  static async launch(
+    config?: { timeout?: number; headless?: boolean },
+  ): Promise<Browser> {
+    const headless = config?.headless ?? true;
+    const timeout = config?.timeout ?? DEFAULT_ASTRAL_TIMEOUT;
+
+    // The profile directory belongs to this browser and goes when it closes.
+    // A launch naming none would reach the profile of the browser the
+    // developer uses, and write into the directory that profile lives in.
+    const profileDir = await Deno.makeTempDir({
+      prefix: PROFILE_DIRECTORY_PREFIX,
+    });
+    try {
+      const process = await BrowserProcess.start({
+        args: [`--user-data-dir=${profileDir}`],
+        headless,
+        // `undefined` leaves the choice to astral, which is the answer when no
+        // system browser is installed.
+        path: astralBinaryPath(),
+      });
+      return new Browser(process, profileDir, { timeout });
+    } catch (error) {
+      // A launch that threw has stopped whatever it started, and hands back no
+      // browser for anyone to close the directory with. The launch failure is
+      // the diagnosis, so a removal that fails as well is carried alongside it
+      // rather than in its place.
+      try {
+        await removeDirectory(profileDir);
+      } catch (removalFailure) {
+        throw new AggregateError(
+          [error, removalFailure],
+          `The browser did not launch, and ${profileDir} is still there.`,
+        );
+      }
+      throw error;
     }
   }
 }

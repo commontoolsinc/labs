@@ -101,7 +101,9 @@ spawned with, so their read ends reach end of file once the last of them has
 exited, and spawning the browser here is what keeps those pipes in reach. Both
 are read to the end: what a browser writes says nothing the run acts on, but a
 pipe nobody reads fills up and stops the process writing into it. Closing the
-browser returns on that end of file, and the removal follows.
+browser returns on that end of file, and the removal follows. The spawning and
+the wait are [`BrowserProcess`](../integration/browser-process.ts), which the
+browser integration tests use for the same reason.
 
 ## Support
 

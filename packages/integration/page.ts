@@ -244,6 +244,13 @@ export class Page extends EventTarget {
     }
   }
 
+  // The Astral page this wraps. Everything this class does goes through it, so
+  // a caller that replaces something on it changes what this page does.
+  get astralPage(): AstralPage {
+    this.#checkIsOk();
+    return this.#page!;
+  }
+
   // Returns Astral's keyboard with `type` patched to apply the configured
   // default delay when a call omits one.
   get keyboard(): Keyboard {

@@ -5,16 +5,12 @@ import {
   assertRejects,
   assertStringIncludes,
 } from "@std/assert";
-import { launch } from "@astral/astral";
-import { closeAstralBrowser } from "../astral-adapter.ts";
 import { Browser } from "../browser.ts";
 import { Page } from "../page.ts";
 
-type LaunchedBrowser = Awaited<ReturnType<typeof launch>>;
-
 async function closeTestBrowser(
   page: Page,
-  browser: LaunchedBrowser,
+  browser: Browser,
 ): Promise<void> {
   let closeError: unknown;
   try {
@@ -23,7 +19,7 @@ async function closeTestBrowser(
     closeError = error;
   }
   try {
-    await closeAstralBrowser(browser);
+    await browser.close();
   } catch (error) {
     closeError ??= error;
   }
@@ -62,37 +58,14 @@ async function waitForSelectorStateInstallation(page: Page): Promise<void> {
   });
 }
 
-Deno.test("closeAstralBrowser ignores only the exited-process race", async () => {
-  let closeCalls = 0;
-  await closeAstralBrowser({
-    close: () => {
-      closeCalls++;
-      return Promise.reject(
-        new TypeError("Child process has already terminated"),
-      );
-    },
-  });
-  assertEquals(closeCalls, 1);
-
-  await assertRejects(
-    () =>
-      closeAstralBrowser({
-        close: () => Promise.reject(new TypeError("different close failure")),
-      }),
-    TypeError,
-    "different close failure",
-  );
-});
-
 Deno.test("Browser closes a published Astral browser", async () => {
   const browser = await Browser.launch();
   await browser.close();
 });
 
 Deno.test("pierce waits reject when their page closes", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     const target = page.waitForSelector("#never-created", {
@@ -106,14 +79,13 @@ Deno.test("pierce waits reject when their page closes", async () => {
     await page.close();
     await rejected;
   } finally {
-    await closeAstralBrowser(browser);
+    await browser.close();
   }
 });
 
 Deno.test("ElementHandle pierce waits observe their own shadow root", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -155,9 +127,8 @@ Deno.test("ElementHandle pierce waits observe their own shadow root", async () =
 });
 
 Deno.test("pierce selectors resolve light-DOM elements", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -226,9 +197,8 @@ Deno.test("pierce selectors resolve light-DOM elements", async () => {
 });
 
 Deno.test("method observers use writable locked descriptors", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -310,9 +280,8 @@ Deno.test("method observers use writable locked descriptors", async () => {
 });
 
 Deno.test("method observers cover submit-button validity", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -385,9 +354,8 @@ Deno.test("method observers cover submit-button validity", async () => {
 });
 
 Deno.test("method observers cover custom-element validity", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -478,9 +446,8 @@ Deno.test("method observers cover custom-element validity", async () => {
 });
 
 Deno.test("method observers cover custom-element definition", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -554,9 +521,8 @@ Deno.test("method observers cover custom-element definition", async () => {
 });
 
 Deno.test("method observers cover custom-element states", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -638,9 +604,8 @@ Deno.test("method observers cover custom-element states", async () => {
 });
 
 Deno.test("property observers cover programmatic file selection", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -697,9 +662,8 @@ Deno.test("property observers cover programmatic file selection", async () => {
 });
 
 Deno.test("root events cover shadow selector state", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -830,9 +794,8 @@ Deno.test("root events cover shadow selector state", async () => {
 });
 
 Deno.test("method observers cover explicit custom-element upgrades", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -908,9 +871,8 @@ Deno.test("method observers cover explicit custom-element upgrades", async () =>
 });
 
 Deno.test("retained selector state reconciles displaced observers", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.evaluate(() => {
@@ -1048,9 +1010,9 @@ Deno.test("retained selector state reconciles displaced observers", async () => 
 });
 
 Deno.test("Page preserves Common Tools behavior on published Astral", async () => {
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
+  const astralPage = page.astralPage;
 
   try {
     await page.evaluate(() => {
@@ -1593,9 +1555,8 @@ Deno.test("Page clicks the part of an element that lies inside the page", async 
   // does not have, and a trusted click dispatched there is delivered to the
   // browser, lands outside the page, and reaches nothing at all.
   const observed: { x: number; y: number }[] = [];
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
   page.setInteractionObserver({
     afterClick: (_element, point) =>
       void observed.push({ x: point.x, y: point.y }),
@@ -1654,9 +1615,8 @@ Deno.test("Page reports an element with no part of it inside the page", async ()
   // that a click can reach. Saying so is the only honest answer: a click
   // dispatched past the edge of the page reaches nothing, and returning from
   // that tells the caller the element was pressed.
-  const browser = await launch({ headless: true });
-  const astralPage = await browser.newPage();
-  const page = new Page(astralPage, { timeout: 10_000 });
+  const browser = await Browser.launch({ timeout: 10_000 });
+  const page = await browser.newPage();
 
   try {
     await page.setViewportSize({ width: 800, height: 600 });
