@@ -1740,6 +1740,40 @@ describe("the vintage gate, end to end", () => {
       expect(await collectVintages(roots.vintagesRoot)).toEqual([]);
     });
 
+    it("refuses a multi-user test, saying the run did not complete", async () => {
+      // A multi-user test's participants instantiate and write in workers of
+      // their own, against a storage server the runner starts, so this
+      // capture's store and observer would see nothing. The runner refuses the
+      // store rather than handing one back unwritten, and a refusal is a run
+      // that did not complete rather than a pattern whose tests failed.
+
+      await setSubjectTest(
+        [
+          "import { assert, multiUserTest, pattern, TESTS } from 'commonfabric';",
+          `import Subject from './${KEY}';`,
+          "export const setup = pattern(() => ({ subject: Subject({}) }));",
+          "export const alice = pattern(() => ({",
+          "  [TESTS]: [{ assertion: assert(() => true) }],",
+          "}));",
+          "export default multiUserTest({ setup, participants: { alice } });",
+          "",
+        ].join("\n"),
+      );
+
+      const { captured, problems } = await captureMissing(
+        roots,
+        [TEST_KEY],
+        new Date("2026-07-29T12:00:00.000Z"),
+      );
+
+      expect(captured).toEqual([]);
+      expect(problems).toHaveLength(1);
+      expect(problems[0]).toContain("the run did not complete");
+      expect(problems[0]).toContain("is a multi-user test");
+      expect(problems[0]).not.toContain("its own tests did not pass");
+      expect(await collectVintages(roots.vintagesRoot)).toEqual([]);
+    });
+
     it("refuses a test that asserts nothing", async () => {
       // A run with no assertions cannot have driven the pattern anywhere, so the
       // fixture would hold a bare materialized root — which is the shape that
