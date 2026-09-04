@@ -29,6 +29,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { backtickQuote } from "@commonfabric/utils/markdown";
+import { isPlainObject } from "@commonfabric/utils/types";
+
 import { REALM_CODEC } from "@/codec-interface/interface.ts";
 import * as fabricInstances from "@/fabric-instances/index.ts";
 import * as fabricPrimitives from "@/fabric-primitives/index.ts";
@@ -82,11 +85,10 @@ function evaluateExpression(expression: string): Record<string, unknown> {
   );
   const result = fn(...values);
 
-  if (
-    (result === null) || (typeof result !== "object") ||
-    (Object.getPrototypeOf(result) !== Object.prototype)
-  ) {
-    const rendered = toCompactDebugString(result, { maxLength: 60 });
+  if (!isPlainObject(result, false)) {
+    const rendered = backtickQuote(
+      toCompactDebugString(result, { maxLength: 60 }),
+    );
     throw new Error(
       `Case expression must produce a plain object; got ${rendered}`,
     );
@@ -98,9 +100,11 @@ function evaluateExpression(expression: string): Record<string, unknown> {
 /**
  * Splits a case file into its expression and its recorded sections, one per
  * case. The expression runs to the first blank line, and the sections are
- * what follow it, separated by blank lines; a rendering never holds a blank
- * line, so the split is unambiguous. A file with nothing but an expression is
- * accepted when the recordings are about to be rewritten.
+ * what follow it, separated by blank lines. The split rests on no rendering
+ * holding a blank line, which holds for every rendering but that of an
+ * instance whose class name itself holds one, and no case has such a class.
+ * A file with nothing but an expression is accepted when the recordings are
+ * about to be rewritten.
  */
 function parseCaseFile(text: string): {
   expression: string;
