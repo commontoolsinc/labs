@@ -443,7 +443,7 @@ class DebugConverter {
  */
 class DebugStringifier {
   readonly #options: DebugValueOptions;
-  readonly #indent: string | undefined;
+  readonly #singleIndent: string | undefined;
 
   /**
    * Constructs an instance which renders using `indent` spaces per nesting
@@ -452,7 +452,9 @@ class DebugStringifier {
    */
   constructor(options: DebugValueOptions, indent?: number) {
     this.#options = options;
-    this.#indent = (indent === undefined) ? undefined : " ".repeat(indent);
+    this.#singleIndent = (indent === undefined)
+      ? undefined
+      : " ".repeat(indent);
   }
 
   //
@@ -462,6 +464,11 @@ class DebugStringifier {
   /** Renders the given value. */
   render(value: FabricValue): string {
     return this.#renderSubvalue(value, "");
+  }
+
+  /** Whether this instance renders on a single line, with no indentation. */
+  get #isCompact(): boolean {
+    return this.#singleIndent === undefined;
   }
 
   /**
@@ -505,7 +512,7 @@ class DebugStringifier {
   ): string {
     if (parts.length === 0) {
       return `${open}${close}`;
-    } else if (this.#indent === undefined) {
+    } else if (this.#isCompact) {
       return `${open}${parts.join(",")}${close}`;
     }
 
@@ -660,7 +667,7 @@ class DebugStringifier {
     unescape = true,
   ): string[] {
     const inner = this.#innerIndent(indent);
-    const separator = (this.#indent === undefined) ? ":" : ": ";
+    const separator = this.#isCompact ? ":" : ": ";
 
     return Object.entries(value).map(([key, subvalue]) => {
       const original = (unescape && (key[0] === "/")) ? key.slice(1) : key;
@@ -807,7 +814,7 @@ class DebugStringifier {
 
   /** Returns the indentation for the contents of a container indented by `indent`. */
   #innerIndent(indent: string): string {
-    return `${indent}${this.#indent ?? ""}`;
+    return this.#isCompact ? indent : `${indent}${this.#singleIndent}`;
   }
 
   /**
@@ -818,7 +825,7 @@ class DebugStringifier {
    * the one quoted string they came from.
    */
   #renderLines(lines: readonly string[], inner: string): string {
-    if ((this.#indent === undefined) || (lines.length === 1)) {
+    if (this.#isCompact || (lines.length === 1)) {
       return JSON.stringify(lines.join(""));
     }
 
@@ -837,7 +844,7 @@ class DebugStringifier {
   ): string {
     const inner = this.#innerIndent(indent);
     const rendered = this.#renderString(partial.excerpt, indent);
-    const separator = (this.#indent === undefined) ? " " : `\n${inner}`;
+    const separator = this.#isCompact ? " " : `\n${inner}`;
 
     return `${rendered} +${separator}... length: ${partial.length}`;
   }
