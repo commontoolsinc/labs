@@ -828,18 +828,16 @@ class DebugStringifier {
   /**
    * Renders the string-length form: the excerpt as `#renderString()` renders
    * it, followed by the length of the whole. The length follows on the same
-   * line, or on a line of its own, indented by `inner`, when the excerpt
-   * renders on more than one.
+   * line, or when the rendering is multi-line, on a line of its own, indented
+   * by `inner`.
    */
   #renderPartialString(
     partial: { readonly length: number; readonly excerpt: string },
     indent: string,
   ): string {
-    const lines = DebugStringifier.#linesOf(partial.excerpt);
     const inner = this.#innerIndent(indent);
-    const rendered = this.#renderLines(lines, inner);
-    const onOwnLine = (this.#indent !== undefined) && (lines.length > 1);
-    const separator = onOwnLine ? `\n${inner}` : " ";
+    const rendered = this.#renderString(partial.excerpt, indent);
+    const separator = (this.#indent === undefined) ? " " : `\n${inner}`;
 
     return `${rendered} +${separator}... length: ${partial.length}`;
   }
@@ -1173,9 +1171,9 @@ export function toCompactDebugString(
  * length to give. The depth limit and replacer apply to both. A string holding
  * a line break renders one line of the string per line of the result, each
  * quoted, every line but the last followed by ` +`, and every line but the
- * first indented one level further than the value; the length of a string
- * carried in part follows on a line of its own when its excerpt renders on
- * more than one.
+ * first indented one level further than the value; and the length of a string
+ * carried in part follows its excerpt on a line of its own, indented the same
+ * way.
  *
  * @throws {Error} if given invalid `options`.
  */

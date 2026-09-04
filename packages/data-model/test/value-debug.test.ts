@@ -259,7 +259,7 @@ describe("value-debug", () => {
 
     it("renders a string's excerpt and length in the string's place", () => {
       expect(toIndentedDebugString({ s: "abcdefgh" }, { maxStringLength: 5 }))
-        .toBe('{\n  s: "abcde" + ... length: 8\n}');
+        .toBe('{\n  s: "abcde" +\n    ... length: 8\n}');
     });
 
     it("renders a string's first lines and length in the string's place", () => {
@@ -299,9 +299,9 @@ describe("value-debug", () => {
           .toBe('"abc\\n" +\n  "d" +\n  ... length: 7');
       });
 
-      it("renders a partial string's one-line excerpt and length on one line", () => {
+      it("renders a partial string's one-line excerpt with the length on the line after", () => {
         expect(toIndentedDebugString("abc\ndef", { maxStringLines: 1 }))
-          .toBe('"abc\\n" + ... length: 7');
+          .toBe('"abc\\n" +\n  ... length: 7');
       });
 
       it("renders a class instance's `toString()` form the same way", () => {
