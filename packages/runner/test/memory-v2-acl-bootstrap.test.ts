@@ -867,17 +867,54 @@ Deno.test("runtime.resolveSpaceName threads a supplied genesis ACL to the named 
       (await server.readDocument(space, `of:${space}`))?.value,
       supplied,
     );
-    // A serving-posture refusal is unchanged by the new option: owner is
-    // still required there (OW31), and the two cannot be combined.
-    await assertRejects(
-      () =>
-        runtime.resolveSpaceName("genesis-acl-both", {
-          owner: user.did(),
-          genesisAcl: supplied,
-        }),
-      Error,
-      "not both",
+  } finally {
+    await runtime.dispose();
+    await manager.close();
+    await server.close();
+  }
+});
+
+Deno.test("a serving runtime refuses a supplied genesis ACL explicitly (OW31 provisioning names the acting user, not a document)", async () => {
+  const service = await Identity.fromPassphrase("acl genesis serving service");
+  const alice = await Identity.fromPassphrase("acl genesis serving alice");
+  const server = createServer("runner-acl-genesis-serving");
+  const factory = new RecordingLoopbackSessionFactory(server);
+  const manager = TestStorageManager.overServer(
+    { as: service, servingHomeSpace: service.did() },
+    factory,
+  );
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: manager,
+    servingPosture: true,
+    experimental: { serverExecution: true },
+  });
+  try {
+    // Red-first witnessed: before the explicit refusal, a document alone
+    // hit OW31's owner-required refusal (whose message wrongly says the
+    // genesis "would name the SERVICE as owner"), and a document plus an
+    // owner hit registerSpaceIdentity's not-both refusal — a closed door
+    // by accident rather than by decision.
+    for (
+      const options of [
+        { genesisAcl: { [alice.did()]: "OWNER" as const } },
+        {
+          owner: alice.did(),
+          genesisAcl: { [alice.did()]: "OWNER" as const },
+        },
+      ]
+    ) {
+      await assertRejects(
+        () => runtime.resolveSpaceName("genesis-acl-serving", options),
+        Error,
+        "serving runtime does not accept genesisAcl",
+      );
+    }
+    assertEquals(
+      runtime.resolveSpaceNameSync("genesis-acl-serving"),
+      undefined,
     );
+    assertEquals(factory.principals, [], "no session was ever opened");
   } finally {
     await runtime.dispose();
     await manager.close();

@@ -1138,18 +1138,18 @@ export class StorageManager implements IStorageManager {
    * session (which signs as the SPACE identity, an implicit owner)
    * never does either.
    */
+  #servingActingAs(): { actingAs?: "space-owner" } {
+    return this.#servingHomeSpace !== undefined
+      ? { actingAs: "space-owner" }
+      : {};
+  }
+
   /** The fallback genesis document for a fresh non-home space no caller
    *  supplied one for: the registered owner (else the signer) as OWNER,
    *  plus the rollout default grants. */
   #defaultGenesisAcl(space: MemorySpace, signer: Signer): ACL {
     const genesisOwner = this.#spaceGenesisOwners.get(space) ?? signer.did();
     return { [genesisOwner]: "OWNER", ...DEFAULT_GENESIS_GRANTS };
-  }
-
-  #servingActingAs(): { actingAs?: "space-owner" } {
-    return this.#servingHomeSpace !== undefined
-      ? { actingAs: "space-owner" }
-      : {};
   }
 
   /** The serving manager's HOME space (Options.servingHomeSpace) —

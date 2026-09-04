@@ -3346,7 +3346,12 @@ export class Runtime {
    * world-writable default is ever written), validated by the memory
    * server's genesis admission. It is inert on a space that already
    * exists, and is refused together with `owner` (two descriptions of one
-   * document); see `IStorageManager.registerSpaceIdentity`.
+   * document); see `IStorageManager.registerSpaceIdentity`. A SERVING
+   * runtime refuses it outright: served provisioning names the run's
+   * acting user OWNER through the OW31 owner path, and a document that
+   * bypassed that path could name any principal — including the service —
+   * on a space the acting user asked for. A creator that wants a sealed
+   * space mints it from its own (client) runtime.
    */
   async resolveSpaceName(
     name: string,
@@ -3354,6 +3359,14 @@ export class Runtime {
   ): Promise<MemorySpace> {
     const cached = this.resolveSpaceNameSync(name);
     if (cached !== undefined) return cached;
+    if (this.servingPosture && options?.genesisAcl !== undefined) {
+      throw new Error(
+        `space-name resolution for "${name}" on a serving runtime does not ` +
+          "accept genesisAcl: served provisioning names the run's acting " +
+          "identity OWNER through the owner path (OW31, RULED 2026-08-18), " +
+          "and a caller-supplied document would bypass it",
+      );
+    }
     if (this.servingPosture && options?.owner === undefined) {
       throw new Error(
         `space-name resolution for "${name}" on a serving runtime requires ` +
