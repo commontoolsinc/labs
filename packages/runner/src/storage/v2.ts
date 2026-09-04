@@ -1755,15 +1755,14 @@ export class StorageManager implements IStorageManager {
     };
   }
 
-  /** Log a sync failure that would otherwise resolve silently, once per
+  /**
+   * Logs a sync failure that would otherwise resolve silently, once per
    * distinct (space, error) pair. The error name and message are the wire
-   * server's own words — for an ACL denial that includes the principal and
+   * server's own words: for an ACL denial that includes the principal and
    * space (`Principal <did> lacks READ on space <did>`), which is exactly
-   * what a caller staring at an unexplained `undefined` needs. *
-   * TypeScript-private rather than a `#` name:
-   * `test/array-ref-defs-propagation.test.ts` drives this member directly.
+   * what a caller staring at an unexplained `undefined` needs.
    */
-  private logSyncLoadFailure(
+  #logSyncLoadFailure(
     space: MemorySpace,
     id: URI,
     failure: unknown,
@@ -1914,7 +1913,7 @@ export class StorageManager implements IStorageManager {
       // into the same silent undefined. Surface the failure; the pending-load
       // ledger below still carries it to scheduler waiters.
       if (loadFailure !== undefined) {
-        this.logSyncLoadFailure(space, id, loadFailure);
+        this.#logSyncLoadFailure(space, id, loadFailure);
       }
       return cell;
     } catch (error) {
@@ -1959,7 +1958,7 @@ export class StorageManager implements IStorageManager {
       );
       loadFailure = result.error;
       if (loadFailure !== undefined) {
-        this.logSyncLoadFailure(address.space, address.id, loadFailure);
+        this.#logSyncLoadFailure(address.space, address.id, loadFailure);
         this.retractDocPullKick(address.space, address.id, scope, identity);
       }
     } catch (error) {
@@ -2012,7 +2011,7 @@ export class StorageManager implements IStorageManager {
         // Same silent-collapse hazard as syncCell: a link-target pull that
         // resolves while carrying an error reads as an absent target.
         if (result.error !== undefined) {
-          this.logSyncLoadFailure(address.space, address.id, result.error);
+          this.#logSyncLoadFailure(address.space, address.id, result.error);
         }
         releaseLoad(result.error);
         return result;

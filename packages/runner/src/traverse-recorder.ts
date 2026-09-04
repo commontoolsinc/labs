@@ -95,11 +95,7 @@ const DEFAULT_MAX_INVOCATIONS = 20_000;
 export class TraverseCaptureRecorder {
   #docs = new Map<string, FabricValue>();
 
-  /**
-   * TypeScript-private rather than a `#` name:
-   * `test/traverse-replay/profile.ts` drives this member directly.
-   */
-  private invocations: TraverseFixtureInvocation[] = [];
+  #invocations: TraverseFixtureInvocation[] = [];
 
   #selectors: SchemaPathSelector[] = [];
   #selectorIndex = new Map<string, number>();
@@ -110,8 +106,12 @@ export class TraverseCaptureRecorder {
   #memoIds = new WeakMap<object, number>();
   #nextMemoId = 0;
   #capHit = false;
+  #maxInvocations: number;
 
-  constructor(private maxInvocations = DEFAULT_MAX_INVOCATIONS) {}
+  /** Constructs an instance that records at most `maxInvocations`. */
+  constructor(maxInvocations = DEFAULT_MAX_INVOCATIONS) {
+    this.#maxInvocations = maxInvocations;
+  }
 
   #idFor(map: WeakMap<object, number>, obj: object, next: () => number) {
     let id = map.get(obj);
@@ -159,18 +159,18 @@ export class TraverseCaptureRecorder {
     context: { includeMeta: boolean },
     memo: object | undefined,
   ): void {
-    if (this.invocations.length >= this.maxInvocations) {
+    if (this.#invocations.length >= this.#maxInvocations) {
       if (!this.#capHit) {
         this.#capHit = true;
         logger.warn("capture", () => [
-          `invocation cap (${this.maxInvocations}) hit; later traversals ` +
+          `invocation cap (${this.#maxInvocations}) hit; later traversals ` +
           "are not recorded (docs still are)",
         ]);
       }
       return;
     }
     const { space, id, type, path, scope } = doc.address;
-    this.invocations.push({
+    this.#invocations.push({
       address: {
         space,
         id,
@@ -196,11 +196,8 @@ export class TraverseCaptureRecorder {
    * Capture the full doc behind `address` (value at path `[]`) once per doc.
    * Reads through the *unwrapped* tx with a scheduling-ignored meta so the
    * extra read does not perturb reactivity logs.
-   *
-   * TypeScript-private rather than a `#` name:
-   * `test/traverse-replay/profile.ts` drives this member directly.
    */
-  private captureDoc(
+  #captureDoc(
     tx: IExtendedStorageTransaction,
     address: IMemorySpaceAddress,
   ): void {
@@ -238,7 +235,7 @@ export class TraverseCaptureRecorder {
       get(target, prop) {
         if (prop === "read" || prop === "readOrThrow") {
           return (address: IMemorySpaceAddress, options?: IReadOptions) => {
-            recorder.captureDoc(target, address);
+            recorder.#captureDoc(target, address);
             // deno-lint-ignore no-explicit-any
             return (target as any)[prop](address, options);
           };
@@ -251,7 +248,7 @@ export class TraverseCaptureRecorder {
           ) => {
             const firstPath = paths[0];
             if (firstPath !== undefined) {
-              recorder.captureDoc(target, {
+              recorder.#captureDoc(target, {
                 ...address,
                 path: [...firstPath],
               });
@@ -279,7 +276,7 @@ export class TraverseCaptureRecorder {
       docs: Object.fromEntries(
         [...this.#docs.entries()].sort(([a], [b]) => a < b ? -1 : 1),
       ),
-      invocations: this.invocations,
+      invocations: this.#invocations,
     };
   }
 
@@ -292,7 +289,7 @@ export class TraverseCaptureRecorder {
     Deno.writeTextFileSync(path, JSON.stringify(fixture));
     logger.info("capture", () => [
       `wrote ${path}: ${this.#docs.size} docs, ` +
-      `${this.invocations.length} invocations, ` +
+      `${this.#invocations.length} invocations, ` +
       `${this.#selectors.length} selectors, ${this.#links.length} links`,
     ]);
   }
