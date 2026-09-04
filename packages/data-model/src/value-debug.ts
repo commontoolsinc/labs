@@ -68,6 +68,12 @@ const DEFAULT_MAX_STRING_LINES = 5;
 const LINE_BREAK_REGEX = /\r\n|[\r\n]/g;
 
 /**
+ * Matches the empty position just past each line break, so that splitting a
+ * string on it yields the string's lines with their line breaks kept.
+ */
+const AFTER_LINE_BREAK_REGEX = /(?<=\r\n|\r(?!\n)|\n)/;
+
+/**
  * What a `FabricPrimitive`'s codec hands back to be rendered: the
  * realm-crossing encoding of a terminal codec, or the expansion of a
  * nonterminal one into other `FabricValue`s.
@@ -685,7 +691,7 @@ class DebugStringifier {
       }
 
       case "string": {
-        return JSON.stringify(value);
+        return this.#renderString(value, indent);
       }
 
       case "symbol": {
@@ -783,8 +789,7 @@ class DebugStringifier {
         // render as it is.
         const partial = DebugStringifier.#partialStringOf(payload);
         if (partial !== undefined) {
-          const excerpt = this.#renderSubvalue(partial.excerpt, indent);
-          return `${excerpt} + ... length: ${partial.length}`;
+          return this.#renderPartialString(partial, indent);
         }
         // deno-coverage-ignore-start
         // The conversion is the form's only producer and shapes it no other
@@ -803,6 +808,51 @@ class DebugStringifier {
   /** Returns the indentation for the contents of a container indented by `indent`. */
   #innerIndent(indent: string): string {
     return `${indent}${this.#indent ?? ""}`;
+  }
+
+  /**
+   * Renders the given lines of a string, as `#linesOf()` splits them. When
+   * the rendering is multi-line and there is more than one, each renders
+   * quoted on a line of its own, every line but the last followed by ` +` and
+   * every line but the first indented by `inner`. Otherwise they render as
+   * the one quoted string they came from.
+   */
+  #renderLines(lines: readonly string[], inner: string): string {
+    if ((this.#indent === undefined) || (lines.length === 1)) {
+      return JSON.stringify(lines.join(""));
+    }
+
+    return lines.map((line) => JSON.stringify(line)).join(` +\n${inner}`);
+  }
+
+  /**
+   * Renders the string-length form: the excerpt as `#renderString()` renders
+   * it, followed by the length of the whole. The length follows on the same
+   * line, or when the rendering is multi-line, on a line of its own, indented
+   * by `inner`.
+   */
+  #renderPartialString(
+    partial: { readonly length: number; readonly excerpt: string },
+    indent: string,
+  ): string {
+    const inner = this.#innerIndent(indent);
+    const rendered = this.#renderString(partial.excerpt, indent);
+    const separator = (this.#indent === undefined) ? " " : `\n${inner}`;
+
+    return `${rendered} +${separator}... length: ${partial.length}`;
+  }
+
+  /**
+   * Renders a string. When the rendering is multi-line and the string holds a
+   * line break, each of its lines renders on a line of its own, the first in
+   * place and the rest indented by the inner indentation of `indent`, joined
+   * by ` +`. Otherwise the string renders whole, quoted.
+   */
+  #renderString(value: string, indent: string): string {
+    return this.#renderLines(
+      DebugStringifier.#linesOf(value),
+      this.#innerIndent(indent),
+    );
   }
 
   //
@@ -859,6 +909,21 @@ class DebugStringifier {
 
     const { length } = value as FabricPlainObject;
     return (typeof length === "number") ? length : undefined;
+  }
+
+  /**
+   * Returns the lines of the given string, each with its line break kept. A
+   * string ending in a line break has no empty line after it, and the empty
+   * string is one empty line.
+   */
+  static #linesOf(value: string): string[] {
+    const lines = value.split(AFTER_LINE_BREAK_REGEX);
+
+    if ((lines.length > 1) && (lines.at(-1) === "")) {
+      lines.pop();
+    }
+
+    return lines;
   }
 
   /**
@@ -1103,7 +1168,12 @@ export function toCompactDebugString(
 /**
  * Like `toCompactDebugString()`, except that the result is indented by two
  * spaces per nesting level, and is never truncated for length, there being no
- * length to give. The depth limit and replacer apply to both.
+ * length to give. The depth limit and replacer apply to both. A string holding
+ * a line break renders one line of the string per line of the result, each
+ * quoted, every line but the last followed by ` +`, and every line but the
+ * first indented one level further than the value; and the length of a string
+ * carried in part follows its excerpt on a line of its own, indented the same
+ * way.
  *
  * @throws {Error} if given invalid `options`.
  */

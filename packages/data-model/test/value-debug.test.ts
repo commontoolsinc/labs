@@ -65,6 +65,10 @@ describe("value-debug", () => {
       }
     });
 
+    it("renders a string holding a line break on one line, the break escaped", () => {
+      expect(toCompactDebugString({ s: "a\nb" })).toBe('{s:"a\\nb"}');
+    });
+
     describe("with `maxLength`", () => {
       it("renders the full text given a `maxLength` of `Infinity`", () => {
         const item = { text: "x".repeat(200) };
@@ -255,12 +259,60 @@ describe("value-debug", () => {
 
     it("renders a string's excerpt and length in the string's place", () => {
       expect(toIndentedDebugString({ s: "abcdefgh" }, { maxStringLength: 5 }))
-        .toBe('{\n  s: "abcde" + ... length: 8\n}');
+        .toBe('{\n  s: "abcde" +\n    ... length: 8\n}');
     });
 
     it("renders a string's first lines and length in the string's place", () => {
       expect(toIndentedDebugString({ s: "a\nb\nc" }, { maxStringLines: 2 }))
-        .toBe('{\n  s: "a\\nb\\n" + ... length: 5\n}');
+        .toBe('{\n  s: "a\\n" +\n    "b\\n" +\n    ... length: 5\n}');
+    });
+
+    describe("with a string holding a line break", () => {
+      it("renders each line quoted on a line of its own, joined by ` +`", () => {
+        expect(toIndentedDebugString("a\nb\nc"))
+          .toBe('"a\\n" +\n  "b\\n" +\n  "c"');
+      });
+
+      it("renders the lines after the first one level further in than the value", () => {
+        expect(toIndentedDebugString({ s: "a\nb" }))
+          .toBe('{\n  s: "a\\n" +\n    "b"\n}');
+        expect(toIndentedDebugString({ o: { s: "a\nb" } }))
+          .toBe('{\n  o: {\n    s: "a\\n" +\n      "b"\n  }\n}');
+        expect(toIndentedDebugString(["a\nb"]))
+          .toBe('[\n  "a\\n" +\n    "b"\n]');
+      });
+
+      it("renders a carriage return, with or without a newline, as a line break", () => {
+        expect(toIndentedDebugString("a\r\nb\rc"))
+          .toBe('"a\\r\\n" +\n  "b\\r" +\n  "c"');
+      });
+
+      it("renders a string ending in a line break with no empty line after it", () => {
+        expect(toIndentedDebugString("a\nb\n")).toBe('"a\\n" +\n  "b\\n"');
+        expect(toIndentedDebugString("a\n")).toBe('"a\\n"');
+      });
+
+      it("renders a partial string's length on a line of its own", () => {
+        expect(toIndentedDebugString("a\nb\nc", { maxStringLines: 2 }))
+          .toBe('"a\\n" +\n  "b\\n" +\n  ... length: 5');
+        expect(toIndentedDebugString("abc\ndef", { maxStringLength: 5 }))
+          .toBe('"abc\\n" +\n  "d" +\n  ... length: 7');
+      });
+
+      it("renders a partial string's one-line excerpt with the length on the line after", () => {
+        expect(toIndentedDebugString("abc\ndef", { maxStringLines: 1 }))
+          .toBe('"abc\\n" +\n  ... length: 7');
+      });
+
+      it("renders a class instance's `toString()` form the same way", () => {
+        class Foo {
+          toString() {
+            return "a\nb";
+          }
+        }
+        expect(toIndentedDebugString({ foo: new Foo() }))
+          .toBe('{\n  foo: /Foo("a\\n" +\n    "b")\n}');
+      });
     });
 
     it("renders the replacement in place of the original value", () => {

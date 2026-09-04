@@ -10,20 +10,41 @@
   "reads like a bigint": "42n",
   "reads like a symbol": "@k",
   "lone surrogate": "\ud800",
+  "in an array": [
+    "one line",
+    "x".repeat(250),
+    "one\ntwo\nthree",
+    "one\ntwo\nthree\nfour\nfive\nsix\nseven",
+  ],
 }
 
 {
   empty: "",
   plain: "hello",
   "with quotes": "say \"hi\"",
-  "with newline": "a\nb",
+  "with newline": "a\n" +
+    "b",
   "with backslash": "a\\b",
   "non-ASCII": "héllo ☃",
   "control character": "\u0001",
   "reads like a token": "undefined",
   "reads like a bigint": "42n",
   "reads like a symbol": "@k",
-  "lone surrogate": "\ud800"
+  "lone surrogate": "\ud800",
+  "in an array": [
+    "one line",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" +
+      ... length: 250,
+    "one\n" +
+      "two\n" +
+      "three",
+    "one\n" +
+      "two\n" +
+      "three\n" +
+      "four\n" +
+      "five\n" +
+      ... length: 33
+  ]
 }
 
 {empty:"",plain:"hello","with quotes":"say \"hi\"","with newline":"a\nb","with backslash":"a\\b",...
