@@ -1019,7 +1019,7 @@ Deno.test("a sealer that loses the genesis race to a different document is told,
     // Red-first witnessed: the swallow let Alice's open SUCCEED — the
     // winner's wildcard granted her access — with her document discarded
     // and nothing reported.
-    await assertRejects(() => aliceOpen, Error, "owned by");
+    await assertRejects(() => aliceOpen, Error, "different ACL");
     // The winner's document stands; Alice's was never applied.
     assertEquals((await server.readDocument(space, aclId))?.value, {
       [bob.did()]: "OWNER",
@@ -1329,7 +1329,7 @@ Deno.test("a sealer that loses the race in the RECHECK window (before its commit
     // Red-first witnessed: the recheck found the ACL created, skipped the
     // bootstrap arm with no conflict to catch, and Alice's open SUCCEEDED
     // under Bob's wildcard.
-    await assertRejects(() => aliceOpen, Error, "owned by");
+    await assertRejects(() => aliceOpen, Error, "different ACL");
     assertEquals((await server.readDocument(space, `of:${space}`))?.value, {
       [bob.did()]: "OWNER",
       "*": "WRITE",
@@ -1564,5 +1564,95 @@ Deno.test("a demanded document on a retracted ACL is refused naming the tombston
     }
   } finally {
     await Deno.remove(directory, { recursive: true });
+  }
+});
+
+Deno.test("a sealer that loses the race to its OWN other runtime's default is refused: same owner, but the wildcard stands", async () => {
+  const alice = await Identity.fromPassphrase("acl genesis same-owner alice");
+  const member = await Identity.fromPassphrase("acl genesis same-owner member");
+  const spaceIdentity = await Identity.fromPassphrase(
+    "acl genesis same-owner space",
+  );
+  const space = spaceIdentity.did();
+  const server = createServer("runner-acl-genesis-same-owner");
+  const aliceGate = gate();
+  const sealerFactory = new GatedGenesisSessionFactory(
+    server,
+    space,
+    aliceGate.opened,
+  );
+  const sealer = TestStorageManager.overServer({ as: alice }, sealerFactory);
+  sealer.registerSpaceIdentity(spaceIdentity, {
+    genesisAcl: { [alice.did()]: "OWNER", [member.did()]: "WRITE" },
+  });
+  // Alice's OTHER runtime — a pattern's inSpace(name), no document — races
+  // with the rollout default { alice: OWNER, "*": WRITE }.
+  const other = TestStorageManager.overServer(
+    { as: alice, spaceIdentity },
+    new RecordingLoopbackSessionFactory(server),
+  );
+  try {
+    const sealerOpen = sealer.ensureSpaceInitialized(space);
+    await sealerFactory.held;
+    await other.ensureSpaceInitialized(space);
+    aliceGate.open();
+    // Red-first witnessed: the owner sets matched, so the sealer was
+    // ADMITTED into a world-writable space with nothing reported.
+    await assertRejects(() => sealerOpen, Error, "different ACL");
+    assertEquals((await server.readDocument(space, `of:${space}`))?.value, {
+      [alice.did()]: "OWNER",
+      "*": "WRITE",
+    });
+  } finally {
+    await sealer.close();
+    await other.close();
+    await server.close();
+  }
+});
+
+Deno.test("a wildcard OWNER counts as an owner: a space owned by everyone is not owned as the document says", async () => {
+  const daemon = await Identity.fromPassphrase("acl genesis wild-owner daemon");
+  const spaceIdentity = await Identity.fromPassphrase(
+    "acl genesis wild-owner space",
+  );
+  const space = spaceIdentity.did();
+  const aclId = `of:${space}` as URI;
+  const server = createServer("runner-acl-genesis-wild-owner");
+  // The server accepts a wildcard OWNER beside a concrete one at genesis.
+  const authority = await new RecordingLoopbackSessionFactory(server).create(
+    space,
+    spaceIdentity,
+  );
+  try {
+    await authority.session.transact({
+      localSeq: 1,
+      reads: { confirmed: [], pending: [] },
+      operations: [{
+        op: "set",
+        id: aclId,
+        value: { value: { "*": "OWNER", [space]: "OWNER" } },
+      }],
+    });
+  } finally {
+    await authority.client.close();
+  }
+  const manager = TestStorageManager.overServer(
+    { as: daemon },
+    new RecordingLoopbackSessionFactory(server),
+  );
+  manager.registerSpaceIdentity(spaceIdentity, {
+    genesisAcl: { [space]: "OWNER", [daemon.did()]: "WRITE" },
+  });
+  try {
+    // Red-first witnessed: the wildcard was dropped from the owner set, the
+    // sets matched, and the sealer was admitted to a space owned by everyone.
+    await assertRejects(
+      () => manager.ensureSpaceInitialized(space),
+      Error,
+      "owned by",
+    );
+  } finally {
+    await manager.close();
+    await server.close();
   }
 });

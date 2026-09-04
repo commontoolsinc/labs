@@ -4,7 +4,7 @@ import {
   hasDataUriScheme,
   valueFromDataUri,
 } from "@commonfabric/data-model/codec-data-uri";
-import { aclDocId } from "@commonfabric/memory/acl";
+import { aclDocId, sameAcl } from "@commonfabric/memory/acl";
 import type { ACL, Entity } from "@commonfabric/memory/interface";
 import {
   type AuthorizationError as IAuthorizationError,
@@ -624,21 +624,20 @@ const defaultGenesisAcl = (owner: string): ACL => ({
   ...DEFAULT_GENESIS_GRANTS,
 });
 
-/** The concrete OWNER principals of a stored ACL document (a non-object
- *  has none). */
+/** The OWNER principals of a stored ACL document, the wildcard included —
+ *  a space with `"*": "OWNER"` is owned by everyone, and a document that
+ *  did not say so is not what stands (a non-object has none). */
 const ownersOf = (document: unknown): string[] =>
   typeof document === "object" && document !== null
     ? Object.entries(document as Record<string, unknown>)
-      .filter(([principal, capability]) =>
-        principal !== "*" && capability === "OWNER"
-      )
+      .filter(([, capability]) => capability === "OWNER")
       .map(([principal]) => principal)
       .sort()
     : [];
 
 /** Whether a stored ACL document is owned exactly as `expected` says: the
- *  same concrete OWNER set, no more, no fewer. Grants below OWNER are the
- *  owner's to evolve and are not compared. */
+ *  same OWNER set, no more, no fewer. Grants below OWNER are the owner's to
+ *  evolve and are not compared. */
 const sameOwners = (stored: unknown, expected: ACL): boolean => {
   const actual = ownersOf(stored);
   const wanted = ownersOf(expected);
@@ -1166,8 +1165,12 @@ export class StorageManager implements IStorageManager {
    * afterwards, so a creator's restart survives its own grants; a space
    * populated before genesis, a retracted ACL, or a genesis another
    * initializer won under a different owner is refused rather than
-   * silently entered under someone else's ACL. It never reaches the
-   * home arm. A caller that will open the
+   * silently entered under someone else's ACL. A genesis race this
+   * attempt loses (the space was fresh when it looked) is held to the
+   * exact document: what stands was written moments ago, not evolved,
+   * and the likely winner — the same user's other runtime writing the
+   * wildcard default — is precisely what the seal refused. It never
+   * reaches the home arm. A caller that will open the
    * space itself must grant its own signer at least READ, or every open
    * after genesis is refused by the server. `owner` and `genesisAcl` are
    * two descriptions of one document, so supplying both in one
@@ -1513,10 +1516,18 @@ export class StorageManager implements IStorageManager {
       const demanded = !isHomeSpace && registered?.supplied === true
         ? registered.document
         : undefined;
+      // `reopen`: the space was not fresh when this attempt first looked —
+      // ownership must match, grants may have evolved. `race`: the space
+      // WAS fresh at this attempt's first inspection, so whatever stands
+      // was written moments ago by a concurrent initializer, not evolved;
+      // the exact document must stand. The likely race is one user's two
+      // runtimes — a sealer against a pattern's default — where the owner
+      // sets agree and the wildcard is exactly what the seal refused.
       const assertDemandedOwnershipStands = (
         snapshot:
           | { seq?: number; document?: { value?: unknown } | null }
           | undefined,
+        arm: "reopen" | "race",
       ): void => {
         if (demanded === undefined) return;
         const stored = snapshot?.document?.value ?? null;
@@ -1524,6 +1535,10 @@ export class StorageManager implements IStorageManager {
           ? (snapshot?.seq ?? 0) > 0
             ? "has a retracted ACL (a tombstone)"
             : "is populated with no ACL (the legacy-public case)"
+          : arm === "race"
+          ? sameAcl(stored, demanded)
+            ? undefined
+            : "was claimed concurrently with a different ACL"
           : sameOwners(stored, demanded)
           ? undefined
           : `is owned by ${ownersOf(stored).join(", ") || "nobody"}, not ${
@@ -1560,7 +1575,7 @@ export class StorageManager implements IStorageManager {
       const aclNeverCreated = aclSnapshot?.seq === 0 &&
         aclSnapshot.document === null;
       if (!aclNeverCreated || (!isHomeSpace && openedServerSeq !== 0)) {
-        assertDemandedOwnershipStands(aclSnapshot);
+        assertDemandedOwnershipStands(aclSnapshot, "reopen");
         return handOff(normal);
       }
 
@@ -1601,8 +1616,8 @@ export class StorageManager implements IStorageManager {
         ) {
           // Claimed (or populated) between the first inspection and this
           // recheck: the default path reopens as the user below; a
-          // demanded document's ownership must already be what stands.
-          assertDemandedOwnershipStands(snapshot);
+          // demanded document must already be exactly what stands.
+          assertDemandedOwnershipStands(snapshot, "race");
         } else {
           try {
             // The HOME arm is untouched — a home space is its own
@@ -1642,14 +1657,16 @@ export class StorageManager implements IStorageManager {
             }
             // Default path: reopening as the user below is the authoritative
             // outcome — it succeeds only if the winning ACL grants access.
-            // A demanded document: the winner must own the space as it
-            // says.
+            // A demanded document: the winner's must be exactly it.
             if (demanded !== undefined) {
               const after = await bootstrap.session.queryGraph({
                 roots: [{ id: aclId, selector: { path: [], schema: false } }],
               });
               assertCurrentRoute();
-              assertDemandedOwnershipStands(aclSnapshotOf(after.entities));
+              assertDemandedOwnershipStands(
+                aclSnapshotOf(after.entities),
+                "race",
+              );
             }
           }
         }
