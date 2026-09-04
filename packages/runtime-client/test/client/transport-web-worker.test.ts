@@ -194,8 +194,9 @@ describe("WebWorkerRuntimeTransport", () => {
       // `connect()` awaits `ready()`, so a pre-ready failure reported into an
       // emitter nobody is listening to yet would leave that promise pending
       // for good -- and a caller waiting on a promise that will not settle has
-      // no way back. `#handleError()` puts a pre-ready worker error on the
-      // promise for the same reason; this is the decode's half of that.
+      // no way back. `WebWorkerRuntimeTransport.#handleError()` puts a
+      // pre-ready worker error on the promise for the same reason; this is the
+      // decode's half of that.
       const transport = makeTransport();
       const emitted: unknown[] = [];
       transport.on("message", (m) => emitted.push(m));
