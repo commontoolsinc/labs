@@ -334,9 +334,9 @@ export class XRootView extends BaseView implements ShellApp {
    * a test drives directly.
    */
   get accessForTestingOnly(): {
-    onBeforeUnload: (event: BeforeUnloadEvent) => void;
+    readonly onBeforeUnload: (event: BeforeUnloadEvent) => void;
     rt: Task<[AppState | undefined], RuntimeInternals | undefined>;
-    runtimeGeneration: number;
+    readonly runtimeGeneration: number;
   } {
     // deno-lint-ignore no-this-alias
     const outerThis = this;

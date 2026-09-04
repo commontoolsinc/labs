@@ -590,7 +590,7 @@ export class XHeaderView extends BaseView {
    * click handlers, which a test drives directly.
    */
   get accessForTestingOnly(): {
-    isFavoriteLoading: boolean;
+    readonly isFavoriteLoading: boolean;
     ensureFavoritesSubscription(): void;
     handleLogoClick(e: Event): void;
     handleToggleFavorite(e: Event): Promise<void>;
