@@ -49,8 +49,9 @@ export class SpaceManager {
   /**
    * The state and the steps of this instance that a test drives directly:
    * the scheduling tables, the running flag, the worker controller, and the
-   * loop and the two steps it takes. A field is read and written through
-   * this object as through the instance itself.
+   * loop and the two steps it takes. A field this class reassigns is read and
+   * written through this object as through the instance itself; the two
+   * tables it never reassigns are handed over as they are.
    *
    * The name is the documentation. Nothing here is part of what this class
    * promises, and code that reaches through it is written against internals
@@ -76,12 +77,8 @@ export class SpaceManager {
       set activePiece(value) {
         outerThis.#activePiece = value;
       },
-      get enabledPieces() {
-        return outerThis.#enabledPieces;
-      },
-      get failureTracking() {
-        return outerThis.#failureTracking;
-      },
+      enabledPieces: this.#enabledPieces,
+      failureTracking: this.#failureTracking,
       get isRunning() {
         return outerThis.#isRunning;
       },
