@@ -345,18 +345,24 @@ therefore carries its own guard:
   meta field and all three are refused: an address naming the field, a
   document-root envelope carrying it as a key, and a document-root write that
   leaves it out, which drops it, since a root write replaces the envelope.
-  The third is decided by reading each meta member of the stored document,
-  never its root: a root read would name a logical path covering every entry
-  in the document's label map, and a guard has no business widening what the
-  transaction around it counts as consumed. Those reads carry no commit
-  precondition, because a precondition would turn a whole-document write into
-  a read-modify-write, and the blind root writes the runtime makes would lose
-  the race against any advance of the document they replace. What that leaves
-  open is an erasure racing the guard, never a forgery: the two shapes that
-  name a field are refused from the write itself, with no read at all. The
-  refusal is also the first of these guards to run, ahead of the ones keyed
-  by target id, so which document a write names cannot decide whether it is
-  asked for an authorization. Meta fields stay readable.
+  The third is decided by one read of the envelope the write replaces, at the
+  document root. What the guard looks at there is which meta keys that envelope
+  has rather than what any of them holds, so the read is `nonRecursive`, and the
+  flow join keys on that: a recursive read consumes every label-map entry at or
+  below the path it names, a `nonRecursive` one consumes only the entry at that
+  path, so this read consumes the document's root entry and nothing else.
+  Reading a meta member instead would consume the user data an entry of the same
+  name covers, because canonicalization strips a leading `value` and a document
+  with a user field named `slug` labels it at the logical path the raw
+  `["slug"]` member reads. The read carries no commit precondition, because a
+  precondition would turn a whole-document write into a read-modify-write, and
+  the blind root writes the runtime makes would lose the race against any
+  advance of the document they replace. What that leaves open is an erasure
+  racing the guard, never a forgery: the two shapes that name a field are
+  refused from the write itself, with no read at all. The refusal is also the
+  first of these guards to run, ahead of the ones keyed by target id, so which
+  document a write names cannot decide whether it is asked for an authorization.
+  Meta fields stay readable.
 - A write addressed at a document's `["cfc"]` label map from outside the
   runtime's privileged persistence scope is recorded, and the commit boundary
   turns each record into a fail-closed reason (audit S18).

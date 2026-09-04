@@ -110,14 +110,12 @@ export function metaFieldsWritten(
 }
 
 /**
- * The meta fields a stored document carries, asked one member at a time.
+ * The meta fields a stored document carries.
  *
  * A write at the document root replaces the envelope, so the fields it does
  * not carry are the fields it drops, and telling which those are means
- * reading what the document holds. `readField` reads one member surface,
- * which is the question the guard asked; a read of the document root asks
- * after the whole document, and a guard has no business widening what the
- * transaction around it counts as consumed.
+ * reading what the document holds. `envelope` is that document root, which
+ * one read answers for every field at once.
  *
  * A field is carried when its value is defined. The storage layer can hold a
  * field that is present and `undefined` — that is what `IWriteOptions.delete`
@@ -125,13 +123,15 @@ export function metaFieldsWritten(
  * read half does too: `getMetaRaw` returns `undefined` for both, and no
  * reader addresses a meta path any other way. A root write that drops such a
  * field redirects no piece, which is what the guard is here to stop.
+ *
+ * An envelope that is not a record carries nothing, which is what a document
+ * the transaction does not hold reads as.
  */
-export function storedMetaFields(
-  readField: (field: MetaField) => unknown,
-): readonly MetaField[] {
+export function storedMetaFields(envelope: unknown): readonly MetaField[] {
+  if (!isObjectNotArray(envelope)) return NO_META_FIELDS;
   let carried: MetaField[] | undefined;
   for (const field of META_FIELDS) {
-    if (readField(field) === undefined) continue;
+    if (envelope[field] === undefined) continue;
     (carried ??= []).push(field);
   }
   return carried ?? NO_META_FIELDS;
