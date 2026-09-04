@@ -3,11 +3,10 @@
  * density, a name never reused, a name kept whatever happens to its item, the
  * backfill and its idempotence, index rows that are the members and the
  * default an unnamed member's `shortName` reads as, the item reading its own
- * name out of the board's
- * table, the declaration, the bound on what a read of the namespace expands,
- * and the rejections. Every rejection here is a thrown verb, so the runtime
- * errors are required, and the count is exact: a guard quietly reverting to
- * a silent return fails the suite.
+ * name out of the board's table, the declaration, the bound on what a read of
+ * the namespace expands, and the rejections. Every rejection here is a thrown
+ * verb, so the runtime errors are required, and the count is exact: a guard
+ * quietly reverting to a silent return fails the suite.
  */
 
 import {
@@ -193,9 +192,11 @@ export default pattern(() => {
 
   // The backfill, on a board that held items before it numbered anything.
   // The items are pushed straight into the list, past `addItem`, which is
-  // how a board from before the namespace holds its members. These two are
-  // wired to the board's table, as the rewire that accompanies a backfill
-  // leaves an older member, so a name the backfill writes reaches their rows.
+  // how a board from before the namespace holds its members. These two carry
+  // the board's table because a name reaches a row only through the member's
+  // own wiring: they stand for members an operator has link-bound, the step
+  // the README pairs with a backfill, done here at construction because a
+  // pattern cannot reach a member's argument.
   const legacyItems = new Writable<ItemDemand[] | Default<[]>>([]);
   const legacyNames = new Writable<NamesMap>({});
   const legacy = Board({ items: legacyItems, names: legacyNames });
@@ -259,8 +260,9 @@ export default pattern(() => {
   const action_create_a_named_item = action(() => {
     legacy.addItem.send({ title: "Named by create", agentName: "Sol" });
   });
-  // Wired to no table: its row keeps reading the default however the map
-  // names it, and the table is where its name is.
+  // And one that stands for a member the link-bind never reached. Its row
+  // keeps reading the default however the map names it — the cost the README
+  // states — while the name itself is real, and `namesTable` is where it is.
   const action_file_a_late_unnamed = action(() => {
     legacyItems.push(Item({ title: "Older three", createdAt: 3 }));
   });

@@ -22,11 +22,14 @@ is the member's address and `index[].@` survives the graft onto Topics; and a
 member's name reaches its row through the member's own `shortName`, coalesced
 with a default the way Topics' `commentCount` is. The rehearsal over the
 unmodified Topic, which publishes no `shortName`, proves naming through the
-names table and the reverse lookup, and never depended on the row shape.
+names table and the reverse lookup. What it claims is board-side and the
+ruling left that untouched; how it claimed it did depend on the row shape, so
+its assertions were rewritten to read a name out of the table rather than out
+of an index row.
 
 ## Why this could not be done compatibly
 
-The compatibility proof reported two findings against both baselines, and
+The compatibility proof reported two issues against both baselines, and
 neither had a pattern-side fix.
 
 `result.index[].member: existing result field was removed`. A row that is the

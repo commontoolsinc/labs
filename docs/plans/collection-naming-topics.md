@@ -71,7 +71,13 @@ ruled. A later reversal is a decision recorded here, not a discovery.
     rows are the members themselves, as Topics' are, and a name reaches a row
     through the member's `shortName` with a default; the rehearsal over the
     unmodified Topic proves naming through the names table and the reverse
-    lookup.
+    lookup. A name therefore reaches a row only through the member's own
+    `boardNames`, which `addItem` wires and no later write can supply: a
+    parent holds its member's result, while `boardNames` is the member's
+    argument. So a backfill on a board whose members were filed past the
+    create must be paired with a one-time link-bind of `namesTable` onto each
+    of them, the same operator step Topics states for `mentionable`. S6
+    carries that step into the Topics graft.
 
 ## Gates and review
 

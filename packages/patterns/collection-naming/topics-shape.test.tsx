@@ -48,8 +48,10 @@ interface AddShapeEvent {
   agentName: string;
 }
 
-/** What the rehearsal's `addTopic` returns: the Topics board's own result
- * row, and the name the create allocated beside it. */
+/**
+ * What the rehearsal's `addTopic` returns: the Topics board's own result row,
+ * and the name the create allocated beside it.
+ */
 interface AddShapeResult {
   topic: TopicIndexRow;
   name: string;
@@ -58,6 +60,15 @@ interface AddShapeResult {
 interface ShapeOutput {
   [NAME]: string;
   topics: TopicDemand[];
+
+  /**
+   * The survey surface, declared exactly as the Topics board declares it. The
+   * width between this and `topics` is the property under test: a demand of
+   * `TopicDemand` carries a topic's body and mentions, the row schema carries
+   * neither, and republishing the one array under the narrower schema is what
+   * makes a survey cheap.
+   */
+  index: TopicIndexRow[] | Default<[]>;
   // deno-lint-ignore ban-types
   names: Default<NamesMap, {}>;
   namesTable: NamesTableRow[] | Default<[]>;
@@ -106,6 +117,10 @@ const ShapeBoard = pattern<ShapeInput, ShapeOutput>(({ topics, names }) => {
   return {
     [NAME]: `Topics (${topicCount})`,
     topics,
+    // The topics themselves, declared through the index's narrow row schema:
+    // a row's address is the topic's address, so a survey and a follow-up read
+    // name the same document.
+    index: topics,
     names,
     namesTable: table,
     naming: SEQUENCE_NAMING,
@@ -197,6 +212,23 @@ export default pattern(() => {
       !table.includes('"comments"') &&
       !table.includes("vnode");
   });
+  // The narrowing itself, which only a real Topic can show: the same array is
+  // published twice, and the schema each is declared through is what a reader
+  // gets. The demand carries the living document and the mention list; the row
+  // schema carries neither, so a survey of a board of real topics reads no
+  // topic's prose, thread, or rendered view.
+  const assert_index_narrows_the_demand = assert(() => {
+    const survey = JSON.stringify(board.index);
+    const demanded = JSON.stringify(board.topics);
+    return (board.index ?? []).length === 2 &&
+      board.index?.[0]?.title === "First topic" &&
+      survey.includes('"createdAt"') &&
+      !survey.includes('"body"') &&
+      !survey.includes('"comments"') &&
+      !survey.includes("vnode") &&
+      demanded.includes("The living document.") &&
+      !survey.includes("The living document.");
+  });
 
   // The backfill, on a board whose topics were filed before it numbered
   // anything: pushed straight into the list, the way an existing board
@@ -277,6 +309,7 @@ export default pattern(() => {
       { assertion: assert_allocated_on_create },
       { assertion: assert_table_names_each_topic },
       { assertion: assert_reads_expand_no_topic },
+      { assertion: assert_index_narrows_the_demand },
       { action: action_file_unnamed_topics },
       { assertion: assert_unnamed_topics_have_no_names },
       { action: action_backfill },

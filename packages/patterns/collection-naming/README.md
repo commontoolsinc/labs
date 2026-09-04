@@ -76,7 +76,13 @@ in the plan run on it. Its verbs:
   that may not have run when the call returns, and a caller must not have to
   wait for it to learn the name it just allocated.
 - `backfillNames({ agentName })` names every unnamed member in filing order and
-  returns the names it wrote. Idempotent.
+  returns the names it wrote. Idempotent. It writes the namespace and nothing
+  else, and on a board whose members were filed past `addItem` that is not the
+  whole job: a name reaches an index row through the member's own `boardNames`
+  wiring, so the backfill has to be paired with a one-time link-bind of the
+  board's `namesTable` onto each member it named. Until that bind the member is
+  named — `names` and `namesTable` carry it, and `nameOf` returns it — and its
+  row still reads the empty string.
 
 It publishes `index` — the items themselves, declared through a row schema of
 `title`, `createdAt`, and `shortName`, so a row IS its item and a row's own
@@ -84,6 +90,12 @@ address is the item's address; `shortName` defaults to the empty string for a
 member whose lookup has produced no value, so a board holding older members
 still reads whole — and `names`, `namesTable`, `naming`, `itemCount`, and a card
 list showing each item with its name.
+
+An empty `shortName` covers two cases a survey cannot tell apart: a member
+nothing has named, and a member the board has named whose `boardNames` was never
+wired. A caller that needs to know which reads the namespace, where the answer
+is: `nameOf` over `namesTable` returns the name for either, and returns
+`undefined` only for the first.
 
 The item is the member: a title, a body, a filing time, and the board's names
 table wired in at creation as `boardNames`. It reads its own row out of that
