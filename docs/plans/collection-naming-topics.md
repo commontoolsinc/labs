@@ -16,7 +16,7 @@ This block is LIVE: the change that moves a stage updates it here.
 | S1 — the library and the exemplar board own a member namespace | on main (#6882) |
 | S1b — index rows are the members | on main (#6886) |
 | S2 — `top/42` resolves at the CLI | on main (#6890) |
-| S2b — assignment refuses by default | built, in review (#6898) |
+| S2b — assignment refuses by default | on main (#6898) |
 | S3 — the shell opens `/<space>/top/42` | built, in review (#6896) |
 | S4 — `#42` in text | on main (#6887) |
 | S6 — graft onto Topics | not started; Mike's call after S4 |
@@ -30,12 +30,12 @@ ruled. A later reversal is a decision recorded here, not a discovery.
 1. **The citation form follows the cell reference grammar.** The fully
    qualified citation is `#//topics-dev/top/42`. The spec's `#@space/...`
    spelling is amended when that grammar lands. Part 1 of the spec, which
-   governs addressing, is unaffected. That grammar arrives with #6814; until
-   it does, the spelling that resolves is `/@<space>/...`, and that is what a
-   stage builds and demonstrates. A criterion's examples mean whichever
-   spelling the grammar accepts when the criterion is checked, so a stage
-   landing after #6814 reads them as `//<space>/...` with no criterion
-   rewritten.
+   governs addressing, is unaffected. #6814 records that decision and changes
+   no parser, so until one accepts `//<space>/...` the spelling that resolves
+   is `/@<space>/...`, and that is what a stage builds and demonstrates. A
+   criterion's examples mean whichever spelling the reference parser accepts
+   when the criterion is checked, so the switch follows that parser rather
+   than any pull request.
 2. **The reverse-map restructure and the cross-space slug target are
    deferred.** A board-owned namespace never writes the piece's single `slug`
    metadata entry, so that restructure gates URL rewriting rather than
@@ -216,15 +216,22 @@ that map, so those two shape what it can say about a member.
 
 ### S3 — The shell opens `/<space>/top/42`
 
-Scope: `packages/shell`, `packages/runtime-client`, shell integration tests.
+Scope: `packages/navigation` (the member in a view and its URL),
+`packages/runtime-client` (the resolution the worker answers),
+`packages/lib-shell` (the hop that carries it, and the piece cache it keys),
+`packages/shell`, and shell integration tests.
 
 1. `/<space>/top/42` opens the member piece; the tab shows its title. The
    exemplar item is the member; the Topics-shape test covers the board side
    only.
 2. `/<space>/top` opens the board, the piece containing the namespace.
 3. `/<space>/top/999` shows a not-found state naming the collection.
-4. The item header shows the number and a copyable portable reference
-   `/@<space>/top/42`; board cards show the number.
+4. The item's own header shows the number, and the shell's header offers a
+   copyable portable reference `/@<space>/top/42`; board cards show the
+   number. (Two headers, which is how this was read when the criterion was
+   delivered and accepted: the badge is the item pattern's, while only the
+   shell knows the space and the collection's name, so only the shell can
+   compose the reference.)
 5. A browser integration test covers 1 and 3.
 
 ### S4 — `#42` in text
@@ -241,7 +248,7 @@ mention).
 3. Autocomplete matches the number as well as the title.
 4. A pasted `#42` stays plain text; the editor's documentation says so and
    why.
-5. Stretch: the pill's plain-text copy is `//<space>/top/42`.
+5. Stretch: the pill's plain-text copy is `/@<space>/top/42`.
 
 ### S6 — Graft onto Topics
 

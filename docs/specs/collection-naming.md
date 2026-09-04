@@ -546,16 +546,18 @@ inside it. Resolving the two together is what the split is for — the path is
 the part that says which member, so a resolver handed the address on its own
 has nothing to walk with.
 
-**4. Walk segments in the URL layer.** Landed for the shell's page URLs.
-`urlToAppView` (`packages/navigation/src/view.ts`) reads the segment after a
-slug as the member name and carries it in the view, which serializes back to
-`<space>/<collection>/<member>`. Resolution is a separate worker round trip,
-`slug:resolve`
+**4. Walk segments in the URL layer.** Built for the shell's page URLs, in
+review. `urlToAppView` (`packages/navigation/src/view.ts`) reads the segment
+after a slug as the member name and carries it in the view, which serializes
+back to `<space>/<collection>/<member>`. Resolution is a separate worker round
+trip, `slug:resolve`
 (`packages/runtime-client/src/backends/runtime-processor.ts`), which hands the
-reference to the runner's walk and answers with the piece the shell then
-starts; a collection named with no member after it opens the piece holding the
-collection, the shell following the refusal that names it. The slug grammar in
-`packages/runner/src/slugs.ts` does not change.
+reference to the runner's walk and answers with the piece and whatever the walk
+did not spend. A name with no member after it is a different question of the
+same slug — which piece is this name inside — and `resolveSlugTargetInPiece`
+answers it directly, so `<space>/top` opens the piece holding the collection.
+The slug grammar in `packages/runner/src/slugs.ts` does not change, and a
+member answers to it too.
 
 Where the walk lives is what that split settles. `parseFabricUrl`
 (`packages/runner/src/fabric-url.ts`) is deliberately pure and synchronous, and

@@ -197,6 +197,39 @@ describe("view", () => {
     ).toBe(true);
   });
 
+  it("rejects a member that is no single URL segment", () => {
+    // An empty member serializes to the collection's own URL, so a view
+    // holding one addresses the piece that holds the collection while
+    // claiming to address a member of it.
+    expect(
+      isAppView({ spaceName: "space", pieceSlug: "top", pieceMember: "" }),
+    ).toBe(false);
+    // Naming no member at all is how a view addresses the collection, and it
+    // stays valid: the field is optional, not empty-able.
+    expect(isAppView({ spaceName: "space", pieceSlug: "top" })).toBe(true);
+    // A separator would round-trip as two segments, the second of them read
+    // as no part of the address.
+    expect(
+      isAppView({ spaceName: "space", pieceSlug: "top", pieceMember: "4/2" }),
+    ).toBe(false);
+    // `..` resolves away before a parser ever sees it as a segment.
+    expect(
+      isAppView({ spaceName: "space", pieceSlug: "top", pieceMember: ".." }),
+    ).toBe(false);
+  });
+
+  it("reads a member out of a URL without holding it to that grammar", () => {
+    // Reading segments apart from resolving them is what keeps the parse
+    // pure, so a member no collection could have named still parses and is
+    // refused by name where the reference resolves. This is the same
+    // permissiveness the parse already gives a piece id it never validates.
+    expect(urlToAppView(new URL("http://common.test/space/top/NOPE"))).toEqual({
+      spaceName: "space",
+      pieceSlug: "top",
+      pieceMember: "NOPE",
+    });
+  });
+
   it("compares two views by their contents", () => {
     const view = { spaceName: "space", pieceSlug: "demo" } as const;
     expect(isAppViewEqual(view, view)).toBe(true);

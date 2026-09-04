@@ -486,8 +486,10 @@ describe("load-errors", () => {
           try {
             const { XAppView } = await import("../src/views/AppView.ts");
             const space = "did:key:z6Mk-shell-slug-target-error" as DID;
-            const resolved: unknown[][] = [];
-            const started: unknown[][] = [];
+            // One log, so the ORDER the name claims is what is checked;
+            // two arrays would prove both calls happened and nothing about
+            // which came first.
+            const calls: Array<{ call: string; args: unknown[] }> = [];
             const view = new XAppView();
             view.app = {
               identity: {},
@@ -498,11 +500,15 @@ describe("load-errors", () => {
             view.rt = {
               signal: new AbortController().signal,
               resolveSlug: (...args: unknown[]) => {
-                resolved.push(args);
-                return Promise.resolve("fid1:slug-target");
+                calls.push({ call: "resolveSlug", args });
+                return Promise.resolve({
+                  pieceId: "fid1:slug-target",
+                  pathAfter: [],
+                  scope: "space",
+                });
               },
               getPattern: (...args: unknown[]) => {
-                started.push(args);
+                calls.push({ call: "getPattern", args });
                 return Promise.resolve({ id: () => "fid1:slug-target" });
               },
             } as never;
@@ -510,8 +516,16 @@ describe("load-errors", () => {
             view._selectedPattern.run();
             await view._selectedPattern.taskComplete;
 
-            expect(resolved).toEqual([[space, "broken-piece", undefined]]);
-            expect(started).toEqual([[space, "fid1:slug-target"]]);
+            expect(calls).toEqual([
+              {
+                call: "resolveSlug",
+                args: [space, "broken-piece", undefined],
+              },
+              {
+                call: "getPattern",
+                args: [space, "fid1:slug-target", { scope: "space" }],
+              },
+            ]);
           } finally {
             restore();
           }

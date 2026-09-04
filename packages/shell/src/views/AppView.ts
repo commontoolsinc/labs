@@ -21,23 +21,108 @@ import { CellEventTarget, CellUpdateEvent } from "../lib/cell-event-target.ts";
 import { DebuggerController } from "../lib/debugger-controller.ts";
 import { GlobalShortcutsController } from "../lib/global-shortcuts-controller.ts";
 import { prepareNamedSpace } from "../lib/named-space.ts";
-import { RuntimeInternals } from "../lib/runtime.ts";
+import {
+  RuntimeInternals,
+  type SlugReferenceRefusal,
+  type SlugReferenceTarget,
+} from "../lib/runtime.ts";
 import { BaseView, createDefaultAppState } from "./BaseView.ts";
 import type { LoadError } from "./BodyView.ts";
 
 /**
- * One live watch on a slug reference: the reference itself, the runtime and
- * space it is read in, and the identity of the subscription it belongs to.
- * `token` and `key` are what a callback arriving after a view change checks
- * itself against.
+ * Which fields of a resolution the view's state depends on.
+ *
+ * Every field of {@link SlugReferenceTarget} is classified here, and the
+ * `satisfies` is what makes that exhaustive: a field added to that type
+ * without a line here does not compile, so the omission that this key's
+ * earlier versions kept making cannot be written. Classifying one `false` is
+ * a decision a reviewer sees rather than an absence nobody notices.
+ *
+ * - `pieceId` — which piece is rendered.
+ * - `scope` — which document that piece is; one id in two scopes is two.
+ * - `pathAfter` — whether the address keeps its member, and whether that
+ *   member may be cited.
+ * - `refusal` — always absent on this arm, where it marks the landing rather
+ *   than carrying anything. Including a constant would say nothing.
+ */
+const SEMANTIC_RESOLUTION_FIELDS = {
+  pieceId: true,
+  scope: true,
+  pathAfter: true,
+  refusal: false,
+} as const satisfies Record<keyof Required<SlugReferenceTarget>, boolean>;
+
+/**
+ * Which fields of a refusal the view's state depends on, classified and
+ * closed the same way.
+ *
+ * - `code` — which refusal it is. A closed set, and the outcomes read
+ *   differently: an unbound name and a collection missing a member are
+ *   different things to be told, so collapsing them into one value leaves a
+ *   reader on the wrong message about the wrong thing.
+ * - `message` — its wording, which is derived from the code and the
+ *   reference. The reference is fixed for one watch, so the message adds
+ *   nothing the code does not already separate, and keying on prose is what
+ *   made a message that varied read as the reference having moved.
+ */
+const SEMANTIC_REFUSAL_FIELDS = {
+  code: true,
+  message: false,
+} as const satisfies Record<
+  keyof SlugReferenceRefusal["refusal"],
+  boolean
+>;
+
+/**
+ * How one resolution is compared against the last: the fields
+ * {@link SEMANTIC_RESOLUTION_FIELDS} marks as decisive, in a fixed order.
+ *
+ * A key naming a subset of what the view derives calls two different answers
+ * the same, and the state built from the older one stands under the newer.
+ * Reading every field off the answer instead would cure that and buy a second
+ * fault: a field that varies per resolution and means nothing would reload
+ * the view on every poll. Projecting an explicitly classified set has neither
+ * — a new field cannot be silently omitted, because it does not compile, and
+ * cannot be silently included, because someone has to write which it is.
+ */
+function slugResolutionKey(
+  landed: SlugReferenceTarget | SlugReferenceRefusal,
+): string {
+  return landed.refusal
+    ? project("refusal", landed.refusal, SEMANTIC_REFUSAL_FIELDS)
+    : project("target", landed, SEMANTIC_RESOLUTION_FIELDS);
+}
+
+/** The decisive fields of `answer`, in a fixed order, under `arm`. */
+function project<T extends object>(
+  arm: string,
+  answer: T,
+  semantic: Record<keyof T, boolean>,
+): string {
+  const fields = (Object.keys(semantic) as (keyof T)[]).sort();
+  return JSON.stringify([
+    arm,
+    ...fields
+      .filter((field) => semantic[field])
+      .map((field) => [field, answer[field]]),
+  ]);
+}
+
+/**
+ * One live watch on a slug reference: the reference itself, and the runtime
+ * and space it is read in. These are every input the watch is built from, so
+ * comparing them is what decides whether a running watch already covers what
+ * the view now addresses.
+ *
+ * A callback arriving after a view change checks itself by identity against
+ * the watch the view is running, so replacing the watch invalidates every
+ * callback still holding the old one.
  */
 interface SlugWatch {
   rt: RuntimeInternals;
   space: DID;
   slug: string;
   member: string | undefined;
-  token: number;
-  key: string;
 }
 
 export class XAppView extends BaseView {
@@ -102,19 +187,57 @@ export class XAppView extends BaseView {
 
   #slugCancel: Cancel | undefined = undefined;
   #slugPollInterval: ReturnType<typeof setInterval> | undefined = undefined;
-  #slugSubscriptionKey: string | undefined = undefined;
-  #slugSubscriptionToken = 0;
-  #slugTargetKey: string | undefined = undefined;
+  #slugWatch: SlugWatch | undefined = undefined;
 
   /**
-   * What the last resolution of the slug reference produced: the piece it
-   * reached, or the failure it reported. A reference that resolves to nothing
-   * is a target state like any other, and comparing against it is what
-   * notices a member arriving later.
+   * The answer the view is SHOWING: the resolution whose piece is on screen,
+   * or whose refusal is the error on screen. Undefined until one of those
+   * has happened.
+   *
+   * One fact, not several about one thing. What was resolved, whether it was
+   * applied, which piece it reached, and which answer is newest are all read
+   * off this — so there is no second slot for one of them to disagree with,
+   * and a re-resolution asks one question: is this what the view is showing?
+   * A no is the whole of the work to do, whether the reference moved, a
+   * member arrived, a refusal changed, or a load failed and left the view on
+   * something else.
+   *
+   * Written only by {@link XAppView.#markShown}, and only from the answer the
+   * writer itself resolved — never from whatever is current when it finishes,
+   * which is how a slow load came to claim a newer answer's identity.
    */
-  #slugResolutionKey: string | undefined = undefined;
+  #shownResolution: SlugReferenceTarget | SlugReferenceRefusal | undefined =
+    undefined;
+
+  /** Whether a re-resolution is running; the watch runs one at a time. */
+  #slugRefreshRunning = false;
+
+  /** Whether something asked to re-resolve while one was running. */
+  #slugRefreshRequested = false;
 
   #selectedPatternTargetId: string | undefined = undefined;
+
+  /**
+   * Whether the member the view carries named a member of a collection, as
+   * the last resolution answered. A citation is offered on this rather than
+   * on the view alone, so a segment that named nothing is never cited as
+   * though it named the piece on screen.
+   */
+  #namedAMember = false;
+
+  /**
+   * The revision the slug watch bumps to make the selection run again, which
+   * a test reads to tell a reload from a resolution that changed nothing.
+   */
+  get accessForTestingOnly(): { readonly slugRevision: number } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      get slugRevision() {
+        return outerThis._slugRevision;
+      },
+    };
+  }
 
   #debuggerController = new DebuggerController(this);
   #keyboard = new GlobalShortcutsController(this);
@@ -181,6 +304,11 @@ export class XAppView extends BaseView {
     > => {
       if (!rt || !space) return;
       this.#selectedPatternTargetId = undefined;
+      // Cleared before the resolution rather than after it: what the last
+      // reference turned out to be says nothing about this one, and a
+      // citation offered in between would be the previous answer standing
+      // under the current address.
+      this.#namedAMember = false;
       try {
         await prepareNamedSpace(app, rt, space);
         if ("pieceSlug" in app.view && app.view.pieceSlug) {
@@ -189,14 +317,40 @@ export class XAppView extends BaseView {
           // about the piece: a slug into a collection names the member the
           // path after it selects, and one into a piece at any other depth
           // names the piece that holds it.
-          const pieceId = await rt.resolveSlug(
+          const member = "pieceMember" in app.view
+            ? app.view.pieceMember
+            : undefined;
+          const landed = await rt.resolveSlug(
             space,
             app.view.pieceSlug,
-            "pieceMember" in app.view ? app.view.pieceMember : undefined,
+            member,
           );
           if (signal.aborted) return;
+          if (landed.refusal) {
+            // A refusal is the reference's answer, and the load-error surface
+            // is where a reader is told it, in the refusal's own words. That
+            // surface IS the view showing this answer, so it is shown before
+            // it is thrown.
+            this.#markShown(landed, signal);
+            throw new Error(landed.refusal.message);
+          }
+          const { pieceId, scope, pathAfter } = landed;
+          this.#namedAMember = member !== undefined && pathAfter.length === 0;
           this.#selectedPatternTargetId = pieceId;
-          const pattern = await rt.getPattern(space, pieceId);
+          // A slug naming a piece at its root spends no member, so the
+          // segment named nothing and the piece's address does not include
+          // it. Drop it, which is how an address the shell cannot honor
+          // normalizes — the same replacement a visited identity URL gets.
+          if (member !== undefined && pathAfter.length > 0) {
+            this.#replaceViewWithoutMember(app.view);
+          }
+          const pattern = await rt.getPattern(space, pieceId, { scope });
+          // `landed` and not whatever is current: this run finished THIS
+          // answer, and saying so with another's identity is how a slow load
+          // came to claim a newer answer was on screen. A throw above writes
+          // nothing, so the watch's next re-resolution sees the view still
+          // showing something else and asks for this one again.
+          this.#markShown(landed, signal);
           if (!signal.aborted) this.#maybeDeliverOpenPath(pattern);
           return pattern;
         }
@@ -274,33 +428,47 @@ export class XAppView extends BaseView {
     const member = "pieceMember" in this.app.view
       ? this.app.view.pieceMember
       : undefined;
-    // The member is part of what is watched: two references through the same
-    // slug reach different pieces, so one subscription cannot stand for both.
-    const key = rt && space && slug
-      ? `${space}:${slug}:${member ?? ""}`
-      : undefined;
-
-    if (key === this.#slugSubscriptionKey) return;
+    // Every input the watch is built from is compared, the runtime among
+    // them: a reference reads the same and reaches a different answer under a
+    // replacement runtime, and two members of one collection are two
+    // references reaching two pieces.
+    const running = this.#slugWatch;
+    if (
+      running && running.rt === rt && running.space === space &&
+      running.slug === slug && running.member === member
+    ) {
+      return;
+    }
     this.#clearSlugSubscription();
-    if (!rt || !space || !slug || !key) return;
+    if (!rt || !space || !slug) return;
 
-    this.#slugSubscriptionKey = key;
-    const watch: SlugWatch = {
-      rt,
-      space,
-      slug,
-      member,
-      token: ++this.#slugSubscriptionToken,
-      key,
-    };
+    const watch: SlugWatch = { rt, space, slug, member };
+    this.#slugWatch = watch;
     rt.getSlugCell(space, slug).then(async (cell) => {
       if (!this.#isCurrentSlugWatch(watch)) return;
 
-      await this.#refreshSlugTarget(watch, false);
+      // Asks like every later resolution, and needs no flag saying it is
+      // the first: the selection marks what the view came to SHOW, so an
+      // answer matching that returns early however it arrived. One that
+      // differs — because the member landed while this subscription was
+      // still opening — reloads a view that would otherwise sit on the
+      // failure forever.
+      await this.#refreshSlugTarget(watch);
       if (!this.#isCurrentSlugWatch(watch)) return;
 
+      // What this poll is for, measured in
+      // `packages/runtime-client/test/backends/slug-resolve.test.ts`. The
+      // subscription reaches further than the slug document: a member
+      // landing in the collection wakes it, a change inside a member wakes
+      // it, and so does a change at the end of a link chain a member is
+      // reached through. What it misses is a metadata write — a document
+      // gaining the pattern identity that MAKES it a piece — because the
+      // read set follows values. That is the one case slug resolution turns
+      // on, since a member whose target is not yet a piece is refused, so
+      // re-resolving is what notices it becoming one. Whoever makes that
+      // observable to a watch can retire this.
       this.#slugPollInterval = globalThis.setInterval(() => {
-        void this.#refreshSlugTarget(watch, true);
+        void this.#refreshSlugTarget(watch);
       }, 1000);
 
       let sawInitialCallback = false;
@@ -309,13 +477,13 @@ export class XAppView extends BaseView {
           sawInitialCallback = true;
           return;
         }
-        void this.#refreshSlugTarget(watch, true);
+        void this.#refreshSlugTarget(watch);
       });
     }).catch((error) => {
-      if (this.#slugSubscriptionToken !== watch.token) return;
+      if (!this.#isCurrentSlugWatch(watch)) return;
       if (rt.signal.aborted) {
-        // Reset the subscription key so a replacement runtime for the
-        // same reference re-subscribes instead of matching the stale key.
+        // Drop the watch so a replacement runtime for the same reference
+        // subscribes instead of matching the stale one.
         this.#clearSlugSubscription();
         return;
       }
@@ -324,42 +492,82 @@ export class XAppView extends BaseView {
   }
 
   #clearSlugSubscription() {
-    this.#slugSubscriptionToken++;
+    this.#slugWatch = undefined;
     this.#slugCancel?.();
     if (this.#slugPollInterval !== undefined) {
       globalThis.clearInterval(this.#slugPollInterval);
     }
     this.#slugCancel = undefined;
     this.#slugPollInterval = undefined;
-    this.#slugSubscriptionKey = undefined;
-    this.#slugTargetKey = undefined;
-    this.#slugResolutionKey = undefined;
+    this.#shownResolution = undefined;
+    this.#slugRefreshRunning = false;
+    this.#slugRefreshRequested = false;
+  }
+
+  /**
+   * Record that the view has come to show `answer`.
+   *
+   * The only writer of {@link XAppView.#shownResolution}, and it takes the
+   * signal of the run that resolved `answer` so a run the view has moved on
+   * from cannot report what it finished as what is on screen.
+   */
+  #markShown(
+    answer: SlugReferenceTarget | SlugReferenceRefusal,
+    signal: AbortSignal,
+  ): void {
+    if (signal.aborted) return;
+    this.#shownResolution = answer;
+  }
+
+  /** The piece the view is showing, when a slug reference reached one. */
+  get #shownPieceId(): string | undefined {
+    const shown = this.#shownResolution;
+    return shown && !shown.refusal ? shown.pieceId : undefined;
   }
 
   /** Whether `watch` is still the subscription this view is running. */
   #isCurrentSlugWatch(watch: SlugWatch): boolean {
-    return this.#slugSubscriptionToken === watch.token &&
-      this.#slugSubscriptionKey === watch.key;
+    return this.#slugWatch === watch;
   }
 
   /**
-   * Re-resolve the reference `watch` follows, and reload the view when it
-   * reaches somewhere else than it did. `notify` is false for the first
-   * resolution, which records where the reference points without reloading a
-   * view already loading it.
+   * Re-resolve the reference `watch` follows, and ask the selection to run
+   * again when the answer is not what the view is showing.
+   *
+   * One at a time. A resolution slower than the poll's interval would
+   * otherwise have a second issued behind it, and two answers in flight is
+   * the whole of the ordering problem — which is newer, and may an older one
+   * still be applied. Running one and coalescing whatever asked meanwhile
+   * removes the question instead of guarding it: there is never a second
+   * answer to compare against, and a wake that arrives mid-flight still gets
+   * its resolution, immediately after.
    */
-  async #refreshSlugTarget(watch: SlugWatch, notify: boolean) {
+  async #refreshSlugTarget(watch: SlugWatch): Promise<void> {
     if (!this.#isCurrentSlugWatch(watch)) return;
-
-    let target: string | undefined;
-    let resolution: string;
+    if (this.#slugRefreshRunning) {
+      this.#slugRefreshRequested = true;
+      return;
+    }
+    this.#slugRefreshRunning = true;
     try {
-      target = await watch.rt.resolveSlug(
+      await this.#resolveAgainst(watch);
+    } finally {
+      this.#slugRefreshRunning = false;
+    }
+    if (!this.#slugRefreshRequested) return;
+    this.#slugRefreshRequested = false;
+    await this.#refreshSlugTarget(watch);
+  }
+
+  /** One re-resolution: ask, and reload the view when the answer differs. */
+  async #resolveAgainst(watch: SlugWatch): Promise<void> {
+    let landed: SlugReferenceTarget | SlugReferenceRefusal;
+    try {
+      landed = await watch.rt.resolveSlug(
         watch.space,
         watch.slug,
         watch.member,
       );
-      resolution = target;
     } catch (error) {
       if (watch.rt.signal.aborted) {
         // The runtime this subscription polls was disposed (logout,
@@ -368,17 +576,21 @@ export class XAppView extends BaseView {
         if (this.#isCurrentSlugWatch(watch)) this.#clearSlugSubscription();
         return;
       }
-      resolution = `unresolved: ${
-        error instanceof Error ? error.message : String(error)
-      }`;
+      // Not a refusal — those arrive as an answer — but a fault in asking: a
+      // transport that dropped, a document that would not decode. It says
+      // nothing about where the reference points, so what the view shows
+      // stands and the load path is what reports the fault to a reader.
+      console.error("[AppView] Failed to re-resolve a slug reference:", error);
+      return;
     }
     if (!this.#isCurrentSlugWatch(watch)) return;
-    if (resolution === this.#slugResolutionKey) return;
-    this.#slugResolutionKey = resolution;
-    this.#slugTargetKey = target;
-    if (notify) {
-      this.#handleSlugCellUpdate(watch);
-    }
+    // The one question. A yes covers every reason the view could be behind —
+    // the reference moved, a member arrived, a refusal changed, a load failed
+    // and left something else on screen — because each of them is the same
+    // fact: what is showing is not this.
+    const shown = this.#shownResolution;
+    if (shown && slugResolutionKey(shown) === slugResolutionKey(landed)) return;
+    this.#handleSlugCellUpdate(watch);
   }
 
   #handleSlugCellUpdate(watch: SlugWatch) {
@@ -429,18 +641,41 @@ export class XAppView extends BaseView {
     this.pieceTitle = event.detail ?? "";
   };
 
+  /**
+   * Drop the member from the address, leaving the collection's name. A
+   * segment the walk did not spend named nothing, so the page it opened is
+   * the one the name alone addresses, and the URL says so.
+   */
+  #replaceViewWithoutMember(view: typeof this.app.view) {
+    if (!("pieceSlug" in view) || !view.pieceSlug) return;
+    this.preserveRuntimeErrorsForNextViewChange?.();
+    const { pieceMember: _dropped, ...rest } = view;
+    this.#replaceView(rest);
+  }
+
   #replacePieceUrlWithSlug(view: typeof this.app.view, slug: string) {
     try {
       validateSlug(slug);
     } catch {
       return;
     }
+    if (!("pieceId" in view)) return;
     this.preserveRuntimeErrorsForNextViewChange?.();
-    if ("spaceName" in view) {
-      replaceNavigation({ spaceName: view.spaceName, pieceSlug: slug });
-    } else if ("spaceDid" in view) {
-      replaceNavigation({ spaceDid: view.spaceDid, pieceSlug: slug });
-    }
+    const { pieceId: _replaced, pieceMember: _dropped, ...rest } = view;
+    this.#replaceView({ ...rest, pieceSlug: slug });
+  }
+
+  /**
+   * Ask for `view` in place of the one showing, which is how an address the
+   * shell settles differently from the one asked for is written back.
+   *
+   * Only what the caller changed is different: what a view is being read as
+   * — embedded, or carrying a `?path=` deep link — outlives a correction to
+   * what it names, and rebuilding a view from the fields a caller remembered
+   * is how the rest of it goes missing.
+   */
+  #replaceView(view: typeof this.app.view) {
+    replaceNavigation(view);
   }
 
   #isRecreatingSpaceRootPattern = false;
@@ -538,16 +773,19 @@ export class XAppView extends BaseView {
 
   /**
    * How the piece this view addresses is cited from anywhere:
-   * `/@<space>/<collection>/<member>`, the spelling every reader of a
-   * reference resolves. Only a member of a named collection has one — a piece
-   * reached by identity carries its own, and a collection's name with no
-   * member after it names no piece at all.
+   * `/@<space>/<collection>/<member>`, the spelling `cf` resolves and which
+   * depends on no binding of the reader's. Only a member of a named
+   * collection has one — a piece
+   * reached by identity carries its own, a collection's name with no member
+   * after it names no piece at all, and a segment the walk did not spend
+   * named nothing to cite.
    *
    * The space is taken from the view rather than from the resolved DID: a
    * space name derives that DID for everyone, so a name travels as far as the
    * DID does and reads better where it lands.
    */
   #getPieceReference(): string | undefined {
+    if (!this.#namedAMember) return;
     const view = this.app.view;
     if (!("pieceSlug" in view) || !view.pieceSlug) return;
     const member = "pieceMember" in view ? view.pieceMember : undefined;
@@ -585,7 +823,7 @@ export class XAppView extends BaseView {
         ? [this._spaceRootPattern.value?.id()]
         : "pieceSlug" in this.app.view
         ? [
-          this.#slugTargetKey ?? this.#selectedPatternTargetId ??
+          this.#shownPieceId ?? this.#selectedPatternTargetId ??
             (this._selectedPattern.status === TaskStatus.COMPLETE
               ? this._selectedPattern.value?.id()
               : undefined),

@@ -22,7 +22,11 @@ The shell supports these browser URL forms:
   fields never answer to the collection's namespace. A member the collection
   does not hold is reported by name, alongside the collection's. The header
   offers the member's portable reference, `/@<space>/<collection>/<member>`,
-  which resolves wherever a reference is read.
+  which carries its own space and so depends on no binding of the reader's. `cf`
+  resolves it; this shell's own URLs and a pattern's `cellFromUrl` do not read
+  that grammar. Where the slug names a piece rather than a collection there are
+  no members to name, so the segment is dropped and the address settles on the
+  piece the page is showing.
 - `/.embed/<space-name-or-did>/<piece-id-or-slug>`: opens the same piece in
   embed mode.
 

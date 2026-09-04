@@ -200,6 +200,40 @@ describe("navigation", () => {
     );
   });
 
+  it("keeps every field of a view whose space it renames", () => {
+    // The mapping exchanges one key. Naming the others one at a time is what
+    // dropped whichever the list had not been taught about, so this asserts
+    // over a view holding every field at once rather than over the one that
+    // was last forgotten.
+    withNavigation(
+      "http://common.test/.embed/my-space",
+      {
+        view: { spaceName: "my-space", mode: "embed" },
+        runtimeSpace: SPACE_DID as DID,
+      },
+      (_navigation, recorded) => {
+        globalThis.dispatchEvent(
+          new CustomEvent("cf-navigate", {
+            detail: {
+              spaceDid: SPACE_DID,
+              pieceSlug: "top",
+              pieceMember: "42",
+              mode: "embed",
+              openPath: "People/Zora/about.md",
+            },
+          }),
+        );
+        expect(recorded.push.at(-1)?.state).toEqual({
+          spaceName: "my-space",
+          pieceSlug: "top",
+          pieceMember: "42",
+          mode: "embed",
+          openPath: "People/Zora/about.md",
+        });
+      },
+    );
+  });
+
   it("keeps a DID that names a space other than the running one", () => {
     const otherDid = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
     withNavigation(

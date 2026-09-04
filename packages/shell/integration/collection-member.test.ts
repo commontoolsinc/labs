@@ -1,9 +1,19 @@
+/**
+ * The shell opening `/<space>/<collection>/<member>` in a browser, over a real
+ * board filed by `cf`.
+ *
+ * What is proven here and nowhere else is the whole chain standing up at once:
+ * a slug bound inside a piece, a worker resolving the reference through it,
+ * and a rendered page that is the member rather than the board.
+ */
+
 import { join, resolve } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 
 import { env, waitForCondition } from "@commonfabric/integration";
 import { ShellIntegration } from "@commonfabric/integration/shell-utils";
 import { writeTempIdentity } from "@commonfabric/integration/temp-identity";
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 
 import "../src/globals.ts";
 
@@ -29,10 +39,15 @@ async function cf(
   args: string[],
   tail: string[] = [],
 ): Promise<string> {
-  const command = new Deno.Command(Deno.execPath(), {
-    cwd: REPO_ROOT,
-    args: [
+  // Through the temporary lock, because a nested Deno resolves dependencies
+  // of its own and would refresh the repository's `deno.lock` as a side
+  // effect of a test that only means to read a board back.
+  const result = await runDenoCommandWithTemporaryLock({
+    root: REPO_ROOT,
+    args: (lockPath) => [
       "run",
+      "--lock",
+      lockPath,
       "-A",
       join(REPO_ROOT, "packages", "cli", "mod.ts"),
       ...args,
@@ -46,7 +61,6 @@ async function cf(
     ],
     env: { CF_LOG_LEVEL: "error" },
   });
-  const result = await command.output();
   const stdout = decoder.decode(result.stdout);
   if (!result.success) {
     throw new Error(
@@ -90,65 +104,76 @@ async function fileBoardWithMembers(
 }
 
 describe("shell collection members", () => {
-  const shell = new ShellIntegration({
-    allowedConsoleErrors: ["[AppView] Failed to load selected piece:"],
+  // Two suites because they tolerate different things. Opening a member must
+  // record no console error at all; only the suite whose subject IS a failed
+  // load allows the one that failure reports, so a regression breaking the
+  // happy path cannot hide inside an allowance written for the other.
+  describe("opening one", () => {
+    const shell = new ShellIntegration();
+    shell.bindLifecycle();
+
+    it("opens the member a collection reference names", async () => {
+      await using tempIdentity = await writeTempIdentity({
+        implementation: "noble",
+      });
+      const { identity, path: identityPath } = tempIdentity;
+      const slug = `members-${crypto.randomUUID()}`;
+      await fileBoardWithMembers(identityPath, slug, [
+        "Glaze recipes",
+        "Oven schedule",
+      ]);
+
+      await shell.goto({
+        frontendUrl: FRONTEND_URL,
+        view: { spaceName: SPACE_NAME, pieceSlug: slug, pieceMember: "2" },
+        identity,
+      });
+
+      // One badge, reading the board's name for this member. The board
+      // renders one per item, so a page carrying exactly one is the member's.
+      await waitForCondition(shell.page(), (probe) => {
+        const badges = probe.collect("[data-member-name]");
+        return badges.length === 1 && probe.deepText(badges[0]).trim() === "2";
+      });
+      // The tab names the piece the shell opened. Member 2 is the second item
+      // filed, and the board would name itself for its item count instead.
+      await waitForCondition(
+        shell.page(),
+        () => document.title === "Oven schedule",
+      );
+    });
   });
-  shell.bindLifecycle();
 
-  it("opens the member a collection reference names", async () => {
-    await using tempIdentity = await writeTempIdentity({
-      implementation: "noble",
+  describe("naming one that is not there", () => {
+    const shell = new ShellIntegration({
+      allowedConsoleErrors: ["[AppView] Failed to load selected piece:"],
     });
-    const { identity, path: identityPath } = tempIdentity;
-    const slug = `members-${crypto.randomUUID()}`;
-    await fileBoardWithMembers(identityPath, slug, [
-      "Glaze recipes",
-      "Oven schedule",
-    ]);
+    shell.bindLifecycle();
 
-    await shell.goto({
-      frontendUrl: FRONTEND_URL,
-      view: { spaceName: SPACE_NAME, pieceSlug: slug, pieceMember: "2" },
-      identity,
+    it("reports a member the collection does not hold, naming both", async () => {
+      await using tempIdentity = await writeTempIdentity({
+        implementation: "noble",
+      });
+      const { identity, path: identityPath } = tempIdentity;
+      const slug = `missing-${crypto.randomUUID()}`;
+      await fileBoardWithMembers(identityPath, slug, ["Glaze recipes"]);
+
+      await shell.goto({
+        frontendUrl: FRONTEND_URL,
+        view: { spaceName: SPACE_NAME, pieceSlug: slug, pieceMember: "999" },
+        identity,
+      });
+
+      await waitForCondition(
+        shell.page(),
+        (probe, expected: string) =>
+          probe.collect(".load-error").some((element) => {
+            const text = probe.deepText(element).replace(/\s+/g, " ").trim();
+            return text.includes("We could not load this piece") &&
+              text.includes(expected);
+          }),
+        { args: [`no member 999 in ${slug}`] },
+      );
     });
-
-    // One badge, reading the board's name for this member. The board renders
-    // one per item, so a page carrying exactly one is the member's own.
-    await waitForCondition(shell.page(), (probe) => {
-      const badges = probe.collect("[data-member-name]");
-      return badges.length === 1 && probe.deepText(badges[0]).trim() === "2";
-    });
-    // The tab names the piece the shell opened. Member 2 is the second item
-    // filed, and the board would name itself for its item count instead.
-    await waitForCondition(
-      shell.page(),
-      () => document.title === "Oven schedule",
-    );
-  });
-
-  it("reports a member the collection does not hold, naming both", async () => {
-    await using tempIdentity = await writeTempIdentity({
-      implementation: "noble",
-    });
-    const { identity, path: identityPath } = tempIdentity;
-    const slug = `missing-${crypto.randomUUID()}`;
-    await fileBoardWithMembers(identityPath, slug, ["Glaze recipes"]);
-
-    await shell.goto({
-      frontendUrl: FRONTEND_URL,
-      view: { spaceName: SPACE_NAME, pieceSlug: slug, pieceMember: "999" },
-      identity,
-    });
-
-    await waitForCondition(
-      shell.page(),
-      (probe, expected: string) =>
-        probe.collect(".load-error").some((element) => {
-          const text = probe.deepText(element).replace(/\s+/g, " ").trim();
-          return text.includes("We could not load this piece") &&
-            text.includes(expected);
-        }),
-      { args: [`no member 999 in ${slug}`] },
-    );
   });
 });

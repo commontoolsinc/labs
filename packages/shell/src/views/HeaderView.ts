@@ -609,7 +609,7 @@ export class XHeaderView extends BaseView {
   #resizeTimer?: ReturnType<typeof setTimeout>;
 
   /**
-   * The favorites subscription step, the favorite-toggle guard, and the two
+   * The favorites subscription step, the favorite-toggle guard, and the three
    * click handlers, which a test drives directly.
    */
   get accessForTestingOnly(): {
@@ -617,6 +617,7 @@ export class XHeaderView extends BaseView {
     ensureFavoritesSubscription(): void;
     handleLogoClick(e: Event): void;
     handleToggleFavorite(e: Event): Promise<void>;
+    copyReference(e: Event): Promise<void>;
   } {
     // deno-lint-ignore no-this-alias
     const outerThis = this;
@@ -627,6 +628,7 @@ export class XHeaderView extends BaseView {
       ensureFavoritesSubscription: () => this.#ensureFavoritesSubscription(),
       handleLogoClick: (e) => this.#handleLogoClick(e),
       handleToggleFavorite: (e) => this.#handleToggleFavorite(e),
+      copyReference: (e) => this.#handleCopyReference(e),
     };
   }
 
@@ -930,8 +932,10 @@ export class XHeaderView extends BaseView {
 
   /**
    * Copy this piece's portable reference to the clipboard. It carries its own
-   * space, so it resolves for whoever receives it and wherever a reference is
-   * read — a pattern, this shell, or `cf`.
+   * space, so it depends on no binding of the copier's and resolves for
+   * whoever receives it — in `cf`, and in anything else that opens a session
+   * before it reads. Neither this shell's own URLs nor a pattern's
+   * `cellFromUrl` reads this grammar today.
    */
   async #handleCopyReference(e: Event) {
     e.preventDefault();

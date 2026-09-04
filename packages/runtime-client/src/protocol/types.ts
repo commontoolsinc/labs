@@ -1,3 +1,4 @@
+import type { CellScope } from "@commonfabric/api";
 import type { MetaField } from "@commonfabric/runner";
 import type {
   FabricArray,
@@ -2112,6 +2113,13 @@ export type PieceGetRequest = BaseRequest & {
    * The space the piece lives in.
    */
   space: DID;
+
+  /**
+   * The scope the piece's document sits in, defaulting to the space. A piece
+   * reached through a link into a narrower scope is addressed by its id plus
+   * that scope, and the id alone reaches nothing.
+   */
+  scope?: CellScope;
 };
 
 /** The {@link RequestType.PieceGetSlug} request. */
@@ -2970,6 +2978,66 @@ export type PieceResponse = {
   piece: PieceRef;
 };
 
+/**
+ * Why a slug reference reached nothing. This is an outcome, not a failure:
+ * a name nobody has bound, or a member a collection does not hold, is what a
+ * reader is asking about, so it crosses as data and leaves the error channel
+ * to transport and decoding faults.
+ */
+export type SlugRefusal = {
+  /**
+   * Which refusal it is, as the runner's slug resolution names them.
+   */
+  code: string;
+
+  /**
+   * What to tell a reader, naming the collection and the member where the
+   * refusal knows them.
+   */
+  message: string;
+};
+
+/**
+ * Where a slug reference landed: the piece it reached and the segments the
+ * walk did not spend, or the refusal that says it reached nothing.
+ *
+ * The two are arms of a union rather than optional fields of one object, so
+ * that a response carrying both cannot be built. Written as optionals, the
+ * contradiction is a shape the type admits and only a reader can catch, and a
+ * reader that checks the refusal first reports a malformed answer as an
+ * ordinary "no such member".
+ */
+export type SlugReferenceResponse =
+  | {
+    /**
+     * The piece the reference reached.
+     */
+    piece: PieceRef;
+
+    /**
+     * What is left of the reference after the piece. Empty where the member
+     * named a member; the member itself where the slug named a piece at its
+     * root, which spends no segment and leaves the member a cell path the
+     * piece's own address does not include.
+     */
+    pathAfter: string[];
+
+    /** Absent, which is what makes this the landing arm. */
+    refusal?: undefined;
+  }
+  | {
+    /** Absent, which is what makes this the refusal arm. */
+    piece?: undefined;
+
+    /** Absent with the piece. */
+    pathAfter?: undefined;
+
+    /**
+     * Why the reference reached nothing.
+     */
+    refusal: SlugRefusal;
+  };
+
 /** A piece's slug, `undefined` where the piece has none. */
 export type SlugResponse = {
   /**
@@ -3337,6 +3405,7 @@ export type RemoteResponse =
   | TriggerTraceResponse
   | WriteStackTraceResponse
   | PieceResponse
+  | SlugReferenceResponse
   | PieceSourceResponse
   | PieceSourceRevisionResponse
   | PieceUpdateSourceResponse
@@ -3600,7 +3669,7 @@ export type Commands = {
   };
   [RequestType.SlugResolve]: {
     request: SlugResolveRequest;
-    response: PieceResponse;
+    response: SlugReferenceResponse;
   };
   [RequestType.PieceRemove]: {
     request: PieceRemoveRequest;

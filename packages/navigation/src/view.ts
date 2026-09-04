@@ -1,5 +1,5 @@
 import { DID, isDID } from "@commonfabric/identity";
-import { isSlugAddress } from "@commonfabric/runner/slugs";
+import { isSlugAddress, isValidSlug } from "@commonfabric/runner/slugs";
 
 export type AppBuiltInView = "home";
 
@@ -84,13 +84,22 @@ function isAppViewModeRef(view: object): view is AppViewModeRef {
 /**
  * Whether a view's piece reference addresses one thing: an id or a slug but
  * never both, and a member only under the slug whose collection holds it.
+ *
+ * A member is held to the grammar the name in front of it answers to, which
+ * `docs/specs/collection-naming.md` fixes as the slug grammar for both. That
+ * is what makes a member one URL segment: `appViewToUrlPath` writes it
+ * verbatim and `urlToAppView` reads it back verbatim, so a value carrying a
+ * separator, resolving away, or reading as empty would name something other
+ * than what it says — an empty member addresses the collection's own piece
+ * rather than a member of it.
  */
 function isPieceViewRef(view: object): view is PieceViewRef {
   if ("pieceId" in view && "pieceSlug" in view) return false;
   const member = "pieceMember" in view ? view.pieceMember : undefined;
   const slug = "pieceSlug" in view ? view.pieceSlug : undefined;
   return member === undefined ||
-    (typeof member === "string" && typeof slug === "string" && !!slug);
+    (typeof member === "string" && isValidSlug(member) &&
+      typeof slug === "string" && !!slug);
 }
 
 /**

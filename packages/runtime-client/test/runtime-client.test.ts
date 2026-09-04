@@ -164,6 +164,275 @@ describe("RuntimeClient", () => {
     });
   });
 
+  describe("getPiece", () => {
+    it("sends the scope alongside the id, an id alone naming no document", async () => {
+      const space = "did:key:z6Mk-runtime-client-piece";
+      const requests: unknown[] = [];
+      const conn = {
+        on: () => {},
+        request: (message: unknown) => {
+          requests.push(message);
+          return Promise.resolve({
+            piece: {
+              cell: { id: "of:fid1:mine", space, scope: "user", path: [] },
+            },
+          });
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      // A piece in a narrower scope is addressed by its id AND that scope;
+      // the worker builds the cell from both, so a scope left behind here
+      // reaches a document that does not exist.
+      const piece = await client.getPiece(
+        "fid1:mine",
+        space as never,
+        true,
+        "user",
+      );
+
+      expect(requests).toEqual([{
+        type: RequestType.PieceGet,
+        pieceId: "fid1:mine",
+        runIt: true,
+        space,
+        scope: "user",
+      }]);
+      expect(piece?.id()).toBe("fid1:mine");
+    });
+
+    it("leaves the scope out when the caller names none", async () => {
+      const space = "did:key:z6Mk-runtime-client-piece";
+      const requests: unknown[] = [];
+      const conn = {
+        on: () => {},
+        request: (message: unknown) => {
+          requests.push(message);
+          return Promise.resolve({
+            piece: {
+              cell: { id: "of:fid1:ours", space, scope: "space", path: [] },
+            },
+          });
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      await client.getPiece("fid1:ours", space as never);
+
+      expect(requests).toEqual([{
+        type: RequestType.PieceGet,
+        pieceId: "fid1:ours",
+        runIt: undefined,
+        space,
+        scope: undefined,
+      }]);
+    });
+
+    it("returns null where the worker answers with no piece", async () => {
+      const space = "did:key:z6Mk-runtime-client-piece";
+      const conn = {
+        on: () => {},
+        request: () => Promise.resolve(null),
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      await expect(client.getPiece("fid1:gone", space as never)).resolves
+        .toBeNull();
+    });
+  });
+
+  describe("resolveSlug", () => {
+    it("asks the worker where a slug reference lands", async () => {
+      const space = "did:key:z6Mk-runtime-client-slug";
+      const piece = {
+        cell: { id: "of:fid1:member", space, scope: "space", path: [] },
+      };
+      const requests: unknown[] = [];
+      const conn = {
+        on: () => {},
+        request: (message: unknown) => {
+          requests.push(message);
+          return Promise.resolve({ piece, pathAfter: [] });
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      const landed = await client.resolveSlug("top", space as never, "42");
+      if (landed.refusal) throw new Error("the worker answered with a piece");
+
+      // The slug, the space and the member cross in the fields the worker
+      // reads them from. This method takes them in a different order than it
+      // sends them, so which value lands in which field is the thing to hold.
+      expect(requests).toEqual([{
+        type: RequestType.SlugResolve,
+        slug: "top",
+        member: "42",
+        space,
+      }]);
+      // The piece comes back as a handle over the ref the worker answered
+      // with, in the routing form of its id.
+      expect(landed.piece.id()).toBe("fid1:member");
+      expect(landed.pathAfter).toEqual([]);
+    });
+
+    it("asks for no member where the reference stops at the slug", async () => {
+      const space = "did:key:z6Mk-runtime-client-slug";
+      const requests: unknown[] = [];
+      const conn = {
+        on: () => {},
+        request: (message: unknown) => {
+          requests.push(message);
+          return Promise.resolve({
+            piece: {
+              cell: { id: "of:fid1:board", space, scope: "space", path: [] },
+            },
+            pathAfter: [],
+          });
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      const landed = await client.resolveSlug("top", space as never);
+
+      expect(requests).toEqual([{
+        type: RequestType.SlugResolve,
+        slug: "top",
+        member: undefined,
+        space,
+      }]);
+      // What came back matters as much as what went out: a board reached
+      // with a member still to spend is a different answer than a board
+      // reached with none.
+      if (landed.refusal) throw new Error("the worker answered with a piece");
+      expect(landed.piece.id()).toBe("fid1:board");
+      expect(landed.pathAfter).toEqual([]);
+    });
+
+    it("carries back a member the walk did not spend", async () => {
+      const space = "did:key:z6Mk-runtime-client-slug";
+      const conn = {
+        on: () => {},
+        request: () =>
+          Promise.resolve({
+            piece: {
+              cell: { id: "of:fid1:plain", space, scope: "space", path: [] },
+            },
+            pathAfter: ["42"],
+          }),
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      // The leftover is what tells a caller the segment named nothing, so it
+      // has to survive this hop rather than being read off the piece.
+      const landed = await client.resolveSlug("plain", space as never, "42");
+      if (landed.refusal) throw new Error("the worker answered with a piece");
+      expect(landed.piece.id()).toBe("fid1:plain");
+      expect(landed.pathAfter).toEqual(["42"]);
+    });
+
+    it("returns a refusal as an answer rather than throwing it", async () => {
+      const space = "did:key:z6Mk-runtime-client-slug";
+      const conn = {
+        on: () => {},
+        request: () =>
+          Promise.resolve({
+            refusal: {
+              code: "missing-member",
+              message: "no member 999 in top",
+            },
+          }),
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      // A name nobody bound is what the caller asked about. Throwing it would
+      // make it indistinguishable from a transport that dropped, and the two
+      // want opposite responses: report the one, retry the other.
+      const landed = await client.resolveSlug("top", space as never, "999");
+      expect(landed.refusal).toEqual({
+        code: "missing-member",
+        message: "no member 999 in top",
+      });
+      expect(landed.piece).toBeUndefined();
+    });
+
+    it("refuses an answer carrying both a piece and a refusal", async () => {
+      const space = "did:key:z6Mk-runtime-client-slug";
+      const conn = {
+        on: () => {},
+        request: () =>
+          Promise.resolve({
+            piece: {
+              cell: { id: "of:fid1:board", space, scope: "space", path: [] },
+            },
+            pathAfter: [],
+            refusal: { code: "missing-member", message: "no member 9 in top" },
+          }),
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      // The type cannot express this; a message off the wire can. Reading the
+      // refusal first would report a protocol fault as a name that is not
+      // bound, and the caller would tell a reader so.
+      await expect(client.resolveSlug("top", space as never)).rejects.toThrow(
+        "both a piece and a refusal",
+      );
+    });
+
+    it("refuses a landing that carries no path", async () => {
+      const space = "did:key:z6Mk-runtime-client-slug";
+      const conn = {
+        on: () => {},
+        request: () =>
+          Promise.resolve({
+            piece: {
+              cell: { id: "of:fid1:board", space, scope: "space", path: [] },
+            },
+          }),
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      // Defaulting the missing path to `[]` would say the member was spent,
+      // which is the fact the citation is offered on.
+      await expect(client.resolveSlug("top", space as never, "42")).rejects
+        .toThrow("a piece and no path");
+    });
+
+    it("refuses an answer that is neither a piece nor a refusal", async () => {
+      const space = "did:key:z6Mk-runtime-client-slug";
+      const conn = {
+        on: () => {},
+        request: () => Promise.resolve({}),
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      // Silently reporting "no piece" for a malformed answer would read as a
+      // name that does not resolve, which is a different fact entirely.
+      await expect(client.resolveSlug("top", space as never)).rejects.toThrow(
+        "neither a piece nor a refusal",
+      );
+    });
+  });
+
   describe("getPieceSource", () => {
     it("asks the worker for one piece's source state", async () => {
       const source = {

@@ -101,6 +101,11 @@ DOM). A host embeds by listening for:
   clicks), the detail is an `AppView`. Bind to the common fields —
   space + `pieceId` — and loud-log + no-op anything else.
 
+  A view naming a collection member carries `pieceSlug` **and**
+  `pieceMember`, and the two are one address: a host that binds the slug and
+  drops the member opens the piece holding the collection instead of the
+  member the view named. Carry both, or no-op the view whole.
+
   ```ts
   import type { DID } from "@commonfabric/identity";
 
@@ -112,7 +117,7 @@ DOM). A host embeds by listening for:
   import type { DID } from "@commonfabric/identity";
 
   // Condensed from packages/navigation/src/view.ts
-  type PieceRef = {
+  type PieceViewRef = {
     pieceId?: string;
     // A slug naming a collection, and the member it selects.
     pieceSlug?: string;
@@ -120,8 +125,8 @@ DOM). A host embeds by listening for:
   };
   export type AppView =
     | { builtin: "home" }
-    | ({ spaceName: string; mode?: "embed" } & PieceRef)
-    | ({ spaceDid: DID; mode?: "embed" } & PieceRef);
+    | ({ spaceName: string; mode?: "embed" } & PieceViewRef)
+    | ({ spaceDid: DID; mode?: "embed" } & PieceViewRef);
   ```
 
 - **`cf-replace-navigation`** — same `AppView` detail; replaces the

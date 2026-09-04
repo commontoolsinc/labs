@@ -5,6 +5,7 @@
  * for interacting with cells across the worker boundary.
  */
 
+import type { CellScope } from "@commonfabric/api";
 import type { FabricPlainObject, FabricValue } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { DID, Identity } from "@commonfabric/identity";
@@ -64,6 +65,7 @@ import {
   type PieceUpdateSourceResponse,
   RequestType,
   type RuntimeSecurityContext,
+  type SlugRefusal,
   type SpaceAclCapability,
   type SpaceAclView,
   TelemetryNotification,
@@ -604,12 +606,14 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     pieceId: string,
     space: DID,
     runIt?: boolean,
+    scope?: CellScope,
   ): Promise<PieceHandle<T> | null> {
     const response = await this.#conn.request<RequestType.PieceGet>({
       type: RequestType.PieceGet,
       pieceId: pieceId,
       runIt,
       space,
+      scope,
     });
 
     if (!response) return null;
@@ -735,21 +739,30 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   /**
-   * The piece a slug reference names: the piece the slug reaches, or the
-   * member of the collection it names. The piece comes back unstarted —
-   * {@link getPiece}, addressed by its id, is what starts one.
+   * Where a slug reference lands: the piece it reached, and the segments the
+   * walk did not spend. The piece comes back unstarted — {@link getPiece},
+   * addressed by its id, is what starts one.
+   *
+   * A name nobody bound, a member a collection does not hold, and a target
+   * that is no piece all come back as a `refusal`: they answer the question
+   * asked, and a caller has to tell them from a fault in the asking, which
+   * wants a retry rather than a report.
    *
    * @param member One member name, absent where the reference stops at the
    *   slug. A member's own fields are a cell path inside the piece it
    *   resolves to, never a second member name.
-   * @throws When the slug does not resolve, when the collection holds no
-   *   such member, or when what the reference reaches is not a piece.
+   * @throws When the asking itself fails — a transport that dropped, a
+   *   document that will not decode — or when the answer is neither a piece
+   *   nor a refusal.
    */
   async resolveSlug<T = unknown>(
     slug: string,
     space: DID,
     member?: string,
-  ): Promise<PieceHandle<T>> {
+  ): Promise<
+    | { piece: PieceHandle<T>; pathAfter: string[]; refusal?: undefined }
+    | { piece?: undefined; pathAfter?: undefined; refusal: SlugRefusal }
+  > {
     const response = await this.#conn.request<RequestType.SlugResolve>({
       type: RequestType.SlugResolve,
       slug,
@@ -757,7 +770,35 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       space,
     });
 
-    return new PieceHandle<T>(this, response.piece);
+    // The type makes a response carrying both arms unconstructable; a message
+    // off the wire is not type-checked, so the same exclusivity is asserted
+    // here rather than restated. Exactly one arm: both and neither are the
+    // same fault, and reading the refusal first would report either of them
+    // as an ordinary "no such member".
+    const landed = response.piece !== undefined;
+    const refused = response.refusal !== undefined;
+    if (landed === refused) {
+      throw new Error(
+        `Resolving the slug "${slug}" answered with ${
+          landed
+            ? "both a piece and a refusal"
+            : "neither a piece nor a refusal"
+        }.`,
+      );
+    }
+    if (response.refusal) return { refusal: response.refusal };
+    if (response.piece === undefined || response.pathAfter === undefined) {
+      // A landing is the piece AND what the walk did not spend. Defaulting
+      // the path would turn a truncated answer into "the member was spent",
+      // which is the fact a citation is offered on.
+      throw new Error(
+        `Resolving the slug "${slug}" answered with a piece and no path.`,
+      );
+    }
+    return {
+      piece: new PieceHandle<T>(this, response.piece),
+      pathAfter: response.pathAfter,
+    };
   }
 
   async removePiece(pieceId: string, space: DID): Promise<boolean> {
