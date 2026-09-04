@@ -22,6 +22,10 @@
     "one\ntwo\nthree",
     "one\ntwo\nthree\nfour\nfive\nsix\nseven",
   ],
+  "in an object": {
+    lines: "one\ntwo\nthree",
+    long: "x".repeat(250),
+  },
 }
 
 empty:
@@ -115,3 +119,13 @@ in an array:
     "five\n" +
     ... length: 33
 ]
+
+in an object:
+{lines:"one\ntwo\nthree",long:"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...
+{
+  lines: "one\n" +
+    "two\n" +
+    "three",
+  long: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" +
+    ... length: 250
+}

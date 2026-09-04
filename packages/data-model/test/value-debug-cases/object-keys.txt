@@ -1,31 +1,43 @@
 {
-  "keys of every kind": {
-    plain: 1,
-    _dollar$2: 2,
-    "my-key": 3,
-    "9x": 4,
-    "": 5,
+  "identifier keys": { plain: 1, _dollar$2: 2 },
+  "keys needing quotes": { "my-key": 3, "9x": 4, "": 5 },
+  "keys starting with a slash": {
     "/tagged": 6,
     "//doubled": 7,
     "/circle": 8,
     "/uniqueSymbol": 9,
     "/Error@1": 10,
-    constructor: 11,
   },
+  "unsafe key": { constructor: 11 },
 }
 
-keys of every kind:
-{plain:1,_dollar$2:2,"my-key":3,"9x":4,"":5,"/tagged":6,"//doubled":7,"/circle":8,"/uniqueSymbol"...
+identifier keys:
+{plain:1,_dollar$2:2}
 {
   plain: 1,
-  _dollar$2: 2,
+  _dollar$2: 2
+}
+
+keys needing quotes:
+{"my-key":3,"9x":4,"":5}
+{
   "my-key": 3,
   "9x": 4,
-  "": 5,
+  "": 5
+}
+
+keys starting with a slash:
+{"/tagged":6,"//doubled":7,"/circle":8,"/uniqueSymbol":9,"/Error@1":10}
+{
   "/tagged": 6,
   "//doubled": 7,
   "/circle": 8,
   "/uniqueSymbol": 9,
-  "/Error@1": 10,
+  "/Error@1": 10
+}
+
+unsafe key:
+{constructor:11}
+{
   constructor: 11
 }
