@@ -1336,15 +1336,19 @@ resolves into a piece rather than to one names a collection, and is refused the
 way a taken name is: it is an address a person opens. Any other failure refuses
 the call saying the availability could not be established, because reporting a
 storage error as a free name would write over whatever is there. That check is
-what stops a caller from taking over a name a person already opens: assigning a
-slug is a blind write, so without it a model naming `home` would repoint `home`
-at whatever it referenced. It is a check and not a lock — resolution and
-assignment are not atomic, so a slug that becomes taken in between is still
-overwritten — and it closes the case that arises rather than a race against a
-concurrent writer. A slug that already points at the very piece the token names
-answers `ok` rather than a refusal: the request is already true. `assign_slug`
-sets the address, not the title: what the piece list displays is the pattern's
-own `NAME` result, so a pattern that wants a title sets `NAME` in its source.
+what stops a caller from taking over a name a person already opens, and it is
+the narrower of the two rules in play: the assignment underneath refuses a name
+pointing anywhere at all, while this one competes only with pieces and
+collections, so a name whose document holds no usable redirect is free here and
+not there. The check's answer is carried into the write as the state to take the
+name from, not forced past the wider rule — forcing would spend the claim the
+assignment makes, and two calls that both read a name as free would both take
+it. Carried in, the write judges this rule against what it lands on, so a name
+bound between the check and the write is refused there instead. A slug that
+already points at the very piece the token names answers `ok` rather than a
+refusal: the request is already true. `assign_slug` sets the address, not the
+title: what the piece list displays is the pattern's own `NAME` result, so a
+pattern that wants a title sets `NAME` in its source.
 
 Every `run_pattern` invocation persists a piece in the configured space, named
 or not. A cancelled run stops its piece, but no piece is ever deleted, and each

@@ -2373,6 +2373,12 @@ export const piece = targetOptions(
     ),
     `Create a piece that can import from parent directories within ./patterns.`,
   )
+  .example(
+    cliText(
+      `cf piece new ${EX_ID} ${EX_COMP} ./main.tsx --slug project-notes --force`,
+    ),
+    `Create a piece and take "project-notes" from whatever it names now.`,
+  )
   .arguments("<main:string>")
   .option("--no-start", "Only set up the piece without starting it")
   .option(
@@ -2399,28 +2405,15 @@ export const piece = targetOptions(
   )
   .option("--slug <slug:string>", "Slug URL/address for this piece.")
   .option(
+    "--force",
+    "Take the slug even when it already points somewhere.",
+    { depends: ["slug"] },
+  )
+  .option(
     "--dangerously-allow-incompatible-schema",
     "Accepted for deploy-script symmetry; a new piece has no previous schema to compare.",
   )
-  .action(async (options, main) => {
-    setQuietMode(!!options.quiet);
-    const spaceConfig = parseSpaceOptions(options);
-    const pieceId = await newPiece(
-      spaceConfig,
-      localPatternEntry(main, options),
-      {
-        start: options.start,
-        slug: options.slug,
-      },
-    );
-    render(pieceId);
-    const browserPieceRef = options.slug ?? pieceId;
-    hint(cliText(`NEXT STEPS:
-  → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${browserPieceRef}
-  → Update code:     cf piece setsrc --cell ${pieceId} ${main} ...
-  → Test a callable: cf piece call --cell ${pieceId} <callableName> ...
-  → Inspect state:   cf piece inspect --cell ${pieceId} ...`));
-  })
+  .action(newPieceFromCommand)
   /* piece set-slug */
   .command(
     "set-slug",
@@ -2437,10 +2430,20 @@ export const piece = targetOptions(
     ),
     `Set slug "latest-note" to the cell currently resolved by "old-slug".`,
   )
+  .example(
+    cliText(
+      `cf piece set-slug ${EX_ID} ${EX_COMP} project-notes fid1:piece2 --force`,
+    ),
+    `Take "project-notes" from whatever it names now.`,
+  )
   .arguments("<slug:string> <source:string>")
   .option(
     "--resolve-before-linking",
     "Resolve the source cell before writing it as the slug redirect target.",
+  )
+  .option(
+    "--force",
+    "Take the name even when it already points somewhere.",
   )
   .action(async (options, slug, sourceRef) => {
     setQuietMode(!!options.quiet);
@@ -2455,6 +2458,7 @@ export const piece = targetOptions(
       {
         sourceScope: source.scope,
         resolveBeforeLinking: !!(options as any).resolveBeforeLinking,
+        force: !!(options as any).force,
       },
     );
     render(`Set slug ${slug} to ${sourceRef}`);
@@ -4784,6 +4788,44 @@ export async function restoreFromCommand(
         `--apply writes it`,
     );
   }
+}
+
+export interface NewPieceCommandDependencies {
+  newPiece?: typeof newPiece;
+}
+
+/**
+ * `cf piece new`'s action, as a function a test can call.
+ *
+ * The registration chain around it is not reachable from a test, so an action
+ * left inline is not either — and what this one decides is worth reaching:
+ * which options become the naming request `newPiece` receives, and that the
+ * address it points a reader at is the slug when there is one.
+ */
+export async function newPieceFromCommand(
+  // deno-lint-ignore no-explicit-any
+  options: any,
+  main: string,
+  deps: NewPieceCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const spaceConfig = parseSpaceOptions(options);
+  const pieceId = await (deps.newPiece ?? newPiece)(
+    spaceConfig,
+    localPatternEntry(main, options),
+    {
+      start: options.start,
+      slug: options.slug,
+      force: !!options.force,
+    },
+  );
+  render(pieceId);
+  const browserPieceRef = options.slug ?? pieceId;
+  hint(cliText(`NEXT STEPS:
+  → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${browserPieceRef}
+  → Update code:     cf piece setsrc --cell ${pieceId} ${main} ...
+  → Test a callable: cf piece call --cell ${pieceId} <callableName> ...
+  → Inspect state:   cf piece inspect --cell ${pieceId} ...`));
 }
 
 export interface SlugListCommandDependencies {

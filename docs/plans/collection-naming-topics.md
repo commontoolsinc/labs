@@ -14,11 +14,11 @@ This block is LIVE: the change that moves a stage updates it here.
 | --- | --- |
 | S0 — decisions ruled, plan filed | on main (#6882) |
 | S1 — the library and the exemplar board own a member namespace | on main (#6882) |
-| S1b — index rows are the members | built, in review |
-| S2 — `top/42` resolves at the CLI | built, in review |
-| S2b — assignment refuses by default | not started |
-| S3 — the shell opens `/<space>/top/42` | not started |
-| S4 — `#42` in text | building |
+| S1b — index rows are the members | on main (#6886) |
+| S2 — `top/42` resolves at the CLI | on main (#6890) |
+| S2b — assignment refuses by default | built, in review (#6898) |
+| S3 — the shell opens `/<space>/top/42` | built, in review (#6896) |
+| S4 — `#42` in text | on main (#6887) |
 | S6 — graft onto Topics | not started; Mike's call after S4 |
 | S5 — deferred, not scheduled | — |
 
@@ -170,11 +170,44 @@ Demo: `cf cell get //<space>/top/2 title` on the local exemplar board.
 The first half of the spec's step 2.
 
 1. `set-slug` on a bound name refuses and names the current target; `--force`
-   steals. The check is a claim inside the transaction: a test with two
-   writers has exactly one win.
+   steals — every bound name, including one whose value is a link cycle,
+   which is the state an operator forces to escape. That last case rests on
+   the redirect write carrying a schema: a write handle with none resolves
+   the value it is about to replace to find one, and resolving a cycle
+   throws. The schema names nothing to follow, so the write pulls the one
+   document it writes, and only the redirect write carries it.
+
+   The check is a claim inside the transaction: a test with two writers has
+   exactly one win. Recorded, after three attempts to describe the
+   interleaving a one-runtime test achieves: it does not pin one, and the
+   paragraph should not claim one. Two things are true and both are tested.
+   The single-runtime test asserts the outcome — two assignments of one free
+   name leave exactly one holder — and its assertions hold however the two
+   were ordered. The racing path is a runtime guarantee, pinned by the
+   cross-session pair: the claim's read joins the commit's read set, so a
+   commit another writer overtakes is rejected and `editWithRetry` re-runs
+   the body against what that writer left, which then declines. That is the
+   shape `packages/runner/src/ensure-space-root.ts` states for the space
+   root.
 2. Whether a synced read inside `editWithRetry` becomes a commit precondition
    is settled by that test and recorded in the spec's open-questions list.
-3. `--force` has a completion slot and a README sentence.
+3. `--force` has a completion slot and a README sentence, on both commands
+   that assign a name: `set-slug` and `piece new --slug`.
+4. A caller whose own rule about a free name is wider than the library's
+   carries that rule's answer into the transaction as `takeFrom` rather than
+   forcing over what it read. Forcing after a standalone read spends the
+   claim — two callers that both read a name as free would both take it — so
+   the rule and the claim are held at once, and two concurrent callers still
+   end with one holder whichever notion of free they hold.
+
+What a forced reassignment leaves behind. Taking a name now clears the `slug`
+entry from the document it takes it from, in the transaction that writes the
+new redirect, so no piece is left claiming a name it no longer holds. What
+remains is structural and still step 1's: the entry is single-valued, so a
+document reachable under two names only ever claims the later one, and a name
+pointing inside a piece stamps no entry at all, which leaves a
+collection-targeted name absent from the reverse map. S3 renders URLs from
+that map, so those two shape what it can say about a member.
 
 ### S3 — The shell opens `/<space>/top/42`
 

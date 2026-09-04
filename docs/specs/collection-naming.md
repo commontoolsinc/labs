@@ -494,23 +494,33 @@ and read by `handlePieceGetSlug`
 (`packages/runtime-client/backends/runtime-processor.ts`); the shell rewrites a
 visited identity URL to that name. One slot cannot hold both a member name and a
 space-level name, so the canonical URL becomes whichever was written last. Two
-further gaps close here: the entry is never cleared from a previous target when
-a name is retargeted, and `setPieceSlug` writes target metadata only for piece
-roots, so a collection-targeted name has no reverse entry at all. The map needs
-a structured form that distinguishes the two and designates one as canonical.
+further gaps were to close here, and one of them has closed ahead of this
+step: an assignment clears the `slug` entry from the holder it takes a name
+from, in the transaction that writes the new redirect, so a retarget no longer
+leaves a document claiming a name it has lost (step 2). The other remains —
+`setPieceSlug` writes target metadata only for piece roots, so a
+collection-targeted name has no reverse entry at all. The map needs a
+structured form that distinguishes the two and designates one as canonical.
 **This is a prerequisite: giving collections member names before it lands makes
 URL rewriting nondeterministic.**
 
-**2. Make name assignment refuse by default.** `setSlugLink` does not read the
-slug cell before writing it, so assigning an assigned name overwrites it
-silently. Sync the cell, read it inside the transaction, refuse when it is
-already bound, and take an explicit flag to steal. `editWithRetry` re-runs its
-body on a retryable rejection, so the check is a claim rather than a
-time-of-check race. Confirm that a synced read inside the transaction becomes a
-commit precondition before relying on it.
+**2. Make name assignment refuse by default.** Two halves, and only the first
+has landed.
 
-The same write path needs a **cross-space target**, which personal bindings
-depend on entirely: a binding lives in the reader's home space and points at a
+Landed: `setSlugLink` (`packages/piece/src/slugs.ts`) syncs the name and reads
+it inside the transaction it commits in, refusing a name pointing anywhere but
+where the caller said to take it from, and taking it under an explicit flag.
+Taking a name clears the `slug` entry from the document root it takes it from,
+in the same transaction. A caller whose own rule about a free name is wider
+than this one's — the harness tool's is, counting a name that resolves to no
+piece as free — carries that rule's answer in as the state to take from, so
+the rule is judged against what the write lands on rather than against a read
+the write has outlived. The read is a commit precondition, which is what makes
+the refusal a claim rather than a time-of-check race; the evidence is under
+"Settled" below.
+
+Still to build: a **cross-space target**, which personal bindings depend on
+entirely: a binding lives in the reader's home space and points at a
 collection in someone else's. `setPieceSlug` builds its target cell in the space
 it was configured with and drops the space an LLM-friendly reference carries, so
 a target outside that space cannot be written today. Resolution already handles
@@ -568,6 +578,23 @@ document settles are worth carrying over rather than re-deciding: a reference's
 visible label and its citation spelling are different, and a label that a person
 has edited stops tracking the destination's name.
 
+## Settled
+
+A question this document once recorded as open, kept here with what answered
+it so that a later reader finds the decision rather than re-opening it.
+
+**Whether a synced read inside an `editWithRetry` body becomes a commit
+precondition**, which is what step 2 rests on. Answered yes, 2026-09-04, and
+the answer is the read's alone rather than the surrounding write's. Two
+sessions over one memory server with fan-out held: the second loads a slug
+document, the first rewrites it, and the second then reads that document and
+writes a different one. Its commit is rejected `ConflictError`; the identical
+write with the read removed commits. That rejection is in the retryable class,
+so `editWithRetry` catches up and re-runs the body, which is what makes a
+read-then-refuse a claim rather than a time-of-check race.
+`packages/piece/test/slug.test.ts` holds the pair that differs in the read
+alone.
+
 ## Deliberately open
 
 Recorded rather than settled, so that a later answer is a decision and not a
@@ -575,9 +602,7 @@ discovery. Five of these block work rather than merely awaiting it, and a plan
 should sequence around them: the sigil question and the renderer's preference
 order both block step 5 outright, a machine-readable policy is what the
 consumer rules in Part 1 rest on, the collection-scope claim path is part of
-step 3, and sibling bindings decide the second rung of the resolver. Step 2
-names a sixth in its own text, the commit precondition it asks to be confirmed
-first.
+step 3, and sibling bindings decide the second rung of the resolver.
 
 **A qualifier for revision, time, or branch.** No slot is reserved for naming a
 thing *as of* something, and this is not hypothetical: memory carries causal
@@ -615,9 +640,6 @@ publishes one — `NamingDeclaration` in
 `packages/patterns/collection-naming/naming.ts`, ruled 2026-09-03 in
 `docs/plans/collection-naming-topics.md` (decision 7) — and whether that shape
 becomes the standard every collection declares is what remains open.
-
-**Whether a synced read inside an `editWithRetry` body becomes a commit
-precondition**, which is what step 2 rests on.
 
 **Whether a collection accepting names from people** reuses the space-level
 claim path or needs its own.

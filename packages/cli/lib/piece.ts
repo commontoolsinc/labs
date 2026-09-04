@@ -26,6 +26,7 @@ import {
   resolveSlugTarget,
   resolveSlugTargetCell,
   setSlugLink,
+  SlugAssignedError,
   SlugResolutionError,
 } from "@commonfabric/piece";
 import {
@@ -1519,11 +1520,18 @@ export async function resolveLinkEndpointAddress(
   }
 }
 
-// Creates a new piece from source code and optional input.
+/**
+ * Creates a new piece from source code and optional input.
+ *
+ * A `slug` that already points somewhere is refused the way `set-slug`
+ * refuses one, and `force` takes it. The refusal arrives after the piece
+ * exists, so it names the piece as well as the flag: an operator who meant to
+ * repoint has an id to name, and one who did not has a piece to find.
+ */
 export async function newPiece(
   config: SpaceConfig,
   entry: EntryConfig,
-  options?: { start?: boolean; slug?: string },
+  options?: { start?: boolean; slug?: string; force?: boolean },
   deps: PieceOperationDependencies = {},
 ): Promise<string> {
   const pieces = await timeCliPhase(
@@ -1602,10 +1610,25 @@ export async function newPiece(
   noteWroteTo(config.space);
 
   if (options?.slug) {
-    await timeCliPhase(
-      "newPiece.assignSlug",
-      () => assignSlug(pieces, piece.getCell(), options.slug!),
-    );
+    try {
+      await timeCliPhase(
+        "newPiece.assignSlug",
+        () =>
+          assignSlug(pieces, piece.getCell(), options.slug!, {
+            force: options.force,
+          }),
+      );
+    } catch (error) {
+      if (error instanceof SlugAssignedError) {
+        throw new SlugAssignedError(
+          error.slug,
+          error.target,
+          `Pass \`--force\` to take it anyway. The piece was created as ` +
+            `${piece.id} and carries no name.`,
+        );
+      }
+      throw error;
+    }
   }
 
   // Explicitly add the piece to the space's registry.
@@ -1617,6 +1640,14 @@ export async function newPiece(
   return piece.id;
 }
 
+/**
+ * Points `slug` at the cell an address and the path after it name.
+ *
+ * A name already pointing somewhere is refused, naming what it points at, so
+ * that a slug someone opens is never taken by accident; `force` takes it. The
+ * refusal names the flag, because the remedy is the CLI's rather than the
+ * library's.
+ */
 export async function setPieceSlug(
   config: SpaceConfig,
   slug: string,
@@ -1625,6 +1656,7 @@ export async function setPieceSlug(
   options?: {
     sourceScope?: PieceConfig["pieceScope"];
     resolveBeforeLinking?: boolean;
+    force?: boolean;
   },
   deps: PieceResolutionDeps = {},
 ): Promise<void> {
@@ -1640,14 +1672,31 @@ export async function setPieceSlug(
     deps,
   );
   await timeCliPhase("setPieceSlug.source.sync", () => source.sync());
-  await timeCliPhase(
-    "setPieceSlug.setSlugLink",
-    () =>
-      setSlugLink(pieces, slug, source, {
-        resolveBeforeLinking: options?.resolveBeforeLinking,
-        writeTargetMetadata: source.getAsNormalizedFullLink().path.length === 0,
-      }),
-  );
+  try {
+    await timeCliPhase(
+      "setPieceSlug.setSlugLink",
+      () =>
+        setSlugLink(pieces, slug, source, {
+          resolveBeforeLinking: options?.resolveBeforeLinking,
+          writeTargetMetadata:
+            source.getAsNormalizedFullLink().path.length === 0,
+          force: options?.force,
+        }),
+    );
+  } catch (error) {
+    // Rethrown rather than wrapped: the name being taken is a fact about the
+    // space rather than a mistake in the line, and the same class carries it
+    // to the top level, where it prints its message and no usage page.
+    if (error instanceof SlugAssignedError) {
+      throw new SlugAssignedError(
+        error.slug,
+        error.target,
+        `Pass \`--force\` to take it anyway; that target is what to point ` +
+          `it back at afterwards.`,
+      );
+    }
+    throw error;
+  }
   noteWroteTo(config.space);
 }
 

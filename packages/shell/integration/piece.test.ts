@@ -22,6 +22,8 @@ async function runCfPieceNewWithSlug(options: {
   sourcePath: string;
   identityPath: string;
   slug: string;
+  /** Take a name that already points somewhere, which `cf` refuses without. */
+  force?: boolean;
 }): Promise<string> {
   const command = new Deno.Command(Deno.execPath(), {
     cwd: REPO_ROOT,
@@ -40,6 +42,7 @@ async function runCfPieceNewWithSlug(options: {
       SPACE_NAME,
       "--slug",
       options.slug,
+      ...(options.force ? ["--force"] : []),
     ],
     env: {
       CF_LOG_LEVEL: "error",
@@ -404,10 +407,13 @@ describe("shell piece tests", () => {
       identity,
     });
 
+    // Repointing is what this test is about, and taking a name that already
+    // points somewhere is what `--force` is for.
     const secondPieceId = await runCfPieceNewWithSlug({
       sourcePath: secondSource,
       identityPath,
       slug,
+      force: true,
     });
     expect(secondPieceId).not.toBe(firstPieceId);
 

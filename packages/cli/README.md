@@ -362,6 +362,19 @@ scope of the cell it points at. `--resolve-before-linking` resolves the source
 cell's link before writing, so the new slug points at what the source's cell
 points at rather than at the cell.
 
+A name that already points somewhere is refused, and the refusal names what it
+points at, so the address someone opens is never taken by accident and the
+caller can see what taking it would cost. `--force` takes it anyway, and clears
+the name from the piece it takes it from, so no piece is left claiming a name it
+no longer holds. The check is a claim rather than a look: the name is read
+inside the transaction the assignment commits in, so two runs claiming one free
+name end with one holder rather than with whichever committed last.
+
+`cf piece new --slug` assigns through the same claim and refuses the same way,
+naming the piece it just created so an operator can name it another way. Its
+`--force` takes the name and is accepted only alongside `--slug`, which is the
+only thing it applies to.
+
 `cf piece search` also starts from the registry. It searches readable input and
 result data, but returns registered pieces only. `cf piece map` likewise shows
 connections among registered pieces rather than walking the complete stored

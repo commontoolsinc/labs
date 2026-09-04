@@ -38,7 +38,7 @@ export class SlugResolutionError extends Error {
  * for every cell in a piece's document whatever its path; {@link isPieceRoot}
  * is the test for the piece itself.
  */
-function isPieceDocument(
+export function isPieceDocument(
   runtime: Runtime,
   cell: Cell<unknown>,
 ): boolean {
@@ -243,7 +243,12 @@ export async function resolveSlugTargetCell(
  * this runtime's own write path rejects such values, but a slug cell can be
  * written by foreign clients over the memory protocol, so the resolver must
  * fold a parse throw into the same typed "malformed" outcome as a
- * structurally-invalid payload. Exported for tests.
+ * structurally-invalid payload.
+ *
+ * The one question about what a name holds, so a reader and a writer cannot
+ * disagree about it: `packages/piece/src/slugs.ts` asks it before assigning,
+ * and would otherwise let a payload this resolver reports as malformed throw
+ * out of an assignment instead.
  */
 export function parseSlugRedirect(raw: unknown, base: Cell<unknown>) {
   try {

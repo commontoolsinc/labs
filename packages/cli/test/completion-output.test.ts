@@ -69,6 +69,14 @@ Deno.test("pre-parse globals are offered even though they are not in the tree", 
   assert(values.includes("--no-color"));
 });
 
+Deno.test("both commands that assign a slug offer the flag that takes a bound name", () => {
+  // A boolean flag declares no value, so the completion-slot gate has nothing
+  // to require of it; that the name reaches the prompt is what this asserts,
+  // on both doors into slug assignment.
+  assert(staticFor("cf piece set-slug top --").includes("--force"));
+  assert(staticFor("cf piece new --").includes("--force"));
+});
+
 Deno.test("an option already supplied is not offered again", () => {
   const values = staticFor("cf piece ls --space team --");
   assertFalse(values.includes("--space"));

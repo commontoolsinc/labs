@@ -4,24 +4,32 @@ import { createSession, Identity } from "@commonfabric/identity";
 import {
   type Cell,
   entityIdFrom,
+  type MemorySpace,
   Runtime,
   type URI,
 } from "@commonfabric/runner";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  EmulatedStorageManager,
+  newLoopbackServer,
+  StorageManager,
+} from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../../runner/src/builder/factory.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
-import { slugIdForSpace } from "../../runner/src/slugs.ts";
+import { slugIdForSpace, slugIndexIdForSpace } from "../../runner/src/slugs.ts";
 import { pieceId } from "../src/piece-id.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 import {
   assignSlug,
   listSlugs,
+  readSlugBinding,
   resolvePieceAddress,
   resolvePieceReference,
   resolveSlugTarget,
   resolveSlugTargetCell,
   setSlugLink,
+  SlugAssignedError,
+  SlugReleasedError,
   SlugResolutionError,
 } from "../src/slugs.ts";
 
@@ -57,6 +65,11 @@ describe("piece slugs", () => {
       { value },
     ) => ({ value }));
     return await pieces.runPersistent(piecePattern, { value: 1 }, cause);
+  }
+
+  /** What `work` rejected with, or `undefined` when it resolved. */
+  async function failureOf(work: Promise<unknown>): Promise<unknown> {
+    return await work.then(() => undefined, (error: unknown) => error);
   }
 
   function readRootMeta(id: string, key: string): unknown {
@@ -129,7 +142,7 @@ describe("piece slugs", () => {
     await assignSlug(pieces, piece, "board");
     await setSlugLink(pieces, "tracker", other);
     // Repointing a name changes where it resolves, never how it is listed.
-    await setSlugLink(pieces, "board", other);
+    await setSlugLink(pieces, "board", other, { force: true });
 
     expect(await listSlugs(pieces)).toEqual(["board", "tracker"]);
     expect(await resolvePieceAddress(pieces, "board")).toBe(pieceId(other)!);
@@ -280,14 +293,358 @@ describe("piece slugs", () => {
     );
   });
 
-  it("overwrites an existing slug redirect", async () => {
-    const first = await createPiece("slug-first");
-    const second = await createPiece("slug-second");
+  it("refuses a name that is already bound, naming what it points at", async () => {
+    const held = await createPiece("slug-held");
+    const taking = await createPiece("slug-taking");
+    await assignSlug(pieces, held, "demo");
 
+    const failure = await failureOf(setSlugLink(pieces, "demo", taking));
+
+    expect(failure).toBeInstanceOf(SlugAssignedError);
+    const refusal = failure as SlugAssignedError;
+    expect(refusal.slug).toBe("demo");
+    // The target is a reference the caller can read and write back, so the
+    // refusal says what taking the name would have cost.
+    expect(refusal.target).toBe(
+      `/${held.getAsNormalizedFullLink().id}`,
+    );
+    expect(refusal.message).toContain(refusal.target);
+    // The name still points where it did: the refusal protected the address
+    // rather than merely reporting on it.
+    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(held));
+  });
+
+  it("takes a bound name when the caller forces it", async () => {
+    const held = await createPiece("slug-held");
+    const taking = await createPiece("slug-taking");
+    await assignSlug(pieces, held, "demo");
+
+    await assignSlug(pieces, taking, "demo", { force: true });
+
+    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(taking));
+  });
+
+  it("clears the name from the holder a forced assignment takes it from", async () => {
+    const held = await createPiece("slug-held");
+    const taking = await createPiece("slug-taking");
+    await assignSlug(pieces, held, "demo");
+    expect(readRootMeta(pieceId(held)!, "slug")).toBe("demo");
+
+    await assignSlug(pieces, taking, "demo", { force: true });
+
+    // Both sides, because a test of the new side alone passes against a
+    // system that never clears the old one.
+    expect(readRootMeta(pieceId(taking)!, "slug")).toBe("demo");
+    expect(readRootMeta(pieceId(held)!, "slug")).toBeUndefined();
+  });
+
+  it("clears the name from a holder reached through a redirect with a path", async () => {
+    // The stamp lands on the RESOLVED root, so the clear has to ask the same
+    // question of the old holder. A stored redirect carrying a path can still
+    // resolve to a root: reading the path off the redirect answers about the
+    // redirect, and the root it reaches keeps the name it no longer holds —
+    // two roots stamped `demo`, which is the state the reverse map cannot
+    // represent.
+    const output = runtime.getCell(
+      pieces.getSpace(),
+      { space: pieces.getSpace(), random: "redirect-output" },
+    );
+    const intermediate = runtime.getCell(
+      pieces.getSpace(),
+      { space: pieces.getSpace(), random: "redirect-intermediate" },
+    );
+    await runtime.editWithRetry((tx) => {
+      output.withTx(tx).set({ value: 1 });
+      intermediate.withTx(tx).key("child").setRawUntyped(
+        output.withTx(tx).getAsWriteRedirectLink({
+          base: intermediate.withTx(tx).key("child"),
+        }),
+      );
+    });
+    const outputId = String(output.getAsNormalizedFullLink().id)
+      .replace(/^of:/, "");
+    await setSlugLink(pieces, "demo", intermediate.key("child"), {
+      writeTargetMetadata: true,
+    });
+    expect(readRootMeta(outputId, "slug")).toBe("demo");
+    const taking = await createPiece("slug-taking");
+
+    await assignSlug(pieces, taking, "demo", { force: true });
+
+    expect(readRootMeta(pieceId(taking)!, "slug")).toBe("demo");
+    expect(readRootMeta(outputId, "slug")).toBeUndefined();
+  });
+
+  it("leaves a holder's own name alone when the name taken from it is another", async () => {
+    // The entry is single-valued, so the last name assigned is the one the
+    // root claims. Taking `demo` back must not drop the claim to `latest`,
+    // which is a different name that still resolves here.
+    const held = await createPiece("slug-held");
+    const taking = await createPiece("slug-taking");
+    await assignSlug(pieces, held, "demo");
+    await assignSlug(pieces, held, "latest");
+    expect(readRootMeta(pieceId(held)!, "slug")).toBe("latest");
+
+    await assignSlug(pieces, taking, "demo", { force: true });
+
+    expect(readRootMeta(pieceId(held)!, "slug")).toBe("latest");
+  });
+
+  it("takes a name still pointing where the caller last read it", async () => {
+    // A caller whose own rule calls this state free carries that answer in
+    // rather than forcing over whatever is there.
+    const held = await createPiece("slug-held");
+    const taking = await createPiece("slug-taking");
+    await assignSlug(pieces, held, "demo");
+
+    const seen = await readSlugBinding(pieces, "demo");
+    await assignSlug(pieces, taking, "demo", { takeFrom: seen });
+
+    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(taking));
+  });
+
+  it("refuses a name that moved since the caller read it, naming where it went", async () => {
+    const first = await createPiece("slug-first");
+    const moved = await createPiece("slug-moved");
+    const taking = await createPiece("slug-taking");
     await assignSlug(pieces, first, "demo");
-    await assignSlug(pieces, second, "demo");
+    const seen = await readSlugBinding(pieces, "demo");
+    // Somebody else takes the name between the caller's read and its write.
+    await assignSlug(pieces, moved, "demo", { force: true });
+
+    const failure = await failureOf(
+      assignSlug(pieces, taking, "demo", { takeFrom: seen }),
+    );
+
+    expect(failure).toBeInstanceOf(SlugAssignedError);
+    expect((failure as SlugAssignedError).target).toBe(
+      `/${moved.getAsNormalizedFullLink().id}`,
+    );
+    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(moved));
+  });
+
+  it("refuses a name the caller named a target for that now points nowhere", async () => {
+    // The fifth state of the claim, and the one an extra clause used to let
+    // through: `takeFrom` says commit only while the name points at that
+    // target, and a name pointing NOWHERE is not that target. A caller that
+    // named none is asking for a free name and gets one — the tests above —
+    // so nothing about the default rests on this.
+    const taking = await createPiece("slug-taking");
+    const elsewhere = await createPiece("slug-elsewhere");
+    const gone = `/${elsewhere.getAsNormalizedFullLink().id}`;
+
+    const failure = await failureOf(
+      assignSlug(pieces, taking, "demo", { takeFrom: gone }),
+    );
+
+    expect(failure).toBeInstanceOf(SlugReleasedError);
+    // Both halves of what a caller acts on: which name to read again, and
+    // the target its rule was about.
+    expect((failure as SlugReleasedError).slug).toBe("demo");
+    expect((failure as SlugReleasedError).expected).toBe(gone);
+    // Refused, so the name was not written: the caller's rule was about a
+    // target that is not there, and taking it anyway is what it excluded.
+    await expect(resolvePieceAddress(pieces, "demo")).rejects.toThrow(
+      /Slug "demo" not found/,
+    );
+  });
+
+  it("assigns over a name whose document holds a payload no redirect can be read from", async () => {
+    // A slug document can be written by a foreign client over the memory
+    // protocol, and this runtime's own write path rejects such a value — so
+    // the read is where one has to be presented. `parseSlugRedirect` folds a
+    // sigil-shaped payload with broken internals into the same "points
+    // nowhere" the resolver reports as malformed; reading it any other way
+    // throws out of an assignment over a name nothing resolves through.
+    const piece = await createPiece("malformed-target");
+    const slugEntity = JSON.stringify(
+      entityIdFrom(slugIdForSpace(pieces.getSpace(), "demo")),
+    );
+    const poisoned = {
+      "/": {
+        "link@1": {
+          id: "of:fid1:whatever",
+          path: "not-an-array",
+          overwrite: "redirect",
+        },
+      },
+    };
+    const poison = (cell: Cell<unknown>): Cell<unknown> =>
+      new Proxy(cell, {
+        get(target, property) {
+          if (property === "getRaw") return () => poisoned;
+          if (property === "withTx") {
+            return (tx: unknown) =>
+              poison(
+                (target.withTx as (tx: unknown) => Cell<unknown>)(tx),
+              );
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    const originalGetCell = runtime.getCellFromEntityId.bind(runtime);
+    runtime.getCellFromEntityId = ((
+      ...args: Parameters<Runtime["getCellFromEntityId"]>
+    ) => {
+      const cell = originalGetCell(...args);
+      return JSON.stringify(args[1]) === slugEntity ? poison(cell) : cell;
+    }) as Runtime["getCellFromEntityId"];
+
+    try {
+      await assignSlug(pieces, piece, "demo");
+    } finally {
+      runtime.getCellFromEntityId = originalGetCell;
+    }
+
+    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(piece));
+  });
+
+  it("refuses when the target the caller judged free has become a piece", async () => {
+    // The rule a `takeFrom` caller applies can read the TARGET — the harness
+    // calls a name free when it resolves to no piece — and the redirect does
+    // not change when the target becomes one. A claim over the pointer alone
+    // would match and repoint a name that now names a piece, which is the
+    // race this whole guard exists to close, one level down.
+    const plain = runtime.getCell(
+      pieces.getSpace(),
+      { space: pieces.getSpace(), random: "becomes-a-piece" },
+    );
+    await runtime.editWithRetry((tx) => {
+      plain.withTx(tx).set({ value: 1 });
+    });
+    await setSlugLink(pieces, "demo", plain);
+    const seen = await readSlugBinding(pieces, "demo");
+    // The target gains a pattern identity, so the same redirect now names a
+    // piece and the caller's rule would no longer call the name free.
+    await runtime.editWithRetry((tx) => {
+      plain.withTx(tx).setMetaRaw(
+        "patternIdentity",
+        { identity: "pattern-late", symbol: "default" },
+        rawMetaWriteAuthorization,
+      );
+    });
+    const taking = await createPiece("slug-taking");
+
+    const failure = await failureOf(
+      assignSlug(pieces, taking, "demo", { takeFrom: seen }),
+    );
+
+    expect(failure).toBeInstanceOf(SlugAssignedError);
+    expect(await resolveSlugTarget(pieces, "demo")).toEqual({
+      piece: String(plain.getAsNormalizedFullLink().id).replace(/^of:/, ""),
+      pathInside: [],
+    });
+  });
+
+  it("takes a name whose value is a link cycle, which is what forcing is for", async () => {
+    // The state an operator forces to escape. Two things have to hold at
+    // once: the write must land on a name whose own value cycles, and the
+    // cleanup that rides along must not resolve that cycle and throw — an
+    // old target that will not resolve has no root carrying the name, which
+    // is nothing to clear rather than a reason to refuse. Both shapes,
+    // because a self-cycle is the one an assignment can point a name at and
+    // a two-step cycle is the one two of them can.
+    const slugCell = runtime.getCellFromEntityId(
+      pieces.getSpace(),
+      entityIdFrom(slugIdForSpace(pieces.getSpace(), "demo")),
+    );
+    await runtime.editWithRetry((tx) => {
+      const cell = slugCell.withTx(tx);
+      cell.setRawUntyped(cell.getAsWriteRedirectLink({ base: cell }));
+    });
+    const first = await createPiece("cycle-first");
+
+    await assignSlug(pieces, first, "demo", { force: true });
+
+    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(first));
+
+    const left = runtime.getCell(
+      pieces.getSpace(),
+      { space: pieces.getSpace(), random: "cycle-left" },
+    );
+    const right = runtime.getCell(
+      pieces.getSpace(),
+      { space: pieces.getSpace(), random: "cycle-right" },
+    );
+    await runtime.editWithRetry((tx) => {
+      left.withTx(tx).setRawUntyped(
+        right.withTx(tx).getAsWriteRedirectLink({ base: left.withTx(tx) }),
+      );
+      right.withTx(tx).setRawUntyped(
+        left.withTx(tx).getAsWriteRedirectLink({ base: right.withTx(tx) }),
+      );
+      slugCell.withTx(tx).setRawUntyped(
+        left.withTx(tx).getAsWriteRedirectLink({ base: slugCell.withTx(tx) }),
+      );
+    });
+    const second = await createPiece("cycle-second");
+
+    await assignSlug(pieces, second, "demo", { force: true });
 
     expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(second));
+  });
+
+  it("reads a name whose target is a redirect cycle as its own state", async () => {
+    // A cycle is a state a caller's rule has to be able to hold an opinion
+    // about, so the claim records it rather than throwing out of the read.
+    // It compares like any other: a name stops resolving nowhere only by
+    // being written.
+    const slugCell = runtime.getCellFromEntityId(
+      pieces.getSpace(),
+      entityIdFrom(slugIdForSpace(pieces.getSpace(), "demo")),
+    );
+    await runtime.editWithRetry((tx) => {
+      const cell = slugCell.withTx(tx);
+      cell.setRawUntyped(cell.getAsWriteRedirectLink({ base: cell }));
+    });
+
+    const seen = await readSlugBinding(pieces, "demo");
+
+    expect(seen).toContain("unresolvable");
+  });
+
+  it("gives one name to the first of two assignments and refuses the second", async () => {
+    // Two assignments of one free name, started together and settling one
+    // after the other. What this asserts is the outcome — exactly one writer
+    // takes the name — and nothing about the interleaving: the assertions
+    // hold whether the two overlapped or ran in sequence, so the test does
+    // not establish which, and no comment here should claim one.
+    //
+    // What the runtime guarantees is separate and stated where it is pinned:
+    // the claim's read joins the commit's read set, so a commit racing
+    // another is rejected and the body re-runs against the new holder and
+    // then declines. The pair under "the read a refusal claims on" below is
+    // what establishes that read, over two sessions where the losing
+    // replica is provably behind.
+    //
+    // The two targets differ, so a guard that let both through would leave
+    // the loser's target standing, which the last assertion would see.
+    const first = await createPiece("slug-race-first");
+    const second = await createPiece("slug-race-second");
+    expect(pieceId(first)).not.toBe(pieceId(second));
+
+    const outcomes = await Promise.all([
+      failureOf(setSlugLink(pieces, "contested", first)),
+      failureOf(setSlugLink(pieces, "contested", second)),
+    ]);
+
+    const [winner, loser] = outcomes[0] === undefined
+      ? [first, second]
+      : [second, first];
+    expect(outcomes.filter((outcome) => outcome === undefined)).toHaveLength(1);
+    const refusal = outcomes.find((outcome) => outcome !== undefined);
+    expect(refusal).toBeInstanceOf(SlugAssignedError);
+    // The refusal names the holder the loser lost to, not its own target.
+    expect((refusal as SlugAssignedError).target).toBe(
+      `/${winner.getAsNormalizedFullLink().id}`,
+    );
+    expect(await resolvePieceAddress(pieces, "contested")).toBe(
+      pieceId(winner),
+    );
+    expect(await resolvePieceAddress(pieces, "contested")).not.toBe(
+      pieceId(loser),
+    );
   });
 
   it("reports missing and malformed slug documents", async () => {
@@ -319,10 +676,6 @@ describe("piece slugs", () => {
     let boardId: string;
     let item1: Cell<unknown>;
     let item2: Cell<unknown>;
-
-    async function failureOf(work: Promise<unknown>): Promise<unknown> {
-      return await work.then(() => undefined, (error: unknown) => error);
-    }
 
     beforeEach(async () => {
       item1 = await createPiece("member-1");
@@ -429,6 +782,106 @@ describe("piece slugs", () => {
         expect(error).toBeInstanceOf(SlugResolutionError);
         expect((error as SlugResolutionError).code).toBe("not-piece");
       });
+    });
+  });
+  describe("the read a refusal claims on", () => {
+    // What `setSlugLink`'s refusal rests on: whether reading the name inside
+    // the transaction puts it in the commit's read set, so that binding the
+    // name under an assignment rejects the assignment instead of letting it
+    // write over the new holder.
+    //
+    // Two sessions on one server with fan-out held manual, so a stale basis
+    // is a gated state rather than a timing accident. The write under test
+    // lands on the slug INDEX, a different document from the slug the body
+    // reads, so nothing but the read can carry a conflict — the pair of
+    // tests differs in the read alone.
+
+    let server: ReturnType<typeof newLoopbackServer>;
+    let holderStorage: EmulatedStorageManager;
+    let holderRuntime: Runtime;
+    let takerStorage: EmulatedStorageManager;
+    let takerRuntime: Runtime;
+    let space: MemorySpace;
+    let slugCellId: string;
+
+    /** A cell in the shared space, addressed the same way from either side. */
+    function cellOf(runtime: Runtime, id: string) {
+      return runtime.getCellFromEntityId(space, entityIdFrom(id));
+    }
+
+    beforeEach(async () => {
+      server = newLoopbackServer({ subscriptionRefreshDelayMs: "manual" });
+      holderStorage = EmulatedStorageManager.connectTo(server, { as: signer });
+      holderRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: holderStorage,
+      });
+      takerStorage = EmulatedStorageManager.connectTo(server, { as: signer });
+      takerRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: takerStorage,
+      });
+      space = signer.did() as MemorySpace;
+      slugCellId = slugIdForSpace(space, "contested");
+
+      // The name starts bound to the first target, and both sessions hold
+      // that basis.
+      const first = holderRuntime.getCell(space, "contested-first");
+      const seed = holderRuntime.edit();
+      cellOf(holderRuntime, slugCellId).withTx(seed).setRawUntyped(
+        first.withTx(seed).getAsWriteRedirectLink({
+          base: cellOf(holderRuntime, slugCellId).withTx(seed),
+        }),
+      );
+      await seed.commit({ resolveAt: "verdict" });
+      await holderRuntime.storageManager.synced();
+      await cellOf(takerRuntime, slugCellId).sync();
+      await cellOf(takerRuntime, slugCellId).pull();
+      await cellOf(takerRuntime, slugIndexIdForSpace(space)).sync();
+
+      // The holder rebinds the name. The taker's basis is now behind, and
+      // the held fan-out keeps it there.
+      const second = holderRuntime.getCell(space, "contested-second");
+      const rebind = holderRuntime.edit();
+      cellOf(holderRuntime, slugCellId).withTx(rebind).setRawUntyped(
+        second.withTx(rebind).getAsWriteRedirectLink({
+          base: cellOf(holderRuntime, slugCellId).withTx(rebind),
+        }),
+      );
+      await rebind.commit({ resolveAt: "verdict" });
+      await holderRuntime.storageManager.synced();
+    });
+
+    afterEach(async () => {
+      await takerRuntime?.dispose();
+      await holderRuntime?.dispose();
+      await takerStorage?.close();
+      await holderStorage?.close();
+      await server?.close();
+    });
+
+    /**
+     * The taker's transaction: it writes the slug index the way an
+     * assignment does, having first read the name it is claiming when
+     * `readName` says so. Answers the commit's rejection, or `undefined`.
+     */
+    async function commitFromStaleBasis(
+      readName: boolean,
+    ): Promise<{ name?: string } | undefined> {
+      const tx = takerRuntime.edit();
+      if (readName) cellOf(takerRuntime, slugCellId).withTx(tx).getRaw();
+      cellOf(takerRuntime, slugIndexIdForSpace(space)).withTx(tx)
+        .key("contested").set(true);
+      const { error } = await tx.commit({ resolveAt: "verdict" });
+      return error;
+    }
+
+    it("rejects the commit when the body read the name another writer had bound", async () => {
+      expect((await commitFromStaleBasis(true))?.name).toBe("ConflictError");
+    });
+
+    it("commits the same write when the body did not read that name", async () => {
+      expect(await commitFromStaleBasis(false)).toBeUndefined();
     });
   });
 });

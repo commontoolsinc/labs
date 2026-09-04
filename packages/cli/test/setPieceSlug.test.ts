@@ -135,6 +135,59 @@ describe("setPieceSlug()", () => {
     });
   });
 
+  it("refuses a name that already points somewhere, naming it and the flag that takes it", async () => {
+    await setSlug("top", boardId, ["names"]);
+
+    const failure = await setSlug("top", memberId, []).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(Error);
+    // The whole remedy, not a substring of it: the target and the flag both
+    // appear in wordings that say quite different things about what the
+    // caller should do, so an assertion on either alone cannot tell them
+    // apart. The target is named in the spelling the command takes as a
+    // source, so pointing the name back afterwards is a paste.
+    expect((failure as Error).message).toBe(
+      `Slug "top" already points at /of:${boardId}/names, so assigning it ` +
+        `would take that address from whoever holds it. Pass \`--force\` to ` +
+        `take it anyway; that target is what to point it back at afterwards.`,
+    );
+    // The collection kept the name: the refused run neither took it nor
+    // repointed it at the member it named.
+    expect(await resolveSlugTarget(pieces, "top")).toEqual({
+      piece: boardId,
+      pathInside: ["names"],
+    });
+  });
+
+  it("takes a name that already points somewhere when forced", async () => {
+    await setSlug("top", boardId, ["names"]);
+
+    await setSlug("top", memberId, [], { force: true });
+
+    expect(await resolveSlugTarget(pieces, "top")).toEqual({
+      piece: memberId,
+      pathInside: [],
+    });
+  });
+
+  it("lets a failure that is not a name being taken reach the caller unchanged", async () => {
+    // Only a refusal to take a bound name is rewritten, to add the flag that
+    // takes it. Everything else — a name the space will not accept, a storage
+    // rejection — has to arrive as itself, or the run reports a naming
+    // conflict for something that was never about the name being held.
+    const failure = await setSlug("not a slug", boardId, ["names"]).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("Slug must use lowercase");
+    expect((failure as Error).message).not.toContain("--force");
+  });
+
   it("refuses a scope written on a bare slug, which has no cell of its own to scope", async () => {
     await setSlug("top", boardId, ["names"]);
 
