@@ -15,8 +15,9 @@ and hand the place to someone else.
 
 A cell reference cannot say where they are. It names one cell and a position
 inside it — space, piece, document, path, resolved in a single dereference,
-which is what makes it canonical and shareable
-([`cell-reference-grammar`](../../specs/cell-reference-grammar.md)). It has one
+which is what makes it canonical and shareable. (The cell reference grammar is
+a decision record proposed in #6814, not yet in the tree; this document takes
+its decisions as read and cites them by number.) It has one
 document slot because one is enough for an address: reaching a second
 document's contents is two dereferences, and an address describes the
 destination of the last one.
@@ -58,10 +59,13 @@ Shuttle keeps the route today and does not spell it. `place.ts` carries
 type Trail = readonly Position[];
 ```
 
-described as "how shuttle reached it", and uses it for exactly one thing: `..`
-walks back through it where there is one. So the ruling below is not whether to
-model routes. It is whether to make the model shuttle already has renderable,
-typeable, and complete enough to carry a link crossing.
+described as "how shuttle reached it". A descent pushes the level it left onto
+it; `..` walks back out through it; and `cd -` restores the previous place's
+trail along with the place, so returning to where you were returns the route
+that reached it. Nothing else reads it, and nothing prints it. So the ruling
+below is not whether to model routes — shuttle models them and preserves them
+across a `cd -`. It is whether to make that model renderable, typeable, and
+complete enough to carry a link crossing.
 
 Two facts make the fit close. A `Position` names a space, a piece and a path,
 which is what a place is. And a link resolves to `NormalizedLink`, which is
