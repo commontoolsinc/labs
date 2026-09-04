@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { testIdentityKey } from "@commonfabric/test-support/records";
 
 import {
+  fullLaneCount,
   plan,
   type PlanInput,
   seededOrder,
@@ -11,7 +12,11 @@ import {
 } from "./plan.ts";
 import type { Calibration, Manifest, ManifestEntry } from "./manifest.ts";
 import { sampleEntry, sampleManifest } from "./testing.ts";
-import { LANES, VALUE_FLOOR } from "./policy.ts";
+import {
+  FULL_LANE_BUDGET_SECONDS,
+  LANE_BUDGET_SECONDS,
+  LANES,
+} from "./policy.ts";
 
 const NO_CAPABILITIES = new Map<string, readonly string[]>();
 
@@ -628,91 +633,204 @@ describe("plan", () => {
   });
 });
 
-describe("an identity the manifest has never heard of", () => {
-  const KEY = '["unit","memory","brand new"]';
-  const WHERE = new Map([[KEY, {
-    suite: "workspace-unit",
-    unit: "packages/memory/test/new.test.ts",
-  }]]);
-
-  it("runs when the caller names it mandatory and says where it lives", () => {
-    const result = run(sampleManifest({ entries: entries(3) }), {
-      mandatory: new Map([[KEY, "changed" as const]]),
-      unknown: WHERE,
-    });
-    const taken = selected(result).find((s) =>
-      testIdentityKey(s.entry.test) === KEY
-    );
-    expect(taken).toBeDefined();
-    expect(taken!.reason).toBe("changed");
-    expect(taken!.repeats).toBe(1);
-    expect(taken!.entry.unit).toBe("packages/memory/test/new.test.ts");
-    // It has no history, so it stands in at the floor and costs nothing
-    // anybody measured.
-    expect(taken!.entry.score).toBe(VALUE_FLOOR);
-    expect(taken!.entry.cost).toBe(0);
-    expect(taken!.entry.inputs).toEqual({
-      catches: 0,
-      mainCatches: 0,
-      sources: 0,
-      churn: 0,
-    });
-  });
-
-  it("carries the configuration when the key names one", () => {
-    const key = '["unit","memory","brand new","server"]';
+describe("an identity the manifest does not carry", () => {
+  it("is left out, because nothing here knows what would run it", () => {
+    const key = '["unit","memory","brand new"]';
     const result = run(sampleManifest({ entries: entries(3) }), {
       mandatory: new Map([[key, "changed" as const]]),
-      unknown: new Map([[key, {
+    });
+    expect(keysOf(result)).not.toContain(key);
+  });
+});
+
+describe("running everything", () => {
+  /** A manifest whose entries differ in every way selection reads. */
+  function corpus(): Manifest {
+    return sampleManifest({
+      entries: [
+        ...entries(6, (i) => ({ cost: 1 + i, score: 0.9 - i / 10 })),
+        sampleEntry({ k: "unit", s: "memory", n: "flaky" }, {
+          unit: "packages/memory/test/flaky.test.ts",
+          flakeRate: 0.9,
+          cost: 2,
+        }),
+        sampleEntry({ k: "unit", s: "memory", n: "worthless" }, {
+          unit: "packages/memory/test/worthless.test.ts",
+          score: 0,
+          cost: 2,
+        }),
+      ],
+      withheld: [{
+        test: { k: "unit", s: "memory", n: "worthless" },
         suite: "workspace-unit",
-        unit: "packages/memory/test/new.test.ts",
-      }]]),
+        reason: "main-red",
+      }],
     });
-    const taken = selected(result).find((s) =>
-      testIdentityKey(s.entry.test) === key
+  }
+
+  it("runs every identity once, whatever it is worth", () => {
+    const result = run(corpus(), { policy: "everything" });
+    expect(keysOf(result)).toEqual(
+      corpus().entries.map((entry) => testIdentityKey(entry.test)).sort(),
     );
-    expect(taken?.entry.test).toEqual({
-      k: "unit",
-      s: "memory",
-      n: "brand new",
-      v: "server",
-    });
+    expect(selected(result).every((s) => s.repeats === 1)).toBe(true);
+    expect(selected(result).every((s) => s.reason === "full")).toBe(true);
   });
 
-  it("is left out when nobody said where it lives", () => {
-    const result = run(sampleManifest({ entries: entries(3) }), {
-      mandatory: new Map([[KEY, "changed" as const]]),
-    });
-    expect(keysOf(result)).not.toContain(KEY);
+  it("says it withheld nothing, because it ran everything", () => {
+    expect(run(corpus()).withheld.length).toBe(1);
+    expect(run(corpus(), { policy: "everything" }).withheld).toEqual([]);
   });
 
-  it("is left out when the key is not a key at all", () => {
-    for (
-      const key of ["not json", "[]", '["unit","memory"]', '["unit",7,"n"]']
-    ) {
-      const result = run(sampleManifest({ entries: entries(3) }), {
-        mandatory: new Map([[key, "changed" as const]]),
-        unknown: new Map([[key, {
-          suite: "workspace-unit",
-          unit: "packages/memory/test/new.test.ts",
-        }]]),
-      });
-      expect(
-        selected(result).some((s) => testIdentityKey(s.entry.test) === key),
-      )
-        .toBe(false);
+  it("runs what a budgeted plan withholds and excludes", () => {
+    const budgeted = keysOf(run(corpus()));
+    const flaky = testIdentityKey({ k: "unit", s: "memory", n: "flaky" });
+    const red = testIdentityKey({ k: "unit", s: "memory", n: "worthless" });
+    expect(budgeted).not.toContain(flaky);
+    expect(budgeted).not.toContain(red);
+    const full = keysOf(run(corpus(), { policy: "everything" }));
+    expect(full).toContain(flaky);
+    expect(full).toContain(red);
+  });
+
+  it("reports nothing unschedulable, since it places everything", () => {
+    const manifest = sampleManifest({
+      entries: entries(2, () => ({ cost: 5_000 })),
+    });
+    expect(run(manifest).unschedulable.length).toBe(2);
+    const full = run(manifest, { policy: "everything" });
+    expect(full.unschedulable).toEqual([]);
+    expect(keysOf(full).length).toBe(2);
+  });
+
+  it("takes the full run's budget rather than a pull request's", () => {
+    // Work that fits one lane of the full run and does not fit one of a
+    // pull request's, which is the whole gap between the two dials.
+    const manifest = sampleManifest({
+      entries: entries(FULL_LANE_BUDGET_SECONDS, () => ({ cost: 1 })),
+    });
+    const full = run(manifest, { policy: "everything", lanes: 1 });
+    expect(full.budgetSeconds).toBe(FULL_LANE_BUDGET_SECONDS);
+    expect(full.overBudgetSeconds).toBe(0);
+    const budgeted = run(manifest, {
+      policy: "everything",
+      lanes: 1,
+      budgetSeconds: LANE_BUDGET_SECONDS,
+    });
+    expect(budgeted.overBudgetSeconds).toBeGreaterThan(0);
+  });
+
+  it("places every identity, however awkward the corpus", () => {
+    // A corpus mixing tests that fit easily, tests larger than a lane,
+    // and tests a budgeted plan would exclude. None of it may go
+    // missing: what `main` does not run, nothing runs.
+    const manifest = sampleManifest({
+      entries: [
+        ...entries(40, (i) => ({ cost: i % 7 === 0 ? 5_000 : i / 10 })),
+        sampleEntry({ k: "unit", s: "memory", n: "flaky" }, {
+          unit: "packages/memory/test/flaky.test.ts",
+          flakeRate: 1,
+        }),
+      ],
+    });
+    for (const lanes of [1, 2, 5, 13]) {
+      const result = run(manifest, { policy: "everything", lanes });
+      expect(keysOf(result).length).toBe(manifest.entries.length);
+      expect(new Set(keysOf(result)).size).toBe(manifest.entries.length);
     }
   });
 
-  it("does not stand in for an identity the manifest does carry", () => {
-    const known = testIdentityKey({ k: "unit", s: "memory", n: "case 0" });
-    const result = run(sampleManifest({ entries: entries(3) }), {
-      mandatory: new Map([[known, "changed" as const]]),
-      unknown: new Map([[known, { suite: "elsewhere", unit: "elsewhere.ts" }]]),
+  it("gives the same answer every time it is asked", () => {
+    const once = run(corpus(), { policy: "everything" });
+    const twice = run(corpus(), { policy: "everything" });
+    expect(JSON.stringify(once)).toBe(JSON.stringify(twice));
+  });
+});
+
+describe("how many lanes the full run needs", () => {
+  const capabilities = NO_CAPABILITIES;
+
+  function count(manifest: Manifest, overrides: Partial<PlanInput> = {}) {
+    return fullLaneCount({ manifest, capabilities, ...overrides });
+  }
+
+  it("takes one lane for work that fits in one", () => {
+    expect(count(sampleManifest({ entries: entries(5, () => ({ cost: 1 })) })))
+      .toBe(1);
+  });
+
+  it("takes enough lanes that none of them runs long", () => {
+    // Three lanes' worth of work, in tests small enough that the packer
+    // can divide them evenly.
+    const manifest = sampleManifest({
+      entries: entries(FULL_LANE_BUDGET_SECONDS * 3, () => ({ cost: 1 })),
     });
-    const taken = selected(result).find((s) =>
-      testIdentityKey(s.entry.test) === known
+    const lanes = count(manifest);
+    expect(lanes).toBe(3);
+    const packed = plan({
+      manifest,
+      mandatory: new Map(),
+      capabilities,
+      policy: "everything",
+      lanes,
+    });
+    expect(packed.overBudgetSeconds).toBe(0);
+  });
+
+  it("honors a budget it was handed", () => {
+    const manifest = sampleManifest({
+      entries: entries(600, () => ({ cost: 1 })),
+    });
+    expect(count(manifest, { budgetSeconds: 100 })).toBe(6);
+  });
+
+  it("stops rather than chasing work no number of lanes can fit", () => {
+    // One identity larger than a whole lane and nothing else. Its lane
+    // runs long however many lanes there are, so adding lanes buys
+    // nothing and the search stops.
+    const manifest = sampleManifest({
+      entries: [
+        sampleEntry({ k: "unit", s: "memory", n: "vast" }, {
+          unit: "packages/memory/test/vast.test.ts",
+          cost: 5_000,
+        }),
+      ],
+    });
+    expect(count(manifest)).toBe(1);
+  });
+
+  it("keeps adding lanes for work one oversized test would hide", () => {
+    // The oversized test pins the worst lane's overrun at every count,
+    // so a search reading the worst lane alone would stop at once and
+    // leave every other lane crowded. What the rest of the corpus needs
+    // is what decides the count.
+    const manifest = sampleManifest({
+      entries: [
+        ...entries(40, () => ({ cost: 100 })),
+        sampleEntry({ k: "unit", s: "memory", n: "vast" }, {
+          unit: "packages/memory/test/vast.test.ts",
+          cost: 900,
+        }),
+      ],
+    });
+    const lanes = count(manifest);
+    const packed = plan({
+      manifest,
+      mandatory: new Map(),
+      capabilities,
+      policy: "everything",
+      lanes,
+    });
+    // Every lane but the one carrying the oversized test fits its
+    // budget, and that one carries nothing else.
+    const over = packed.lanes.filter((lane) =>
+      lane.projectedSeconds > packed.budgetSeconds
     );
-    expect(taken?.entry.unit).toBe("packages/memory/test/case-0.test.ts");
+    expect(over.length).toBe(1);
+    expect(over[0]!.selections.length).toBe(1);
+  });
+
+  it("takes one lane for a corpus of nothing", () => {
+    expect(count(sampleManifest({ entries: [] }))).toBe(1);
   });
 });

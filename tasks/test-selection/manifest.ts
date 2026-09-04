@@ -9,6 +9,12 @@
 
 import { DIALS } from "./policy.ts";
 
+import {
+  digestIdentities,
+  type Manifest,
+  MANIFEST_SCHEMA_VERSION,
+} from "@commonfabric/test-support/records";
+
 export {
   digestIdentities,
   MANIFEST_SCHEMA_VERSION,
@@ -36,4 +42,32 @@ export function dialSnapshot(): Record<string, unknown> {
   const snapshot: Record<string, unknown> = {};
   for (const dial of DIALS) snapshot[dial.name] = dial.value;
   return snapshot;
+}
+
+/**
+ * A manifest carrying nothing, which is what a working tree is read
+ * against when the store has no manifest to give. The tree still decides
+ * what runs; what it loses is every figure saying which of its tests are
+ * worth more than the others, so all of them are unmeasured and all of
+ * them run.
+ */
+export function emptyManifest(): Manifest {
+  return {
+    schema: MANIFEST_SCHEMA_VERSION,
+    // A fixed moment rather than this one, so that reading a tree twice
+    // gives the same manifest both times.
+    generatedAt: new Date(0).toISOString(),
+    seed: "",
+    commit: "",
+    runs: 0,
+    dials: dialSnapshot(),
+    calibration: { setupCost: {}, suites: {}, unitOverhead: {}, prologue: 0 },
+    entries: [],
+    withheld: [],
+    unavailable: [],
+    unschedulable: [],
+    lanes: [],
+    known: { count: 0, digest: digestIdentities([]) },
+    coverageBaselines: [],
+  };
 }

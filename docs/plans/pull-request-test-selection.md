@@ -1892,7 +1892,19 @@ The full run on `main` does have a planning job before its lanes,
 `plan-full`, because there the number of lanes is not fixed and GitHub
 needs the matrix before it can start anything. A pull request needs no
 planning job because `LANES` is a constant, so each lane can work out its
-own share.
+own share. What `plan-full` decides is the lane count and nothing else,
+so `main`'s lanes work out their own shares the same way a pull request's
+do.
+
+What the two runs do differ in is two values handed to the same
+function: the policy, which is `everything` for the full run and
+`budgeted` for a pull request, and the diff, which the full run does not
+have. Under `everything` every identity is required, so the exclusions
+and the value, density and exploration passes have nothing to act on and
+the rest of the packer behaves identically for both. Holding the
+difference to those two values is what stops the two runs drifting into
+enumerating different tests, applying a suite's settings unevenly, or
+packing the same work in reliably different orders.
 
 The function must therefore be deterministic: no wall clock, no unseeded
 randomness, no dependence on anything but its inputs. The exploration
@@ -2242,10 +2254,18 @@ What the runner does, in order:
    the attribution map that manifest names. No manifest at or before that
    date, or a fetch failure, takes the fallback (see [Failure
    modes](#failure-modes)).
-2. Enumerate every suite against the working tree.
+2. Enumerate every suite against the working tree, and read the manifest
+   against that enumeration. The tree decides which tests exist and the
+   manifest decides what each is worth and costs, so an entry naming a
+   unit the tree no longer has drops out and a unit the manifest has
+   never seen gains a stand-in. Everything after this reads the result
+   rather than the manifest the store gave, which is what keeps the full
+   run and a pull request working from one answer about what exists.
 3. Compute the diff against the merge base, and resolve the changed source
-   lines through the attribution map to the items that execute them.
-4. Call `plan()`, take this lane's plan.
+   lines through the attribution map to the items that execute them. The
+   full run skips this: it has no diff.
+4. Call `plan()`, take this lane's plan. The full run calls it with the
+   `everything` policy and this is the only place the two differ.
 5. Print the plan to the job summary: which batches, which items, what
    each is expected to cost, why each was chosen, which items were
    withheld and why, and which manifest the plan came from.
@@ -2267,18 +2287,58 @@ What the runner does, in order:
 A push to `main` still runs everything, and it runs it through the same
 topology so that the two paths cannot drift.
 
-`deno.yml` gains a small `plan-full` job that runs on push, calls the
-topology, packs every item into as many lanes as a ten-minute budget
-needs, and emits the result as a job output. A `full-tests` job consumes
-it with `strategy.matrix: fromJSON(...)` and runs the same
-`tasks/ci-lane.ts` with `--full`. The build, attestation, coverage and
-deploy jobs keep their present shape and depend on `full-tests` in place
-of the long dependency lists they carry today.
+`deno.yml` gains a small `plan-full` job that runs on push and emits one
+integer: how many lanes the run needs. It gets that from `deno run -A
+tasks/ci-lane.ts --full --lane-count`, which reads the working tree
+against the manifest and raises the lane count while that reduces the
+total by which the lanes are over the full run's budget. The total
+rather than the worst lane: one test costing more than a whole lane
+holds its own lane over budget at every count, so a search reading the
+worst lane would stop at the first step and leave every other lane
+packed far tighter than the budget it was given.
+
+A `full-tests` job consumes the integer with `strategy.matrix:
+fromJSON(...)` and runs the same `tasks/ci-lane.ts` with `--full`. The
+build, attestation, coverage and deploy jobs keep their present shape
+and depend on `full-tests` in place of the long dependency lists they
+carry today.
+
+An integer is deliberately the whole of what passes from the planning job
+to the lanes. Each lane reads the same tree against the same manifest and
+computes the same packing for itself, exactly as the pull-request lanes
+do, so nothing about which tests run travels through a job output and
+there is no second packing anywhere to disagree with theirs. A planning
+job that emitted the packing would be a second planner, and the two would
+drift.
 
 The full run's packing needs durations but no selection, so it reads the
-manifest for its cost table. When the store is unreachable it falls back
-to one lane per suite: less even, still complete, and requiring no
-committed weight table to maintain.
+manifest for its cost table. Where nothing in the tree has a measured
+cost it falls back to one lane per suite that has anything to run: less
+even, still complete, and requiring no committed weight table to
+maintain.
+
+The condition is what the tree holds rather than whether a manifest
+arrived, because those are not the same question. A manifest published
+before most of a tree existed arrives and still knows almost none of it,
+and a cost model reading that one is as blind as a cost model reading
+nothing at all.
+
+The fallback is a count rather than a cost model on purpose. Where
+nothing is measured, a projection from costs is arithmetic over whatever
+figure stands in for the ones nobody measured, and it is wrong by
+however wrong that figure is. Against this repository the stand-in
+figure puts the whole corpus at 2,403 seconds where the reference build
+measured 9,960, and the count that follows from it is five lanes for a
+run that today takes 67 jobs. The error is also in the direction that
+breaks a run: too few lanes means every one of them runs past the bound
+its job is killed at, where too many means some jobs finish early. So the shape of the topology answers instead. It needs no
+number nobody measured, and it is a bound rather than a plan — the lanes
+still pack themselves, and one of them may hold several suites.
+
+A lane packing against stand-in costs says so in its summary, for the
+same reason: a projected time that rests on nothing measured is a
+different thing from one that rests on a week of records, and the job
+summary is where somebody finds out which they are reading.
 
 Before the pull-request path replaces the old matrix, `main` must complete
 at least one successful full run whose records account for every item the
@@ -3048,7 +3108,8 @@ tape measure.
 | `LANE_BOUND_SECONDS` | 300 | seconds | Chosen | Up when more should fit in a lane; down when five minutes is longer than anybody will wait for a first answer. Either way `LANE_WORK_TIMEOUT_MINUTES` and `LANE_JOB_TIMEOUT_MINUTES` in `deno.yml` move with it. |
 | `LANE_PROLOGUE_SECONDS` | 40 | seconds | Measured | Never. The publisher overwrites it from the lanes' own timing records, and the checked-in figure is only what the first lane uses before any lane has reported one. |
 | `LANE_SAFETY_SECONDS` | 30 | seconds | Chosen | Up when lanes overrun their bound on slow runners; down when they finish early every time and the headroom is buying nothing. |
-| `FULL_LANE_BUDGET_SECONDS` | 600 | seconds | Chosen | Up when `main`'s run uses more jobs than it needs; down when `main` takes too long to say something broke. |
+| `FULL_LANE_BOUND_SECONDS` | 600 | seconds | Chosen | Up when `main`'s run uses more jobs than it needs; down when `main` takes too long to say something broke. |
+| `FULL_LANE_BUDGET_SECONDS` | 530 | seconds | Derived | Nothing edits this. It is the full run's bound less the same prologue and safety margin a pull request's lane pays, since a lane of either run is the same job doing the same setup on the same runner. |
 | `FULL_RUN_LABEL` | `ci: full` | a label | Chosen | Not a quantity. Change it only if the label collides with one the repository already uses for something else. |
 | `VALUE_FLOOR` | 0.05 | score | Chosen | Up when the cheap tail is not being swept up; down when it crowds out tests with a record of catching things. |
 | `WEIGHT_PROVEN` | 0.55 | share of the score | Chosen | Up when a record of catching things should count for more. The three weights are shares of one score, so what this gains the other two lose. |

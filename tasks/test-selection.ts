@@ -31,6 +31,7 @@ import {
 import { fetchManifest } from "./test-selection/store.ts";
 import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
 import { type Suite, unavailableUnits } from "./test-topology/suite.ts";
+import { census } from "./test-selection/census.ts";
 import type { Manifest } from "./test-selection/manifest.ts";
 import { plan } from "./test-selection/plan.ts";
 import { readWorkspaceMembers } from "./workspace-tests.ts";
@@ -264,17 +265,25 @@ function laneLine(
 
 /**
  * The packing, over a manifest and no diff, as a lane would compute it.
- * The capabilities a suite opens are most of what a lane's budget goes
- * on, so the topology is what makes this the answer a lane would give
- * rather than one that leaves the setup out. The publisher computes its
- * reference plan the same way.
+ *
+ * It reads the tree against the manifest first, exactly as a lane does.
+ * Without that this would answer for a corpus a lane never sees: the
+ * units the manifest still names and the tree has dropped would be in
+ * the answer, and the units the tree has gained would not. The
+ * capabilities a suite opens are most of what a lane's budget goes on,
+ * which is the other reason the topology is what makes this the answer a
+ * lane would give.
  */
 function planFor(manifest: Manifest, suites: readonly Suite[]) {
-  return plan({
-    manifest,
-    mandatory: new Map(),
-    capabilities: capabilitiesBySuite(suites),
-  });
+  const seen = census(suites, manifest, new Set());
+  return {
+    seen: seen.manifest,
+    result: plan({
+      manifest: seen.manifest,
+      mandatory: seen.mandatory,
+      capabilities: capabilitiesBySuite(suites),
+    }),
+  };
 }
 
 /** What `plan --dry-run` prints, as lines. */
@@ -284,7 +293,7 @@ export function planLines(
   laneNumber: number | undefined,
 ): string[] {
   const lines: string[] = [];
-  const result = planFor(manifest, suites);
+  const { seen, result } = planFor(manifest, suites);
   const lanes = laneNumber === undefined
     ? result.lanes
     : result.lanes.filter((lane) => lane.lane === laneNumber);
@@ -292,9 +301,13 @@ export function planLines(
     `manifest of ${manifest.generatedAt}, from ${manifest.runs} runs at ` +
       `${manifest.commit}`,
   );
+  // The corpus the lanes below were packed from, which is what this tree
+  // holds rather than what the manifest was published over. Counting the
+  // manifest's own entries here would head a plan with a total the plan
+  // does not add up to.
   lines.push(
-    `${manifest.entries.length} known identities, ` +
-      `${manifest.withheld.length} withheld`,
+    `${seen.entries.length} identities in this tree, ` +
+      `${seen.withheld.length} withheld`,
   );
   for (const lane of lanes) {
     lines.push(laneLine(lane));
@@ -338,7 +351,7 @@ export function verdictFor(
   suites: readonly Suite[],
   test: TestIdentity,
 ): PlanVerdict {
-  const result = planFor(manifest, suites);
+  const { result } = planFor(manifest, suites);
   const key = testIdentityKey(test);
   const taken = result.lanes.flatMap((lane) => lane.selections).find((
     selection,

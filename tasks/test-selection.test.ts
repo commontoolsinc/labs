@@ -176,9 +176,26 @@ describe("test-selection", () => {
         ],
       });
       const text = planLines(manifest, TOPOLOGY, undefined).join("\n");
-      expect(text).toContain("2 known identities");
+      expect(text).toContain("2 identities in this tree");
       expect(text).toContain(`${LANES} lanes`);
       expect(text).toContain("lane 1:");
+    });
+
+    it("counts the corpus the lanes were packed from", () => {
+      // The manifest's own entries are not that corpus: one of these
+      // names a unit this tree does not have, and no lane can run it.
+      const manifest = sampleManifest({
+        entries: [
+          sampleEntry({ k: "unit", s: "memory", n: "here" }, {
+            unit: "packages/memory/test/memory.test.ts",
+          }),
+          sampleEntry({ k: "unit", s: "memory", n: "gone" }, {
+            unit: "packages/memory/test/deleted.test.ts",
+          }),
+        ],
+      });
+      const text = planLines(manifest, TOPOLOGY, undefined).join("\n");
+      expect(text).toContain("1 identities in this tree");
     });
 
     it("prints one lane when asked for one", () => {
@@ -288,11 +305,11 @@ describe("verdictFor()", () => {
     const manifest = sampleManifest({
       entries: [sampleEntry({ k: "unit", s: "memory", n: "heavy" }, {
         cost: 200,
-        suite: "pattern-integration",
+        unit: "packages/memory/test/memory.test.ts",
       })],
       calibration: {
         setupCost: {},
-        suites: { "pattern-integration": { overhead: 400, correction: 1 } },
+        suites: { "workspace-unit": { overhead: 400, correction: 1 } },
         unitOverhead: {},
         prologue: 0,
       },

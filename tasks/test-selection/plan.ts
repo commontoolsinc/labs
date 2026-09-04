@@ -9,19 +9,17 @@
  * The exploration draw's seed comes from the manifest.
  */
 
-import {
-  type TestIdentity,
-  testIdentityKey,
-} from "@commonfabric/test-support/records";
+import { testIdentityKey } from "@commonfabric/test-support/records";
 import {
   FILL_DENSITY_SHARE,
   FILL_EXPLORATION_SHARE,
   FILL_VALUE_SHARE,
   FLAKE_EXCLUSION_RATE,
+  FULL_LANE_BOUND_SECONDS,
+  FULL_LANE_BUDGET_SECONDS,
   LANE_BOUND_SECONDS,
   LANE_BUDGET_SECONDS,
   LANES,
-  VALUE_FLOOR,
 } from "./policy.ts";
 import type {
   Manifest,
@@ -38,7 +36,22 @@ export type SelectionReason =
   | "coverage-gate"
   | "value"
   | "density"
-  | "exploration";
+  | "exploration"
+  | "full";
+
+/**
+ * How much of the corpus a plan runs, which is the whole of the
+ * difference between what a pull request runs and what `main` runs.
+ *
+ * `budgeted` spends a bounded amount on the tests worth the most, which
+ * is the four passes below. `everything` runs the corpus it was given,
+ * once each. Under `everything` every identity is required, so the
+ * exclusions and the three discretionary passes have nothing to act on
+ * and the rest of this file behaves the same way for both. Keeping the
+ * difference to one value is what stops the two runs drifting into
+ * packing the same tests differently.
+ */
+export type Policy = "budgeted" | "everything";
 
 /** One identity the plan runs, and what put it there. */
 export interface Selection {
@@ -70,7 +83,18 @@ export interface LaneAssignment {
 export interface Plan {
   lanes: LaneAssignment[];
 
-  /** Identities the manifest withheld, so a lane can say why. */
+  /**
+   * Seconds each of these lanes was packed against, which the policy
+   * decides. Carried here so that whatever reports a lane's projected
+   * time reports it against the figure it was actually judged by, rather
+   * than working the figure out a second time.
+   */
+  budgetSeconds: number;
+
+  /**
+   * Identities this plan declined to run, so a lane can say why. Empty
+   * for a full run, which declines nothing.
+   */
   withheld: Manifest["withheld"];
 
   /**
@@ -108,21 +132,20 @@ export interface PlanInput {
   /** Which capabilities each suite needs. */
   capabilities: ReadonlyMap<string, readonly string[]>;
 
-  /**
-   * Where an identity the manifest does not carry runs, by identity key.
-   * An identity with no records is mandatory, and the manifest cannot say
-   * where it runs precisely because it has never seen it, so whoever
-   * enumerated the tree says instead.
-   */
-  unknown?: ReadonlyMap<string, { suite: string; unit: string }>;
+  /** How much of the manifest to run. Defaults to `budgeted`. */
+  policy?: Policy;
 
   /** How many lanes to fill, at least one. Defaults to the dial. */
   lanes?: number;
 
-  /** Seconds each lane may fill. Defaults to the dial. */
+  /**
+   * Seconds each lane may fill. Defaults to the dial the policy belongs
+   * to, so that the full run cannot be packed against a pull request's
+   * budget by leaving one field out.
+   */
   budgetSeconds?: number;
 
-  /** The hard bound on a lane's work step. Defaults to the dial. */
+  /** The hard bound on a lane's work step. Defaults to the policy's dial. */
   boundSeconds?: number;
 }
 
@@ -337,7 +360,9 @@ export function plan(input: PlanInput): Plan {
       `a plan needs a lane to fill, and was asked for ${laneCount}`,
     );
   }
-  const laneBudget = input.budgetSeconds ?? LANE_BUDGET_SECONDS;
+  const everything = input.policy === "everything";
+  const laneBudget = input.budgetSeconds ??
+    (everything ? FULL_LANE_BUDGET_SECONDS : LANE_BUDGET_SECONDS);
   const budget = laneBudget * laneCount;
   const lanes: Filling[] = Array.from({ length: laneCount }, (_, i) => ({
     lane: i + 1,
@@ -348,11 +373,24 @@ export function plan(input: PlanInput): Plan {
     load: 0,
   }));
 
-  const bound = input.boundSeconds ?? LANE_BOUND_SECONDS;
+  const bound = input.boundSeconds ??
+    (everything ? FULL_LANE_BOUND_SECONDS : LANE_BOUND_SECONDS);
   const byKey = new Map<string, ManifestEntry>();
   for (const entry of manifest.entries) {
     byKey.set(testIdentityKey(entry.test), entry);
   }
+
+  // What runs whatever anything else says. A full run is the case where
+  // that is the whole corpus, which is why it needs no pass of its own:
+  // the mandatory pass below places every identity, and the three
+  // discretionary passes then find nothing left to take.
+  const requiredOf: ReadonlyMap<string, SelectionReason> = everything
+    ? new Map(
+      manifest.entries.map((
+        entry,
+      ) => [testIdentityKey(entry.test), "full" as SelectionReason]),
+    )
+    : input.mandatory;
 
   // An identity whose own measured time is past the hard bound shares a
   // lane with nothing, so a discretionary one is reported rather than
@@ -363,7 +401,7 @@ export function plan(input: PlanInput): Plan {
   // first, because that is what the time will actually be.
   const unschedulable: UnschedulableEntry[] = [];
   for (const entry of manifest.entries) {
-    if (input.mandatory.has(testIdentityKey(entry.test))) continue;
+    if (requiredOf.has(testIdentityKey(entry.test))) continue;
     // What an empty lane would pay for it: its own corrected time plus
     // every overhead and setup that lane would open. Charging only the
     // test's own time would schedule an identity whose suite, unit, and
@@ -382,11 +420,11 @@ export function plan(input: PlanInput): Plan {
   );
   for (const held of manifest.withheld) {
     const key = testIdentityKey(held.test);
-    if (!input.mandatory.has(key)) excluded.add(key);
+    if (!requiredOf.has(key)) excluded.add(key);
   }
   for (const entry of manifest.entries) {
     const key = testIdentityKey(entry.test);
-    if (entry.flakeRate > FLAKE_EXCLUSION_RATE && !input.mandatory.has(key)) {
+    if (entry.flakeRate > FLAKE_EXCLUSION_RATE && !requiredOf.has(key)) {
       excluded.add(key);
     }
   }
@@ -404,15 +442,12 @@ export function plan(input: PlanInput): Plan {
     entry: ManifestEntry;
     cost: number;
   }[] = [];
-  for (const [key, reason] of input.mandatory) {
-    // An identity the manifest has never heard of is exactly the one that
-    // must run: records exist only for tests that ran, and a renamed test
-    // is unknown until an alias lands. Dropping it here would break the
-    // rule the caller invoked by naming it mandatory, so it is carried on
-    // an entry standing in for the history it has none of — the floor
-    // score, and no measured cost, which is what an unrun test costs as
-    // far as anything here knows.
-    const entry = byKey.get(key) ?? unknownEntry(key, input);
+  for (const [key, reason] of requiredOf) {
+    // An identity the manifest does not carry cannot be placed, because
+    // nothing here knows which suite would run it. Whoever enumerated the
+    // working tree carries a stand-in entry for it, so the identities
+    // that reach this without one are the ones no tree holds.
+    const entry = byKey.get(key);
     if (entry === undefined) continue;
     required.push({
       key,
@@ -521,6 +556,27 @@ export function plan(input: PlanInput): Plan {
     withRepeats,
   );
 
+  // The full run is the safety net under everything else, so a test it
+  // fails to place is a test nothing anywhere runs, and the run reports
+  // a pass over it. That the mandatory pass places every identity it is
+  // given follows from every lane being a candidate for work that fits
+  // in none of them, but an argument is the wrong thing to rest that on:
+  // a green run over tests that never ran is the one failure of this
+  // design that would leave no trace, so it is checked here rather than
+  // reasoned about.
+  if (everything) {
+    const placed = lanes.reduce(
+      (total, lane) => total + lane.selections.length,
+      0,
+    );
+    if (placed !== requiredOf.size) {
+      throw new Error(
+        `a full plan placed ${placed} of ${requiredOf.size} identities, ` +
+          `so ${requiredOf.size - placed} would run nowhere`,
+      );
+    }
+  }
+
   return {
     lanes: lanes.map((lane) => ({
       lane: lane.lane,
@@ -528,45 +584,85 @@ export function plan(input: PlanInput): Plan {
       projectedSeconds: lane.load,
       capabilities: [...lane.capabilities].sort(),
     })),
-    withheld: manifest.withheld,
+    budgetSeconds: laneBudget,
+    // A full run withholds nothing: every identity is required, so the
+    // reasons the manifest gives for holding one back never applied.
+    // Reporting the manifest's list here would have a run that ran a
+    // test say in its own summary that no lane chose it.
+    withheld: everything ? [] : manifest.withheld,
     overBudgetSeconds: overBudget,
     unschedulable,
   };
 }
 
 /**
- * A stand-in entry for an identity the manifest does not carry. The
- * caller says where it runs, because only the topology knows; without
- * that the identity cannot be placed and is reported rather than run.
+ * How many lanes the full run needs.
+ *
+ * A pull request has a fixed number of lanes, so each one works out its
+ * own share and no job sits ahead of them. `main` cannot: the number
+ * depends on how much work there is, and the job matrix has to be known
+ * before anything starts. So one job answers this, and an integer is the
+ * whole of what it answers. The lanes then call `plan` over the same
+ * manifest and take their own share of it, exactly as the pull-request
+ * lanes do, so there is no second packing anywhere that could disagree
+ * with the first.
+ *
+ * The search starts at the fewest lanes the work could conceivably fit
+ * in and adds one while that helps. What it measures is the total by
+ * which the lanes are over budget rather than the worst single lane: a
+ * test costing more than a whole lane holds its own lane over budget at
+ * every count, so the worst lane stops moving while every other lane is
+ * still crowded, and a search reading the worst lane would stop there
+ * and leave the rest of the run packed twice as tight as it asked for.
+ * The total keeps falling while lanes are still worth adding and stops
+ * falling once only the unsplittable part is left, which is where the
+ * search stops. It terminates on that total, which cannot fall below
+ * zero, and on one lane per identity being the finest packing there is.
  */
-function unknownEntry(
-  key: string,
-  input: PlanInput,
-): ManifestEntry | undefined {
-  const surface = input.unknown?.get(key);
-  if (surface === undefined) return undefined;
-  let test: TestIdentity;
-  try {
-    const [k, s, n, v] = JSON.parse(key) as string[];
-    if (
-      typeof k !== "string" || typeof s !== "string" || typeof n !== "string"
-    ) {
-      return undefined;
-    }
-    test = v === undefined ? { k, s, n } : { k, s, n, v };
-  } catch {
-    return undefined;
+export function fullLaneCount(
+  input: Omit<PlanInput, "policy" | "lanes" | "mandatory">,
+): number {
+  const manifest = input.manifest;
+  const budget = input.budgetSeconds ?? FULL_LANE_BUDGET_SECONDS;
+  // The tests' own corrected time, with no lane overhead in it. Every
+  // overhead a lane pays only raises the answer, so this is a floor and
+  // starting below it would measure packings that cannot fit.
+  const work = manifest.entries.reduce(
+    (total, entry) =>
+      total + entry.cost *
+        (manifest.calibration.suites[entry.suite]?.correction ?? 1),
+    0,
+  );
+  const most = Math.max(1, manifest.entries.length);
+  let count = Math.min(most, Math.max(1, Math.ceil(work / budget)));
+  const packed = (lanes: number) =>
+    plan({
+      ...input,
+      // Under `everything` every identity is required, so there is
+      // nothing a caller could add to this that would change the answer.
+      mandatory: new Map(),
+      policy: "everything",
+      budgetSeconds: budget,
+      lanes,
+    });
+  /** Seconds by which the lanes are over budget, added up over all of them. */
+  const overrun = (result: Plan): number =>
+    result.lanes.reduce(
+      (total, lane) => total + Math.max(0, lane.projectedSeconds - budget),
+      0,
+    );
+  let best = overrun(packed(count));
+  while (best > 0 && count < most) {
+    const next = overrun(packed(count + 1));
+    // A lane has to buy at least a second to be worth adding. Stopping
+    // only on no improvement at all would let a run of ever smaller ones
+    // carry the search as far as there are identities, and a lane's
+    // budget is counted in seconds, so anything under one is noise.
+    if (next > best - 1) break;
+    count += 1;
+    best = next;
   }
-  return {
-    test,
-    suite: surface.suite,
-    unit: surface.unit,
-    cost: 0,
-    score: VALUE_FLOOR,
-    inputs: { catches: 0, mainCatches: 0, sources: 0, churn: 0 },
-    flakeRate: 0,
-    repeats: 1,
-  };
+  return count;
 }
 
 function laneLoad(lanes: readonly Filling[]): number {
