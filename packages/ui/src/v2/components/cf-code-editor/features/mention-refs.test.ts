@@ -60,6 +60,23 @@ function pills(
   return found;
 }
 
+/** Every range a state's mentions hide from the reader, in document order. */
+function hidden(
+  state: EditorState,
+  hasFocus = false,
+): Array<{ from: number; to: number }> {
+  const found: Array<{ from: number; to: number }> = [];
+  mentionRefDecorations(state, hasFocus).between(
+    0,
+    state.doc.length,
+    (from, to, value) => {
+      if (value.spec.class !== undefined) return;
+      found.push({ from, to });
+    },
+  );
+  return found;
+}
+
 describe("mention-refs", () => {
   describe("parseMentionRefs()", () => {
     const known = new Set([KEY]);
@@ -419,11 +436,13 @@ describe("mention-refs", () => {
       expect(pills(state, false)).toHaveLength(1);
     });
 
-    it("returns no pill for a mention whose label is empty", () => {
-      // A mark decoration may not be empty, so an emptied label takes the
-      // editing rendering instead: `[]` stays visible and can be typed back
-      // into.
-      expect(pills(createState(`[][${KEY}]`))).toEqual([]);
+    it("leaves a mention whose label is empty visible and unpilled", () => {
+      // What a deleted label leaves is `[]`, and it stays on screen so it can
+      // be typed back into: hiding it would leave a token the document holds
+      // and nobody can see or reach.
+      const state = createState(`[][${KEY}]`);
+      expect(pills(state)).toEqual([]);
+      expect(hidden(state)).toEqual([{ from: 2, to: 10 }]);
     });
   });
 

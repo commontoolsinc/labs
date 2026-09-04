@@ -150,7 +150,7 @@ function generateNoteId(): string {
  * row of a universe whose collection names nothing.
  */
 function shortNameOf(entry: Mentionable | undefined): string {
-  const name = entry?.name;
+  const name = entry?.shortName;
   return typeof name === "string" ? name : "";
 }
 
@@ -2773,6 +2773,11 @@ export class CFCodeEditor extends BaseElement {
             }
           }
 
+          // A `#42` query gets no branch here, deliberately. The completion
+          // below `[[` CREATES a piece for a query that matched nothing, and
+          // a stray `#7` typed into prose must never create anything. A
+          // short-name citation is picked from the completion list or it
+          // stays text, so Enter over one falls through to the newline.
           return false;
         },
       }])),

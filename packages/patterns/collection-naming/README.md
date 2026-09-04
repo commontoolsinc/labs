@@ -98,13 +98,20 @@ is: `nameOf` over `namesTable` returns the name for either, and returns
 `undefined` only for the first.
 
 `mentionable` is the board's mention universe: one row per member carrying the
-display name, the title, the board's `name` for the member, and the member
-itself as an unread reference. Unlike `index`, whose rows ARE the items, these
-rows are copies: the universe is read by every item's editor, so wiring it to
-the items would multiply the board by itself. Every item the board creates is
+display name, the title, the board's name for the member as `shortName`, and the
+member itself as an unread reference. Unlike `index`, whose rows ARE the items,
+these rows are copies: the universe is read by every item's editor, so wiring it
+to the items would multiply the board by itself. Every item the board creates is
 wired to it, so an item's body editor completes `#42` over the board's own
-numbering. The query matches a row's copied `name`, so offering the list expands
-no member, and what a picked completion stores is the member itself.
+numbering. The query matches a row's copied `shortName`, taken off the member's
+own — the same property a member publishes for itself, and the one `index` shows
+— so one fact is derived once and the editor reads one name at both ends. That
+is what lets offering the list expand no member; what a picked completion stores
+is the member itself.
+
+A member whose `boardNames` never arrived reads blank in the universe for the
+reason its index row does, so the link-bind the backfill has to be paired with
+governs both.
 
 The item is the member: a title, a body, a filing time, and the board's names
 table wired in at creation as `boardNames`. It reads its own row out of that

@@ -162,21 +162,25 @@ export default pattern(() => {
     (board.mentionable ?? []).length === 3 &&
     board.mentionable?.[0]?.[NAME] === "First item, renamed" &&
     board.mentionable?.[0]?.title === "First item, renamed" &&
-    board.mentionable?.[0]?.name === "1" &&
-    board.mentionable?.[1]?.name === "8" &&
-    board.mentionable?.[2]?.name === "9" &&
+    board.mentionable?.[0]?.shortName === "1" &&
+    board.mentionable?.[1]?.shortName === "8" &&
+    board.mentionable?.[2]?.shortName === "9" &&
     equals(
       board.mentionable?.[0]?.piece as object,
       board.items?.[0] as object,
     )
   );
   // The same bound the index keeps: the rows carry copied strings and a
-  // reference, and nothing behind the reference.
+  // reference, and nothing behind the reference. `shortName` is one of those
+  // copies here, so what says no member was expanded is a field the item
+  // publishes and the row does not.
   const assert_universe_read_expands_no_member = assert(() => {
     const serialized = JSON.stringify(board.mentionable);
     return serialized.includes('"title"') &&
+      serialized.includes('"shortName"') &&
       !serialized.includes('"body"') &&
-      !serialized.includes('"shortName"') &&
+      !serialized.includes('"createdAt"') &&
+      !serialized.includes('"references"') &&
       !serialized.includes("vnode");
   });
 
@@ -251,8 +255,8 @@ export default pattern(() => {
   const assert_unnamed_universe_rows_have_no_name = assert(() =>
     (legacy.mentionable ?? []).length === 2 &&
     legacy.mentionable?.[0]?.[NAME] === "Older one" &&
-    legacy.mentionable?.[0]?.name === "" &&
-    legacy.mentionable?.[1]?.name === ""
+    legacy.mentionable?.[0]?.shortName === "" &&
+    legacy.mentionable?.[1]?.shortName === ""
   );
   // The library call itself, so its return is observable: the names it
   // wrote, in filing order.
@@ -275,8 +279,8 @@ export default pattern(() => {
   // The universe follows the namespace: a member named by the backfill
   // carries its name in the row an editor completes over.
   const assert_backfill_reaches_the_universe = assert(() =>
-    legacy.mentionable?.[0]?.name === "1" &&
-    legacy.mentionable?.[1]?.name === "2"
+    legacy.mentionable?.[0]?.shortName === "1" &&
+    legacy.mentionable?.[1]?.shortName === "2"
   );
   // Idempotent: the second run returns no names — it writes exactly the
   // names it returns — and the map holds what the first run left.
@@ -317,6 +321,16 @@ export default pattern(() => {
     legacy.index?.[3]?.title === "Older three" &&
     nameOf(legacyItems.key(3), legacy.namesTable ?? []) === "4" &&
     Object.keys((legacy.names ?? {}) as NamesMap).join(",") === "1,2,3,4"
+  );
+  // The universe reads an unwired member the way its index row does: blank,
+  // however the namespace names it. Both take the member's own `shortName`,
+  // so one derivation gives one answer, and a caller that needs to tell a
+  // missing bind from a missing name reads the namespace for both.
+  const assert_universe_follows_the_wiring = assert(() =>
+    legacy.mentionable?.[2]?.shortName === "3" &&
+    legacy.mentionable?.[3]?.[NAME] === "Older three" &&
+    legacy.mentionable?.[3]?.shortName === "" &&
+    nameOf(legacyItems.key(3), legacy.namesTable ?? []) === "4"
   );
 
   // One member at two positions, backfilled over an empty namespace: named
@@ -453,6 +467,7 @@ export default pattern(() => {
       { action: action_file_a_late_unnamed },
       { action: action_backfill_verb },
       { assertion: assert_backfill_skips_the_named },
+      { assertion: assert_universe_follows_the_wiring },
       { action: action_list_one_item_twice },
       { action: action_backfill_the_twins },
       { assertion: assert_twin_is_named_once },

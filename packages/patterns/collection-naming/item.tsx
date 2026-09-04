@@ -26,7 +26,7 @@ import { type NamesTableRow, ownName } from "./naming.ts";
 /**
  * What the body editor's mention autocomplete needs of a universe entry: the
  * display name it lists and matches on, the title, and the board's name for
- * the member, which is what a `#42` query matches.
+ * the member as `shortName`, which is what a `#42` query matches.
  *
  * These three are deliberately the WHOLE demand. A board's universe row
  * carries its item as a `piece` reference besides them, and leaving that out
@@ -39,7 +39,7 @@ import { type NamesTableRow, ownName } from "./naming.ts";
 export interface ItemMentionable {
   [NAME]: string | Default<""> | undefined;
   title: string | Default<"">;
-  name: string | Default<"">;
+  shortName: string | Default<"">;
 }
 
 /**

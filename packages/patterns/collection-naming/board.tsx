@@ -11,7 +11,6 @@
 
 import {
   action,
-  type ComparableCell,
   Default,
   lift,
   NAME,
@@ -27,7 +26,6 @@ import Item from "./item.tsx";
 import {
   assignName,
   backfillNames,
-  nameOf,
   type NamesMap,
   namesTable,
   type NamesTableRow,
@@ -212,13 +210,19 @@ const reject = (verb: string, reason: string): never => {
 /**
  * One row of the board's mention universe: the display name the editor's
  * autocomplete lists and matches on, the title, the board's name for the
- * member, and the member itself as a reference.
+ * member as `shortName`, and the member itself as a reference.
  *
- * The strings are COPIES, and the copies are the design rather than a
- * shortcut. An autocomplete needs every row's strings just to open, so a row
- * that pointed at its item for them would make every reader of the universe
- * expand every item. `name` is copied for the same reason, and it is what a
- * `#42` query matches without reading a member.
+ * The strings are COPIES, and that is what separates this from `index`. An
+ * index row IS its item, because a survey reads those items anyway; the
+ * universe is read by EVERY item's editor, so wiring it to the items would
+ * multiply the board by itself, and one document of copies is what bounds that
+ * product.
+ *
+ * `shortName` is copied off the member's own — the derivation `index`
+ * publishes — rather than looked up in the names table a second way, so one
+ * fact is derived once and a member's number reads the same wherever the board
+ * shows it. A member whose `boardNames` never arrived therefore reads blank
+ * here exactly as it does in its index row.
  *
  * `piece` is the item, written as a reference and never read through here:
  * the editor resolves it when a completion is picked, so what a mention
@@ -232,13 +236,14 @@ const reject = (verb: string, reason: string): never => {
 export interface ItemMentionableRow {
   [NAME]: string;
   title: string | Default<"">;
-  name: string | Default<"">;
+  shortName: string | Default<"">;
   piece: unknown;
 }
 
 /**
- * Each member's universe row, read once per member. A member the board has
- * not named carries the empty name, which is a row no `#42` query matches.
+ * Each member's universe row, read once per member. A member whose own
+ * `shortName` has produced no value carries the empty name, which is a row no
+ * `#42` query matches.
  *
  * Declared structurally for the reason `indexRowsOf` is: a member with
  * nothing behind it yet — one appended a moment ago, still mid-sync — reads
@@ -247,10 +252,13 @@ export interface ItemMentionableRow {
  */
 export function mentionableRowsOf(
   members: readonly (
-    | { get(): { [NAME]?: string; title?: string } | undefined }
+    | {
+      get():
+        | { [NAME]?: string; title?: string; shortName?: string }
+        | undefined;
+    }
     | undefined
   )[],
-  table: readonly NamesTableRow[],
 ): ItemMentionableRow[] {
   const rows: ItemMentionableRow[] = [];
   for (const member of members) {
@@ -262,7 +270,7 @@ export function mentionableRowsOf(
       // persisted title is authoritative until it does.
       [NAME]: value[NAME] || value.title || "",
       title: value.title ?? "",
-      name: nameOf(member, table) ?? "",
+      shortName: value.shortName ?? "",
       piece: member,
     });
   }
@@ -281,18 +289,19 @@ export function mentionableRowsOf(
  */
 const mentionableIndex = lift(
   (
-    { members, table }: {
+    { members }: {
       members:
         | ReadonlyCell<{
           [NAME]?: string | Default<"">;
           title: string | Default<"">;
+          shortName: string | Default<""> | undefined;
         }>[]
         | Default<[]>;
-      table: { member: ComparableCell<unknown>; name: string }[] | Default<[]>;
     },
   ): ItemMentionableRow[] =>
-    // A plain array, read once per member, as the index reads its own.
-    mentionableRowsOf(Array.from(members), table),
+    // A plain array, read once per member: an element read through the
+    // reactive array costs a link resolution per access.
+    mentionableRowsOf(Array.from(members)),
 );
 
 export default pattern<BoardInput, BoardOutput>(({ items, names }) => {
@@ -303,7 +312,7 @@ export default pattern<BoardInput, BoardOutput>(({ items, names }) => {
   const table = namesTable({ names });
   // Also derived once for the whole board: the mention universe every item's
   // editor autocompletes over, as one document of copies.
-  const mentionable = mentionableIndex({ members: items, table });
+  const mentionable = mentionableIndex({ members: items });
   const hasNoItems = itemCount === 0;
 
   const addItem = action<AddItemEvent, AddItemResult>(

@@ -98,6 +98,10 @@ as soon as its destination starts publishing one, and loses it again when the
 destination stops. The two arrive independently: a destination with a short name
 and no name yet still shows its number.
 
+`shortName` is the one property for this fact at both ends. A universe row
+carries the collection's copy of it for the completion above; a destination
+publishes its own for the pill here.
+
 The document's own text does not change. The label is the person's wording and
 the short name is display, which is what `docs/specs/collection-naming.md`
 settles under "Rendering": a reference's spelling is computed from where it is
@@ -108,20 +112,25 @@ effect, is held in `refShortNameField`, and lands on the pill as a
 ## Two triggers, one mention
 
 `[[` opens a query over the universe's display names. `#` followed by digits
-opens one over each row's own `name` — what the collection publishing the
+opens one over each row's own `shortName` — what the collection publishing the
 universe calls that member. Both are sources of the same `autocompletion`
 extension, both offer the same rows, and picking from either mints the same
 reference-form mention. What differs is only what opens the query.
 
-`name` is optional in the `Mentionable` contract
+`shortName` is optional in the `Mentionable` contract
 (`packages/ui/src/v2/core/mentionable.ts`), so a universe whose collection names
 nothing offers nothing to a `#` query, and a member the collection has not named
 is a row that query never reaches. The match is a PREFIX rather than a
 substring, because a member name is a number and `4` offering `42` beside `14`
-and `24` buries the one being typed. The `[[` query matches a row's `name` as
-well as its display name, so someone who knows the number reaches the member
+and `24` buries the one being typed. The `[[` query matches a row's `shortName`
+as well as its display name, so someone who knows the number reaches the member
 without switching sigils; what Enter completes there is unchanged, because an
 exact match is still asked of the display name alone.
+
+Enter does not complete a `#` query at all: it is picked from the list, or it
+stays text. The `[[` handler's fallthrough CREATES a piece for a query that
+matched nothing, and a stray `#7` must never create anything, so the sigil is
+left out of that handler rather than given a branch inside it.
 
 A sigil that does not open its token opens no query: `abc#4` is one word and
 `##4` is no citation. At least one digit is required, which is what keeps a

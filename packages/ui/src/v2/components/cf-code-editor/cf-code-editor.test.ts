@@ -708,23 +708,23 @@ describe("CFCodeEditor short-name completion", () => {
     {
       [NAME]: "First item",
       title: "First item",
-      name: "1",
+      shortName: "1",
       piece: link("of:1"),
     },
     {
       [NAME]: "Second item",
       title: "Second item",
-      name: "42",
+      shortName: "42",
       piece: link("of:42"),
     },
     {
       [NAME]: "Third item",
       title: "Third item",
-      name: "43",
+      shortName: "43",
       piece: link("of:43"),
     },
     // No name of its own, and a display name that a `#42` query would match
-    // were the query asked of anything but `name`.
+    // were the query asked of anything but `shortName`.
     { [NAME]: "42 apples", title: "42 apples", piece: link("of:none") },
   ];
 
