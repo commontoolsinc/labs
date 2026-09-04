@@ -10,7 +10,10 @@ import {
 } from "@commonfabric/agents-connector/fabric-graph";
 import { createSession } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { Runtime } from "@commonfabric/runner";
+import {
+  type IExtendedStorageTransaction,
+  Runtime,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import type { Cell } from "../../../../runner/src/builder/types.ts";
@@ -324,6 +327,22 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
       const originalStartPiece = manager.startPiece;
       const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
       const originalStop = runtime.runner.stop.bind(runtime.runner);
+      // The registration carries the owner's `User` label, which a read of it
+      // inside a transaction joins onto everything that transaction writes.
+      // This wrapper adds nothing to the read set of what it observes.
+      const registrationLink = registration.getAsNormalizedFullLink();
+      const wroteRegistration = (
+        transaction: IExtendedStorageTransaction,
+      ): boolean => {
+        const writes = transaction.getWriteDetails?.(registrationLink.space);
+        if (writes === undefined) {
+          throw new Error("transaction does not report its write set");
+        }
+        for (const write of writes) {
+          if (write.address.id === registrationLink.id) return true;
+        }
+        return false;
+      };
       let candidatePiece: Cell<unknown> | undefined;
       let candidateWasStopped = false;
       let interceptRegistrationCommit = false;
@@ -342,18 +361,10 @@ Deno.test("debug deployment rolls back an aborted registration", async () => {
         if (interceptRegistrationCommit) commitCount++;
         let shouldIntercept = false;
         const result = await originalEditWithRetry((transaction) => {
-          const registrationBefore = transaction.readValueOrThrow(
-            registration.getAsNormalizedFullLink(),
-          );
           const result = action(transaction);
-          const registrationAfter = transaction.readValueOrThrow(
-            registration.getAsNormalizedFullLink(),
-          );
-          const registrationChanged = JSON.stringify(registrationBefore) !==
-            JSON.stringify(registrationAfter);
           shouldIntercept = interceptRegistrationCommit &&
             (options.interceptPrivateRegistration
-              ? registrationChanged
+              ? wroteRegistration(transaction)
               : commitCount === 1);
           if (shouldIntercept) {
             const originalCommit = transaction.commit.bind(transaction);

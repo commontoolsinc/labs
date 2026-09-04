@@ -314,6 +314,36 @@ is a separate obligation, and
 [`COVERAGE.md`](COVERAGE.md#diagnostics-that-fire-on-wall-clock-time) carries
 it.
 
+### A test double over `editWithRetry` must not read as it observes
+
+`Runtime.editWithRetry` is the seam a test replaces when it wants to watch or
+delay one particular commit. It is also how much of what the runtime commits
+on a transaction of its own reaches storage: the compile cache's write-back,
+which the pattern manager keeps independent of whatever asked for the compile,
+and a `#now` wish's interval tick, among others. A double installed to watch
+one commit runs for those too.
+
+What that costs depends on what the double does. Reading a document inside a
+transaction joins that document's confidentiality label onto the transaction's
+flow join, and the join lands on every document that transaction writes. With
+`cfcFlowLabels: "persist"` the label is stamped on all of them durably, and
+section 8.12.2's ratchet does not take it back. Add
+`cfcEnforcementMode: "enforce-strict"` and the writer-fit check refuses the
+commit wherever the written document declares no ceiling covering the label,
+which the documents a compile-cache write-back writes do not. See
+[the enforcement matrix](../specs/cfc-enforcement-matrix.md) section 4 for the
+check.
+
+Forcing that row on refuses the write-back of the debug-view deployment's own
+compile. `writeBackCompileCache` rethrows the refusal, so the deployment
+promise rejects. A case waiting for a commit further along the deployment then
+waits forever, and the reason string names documents the case never mentions.
+
+So a double observes the transaction rather than reading through it. To ask
+whether the wrapped action wrote a particular document, walk the transaction's
+own write set with `getWriteDetails`, which adds nothing to the read set.
+`debug-view-deployment-lifecycle.test.ts` asks that way.
+
 ### Recording browser integration tests as video demos
 
 Selected `patterns` and `shell` browser integration tests can be recorded with
