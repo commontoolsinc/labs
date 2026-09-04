@@ -39,12 +39,15 @@ const DEBUGGER_VALUE_OPTIONS: DebugValueOptions = {
 };
 
 /**
- * Rendering options for the runs of a non-idempotent report: the debugger's,
- * but deep enough to reach the values under each run's `reads` and `writes`.
+ * Rendering options for the runs of a non-idempotent report. The panel is an
+ * inspector, so every run and every cell each one read or wrote is shown,
+ * deep enough to reach the values; only a long string is still cut.
  */
 const RUN_DETAIL_OPTIONS: DebugValueOptions = {
   ...DEBUGGER_VALUE_OPTIONS,
   maxDepth: 6,
+  maxArrayLength: Infinity,
+  maxProperties: Infinity,
 };
 
 /**
