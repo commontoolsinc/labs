@@ -6,6 +6,9 @@ import {
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
   MEMORY_PROTOCOL,
+  type ResponseMessage,
+  type ServerMessage,
+  type SessionOpenAuthMetadata,
 } from "../v2.ts";
 import { Server } from "../v2/server.ts";
 import { testSessionOpenServerOptions } from "./v2-auth-test-helpers.ts";
@@ -24,6 +27,10 @@ import { testSessionOpenServerOptions } from "./v2-auth-test-helpers.ts";
 // those two documents pointing at rows that no longer exist. These tests
 // are that gate, so they assert the names and the split — never a
 // duration, which is a property of the machine.
+//
+// The response halves (`memory/response/prepareSchemas` and `/sendRaw`)
+// and the watch.add total (`memory/watchAdd/total`) are documented in the
+// same place and gated here for the same reason.
 
 const HELLO = {
   type: "hello",
@@ -47,6 +54,49 @@ const flushCounts = (): { queue: number; refresh: number } => {
     queue: timing.getTimeStats("memory", "flush", "queue")?.count ?? 0,
     refresh: timing.getTimeStats("memory", "flush", "refresh")?.count ?? 0,
   };
+};
+
+const responseCounts = (): { prepareSchemas: number; sendRaw: number } => {
+  const timing = getLogger("memory");
+  return {
+    prepareSchemas:
+      timing.getTimeStats("memory", "response", "prepareSchemas")?.count ?? 0,
+    sendRaw: timing.getTimeStats("memory", "response", "sendRaw")?.count ?? 0,
+  };
+};
+
+const watchAddCount = (): number =>
+  getLogger("memory").getTimeStats("memory", "watchAdd", "total")?.count ?? 0;
+
+/** Hello, then a session open answered with the challenge hello.ok issued. */
+const openSession = async (
+  server: Server,
+  space: string,
+): Promise<{
+  connection: ReturnType<Server["connect"]>;
+  sessionId: string;
+}> => {
+  const messages: ServerMessage[] = [];
+  const connection = server.connect((message) => messages.push(message));
+  await connection.receive(encodeMemoryBoundary(HELLO));
+  const hello = messages.shift() as
+    | { type: string; sessionOpen?: SessionOpenAuthMetadata }
+    | undefined;
+  expect(hello?.type).toBe("hello.ok");
+  const sessionOpen = hello!.sessionOpen!;
+  await connection.receive(encodeMemoryBoundary({
+    type: "session.open",
+    requestId: "open",
+    space,
+    session: {},
+    invocation: {
+      aud: sessionOpen.audience,
+      challenge: sessionOpen.challenge.value,
+    },
+  }));
+  const opened = messages.shift() as ResponseMessage<{ sessionId: string }>;
+  expect(opened.ok).toBeDefined();
+  return { connection, sessionId: opened.ok!.sessionId };
 };
 
 describe("v2 server frame timing", () => {
@@ -98,6 +148,53 @@ describe("v2 server frame timing", () => {
       const after = frameCounts();
       expect(after.queue - before.queue).toBe(3);
       expect(after.handle - before.handle).toBe(3);
+    } finally {
+      await server.close();
+    }
+  });
+  it("splits every outbound message into schema preparation and the transport hand-off", async () => {
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://frame-timing-response"),
+    });
+    try {
+      const before = responseCounts();
+      const connection = server.connect(() => {});
+      await connection.receive(encodeMemoryBoundary(HELLO));
+
+      // One frame in, one message out: `hello.ok` leaves through the same
+      // send as every response and effect, so each half counts once.
+      const after = responseCounts();
+      expect(after.prepareSchemas - before.prepareSchemas).toBe(1);
+      expect(after.sendRaw - before.sendRaw).toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+  it("times a watch.add end to end under its own key", async () => {
+    const space = "did:key:z6Mk-frame-timing-watch-add";
+    const server = new Server({
+      ...testSessionOpenServerOptions,
+      store: new URL("memory://frame-timing-watch-add"),
+    });
+    try {
+      const { connection, sessionId } = await openSession(server, space);
+      const before = watchAddCount();
+      await connection.receive(encodeMemoryBoundary({
+        type: "session.watch.add",
+        requestId: "watch",
+        space,
+        sessionId,
+        watches: [{
+          id: "watch-id",
+          kind: "graph",
+          query: {
+            roots: [{ id: "of:timed", selector: { path: [], schema: true } }],
+          },
+        }],
+      }));
+
+      expect(watchAddCount() - before).toBe(1);
     } finally {
       await server.close();
     }
