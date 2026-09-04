@@ -582,14 +582,14 @@ about:
 
 See [what a selection means for a call](#what-a-selection-means-for-a-call) for
 the cases where the call's difference shows. `exec` is the same invocation
-reached through a mount, so it meets the value-less verb and the
-graph-quiescence coupling described there; it has neither `--no-wait` nor
-`--show-links`, so the two cases about those flags do not arise. `wish` adds one
-of its own: a query that matched nothing is an ordinary outcome rather than an
-error, so the selection is never reached and the empty result comes back as it
-always did. A selection that keeps nothing over a target that DID resolve is
-refused, because "the wish matched nothing" and "your projection kept nothing"
-are different facts.
+reached through a mount, so it meets the value-less verb and the readiness
+coupling described there; it has neither `--no-wait` nor `--show-links`, so the
+two cases about those flags do not arise. `wish` adds one of its own: a query
+that matched nothing is an ordinary outcome rather than an error, so the
+selection is never reached and the empty result comes back as it always did. A
+selection that keeps nothing over a target that DID resolve is refused, because
+"the wish matched nothing" and "your projection kept nothing" are different
+facts.
 
 `--filter` is jq-inspired rather than a full jq interpreter. It applies only to
 arrays and accepts value paths (`.status`, `.author.name`, `.["display-name"]`,
@@ -840,14 +840,15 @@ has happened before the selection applies.) The same holds for a tool, whose
 result is read off the cell the tool wrote. Use a selection to control what
 reaches stdout, not to control what travels.
 
-A selection also couples the call to graph quiescence. The shaped readback runs
-through the same shared read step as `cf cell get`, and that step awaits the CLI
-runtime's global idle plus storage sync before answering — while the plain call
-acknowledges at its own handling's commit. On a piece with heavy derived state,
-a shaped call can therefore wait on unrelated recomputation the handler
-triggered elsewhere in the graph. When that wait matters, shape the collect
-instead: call plain (or `--no-wait`), then
-`cf cell get --cell <receipt id> --select …`.
+A selection also adds a computed read after the call. The shaped readback runs
+through the same shared read step as `cf cell get`, and waits for its output
+with one `Cell.pull()`. That pull drives the output's transitive computation and
+linked-document loads through the runtime scheduler and its manager-wide
+convergence pool, so work already active in that runtime can still share the
+wait. Declared object keys are then ordered locally from the projection before
+rendering; that step starts no graph or storage work. When isolating the read
+matters, shape the collect instead. Call plain (or `--no-wait`), then collect
+from the receipt with `cf cell get --cell <receipt id> --select …`.
 
 Three cases follow from that:
 

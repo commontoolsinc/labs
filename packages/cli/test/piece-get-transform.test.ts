@@ -2055,6 +2055,53 @@ describe("cf cell get transforms", () => {
     }
   });
 
+  it("returns projection-ordered output without a storage-wide sync", async () => {
+    const setup = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "transform-output-readiness-source",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "number" },
+            label: { type: "string" },
+            ignored: { type: "string" },
+          },
+        },
+      },
+      setup,
+    );
+    source.set([
+      { id: 1, label: "first", ignored: "not selected" },
+      { id: 2, label: "second", ignored: "not selected" },
+    ]);
+    expect((await setup.commit()).ok).toBeDefined();
+
+    const originalSynced = storageManager.synced.bind(storageManager);
+    let storageWideSyncs = 0;
+    storageManager.synced = () => {
+      storageWideSyncs++;
+      return originalSynced();
+    };
+    try {
+      const result = await deriveSelectedValue(runtime, space, source, {
+        projection: parseSelectProjection("label,id"),
+      });
+      expect(result).toEqual([
+        { label: "first", id: 1 },
+        { label: "second", id: 2 },
+      ]);
+      expect(JSON.stringify(result)).toBe(
+        '[{"label":"first","id":1},{"label":"second","id":2}]',
+      );
+      expect(storageWideSyncs).toBe(0);
+    } finally {
+      storageManager.synced = originalSynced;
+    }
+  });
+
   it("carries predicate labels on filtered membership like a pattern", async () => {
     await seedLabeledDoc(runtime, "filter-element-a", {
       id: 1,

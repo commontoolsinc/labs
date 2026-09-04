@@ -333,10 +333,17 @@ describe("read options, four ways", () => {
       "exec": expected,
     });
 
-    // And identically: one rendering, not four that happen to agree in
-    // content. Key order is part of what a caller diffs, so the comparison is
-    // over the bytes `render()` writes.
-    expect(new Set(Object.values(rendered)).size).toBe(1);
+    // And identically in the order the selection names: one expected rendering,
+    // not four values that happen to agree in content. Key order is part of
+    // what a caller diffs, so the comparison is over the bytes `render()`
+    // writes.
+    const expectedRendering = safeStringify(expected);
+    expect(rendered).toEqual({
+      "piece get": expectedRendering,
+      "piece call": expectedRendering,
+      "wish": expectedRendering,
+      "exec": expectedRendering,
+    });
   });
 
   it("names one cell's address through get, call, wish and exec", async () => {

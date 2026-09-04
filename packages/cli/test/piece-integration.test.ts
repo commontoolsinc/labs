@@ -48,6 +48,8 @@ let pieceId = "";
 let sessionResultPieceId = "";
 let coldSessionResultPieceId = "";
 let staleSessionResultPieceId = "";
+let coldSelectionResultPieceId = "";
+let staleSelectionResultPieceId = "";
 let sessionScopedPieceId = "";
 let flags = "";
 let identityPath = "";
@@ -114,6 +116,14 @@ describe("cf cell get (integration)", { ignore: !API_URL }, () => {
       rootPath: REPO_ROOT,
     }, { start: false });
     staleSessionResultPieceId = await newPiece(spaceConfig, {
+      mainPath: SESSION_RESULT_PATTERN,
+      rootPath: REPO_ROOT,
+    }, { start: false });
+    coldSelectionResultPieceId = await newPiece(spaceConfig, {
+      mainPath: SESSION_RESULT_PATTERN,
+      rootPath: REPO_ROOT,
+    }, { start: false });
+    staleSelectionResultPieceId = await newPiece(spaceConfig, {
       mainPath: SESSION_RESULT_PATTERN,
       rootPath: REPO_ROOT,
     }, { start: false });
@@ -255,6 +265,34 @@ describe("cf cell get (integration)", { ignore: !API_URL }, () => {
     );
     expect(code, stderr.join("\n")).toBe(0);
     expect(JSON.parse(stdout.join(""))).toEqual(["updated-while-stopped"]);
+  });
+
+  it("selects a cold session-scoped computed result", async () => {
+    const sessionFlags =
+      `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${coldSelectionResultPieceId}`;
+    const { code, stdout, stderr } = await integrationCf(
+      `cell get ${sessionFlags} --step --select value`,
+    );
+    expect(code, stderr.join("\n")).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toEqual({ value: "session-ready" });
+  });
+
+  it("selects a current result after changing an unstarted piece's input", async () => {
+    const sessionFlags =
+      `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${staleSelectionResultPieceId}`;
+    const write = await integrationCf(
+      `cell set ${sessionFlags} values --input`,
+      { stdin: '["selected-while-stopped"]' },
+    );
+    expect(write.code, write.stderr.join("\n")).toBe(0);
+
+    const { code, stdout, stderr } = await integrationCf(
+      `cell get ${sessionFlags} --step --select value`,
+    );
+    expect(code, stderr.join("\n")).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toEqual({
+      value: "selected-while-stopped",
+    });
   });
 
   it("list and inspect expose the running pattern reference", async () => {

@@ -3404,26 +3404,20 @@ export async function deriveSelectedValue(
         `Could not apply get transform: ${committed.error}`,
       );
     }
-    // This wait is GLOBAL: idle() drains the whole reactive graph and
-    // synced() the whole storage manager, not just this transform. On a
-    // plain `cf cell get` that is benign — nothing else runs in the CLI's
-    // runtime — but a shaped `cf piece call` readback arrives here right after
-    // its handler ran, so the selection waits on whatever derived
-    // recomputation that handler triggered elsewhere, a coupling the plain
-    // call's transaction-local acknowledgment deliberately avoids.
-    // Documented as a known cost of shaping at the call (decided
-    // 2026-08-14; packages/cli/README.md names the shape-the-collect
-    // alternative); scoping this wait to the transform's own computation is
-    // the named follow-up.
-    await timeSelectionPhase("output.pull.beforeIdle", () => outputCell.pull());
-    await timeSelectionPhase("runtime.idle.beforeSync", () => runtime.idle());
-    await timeSelectionPhase(
-      "storage.synced",
-      () => runtime.storageManager.synced(),
-    );
-    await timeSelectionPhase("output.pull.afterSync", () => outputCell.pull());
-    await timeSelectionPhase("runtime.idle.afterSync", () => runtime.idle());
+    // pull() is the readiness boundary for this output: it drives transitive
+    // computations, waits for linked documents those reads discover, and
+    // re-idles after each arrival.
+    await timeSelectionPhase("output.pull", () => outputCell.pull());
     const outputValue = outputCell.get();
+    // Runtime materialization can expose object children in arrival order.
+    // Apply the resolved projection to the value in hand so declared fields
+    // instead follow schema order. This is local value work and starts no graph
+    // or storage operation.
+    const orderedOutput = projection === undefined ? outputValue : projectValue(
+      outputValue,
+      projection.projectionSchema,
+      implicitArrayTraversal,
+    );
     const recorded = errors.slice(errorCountBefore);
     if (recorded.length > 0) {
       // Translate the array-shape errors emitted by the runner filter/map
@@ -3455,10 +3449,10 @@ export async function deriveSelectedValue(
       );
     }
     deps.onOutputCell?.(outputCell);
-    return markers === undefined ? outputValue : await composeLinkAddresses(
+    return markers === undefined ? orderedOutput : await composeLinkAddresses(
       sourcePosition(sourceValueCell, space),
       markers,
-      outputValue,
+      orderedOutput,
       implicitArrayTraversal,
     );
   } finally {

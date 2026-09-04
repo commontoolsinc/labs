@@ -187,13 +187,13 @@ export interface CallableExecutionDeps {
    * readback has already materialized the whole receipt by the time this
    * applies. (A plain result's receipt does carry a descriptive schema of
    * what it holds — a reactive result's carries none — but either way the
-   * fetch has happened first.) The shared step also awaits the runtime's
-   * global idle plus storage sync, so a shaped call result can wait on
-   * derived recomputation the plain call's transaction-local acknowledgment
-   * does not — a documented cost of shaping at the call
-   * (`deriveSelectedValue`, cell-selection.ts). A verb that returns nothing
-   * keeps returning nothing — there is no value for a selection to be
-   * about. */
+   * fetch has happened first.) The shared step waits for its computed output
+   * with `Cell.pull()`, whose scheduler and linked-document convergence pool
+   * are runtime/manager-wide; a shaped call can therefore still share a wait
+   * with active work that the plain call's transaction-local acknowledgment
+   * does not. Declared object keys are ordered locally from the projection
+   * after that readiness boundary. A verb that returns nothing keeps returning
+   * nothing — there is no value for a selection to be about. */
   selection?: CellSelection;
 
   /** @internal Seam for tests, mirroring `getCellValue`'s. */
