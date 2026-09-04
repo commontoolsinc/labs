@@ -51,8 +51,18 @@ export class WebWorkerRuntimeTransport
         name: "runtime-worker",
       },
     );
-    this.#worker.addEventListener("message", this._handleMessage);
-    this.#worker.addEventListener("error", this._handleError);
+    this.#worker.addEventListener("message", this.#handleMessage);
+    this.#worker.addEventListener("error", this.#handleError);
+  }
+
+  /**
+   * The worker message handler, which a test drives directly to deliver a
+   * message by hand.
+   */
+  get accessForTestingOnly(): {
+    readonly handleMessage: (event: MessageEvent) => void;
+  } {
+    return { handleMessage: this.#handleMessage };
   }
 
   /** @inheritDoc */
@@ -140,12 +150,8 @@ export class WebWorkerRuntimeTransport
    * Handles one message from the worker. What a decode returns is deep-frozen,
    * so a consumer of a response or a notification reads it rather than
    * reshaping it in place.
-   *
-   * TypeScript-private rather than a `#` name, and keeping the `_` the rest of
-   * this sweep drops, because `test/client/transport-web-worker.test.ts`
-   * reaches it under exactly that name to deliver a message by hand.
    */
-  private _handleMessage = (event: MessageEvent): void => {
+  #handleMessage = (event: MessageEvent): void => {
     let data: IPCRemotePost;
 
     try {
@@ -163,7 +169,7 @@ export class WebWorkerRuntimeTransport
       // protect and no one listening for the report: what a failure costs
       // there is `ready()` never settling, and a caller waiting on a promise
       // that will not resolve has no way back. So the failure lands where
-      // `_handleError()` puts a pre-ready one, on the promise itself.
+      // `#handleError()` puts a pre-ready one, on the promise itself.
       if (!this.#ready) {
         this.#readyPromise.reject(
           new Error(
@@ -203,11 +209,10 @@ export class WebWorkerRuntimeTransport
   };
 
   /**
-   * TypeScript-private rather than a `#` name, and keeping the `_` the rest
-   * of this sweep drops, because `test/client/transport-web-worker.test.ts`
-   * reaches it under exactly that name to deliver a message by hand.
+   * Handles a worker error: before the worker is ready it fails the ready
+   * promise, and after that it is emitted as an error notification.
    */
-  private _handleError = (event: ErrorEvent): void => {
+  #handleError = (event: ErrorEvent): void => {
     event.preventDefault();
 
     const error = new Error(
