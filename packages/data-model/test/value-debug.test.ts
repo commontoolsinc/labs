@@ -188,6 +188,14 @@ describe("value-debug", () => {
           .toBe("/Wide(\n  p: 1,\n  q: 2,\n  ... count: 3\n)");
       });
 
+      it("renders a fabric instance's contents to the limit as well", () => {
+        const link = new FabricLink({ id: "of:fid1:abc", a: 1, b: 2 });
+        expect(toCompactDebugString(link, { maxProperties: 2 }))
+          .toBe('/Link(id:"of:fid1:abc",a:1,...count:3)');
+        expect(toIndentedDebugString(link, { maxProperties: 2 }))
+          .toBe('/Link(\n  id: "of:fid1:abc",\n  a: 1,\n  ... count: 3\n)');
+      });
+
       it("renders no more than 100 properties when the limit is not given", () => {
         const value = Object.fromEntries(
           Array.from({ length: 101 }, (_, i) => [`k${i}`, i]),
