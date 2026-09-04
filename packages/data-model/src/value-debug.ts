@@ -583,7 +583,7 @@ class DebugStringifier {
    */
   #renderRealmState(value: PrimitiveState, indent: string): string {
     if (value instanceof ArrayBuffer) {
-      return DebugStringifier.#renderBuffer(value);
+      return this.#renderBuffer(value);
     } else if (Array.isArray(value)) {
       const inner = this.#innerIndent(indent);
       const parts = value.map((element) =>
@@ -780,9 +780,9 @@ class DebugStringifier {
           ? payload.match(/^(?<name>.*)\(\.\.\.\)$/)?.groups?.name
           : undefined;
         if (name === "<anonymous>") {
-          return "(...) => {...}";
+          return `(...)${this.#spacer}=>${this.#spacer}{...}`;
         } else if (name !== undefined) {
-          return `function ${name}(...) {...}`;
+          return `function ${name}(...)${this.#spacer}{...}`;
         }
         return this.#renderInstance(tag, payload, indent);
       }
@@ -799,7 +799,7 @@ class DebugStringifier {
         // whose payload -- what kind of value was elided -- is left out of
         // the rendering.
         const length = DebugStringifier.#lengthOf(payload);
-        return (length === undefined) ? "..." : `... length: ${length}`;
+        return (length === undefined) ? "..." : this.#renderLength(length);
       }
 
       case "partialString": {
@@ -830,6 +830,27 @@ class DebugStringifier {
   }
 
   /**
+   * Renders an `ArrayBuffer` as `buf [...]`, the space being the spacer, with
+   * its bytes in hexadecimal and a space after every fourth byte in either
+   * mode.
+   */
+  #renderBuffer(buffer: ArrayBuffer): string {
+    const hex = [...new Uint8Array(buffer)]
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+      .replace(/.{8}(?=.)/g, "$& ");
+    return `buf${this.#spacer}[${hex}]`;
+  }
+
+  /**
+   * Renders the note which stands for what a length limit cut: an ellipsis
+   * and the actual length.
+   */
+  #renderLength(length: number): string {
+    return `...${this.#spacer}length${this.#colon}${length}`;
+  }
+
+  /**
    * Renders the string-length form: the excerpt as `#renderString()` renders
    * it, followed by the length of the whole. The length follows on the same
    * line, or when the rendering is multi-line, on a line of its own, indented
@@ -837,9 +858,12 @@ class DebugStringifier {
    */
   #renderPartialString(partial: PartialString, indent: string): string {
     const rendered = this.#renderString(partial.excerpt, indent);
-    const separator = this.#isCompact ? " " : `\n${this.#innerIndent(indent)}`;
+    const separator = this.#isCompact
+      ? this.#spacer
+      : `\n${this.#innerIndent(indent)}`;
+    const length = this.#renderLength(partial.length);
 
-    return `${rendered} +${separator}... length: ${partial.length}`;
+    return `${rendered}${this.#spacer}+${separator}${length}`;
   }
 
   /**
@@ -863,18 +887,6 @@ class DebugStringifier {
   //
   // Static members
   //
-
-  /**
-   * Renders an `ArrayBuffer` as `buf [...]`, with its bytes in hexadecimal, a
-   * space after every fourth byte.
-   */
-  static #renderBuffer(buffer: ArrayBuffer): string {
-    const hex = [...new Uint8Array(buffer)]
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("")
-      .replace(/.{8}(?=.)/g, "$& ");
-    return `buf [${hex}]`;
-  }
 
   /**
    * Renders the elided form of a `FabricPrimitive` whose state cannot be had,
