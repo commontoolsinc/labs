@@ -40,8 +40,9 @@ const DEBUGGER_VALUE_OPTIONS: DebugValueOptions = {
 
 /**
  * Rendering options for the runs of a non-idempotent report. The panel is an
- * inspector, so every run and every cell each one read or wrote is shown,
- * deep enough to reach the values; only a long string is still cut.
+ * inspector, so every run and every cell a run read or wrote is shown, deep
+ * enough to reach the values; a long string, or a value nested past the
+ * depth, is still cut.
  */
 const RUN_DETAIL_OPTIONS: DebugValueOptions = {
   ...DEBUGGER_VALUE_OPTIONS,
@@ -101,12 +102,13 @@ export type SubtopicKey<T extends TopicKey> =
  */
 export class XDebuggerView extends LitElement {
   // The members below stay TypeScript-private rather than becoming `#` names,
-  // which is the convention elsewhere. `test/disposal-handling.test.ts` calls
-  // this view's handlers off `XDebuggerView.prototype` against a stand-in
-  // receiver: a plain object supplying `getLoggerRegistry`,
-  // `debuggerController`, and the rest as ordinary properties. A `#` name is
-  // scoped to real instances, so each of those calls would throw. Converting
-  // the class means rewriting that suite to build real views.
+  // which is the convention elsewhere. `test/disposal-handling.test.ts` and
+  // `test/XDebuggerView.test.ts` call this view's methods off
+  // `XDebuggerView.prototype` against a stand-in receiver: a plain object
+  // supplying `getLoggerRegistry`, `debuggerController`, and the rest as
+  // ordinary properties. A `#` name is scoped to real instances, so each of
+  // those calls would throw. Converting the class means rewriting both suites
+  // to build real views.
 
   static override styles = css`
     :host {

@@ -2,21 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { XDebuggerView } from "../src/views/DebuggerView.ts";
-
-/** Flattens a Lit template result, its values included, to its markup. */
-function templateMarkup(value: unknown): string {
-  if (Array.isArray(value)) return value.map(templateMarkup).join("");
-  if (value === null || value === undefined) return "";
-  if (typeof value !== "object") return String(value);
-  const template = value as {
-    strings?: readonly string[];
-    values?: readonly unknown[];
-  };
-  if (template.strings === undefined) return "";
-  return template.strings.map((part, index) =>
-    part + templateMarkup(template.values?.[index])
-  ).join("");
-}
+import { templateMarkup } from "./lit-template-markup.ts";
 
 describe("XDebuggerView", () => {
   describe("instance members", () => {
@@ -61,7 +47,8 @@ describe("XDebuggerView", () => {
         const markup = templateMarkup(render.call(view));
         expect(markup).toContain("timestamp: 7");
         expect(markup).toContain("out24: 24n");
-        expect(markup).not.toContain("/...");
+        expect(markup).not.toContain("... length:");
+        expect(markup).not.toContain("... count:");
       });
     });
   });

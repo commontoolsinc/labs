@@ -11,6 +11,7 @@ import {
   NotificationType,
   RuntimeErrorCode,
 } from "@commonfabric/runtime-client";
+import { templateMarkup } from "./lit-template-markup.ts";
 
 // XRootView is a Lit element; load and exercise it under a minimal browser
 // shim, mirroring login-view.test.ts. Constructing it runs its field
@@ -82,20 +83,6 @@ function installBrowserGlobals(): () => void {
 function templateStrings(value: unknown): string {
   const result = value as { strings?: readonly string[] };
   return (result?.strings ?? []).join("");
-}
-
-function templateMarkup(value: unknown): string {
-  if (Array.isArray(value)) return value.map(templateMarkup).join("");
-  if (value === null || value === undefined) return "";
-  if (typeof value !== "object") return String(value);
-  const template = value as {
-    strings?: readonly string[];
-    values?: readonly unknown[];
-  };
-  if (template.strings === undefined) return "";
-  return template.strings.map((part, index) =>
-    part + templateMarkup(template.values?.[index])
-  ).join("");
 }
 
 describe("XRootView", () => {

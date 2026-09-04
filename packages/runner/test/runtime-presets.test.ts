@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
-import { expect } from "@std/expect";
 import { stub } from "@std/testing/mock";
+import { expect } from "@std/expect";
 import {
   ADOPT_SERVER_FLAGS_ENV,
   adoptServerExperimentalOptions,
