@@ -472,11 +472,22 @@ Resume a root run with `--resume-run <run-root-or-run-state.json>`. Codex resume
 keeps the recorded provider, model, exact credential owner, and encrypted
 provider continuation; requesting another model is rejected before credentials
 or provider traffic. Child runs are recorded with their root/parent lineage and
-cannot be resumed directly as top-level runs—resume the root run instead.
-Library callers receive the same guards: `runTranscript()` binds the first
-selected Codex model into run state and cannot override a resumed binding, while
-a whole-tree restorer must supply a matching typed `subagentResumeContext` when
-it reconstructs a child beneath its trusted root/parent session.
+cannot be resumed directly as top-level runs—resume the root run instead. A
+resume also keeps the CFC enforcement mode the run recorded, which is the mode
+its tool policy and sandbox transport floor read: a resume that states no dial
+inherits that mode (recorded as source `inherited`) rather than falling to the
+harness default, and a resume whose configuration resolves any other mode is
+refused naming the recorded mode and the requested one. Both a stated
+`--cfc-enforcement-mode` and a fabric session raised to `enforce-strict` above
+the recorded mode reach this refusal; restating the recorded mode resumes
+silently. The environment forms of the harness dial
+(`CF_HARNESS_CFC_ENFORCEMENT_MODE`, `CF_CFC_MODE`) are ignored on a resume, the
+way `CF_HARNESS_MODEL` is: they name the posture a fleet starts its runs at, not
+a decision about a run whose mode is already recorded. Library callers receive
+the same guards: `runTranscript()` binds the first selected Codex model into run
+state and cannot override a resumed binding, while a whole-tree restorer must
+supply a matching typed `subagentResumeContext` when it reconstructs a child
+beneath its trusted root/parent session.
 
 The gateway and subscription routes have different billing, workspace policy,
 retention, and model availability. The model catalog is read live from the
@@ -1281,8 +1292,10 @@ policy and the sandbox. The two are set independently up to one tie: under a
 session raised to `enforce-strict`, a harness dial nobody set follows the
 session rather than the harness default (recorded as source `fabric-session`),
 and a harness dial stated weaker than the session refuses startup naming both
-flags. Nothing else about the two families is derived; `--fabric-cfc-posture`
-sets the flow-label dial, not the enforcement mode.
+flags. A resume has no such tie to settle: the recorded mode stands, and a
+session that would raise the harness dial above it refuses the resume. Nothing
+else about the two families is derived; `--fabric-cfc-posture` sets the
+flow-label dial, not the enforcement mode.
 
 A run states both postures rather than leaving them to be inferred: the resolved
 fabric-session posture — each dial's value and whether the operator configured

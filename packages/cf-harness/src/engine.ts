@@ -591,6 +591,14 @@ export class CfHarnessEngine {
         "resumed run credential owner does not match requested credential owner",
       );
     }
+    if (
+      options.runState !== undefined &&
+      options.runState.cfcEnforcementMode === undefined
+    ) {
+      throw new Error(
+        "run state is missing cfcEnforcementMode; older cf-harness runs cannot be resumed",
+      );
+    }
     if (options.runState?.handleTable !== undefined) {
       assertValidHarnessHandleTable(options.runState.handleTable);
     }
@@ -619,7 +627,33 @@ export class CfHarnessEngine {
       ...(options.runState !== undefined && recordedAuthSource !== undefined
         ? { modelAuthSource: recordedAuthSource }
         : {}),
+      // A resume resolves its enforcement mode from the mode the run
+      // recorded, which is the mode the loop enforces at: the sandbox
+      // transport floor and the tool policy both read
+      // `runState.cfcEnforcementMode`. Starting the resolution anywhere else
+      // gives the resolved configuration a mode nothing honors, and the
+      // policy snapshot a source label describing a decision the run never
+      // took.
+      ...(options.runState !== undefined
+        ? { inheritedCfcEnforcementMode: options.runState.cfcEnforcementMode }
+        : {}),
     });
+    // A resume that states its own enforcement dials, or that introduces a
+    // fabric session whose raise outranks the recorded mode, resolves a mode
+    // the run cannot move to: the recorded mode is what the rest of the run
+    // enforces at. Refusing names both, rather than running at one and
+    // labelling the artifacts with the other. A resume that resolves the
+    // recorded mode passes silently, whether it restated it or inherited it.
+    if (
+      options.runState !== undefined &&
+      this.config.cfcEnforcementMode !== options.runState.cfcEnforcementMode
+    ) {
+      throw new Error(
+        this.config.cfcEnforcementModeSource === "fabric-session"
+          ? `resumed run CFC enforcement mode ${options.runState.cfcEnforcementMode} does not match the ${this.config.cfcEnforcementMode} its fabric session raises the harness dial to; lower --fabric-cfc-enforcement-mode to resume this run`
+          : `resumed run CFC enforcement mode ${options.runState.cfcEnforcementMode} does not match requested CFC enforcement mode ${this.config.cfcEnforcementMode}`,
+      );
+    }
     const runId = options.runState?.runId ?? options.runId ??
       crypto.randomUUID();
     // The session behind `run_pattern` is expensive and remote, so it is

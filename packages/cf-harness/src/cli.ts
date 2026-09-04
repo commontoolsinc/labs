@@ -598,6 +598,8 @@ Environment:
                                 patterns to search immediately (default: recorded only)
   CF_HARNESS_SANDBOX_IMAGE      Default value for --sandbox-image
   CF_HARNESS_SANDBOX_DOCKER_RUNTIME Default value for --sandbox-docker-runtime
+  CF_HARNESS_CFC_ENFORCEMENT_MODE Default value for --cfc-enforcement-mode (ignored on --resume-run)
+  CF_CFC_MODE                   Fallback for CF_HARNESS_CFC_ENFORCEMENT_MODE
   ${CFC_RESULT_DIR_ENV} Fallback for --cfc-result-dir
   ${CFC_INVOCATION_CONTEXT_DIR_ENV} Fallback for --cfc-invocation-context-dir
 `;
@@ -1608,8 +1610,15 @@ export const parseCfHarnessCliArgs = async (
   const explicitCfcMode = typeof args["cfc-enforcement-mode"] === "string"
     ? args["cfc-enforcement-mode"]
     : undefined;
-  const envCfcMode = nonEmptyEnvValue(env.CF_HARNESS_CFC_ENFORCEMENT_MODE) ??
-    nonEmptyEnvValue(env.CF_CFC_MODE);
+  // The environment forms name a fleet's posture for the runs it starts, and
+  // a resume is not one of those: its mode is already recorded, and the run
+  // enforces at the recorded mode whatever the environment says. Reading them
+  // on a resume would state a dial nobody typed, which a run recorded at
+  // another mode then refuses. `CF_HARNESS_MODEL` is read the same way.
+  const envCfcMode = resumeRun === undefined
+    ? nonEmptyEnvValue(env.CF_HARNESS_CFC_ENFORCEMENT_MODE) ??
+      nonEmptyEnvValue(env.CF_CFC_MODE)
+    : undefined;
   const cfcEnforcementModeOverride = parseCfcEnforcementMode(
     explicitCfcMode ?? envCfcMode,
   );

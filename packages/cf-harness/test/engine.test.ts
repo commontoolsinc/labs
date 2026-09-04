@@ -438,8 +438,12 @@ Deno.test("CfHarnessEngine refuses to resume under a fabric-session posture that
   // A legacy record (no posture ever captured) stays frozen as history:
   // plain session dials may restate the original invocation, but the named
   // bundle cannot have been what the run ran, so a posture resume is refused.
+  // Recorded at the mode the strict dial below resolves, so the session's
+  // raise leaves the harness mode where the run recorded it and the posture
+  // record is the only thing under test here.
   const legacyState = {
     ...runState,
+    cfcEnforcementMode: "enforce-strict" as const,
     fabricSessionCfc: undefined,
   } as typeof runState;
   const legacyWithDials = new CfHarnessEngine({
@@ -462,6 +466,154 @@ Deno.test("CfHarnessEngine refuses to resume under a fabric-session posture that
       }),
     Error,
     "records no fabric-session posture",
+  );
+});
+
+Deno.test("CfHarnessEngine refuses to resume under a harness CFC enforcement dial that contradicts the recorded mode", () => {
+  // `runState.cfcEnforcementMode` is the mode the run enforces at: the
+  // sandbox transport floor and the tool policy both read it. A resume that
+  // states a different one cannot move it, so the run would go on enforcing
+  // the recorded mode while the policy snapshot credited the operator's dial
+  // for it.
+  const runState = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    cfcEnforcementModeOverride: "observe",
+  }).getRunState();
+  assertEquals(runState.cfcEnforcementMode, "observe");
+
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        runState,
+        cfcEnforcementModeOverride: "disabled",
+      }),
+    Error,
+    "resumed run CFC enforcement mode observe does not match requested CFC enforcement mode disabled",
+  );
+
+  // The configured dial the override stands in front of, refused the same
+  // way: what the resume states is what it asked the run to enforce at.
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        runState,
+        cfcEnforcementMode: "enforce-strict",
+      }),
+    Error,
+    "resumed run CFC enforcement mode observe does not match requested CFC enforcement mode enforce-strict",
+  );
+
+  // Restating the recorded mode asks for nothing the run is not already
+  // doing, so it resumes, and the snapshot names the operator's dial.
+  const restated = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    runState,
+    cfcEnforcementModeOverride: "observe",
+  });
+  assertEquals(restated.config.cfcEnforcementMode, "observe");
+  assertEquals(restated.config.cfcEnforcementModeSource, "override");
+
+  // A resume that states nothing inherits the recorded mode rather than
+  // falling to this invocation's default, which would resolve
+  // enforce-explicit and label it a default the run never took.
+  const quiet = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    runState,
+  });
+  assertEquals(quiet.config.cfcEnforcementMode, "observe");
+  assertEquals(quiet.config.cfcEnforcementModeSource, "inherited");
+
+  // A run manifest is outranked by the record, so a manifest whose mode
+  // moved under the run cannot move the resumed run either.
+  const manifested = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    runState,
+    runManifest: {
+      type: "cf-harness.loom-run-manifest",
+      version: 1,
+      source: "loom",
+      cfc: { enforcementMode: "enforce-strict" },
+    },
+  });
+  assertEquals(manifested.config.cfcEnforcementMode, "observe");
+  assertEquals(manifested.config.cfcEnforcementModeSource, "inherited");
+});
+
+Deno.test("CfHarnessEngine refuses to resume under a fabric session raised above the recorded CFC enforcement mode", () => {
+  // A session at enforce-strict raises the harness loop to meet it, which on
+  // a resume is a mode the loop cannot move to. The recorded-posture guard
+  // does not reach this pair: the run recorded no fabric session, and the new
+  // session names no posture bundle.
+  const runState = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    cfcEnforcementModeOverride: "observe",
+  }).getRunState();
+  assertEquals(runState.fabricSessionCfc, undefined);
+
+  const strictSession = {
+    apiUrl: "https://fabric.test",
+    identityKeyPath: "/keys/identity.pkcs8",
+    space: "demo",
+    cfcEnforcementMode: "enforce-strict",
+  } as const;
+  // The message names the session dial, because that is the one to lower:
+  // every value of the harness dial is refused here, the weaker ones by the
+  // resolver and `enforce-strict` by the recorded mode.
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        runState,
+        fabricSession: strictSession,
+        fabricSessionFactory: () =>
+          Promise.reject(new Error("never built in this test")),
+      }),
+    Error,
+    "resumed run CFC enforcement mode observe does not match the enforce-strict its fabric session raises the harness dial to; lower --fabric-cfc-enforcement-mode to resume this run",
+  );
+
+  // The same session over a run that already enforces strictly raises
+  // nothing, so the recorded mode stands and the resume is credited to the
+  // record rather than to the session.
+  const strictRunState = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    cfcEnforcementModeOverride: "enforce-strict",
+  }).getRunState();
+  assertEquals(strictRunState.cfcEnforcementMode, "enforce-strict");
+  const resumed = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    runState: strictRunState,
+    fabricSession: strictSession,
+    fabricSessionFactory: () =>
+      Promise.reject(new Error("never built in this test")),
+  });
+  assertEquals(resumed.config.cfcEnforcementMode, "enforce-strict");
+  assertEquals(resumed.config.cfcEnforcementModeSource, "inherited");
+});
+
+Deno.test("CfHarnessEngine refuses a run state recorded before the CFC enforcement mode was", () => {
+  // The resume reads the recorded mode to resolve against, so a run state too
+  // old to carry one is refused for what it is, rather than reported as a
+  // mismatch against a mode it never named.
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runState: {
+          runId: "run-legacy-cfc",
+          status: "completed",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:01.000Z",
+          currentDir: "/workspace",
+          policyEvents: [],
+          toolOutputs: [],
+          failureRecords: [],
+        } as unknown as HarnessRunState,
+      }),
+    Error,
+    "run state is missing cfcEnforcementMode; older cf-harness runs cannot be resumed",
   );
 });
 
