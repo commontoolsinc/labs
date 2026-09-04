@@ -1041,6 +1041,16 @@ describe("run-measurement-batch", () => {
       );
     });
 
+    it("asks git itself when given no runner", async () => {
+      // No repository holds the all-zero commit, and a checkout that does not
+      // hold a commit reads as unchecked wherever this runs.
+      const reading = await readAncestry("0".repeat(40), "main");
+      expect(reading.kind).toBe("unchecked");
+      expect(reading.kind === "unchecked" ? reading.reason : "").toContain(
+        `does not hold ${"0".repeat(40)}`,
+      );
+    });
+
     it("returns `unchecked` for a server that reported no commit", async () => {
       expect(await readAncestry(undefined, "main", gitRun(true, true)))
         .toEqual({
@@ -2143,6 +2153,29 @@ describe("run-measurement-batch", () => {
     });
 
     /**
+     * The real posture reader, with the two questions it asks of the local
+     * repository answered by `run` rather than by `git` in the checkout the
+     * tests are started in. The stand-in console reports a commit this
+     * repository's own history holds, so each case says which repository it
+     * means.
+     */
+    const postureAsking = (
+      run: ReturnType<typeof gitRun>,
+    ): typeof preflightPosture =>
+    (fabricApiUrl, base, expectGitSha, fetchImpl, _run, allowDiverged) =>
+      preflightPosture(
+        fabricApiUrl,
+        base,
+        expectGitSha,
+        fetchImpl,
+        run,
+        allowDiverged,
+      );
+
+    /** A repository holding the commit, with it on the base branch. */
+    const POSTURE_ON_THE_BASE_BRANCH = postureAsking(gitRun(true, true));
+
+    /**
      * Runs the command against a stand-in console, in a temporary directory
      * holding the suite it is given and receiving the report it writes.
      * `/api/meta` is served by the same stand-in, so the whole command runs
@@ -2152,7 +2185,7 @@ describe("run-measurement-batch", () => {
       options: FakeConsoleOptions,
       suite: unknown,
       extraArgs: readonly string[] = [],
-      postureReader: typeof preflightPosture = preflightPosture,
+      postureReader: typeof preflightPosture = POSTURE_ON_THE_BASE_BRANCH,
     ): Promise<{ code: number; logs: string[]; dir: string }> => {
       const dir = await Deno.makeTempDir();
       // Registered before anything can throw, so the directory is removed
@@ -2376,25 +2409,32 @@ describe("run-measurement-batch", () => {
       }
     });
 
+    it("runs the batch when the local repository cannot place the server's commit, which is not divergence", async () => {
+      // The shape a shallow clone gives: git answers, and what it answers is
+      // that it does not hold the commit.
+      const { code, dir } = await runMain(
+        {
+          streams: [completedStream()],
+          runId: "fixture-run",
+          artifactRoot: FIXTURE_ROOT,
+        },
+        ONE_TASK,
+        [],
+        postureAsking(gitRun(false, false)),
+      );
+      expect(code).toBe(0);
+      const report = await Deno.readTextFile(`${dir}/out/report.md`);
+      expect(report).toContain(
+        `NOT CHECKED — this clone does not hold ${META.gitSha}`,
+      );
+      const json = JSON.parse(
+        await Deno.readTextFile(`${dir}/out/report.json`),
+      );
+      expect(json.results).toHaveLength(1);
+    });
+
     it("returns 4 for known divergence unless the explicit opt-out is passed", async () => {
-      const postureReader: typeof preflightPosture = (
-        _url,
-        base,
-        _expectGitSha,
-        _fetch,
-        _run,
-        allowDiverged,
-      ) =>
-        Promise.resolve(
-          allowDiverged
-            ? { kind: "read", meta: META, ancestry: { kind: "diverged", base } }
-            : {
-              kind: "refused",
-              meta: META,
-              ancestry: { kind: "diverged", base },
-              reason: `the server is off ${base}`,
-            },
-        );
+      const postureReader = postureAsking(gitRun(true, false));
       const refused = await runMain(
         { streams: [completedStream()] },
         ONE_TASK,
@@ -2496,17 +2536,25 @@ describe("run-measurement-batch", () => {
         const suitePath = `${dir}/suite.json`;
         await Deno.writeTextFile(suitePath, JSON.stringify(ONE_TASK));
         Deno.chdir(dir);
-        await main([
-          suitePath,
-          `--console=${console_.url}`,
-          `--fabric-api-url=${console_.url}`,
-        ], () => {});
+        const code = await main(
+          [
+            suitePath,
+            `--console=${console_.url}`,
+            `--fabric-api-url=${console_.url}`,
+          ],
+          () => {},
+          POSTURE_ON_THE_BASE_BRANCH,
+        );
+        expect(code).toBe(0);
         const measurements = `${dir}/.cf-harness-console/measurements`;
         const written = [...Deno.readDirSync(measurements)];
         expect(written).toHaveLength(1);
-        expect(
-          await Deno.stat(`${measurements}/${written[0].name}/report.md`),
-        ).toBeDefined();
+        const out = `${measurements}/${written[0].name}`;
+        expect(await Deno.stat(`${out}/report.md`)).toBeDefined();
+        // A refusal writes the dated report too, so the result is what says
+        // the batch ran and put its report here.
+        const json = JSON.parse(await Deno.readTextFile(`${out}/report.json`));
+        expect(json.results).toHaveLength(1);
       } finally {
         Deno.chdir(cwd);
         await console_.close();
