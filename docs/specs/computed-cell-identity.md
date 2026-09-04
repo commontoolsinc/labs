@@ -585,7 +585,7 @@ changes here:
   analysis (`capability-analysis.ts`) is the natural place to detect the
   calls, including through module-scope helpers via its interprocedural
   summaries.
-- Deferred tooling gap: `SchedulerGraphView.extractEntityId` (shell) groups
+- Deferred tooling gap: `XSchedulerGraph.#extractEntityId` (shell) groups
   graph nodes by scheme-stripped entity id, so an `of:` doc and a
   `computed:` doc minted from the same cause would be conflated into one
   group in the debug graph. This is more than cosmetic debt: the scheduler

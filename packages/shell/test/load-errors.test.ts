@@ -198,12 +198,7 @@ describe("load-errors", () => {
               ...view.app,
               identity: await Identity.generate({ implementation: "noble" }),
             };
-            const task = (view as unknown as {
-              _rt: {
-                run(args: [typeof view.app]): void;
-                taskComplete: Promise<unknown>;
-              };
-            })._rt;
+            const task = view.accessForTestingOnly.rt;
 
             task.run([view.app]);
             await task.taskComplete.catch(() => undefined);

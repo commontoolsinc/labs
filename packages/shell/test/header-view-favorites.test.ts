@@ -4,23 +4,22 @@
 
 import { assert, assertEquals, assertFalse } from "@std/assert";
 
+import type { XHeaderView as HeaderViewClass } from "../src/views/HeaderView.ts";
+
 // Exercises the lazy favorites-subscription paths in HeaderView. The header
 // resolves the home space's default pattern only when its favorites surface is
 // first opened (menu open or favorite toggle), not at login, so the home
 // pattern's one-time creation does not contend with the user's first write.
 
 // The members the tests drive, typed loosely so fakes can stand in for the
-// runtime and the private methods/state are reachable without leaking `any`.
+// runtime; the private steps and state are reached through the accessor.
 interface HeaderViewLike {
   rt: unknown;
   space: unknown;
   pieceId: unknown;
   menuOpen: boolean;
-  _isFavoriteLoading: boolean;
-  _ensureFavoritesSubscription(): void;
+  accessForTestingOnly: HeaderViewClass["accessForTestingOnly"];
   willUpdate(changed: Map<string, unknown>): void;
-  handleLogoClick(e: Event): void;
-  handleToggleFavorite(e: Event): Promise<void>;
   disconnectedCallback(): void;
 }
 
@@ -123,16 +122,16 @@ Deno.test("favorites stay unsubscribed until a runtime exists and a surface open
     const rt = makeRuntime();
 
     // No runtime yet: requesting the subscription is a no-op.
-    view._ensureFavoritesSubscription();
+    view.accessForTestingOnly.ensureFavoritesSubscription();
     assertEquals(rt.subscribeCount, 0);
 
     // Runtime present: the first request subscribes exactly once.
     view.rt = rt;
-    view._ensureFavoritesSubscription();
+    view.accessForTestingOnly.ensureFavoritesSubscription();
     assertEquals(rt.subscribeCount, 1);
 
     // Idempotent: a repeat request does not subscribe again.
-    view._ensureFavoritesSubscription();
+    view.accessForTestingOnly.ensureFavoritesSubscription();
     assertEquals(rt.subscribeCount, 1);
   } finally {
     restore();
@@ -148,14 +147,14 @@ Deno.test("a new runtime re-arms the lazy subscription", async () => {
     const closed = new XHeaderView() as unknown as HeaderViewLike;
     const first = makeRuntime();
     closed.rt = first;
-    closed._ensureFavoritesSubscription();
+    closed.accessForTestingOnly.ensureFavoritesSubscription();
     assertEquals(first.subscribeCount, 1);
 
     // Swapping the runtime tears down the old subscription; with the menu
     // closed nothing resubscribes yet, but the next open does.
     closed.willUpdate(new Map([["rt", undefined]]));
     assertEquals(first.unsubscribeCount, 1);
-    closed._ensureFavoritesSubscription();
+    closed.accessForTestingOnly.ensureFavoritesSubscription();
     assertEquals(first.subscribeCount, 2);
 
     // Menu already open when the runtime arrives: subscribe immediately.
@@ -178,7 +177,7 @@ Deno.test("opening the header menu requests the favorites subscription", async (
     const rt = makeRuntime();
     view.rt = rt;
 
-    view.handleLogoClick(fakeEvent());
+    view.accessForTestingOnly.handleLogoClick(fakeEvent());
     assert(view.menuOpen);
     assertEquals(rt.subscribeCount, 1);
   } finally {
@@ -197,9 +196,9 @@ Deno.test("toggling a favorite requests the subscription and swallows a disposal
     ok.rt = okRt;
     ok.space = "did:key:test";
     ok.pieceId = "piece-1";
-    await ok.handleToggleFavorite(fakeEvent());
+    await ok.accessForTestingOnly.handleToggleFavorite(fakeEvent());
     assertEquals(okRt.subscribeCount, 1);
-    assertFalse(ok._isFavoriteLoading);
+    assertFalse(ok.accessForTestingOnly.isFavoriteLoading);
 
     // A write cancelled by a disposed runtime is swallowed, not surfaced.
     const racing = new XHeaderView() as unknown as HeaderViewLike;
@@ -207,8 +206,8 @@ Deno.test("toggling a favorite requests the subscription and swallows a disposal
     racing.rt = racingRt;
     racing.space = "did:key:test";
     racing.pieceId = "piece-2";
-    await racing.handleToggleFavorite(fakeEvent());
-    assertFalse(racing._isFavoriteLoading);
+    await racing.accessForTestingOnly.handleToggleFavorite(fakeEvent());
+    assertFalse(racing.accessForTestingOnly.isFavoriteLoading);
   } finally {
     restore();
   }
@@ -223,7 +222,7 @@ Deno.test("favorites re-subscribe after the header disconnects and reopens", asy
     view.rt = rt;
 
     // Opening the menu subscribes.
-    view._ensureFavoritesSubscription();
+    view.accessForTestingOnly.ensureFavoritesSubscription();
     assertEquals(rt.subscribeCount, 1);
 
     // Disconnecting tears the subscription down.
@@ -231,7 +230,7 @@ Deno.test("favorites re-subscribe after the header disconnects and reopens", asy
     assertEquals(rt.unsubscribeCount, 1);
 
     // Reopening after reconnect must subscribe again, not skip on stale state.
-    view._ensureFavoritesSubscription();
+    view.accessForTestingOnly.ensureFavoritesSubscription();
     assertEquals(rt.subscribeCount, 2);
   } finally {
     restore();
