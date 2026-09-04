@@ -254,11 +254,6 @@ export class IndexTrackingStack<T = unknown> {
   /**
    * The heights this class arranges itself around, for a test or a benchmark
    * to bound its cases with.
-   *
-   * The name is the documentation. These are a tuning decision, not part of
-   * what this class promises, and code that reads them is written against a
-   * number that is free to move. A test that has to straddle a threshold has
-   * no other way to find it, which is the whole of why this exists.
    */
   static get accessForTestingOnly(): {
     ADD_INDEX_AT: number;
