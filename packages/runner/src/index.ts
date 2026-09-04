@@ -373,6 +373,12 @@ export {
 } from "./sandbox/fabric-import-specifier.ts";
 export { type PinRewrite, rewriteFabricPins } from "./fabric-pin-rewrite.ts";
 export {
+  isPieceDocument,
+  isPieceRoot,
+  resolveSlugReference,
   resolveSlugTargetCell,
+  resolveSlugTargetInPiece,
+  type SlugReferenceTarget,
   SlugResolutionError,
+  type SlugTargetInPiece,
 } from "./slug-resolution.ts";

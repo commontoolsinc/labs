@@ -1,14 +1,21 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import type { Cell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { parseLink } from "../src/link-utils.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
+import { cellEntityIdString } from "../src/piece-helpers.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
 import { entityIdFrom } from "../src/create-ref.ts";
 import {
+  isPieceRoot,
   parseSlugRedirect,
+  resolveSlugReference,
   resolveSlugTargetCell,
+  resolveSlugTargetInPiece,
+  SlugResolutionError,
 } from "../src/slug-resolution.ts";
 
 const signer = await Identity.fromPassphrase("runner slug resolution tests");
@@ -101,5 +108,177 @@ describe("slug resolution", () => {
     expect(
       parseSlugRedirect("not a redirect", base),
     ).toBeUndefined();
+  });
+
+  describe("a slug that names a collection", () => {
+    // A piece here is a document stamped with a `patternIdentity`, which is
+    // what the resolvers read; nothing runs. The board holds its collection
+    // at `names`, keyed by member name, each member a link to an item's
+    // document, with one key holding a plain value for a member that is no
+    // piece. `top` points at the collection, `board` at the board itself,
+    // and `plain` at a document that is no piece at all.
+
+    let board: Cell<unknown>;
+    let item1: Cell<unknown>;
+    let item2: Cell<unknown>;
+
+    async function pieceDocument(
+      cause: string,
+      content: unknown,
+    ): Promise<Cell<unknown>> {
+      const cell = runtime.getCell(space, { space, random: cause });
+      await runtime.editWithRetry((tx) => {
+        const withTx = cell.withTx(tx);
+        withTx.set(content);
+        withTx.setMetaRaw(
+          "patternIdentity",
+          { identity: `pattern-${cause}`, symbol: "default" },
+          rawMetaWriteAuthorization,
+        );
+      });
+      return cell;
+    }
+
+    async function pointSlug(
+      slug: string,
+      target: Cell<unknown>,
+    ): Promise<void> {
+      const slugCell = runtime.getCellFromEntityId(
+        space,
+        entityIdFrom(slugIdForSpace(space, slug)),
+      );
+      await runtime.editWithRetry((tx) => {
+        const slugWithTx = slugCell.withTx(tx);
+        slugWithTx.setRawUntyped(
+          target.withTx(tx).getAsWriteRedirectLink({ base: slugWithTx }),
+        );
+      });
+    }
+
+    function idOf(cell: Cell<unknown>): string {
+      return cell.getAsNormalizedFullLink().id;
+    }
+
+    beforeEach(async () => {
+      item1 = await pieceDocument("item-1", { title: "Glaze recipes" });
+      item2 = await pieceDocument("item-2", { title: "Oven schedule" });
+      // Member `4` reaches its piece through a document that is nothing but
+      // a link to it, the way a member stored by reference does.
+      const viaLink = runtime.getCell(space, { space, random: "via-link" });
+      const plain = runtime.getCell(space, { space, random: "plain" });
+      await runtime.editWithRetry((tx) => {
+        viaLink.withTx(tx).set(item2);
+        plain.withTx(tx).set({ value: 1 });
+      });
+      board = await pieceDocument("board", {
+        names: { "1": item1, "2": item2, "3": { plain: true }, "4": viaLink },
+      });
+      await pointSlug("board", board);
+      await pointSlug("top", board.key("names"));
+      await pointSlug("plain", plain);
+    });
+
+    describe("resolveSlugReference()", () => {
+      it("returns the piece and the whole path when the slug names a piece root", async () => {
+        const target = await resolveSlugReference(runtime, space, "board", [
+          "names",
+          "1",
+        ]);
+        expect(idOf(target.piece)).toBe(idOf(board));
+        expect(target.path).toEqual(["names", "1"]);
+      });
+
+      it("returns the member piece and the rest of the path when the slug names a collection", async () => {
+        const target = await resolveSlugReference(runtime, space, "top", [
+          "2",
+          "title",
+        ]);
+        expect(idOf(target.piece)).toBe(idOf(item2));
+        expect(target.piece.getAsNormalizedFullLink().path).toEqual([]);
+        expect(target.path).toEqual(["title"]);
+      });
+
+      it("reads a numeric segment as the member name it denotes", async () => {
+        const target = await resolveSlugReference(runtime, space, "top", [1]);
+        expect(idOf(target.piece)).toBe(idOf(item1));
+        expect(target.path).toEqual([]);
+      });
+
+      it("follows a member through a chain of links to the piece at its end", async () => {
+        const target = await resolveSlugReference(runtime, space, "top", [
+          "4",
+          "title",
+        ]);
+        expect(idOf(target.piece)).toBe(idOf(item2));
+        expect(target.path).toEqual(["title"]);
+      });
+
+      it("fails with `missing-member` naming the collection when a segment selects nothing", async () => {
+        const error = await resolveSlugReference(runtime, space, "top", [
+          "999",
+        ]).catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(SlugResolutionError);
+        expect((error as SlugResolutionError).code).toBe("missing-member");
+        expect((error as Error).message).toBe("no member 999 in top");
+      });
+
+      it("fails with `inside-piece` naming the containing piece when the slug names a collection and the path is empty", async () => {
+        const error = await resolveSlugReference(runtime, space, "top", [])
+          .catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(SlugResolutionError);
+        expect((error as SlugResolutionError).code).toBe("inside-piece");
+        expect((error as Error).message).toContain(
+          `inside piece ${cellEntityIdString(board)}`,
+        );
+        expect((error as Error).message).toContain("top/<name>");
+      });
+
+      it("fails with `not-piece` when the segments run out before a piece", async () => {
+        const error = await resolveSlugReference(runtime, space, "top", ["3"])
+          .catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(SlugResolutionError);
+        expect((error as SlugResolutionError).code).toBe("not-piece");
+        expect((error as Error).message).toMatch(
+          /"top\/3" does not name a piece/,
+        );
+      });
+
+      it("fails with `not-piece` for a slug to a plain document and no path", async () => {
+        const error = await resolveSlugReference(runtime, space, "plain", [])
+          .catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(SlugResolutionError);
+        expect((error as SlugResolutionError).code).toBe("not-piece");
+        expect((error as Error).message).toMatch(/not a piece/);
+      });
+    });
+
+    describe("resolveSlugTargetInPiece()", () => {
+      it("returns the containing piece's root and the path to the target", async () => {
+        const target = await resolveSlugTargetInPiece(runtime, space, "top");
+        expect(idOf(target.piece)).toBe(idOf(board));
+        expect(target.piece.getAsNormalizedFullLink().path).toEqual([]);
+        expect(target.path).toEqual(["names"]);
+      });
+
+      it("returns an empty path for a slug that names the piece itself", async () => {
+        const target = await resolveSlugTargetInPiece(runtime, space, "board");
+        expect(idOf(target.piece)).toBe(idOf(board));
+        expect(target.path).toEqual([]);
+      });
+
+      it("fails with `not-piece` for a slug to a plain document", async () => {
+        const error = await resolveSlugTargetInPiece(runtime, space, "plain")
+          .catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(SlugResolutionError);
+        expect((error as SlugResolutionError).code).toBe("not-piece");
+      });
+    });
+
+    describe("isPieceRoot()", () => {
+      it("returns `true` for a piece's root and `false` for a cell inside it", () => {
+        expect(isPieceRoot(runtime, board)).toBe(true);
+        expect(isPieceRoot(runtime, board.key("names"))).toBe(false);
+      });
+    });
   });
 });

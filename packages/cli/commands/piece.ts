@@ -20,7 +20,7 @@ import {
   type RestorableRevision,
 } from "@commonfabric/piece/ops";
 import ports from "@commonfabric/ports" with { type: "json" };
-import { parseCellPath, UI } from "@commonfabric/runner";
+import { isSlugAddress, parseCellPath, UI } from "@commonfabric/runner";
 import {
   encodeJsonPointer,
   parseScopedIdSegment,
@@ -100,6 +100,7 @@ import {
   newPiece,
   partitionVerbListing,
   PieceConfig,
+  pieceIdOnlyPathRefusal,
   PieceResultProjectionError,
   PieceVerbReadError,
   recreateSpaceRootPattern,
@@ -120,6 +121,7 @@ import type {
   ExecutedPieceCallable,
   PieceCallablesListing,
   PieceInspection,
+  SlugSummary,
 } from "../lib/piece.ts";
 import { render, safeStringify } from "../lib/render.ts";
 import { newSessionId } from "../lib/session.ts";
@@ -642,12 +644,13 @@ export function renderPieceSummaries(
   if (rows.length > 1) render(Table.from(rows).toString());
 }
 
-/** `cf piece slugs` output: one row per indexed name, the piece it resolves
- * to where it resolves to one, and the resolution's own error where it does
- * not. The error rides the JSON too — a machine reader has no table to read
- * a `<error: …>` marker off. */
+/** `cf piece slugs` output: one row per indexed name, where it points — the
+ * piece, or the piece and the path inside it, printed `piece/path` in the
+ * table and as a `path` array in the JSON — and the resolution's own error
+ * where it points into no piece. The error rides the JSON too — a machine
+ * reader has no table to read a `<error: …>` marker off. */
 export function renderSlugSummaries(
-  slugs: Array<{ slug: string; piece?: string; error?: string }>,
+  slugs: SlugSummary[],
   json: boolean,
 ): void {
   if (json) {
@@ -655,6 +658,7 @@ export function renderSlugSummaries(
       slugs.map((entry) => ({
         slug: entry.slug,
         piece: entry.piece ?? null,
+        ...(entry.path !== undefined ? { path: entry.path } : {}),
         ...(entry.error !== undefined ? { error: entry.error } : {}),
       })),
       { json: true },
@@ -666,7 +670,11 @@ export function renderSlugSummaries(
     ["SLUG", "PIECE"],
     ...slugs.map((entry) => [
       entry.slug,
-      entry.error !== undefined ? `<error: ${entry.error}>` : entry.piece!,
+      entry.error !== undefined
+        ? `<error: ${entry.error}>`
+        : entry.path !== undefined
+        ? `${entry.piece}/${entry.path.join("/")}`
+        : entry.piece!,
     ]),
   ];
   if (rows.length > 1) render(Table.from(rows).toString());
@@ -4989,13 +4997,16 @@ export function parsePieceOptions(
     );
   }
   const config = options as PieceConfig;
-  if (config.piecePath?.length && !parseOptions?.acceptsPath) {
-    throw new ValidationError(
-      `The piece reference embeds a path ("${
-        config.piecePath.join("/")
-      }") but this command takes a piece id only.`,
-      { exitCode: 1 },
-    );
+  // A slug's path is not refused here: a slug may name a collection, whose
+  // member the path selects, and only resolution can tell. What the walk
+  // leaves is refused there, in these words.
+  if (
+    config.piecePath?.length && !parseOptions?.acceptsPath &&
+    !isSlugAddress(config.piece)
+  ) {
+    throw new ValidationError(pieceIdOnlyPathRefusal(config.piecePath), {
+      exitCode: 1,
+    });
   }
   if (config.pieceInput && !parseOptions?.acceptsArgument) {
     throw new ValidationError(

@@ -1,12 +1,18 @@
 /**
- * `cf piece slugs` at its three seams: the lib listing over an index-cell
- * double (name filtering and per-row error isolation — the happy resolution
- * path runs against a real runtime in `packages/piece/test/slug.test.ts`),
- * the renderer's JSON and table shapes, and the command wiring.
+ * `cf piece slugs` at its three seams: the lib listing — over an index-cell
+ * double for name filtering and per-row error isolation, and over a real
+ * runtime for where a name points, a piece or a cell inside one — the
+ * renderer's JSON and table shapes, and the command wiring.
  */
 
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { createSession, Identity } from "@commonfabric/identity";
+import { pieceId, setSlugLink } from "@commonfabric/piece";
+import { PiecesController } from "@commonfabric/piece/ops";
+import { type Cell, Runtime } from "@commonfabric/runner";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
+import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { decode } from "@commonfabric/utils/encoding";
 import { listSpaceSlugs } from "../lib/piece.ts";
 import {
@@ -85,13 +91,70 @@ describe("piece-slugs", () => {
         }),
       ).toEqual([]);
     });
+
+    describe("over a real runtime", () => {
+      // The board is a document stamped as a piece's, which is what the
+      // resolution reads; nothing runs. `board` names it, and `top` names the
+      // collection it keeps at `names`.
+
+      let storageManager: ReturnType<typeof StorageManager.emulate>;
+      let runtime: Runtime;
+      let pieces: PiecesController;
+      let board: Cell<unknown>;
+
+      beforeEach(async () => {
+        const signer = await Identity.fromPassphrase("cf piece slugs listing");
+        storageManager = StorageManager.emulate({ as: signer });
+        runtime = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+        });
+        const session = await createSession({
+          identity: signer,
+          spaceName: "piece-slugs-listing",
+        });
+        pieces = new PiecesController(session, runtime);
+        await pieces.synced();
+        board = runtime.getCell(
+          pieces.getSpace(),
+          { space: pieces.getSpace(), random: "board" },
+        );
+        await runtime.editWithRetry((tx) => {
+          const withTx = board.withTx(tx);
+          withTx.set({ names: {} });
+          withTx.setMetaRaw(
+            "patternIdentity",
+            { identity: "pattern-board", symbol: "default" },
+            rawMetaWriteAuthorization,
+          );
+        });
+        await setSlugLink(pieces, "board", board);
+        await setSlugLink(pieces, "top", board.key("names"));
+      });
+
+      afterEach(async () => {
+        await runtime.dispose();
+        await storageManager.close();
+      });
+
+      it("lists a slug into a piece with the containing piece and the path, and one to a piece with no path", async () => {
+        const rows = await listSpaceSlugs(CONFIG, {
+          loadPieces: () => Promise.resolve(pieces),
+        });
+        expect(rows).toEqual([
+          { slug: "board", piece: pieceId(board) },
+          { slug: "top", piece: pieceId(board), path: ["names"] },
+        ]);
+      });
+    });
   });
 
   describe("renderSlugSummaries", () => {
-    it("renders rows as JSON with a null piece and the error carried through", () => {
+    it("renders rows as JSON with a null piece, the path where there is one, and the error carried through", () => {
       const json = captureStdout(() =>
         renderSlugSummaries([
           { slug: "board", piece: "fid1:abc" },
+          { slug: "top", piece: "fid1:abc", path: ["names"] },
           {
             slug: "broken",
             error: "redirects to a document that is not a piece",
@@ -100,6 +163,7 @@ describe("piece-slugs", () => {
       );
       expect(JSON.parse(json)).toEqual([
         { slug: "board", piece: "fid1:abc" },
+        { slug: "top", piece: "fid1:abc", path: ["names"] },
         {
           slug: "broken",
           piece: null,
@@ -108,10 +172,11 @@ describe("piece-slugs", () => {
       ]);
     });
 
-    it("renders a SLUG/PIECE table with an error marker, and nothing when empty", () => {
+    it("renders a SLUG/PIECE table with `piece/path` for a slug into a piece and an error marker, and nothing when empty", () => {
       const table = captureStdout(() =>
         renderSlugSummaries([
           { slug: "board", piece: "fid1:abc" },
+          { slug: "top", piece: "fid1:abc", path: ["names"] },
           { slug: "broken", error: "no longer loads" },
         ], false)
       );
@@ -119,6 +184,7 @@ describe("piece-slugs", () => {
       expect(table).toContain("PIECE");
       expect(table).toContain("board");
       expect(table).toContain("fid1:abc");
+      expect(table).toContain("fid1:abc/names");
       expect(table).toContain("<error: no longer loads>");
 
       expect(captureStdout(() => renderSlugSummaries([], false))).toBe("");

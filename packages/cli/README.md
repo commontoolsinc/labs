@@ -122,6 +122,25 @@ way and once the session opens when only a derivation can compare them. An
 address printed by one command therefore composes into the next with no flag
 beside it, whatever space the reader has configured.
 
+A slug may name a collection rather than a piece.
+`cf piece set-slug top
+/of:fid1:…/names` points `top` at the map a board keeps
+its members in, keyed by member name, and `/top/2` then names member `2`. Where
+the slug points is what decides how the path after it reads. A slug that points
+at a piece names that piece, and the path is a cell path inside it, as it is
+after a handle: `/tracker/items/0` is `items/0` inside the piece `tracker`
+names, whatever `items` holds. A slug that points anywhere else names a
+collection: the first segment selects a member, the cell that member holds is
+the piece, and the segments after it are a cell path inside that member. So
+`cf cell get /top/2 title` reads member `2`'s title,
+`cf piece describe --cell /top/2` describes it, and
+`cf piece call --cell /top/2 <verb>` calls it. A collection's name with no
+member after it is refused, naming the piece that holds the collection; a member
+the collection does not hold is refused as `no member 999 in top`. This is the
+rule wherever a `--cell` or positional address names the target, and for the
+source of `set-slug`; a `cf piece link` endpoint resolves its slug to a piece
+and reads the path inside that piece.
+
 Beside the reference, the CLI's bare form — `pieceId[@scope]`,
 `pieceId[@scope]/path` at link endpoints, and slugs — is a convenience alias for
 interactive use. New reference-syntax capabilities land in the reference first;
@@ -300,10 +319,20 @@ still following an origin is not there: restoring severs the origin, so the run
 writes and names the origin it would cut.
 
 `cf piece slugs` lists the space's slug index: every name assigned through
-`--slug` or `set-slug`, each resolved to the piece it names. The index records
+`--slug` or `set-slug`, each resolved to where it points — the piece it names,
+or for a slug into a cell inside a piece, that piece and the path, printed
+`fid1:…/names` in the table and as a `path` array in the JSON. The index records
 assignments made since it existed, so a slug written by an older client still
 resolves but is not listed — a slug document's id is derived from its name, and
 nothing can enumerate names it was never told.
+
+`cf piece set-slug <slug> <source>` takes any address as its source. A handle
+with a path, `/of:fid1:…/names`, names a cell inside that piece, which is how a
+collection gets its name. A slug with a path after it resolves as a target does,
+so `set-slug two /top/2` names member `2`. A bare slug names whatever that slug
+points at, piece or not, which is how a collection's name is aliased.
+`--resolve-before-linking` resolves the source cell's link before writing, so
+the new slug points at what the source's cell points at rather than at the cell.
 
 `cf piece search` also starts from the registry. It searches readable input and
 result data, but returns registered pieces only. `cf piece map` likewise shows

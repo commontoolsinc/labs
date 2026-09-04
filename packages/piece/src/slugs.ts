@@ -1,19 +1,20 @@
 import type { JSONSchema } from "@commonfabric/api";
 import type { Cell } from "@commonfabric/runner";
-import { utf8Compare } from "@commonfabric/utils/utf8";
 import {
   entityIdFrom,
-  getPatternIdentityRef,
   isSlugAddress,
+  resolveSlugReference,
   resolveSlugTargetCell as resolveRuntimeSlugTargetCell,
+  resolveSlugTargetInPiece,
   slugIdForSpace,
   slugIndexIdForSpace,
   SlugResolutionError,
   validateSlug,
 } from "@commonfabric/runner";
-import { pieceId } from "./piece-id.ts";
-import type { PiecesController } from "./ops/pieces-controller.ts";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
+import { utf8Compare } from "@commonfabric/utils/utf8";
+import type { PiecesController } from "./ops/pieces-controller.ts";
+import { pieceId } from "./piece-id.ts";
 
 export { SlugResolutionError };
 
@@ -123,31 +124,93 @@ export async function setSlugLink(
   await pieces.synced();
 }
 
+/**
+ * A piece and a cell path inside it, as an address and the path written
+ * after it resolve.
+ */
+export interface PieceReference {
+  /** The piece's id. */
+  piece: string;
+
+  /** The segments after the piece, a cell path inside it. */
+  path: (string | number)[];
+}
+
+/**
+ * Where a slug points: the piece whose document holds the target, and the
+ * path from that document's root to the target, which is empty when the slug
+ * names the piece itself.
+ */
+export interface SlugTarget {
+  /** The id of the piece the target sits in. */
+  piece: string;
+
+  /** The path from the piece's root to the target. */
+  path: string[];
+}
+
+/**
+ * Resolves an address and the path written after it to a piece and the cell
+ * path inside it. A handle names its piece and the path is returned whole. A
+ * slug resolves as the runtime's `resolveSlugReference` does: to the piece it
+ * names, with the path returned whole, or through the collection it names to
+ * the member the path's first segment selects, with the rest of the path.
+ *
+ * Fails as `resolveSlugReference` fails, and with `missing-piece-id` when the
+ * piece reached has no id.
+ */
+export async function resolvePieceReference(
+  pieces: PiecesController,
+  token: string,
+  path: readonly (string | number)[],
+): Promise<PieceReference> {
+  if (!isSlugAddress(token)) {
+    return { piece: token, path: [...path] };
+  }
+  const target = await resolveSlugReference(
+    pieces.runtime,
+    pieces.getSpace(),
+    token,
+    path,
+  );
+  return { piece: pieceIdOrThrow(token, target.piece), path: target.path };
+}
+
+/**
+ * Resolves an address to a piece id: a handle as itself, and a slug as
+ * {@link resolvePieceReference} resolves it with no path, so a slug that
+ * names a collection rather than a piece is refused.
+ */
 export async function resolvePieceAddress(
   pieces: PiecesController,
   token: string,
 ): Promise<string> {
-  if (!isSlugAddress(token)) {
-    return token;
-  }
+  return (await resolvePieceReference(pieces, token, [])).piece;
+}
 
-  const target = await resolveSlugTargetCell(pieces, token);
-  // A KEYLESS piece carries no durable pointer (the never-durable
-  // contract; L3(a), RULED 2026-08-27): in the session that set it up the
-  // runner's session pointer vouches for it. A fresh session cannot vouch
-  // for a keyless target — which matches the contract: nothing keyless is
-  // loadable there anyway.
-  if (
-    getPatternIdentityRef(target) === undefined &&
-    pieces.runtime.runner.sessionPatternPointerFor(target) === undefined
-  ) {
-    throw new SlugResolutionError(
-      `Slug "${token}" redirects to a document that is not a piece.`,
-      "not-piece",
-    );
-  }
+/**
+ * Resolves a slug to the piece its target sits in and the path to the target
+ * inside it. Fails with `not-piece` when that document is no piece, and with
+ * `missing-piece-id` when it has no id.
+ */
+export async function resolveSlugTarget(
+  pieces: PiecesController,
+  token: string,
+): Promise<SlugTarget> {
+  const target = await resolveSlugTargetInPiece(
+    pieces.runtime,
+    pieces.getSpace(),
+    token,
+  );
+  return { piece: pieceIdOrThrow(token, target.piece), path: target.path };
+}
 
-  const id = pieceId(target);
+/**
+ * Helper for the resolvers above, which reads a piece's id off its root cell
+ * and refuses a cell that has none.
+ */
+function pieceIdOrThrow(token: string, piece: Cell<unknown>): string {
+  const id = pieceId(piece);
   if (!id) {
     throw new SlugResolutionError(
       `Slug "${token}" redirects to a document without a piece id.`,
