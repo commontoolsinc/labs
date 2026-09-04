@@ -1323,7 +1323,10 @@ Deno.test("acl enforce: a genesis ACL without a concrete OWNER is refused and th
   // The runner's genesis-supplied ACL option hands the caller's document to
   // this same admission check (no client-side validation): a space identity
   // that tries to mint an unowned or malformed space is refused at genesis
-  // with the existing shape error, and genesis stays owed.
+  // with the existing shape error, and genesis stays owed. This pins
+  // behavior the server already had — no server code changed — rather than
+  // driving new behavior; it reddens when `hasConcreteOwner` is dropped
+  // from `#validateAclCommit` (mutation witnessed).
   const server = createAclServer("memory://acl-genesis-unowned", {
     mode: "enforce",
   });
