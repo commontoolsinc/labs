@@ -666,7 +666,7 @@ Three pieces of the service arm positive-delay timers. `SpaceManager.#execLoop`
 parks on `sleep(pollingIntervalMs)` between polls of its task queue.
 `SpaceManager.stop` races a `setInterval` that watches for the active job to
 finish against a `sleep(deactivationTimeoutMs)` deadline. And
-`WorkerController.exec` arms a `setTimeout(timeoutMs)` that rejects a worker
+`WorkerController.#exec` arms a `setTimeout(timeoutMs)` that rejects a worker
 request the worker never answers. Each of these is scheduled from `src/`, so the
 clock reads it as a production timer. The poll and the deactivation deadline
 reach `setTimeout` indirectly, through the `sleep` helper in
