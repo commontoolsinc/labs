@@ -5279,10 +5279,8 @@ describe("runtime-processor", () => {
     const handleVDomUnmount =
       (RuntimeProcessor.prototype as any).handleVDomUnmount;
 
-    type RootRenderPolicy = {
-      maxConfidentiality?: readonly unknown[];
-      caveatKindAllow?: readonly string[];
-    };
+    type RootRenderPolicy =
+      WorkerReconciler["accessForTestingOnly"]["rootRenderPolicy"];
 
     async function mountAndGetRootPolicy(
       renderConfidentialityCeiling:
