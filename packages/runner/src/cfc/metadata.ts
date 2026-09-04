@@ -48,10 +48,25 @@ const KNOWN_CFC_METADATA_VERSIONS: readonly CfcMetadata["version"][] = [1];
 const isKnownMetadataVersion = (value: unknown): boolean =>
   KNOWN_CFC_METADATA_VERSIONS.some((version) => version === value);
 
-const isCfcMetadata = (value: unknown): value is CfcMetadata =>
+export const isCfcMetadata = (value: unknown): value is CfcMetadata =>
   isObjectNotArray(value) && isKnownMetadataVersion(value.version) &&
   isObjectNotArray(value.labelMap) &&
   Array.isArray(value.labelMap.entries);
+
+/**
+ * A stored envelope at the reserved position that carries no label map this
+ * build can walk. The labels cannot be read, so a consumer that resolves
+ * labels fails CLOSED on this error: a document whose envelope is present but
+ * unreadable is not an unlabeled document.
+ */
+export class UnreadableCfcMetadataError extends Error {
+  constructor(id: string) {
+    super(
+      `stored CFC metadata for ${id} carries no label map this build can read`,
+    );
+    this.name = "UnreadableCfcMetadataError";
+  }
+}
 
 // A record at the reserved metadata position whose `version` this build does
 // not interpret. The position is what qualifies the record, never its field
