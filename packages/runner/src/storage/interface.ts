@@ -2233,7 +2233,7 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
    * grant — audience entries principal-like per §3.1.8, `owner` equal to
    * this transaction's acting principal (release authority), lifecycle
    * shape — derives the content-addressed id under the reserved
-   * `grant:cfc:` namespace, and writes the document inside the privileged
+   * `cfc-grant:` namespace, and writes the document inside the privileged
    * system-write scope. Throws on any violation. Any OTHER write to the
    * reserved namespace is recorded as an unprivileged system write and
    * fails closed at prepare (S18 class).

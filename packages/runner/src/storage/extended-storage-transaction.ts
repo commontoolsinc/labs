@@ -2822,7 +2822,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // write. The label-map arms are structurally unreachable here (a
     // NormalizedFullLink always yields a value-rooted storage path, so neither
     // the ["cfc"] path nor the document root can arrive), but the reserved
-    // `grant:cfc:` documents are keyed by ID, and the mergeable path must not
+    // `cfc-grant:` documents are keyed by ID, and the mergeable path must not
     // slip an unprivileged grant mutation past the gate. The meta-seam arm is
     // unreachable for the same reason, which is why no value reaches it from
     // here.

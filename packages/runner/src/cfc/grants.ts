@@ -29,11 +29,11 @@ import type {
  *
  * A grant document's entity id derives deterministically from its RELEASE
  * SCOPE — `{ space, kind, owner, resource }` — hashed under a versioned
- * `cfcGrant` wrapper and carried under the reserved `grant:cfc:` id scheme
+ * `cfcGrant` wrapper and carried under the reserved `cfc-grant:` id scheme
  * (the `cid:` schema-doc precedent: a distinct URI scheme IS the reserved
  * namespace, recognizable by the S18-class write gate without any registry):
  *
- *   id = `grant:cfc:` + hashStringOf({ cfcGrant:
+ *   id = `cfc-grant:` + hashStringOf({ cfcGrant:
  *          { version, space, kind, owner, resource } })
  *
  * Why these four fields and not the full record:
@@ -76,7 +76,7 @@ import type {
 /** Reserved id scheme for grant documents. The whole document is policy
  * state: any unprivileged write at any path under an id with this prefix is
  * recorded and fails closed (S18-class, `noteSystemWrite`). */
-export const CFC_GRANT_ID_PREFIX = "grant:cfc:";
+export const CFC_GRANT_ID_PREFIX = "cfc-grant:";
 
 /** Version stamped into both the address derivation and the stored value. */
 export const CFC_GRANT_VERSION = 1;
@@ -179,12 +179,12 @@ export const cfcGrantDocId = (identity: CfcGrantIdentity): URI =>
  * `createRef` over the cause record, minting an ordinary `of:` entity id.
  * This receipt instead follows the §6.5.1 SHAPE (`{ grantConsumed:
  * { grantId } }`, one receipt per grant id) realized with the #4627 ADDRESS
- * IDIOM (the reserved `grant:cfc:` URI scheme + a versioned `hashStringOf`
+ * IDIOM (the reserved `cfc-grant:` URI scheme + a versioned `hashStringOf`
  * wrapper, exactly like `cfcGrantDocId`) rather than `createRef`, because:
  *
  * - **The receipt is policy state and must live in the reserved namespace.**
  *   `noteSystemWrite` records ANY unprivileged write at ANY path under a
- *   `grant:cfc:` id as an S18-class violation. An `of:` receipt would sit
+ *   `cfc-grant:` id as an S18-class violation. An `of:` receipt would sit
  *   outside that gate: forging one is merely fail-closed (a denied live
  *   grant), but unprivileged DELETION/overwrite of a spent receipt would
  *   RE-ARM a consumed single-use grant — fail open. The reserved scheme
@@ -238,7 +238,7 @@ type PendingGrantConsumptionClaim = {
  *
  * Deliberately a module-private WeakMap rather than a field on `CfcTxState`
  * or a method on the transaction interface: a claim staged here is written
- * into the reserved `grant:cfc:` namespace INSIDE the privileged scope by
+ * into the reserved `cfc-grant:` namespace INSIDE the privileged scope by
  * `flushCfcGrantConsumptionClaims` (called from `prepareBoundaryCommit`), so
  * a registration surface reachable from handler code via `(cell.tx as any)`
  * would launder unprivileged receipt forgeries — spending any grant the

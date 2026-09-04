@@ -12,6 +12,7 @@ import type { URI } from "@commonfabric/memory/interface";
 
 import type { Cell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
+import { CFC_GRANT_ID_PREFIX } from "../src/cfc/grants.ts";
 import type { CfcEnforcementMode } from "../src/cfc/types.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
@@ -211,7 +212,7 @@ describe("meta-seam-write-authorization", () => {
     });
 
     it("throws on a meta write to a reserved grant document", async () => {
-      // A reserved `grant:cfc:` document is recorded by an arm of the same
+      // A reserved `cfc-grant:` document is recorded by an arm of the same
       // chokepoint, and a recording arm returns. The seam's refusal comes
       // first, so which document a write names cannot decide whether it is
       // asked for an authorization. CFC is disabled here, the mode in which
@@ -220,9 +221,12 @@ describe("meta-seam-write-authorization", () => {
       await withRuntime(({ tx }) => {
         expect(() =>
           tx.writeOrThrow(
-            documentAddress("grant:cfc:meta-seam-probe" as URI, [
-              "patternIdentity",
-            ]),
+            documentAddress(
+              `${CFC_GRANT_ID_PREFIX}meta-seam-probe` as URI,
+              [
+                "patternIdentity",
+              ],
+            ),
             forgedIdentity,
           )
         ).toThrow(/patternIdentity/);

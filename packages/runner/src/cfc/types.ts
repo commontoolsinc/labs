@@ -893,7 +893,7 @@ export type CfcTxState = {
   // writes in prepareBoundaryCommit run privileged and never land here; anything
   // that does is forging metadata that drives derivation for other writes, so
   // prepareBoundaryCommit turns each into a fail-closed reason. Writes to
-  // reserved `grant:cfc:` documents outside the trusted policy-writer path
+  // reserved `cfc-grant:` documents outside the trusted policy-writer path
   // (`writeCfcGrant`) are recorded here too — same S18 class, same reasons.
   unprivilegedSystemWrites: string[];
   // Grant documents consulted by policyState-guarded boundary evaluation in

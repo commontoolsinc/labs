@@ -242,8 +242,8 @@ The strict-only delta is:
   read-failed marker sits outside every ceiling, the residency clause
   included, so a poisoned measurement never proves fit. The reserved policy
   namespaces are outside the check too: the durable policy manifests
-  (`of:cfc-policy-manifest:<digest>`) and the release grants and single-use
-  consumption receipts (`grant:cfc:<digest>`) hold policy state the runtime
+  (`cfc-policy-manifest:<digest>`) and the release grants and single-use
+  consumption receipts (`cfc-grant:<digest>`) hold policy state the runtime
   persists through its own privileged writers, gated at the transaction write
   chokepoint, so they are not value-write targets any of the write-side checks
   measure. The spec settles this rather than leaving it to implementation

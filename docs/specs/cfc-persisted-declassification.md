@@ -167,7 +167,7 @@ rewrite event:
    writes, under the `enforce` policy-evaluation dial — never the render
    ceiling or observe-dial diagnostics, where a grant would be spent by
    looking at it) and only while its consumption receipt is absent. The
-   receipt is `grant:cfc:` + a digest of `{grantConsumed: {grantId}}` — the
+   receipt is `cfc-grant:` + a digest of `{grantConsumed: {grantId}}` — the
    §6.5.1 `consumedCellId` shape on the item-2 address idiom, so the
    S18-class reserved-namespace write gate covers forging AND the
    re-arming delete. The releasing transaction stages the receipt write +
@@ -196,7 +196,7 @@ _Implementation note (2026-07-09): items 1–3 shipped in #4627. The
 `policyState` guard resolves through `ExchangeEvalContext.grantResolver`
 (evaluator stays pure; variables bind from grant fields; unresolvable or
 throwing resolution fails closed). `CfcGrant` records live in the **owner's
-identity space** at `grant:cfc:` + a digest of the release scope
+identity space** at `cfc-grant:` + a digest of the release scope
 `{version, space, kind, owner, resource}` — identity is the scope only, so
 the audience and lifecycle live in the value and revocation keeps the
 address (a full-record hash would give revocations a fresh address while

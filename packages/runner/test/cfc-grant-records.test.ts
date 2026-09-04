@@ -768,9 +768,10 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     it("records a diagnostic and allows the write in observe mode", async () => {
       await withRuntime({ enforcement: "observe" }, async (runtime) => {
         const tx = runtime.edit();
+        const forgedId = `${CFC_GRANT_ID_PREFIX}forged-observe`;
         tx.writeOrThrow({
           space: signer.did(),
-          id: `${CFC_GRANT_ID_PREFIX}forged-observe` as URI,
+          id: forgedId as URI,
           type: "application/json",
           path: ["value"],
         }, { probe: true });
@@ -779,7 +780,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
         expect(
           tx.getCfcState().diagnostics.some((note) =>
             note.includes("unprivileged write to protected cfc path") &&
-            note.includes(CFC_GRANT_ID_PREFIX)
+            note.includes(`${forgedId}/value`)
           ),
         ).toBe(true);
       });
@@ -1466,7 +1467,10 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
         tx.prepareCfc();
         expect(tx.getCfcState().prepare.status).toBe("prepared");
         // New address: invalidates.
-        tx.recordCfcConsultedGrant({ ...entry("d3"), id: "grant:cfc:other" });
+        tx.recordCfcConsultedGrant({
+          ...entry("d3"),
+          id: `${CFC_GRANT_ID_PREFIX}other`,
+        });
         const added = tx.getCfcState().prepare;
         expect(added.status).toBe("invalidated");
         if (added.status === "invalidated") {

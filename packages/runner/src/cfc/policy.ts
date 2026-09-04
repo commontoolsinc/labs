@@ -2,11 +2,17 @@ import { deepFreeze, hashStringOf } from "@commonfabric/data-model";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { type AtomPattern, isAtomVarPlaceholder } from "./atom-pattern.ts";
 
-export const CFC_POLICY_MANIFEST_ID_PREFIX = "of:cfc-policy-manifest:";
+/** Reserved id scheme for policy-manifest documents. An unprivileged write at
+ * any path under an id with this prefix throws (S18-class,
+ * `noteSystemWrite`). The scheme is not one of the entity URI schemes in
+ * `entity-kind.ts`, and `toURI` accepts only those, so an id under this prefix
+ * reaches storage as a link. */
+export const CFC_POLICY_MANIFEST_ID_PREFIX = "cfc-policy-manifest:";
 
 export const cfcPolicyManifestDocId = (
   policyDigest: string,
-): `of:${string}` => `${CFC_POLICY_MANIFEST_ID_PREFIX}${policyDigest}`;
+): `cfc-policy-manifest:${string}` =>
+  `${CFC_POLICY_MANIFEST_ID_PREFIX}${policyDigest}`;
 
 /**
  * Policy records + exchange rules (spec §4.3/§4.4, Epic B2 of

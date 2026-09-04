@@ -14,7 +14,7 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
  * Makes the commit boundary refuse `tx`, and says in `reason` what the case
  * wanted a refusal for.
  *
- * The whole of a reserved `grant:cfc:` document is policy state that only
+ * The whole of a reserved `cfc-grant:` document is policy state that only
  * `writeCfcGrant` may write, so an ordinary write to one is recorded at the
  * transaction's write chokepoint and prepare refuses over it. The refusal is
  * a verdict on the transaction's data, so it reaches the caller under the

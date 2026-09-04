@@ -109,7 +109,7 @@ reason to prefer fixing replay in the runner over deriving addresses in a
 client: replay safety helps every dispatch, nameable or not.
 
 **Should recovery ever get a name, `invocation` not `receipt`.** CFC single-use grants write a
-*consumption receipt* under the reserved `grant:cfc:` scheme
+*consumption receipt* under the reserved `cfc-grant:` scheme
 (`packages/runner/src/cfc/grants.ts`), deliberately avoiding the `resultFor`
 idiom so `noteSystemWrite` gates it. `cf receipt` would be ambiguous between the
 two and invite the expectation that it reads the policy-state kind.

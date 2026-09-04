@@ -1370,6 +1370,29 @@ export class Runtime {
       : undefined;
   }
 
+  /**
+   * Cell over the policy-manifest document for `policyDigest`. The reserved
+   * `cfc-policy-manifest:` id is not one of the entity URI schemes `toURI`
+   * mints and validates, so the link is built here and handed to
+   * `getCellFromLink`.
+   */
+  #cfcPolicyManifestCell(
+    space: MemorySpace,
+    policyDigest: string,
+    tx: IExtendedStorageTransaction,
+  ) {
+    return this.getCellFromLink(
+      {
+        id: cfcPolicyManifestDocId(policyDigest),
+        path: [],
+        space,
+        scope: "space",
+      },
+      CFC_POLICY_MANIFEST_DOC_SCHEMA,
+      tx,
+    );
+  }
+
   hasCfcPolicyManifest(
     space: MemorySpace,
     reference: unknown,
@@ -1394,11 +1417,9 @@ export class Runtime {
         : this.#readCfcPolicyManifest(space, reference, tx));
     if (artifact === undefined) return false;
     if (tx !== undefined) {
-      const cell = this.getCellFromEntityId(
+      const cell = this.#cfcPolicyManifestCell(
         space,
-        cfcPolicyManifestDocId(artifact.policyDigest),
-        [],
-        CFC_POLICY_MANIFEST_DOC_SCHEMA,
+        artifact.policyDigest,
         tx,
       );
       const existing = snapshotQueryResult(cell.get());
@@ -1440,11 +1461,9 @@ export class Runtime {
     ) return undefined;
     const candidate = reference as Record<string, unknown>;
     if (typeof candidate.policyDigest !== "string") return undefined;
-    const cell = this.getCellFromEntityId(
+    const cell = this.#cfcPolicyManifestCell(
       space,
-      cfcPolicyManifestDocId(candidate.policyDigest),
-      [],
-      CFC_POLICY_MANIFEST_DOC_SCHEMA,
+      candidate.policyDigest,
       tx,
     );
     const stored = snapshotQueryResult(cell.get());

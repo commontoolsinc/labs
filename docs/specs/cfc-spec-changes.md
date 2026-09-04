@@ -796,7 +796,7 @@ without evaluation (export/publish). Unconflate the §13 table row.
 `applied` — specs#14 (2026-07-09): §8.12.7 route 2 split into 2a/2b with the
 2b contract (including the create-only intent-causal record shape) and the
 §13 summary-table row unconflated. Runner-side: grants build-order items 1–3
-shipped as labs#4627 (`policyState` guards, owner-space `grant:cfc:` records,
+shipped as labs#4627 (`policyState` guards, owner-space grant records,
 consulted-grant digest binding); the rewrite event is **superseded** per
 `cfc-persisted-declassification.md` §5 (owner decision 2026-07-10: in-fabric
 federation trust comes from remote attestation, so trust-free release buys
