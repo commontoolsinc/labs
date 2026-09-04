@@ -6379,6 +6379,11 @@ export class Server {
     );
   }
 
+  /**
+   * Helper for the refresh timer, which waits for the connection queues to
+   * drain and then flushes the scheduled sessions, logging a failure rather
+   * than throwing it, since the timer has no caller to surface one to.
+   */
   async #flushScheduledSessions(): Promise<void> {
     await this.#waitForConnectionQueuesToDrain(
       Math.max(
@@ -6444,8 +6449,9 @@ export class Server {
    * for other spaces remain independent, so the latency coupling is local to
    * one space.
    *
-   * TypeScript-private rather than a `#` name, because `test/v2-server.test.ts`
-   * reaches this member and a `#` name would put it out of reach.
+   * TypeScript-private rather than a `#` name, because
+   * `test/v2-verdict-catchup.test.ts` replaces this member by assignment,
+   * which a `#` method does not allow.
    */
   private async withSpacePublicationLock<T>(
     space: string,
@@ -6795,8 +6801,8 @@ export class Server {
 
   /**
    * TypeScript-private rather than a `#` name, because
-   * `test/v2-server-acl.test.ts` reaches this member and a `#` name would put
-   * it out of reach.
+   * `test/v2-server-acl.test.ts` replaces this member by assignment, which a
+   * `#` method does not allow.
    */
   private openEngine(space: string): Promise<Engine.Engine> {
     const existing = this.#engines.get(space);
