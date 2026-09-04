@@ -14,7 +14,10 @@ import { resolve } from "@std/path";
 import type { Identity } from "@commonfabric/identity";
 import { experimentalOptionsForDeployedClient } from "@commonfabric/runner";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { writeTempIdentity } from "@commonfabric/integration/temp-identity";
+import {
+  type TempIdentity,
+  writeTempIdentity,
+} from "@commonfabric/integration/temp-identity";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
 import {
   callPieceHandler,
@@ -51,6 +54,7 @@ let staleSessionResultPieceId = "";
 let sessionScopedPieceId = "";
 let flags = "";
 let identityPath = "";
+let tempIdentity: TempIdentity | undefined;
 let spaceConfig: SpaceConfig;
 // The server-execution arm `cf` itself runs at (server-execution v2,
 // testing.md §2): resolved exactly as the cf binary resolves it — the
@@ -96,7 +100,8 @@ describe("cf cell get (integration)", { ignore: !API_URL }, () => {
       apiUrl: new URL(API_URL!),
       env: Deno.env.get,
     })).serverExecution === true;
-    const { identity, path } = await writeTempIdentity();
+    tempIdentity = await writeTempIdentity();
+    const { identity, path } = tempIdentity;
     identityPath = path;
     const spaceName = `cf-piece-get-test-${Date.now()}`;
     spaceConfig = {
@@ -142,9 +147,7 @@ describe("cf cell get (integration)", { ignore: !API_URL }, () => {
   afterAll(async () => {
     // Ephemeral space names ensure isolation; only the throwaway identity
     // keyfile needs removing.
-    if (identityPath) {
-      await Deno.remove(identityPath);
-    }
+    await tempIdentity?.remove();
   });
 
   it("bad path exits 1 with Available keys: in output", async () => {

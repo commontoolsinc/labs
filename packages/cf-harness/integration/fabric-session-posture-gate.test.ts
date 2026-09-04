@@ -49,59 +49,34 @@ describe(
         SERVER_EXECUTION_DEFAULT_ENABLED,
       );
 
-      // The keyfile's path is tracked OUTSIDE the session setup: the outer
-      // `finally` below owns it, so it is removed even when session
-      // construction throws before the inner `try` begins.
-      let identityKeyPath: string | undefined;
+      await using tempIdentity = await writeTempIdentity();
+      const factory = createHarnessFabricSessionFactory({
+        apiUrl: API_URL!,
+        identityKeyPath: tempIdentity.path,
+        space: `cf-harness-posture-gate-${Date.now()}`,
+      });
+      const session = await factory();
       try {
-        const { path } = await writeTempIdentity();
-        identityKeyPath = path;
-        const factory = createHarnessFabricSessionFactory({
-          apiUrl: API_URL!,
-          identityKeyPath: path,
-          space: `cf-harness-posture-gate-${Date.now()}`,
-        });
-        const session = await factory();
-        try {
-          // The client half: the session's runtime resolved the posture from the
-          // deployment with nothing declared locally.
-          expect(session.pieces.runtime.experimental.serverExecution).toBe(
-            SERVER_EXECUTION_DEFAULT_ENABLED,
-          );
+        // The client half: the session's runtime resolved the posture from the
+        // deployment with nothing declared locally.
+        expect(session.pieces.runtime.experimental.serverExecution).toBe(
+          SERVER_EXECUTION_DEFAULT_ENABLED,
+        );
 
-          // One genuine flow through the session: compile + instantiate a
-          // pattern and read its result back through the serving topology.
-          const piece = await session.pieces.create(GATE_PATTERN);
-          const statusCell = (await piece.result.getCell())
-            .asSchema<{ status?: string }>()
-            .key("status");
-          await statusCell.pull();
-          await waitForCellValue<string>(
-            session.pieces.runtime,
-            statusCell,
-            (value) => value === "serving",
-          );
-        } finally {
-          await session.pieces.dispose();
-        }
+        // One genuine flow through the session: compile + instantiate a
+        // pattern and read its result back through the serving topology.
+        const piece = await session.pieces.create(GATE_PATTERN);
+        const statusCell = (await piece.result.getCell())
+          .asSchema<{ status?: string }>()
+          .key("status");
+        await statusCell.pull();
+        await waitForCellValue<string>(
+          session.pieces.runtime,
+          statusCell,
+          (value) => value === "serving",
+        );
       } finally {
-        // `writeTempIdentity`'s own contract: "The caller owns the file and
-        // removes it when done" — otherwise every run leaves a PKCS#8
-        // identity in the system temp dir.
-        const created = identityKeyPath;
-        if (created !== undefined) {
-          await Deno.remove(created).catch((error: unknown) => {
-            // Already gone is the goal state. Anything else is REPORTED,
-            // never thrown: a cleanup throw here would replace the gate's
-            // own failure with a temp-file error.
-            if (!(error instanceof Deno.errors.NotFound)) {
-              console.warn(
-                `cf-harness posture gate: could not remove the temporary ` +
-                  `identity keyfile ${created}: ${error}`,
-              );
-            }
-          });
-        }
+        await session.pieces.dispose();
       }
     });
   },
