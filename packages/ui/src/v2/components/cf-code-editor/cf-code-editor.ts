@@ -1762,10 +1762,11 @@ export class CFCodeEditor extends BaseElement {
     this._cleanupPresence();
     const collaboration = this._collaboration;
     this._collaboration = undefined;
-    void collaboration?.stop().catch(() => {
-      // The element is disconnecting, so there is no live editor surface on
-      // which to reconcile a failed final send. The controller has already
-      // failed closed and detached its subscription.
+    void collaboration?.stop().catch((cause: unknown) => {
+      // The element is detaching, so there is no editor surface on which to
+      // reconcile a failed final send; the event is what remains of it.
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      this.emit("cf-error", { error, message: error.message });
     });
   }
 

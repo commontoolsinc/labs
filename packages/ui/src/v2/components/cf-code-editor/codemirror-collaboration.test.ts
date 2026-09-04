@@ -921,6 +921,376 @@ describe("CodeMirror operation collaboration", () => {
     await controller.stop();
   });
 
+  it("submits edits recorded during an in-flight submission in the next one", async () => {
+    // Only `localDocChanged()` drives the controller here. `stop()` and
+    // `prepareExternalChange()` ask for a complete drain themselves; what this
+    // pins is that ordinary typing during a round trip gets one too.
+
+    const first = Promise.withResolvers<void>();
+    const firstCaptured = Promise.withResolvers<void>();
+    const applies: ApplyRequest[] = [];
+    const { controller, view, errors } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followups: [
+        activeSnapshotAt("abc1", 1),
+        activeSnapshotAt("abc1234567", 7),
+      ],
+      apply: async (request) => {
+        applies.push(request);
+        if (applies.length === 1) {
+          firstCaptured.resolve();
+          await first.promise;
+        }
+        return resolutionFor(request);
+      },
+    });
+
+    await controller.start();
+    view.dispatch({ changes: { from: 3, insert: "1" } });
+    const sends = [controller.localDocChanged()];
+    await firstCaptured.promise;
+    for (const character of "234567") {
+      view.dispatch({
+        changes: { from: view.state.doc.length, insert: character },
+      });
+      sends.push(controller.localDocChanged());
+    }
+    first.resolve();
+    await Promise.all(sends);
+
+    expect(errors).toEqual([]);
+    expect(
+      applies.map((request) => [
+        request.base?.version ?? null,
+        (request.payload as { updates: unknown[] }).updates.length,
+      ]),
+    ).toEqual([[null, 1], [1, 6]]);
+    expect(view.state.doc.toString()).toBe("abc1234567");
+    expect(sendableUpdates(view.state)).toHaveLength(0);
+    await controller.stop();
+  });
+
+  it("stops only after submitting edits recorded during its own submissions", async () => {
+    // A closing controller refuses `localDocChanged()`, so an edit recorded
+    // while one of its submissions is in flight has no caller of its own.
+    // `stop()` carries it in the next round trip rather than failing.
+
+    const gates = [0, 1, 2].map(() => Promise.withResolvers<void>());
+    const captured = [0, 1, 2].map(() => Promise.withResolvers<void>());
+    const applies: ApplyRequest[] = [];
+    const { controller, view, errors } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followups: [
+        activeSnapshotAt("abcX", 1),
+        activeSnapshotAt("abcXY", 2),
+        activeSnapshotAt("abcXYZ", 3),
+      ],
+      apply: async (request) => {
+        const index = applies.length;
+        applies.push(request);
+        captured[index].resolve();
+        await gates[index].promise;
+        return resolutionFor(request);
+      },
+    });
+
+    await controller.start();
+    view.dispatch({ changes: { from: 3, insert: "X" } });
+    const sending = controller.localDocChanged();
+    await captured[0].promise;
+    const stopped = controller.stop();
+    view.dispatch({ changes: { from: 4, insert: "Y" } });
+    gates[0].resolve();
+    await captured[1].promise;
+    view.dispatch({ changes: { from: 5, insert: "Z" } });
+    gates[1].resolve();
+    // A stop that gives up on the pending edit rejects here instead.
+    await Promise.race([captured[2].promise, stopped]);
+    gates[2].resolve();
+    await Promise.all([sending, stopped]);
+
+    expect(errors).toEqual([]);
+    expect(
+      applies.map((request) => [
+        request.base?.version ?? null,
+        (request.payload as { updates: unknown[] }).updates.length,
+      ]),
+    ).toEqual([[null, 1], [1, 1], [2, 1]]);
+    expect(view.state.doc.toString()).toBe("abcXYZ");
+    expect(sendableUpdates(view.state)).toHaveLength(0);
+  });
+
+  it("rebases edits recorded during a round trip over an operation that intervened", async () => {
+    // Bob's insertion at the start of the document lands at Memory between
+    // alice's two round trips, so her second submission is integrated after
+    // it and comes back rebased.
+
+    const first = Promise.withResolvers<void>();
+    const firstCaptured = Promise.withResolvers<void>();
+    const applies: ApplyRequest[] = [];
+    const bob = {
+      opId: "op:bob:1",
+      cursor: { epoch: 1, version: 2 },
+      submissionId: "bob:1",
+      payload: {
+        updates: [{
+          clientId: "bob",
+          changes: ChangeSet.of({ from: 0, insert: "b" }, 4).toJSON(),
+        }],
+      } as ApplyOpResolution["operations"][number]["payload"],
+    };
+    const { controller, view, errors } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followups: [
+        activeSnapshotAt("abcX", 1),
+        activeSnapshotAt("babcXY", 3),
+      ],
+      apply: async (request) => {
+        applies.push(request);
+        if (applies.length === 1) {
+          firstCaptured.resolve();
+          await first.promise;
+          return resolutionFor(request);
+        }
+        const own = resolutionFor({
+          ...request,
+          base: { epoch: 1, version: 2 },
+        });
+        return {
+          ...own,
+          from: { epoch: 1, version: 1 },
+          operations: [bob, ...own.operations],
+        };
+      },
+    });
+
+    await controller.start();
+    view.dispatch({ changes: { from: 3, insert: "X" } });
+    const sends = [controller.localDocChanged()];
+    await firstCaptured.promise;
+    view.dispatch({ changes: { from: 4, insert: "Y" } });
+    sends.push(controller.localDocChanged());
+    first.resolve();
+    await Promise.all(sends);
+
+    expect(errors).toEqual([]);
+    expect(applies[1]?.base).toEqual({ epoch: 1, version: 1 });
+    expect(view.state.doc.toString()).toBe("babcXY");
+    expect(sendableUpdates(view.state)).toHaveLength(0);
+    expect(controller.synchronizationSnapshot?.confirmedCursor).toEqual({
+      epoch: 1,
+      version: 3,
+    });
+    await controller.stop();
+  });
+
+  it("fails closed when a round trip confirms none of the submitted edits", async () => {
+    // Memory answers the first submission without integrating it. A
+    // controller that resubmits instead of failing reaches the second apply,
+    // which the harness refuses.
+
+    let applyCount = 0;
+    let cancellations = 0;
+    const { controller, view, errors } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followup: activeSnapshotAt("abc", 0),
+      apply: (request) => {
+        applyCount++;
+        if (applyCount > 1) throw new Error("resubmitted an unconfirmed edit");
+        return {
+          ...resolutionFor(request),
+          to: { epoch: 1, version: 0 },
+          operations: [],
+        };
+      },
+      cancel: () => cancellations++,
+    });
+
+    await controller.start();
+    view.dispatch({ changes: { from: 1, insert: "X" } });
+    await controller.localDocChanged();
+
+    expect(applyCount).toBe(1);
+    expect(errors.map((error) => error.message)).toEqual([
+      "CodeMirror submission confirmed no local update",
+    ]);
+    expect(cancellations).toBe(1);
+    expect(view.state.doc.toString()).toBe("aXbc");
+    expect(sendableUpdates(view.state)).toHaveLength(1);
+  });
+
+  it("submits an edit recorded at any microtask offset from a drain's last confirmation", async () => {
+    // The drain re-reads its queue after each round trip, and `#flush` clears
+    // the in-flight promise a few microtasks later. An edit recorded in
+    // between belongs to neither the finished drain nor a new one unless the
+    // caller re-reads the queue after waiting. Each offset from the
+    // confirmation is one candidate for that window.
+
+    for (let offset = 0; offset < 6; offset++) {
+      const applies: ApplyRequest[] = [];
+      const { controller, view, errors } = controllerHarness({
+        initial: inactiveSnapshot("abc"),
+        followups: [
+          activeSnapshotAt("abcX", 1),
+          activeSnapshotAt("abcXY", 2),
+        ],
+        apply: (request) => {
+          applies.push(request);
+          return resolutionFor(request);
+        },
+      });
+      await controller.start();
+      let late: Promise<void> | undefined;
+      controller.observeSynchronization((snapshot) => {
+        if (late !== undefined || snapshot?.confirmedCursor.version !== 1) {
+          return;
+        }
+        late = Promise.resolve().then(async () => {
+          for (let hop = 0; hop < offset; hop++) await Promise.resolve();
+          view.dispatch({ changes: { from: 4, insert: "Y" } });
+          await controller.localDocChanged();
+        });
+      });
+      view.dispatch({ changes: { from: 3, insert: "X" } });
+      await controller.localDocChanged();
+      await late;
+
+      expect(errors).toEqual([]);
+      expect(applies).toHaveLength(2);
+      expect(view.state.doc.toString()).toBe("abcXY");
+      expect(sendableUpdates(view.state)).toHaveLength(0);
+      await controller.stop();
+    }
+  });
+
+  it("submits an edit once when several waiters wake from the same drain", async () => {
+    // Waiters woken by one drain's end each re-read the queue. Only the first
+    // may own the next drain; the others must see that drain in flight and
+    // wait again, or the same update goes out under two submission ids.
+
+    for (let offset = 0; offset < 6; offset++) {
+      const applies: ApplyRequest[] = [];
+      const { controller, view, errors } = controllerHarness({
+        initial: inactiveSnapshot("abc"),
+        followups: [
+          activeSnapshotAt("abcX", 1),
+          activeSnapshotAt("abcXY", 2),
+        ],
+        apply: (request) => {
+          applies.push(request);
+          return resolutionFor(request);
+        },
+      });
+      await controller.start();
+      let late: Promise<void> | undefined;
+      controller.observeSynchronization((snapshot) => {
+        if (late !== undefined || snapshot?.confirmedCursor.version !== 1) {
+          return;
+        }
+        late = Promise.resolve().then(async () => {
+          for (let hop = 0; hop < offset; hop++) await Promise.resolve();
+          view.dispatch({ changes: { from: 4, insert: "Y" } });
+        });
+      });
+      view.dispatch({ changes: { from: 3, insert: "X" } });
+      const sends = [
+        controller.localDocChanged(),
+        controller.localDocChanged(),
+        controller.localDocChanged(),
+      ];
+      await Promise.all(sends);
+      await late;
+      await controller.localDocChanged();
+
+      expect(errors).toEqual([]);
+      const submitted = applies.flatMap((request) =>
+        (request.payload as { updates: unknown[] }).updates
+      );
+      expect(submitted).toHaveLength(2);
+      expect(view.state.doc.toString()).toBe("abcXY");
+      expect(sendableUpdates(view.state)).toHaveLength(0);
+      await controller.stop();
+    }
+  });
+
+  it("confirms a rewrite Memory suppressed as a duplicate through the intervening operation", async () => {
+    // Bob integrated the same rewrite first, so Memory accepts alice's
+    // submission with no operations of its own; the follow-up query carries
+    // bob's, and its dedupe id confirms alice's queue head.
+
+    const applies: ApplyRequest[] = [];
+    const bobRewrite = {
+      opId: "op:bob:2",
+      cursor: { epoch: 1, version: 2 },
+      submissionId: "bob:2",
+      payload: {
+        updates: [{
+          clientId: "bob",
+          changes: ChangeSet.of({ from: 0, to: 3, insert: "new" }, 3).toJSON(),
+          dedupeId: "title:old:new",
+        }],
+      } as ApplyOpResolution["operations"][number]["payload"],
+    };
+    const { controller, view, errors } = controllerHarness({
+      initial: activeSnapshotAt("old", 1),
+      followup: { ...activeSnapshotAt("new", 2), operations: [bobRewrite] },
+      apply: (request) => {
+        applies.push(request);
+        return {
+          ...resolutionFor(request),
+          from: { epoch: 1, version: 2 },
+          to: { epoch: 1, version: 2 },
+          operations: [],
+        };
+      },
+    });
+
+    await controller.start();
+    view.dispatch({
+      changes: { from: 0, to: 3, insert: "new" },
+      effects: codeMirrorRewriteDedupeEffect.of("title:old:new"),
+    });
+    await controller.localDocChanged();
+
+    expect(errors).toEqual([]);
+    expect(applies).toHaveLength(1);
+    expect(view.state.doc.toString()).toBe("new");
+    expect(sendableUpdates(view.state)).toHaveLength(0);
+    expect(controller.synchronizationSnapshot?.confirmedCursor).toEqual({
+      epoch: 1,
+      version: 2,
+    });
+  });
+
+  it("leaves the editor alone once disposed during a round trip", async () => {
+    // A superseding controller reinstalls the shared compartment, so a
+    // resolution arriving for the disposed one must not be dispatched.
+
+    const applied = Promise.withResolvers<void>();
+    const captured = Promise.withResolvers<void>();
+    const { controller, view, errors } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followup: activeSnapshotAt("aXbc", 1),
+      apply: async (request) => {
+        captured.resolve();
+        await applied.promise;
+        return resolutionFor(request);
+      },
+    });
+
+    await controller.start();
+    view.dispatch({ changes: { from: 1, insert: "X" } });
+    const sending = controller.localDocChanged();
+    await captured.promise;
+    controller.dispose();
+    const untouched = view.state;
+    applied.resolve();
+    await sending;
+
+    expect(errors).toEqual([]);
+    expect(view.state).toBe(untouched);
+  });
+
   it("isolates synchronization observers from the Memory operation path", async () => {
     const accepted = acceptedResolution("abc", 1, "X");
     const { controller, view, errors } = controllerHarness({
@@ -1027,11 +1397,61 @@ function activeSnapshot(
   };
 }
 
+type ApplyRequest = Parameters<RuntimeClient["applyOperation"]>[1];
+
+function activeSnapshotAt(
+  materialized: string,
+  version: number,
+): OperationFieldSnapshot {
+  return {
+    branch: "",
+    id: "of:editor",
+    scopeKey: "space",
+    path,
+    active: true,
+    codec: "codemirror-changeset@1",
+    cursor: { epoch: 1, version },
+    baselineHash: "baseline:abc",
+    materialized,
+    operations: [],
+  };
+}
+
+/**
+ * Resolves `request` the way Memory's changeset codec does with nothing
+ * intervening: every submitted update becomes one integrated operation at the
+ * next version.
+ */
+function resolutionFor(request: ApplyRequest): ApplyOpResolution {
+  const from = request.base ?? { epoch: 1, version: 0 };
+  const updates = (request.payload as { updates: unknown[] }).updates;
+  const operations = updates.map((update, index) => ({
+    opId: `op:${request.submissionId}:${index}`,
+    cursor: { epoch: from.epoch, version: from.version + index + 1 },
+    submissionId: request.submissionId,
+    payload: { updates: [update] } as ApplyOpResolution["operations"][number][
+      "payload"
+    ],
+  }));
+  return {
+    operationIndex: 0,
+    address: { branch: "", id: "of:editor", scopeKey: "space", path },
+    codec: "codemirror-changeset@1",
+    submissionId: request.submissionId,
+    from,
+    to: { epoch: from.epoch, version: from.version + updates.length },
+    operations,
+    duplicate: false,
+  };
+}
+
 function controllerHarness(options: {
   initial: OperationFieldSnapshot;
   followup?: OperationFieldSnapshot;
   followups?: OperationFieldSnapshot[];
-  apply: () => ApplyOpResolution | Promise<ApplyOpResolution>;
+  apply: (
+    request: ApplyRequest,
+  ) => ApplyOpResolution | Promise<ApplyOpResolution>;
   codecs?: string[];
   subscribe?: (callback: (snapshot: OperationFieldSnapshot) => void) => void;
   subscription?: Promise<() => void>;
@@ -1073,7 +1493,8 @@ function controllerHarness(options: {
       return options.subscription ??
         Promise.resolve(() => options.cancel?.());
     },
-    applyOperation: () => Promise.resolve(options.apply()),
+    applyOperation: (_cell: CellHandle<string>, request: ApplyRequest) =>
+      Promise.resolve(options.apply(request)),
     releaseOperationField: () => Promise.resolve(options.release?.()),
     closeOperationSession: () => {
       options.close?.();

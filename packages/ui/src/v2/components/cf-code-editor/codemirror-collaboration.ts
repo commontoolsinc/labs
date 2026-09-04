@@ -365,7 +365,7 @@ export class CodeMirrorCollaborationController {
   /** Confirms every pending edit before a semantic external rewrite. */
   async prepareExternalChange(): Promise<boolean> {
     if (!this.active || this.#failed) return false;
-    await this.#flushAll();
+    await this.#flush();
     return this.active && sendableUpdates(this.#view.state).length === 0;
   }
 
@@ -399,7 +399,7 @@ export class CodeMirrorCollaborationController {
     }
     this.#closing = true;
     try {
-      await this.#flushAll();
+      await this.#flush();
       if (sendableUpdates(this.#view.state).length !== 0) {
         throw new Error(
           "CodeMirror collaboration cannot stop with local edits pending",
@@ -418,7 +418,7 @@ export class CodeMirrorCollaborationController {
     }
     this.#closing = true;
     try {
-      await this.#flushAll();
+      await this.#flush();
       if (sendableUpdates(this.#view.state).length !== 0) {
         throw new Error(
           "CodeMirror collaboration cannot be released with local edits pending",
@@ -443,6 +443,16 @@ export class CodeMirrorCollaborationController {
     }
   }
 
+  /**
+   * Replaces the document and CodeMirror's collaboration state with the
+   * snapshot's canonical epoch.
+   *
+   * Installing discards CodeMirror's unconfirmed queue, which is the only
+   * record of a local edit Memory has not confirmed. An installed controller
+   * holding unconfirmed edits therefore refuses, failing with a
+   * `CodeMirrorReconciliationError` that carries both values, so the host
+   * reports the conflict instead of adopting the canonical value silently.
+   */
   #install(snapshot: OperationFieldSnapshot): void {
     if (typeof snapshot.materialized !== "string") {
       throw new Error("CodeMirror collaboration requires a string field");
@@ -455,6 +465,17 @@ export class CodeMirrorCollaborationController {
       );
     }
     this.#assertFieldIdentity(snapshot);
+    // Before the first installation the compartment holds no collaboration
+    // field, and there is nothing to discard; `#ready` is what says a field
+    // is installed and its queue can be read.
+    if (this.#ready && sendableUpdates(this.#view.state).length !== 0) {
+      throw new CodeMirrorReconciliationError(
+        this.#view.state.doc.toString(),
+        snapshot.materialized,
+        this.#cursor,
+        snapshot.active ? snapshot.cursor : null,
+      );
+    }
     const version = snapshot.cursor?.version ?? 0;
     this.#ready = false;
     // Invalidate observer state before any transaction can map ephemeral
@@ -509,14 +530,6 @@ export class CodeMirrorCollaborationController {
             this.#baselineHash = snapshot.baselineHash;
             return;
           }
-          if (sendableUpdates(this.#view.state).length !== 0) {
-            throw new CodeMirrorReconciliationError(
-              this.#view.state.doc.toString(),
-              snapshot.materialized,
-              this.#cursor,
-              null,
-            );
-          }
           this.#install(snapshot);
           return;
         }
@@ -542,14 +555,6 @@ export class CodeMirrorCollaborationController {
       }
 
       if (snapshot.reset === true) {
-        if (sendableUpdates(this.#view.state).length !== 0) {
-          throw new CodeMirrorReconciliationError(
-            this.#view.state.doc.toString(),
-            snapshot.materialized,
-            this.#cursor,
-            snapshot.cursor,
-          );
-        }
         this.#install(snapshot);
         return;
       }
@@ -559,14 +564,6 @@ export class CodeMirrorCollaborationController {
       if (becameActive) {
         this.#cursor = { epoch: snapshot.cursor.epoch, version: 0 };
       } else if (previousCursor.epoch !== snapshot.cursor.epoch) {
-        if (sendableUpdates(this.#view.state).length !== 0) {
-          throw new CodeMirrorReconciliationError(
-            this.#view.state.doc.toString(),
-            snapshot.materialized,
-            this.#cursor,
-            snapshot.cursor,
-          );
-        }
         this.#install(snapshot);
         return;
       }
@@ -623,35 +620,80 @@ export class CodeMirrorCollaborationController {
     }
   }
 
+  /**
+   * Waits for any running drain, re-reads the queue, and owns the next drain
+   * if unconfirmed updates remain.
+   *
+   * One drain runs at a time. A running drain may have serialized its
+   * submission before the update this caller observed, so waiting and then
+   * re-reading is what makes that update the responsibility of a submission
+   * serialized after it was recorded: this call's, or that of a drain another
+   * waiter started first. Waiting again whenever a drain is in flight is what
+   * keeps several waiters woken by the same drain from each starting one and
+   * submitting the same update under two submission ids.
+   */
   async #flush(): Promise<void> {
-    if (this.#flushPromise !== undefined) {
-      return await this.#flushPromise;
+    while (this.#flushPromise !== undefined) {
+      try {
+        await this.#flushPromise;
+      } catch {
+        // The drain's owner receives its rejection; a waiter only needs it
+        // to have settled.
+      }
     }
-    if (!this.#canProcess() || this.#failed) return;
-    const pending = this.#flushOnce();
-    this.#flushPromise = pending;
+    if (
+      !this.#canProcess() || sendableUpdates(this.#view.state).length === 0
+    ) {
+      return;
+    }
+    const drain = this.#drain();
+    this.#flushPromise = drain;
     try {
-      await pending;
+      await drain;
     } finally {
-      if (this.#flushPromise === pending) this.#flushPromise = undefined;
+      if (this.#flushPromise === drain) this.#flushPromise = undefined;
     }
   }
 
-  async #flushAll(): Promise<void> {
-    await this.#flush();
+  /**
+   * Submits unconfirmed local updates, one round trip at a time, until none
+   * remain or this controller can no longer process.
+   *
+   * CodeMirror's unconfirmed queue is the only record of a local edit before
+   * Memory confirms it, so every update recorded there is either confirmed by
+   * a submission or reported through `onError`. An update recorded while a
+   * submission is in flight stays queued, rebased over whatever that
+   * submission integrates, and the next round trip carries it.
+   */
+  async #drain(): Promise<void> {
     while (
       this.#canProcess() && sendableUpdates(this.#view.state).length !== 0
     ) {
-      await this.#flush();
+      // CodeMirror keeps an update's origin transaction across rebases, so
+      // the oldest unconfirmed update still heading the queue after a round
+      // trip means that round trip confirmed nothing, and repeating it would
+      // repeat forever. This bounds each round trip to confirming at least
+      // its oldest update; a later update left unconfirmed heads the next
+      // round trip and is judged there.
+      const oldest = sendableUpdates(this.#view.state)[0].origin;
+      await this.#submit();
+      if (
+        this.#canProcess() &&
+        sendableUpdates(this.#view.state)[0]?.origin === oldest
+      ) {
+        this.#fail(
+          new Error("CodeMirror submission confirmed no local update"),
+        );
+      }
     }
   }
 
-  async #flushOnce(): Promise<void> {
-    const submission = codeMirrorSubmission(this.#view.state);
-    if (submission === undefined) return;
+  /** Submits every unconfirmed update in one apply and integrates the result. */
+  async #submit(): Promise<void> {
     this.#sending = true;
-    let accepted = false;
     try {
+      const submission = codeMirrorSubmission(this.#view.state);
+      if (submission === undefined) return;
       const base = this.#cursor === null
         ? null
         : { epoch: this.#cursor.epoch, version: submission.baseVersion };
@@ -662,24 +704,21 @@ export class CodeMirrorCollaborationController {
         ...(base === null ? { baselineHash: this.#baselineHash } : {}),
         payload: submission.payload,
       }, this.#operationSessionId);
+      // A superseding controller owns the compartment once this one is
+      // disposed; a late resolution must not be dispatched into it.
+      if (this.#disposed) return;
       this.#receiveResolution(resolution);
       const snapshot = await this.#runtime.queryOperationField(
         this.#cell,
         this.#cursor ?? undefined,
         this.#operationSessionId,
       );
+      if (this.#disposed) return;
       this.#receive(snapshot);
-      accepted = !this.#failed;
     } catch (error) {
       this.#fail(error);
     } finally {
       this.#sending = false;
-    }
-    if (
-      accepted && this.#canProcess() &&
-      codeMirrorSubmission(this.#view.state) !== undefined
-    ) {
-      queueMicrotask(() => void this.#flush());
     }
   }
 
