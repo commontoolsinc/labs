@@ -48,8 +48,8 @@ export class SpaceManager {
 
   /**
    * The state and the steps of this instance that a test drives directly:
-   * the scheduling tables, the running flag, the worker controller, and the
-   * loop and the two steps it takes.
+   * the scheduling tables, the piece in flight, the running flag, the worker
+   * controller, and the loop and the two steps it takes.
    */
   get accessForTestingOnly(): {
     activePiece: Cell<BGPieceEntry> | null;

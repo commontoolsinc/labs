@@ -536,11 +536,11 @@ describe("BackgroundPieceService", () => {
 describe("SpaceManager", () => {
   // One freezeAround wraps this whole describe, so its timer map and logical
   // clock persist across cases. Several cases leave a fire-and-forget
-  // WorkerController.shutdown() (from setupWorkerController) parked on a worker
-  // that never answers, so its cleanup timeout lingers in the map. Dropping
-  // every pending timer after each case keeps a leftover from firing in a later
-  // case — here or in a following describe once this one's trailing
-  // auto-advance runs.
+  // WorkerController.shutdown() (from `#setupWorkerController`) parked on a
+  // worker that never answers, so its cleanup timeout lingers in the map.
+  // Dropping every pending timer after each case keeps a leftover from firing
+  // in a later case — here or in a following describe once this one's
+  // trailing auto-advance runs.
   afterEach(() => clock.reset());
 
   it("schedules, runs, retries, disables, and removes pieces", async () => {
@@ -590,6 +590,9 @@ describe("SpaceManager", () => {
       });
       await manager.accessForTestingOnly.processPiece(PIECE_ID, entry as never);
       assertEquals(entry.value.status, "graph failed");
+      // A failed run clears the active slot, which is what lets `stop()` return
+      // without waiting out the deactivation deadline.
+      assertEquals(manager.accessForTestingOnly.activePiece, null);
       await manager.accessForTestingOnly.processPiece(PIECE_ID, entry as never);
       await manager.accessForTestingOnly.processPiece(PIECE_ID, entry as never);
       assert(entry.value.disabledAt > 0);
@@ -619,7 +622,7 @@ describe("SpaceManager", () => {
 
       manager.start();
       manager.start();
-      // execLoop parks on sleep(pollingIntervalMs) each pass; let it reach the
+      // `#execLoop` parks on sleep(pollingIntervalMs) each pass; let it reach the
       // first park, stop it, then fire the parked sleep so the loop observes
       // isRunning === false and exits.
       await clock.settle();
@@ -748,6 +751,12 @@ describe("SpaceManager", () => {
       manager.accessForTestingOnly.isRunning = true;
       await manager.accessForTestingOnly.execLoop();
       assertEquals(calls, ["run"]);
+      // The loop consumed the due task, and the successful run put the next
+      // run in its place.
+      assertEquals(manager.accessForTestingOnly.pendingTasks.length, 1);
+      assert(
+        manager.accessForTestingOnly.pendingTasks[0].timestamp > Date.now(),
+      );
       assertEquals(
         manager.accessForTestingOnly.failureTracking.has(PIECE_ID),
         false,
