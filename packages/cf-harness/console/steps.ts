@@ -23,6 +23,12 @@ import type {
 import type { ToolResultRef } from "../src/contracts/tool-result.ts";
 import type { HarnessPolicyEvent } from "../src/contracts/policy.ts";
 import type { HarnessPolicyDecisionRecord } from "../src/contracts/policy-trace.ts";
+import type { HarnessToolPolicyDecision } from "../src/contracts/run-report.ts";
+import {
+  HARNESS_RELEASE_BOUNDARIES,
+  HARNESS_RELEASE_DECISION_REASON_CODES,
+  harnessReleaseDecisionOutcome,
+} from "../src/contracts/policy-refusal.ts";
 import type { HarnessCfcInvocationContext } from "../src/contracts/cfc-invocation-context.ts";
 import type {
   HarnessTranscriptOmissionRule,
@@ -426,6 +432,52 @@ const TOOL_SUCCESS_STATUSES = new Map<string, readonly string[]>([
 /** What a tool this does not name is taken to report success with. */
 const DEFAULT_SUCCESS_STATUSES: readonly string[] = ["ok", "completed"];
 
+/**
+ * What a decision decided, taken from the boundary's own reason code wherever
+ * a boundary decided it.
+ *
+ * The outcome word a run persisted is the word its build could spell, and a
+ * run recorded before a word existed carries the one it had. The reason code
+ * on the `release` record is the fact, and it does not move: a decision
+ * naming `cfc_release_withheld` is a withheld release whatever the trace says
+ * beside it. Reading it this way is what AUD-16 does, so the console and the
+ * audit answer alike over one corpus.
+ *
+ * `denied` is left to a decision with no release record — a call authority
+ * refused, which never ran — and to `cfc_commit_refused`, a write the runner
+ * refused, which landed no result.
+ */
+const outcomeOf = (
+  decision: HarnessPolicyDecisionRecord | undefined,
+): HarnessToolPolicyDecision | undefined => {
+  if (decision === undefined) return undefined;
+  const release = decision.release as
+    | { reasonCode?: unknown; boundary?: unknown }
+    | null
+    | undefined;
+  // `null` as well as absent: a decision persisted with an empty release is a
+  // record this cannot read, and dereferencing it would throw before the step
+  // could be given a status at all.
+  if (release === null || release === undefined) return decision.decision;
+  // Both discriminants are checked against the sets the contract exports for
+  // the purpose, rather than against literals repeated here: a closed union
+  // that gains a member should widen what this reads, not silently stop
+  // matching a record the contract calls valid. A trace is read back through
+  // JSON, so a record answering neither set is a release record this cannot
+  // read — not evidence to rewrite a persisted outcome with, so the persisted
+  // word stands.
+  const boundary = HARNESS_RELEASE_BOUNDARIES.find((known) =>
+    known === release.boundary
+  );
+  if (boundary === undefined) return decision.decision;
+  const reasonCode = HARNESS_RELEASE_DECISION_REASON_CODES.find((known) =>
+    known === release.reasonCode
+  );
+  return reasonCode === undefined
+    ? decision.decision
+    : harnessReleaseDecisionOutcome(reasonCode);
+};
+
 /** How a tool step turned out, read from its own result and CFC's verdict. */
 const statusOf = (
   toolName: string,
@@ -434,8 +486,9 @@ const statusOf = (
   decision: HarnessPolicyDecisionRecord | undefined,
   events: readonly HarnessPolicyEvent[],
 ): ConsoleStepStatus => {
+  const outcome = outcomeOf(decision);
   if (
-    decision?.decision === "denied" ||
+    outcome === "denied" ||
     events.some((event) => event.severity === "denied")
   ) {
     return "denied";
@@ -443,10 +496,10 @@ const statusOf = (
   // A call rejected for its arguments ran nothing, and its answer carries no
   // status field of its own to read that from. It is an error rather than a
   // denial: policy refused it nothing.
-  if (decision?.decision === "invalid") {
+  if (outcome === "invalid") {
     return "error";
   }
-  // A `withheld` decision is deliberately not read here. The call ran and
+  // A `withheld` outcome is deliberately not read here. The call ran and
   // answered with the reference to the result whose values the boundary held
   // back, so the step's outcome is the one its own answer states, below; the
   // boundary shows as the withheld marker beside the CFC line instead.
@@ -732,7 +785,9 @@ export const consoleRunSteps = (
         ...(decision !== undefined
           ? {
             policy: {
-              decision: decision.decision,
+              // The badge and the marker beside it read this word, so the
+              // rule lives here once rather than again at the view.
+              decision: outcomeOf(decision) ?? decision.decision,
               ...(decision.effectClass !== undefined
                 ? { effectClass: decision.effectClass }
                 : {}),

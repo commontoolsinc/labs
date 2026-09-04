@@ -502,10 +502,14 @@ record of what the run recorded rather than a cell with nothing to hide.
     confidentiality boundary holding back the values of a result the call did
     return, so the count of the positions it held back sits beside it and the
     step itself stays the success its answer states; the dot goes amber only for
-    a call that did not run. A policy event appears beside the decision, which
-    is how a call CFC _allowed_ but whose _observation_ it refused reads as the
-    two separate facts it is. The flow labels the runtime computed for each
-    input position appear here too.
+    a call that did not run. Which of the three it is comes from the `release`
+    record's own reason code wherever a boundary decided, not from the outcome
+    word the run persisted beside it — the same field AUD-16 counts — so a run
+    recorded before that word existed reads here as what its boundary actually
+    decided. A policy event appears beside the decision, which is how a call CFC
+    _allowed_ but whose _observation_ it refused reads as the two separate facts
+    it is. The flow labels the runtime computed for each input position appear
+    here too.
   - **disclosure** — how many bytes the result let across as a plain value, how
     many positions it sealed behind a reference, and the longest run of numbers
     it carried. A long numeric run is called out, in the rail as well: the
