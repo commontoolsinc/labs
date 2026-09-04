@@ -87,6 +87,12 @@ type PrimitiveState = RealmCodecValue | FabricValue;
 type TaggedForm = { readonly tag: string; readonly payload: FabricValue };
 
 /**
+ * The payload of the conversion's string-length form: the length of the
+ * whole string, and the excerpt of it that was carried.
+ */
+type PartialString = { readonly length: number; readonly excerpt: string };
+
+/**
  * The limits a conversion runs within, each resolved from the option of the
  * same name: the limit stated, or its default when none was, capped at its
  * absolute maximum.
@@ -443,7 +449,13 @@ class DebugConverter {
  */
 class DebugStringifier {
   readonly #options: DebugValueOptions;
-  readonly #indent: string | undefined;
+  readonly #singleIndent: string | undefined;
+  readonly #spacer: string;
+  readonly #colon: string;
+
+  /** `#renderRealmState()` as a function, for passing to a renderer of parts. */
+  readonly #renderRealmStateFn = (v: PrimitiveState, i: string): string =>
+    this.#renderRealmState(v, i);
 
   /**
    * Constructs an instance which renders using `indent` spaces per nesting
@@ -452,7 +464,11 @@ class DebugStringifier {
    */
   constructor(options: DebugValueOptions, indent?: number) {
     this.#options = options;
-    this.#indent = (indent === undefined) ? undefined : " ".repeat(indent);
+    this.#singleIndent = (indent === undefined)
+      ? undefined
+      : " ".repeat(indent);
+    this.#spacer = this.#isCompact ? "" : " ";
+    this.#colon = `:${this.#spacer}`;
   }
 
   //
@@ -462,6 +478,11 @@ class DebugStringifier {
   /** Renders the given value. */
   render(value: FabricValue): string {
     return this.#renderSubvalue(value, "");
+  }
+
+  /** Whether this instance renders on a single line, with no indentation. */
+  get #isCompact(): boolean {
+    return this.#singleIndent === undefined;
   }
 
   /**
@@ -505,7 +526,7 @@ class DebugStringifier {
   ): string {
     if (parts.length === 0) {
       return `${open}${close}`;
-    } else if (this.#indent === undefined) {
+    } else if (this.#isCompact) {
       return `${open}${parts.join(",")}${close}`;
     }
 
@@ -540,14 +561,12 @@ class DebugStringifier {
     }
 
     const open = `/${DebugStringifier.#typeNameOf(tag)}(`;
-    const realm = (v: PrimitiveState, i: string) =>
-      this.#renderRealmState(v, i);
 
     if (isPlainObject(state)) {
       const parts = this.#renderProperties(
         state as { readonly [key: string]: PrimitiveState },
         indent,
-        realm,
+        this.#renderRealmStateFn,
         false,
       );
       return this.#renderContainer(open, ")", parts, indent);
@@ -563,20 +582,19 @@ class DebugStringifier {
    * the conversion.
    */
   #renderRealmState(value: PrimitiveState, indent: string): string {
-    const realm = (v: PrimitiveState, i: string) =>
-      this.#renderRealmState(v, i);
-
     if (value instanceof ArrayBuffer) {
       return DebugStringifier.#renderBuffer(value);
     } else if (Array.isArray(value)) {
       const inner = this.#innerIndent(indent);
-      const parts = value.map((element) => realm(element, inner));
+      const parts = value.map((element) =>
+        this.#renderRealmState(element, inner)
+      );
       return this.#renderContainer("[", "]", parts, indent);
     } else if (isPlainObject(value)) {
       const parts = this.#renderProperties(
         value as { readonly [key: string]: PrimitiveState },
         indent,
-        realm,
+        this.#renderRealmStateFn,
         false,
       );
       return this.#renderContainer("{", "}", parts, indent);
@@ -660,12 +678,13 @@ class DebugStringifier {
     unescape = true,
   ): string[] {
     const inner = this.#innerIndent(indent);
-    const separator = (this.#indent === undefined) ? ":" : ": ";
 
     return Object.entries(value).map(([key, subvalue]) => {
       const original = (unescape && (key[0] === "/")) ? key.slice(1) : key;
       const rendered = render(subvalue, inner);
-      return `${DebugStringifier.#renderKey(original)}${separator}${rendered}`;
+      return `${
+        DebugStringifier.#renderKey(original)
+      }${this.#colon}${rendered}`;
     });
   }
 
@@ -807,52 +826,38 @@ class DebugStringifier {
 
   /** Returns the indentation for the contents of a container indented by `indent`. */
   #innerIndent(indent: string): string {
-    return `${indent}${this.#indent ?? ""}`;
-  }
-
-  /**
-   * Renders the given lines of a string, as `#linesOf()` splits them. When
-   * the rendering is multi-line and there is more than one, each renders
-   * quoted on a line of its own, every line but the last followed by ` +` and
-   * every line but the first indented by `inner`. Otherwise they render as
-   * the one quoted string they came from.
-   */
-  #renderLines(lines: readonly string[], inner: string): string {
-    if ((this.#indent === undefined) || (lines.length === 1)) {
-      return JSON.stringify(lines.join(""));
-    }
-
-    return lines.map((line) => JSON.stringify(line)).join(` +\n${inner}`);
+    return this.#isCompact ? indent : `${indent}${this.#singleIndent}`;
   }
 
   /**
    * Renders the string-length form: the excerpt as `#renderString()` renders
    * it, followed by the length of the whole. The length follows on the same
    * line, or when the rendering is multi-line, on a line of its own, indented
-   * by `inner`.
+   * by the inner indentation of `indent`.
    */
-  #renderPartialString(
-    partial: { readonly length: number; readonly excerpt: string },
-    indent: string,
-  ): string {
-    const inner = this.#innerIndent(indent);
+  #renderPartialString(partial: PartialString, indent: string): string {
     const rendered = this.#renderString(partial.excerpt, indent);
-    const separator = (this.#indent === undefined) ? " " : `\n${inner}`;
+    const separator = this.#isCompact ? " " : `\n${this.#innerIndent(indent)}`;
 
     return `${rendered} +${separator}... length: ${partial.length}`;
   }
 
   /**
    * Renders a string. When the rendering is multi-line and the string holds a
-   * line break, each of its lines renders on a line of its own, the first in
-   * place and the rest indented by the inner indentation of `indent`, joined
-   * by ` +`. Otherwise the string renders whole, quoted.
+   * line break, each of its lines renders quoted on a line of its own, every
+   * line but the last followed by ` +` and every line but the first indented
+   * by the inner indentation of `indent`. Otherwise the string renders whole,
+   * quoted.
    */
   #renderString(value: string, indent: string): string {
-    return this.#renderLines(
-      DebugStringifier.#linesOf(value),
-      this.#innerIndent(indent),
-    );
+    const lines = DebugStringifier.#linesOf(value);
+
+    if (this.#isCompact || (lines.length === 1)) {
+      return JSON.stringify(value);
+    }
+
+    const inner = this.#innerIndent(indent);
+    return lines.map((line) => JSON.stringify(line)).join(` +\n${inner}`);
   }
 
   //
@@ -931,9 +936,7 @@ class DebugStringifier {
    * shape of the string-length form, a plain object whose `length` is a
    * number and whose `excerpt` is a string, and `undefined` when it is not.
    */
-  static #partialStringOf(
-    value: FabricValue,
-  ): { readonly length: number; readonly excerpt: string } | undefined {
+  static #partialStringOf(value: FabricValue): PartialString | undefined {
     const length = DebugStringifier.#lengthOf(value);
     // deno-coverage-ignore-start
     // The conversion shapes the form no other way; see the `partialString`
