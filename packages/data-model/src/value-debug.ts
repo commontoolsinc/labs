@@ -560,7 +560,8 @@ class DebugStringifier {
       return DebugStringifier.#renderElidedInstance(classNameOf(value));
     }
 
-    const open = `/${DebugStringifier.#typeNameOf(tag)}(`;
+    const typeName = DebugStringifier.#typeNameOf(tag);
+    const open = `${DebugStringifier.#renderTypeName(typeName)}(`;
 
     if (isPlainObject(state)) {
       const parts = this.#renderProperties(
@@ -610,17 +611,17 @@ class DebugStringifier {
    * Renders a class instance which the conversion carried under its class
    * name, or a `FabricInstance` carried under its type name, as
    * `/Name(<props>)` when its payload is a plain object of properties and as
-   * `/Name(...)` when the conversion had nothing to show for it. Any other
-   * payload -- a `toString()` form, what `toJSON()` returned, or an encoding
-   * that is not a plain object -- is rendered as it stands inside the
-   * parentheses.
+   * `/Name(...)` when the conversion had nothing to show for it, the name
+   * rendered as `#renderTypeName()` renders it. Any other payload -- a
+   * `toString()` form, what `toJSON()` returned, or an encoding that is not a
+   * plain object -- is rendered as it stands inside the parentheses.
    */
   #renderInstance(
     className: string,
     payload: FabricValue,
     indent: string,
   ): string {
-    const open = `/${className}(`;
+    const open = `${DebugStringifier.#renderTypeName(className)}(`;
 
     if (payload === "/...") {
       return `${open}...)`;
@@ -894,7 +895,7 @@ class DebugStringifier {
    * than an instance of some random class.
    */
   static #renderElidedInstance(name: string): string {
-    return `/${name}(...)`;
+    return `${DebugStringifier.#renderTypeName(name)}(...)`;
   }
 
   /**
@@ -906,12 +907,24 @@ class DebugStringifier {
   }
 
   /**
-   * Renders a key -- an object property name or a symbol's key -- bare when it
-   * is a valid identifier, and as a quoted string otherwise. The identifier
-   * check is the ASCII one.
+   * Renders a key -- an object property name, a symbol's key, or a type name
+   * -- bare when it is a valid identifier, and as a quoted string otherwise.
+   * The identifier check is the ASCII one.
    */
   static #renderKey(key: string): string {
     return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? key : JSON.stringify(key);
+  }
+
+  /**
+   * Renders the type name a tagged form opens with: a slash, then the name as
+   * `#renderKey()` renders it. The `<anonymous>` marker, which stands for a
+   * class with no name, stays bare.
+   */
+  static #renderTypeName(name: string): string {
+    const rendered = (name === "<anonymous>")
+      ? name
+      : DebugStringifier.#renderKey(name);
+    return `/${rendered}`;
   }
 
   /**

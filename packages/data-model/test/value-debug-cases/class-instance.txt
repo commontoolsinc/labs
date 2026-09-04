@@ -4,7 +4,21 @@
     y = "two";
     nested = { z: [3] };
   }
-  return { data: new Data(), empty: new (class Empty {})() };
+  // A class name that is not a valid identifier renders quoted, as a key
+  // does; a class with no name renders under the `<anonymous>` marker.
+  class Renamed {
+    static name = "Not a proper identifier";
+    x = 1;
+  }
+  class WithNewline {
+    static name = "a\nb";
+  }
+  return {
+    data: new Data(),
+    empty: new (class Empty {})(),
+    "name not an identifier": new Renamed(),
+    "name with a newline": new WithNewline(),
+  };
 })()
 
 data:
@@ -22,3 +36,13 @@ data:
 empty:
 /Empty(...)
 /Empty(...)
+
+name not an identifier:
+/"Not a proper identifier"(x:1)
+/"Not a proper identifier"(
+  x: 1
+)
+
+name with a newline:
+/"a\nb"(...)
+/"a\nb"(...)
