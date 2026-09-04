@@ -256,8 +256,8 @@ export class IndexTrackingStack<T = unknown> {
    * to bound its cases with.
    */
   static get accessForTestingOnly(): {
-    ADD_INDEX_AT: number;
-    DROP_INDEX_BELOW: number;
+    readonly ADD_INDEX_AT: number;
+    readonly DROP_INDEX_BELOW: number;
   } {
     return {
       ADD_INDEX_AT: IndexTrackingStack.#ADD_INDEX_AT,
