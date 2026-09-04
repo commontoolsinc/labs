@@ -1419,16 +1419,20 @@ Whichever way it went, the measurement is also a decision in the run's
 as: `cfc_release_allowed` where the ceiling admitted the values,
 `cfc_release_observed` where a rung below enforcement measured a refusal it did
 not act on, `cfc_release_withheld` where it did, and `cfc_commit_refused` for
-the other boundary, a commit the runner refused. The decision carries a
-`release` record — the boundary, the sink and ceiling the flow was fitted
-against, and the refusal with its attribution — beside the reference to the tool
-output it decided about. It is appended AFTER the allow-side decision for the
-same call, because that decision answers whether the call may run and is
-recorded before it does; a boundary that refuses inside the call cannot appear
-there at all. A call that asks for no values makes no release decision, since
-nothing was measured. Nothing of this reaches the model: the refusal already
-reaches it as `valueError` and `policyRefusal`, and the trace is where an
-operator reads it.
+the other boundary, a commit the runner refused. Each states its own outcome:
+`allowed`, `warned`, `withheld`, and `denied` in that order, counted in the
+trace's `decisionCounts` under those names. `withheld` is its own outcome
+because the call ran and answered with the reference to the result whose values
+were held back; `denied` names a call that did not run, which is what a refused
+commit is. The decision carries a `release` record — the boundary, the sink and
+ceiling the flow was fitted against, and the refusal with its attribution —
+beside the reference to the tool output it decided about. It is appended AFTER
+the allow-side decision for the same call, because that decision answers whether
+the call may run and is recorded before it does; a boundary that refuses inside
+the call cannot appear there at all. A call that asks for no values makes no
+release decision, since nothing was measured. Nothing of this reaches the model:
+the refusal already reaches it as `valueError` and `policyRefusal`, and the
+trace is where an operator reads it.
 
 A result that settles to nothing names its cause when one was observed: when the
 settled result fails the declared `resultSchema` or holds no fields of its own
@@ -2132,7 +2136,7 @@ event or a typed deny observation.
 A release refusal is also not a denied CALL, and AUD-4 leaves it alone for that
 reason: the call completed and answered with a reference to the result whose
 values it withheld, so there is no denied call for the typed deny channel to
-carry.
+carry. Its decision records the outcome `withheld` for the same reason.
 
 AUD-16 reports `inconclusive` where a run's policy decisions could not be read
 from the trace, the run report, or the run state — missing, unparseable, or

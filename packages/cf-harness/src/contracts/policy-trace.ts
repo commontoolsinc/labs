@@ -82,6 +82,12 @@ export interface HarnessPolicyDecisionCounts {
    * field reads it as `?? 0` rather than as a number.
    */
   invalid?: number;
+
+  /**
+   * Results a confidentiality boundary held the values of, on calls that ran
+   * and answered. Read as `?? 0` for the same reason `invalid` is.
+   */
+  withheld?: number;
 }
 
 export interface HarnessPolicyTrace {
@@ -158,6 +164,8 @@ export const countHarnessPolicyDecisions = (
   denied: decisions.filter((decision) => decision.decision === "denied")
     .length,
   invalid: decisions.filter((decision) => decision.decision === "invalid")
+    .length,
+  withheld: decisions.filter((decision) => decision.decision === "withheld")
     .length,
 });
 

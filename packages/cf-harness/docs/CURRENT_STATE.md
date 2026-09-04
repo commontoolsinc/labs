@@ -93,6 +93,12 @@ The current package provides:
   `not-run` tool activity and an `invalid_tool_call` failure record. Only what
   the model cannot correct — transport, engine invariants, artifact persistence,
   cancellation, the turn cap — ends the run;
+- a release a confidentiality boundary refused is recorded as a policy decision
+  with the outcome `withheld` rather than `denied`: the call ran and answered
+  with the reference to the result whose values were held back, so the trace
+  counts it in its own bucket, and the console renders the step as the success
+  its answer states with a withheld marker beside the CFC line. `denied` names a
+  call that did not run;
 - transcript-based resume and durable run artifacts, with retrospective omission
   joins kept outside the transcript and provider context;
 - server-side Responses context compaction with a default threshold derived from

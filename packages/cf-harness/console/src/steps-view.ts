@@ -373,7 +373,11 @@ export class ConsoleSteps extends LitElement {
     `;
   }
 
-  /** What CFC decided about this call, and any event it raised. */
+  /**
+   * What CFC decided about this call, and any event it raised. A withheld
+   * release carries the retrospective's count of the positions it held back,
+   * which is what says the call itself succeeded.
+   */
   #policy(step: ConsoleStep): TemplateResult | typeof nothing {
     const labelEntries = step.invocation?.cfcInputLabels?.entries ?? [];
     if (
@@ -390,7 +394,8 @@ export class ConsoleSteps extends LitElement {
             <span
               class="badge ${step.policy.decision === "denied"
                 ? "denied"
-                : step.policy.decision === "invalid"
+                : step.policy.decision === "invalid" ||
+                    step.policy.decision === "withheld"
                 ? "warn"
                 : "ok"}"
             >${step.policy.decision}</span>
@@ -400,6 +405,11 @@ export class ConsoleSteps extends LitElement {
             <span class="cfc-reasons">
               ${step.policy.reasonCodes.join(", ")}
             </span>
+            ${step.policy.decision === "withheld"
+              ? html`
+                <span class="cfc-withheld">${withheldSummary(step)}</span>
+              `
+              : nothing}
           </div>
         `} ${step.policyEvents.map((event) =>
           html`

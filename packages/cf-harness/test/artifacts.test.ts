@@ -596,6 +596,7 @@ Deno.test({
         warned: 0,
         denied: 0,
         invalid: 0,
+        withheld: 0,
       });
       assertEquals(persistedPolicyTrace.decisions[0], {
         type: "cf-harness.policy-decision",
@@ -648,6 +649,7 @@ Deno.test({
         warned: 0,
         denied: 0,
         invalid: 0,
+        withheld: 0,
       });
       assertEquals(persistedReport.policyDecisions, [
         persistedPolicyTrace.decisions[0],
@@ -1642,6 +1644,7 @@ Deno.test({
         warned: 0,
         denied: 1,
         invalid: 0,
+        withheld: 0,
       });
       assertEquals(policyTrace.decisions[0].decision, "denied");
       assertEquals(policyTrace.decisions[0].reasonCodes, [

@@ -485,7 +485,8 @@ record of what the run recorded rather than a cell with nothing to hide.
 - **Timeline** — the run step by step, scrubbed with arrow keys or the slider. A
   tool call and the result answering it are one step. A coloured dot on each
   step in the rail says how it turned out: green for a result the tool called
-  `ok`, red for one it called an error, amber for a call CFC denied.
+  `ok`, red for one it called an error, amber for a call CFC denied. A call
+  whose result CFC withheld the values of is green: it ran and answered.
 
   A step leads with what it was given and what it holds, and the payloads come
   after:
@@ -496,11 +497,15 @@ record of what the run recorded rather than a cell with nothing to hide.
     leads back to the step that produced it; both spellings resolve alike, since
     `run_pattern` takes a `cfh:a:` token or a whole link and they name one cell.
     A plain value says it is a value.
-  - **cfc** — the decision recorded for that call: allowed or denied, its effect
-    class, and the reason codes behind it. A policy event appears beside it,
-    which is how a call CFC _allowed_ but whose _observation_ it refused reads
-    as the two separate facts it is. The flow labels the runtime computed for
-    each input position appear here too.
+  - **cfc** — the decision recorded for that call: allowed, denied, or withheld,
+    its effect class, and the reason codes behind it. A withheld decision is a
+    confidentiality boundary holding back the values of a result the call did
+    return, so the count of the positions it held back sits beside it and the
+    step itself stays the success its answer states; the dot goes amber only for
+    a call that did not run. A policy event appears beside the decision, which
+    is how a call CFC _allowed_ but whose _observation_ it refused reads as the
+    two separate facts it is. The flow labels the runtime computed for each
+    input position appear here too.
   - **disclosure** — how many bytes the result let across as a plain value, how
     many positions it sealed behind a reference, and the longest run of numbers
     it carried. A long numeric run is called out, in the rail as well: the

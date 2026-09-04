@@ -658,6 +658,11 @@ button[disabled] {
   overflow-wrap: anywhere;
 }
 
+.cfc-withheld {
+  color: #b54708;
+  font-size: 0.8rem;
+}
+
 /* The run rail holds long task titles; it must not set the column width. */
 .run-list {
   min-width: 0;
