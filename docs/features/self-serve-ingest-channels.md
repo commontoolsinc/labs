@@ -51,7 +51,7 @@ target space; server reads it back.
 **It proves the wrong predicate.** The round-trip demonstrates *write*
 capability. Non-home spaces genesis as the document the caller registered
 beside the space key, else the fallback
-`{ [activeUser]: "OWNER", "*": "WRITE" }` (`packages/runner/src/storage/v2.ts:1440-1443`)
+`{ [activeUser]: "OWNER", "*": "WRITE" }` (`packages/runner/src/storage/v2.ts:1564-1566`)
 — and the ingest path registers none, so it gets the fallback — described
 upstream as "the rollout default until ACL management has a UI"
 (`docs/specs/memory-v2/04-protocol.md:742-748`). So on a genesis'd data space,
@@ -86,7 +86,7 @@ future work on its own track." The server cannot ask "was this written by the
 space's owner?"
 
 *Correction worth recording:* a user's **home/identity** space genesises as
-`{ [signer]: "OWNER" }` with **no wildcard** (`v2.ts:1440-1443`), so Option B is
+`{ [signer]: "OWNER" }` with **no wildcard** (`v2.ts:1564-1566`), so Option B is
 sound *for home spaces specifically*. It is unsound for the named data spaces
 the location beacon actually targets. Option B becomes generally sound exactly
 when the wildcard goes away — but a create primitive whose safety depends on a

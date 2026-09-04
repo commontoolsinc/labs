@@ -167,7 +167,7 @@ registered beside the space key (`registerSpaceIdentity(identity,
 { genesisAcl })`), else the fallback `{ [activeUser]: "OWNER", "*": "WRITE" }`,
 so new non-home spaces that asked for nothing are public read/write until ACL
 management has a UI. Home bootstrap remains owner-only. The wildcard is a
-default, not a fixture: a caller can supply a sealed document at genesis, and
+default, not a fixture: a caller can supply its own document at genesis, and
 the space's owner can narrow it afterwards with `cf acl remove ANYONE` (see
 [tutorial chapter 10](../tutorial/10-identity-and-security.md#reading-and-changing-a-spaces-acl)).
 Whatever writes the ACL must send it as a single whole-document replacement —

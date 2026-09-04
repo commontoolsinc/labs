@@ -97,7 +97,8 @@ valid ACL with at least one concrete OWNER. Named-space bootstrap uses a
 temporary space-identity session to write the genesis ACL, then remounts as
 that user: the document a caller registered beside the space key
 (`registerSpaceIdentity(identity, { genesisAcl })`, so a space can be born
-sealed), else the rollout default of the active user as OWNER plus `"*"`
+with exactly that ACL), else the rollout default of the active user as OWNER
+plus `"*"`
 WRITE. Home spaces use the
 same identity for both roles and remain private by claiming
 `{ [space]: "OWNER" }`, including an ACL-less legacy home.

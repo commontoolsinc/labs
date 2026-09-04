@@ -1133,10 +1133,18 @@ export class StorageManager implements IStorageManager {
    * it did not ask for. It is validated by the memory server's own
    * genesis admission (a concrete OWNER, an ACL-only commit; INV-12/13),
    * never here: a refused document leaves the space uninitialized and
-   * the open rejects. It is inert outside true genesis (a populated
-   * ACL-less space, a retracted ACL) and never reaches the home arm.
-   * `owner` and `genesisAcl` are two descriptions of one document, so
-   * supplying both is refused rather than silently ranked.
+   * the open rejects, and a corrected registration may retry. The
+   * document is a demand: the space's first open on this manager
+   * proceeds only if the space is fresh (the document becomes its only
+   * commit) or already carries exactly that document; a space populated
+   * before genesis, or claimed by another initializer with a different
+   * ACL, is refused rather than silently entered under the other ACL's
+   * grant. It never reaches the home arm. A caller that will open the
+   * space itself must grant its own signer at least READ, or every open
+   * after genesis is refused by the server. `owner` and `genesisAcl` are
+   * two descriptions of one document, so supplying both in one
+   * registration is refused rather than silently ranked; a registration
+   * after the space's first mount has begun is refused too.
    */
   registerSpaceIdentity(
     identity: Signer,

@@ -284,11 +284,15 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * `options.genesisAcl` is the exact document a fresh space is born with
    * (its first and only commit; no intermediate default is ever written),
    * validated by the memory server's genesis admission rather than here.
-   * It is inert outside true genesis and never reaches the home arm.
-   * Supplying it together with `owner` in one registration is refused; a
-   * later registration for the same space replaces an earlier one. A
-   * manager that cannot bootstrap an ACL refuses it rather than accept a
-   * document it would never write.
+   * It is a demand: the open proceeds only if the space is fresh or already
+   * carries exactly that document, and is refused otherwise — never
+   * silently entered under a different ACL. It never reaches the home arm.
+   * The signer that will open the space must be granted at least READ by
+   * it. Supplying it together with `owner` in one registration is refused;
+   * a later registration for the same space replaces an earlier one, but
+   * not once the space's first mount has begun. A manager that cannot
+   * bootstrap an ACL refuses it rather than accept a document it would
+   * never write.
    */
   registerSpaceIdentity?(
     identity: Signer,

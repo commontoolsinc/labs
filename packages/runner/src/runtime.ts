@@ -3348,9 +3348,16 @@ export class Runtime {
    * `options.genesisAcl` is the exact ACL document the space is born with
    * when this resolution creates it (its first and only commit — no
    * world-writable default is ever written), validated by the memory
-   * server's genesis admission. It is inert on a space that already
-   * exists, and is refused together with `owner` (two descriptions of one
-   * document); see `IStorageManager.registerSpaceIdentity`. A SERVING
+   * server's genesis admission; on a space that already exists the open
+   * proceeds only if it carries exactly that document, else refuses. It is
+   * refused together with `owner` (two descriptions of one document), for
+   * a bare DID (no key to register against), and for a name already
+   * resolved — by anything, including a pattern's `inSpace(name)` — unless
+   * with the identical document; see `IStorageManager.registerSpaceIdentity`.
+   * The name is cached at resolution, before the server can refuse the
+   * document, so a refusal surfaced later (on the first sync) has no
+   * correction path through this method: register a corrected document
+   * with the storage manager directly, or use a fresh runtime. A SERVING
    * runtime refuses it outright: served provisioning names the run's
    * acting user OWNER through the OW31 owner path, and a document that
    * bypassed that path could name any principal — including the service —
