@@ -510,6 +510,18 @@ export interface DebugValueOptions {
   readonly maxArrayLength?: number;
 
   /**
+   * Maximum number of properties of an object which are represented: a
+   * positive integer, or `Infinity` for as many as the conversion allows. An
+   * object with more properties than this has only the first that many, in
+   * key order, converted, and after them a form suggestive of the elision,
+   * which includes the object's actual property count. This applies wherever
+   * properties are laid out: a plain object, a class instance's own
+   * properties, and the contents of a fabric special object. When absent,
+   * the limit is one hundred. A large value is capped.
+   */
+  readonly maxProperties?: number;
+
+  /**
    * Maximum length of a string which is represented whole: a positive
    * integer, or `Infinity` for as long as the conversion allows. A longer
    * string is converted to a form suggestive of the elision, which carries an

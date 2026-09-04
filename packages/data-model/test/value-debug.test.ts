@@ -19,9 +19,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import type {
-  CompactDebugStringOptions,
-  DebugValueOptions,
+import { REALM_CODEC } from "@/codec-interface/interface.ts";
+import {
+  type CompactDebugStringOptions,
+  type DebugValueOptions,
+  FabricPrimitive,
 } from "@/interface.ts";
 import {
   toCompactDebugString,
@@ -157,6 +159,51 @@ describe("value-debug", () => {
       });
     });
 
+    describe("with `maxProperties`", () => {
+      it("renders the first properties, and the object's property count in place of the rest", () => {
+        const value = { a: 1, b: 2, c: 3 };
+        expect(toCompactDebugString(value, { maxProperties: 2 }))
+          .toBe("{a:1,b:2,...count:3}");
+        expect(toCompactDebugString({ o: value }, { maxProperties: 2 }))
+          .toBe("{o:{a:1,b:2,...count:3}}");
+      });
+
+      it("renders an object with as many properties as the limit whole", () => {
+        expect(toCompactDebugString({ a: 1, b: 2 }, { maxProperties: 2 }))
+          .toBe("{a:1,b:2}");
+      });
+
+      it("renders a primitive's realm state to the limit as well", () => {
+        class Wide extends FabricPrimitive {
+          static get [REALM_CODEC]() {
+            return {
+              tagForValue: () => "Wide@1",
+              encode: () => ({ p: 1, q: 2, r: 3 }),
+            };
+          }
+        }
+        expect(toCompactDebugString(new Wide(), { maxProperties: 2 }))
+          .toBe("/Wide(p:1,q:2,...count:3)");
+        expect(toIndentedDebugString(new Wide(), { maxProperties: 2 }))
+          .toBe("/Wide(\n  p: 1,\n  q: 2,\n  ... count: 3\n)");
+      });
+
+      it("renders no more than 100 properties when the limit is not given", () => {
+        const value = Object.fromEntries(
+          Array.from({ length: 101 }, (_, i) => [`k${i}`, i]),
+        );
+        expect(toCompactDebugString(value)).toMatch(
+          /,k99:99,\.\.\.count:101\}$/,
+        );
+      });
+
+      it("throws given a `maxProperties` that is not a positive integer", () => {
+        expect(() => toCompactDebugString({}, { maxProperties: 0 })).toThrow(
+          "`maxProperties` must be a positive integer, `Infinity`, or",
+        );
+      });
+    });
+
     describe("with `maxStringLength`", () => {
       it("renders an excerpt of the string, and the string's length after it", () => {
         expect(toCompactDebugString("abcdefgh", { maxStringLength: 5 }))
@@ -253,6 +300,11 @@ describe("value-debug", () => {
     it("renders the array's length on its own line in place of the elements past the limit", () => {
       expect(toIndentedDebugString([1, , , 4, 5], { maxArrayLength: 3 }))
         .toBe("[\n  1,\n  <2 holes>,\n  ... length: 5\n]");
+    });
+
+    it("renders the object's property count on its own line in place of the properties past the limit", () => {
+      expect(toIndentedDebugString({ a: 1, b: 2, c: 3 }, { maxProperties: 2 }))
+        .toBe("{\n  a: 1,\n  b: 2,\n  ... count: 3\n}");
     });
 
     it("renders a string's excerpt and length in the string's place", () => {

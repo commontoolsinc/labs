@@ -379,6 +379,7 @@ export const TypeMismatchError = (
  */
 const INCONSISTENCY_RENDER_OPTIONS: DebugValueOptions = {
   maxArrayLength: Infinity,
+  maxProperties: Infinity,
   maxStringLines: Infinity,
 };
 

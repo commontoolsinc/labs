@@ -2520,7 +2520,10 @@ export function wish(
           // the difference it reports, so a string is rendered whole.
           await commitPatternErrorUI(
             resultCell,
-            toCompactDebugString(error, { maxStringLines: Infinity }),
+            toCompactDebugString(error, {
+              maxProperties: Infinity,
+              maxStringLines: Infinity,
+            }),
           );
           return;
         }
