@@ -1,6 +1,7 @@
-import type { JSONSchema } from "@commonfabric/api";
+import type { CellScope, JSONSchema } from "@commonfabric/api";
 import type { Cell } from "@commonfabric/runner";
 import {
+  DEFAULT_CELL_SCOPE,
   entityIdFrom,
   isSlugAddress,
   resolveSlugReference,
@@ -132,6 +133,13 @@ export interface PieceReference {
   /** The piece's id. */
   piece: string;
 
+  /**
+   * The scope the piece was reached through, where that narrows the default.
+   * Absent otherwise, which leaves whatever scope the caller was addressing
+   * under standing.
+   */
+  scope?: CellScope;
+
   /** The segments left to address after the piece, a cell path inside it. */
   pathAfter: (string | number)[];
 }
@@ -173,8 +181,14 @@ export async function resolvePieceReference(
     token,
     path,
   );
+  // Scope selects which instance of an id is addressed, so a member held
+  // through a narrowed link is a different cell from the one the id alone
+  // names. Reporting it is what keeps a read and a write on that member from
+  // landing on the space-wide instance instead.
+  const { scope } = target.piece.getAsNormalizedFullLink();
   return {
     piece: pieceIdOrThrow(token, target.piece),
+    ...(scope !== undefined && scope !== DEFAULT_CELL_SCOPE && { scope }),
     pathAfter: target.pathAfter,
   };
 }

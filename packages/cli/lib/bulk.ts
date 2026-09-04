@@ -46,7 +46,7 @@ import {
   loadPieces,
   type PieceConfig,
   type PieceResolutionDeps,
-  resolveAddressedPieceId,
+  resolveAddressedPieceConfig,
   type SpaceConfig,
 } from "./piece.ts";
 
@@ -66,8 +66,13 @@ export async function readSourcePin(
   deps: SourcePinDependencies = {},
 ): Promise<PiecePin | undefined> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
-  const piece = await resolveAddressedPieceId(pieces, config, deps);
-  return await readPiecePin(pieces, piece, new Map(), config.pieceScope);
+  const resolved = await resolveAddressedPieceConfig(pieces, config, deps);
+  return await readPiecePin(
+    pieces,
+    resolved.piece,
+    new Map(),
+    resolved.pieceScope,
+  );
 }
 
 /**
@@ -453,16 +458,18 @@ export async function runRestore(
   deps: RestoreRunDependencies = {},
 ): Promise<RestoreOutcome> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
-  const piece = await resolveAddressedPieceId(pieces, config, deps);
-  return await (deps.restorePiece ?? restorePiece)(pieces, piece, {
+  const resolved = await resolveAddressedPieceConfig(pieces, config, deps);
+  return await (deps.restorePiece ?? restorePiece)(pieces, resolved.piece, {
     ...(request.revisionId === undefined
       ? {}
       : { revisionId: request.revisionId }),
     ...(request.apply === true ? { apply: true } : {}),
-    // The scope the address carried, threaded the way `readSourcePin`
+    // The scope the address resolved to, threaded the way `readSourcePin`
     // threads it: a scoped reference names a different cell, so a run that
     // dropped it would list and restore a piece nobody asked about.
-    ...(config.pieceScope === undefined ? {} : { scope: config.pieceScope }),
+    ...(resolved.pieceScope === undefined
+      ? {}
+      : { scope: resolved.pieceScope }),
   });
 }
 

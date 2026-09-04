@@ -1384,7 +1384,14 @@ async function resolvePieceTargetWithPieces(
   );
   const { piecePath: _embedded, ...rest } = config;
   return {
-    config: { ...rest, piece: resolved.piece },
+    config: {
+      ...rest,
+      piece: resolved.piece,
+      // The stored link is the authority on which instance of an id a member
+      // is, so a scope the walk reached it through stands over the one the
+      // command was addressing under.
+      ...(resolved.scope !== undefined && { pieceScope: resolved.scope }),
+    },
     path: resolved.pathAfter,
   };
 }
@@ -1445,21 +1452,22 @@ export async function resolvePieceConfig(
 }
 
 /**
- * The piece a config addresses, for a command whose intake is a piece and
- * nothing inside it.
+ * The config a command whose intake is a piece and nothing inside it should
+ * act on: the piece the address reached, and the scope it was reached
+ * through.
  *
  * Every such command resolves through here, because the refusal it owes a
  * caller cannot be raised at the parse: a slug's embedded path may be spent
  * selecting a member, and only the walk can tell that from a cell path the
  * command has no use for. A command that resolved the address on its own
- * would take the piece and drop the path without saying so.
+ * would take the piece and drop the rest of what the walk reached.
  */
-export async function resolveAddressedPieceId(
+export async function resolveAddressedPieceConfig(
   pieces: PiecesController,
   config: PieceConfig,
   deps: PieceResolutionDeps = {},
-): Promise<string> {
-  return (await resolvePieceConfigWithPieces(config, pieces, deps)).piece;
+): Promise<PieceConfig> {
+  return await resolvePieceConfigWithPieces(config, pieces, deps);
 }
 
 /**
@@ -1661,10 +1669,14 @@ async function resolveSlugSourceCell(
       () => resolveSlugTargetCell(pieces, sourcePieceId),
     );
   }
-  const { piece, pathAfter: path } = await timeCliPhase(
+  const { piece, pathAfter: path, scope } = await timeCliPhase(
     "setPieceSlug.resolveSource",
     () => pieceReferenceResolver(deps)(pieces, sourcePieceId, sourcePath),
   );
+  // A member reached through a narrowed link is that instance, so the cell
+  // the slug is pointed at is read at the scope the walk reached, not the one
+  // the command was addressing under.
+  const resolvedScope = scope ?? sourceScope;
   if (path.length === 0) {
     return pieces.runtime.getCellFromEntityId(
       pieces.getSpace(),
@@ -1672,12 +1684,12 @@ async function resolveSlugSourceCell(
       [],
       undefined,
       undefined,
-      sourceScope,
+      resolvedScope,
     );
   }
   const holder = await timeCliPhase(
     "setPieceSlug.getSourcePiece",
-    () => pieces.get(piece, false, undefined, sourceScope),
+    () => pieces.get(piece, false, undefined, resolvedScope),
   );
   return holder.getCell().key(...path);
 }
@@ -3705,11 +3717,14 @@ export async function linkPieces(
   // Both halves name the piece the walk reached rather than the token that
   // reached it: an address naming a collection's member checks its path on
   // the member, and a message pairing that path with the collection's name
-  // would describe a read nobody made.
+  // would describe a read nobody made. The scope travels with each half for
+  // the same reason — it says which instance of that id the link named.
   const resolvedSourcePieceId = source.piece;
   const resolvedSourcePath = source.pathAfter;
+  const resolvedSourceScope = source.scope ?? options?.sourceScope;
   const resolvedTargetPieceId = target.piece;
   const resolvedTargetPath = target.pathAfter;
+  const resolvedTargetScope = target.scope ?? options?.targetScope;
 
   // Validate that source and target pieces/paths exist by reading them
   if (!options?.allowNonExisting) {
@@ -3724,7 +3739,7 @@ export async function linkPieces(
           resolvedSourcePieceId,
           false,
           undefined,
-          options?.sourceScope,
+          resolvedSourceScope,
         ),
     );
     const sourceHasPattern =
@@ -3768,7 +3783,7 @@ export async function linkPieces(
           resolvedTargetPieceId,
           false,
           undefined,
-          options?.targetScope,
+          resolvedTargetScope,
         ),
     );
     const targetHasPattern =
@@ -3819,7 +3834,15 @@ export async function linkPieces(
         resolvedSourcePath,
         resolvedTargetPieceId,
         resolvedTargetPath,
-        options,
+        {
+          ...options,
+          ...(resolvedSourceScope === undefined
+            ? {}
+            : { sourceScope: resolvedSourceScope }),
+          ...(resolvedTargetScope === undefined
+            ? {}
+            : { targetScope: resolvedTargetScope }),
+        },
       ),
   );
   noteWroteTo(config.space);
@@ -3882,7 +3905,7 @@ export async function linkSqliteDiskSource(
   );
   await pieces.link(id, [], resolvedTarget.piece, resolvedTarget.pathAfter, {
     start: options?.start,
-    targetScope: options?.targetScope,
+    targetScope: resolvedTarget.scope ?? options?.targetScope,
   });
   await pieces.synced();
 }
