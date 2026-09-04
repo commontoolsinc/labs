@@ -37,6 +37,29 @@ export class CommonIframeSandboxElement extends LitElement {
     this.requestUpdate("bridge", previousValue);
   }
 
+  /**
+   * The frame, the window whose readiness was last acted on, and the
+   * outer-ready step, which a test drives directly: it asserts the
+   * outer-ready refusal where the refusal is made, since a frame reports
+   * itself ready exactly once, from a window nothing outside this element
+   * can speak for.
+   */
+  get accessForTestingOnly(): {
+    readonly iframeRef: Ref<HTMLIFrameElement>;
+    readonly readyWindow: Window | undefined;
+    onOuterReady(source: Window): void;
+  } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      iframeRef: this.#iframeRef,
+      get readyWindow() {
+        return outerThis.#readyWindow;
+      },
+      onOuterReady: (source) => this.#onOuterReady(source),
+    };
+  }
+
   @property({ attribute: "load-state", reflect: true })
   accessor loadState: CommonIframeLoadState = "";
 
@@ -58,13 +81,9 @@ export class CommonIframeSandboxElement extends LitElement {
 
   /**
    * The frame this element renders, held so the guest can be reached through
-   * it. TypeScript-private rather than `#`, as `readyWindow` and
-   * `onOuterReady` also are, because `test/iframe.browser.test.ts` reaches for
-   * all three: it asserts the outer-ready refusal where the refusal is made,
-   * and a frame reports itself ready exactly once, from a window nothing
-   * outside this element can speak for.
+   * it.
    */
-  private iframeRef: Ref<HTMLIFrameElement> = createRef();
+  readonly #iframeRef: Ref<HTMLIFrameElement> = createRef();
 
   /**
    * The outer-frame window whose `ready` this element last acted on, once one
@@ -72,7 +91,7 @@ export class CommonIframeSandboxElement extends LitElement {
    * one already in hand: detaching the element discards the frame's browsing
    * context, so the frame reattaching brings is a different window.
    */
-  private readyWindow: Window | undefined;
+  #readyWindow: Window | undefined;
 
   /**
    * Handles the outer frame reporting itself ready, which it does on its own
@@ -92,11 +111,11 @@ export class CommonIframeSandboxElement extends LitElement {
    * from the same window is this element's model of the frame's lifetime being
    * wrong rather than a frame having been replaced.
    */
-  private onOuterReady(source: Window) {
-    if (source === this.readyWindow) {
+  #onOuterReady(source: Window) {
+    if (source === this.#readyWindow) {
       throw new Error(`common-iframe-sandbox: Already initialized.`);
     }
-    this.readyWindow = source;
+    this.#readyWindow = source;
     this.#releaseGuest();
     if (this.src) {
       this.#loadInnerDoc();
@@ -116,7 +135,7 @@ export class CommonIframeSandboxElement extends LitElement {
     // The guest is the inner frame, which is a frame of the outer one. A
     // cross-origin frame is unreachable for anything but this: indexed access
     // and `postMessage`, which is what a transfer rides.
-    const guestWindow = this.iframeRef.value?.contentWindow?.frames[0];
+    const guestWindow = this.#iframeRef.value?.contentWindow?.frames[0];
     if (!guestWindow) {
       console.error("common-iframe-sandbox: No guest frame to open a port to.");
       return;
@@ -136,7 +155,7 @@ export class CommonIframeSandboxElement extends LitElement {
 
   /** Handles a message from the outer frame. */
   #onMessage = (event: MessageEvent) => {
-    if (event.source !== this.iframeRef.value?.contentWindow) {
+    if (event.source !== this.#iframeRef.value?.contentWindow) {
       return;
     }
 
@@ -189,7 +208,7 @@ export class CommonIframeSandboxElement extends LitElement {
         return;
       }
       case IPC.IPCGuestMessageType.Ready: {
-        this.onOuterReady(event.source as Window);
+        this.#onOuterReady(event.source as Window);
         return;
       }
     }
@@ -248,7 +267,7 @@ export class CommonIframeSandboxElement extends LitElement {
 
   /** Sends `message` to the outer frame. */
   #toOuterFrame(message: IPC.IPCHostMessage) {
-    this.iframeRef.value?.contentWindow?.postMessage(message, "*");
+    this.#iframeRef.value?.contentWindow?.postMessage(message, "*");
   }
 
   /** The outer frame's message listener, as `globalThis` holds it. */
@@ -278,7 +297,7 @@ export class CommonIframeSandboxElement extends LitElement {
    */
   protected override updated(changed: PropertyValues) {
     super.updated(changed);
-    if (!this.readyWindow) return;
+    if (!this.#readyWindow) return;
     if (changed.has("src") || (changed.has("bridge") && this.src)) {
       this.#loadInnerDoc();
     }
@@ -288,7 +307,7 @@ export class CommonIframeSandboxElement extends LitElement {
   override render() {
     return html`
       <iframe
-        ${ref(this.iframeRef)}
+        ${ref(this.#iframeRef)}
         allow="clipboard-write"
         sandbox="allow-scripts allow-pointer-lock allow-popups allow-popups-to-escape-sandbox"
         .srcdoc="${OuterFrame}"
