@@ -68,37 +68,37 @@ export class SpaceManager {
     setupWorkerController(): Promise<void>;
   } {
     // deno-lint-ignore no-this-alias
-    const manager = this;
+    const outerThis = this;
     return {
       get activePiece() {
-        return manager.#activePiece;
+        return outerThis.#activePiece;
       },
       set activePiece(value) {
-        manager.#activePiece = value;
+        outerThis.#activePiece = value;
       },
       get enabledPieces() {
-        return manager.#enabledPieces;
+        return outerThis.#enabledPieces;
       },
       get failureTracking() {
-        return manager.#failureTracking;
+        return outerThis.#failureTracking;
       },
       get isRunning() {
-        return manager.#isRunning;
+        return outerThis.#isRunning;
       },
       set isRunning(value) {
-        manager.#isRunning = value;
+        outerThis.#isRunning = value;
       },
       get pendingTasks() {
-        return manager.#pendingTasks;
+        return outerThis.#pendingTasks;
       },
       set pendingTasks(value) {
-        manager.#pendingTasks = value;
+        outerThis.#pendingTasks = value;
       },
       get workerController() {
-        return manager.#workerController;
+        return outerThis.#workerController;
       },
       set workerController(value) {
-        manager.#workerController = value;
+        outerThis.#workerController = value;
       },
       execLoop: () => this.#execLoop(),
       processPiece: (pieceId, entry) => this.#processPiece(pieceId, entry),
