@@ -15,10 +15,10 @@ This block is LIVE: the change that moves a stage updates it here.
 | S0 — decisions ruled, plan filed | on main (#6882) |
 | S1 — the library and the exemplar board own a member namespace | on main (#6882) |
 | S1b — index rows are the members | built, in review |
-| S2 — `top/42` resolves at the CLI | not started |
+| S2 — `top/42` resolves at the CLI | built, in review |
 | S2b — assignment refuses by default | not started |
 | S3 — the shell opens `/<space>/top/42` | not started |
-| S4 — `#42` in text | not started |
+| S4 — `#42` in text | building |
 | S6 — graft onto Topics | not started; Mike's call after S4 |
 | S5 — deferred, not scheduled | — |
 
