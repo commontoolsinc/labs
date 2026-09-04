@@ -1610,6 +1610,21 @@ export class Server {
     );
   }
 
+  /**
+   * The timer-driven refresh pass, which a test drives directly.
+   *
+   * The name is the documentation. Nothing here is part of what this class
+   * promises, and code that reaches through it is written against internals
+   * that are free to change.
+   */
+  get accessForTestingOnly(): {
+    flushScheduledSessions(): Promise<void>;
+  } {
+    return {
+      flushScheduledSessions: () => this.#flushScheduledSessions(),
+    };
+  }
+
   /** This server's health-route providers, kept so close() can withdraw
    * exactly them and no other server's. */
   #pushPriorityStatsProvider = () => this.pushPriorityStats();
@@ -6362,18 +6377,13 @@ export class Server {
     this.#refreshTurn = armTurn(
       () => {
         this.#refreshTurn = null;
-        void this.flushScheduledSessions();
+        void this.#flushScheduledSessions();
       },
       this.options.subscriptionRefreshDelayMs ?? SUBSCRIPTION_REFRESH_DELAY_MS,
     );
   }
 
-  /**
-   * TypeScript-private rather than a `#` name, because
-   * `test/v2-verdict-catchup.test.ts` reaches this member and a `#` name would
-   * put it out of reach.
-   */
-  private async flushScheduledSessions(): Promise<void> {
+  async #flushScheduledSessions(): Promise<void> {
     await this.#waitForConnectionQueuesToDrain(
       Math.max(
         MIN_REFRESH_QUEUE_DRAIN_WAIT_MS,

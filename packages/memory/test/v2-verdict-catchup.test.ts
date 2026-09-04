@@ -582,8 +582,7 @@ Deno.test("memory v2 server: a failing timer-driven flush warns and leaves recov
       }
       return originalFlush();
     };
-  await (server as unknown as { flushScheduledSessions(): Promise<void> })
-    .flushScheduledSessions();
+  await server.accessForTestingOnly.flushScheduledSessions();
   assertEquals(committerMessages.length, 0);
 
   // The batch was never consumed (the stub rejected before the pass); a
