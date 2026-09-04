@@ -662,7 +662,7 @@ clock for the same reason the runner does: the service's own machinery is
 time-coupled, so freezing every positive-delay timer would deadlock a plain test
 on the service's own loop rather than on any sleep the test wrote.
 
-Three pieces of the service arm positive-delay timers. `SpaceManager.execLoop`
+Three pieces of the service arm positive-delay timers. `SpaceManager.#execLoop`
 parks on `sleep(pollingIntervalMs)` between polls of its task queue.
 `SpaceManager.stop` races a `setInterval` that watches for the active job to
 finish against a `sleep(deactivationTimeoutMs)` deadline. And

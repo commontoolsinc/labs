@@ -111,6 +111,17 @@ class FakeEntryCell {
   }
 }
 
+/**
+ * Installs a stand-in for `manager`'s worker controller, supplying only the
+ * members the case exercises.
+ */
+function installWorker(
+  manager: SpaceManager,
+  stub: Partial<WorkerController>,
+): void {
+  manager.accessForTestingOnly.workerController = stub as WorkerController;
+}
+
 class FakePiecesCell {
   syncCount = 0;
   schemaSyncCount = 0;
@@ -545,9 +556,9 @@ describe("SpaceManager", () => {
         rerunIntervalMs: 5,
       });
 
-      (manager as never as { workerController: unknown }).workerController = {
+      installWorker(manager, {
         isReady: () => true,
-        runPiece: (cell: FakeEntryCell) => {
+        runPiece: (cell) => {
           workerCalls.push(cell.get().pieceId);
           return Promise.resolve();
         },
@@ -555,22 +566,19 @@ describe("SpaceManager", () => {
           workerCalls.push("shutdown");
           return Promise.resolve();
         },
-      };
+      });
 
       const cancel = manager.watch([entry as never]);
       assertEquals(
-        (manager as never as { enabledPieces: Map<string, unknown> })
-          .enabledPieces.has(PIECE_ID),
+        manager.accessForTestingOnly.enabledPieces.has(PIECE_ID),
         true,
       );
 
-      await (manager as never as {
-        processPiece: (pieceId: string, entry: FakeEntryCell) => Promise<void>;
-      }).processPiece(PIECE_ID, entry);
+      await manager.accessForTestingOnly.processPiece(PIECE_ID, entry as never);
       assertEquals(workerCalls, [PIECE_ID]);
       assertEquals(entry.value.status, "Success");
 
-      (manager as never as { workerController: unknown }).workerController = {
+      installWorker(manager, {
         isReady: () => true,
         runPiece: () => {
           throw new Error("graph failed");
@@ -579,23 +587,15 @@ describe("SpaceManager", () => {
           workerCalls.push("shutdown");
           return Promise.resolve();
         },
-      };
-      await (manager as never as {
-        processPiece: (pieceId: string, entry: FakeEntryCell) => Promise<void>;
-      }).processPiece(PIECE_ID, entry);
+      });
+      await manager.accessForTestingOnly.processPiece(PIECE_ID, entry as never);
       assertEquals(entry.value.status, "graph failed");
-      await (manager as never as {
-        processPiece: (pieceId: string, entry: FakeEntryCell) => Promise<void>;
-      }).processPiece(PIECE_ID, entry);
-      await (manager as never as {
-        processPiece: (pieceId: string, entry: FakeEntryCell) => Promise<void>;
-      }).processPiece(PIECE_ID, entry);
+      await manager.accessForTestingOnly.processPiece(PIECE_ID, entry as never);
+      await manager.accessForTestingOnly.processPiece(PIECE_ID, entry as never);
       assert(entry.value.disabledAt > 0);
       assertStringIncludes(entry.value.status, "Disabled: graph failed");
 
-      await (manager as never as {
-        processPiece: (pieceId: string, entry: FakeEntryCell) => Promise<void>;
-      }).processPiece(PIECE_ID, entry);
+      await manager.accessForTestingOnly.processPiece(PIECE_ID, entry as never);
       manager.watch([]);
       cancel();
       await manager.stop();
@@ -612,10 +612,10 @@ describe("SpaceManager", () => {
         pollingIntervalMs: 1,
         deactivationTimeoutMs: 1,
       });
-      (manager as never as { workerController: unknown }).workerController = {
+      installWorker(manager, {
         isReady: () => false,
         shutdown: async () => {},
-      };
+      });
 
       manager.start();
       manager.start();
@@ -626,7 +626,7 @@ describe("SpaceManager", () => {
       await manager.stop();
       await clock.tick(1);
       assertEquals(
-        (manager as never as { isRunning: boolean }).isRunning,
+        manager.accessForTestingOnly.isRunning,
         false,
       );
     });
@@ -645,34 +645,30 @@ describe("SpaceManager", () => {
         deactivationTimeoutMs: 10,
       });
 
-      (manager as never as { workerController: unknown }).workerController = {
+      installWorker(manager, {
         isReady: () => true,
         shutdown: () => {
           shutdowns.push("shutdown");
           return Promise.resolve();
         },
-      };
+      });
 
       manager.watch([first as never, second as never]);
       first.set({ ...first.value, disabledAt: Date.now() });
       assertEquals(
-        (manager as never as { enabledPieces: Map<string, unknown> })
-          .enabledPieces.has(PIECE_ID),
+        manager.accessForTestingOnly.enabledPieces.has(PIECE_ID),
         false,
       );
 
       manager.watch([first as never]);
       assertEquals(
-        (manager as never as { enabledPieces: Map<string, unknown> })
-          .enabledPieces.has(OTHER_PIECE_ID),
+        manager.accessForTestingOnly.enabledPieces.has(OTHER_PIECE_ID),
         false,
       );
 
-      (manager as never as { activePiece: FakeEntryCell | null }).activePiece =
-        second;
+      manager.accessForTestingOnly.activePiece = second as never;
       setTimeout(() => {
-        (manager as never as { activePiece: FakeEntryCell | null })
-          .activePiece = null;
+        manager.accessForTestingOnly.activePiece = null;
       }, 0);
       await manager.stop();
       assertEquals(shutdowns, ["shutdown"]);
@@ -690,78 +686,70 @@ describe("SpaceManager", () => {
         deactivationTimeoutMs: 1,
       });
 
-      (manager as never as { workerController: unknown }).workerController = {
+      installWorker(manager, {
         isReady: () => false,
         shutdown: () => Promise.resolve(),
-      };
-      (manager as never as { isRunning: boolean }).isRunning = true;
+      });
+      manager.accessForTestingOnly.isRunning = true;
       // isReady() === false: the loop parks on sleep(pollingIntervalMs). Let it
       // reach the park, clear isRunning, then fire the parked sleep so it exits.
-      const idleLoop = (manager as never as { execLoop: () => Promise<void> })
-        .execLoop();
+      const idleLoop = manager.accessForTestingOnly.execLoop();
       await clock.settle();
-      (manager as never as { isRunning: boolean }).isRunning = false;
+      manager.accessForTestingOnly.isRunning = false;
       await clock.tick(1);
       await idleLoop;
 
-      (manager as never as { workerController: unknown }).workerController = {
+      installWorker(manager, {
         isReady: () => true,
         shutdown: () => Promise.resolve(),
-      };
-      (manager as never as { activePiece: FakeEntryCell | null }).activePiece =
-        entry;
-      (manager as never as { isRunning: boolean }).isRunning = true;
+      });
+      manager.accessForTestingOnly.activePiece = entry as never;
+      manager.accessForTestingOnly.isRunning = true;
       // isReady() === true with an active piece: the loop parks until the active
       // piece clears.
-      const activeLoop = (manager as never as { execLoop: () => Promise<void> })
-        .execLoop();
+      const activeLoop = manager.accessForTestingOnly.execLoop();
       await clock.settle();
-      (manager as never as { activePiece: FakeEntryCell | null }).activePiece =
-        null;
-      (manager as never as { isRunning: boolean }).isRunning = false;
+      manager.accessForTestingOnly.activePiece = null;
+      manager.accessForTestingOnly.isRunning = false;
       await clock.tick(1);
       await activeLoop;
 
-      (manager as never as { pendingTasks: unknown[] }).pendingTasks = [{
+      manager.accessForTestingOnly.pendingTasks = [{
         pieceId: PIECE_ID,
-        entry,
+        entry: entry as never,
         timestamp: Date.now() + 10,
       }];
-      (manager as never as { isRunning: boolean }).isRunning = true;
+      manager.accessForTestingOnly.isRunning = true;
       // The only pending task is scheduled in the future: the loop parks until
       // it comes due.
-      const futureLoop = (manager as never as { execLoop: () => Promise<void> })
-        .execLoop();
+      const futureLoop = manager.accessForTestingOnly.execLoop();
       await clock.settle();
-      (manager as never as { isRunning: boolean }).isRunning = false;
+      manager.accessForTestingOnly.isRunning = false;
       await clock.tick(1);
       await futureLoop;
 
       const calls: string[] = [];
-      (manager as never as { workerController: unknown }).workerController = {
+      installWorker(manager, {
         isReady: () => true,
         runPiece: () => {
           calls.push("run");
-          (manager as never as { isRunning: boolean }).isRunning = false;
+          manager.accessForTestingOnly.isRunning = false;
           return Promise.resolve();
         },
         shutdown: () => Promise.resolve(),
-      };
-      (manager as never as { enabledPieces: Map<string, FakeEntryCell> })
-        .enabledPieces.set(PIECE_ID, entry);
-      (manager as never as { failureTracking: Map<string, number> })
-        .failureTracking.set(PIECE_ID, 1);
-      (manager as never as { pendingTasks: unknown[] }).pendingTasks = [{
+      });
+      manager.accessForTestingOnly.enabledPieces.set(PIECE_ID, entry as never);
+      manager.accessForTestingOnly.failureTracking.set(PIECE_ID, 1);
+      manager.accessForTestingOnly.pendingTasks = [{
         pieceId: PIECE_ID,
-        entry,
+        entry: entry as never,
         timestamp: Date.now() - 1,
       }];
-      (manager as never as { isRunning: boolean }).isRunning = true;
-      await (manager as never as { execLoop: () => Promise<void> }).execLoop();
+      manager.accessForTestingOnly.isRunning = true;
+      await manager.accessForTestingOnly.execLoop();
       assertEquals(calls, ["run"]);
       assertEquals(
-        (manager as never as { failureTracking: Map<string, number> })
-          .failureTracking.has(PIECE_ID),
+        manager.accessForTestingOnly.failureTracking.has(PIECE_ID),
         false,
       );
       await manager.stop();
@@ -833,16 +821,14 @@ describe("SpaceManager", () => {
         deactivationTimeoutMs: 1,
       });
       let removed = false;
-      (manager as never as { workerController: unknown }).workerController = {
+      installWorker(manager, {
         removeEventListener: () => {
           removed = true;
         },
         shutdown: () => Promise.reject(new Error("old shutdown failed")),
-      };
+      });
 
-      await (manager as never as {
-        setupWorkerController: () => Promise<void>;
-      }).setupWorkerController();
+      await manager.accessForTestingOnly.setupWorkerController();
       await clock.settle();
 
       assertEquals(removed, true);
