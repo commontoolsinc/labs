@@ -13,6 +13,7 @@ import {
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import { FabricError } from "@commonfabric/data-model/fabric-instances";
+import type { WorkerReconciler } from "@commonfabric/html/worker";
 import {
   FabricBytes,
   FabricEpochNsec,
@@ -5327,8 +5328,8 @@ describe("runtime-processor", () => {
         });
         const mount = state.vdomMounts.get("0 1");
         expect(mount).toBeDefined();
-        const policy = (mount!.reconciler as { rootRenderPolicy?: unknown })
-          .rootRenderPolicy as RootRenderPolicy;
+        const policy = (mount!.reconciler as WorkerReconciler)
+          .accessForTestingOnly.rootRenderPolicy;
         handleVDomUnmount.call(state, {
           type: RequestType.VDomUnmount,
           mountId: 1,
