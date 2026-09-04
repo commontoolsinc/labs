@@ -288,10 +288,18 @@ describe("assign-slug", () => {
       );
     });
 
-    it("gives a free name to exactly one of two calls racing for it", async () => {
-      // Both calls read the name as free, so both reach the write, and the
-      // write is where exactly one of them can win. Forcing over the read
-      // instead would let the loser overwrite the winner and report success.
+    it("gives a free name to the first of two calls and refuses the second", async () => {
+      // Two calls for one free name, started together and settling one after
+      // the other. What this asserts is the outcome — exactly one takes the
+      // name — and nothing about the interleaving: the assertions hold
+      // whether the two overlapped or ran in sequence. Forcing over the read
+      // instead of carrying it into the write would let the loser overwrite
+      // the winner and report success, which is what the assertions catch.
+      //
+      // The racing path is the library's, pinned over two sessions where the
+      // losing replica is provably behind: `packages/piece/test/slug.test.ts`,
+      // under "the read a refusal claims on".
+      //
       // The two tokens name different pieces, so the address the name ends
       // up holding says which call won rather than being true either way.
       await linkDefaultPattern();
@@ -478,22 +486,25 @@ describe("assign-slug", () => {
       const engine = createEngine();
       const created = await createPiece(engine);
 
-      const originalGetSpace = pieces.getSpace.bind(pieces);
       const originalAdd = pieces.add.bind(pieces);
+      const originalGetCell = runtime.getCellFromEntityId.bind(runtime);
       pieces.add = async (cells) => {
         await originalAdd(cells);
         // The join has landed; make the assignment that follows fail once.
-        pieces.getSpace = () => {
-          pieces.getSpace = originalGetSpace;
+        // Through a call only the slug write makes, so the failure is the
+        // assignment's rather than the listing's — the tool reports those
+        // separately, because only one of them leaves a listed piece.
+        runtime.getCellFromEntityId = (() => {
+          runtime.getCellFromEntityId = originalGetCell;
           throw new Error("slug assignment refused");
-        };
+        }) as Runtime["getCellFromEntityId"];
       };
       const first = await engine.invokeBuiltinTool("assign_slug", {
         token: created.resultRef,
         slug: "doubling-report",
       });
       pieces.add = originalAdd;
-      pieces.getSpace = originalGetSpace;
+      runtime.getCellFromEntityId = originalGetCell;
       const failed = first.output as AssignSlugToolErrorOutput;
       expect(failed.status).toBe("error");
       expect(failed.message).toContain("failed while naming");
@@ -765,7 +776,11 @@ describe("assign-slug", () => {
       );
     });
 
-    it("reports the naming failure when the space root cannot be initialized", async () => {
+    it("reports the listing failure when the space root cannot be initialized, claiming no listing", async () => {
+      // The registry join is where this fails, so it is the listing that is
+      // reported and the piece is not listed. The refusals on the other side
+      // of the join say the piece IS listed, and a report that conflated the
+      // two would send a caller looking for a piece that is not there.
       const engine = createEngine();
       const created = await createPiece(engine);
       const originalEnsureDefaultPattern = pieces.ensureDefaultPattern;
@@ -780,8 +795,10 @@ describe("assign-slug", () => {
 
       const output = result.output as AssignSlugToolErrorOutput;
       expect(output.status).toBe("error");
-      expect(output.message).toContain("failed while naming");
+      expect(output.message).toContain("failed while listing");
       expect(output.message).toContain("space root unavailable");
+      expect(output.message).not.toContain("the piece is listed");
+      expect(await pieces.getRegisteredPieces()).toEqual([]);
     });
 
     it("leaves an initialized space root untouched while assigning the slug", async () => {

@@ -370,13 +370,24 @@ export const assignSlugTool: HarnessToolDefinition<
         `assign_slug could not establish whether slug "${slug}" is available: ${availability.reason}. Nothing was assigned. Try the same call again.`,
       );
     }
+    // The registry join goes first, so a failure between the two leaves a
+    // listed-but-unnamed piece — visible and reachable by its handle —
+    // rather than an orphan name pointing outside the list. Membership is
+    // ensured rather than appended: a retry after exactly that failure must
+    // not list the piece twice.
+    //
+    // Its own try, because what the two failures leave behind differs: this
+    // one leaves nothing, and the refusals below leave a listed piece. A
+    // sentence attached to the catch rather than to the state it describes
+    // would say the piece is listed when the listing is what failed.
     try {
-      // The registry join goes first, so a failure between the two leaves a
-      // listed-but-unnamed piece — visible and reachable by its handle —
-      // rather than an orphan name pointing outside the list. Membership is
-      // ensured rather than appended: a retry after exactly that failure
-      // must not list the piece twice.
       await ensureRegistered(pieces, cell, targetId);
+    } catch (error) {
+      return errorOutput(
+        `assign_slug failed while listing the piece: ${errorMessage(error)}`,
+      );
+    }
+    try {
       await assignSlug(pieces, cell, slug, { takeFrom: availability.binding });
     } catch (error) {
       // The name was bound between this call's reading of it and its write,

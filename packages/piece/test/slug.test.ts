@@ -438,6 +438,9 @@ describe("piece slugs", () => {
     );
 
     expect(failure).toBeInstanceOf(SlugReleasedError);
+    // Both halves of what a caller acts on: which name to read again, and
+    // the target its rule was about.
+    expect((failure as SlugReleasedError).slug).toBe("demo");
     expect((failure as SlugReleasedError).expected).toBe(gone);
     // Refused, so the name was not written: the caller's rule was about a
     // target that is not there, and taking it anyway is what it excluded.
@@ -532,6 +535,54 @@ describe("piece slugs", () => {
       piece: String(plain.getAsNormalizedFullLink().id).replace(/^of:/, ""),
       pathInside: [],
     });
+  });
+
+  it("takes a name whose value is a link cycle, which is what forcing is for", async () => {
+    // The state an operator forces to escape. Two things have to hold at
+    // once: the write must land on a name whose own value cycles, and the
+    // cleanup that rides along must not resolve that cycle and throw — an
+    // old target that will not resolve has no root carrying the name, which
+    // is nothing to clear rather than a reason to refuse. Both shapes,
+    // because a self-cycle is the one an assignment can point a name at and
+    // a two-step cycle is the one two of them can.
+    const slugCell = runtime.getCellFromEntityId(
+      pieces.getSpace(),
+      entityIdFrom(slugIdForSpace(pieces.getSpace(), "demo")),
+    );
+    await runtime.editWithRetry((tx) => {
+      const cell = slugCell.withTx(tx);
+      cell.setRawUntyped(cell.getAsWriteRedirectLink({ base: cell }));
+    });
+    const first = await createPiece("cycle-first");
+
+    await assignSlug(pieces, first, "demo", { force: true });
+
+    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(first));
+
+    const left = runtime.getCell(
+      pieces.getSpace(),
+      { space: pieces.getSpace(), random: "cycle-left" },
+    );
+    const right = runtime.getCell(
+      pieces.getSpace(),
+      { space: pieces.getSpace(), random: "cycle-right" },
+    );
+    await runtime.editWithRetry((tx) => {
+      left.withTx(tx).setRawUntyped(
+        right.withTx(tx).getAsWriteRedirectLink({ base: left.withTx(tx) }),
+      );
+      right.withTx(tx).setRawUntyped(
+        left.withTx(tx).getAsWriteRedirectLink({ base: right.withTx(tx) }),
+      );
+      slugCell.withTx(tx).setRawUntyped(
+        left.withTx(tx).getAsWriteRedirectLink({ base: slugCell.withTx(tx) }),
+      );
+    });
+    const second = await createPiece("cycle-second");
+
+    await assignSlug(pieces, second, "demo", { force: true });
+
+    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(second));
   });
 
   it("reads a name whose target is a redirect cycle as its own state", async () => {

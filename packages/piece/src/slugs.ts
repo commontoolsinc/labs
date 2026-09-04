@@ -98,6 +98,20 @@ export class SlugReleasedError extends Error {
  * whole maps racing. The names are the whole content — where a name points
  * stays the slug cell's own answer, because a copy of the target here would
  * be a second answer able to disagree with it. */
+/**
+ * The schema the redirect write carries. It exists to stop the write asking
+ * what the name currently resolves to: a handle with no schema resolves its
+ * own link to find one, and a name whose value is a link cycle makes that
+ * throw — so without it a forced assignment could not repoint the very state
+ * an operator forces to escape.
+ *
+ * An object with no properties describes the shape a redirect payload has and
+ * names nothing to follow, so the sync it kicks is the one document it
+ * writes. Measured against a schemaless write over a five-document chain: the
+ * same single document pulled, and the same stored value.
+ */
+const SLUG_REDIRECT_SCHEMA = { type: "object" } as const satisfies JSONSchema;
+
 const SLUG_INDEX_SCHEMA = {
   type: "object",
   additionalProperties: { type: "boolean" },
@@ -382,8 +396,11 @@ export async function setSlugLink(
       : slugStampRoot(metadataTargetWithTx);
     stampRoot?.setMetaRaw("slug", validSlug, rawMetaWriteAuthorization);
     slugWithTx.setMetaRaw("slug", validSlug, rawMetaWriteAuthorization);
-    slugWithTx.setRawUntyped(
-      targetWithTx.getAsWriteRedirectLink({ base: slugWithTx }),
+    // Only the redirect write carries the schema; the meta write above keeps
+    // the bare handle, whose sync stays the one the name was read through.
+    const redirectWrite = slugWithTx.asSchema(SLUG_REDIRECT_SCHEMA);
+    redirectWrite.setRawUntyped(
+      targetWithTx.getAsWriteRedirectLink({ base: redirectWrite }),
     );
     // The index entry rides the slug's own transaction, so a listing can
     // never see a name without its slug or a slug without its name.
