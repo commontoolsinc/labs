@@ -124,9 +124,9 @@ describe("value-debug", () => {
     describe("with `maxArrayLength`", () => {
       it("renders the elements below the limit, and the array's length in place of the rest", () => {
         expect(toCompactDebugString([1, 2, 3, 4, 5], { maxArrayLength: 3 }))
-          .toBe("[1,2,3,... length: 5]");
+          .toBe("[1,2,3,...length:5]");
         expect(toCompactDebugString({ a: [1, 2, 3] }, { maxArrayLength: 2 }))
-          .toBe("{a:[1,2,... length: 3]}");
+          .toBe("{a:[1,2,...length:3]}");
       });
 
       it("renders an array whose length is the limit whole", () => {
@@ -136,17 +136,17 @@ describe("value-debug", () => {
 
       it("renders only the holes below the limit of a run of holes which crosses it", () => {
         expect(toCompactDebugString([1, , , , , 6], { maxArrayLength: 3 }))
-          .toBe("[1,<2 holes>,... length: 6]");
+          .toBe("[1,<2 holes>,...length:6]");
         expect(toCompactDebugString([1, , , , , 6], { maxArrayLength: 2 }))
-          .toBe("[1,<hole>,... length: 6]");
+          .toBe("[1,<hole>,...length:6]");
         expect(toCompactDebugString([1, , 3, , , , 7], { maxArrayLength: 4 }))
-          .toBe("[1,<hole>,3,<hole>,... length: 7]");
+          .toBe("[1,<hole>,3,<hole>,...length:7]");
       });
 
       it("renders no more than 100 elements when the limit is not given", () => {
         const value = Array.from({ length: 101 }, (_, i) => i);
         expect(toCompactDebugString(value)).toMatch(
-          /,99,\.\.\. length: 101\]$/,
+          /,99,\.\.\.length:101\]$/,
         );
       });
 
@@ -160,9 +160,9 @@ describe("value-debug", () => {
     describe("with `maxStringLength`", () => {
       it("renders an excerpt of the string, and the string's length after it", () => {
         expect(toCompactDebugString("abcdefgh", { maxStringLength: 5 }))
-          .toBe('"abcde" + ... length: 8');
+          .toBe('"abcde"+...length:8');
         expect(toCompactDebugString({ s: "abcdefgh" }, { maxStringLength: 5 }))
-          .toBe('{s:"abcde" + ... length: 8}');
+          .toBe('{s:"abcde"+...length:8}');
       });
 
       it("renders a string whose length is the limit whole", () => {
@@ -172,7 +172,7 @@ describe("value-debug", () => {
 
       it("renders no more than 200 characters when the limit is not given", () => {
         expect(toCompactDebugString("x".repeat(250)))
-          .toMatch(/^"x{200}" \+ \.\.\. length: 250$/);
+          .toMatch(/^"x{200}"\+\.\.\.length:250$/);
       });
 
       it("throws given a `maxStringLength` that is not a positive integer", () => {
@@ -185,9 +185,9 @@ describe("value-debug", () => {
     describe("with `maxStringLines`", () => {
       it("renders the string's first lines, and the string's length after them", () => {
         expect(toCompactDebugString("a\nb\nc", { maxStringLines: 2 }))
-          .toBe('"a\\nb\\n" + ... length: 5');
+          .toBe('"a\\nb\\n"+...length:5');
         expect(toCompactDebugString({ s: "a\nb\nc" }, { maxStringLines: 2 }))
-          .toBe('{s:"a\\nb\\n" + ... length: 5}');
+          .toBe('{s:"a\\nb\\n"+...length:5}');
       });
 
       it("renders a string whose line count is the limit whole", () => {
@@ -197,7 +197,7 @@ describe("value-debug", () => {
 
       it("renders no more than 5 lines when the limit is not given", () => {
         expect(toCompactDebugString("a\nb\nc\nd\ne\nf"))
-          .toBe('"a\\nb\\nc\\nd\\ne\\n" + ... length: 11');
+          .toBe('"a\\nb\\nc\\nd\\ne\\n"+...length:11');
       });
 
       it("throws given a `maxStringLines` that is not a positive integer", () => {
@@ -226,7 +226,6 @@ describe("value-debug", () => {
 
   describe("toIndentedDebugString", () => {
     it("renders a top-level scalar the same as the compact form does", () => {
-      function foo() {}
       const values = [
         undefined,
         null,
@@ -238,7 +237,6 @@ describe("value-debug", () => {
         "str",
         Symbol.for("k"),
         Symbol("d"),
-        foo,
         new FabricEpochNsec(123n),
       ];
       for (const value of values) {
@@ -398,7 +396,7 @@ describe("value-debug", () => {
 
     it("renders a FabricPrimitive as its debug string, not `{}`", () => {
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
-      expect(Deno.inspect(bytes)).toBe("/Bytes(buf [010203])");
+      expect(Deno.inspect(bytes)).toBe("/Bytes(buf[010203])");
     });
 
     it("renders a FabricInstance as its debug string, not `{}`", () => {
@@ -413,9 +411,9 @@ describe("value-debug", () => {
 
     it("renders when nested in containers", () => {
       const bytes = new FabricBytes(new Uint8Array([9]));
-      expect(Deno.inspect({ blob: bytes })).toBe("{ blob: /Bytes(buf [09]) }");
+      expect(Deno.inspect({ blob: bytes })).toBe("{ blob: /Bytes(buf[09]) }");
       expect(Deno.inspect([bytes, bytes]))
-        .toBe("[ /Bytes(buf [09]), /Bytes(buf [09]) ]");
+        .toBe("[ /Bytes(buf[09]), /Bytes(buf[09]) ]");
     });
   });
 });

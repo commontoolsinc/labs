@@ -12,4 +12,4 @@
   ... length: 250
 ]
 
-[1,<99 holes>,... length: 250]
+[1,<99 holes>,...length:250]

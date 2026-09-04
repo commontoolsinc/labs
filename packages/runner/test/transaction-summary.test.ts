@@ -425,9 +425,9 @@ describe("transaction-summary", () => {
     expect(summary.writes[1].value).toEqual([1, 2, 3]);
     expect(summary.writes[2].value).toEqual({ nested: { count: 1 } });
     expect(formatted).toContain(
-      `long = "${"x".repeat(50)}" + ... length: 120`,
+      `long = "${"x".repeat(50)}"+...length:120`,
     );
-    expect(formatted).toContain("items = [1,2,... length: 3]");
+    expect(formatted).toContain("items = [1,2,...length:3]");
     expect(formatted).toContain("details = {nested:{count:1}}");
     expect(formatted).toContain("done = true");
     assertEquals(

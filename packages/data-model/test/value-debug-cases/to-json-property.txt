@@ -13,4 +13,4 @@
   toJSON: function toJSON(...) {...}
 }
 
-{toJSON:function toJSON(...) {...}}
+{toJSON:function toJSON(...){...}}
