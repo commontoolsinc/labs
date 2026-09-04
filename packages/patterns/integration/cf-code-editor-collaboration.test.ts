@@ -121,6 +121,38 @@ const reconciliationReached = (probe: ProbeApi): boolean => {
     globals.__collaborationReconciliationError !== undefined;
 };
 
+const epochReleaseObserved = (
+  probe: ProbeApi,
+  canonical: string,
+): boolean => {
+  const editor = probe.collect("cf-code-editor")[0] as EditorHost | undefined;
+  return editor?._collaboration?.active === false ||
+    editor?._editorView?.state.doc.toString() === canonical;
+};
+
+async function reconciliationReachedNow(page: Page): Promise<boolean> {
+  return await page.evaluate(() => {
+    const collect = (root: Document | ShadowRoot): Element[] => {
+      const result: Element[] = [];
+      for (const element of root.querySelectorAll("*")) {
+        result.push(element);
+        if (element.shadowRoot) result.push(...collect(element.shadowRoot));
+      }
+      return result;
+    };
+    const editor = collect(document).find((element) =>
+      element.localName === "cf-code-editor"
+    ) as EditorHost | undefined;
+    const globals = globalThis as typeof globalThis & {
+      __collaborationReconciliation?: unknown;
+      __collaborationReconciliationError?: unknown;
+    };
+    return editor?._editorView?.state.readOnly === true &&
+      globals.__collaborationReconciliation !== undefined &&
+      globals.__collaborationReconciliationError !== undefined;
+  });
+}
+
 async function editorContent(page: Page): Promise<string> {
   return await page.evaluate(() => {
     const collect = (root: Document | ShadowRoot): Element[] => {
@@ -1231,17 +1263,23 @@ describe("cf-code-editor collaboration", () => {
       waitForCondition(alicePage, editorContainsTokens, { args: [tokens] }),
       waitForCondition(bobPage, editorContainsTokens, { args: [tokens] }),
     ]);
-    const [aliceContent, bobContent, materialized] = await Promise.all([
+    // Holding every token says each browser has integrated the other's
+    // operations, not that its own are confirmed; confirming them is the
+    // convergence barrier.
+    await Promise.all([
+      confirmPendingCollaborationEdits(alicePage),
+      confirmPendingCollaborationEdits(bobPage),
+    ]);
+    const [aliceContent, bobContent] = await Promise.all([
       editorContent(alicePage),
       editorContent(bobPage),
-      awaitMaterialized(
-        "burstBoth",
-        (value) => tokens.every((token) => value.includes(token)),
-      ),
     ]);
     assertEquals(aliceContent, bobContent);
-    assertEquals(materialized, aliceContent);
     assertEquals(aliceContent.length, "both".length + 12);
+    assertEquals(
+      await awaitMaterialized("burstBoth", (value) => value === aliceContent),
+      aliceContent,
+    );
     assertEquals(await collaborationErrors(alicePage), []);
     assertEquals(await collaborationErrors(bobPage), []);
   });
@@ -1267,7 +1305,16 @@ describe("cf-code-editor collaboration", () => {
     await appendEdit(alicePage, "L3");
 
     await releaseCollaboration(bobPage);
-    await waitForCondition(alicePage, reconciliationReached);
+    // Alice observes the release by failing closed or by adopting the
+    // canonical value; only the first is acceptable, and the wait admits
+    // both so that the second fails the assertion rather than the wait.
+    await waitForCondition(alicePage, epochReleaseObserved, {
+      args: ["epoch!"],
+    });
+    assert(
+      await reconciliationReachedNow(alicePage),
+      "release with pending edits did not reach reconciliation",
+    );
     const detail = await reconciliationDetail(alicePage);
     assertEquals(detail.localValue, "epoch!L1L2L3");
     assertEquals(detail.canonicalValue, "epoch!");

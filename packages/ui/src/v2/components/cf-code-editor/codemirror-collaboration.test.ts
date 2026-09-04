@@ -1020,6 +1020,149 @@ describe("CodeMirror operation collaboration", () => {
     expect(sendableUpdates(view.state)).toHaveLength(0);
   });
 
+  it("rebases edits recorded during a round trip over an operation that intervened", async () => {
+    // Bob's insertion at the start of the document lands at Memory between
+    // alice's two round trips, so her second submission is integrated after
+    // it and comes back rebased.
+
+    const first = Promise.withResolvers<void>();
+    const firstCaptured = Promise.withResolvers<void>();
+    const applies: ApplyRequest[] = [];
+    const bob = {
+      opId: "op:bob:1",
+      cursor: { epoch: 1, version: 2 },
+      submissionId: "bob:1",
+      payload: {
+        updates: [{
+          clientId: "bob",
+          changes: ChangeSet.of({ from: 0, insert: "b" }, 4).toJSON(),
+        }],
+      } as ApplyOpResolution["operations"][number]["payload"],
+    };
+    const { controller, view, errors } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followups: [
+        activeSnapshotAt("abcX", 1),
+        activeSnapshotAt("babcXY", 3),
+      ],
+      apply: async (request) => {
+        applies.push(request);
+        if (applies.length === 1) {
+          firstCaptured.resolve();
+          await first.promise;
+          return resolutionFor(request);
+        }
+        const own = resolutionFor({
+          ...request,
+          base: { epoch: 1, version: 2 },
+        });
+        return {
+          ...own,
+          from: { epoch: 1, version: 1 },
+          operations: [bob, ...own.operations],
+        };
+      },
+    });
+
+    await controller.start();
+    view.dispatch({ changes: { from: 3, insert: "X" } });
+    const sends = [controller.localDocChanged()];
+    await firstCaptured.promise;
+    view.dispatch({ changes: { from: 4, insert: "Y" } });
+    sends.push(controller.localDocChanged());
+    first.resolve();
+    await Promise.all(sends);
+
+    expect(errors).toEqual([]);
+    expect(applies[1]?.base).toEqual({ epoch: 1, version: 1 });
+    expect(view.state.doc.toString()).toBe("babcXY");
+    expect(sendableUpdates(view.state)).toHaveLength(0);
+    expect(controller.synchronizationSnapshot?.confirmedCursor).toEqual({
+      epoch: 1,
+      version: 3,
+    });
+    await controller.stop();
+  });
+
+  it("fails closed when a round trip confirms none of the submitted edits", async () => {
+    // Memory answers the first submission without integrating it. A
+    // controller that resubmits instead of failing reaches the second apply,
+    // which the harness refuses.
+
+    let applyCount = 0;
+    let cancellations = 0;
+    const { controller, view, errors } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followup: activeSnapshotAt("abc", 0),
+      apply: (request) => {
+        applyCount++;
+        if (applyCount > 1) throw new Error("resubmitted an unconfirmed edit");
+        return {
+          ...resolutionFor(request),
+          to: { epoch: 1, version: 0 },
+          operations: [],
+        };
+      },
+      cancel: () => cancellations++,
+    });
+
+    await controller.start();
+    view.dispatch({ changes: { from: 1, insert: "X" } });
+    await controller.localDocChanged();
+
+    expect(applyCount).toBe(1);
+    expect(errors.map((error) => error.message)).toEqual([
+      "CodeMirror submission confirmed no local update",
+    ]);
+    expect(cancellations).toBe(1);
+    expect(view.state.doc.toString()).toBe("aXbc");
+    expect(sendableUpdates(view.state)).toHaveLength(1);
+  });
+
+  it("submits an edit recorded at any microtask offset from a drain's last confirmation", async () => {
+    // The drain re-reads its queue after each round trip, and `#flush` clears
+    // the in-flight promise a few microtasks later. An edit recorded in
+    // between belongs to neither the finished drain nor a new one unless the
+    // caller re-reads the queue after waiting. Each offset from the
+    // confirmation is one candidate for that window.
+
+    for (let offset = 0; offset < 6; offset++) {
+      const applies: ApplyRequest[] = [];
+      const { controller, view, errors } = controllerHarness({
+        initial: inactiveSnapshot("abc"),
+        followups: [
+          activeSnapshotAt("abcX", 1),
+          activeSnapshotAt("abcXY", 2),
+        ],
+        apply: (request) => {
+          applies.push(request);
+          return resolutionFor(request);
+        },
+      });
+      await controller.start();
+      let late: Promise<void> | undefined;
+      controller.observeSynchronization((snapshot) => {
+        if (late !== undefined || snapshot?.confirmedCursor.version !== 1) {
+          return;
+        }
+        late = Promise.resolve().then(async () => {
+          for (let hop = 0; hop < offset; hop++) await Promise.resolve();
+          view.dispatch({ changes: { from: 4, insert: "Y" } });
+          await controller.localDocChanged();
+        });
+      });
+      view.dispatch({ changes: { from: 3, insert: "X" } });
+      await controller.localDocChanged();
+      await late;
+
+      expect(errors).toEqual([]);
+      expect(applies).toHaveLength(2);
+      expect(view.state.doc.toString()).toBe("abcXY");
+      expect(sendableUpdates(view.state)).toHaveLength(0);
+      await controller.stop();
+    }
+  });
+
   it("isolates synchronization observers from the Memory operation path", async () => {
     const accepted = acceptedResolution("abc", 1, "X");
     const { controller, view, errors } = controllerHarness({
