@@ -453,6 +453,10 @@ class DebugStringifier {
   readonly #spacer: string;
   readonly #colon: string;
 
+  /** `#renderRealmState()` as a function, for passing to a renderer of parts. */
+  readonly #renderRealmStateFn = (v: PrimitiveState, i: string): string =>
+    this.#renderRealmState(v, i);
+
   /**
    * Constructs an instance which renders using `indent` spaces per nesting
    * level when given, and on a single line when not. A value which turns up
@@ -557,14 +561,12 @@ class DebugStringifier {
     }
 
     const open = `/${DebugStringifier.#typeNameOf(tag)}(`;
-    const realm = (v: PrimitiveState, i: string) =>
-      this.#renderRealmState(v, i);
 
     if (isPlainObject(state)) {
       const parts = this.#renderProperties(
         state as { readonly [key: string]: PrimitiveState },
         indent,
-        realm,
+        this.#renderRealmStateFn,
         false,
       );
       return this.#renderContainer(open, ")", parts, indent);
@@ -580,20 +582,19 @@ class DebugStringifier {
    * the conversion.
    */
   #renderRealmState(value: PrimitiveState, indent: string): string {
-    const realm = (v: PrimitiveState, i: string) =>
-      this.#renderRealmState(v, i);
-
     if (value instanceof ArrayBuffer) {
       return DebugStringifier.#renderBuffer(value);
     } else if (Array.isArray(value)) {
       const inner = this.#innerIndent(indent);
-      const parts = value.map((element) => realm(element, inner));
+      const parts = value.map((element) =>
+        this.#renderRealmState(element, inner)
+      );
       return this.#renderContainer("[", "]", parts, indent);
     } else if (isPlainObject(value)) {
       const parts = this.#renderProperties(
         value as { readonly [key: string]: PrimitiveState },
         indent,
-        realm,
+        this.#renderRealmStateFn,
         false,
       );
       return this.#renderContainer("{", "}", parts, indent);
