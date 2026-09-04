@@ -1083,9 +1083,10 @@ class DebugStringifier {
  */
 function checkOptions(options: DebugValueOptions | undefined): void {
   if ((options !== undefined) && !isPlainObject(options)) {
-    const badOptions = backtickQuote(
-      toCompactDebugString(options, { maxLength: 20 }),
-    );
+    const badOptions = toCompactDebugString(options, {
+      maxLength: 20,
+      backtickQuote: true,
+    });
     throw new Error(
       `\`options\` must be a plain object or \`undefined\`; got ${badOptions}`,
     );
@@ -1121,9 +1122,10 @@ function checkedLimit(
     }
   }
 
-  const badValue = backtickQuote(
-    toCompactDebugString(value, { maxLength: 20 }),
-  );
+  const badValue = toCompactDebugString(value, {
+    maxLength: 20,
+    backtickQuote: true,
+  });
   throw new Error(
     `\`${name}\` must be a positive integer, \`Infinity\`, or \`undefined\`; got ${badValue}`,
   );
@@ -1220,7 +1222,8 @@ function renderDebugString(
  * Produces a compact string representation of a value, optionally truncating to
  * the maximum length given in `options`. When truncating is requested and turns
  * out to be necessary, the returned result will be the indicated length, which
- * includes an "ASCII ellipsis" of `...`.
+ * includes an "ASCII ellipsis" of `...`. When `options` asks for it, the result
+ * is then quoted as a Markdown code span, ready to splice into message text.
  *
  * The value is first converted with `toStructuredDebugValue()`, passing along
  * the depth limit and replacer given in `options`, and it is that result which
@@ -1264,17 +1267,17 @@ export function toCompactDebugString(
   value: unknown,
   options?: CompactDebugStringOptions,
 ): string {
-  const result = renderDebugString(value, options);
+  let result = renderDebugString(value, options);
   const maxLength = options?.maxLength;
 
   if (typeof maxLength === "number") {
     const actualMax = Math.max(Math.floor(maxLength), 3);
     if (result.length > actualMax) {
-      return result.slice(0, actualMax - 3) + "...";
+      result = result.slice(0, actualMax - 3) + "...";
     }
   }
 
-  return result;
+  return (options?.backtickQuote === true) ? backtickQuote(result) : result;
 }
 
 /**

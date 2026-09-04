@@ -46,7 +46,6 @@ import {
 } from "./multi-runtime-ipc.ts";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import { getLoggerCountsBreakdown } from "@commonfabric/utils/logger";
-import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 let cc: PiecesController | undefined;
@@ -583,7 +582,9 @@ const handlers: Record<
     if (!isValidFabricValue(counts)) {
       throw new Error(
         "Cannot send logger counts across this boundary, not being a " +
-          `\`FabricValue\`: ${backtickQuote(toCompactDebugString(counts))}`,
+          `\`FabricValue\`: ${
+            toCompactDebugString(counts, { backtickQuote: true })
+          }`,
       );
     }
     return counts;
