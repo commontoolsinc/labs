@@ -1612,10 +1612,6 @@ export class Server {
 
   /**
    * The timer-driven refresh pass, which a test drives directly.
-   *
-   * The name is the documentation. Nothing here is part of what this class
-   * promises, and code that reaches through it is written against internals
-   * that are free to change.
    */
   get accessForTestingOnly(): {
     flushScheduledSessions(): Promise<void>;
