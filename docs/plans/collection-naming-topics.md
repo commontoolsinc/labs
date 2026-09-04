@@ -48,7 +48,9 @@ ruled. A later reversal is a decision recorded here, not a discovery.
    (`docs/specs/memory-v2/08-conflict-granularity.md`), so two creators
    serialize through one retry of `editWithRetry`.
 5. **A member's display name stays its title.** The number renders as a badge
-   and rides the index rows as `name`.
+   beside it, never in place of it, and every reader reaches it through the
+   member's own `shortName`: an index row, a mention universe row, and a
+   mention's pill all read that one property.
 6. **"In text" means the editor.** Typing `#42` completes to a reference-form
    mention that shows the number. Pasted text is left alone. The `#` sigil is
    provisional: the spec leaves tags versus citations open.
@@ -185,7 +187,9 @@ Scope: `packages/shell`, `packages/runtime-client`, shell integration tests.
 ### S4 — `#42` in text
 
 Scope: `packages/ui` cf-code-editor mention completion and pill; the exemplar
-(mentionable rows carry `name`, item output carries `shortName`).
+(mentionable rows and the item output both carry the member's name as
+`shortName`, which is the one property the editor reads at both ends of a
+mention).
 
 1. Typing `#42` in the exemplar item's body offers the member named 42;
    picking it inserts a reference-form mention.
@@ -205,10 +209,17 @@ Mike's call, after S4.
    board and nothing more.
 2. `topic.tsx` gains the item-side display the exemplar item proved: the
    badge and `shortName`.
-3. The production backfill is rehearsed on a clone per
+3. `TopicMentionableRow` gains `shortName` and the board copies each topic's
+   own into it, which is what makes the `#42` trigger live on the deployed
+   board — until then it matches nothing there, because a Topics universe row
+   carries no such property. The exemplar's `mentionableRowsOf` and
+   `mentionableIndex` are a fork of the Topics pair differing only by that
+   property, so this step is where the fork ends: one of the two goes, and the
+   survivor is the one both boards derive their universe through.
+4. The production backfill is rehearsed on a clone per
    `../development/space-clone-rehearsal.md`; the deployed vintage includes
    #6827 before the backfill runs.
-4. `skills/topics/SKILL.md` describes `top/42` addressing.
+5. `skills/topics/SKILL.md` describes `top/42` addressing.
 
 ### S5 — Deferred, not scheduled
 

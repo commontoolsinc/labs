@@ -143,11 +143,19 @@ export interface ItemOutput {
   references: ItemMentionRefMap | Default<{}>;
 
   /**
-   * The editor's working copy of that map, session-local as the body draft
-   * is. Published so an embedding surface can drive the same edit the item's
-   * own controls do.
+   * Whether the body editor is open, session-local: a second tab opens on the
+   * stored body rather than on this one.
+   *
+   * The toggle alone is published, and the drafts behind it are not. Opening
+   * the editor is the whole of what a surface outside this item needs: the
+   * prose, the mention map and the Save that writes them together are the
+   * item's own controls, rendered by the item, so an embedder that flips this
+   * gets the whole edit rather than the half `saveBody` exists to prevent.
+   * The streams are deliberately unpublished too — a member's published value
+   * is written into its board's namespace map, and streams in it do not
+   * survive that write.
    */
-  referencesDraft: PerSession<Writable<ItemMentionRefMap>>;
+  editingBody: PerSession<Writable<boolean>>;
 }
 
 export default pattern<ItemInput, ItemOutput>(
@@ -272,7 +280,7 @@ export default pattern<ItemInput, ItemOutput>(
       createdAt,
       shortName,
       references,
-      referencesDraft,
+      editingBody,
     };
   },
 );

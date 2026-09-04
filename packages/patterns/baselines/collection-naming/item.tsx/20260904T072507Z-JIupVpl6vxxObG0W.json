@@ -165,14 +165,14 @@
         "description": "When the item was filed (epoch milliseconds).",
         "type": "number"
       },
+      "editingBody": {
+        "description": "Whether the body editor is open, session-local: a second tab opens on the\nstored body rather than on this one.\n\nThe toggle alone is published, and the drafts behind it are not. Opening\nthe editor is the whole of what a surface outside this item needs: the\nprose, the mention map and the Save that writes them together are the\nitem's own controls, rendered by the item, so an embedder that flips this\ngets the whole edit rather than the half `saveBody` exists to prevent.\nThe streams are deliberately unpublished too — a member's published value\nis written into its board's namespace map, and streams in it do not\nsurvive that write.",
+        "type": "boolean"
+      },
       "references": {
         "$ref": "#/$defs/ItemMentionRefMap",
         "default": {},
         "description": "Where this item's mentions point, keyed by the token in the body. Written\nwhole by the body save, out of the draft the editor minted into."
-      },
-      "referencesDraft": {
-        "$ref": "#/$defs/ItemMentionRefMap",
-        "description": "The editor's working copy of that map, session-local as the body draft\nis. Published so an embedding surface can drive the same edit the item's\nown controls do."
       },
       "shortName": {
         "description": "The name the board calls this item by, read out of the board's names\ntable; `undefined` for an item no board has named, or one wired to no\nboard.\n\nPublished under the name a mention pill reads it by\n(`Mentionable.shortName` in `packages/ui/src/v2/core/mentionable.ts`), so\na mention of this item elsewhere gains the number as soon as the board\nnames it.",
@@ -193,7 +193,7 @@
       "createdAt",
       "shortName",
       "references",
-      "referencesDraft",
+      "editingBody",
       "$NAME",
       "$UI"
     ],

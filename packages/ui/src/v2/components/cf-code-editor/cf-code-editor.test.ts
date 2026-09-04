@@ -14,7 +14,11 @@ import { type CellHandle, type CellRef } from "@commonfabric/runtime-client";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
 import type { MentionRefMap } from "../../core/mention-refs.ts";
 import type { Mentionable, MentionableArray } from "../../core/mentionable.ts";
-import { mentionRefField, refShortNameField } from "./features/mention-refs.ts";
+import {
+  mentionRefField,
+  refShortNameField,
+  setKnownRefKeys,
+} from "./features/mention-refs.ts";
 import { CFCodeEditor, MimeType } from "./index.ts";
 
 describe("CFCodeEditor", () => {
@@ -704,24 +708,26 @@ describe("CFCodeEditor short-name completion", () => {
 
   const link = (id: string) => ({ "$link": { id, path: [] } });
 
+  const REF_KEY = "a3f9zz";
+
   const UNIVERSE = [
     {
       [NAME]: "First item",
       title: "First item",
       shortName: "1",
-      piece: link("of:1"),
+      piece: link("of:aa1"),
     },
     {
       [NAME]: "Second item",
       title: "Second item",
       shortName: "42",
-      piece: link("of:42"),
+      piece: link("of:zz9"),
     },
     {
       [NAME]: "Third item",
       title: "Third item",
       shortName: "43",
-      piece: link("of:43"),
+      piece: link("of:bb3"),
     },
     // No name of its own, and a display name that a `#42` query would match
     // were the query asked of anything but `shortName`.
@@ -800,6 +806,22 @@ describe("CFCodeEditor short-name completion", () => {
       .toEqual([]);
   });
 
+  it("returns null for a sigil opening a backlink query", async () => {
+    // `[[#4` is the backlink gesture, which owns the brackets around it: this
+    // source replaces neither, so completing here would nest a mention inside
+    // them.
+    const { source, view } = await editorOver("[[#4");
+    expect(source(new CompletionContext(view.state, 4, true))).toBeNull();
+  });
+
+  it("returns null for a sigil typed inside an existing mention's label", async () => {
+    // A label is ordinary editable text, so a sigil can land in one; inserting
+    // there would put a token inside a token.
+    const { source, view } = await editorOver(`[My #42Note][${REF_KEY}]`);
+    view.dispatch({ effects: setKnownRefKeys.of([REF_KEY]) });
+    expect(source(new CompletionContext(view.state, 7, true))).toBeNull();
+  });
+
   it("returns null where the sigil sits inside a word", async () => {
     const { source, view } = await editorOver("issue#4");
     expect(source(new CompletionContext(view.state, 7, true))).toBeNull();
@@ -827,7 +849,7 @@ describe("CFCodeEditor short-name completion", () => {
     expect(view.state.doc.toString()).toBe(`see [Second item][${key}]`);
     // The mock network stores what the write serialized to, which is the cell
     // the row's `piece` link named — the item, not the row that listed it.
-    expect((entry.destination as { id: string }).id).toBe("of:42");
+    expect((entry.destination as { id: string }).id).toBe("of:zz9");
     expect(entry.modifiedTitle).toBe(false);
   });
 
@@ -843,7 +865,10 @@ describe("CFCodeEditor short-name completion", () => {
       to: number,
     ) => void)(view as unknown as EditorView, option, result.from, 7);
 
-    expect(view.state.doc.toString()).toBe("see [[Second item (42)]]");
+    // The id, not the short name: the fixture's `of:zz9` resolves to an
+    // embed id nothing else in the row spells, so an insertion that reached
+    // for `shortName` instead could not pass this.
+    expect(view.state.doc.toString()).toBe("see [[Second item (zz9)]]");
   });
 
   it("offers a row by its collection name from the backlink query too", async () => {

@@ -4,9 +4,10 @@
  *
  * The name reaches the pill as a `data-short-name` attribute a stylesheet
  * turns into generated content, so none of it is in the document text or in
- * `textContent`, and only a laid-out pill can answer whether it is on screen.
- * That is why these need a browser and run under deno-web-test rather than
- * `deno test`. The harness registers tests through `Deno.test` and calls each
+ * `textContent` — a documented property of the form rather than a gap, which
+ * `docs/mention-refs.md` states under the short name — and only a laid-out pill
+ * can answer whether it is on screen. That is why these need a browser and run
+ * under deno-web-test rather than `deno test`. The harness registers tests through `Deno.test` and calls each
  * one with no arguments, so the BDD functions the rest of the repository uses
  * are not available here.
  *
@@ -54,22 +55,38 @@ async function mount(shortName?: string): Promise<Mounted> {
   await element.updateComplete;
   assert(element.editorView, "the component builds an editor view");
 
-  const destination = createMockCellHandle<Record<string, unknown>>(
+  const destination = destinationNamed(shortName);
+  // Bound after the mount, which is also the order a host pattern's cell
+  // arrives in: the map announces the key, and the destination's own
+  // subscription carries the name.
+  await bindReferences(element, destination);
+
+  return { element, destination, done: () => element.remove() };
+}
+
+/** A destination piece that calls itself `shortName`, or that names nothing. */
+function destinationNamed(
+  shortName?: string,
+  id = "of:item-42",
+): CellHandle<Record<string, unknown>> {
+  return createMockCellHandle<Record<string, unknown>>(
     {
       [NAME]: "Second item",
       ...(shortName === undefined ? {} : { shortName }),
     },
-    { id: "of:item-42" } as Partial<CellRef>,
+    { id } as Partial<CellRef>,
   );
-  // Bound after the mount, which is also the order a host pattern's cell
-  // arrives in: the map announces the key, and the destination's own
-  // subscription carries the name.
+}
+
+/** Point the editor's reference map at `destination`, under the one key. */
+async function bindReferences(
+  element: CFCodeEditor,
+  destination: CellHandle<Record<string, unknown>>,
+): Promise<void> {
   element.references = createMockCellHandle({
     [KEY]: { destination, modifiedTitle: false },
   }) as unknown as CellHandle<MentionRefMap>;
   await element.updateComplete;
-
-  return { element, destination, done: () => element.remove() };
 }
 
 /** The rendered pill the editor draws over the mention's label. */
@@ -98,6 +115,22 @@ Deno.test("a pill renders the short name its destination publishes", async () =>
   } finally {
     named.done();
     bare.done();
+  }
+});
+
+Deno.test("a pill's width follows the short name it was given", async () => {
+  const short = await mount("4");
+  const long = await mount("4242");
+  try {
+    // Presence is not enough. A mis-resolved `attr()` would render some fixed
+    // glyphs and widen both pills equally, so what is pinned here is that the
+    // width tracks the VALUE: same label, same font, longer name, wider pill.
+    assertEquals(pillOf(short.element).getAttribute("data-short-name"), "4");
+    assertEquals(pillOf(long.element).getAttribute("data-short-name"), "4242");
+    assertGreater(pillWidth(long.element), pillWidth(short.element));
+  } finally {
+    short.done();
+    long.done();
   }
 });
 
@@ -153,6 +186,27 @@ Deno.test("clicking the short name navigates to the destination", async () => {
       (event.detail.piece as CellHandle<unknown>).id(),
       destination.id(),
     );
+  } finally {
+    done();
+  }
+});
+
+Deno.test("a pill drops the short name when its destination is replaced", async () => {
+  const { element, done } = await mount("42");
+  try {
+    assertEquals(pillOf(element).getAttribute("data-short-name"), "42");
+    const namedWidth = pillWidth(element);
+
+    // The same key, pointed at a destination that publishes no name. The
+    // editor tears the old subscription down before opening the new one, so
+    // the number has to go with the destination that published it rather
+    // than surviving on a pill that now names something else.
+    await bindReferences(element, destinationNamed(undefined, "of:item-none"));
+
+    const pill = pillOf(element);
+    assertEquals(pill.hasAttribute("data-short-name"), false);
+    assertEquals(globalThis.getComputedStyle(pill, "::after").content, "none");
+    assertGreater(namedWidth, pillWidth(element));
   } finally {
     done();
   }

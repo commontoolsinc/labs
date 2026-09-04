@@ -108,6 +108,7 @@ import {
   type MentionRefInfo,
   mentionRefs,
   refShortNameField,
+  refShortNames,
   scanRefKeys,
   setKnownRefKeys,
   setRefShortNames,
@@ -168,6 +169,16 @@ function shortNameMatches(
 ): boolean {
   const name = shortNameOf(entry);
   return name !== "" && name.toLowerCase().startsWith(query.toLowerCase());
+}
+
+/** Whether two short-name records hold the same names under the same keys. */
+function sameShortNames(
+  a: Readonly<Record<string, string>>,
+  b: Readonly<Record<string, string>>,
+): boolean {
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length &&
+    keys.every((key) => a[key] === b[key]);
 }
 
 function escapeMarkdownImageAltText(text: string): string {
@@ -607,9 +618,13 @@ export class CFCodeEditor extends BaseElement {
    * Create the completion source for a `#42` citation.
    *
    * The query is the digits after the sigil, matched against each universe
-   * row's own `name` — its collection's copy of what it calls the member — so
-   * offering the list reads no member. A row carrying no name matches
-   * nothing, which is every row of a universe whose collection names nothing.
+   * row's own `shortName` — its collection's copy of what it calls the member
+   * — so offering the list reads no member. A row carrying no short name
+   * matches nothing, which is every row of a universe whose collection names
+   * nothing.
+   *
+   * A sigil inside a mention gesture the document already carries opens no
+   * query at all; `_shortNameQueryIsClear()` says which those are.
    */
   private createShortNameCompletionSource() {
     return (context: CompletionContext): CompletionResult | null => {
@@ -619,6 +634,7 @@ export class CFCodeEditor extends BaseElement {
       if (!query) return null;
 
       const from = line.from + query.from;
+      if (!this._shortNameQueryIsClear(context.state, from)) return null;
       const options: Completion[] = this._matchingShortNames(query.query).map(
         ([row, index, name]) => {
           const rowName = row.key(NAME).get() || "";
@@ -646,8 +662,28 @@ export class CFCodeEditor extends BaseElement {
   }
 
   /**
-   * The universe rows whose own name begins with `query`, each with the index
-   * that addresses it and the name that matched.
+   * Whether a `#` at `from` opens a citation, rather than sitting inside a
+   * mention gesture that owns the text around it.
+   *
+   * Two overlaps, and neither is caught by the sigil's own shape. A `#` just
+   * inside `[[` belongs to the backlink query, which owns that gesture: its
+   * source reads back over the two brackets and extends across an auto-closed
+   * `]]`, and inserting from here does neither, so `[[|]]` would complete to
+   * `[[[Label][key]]]`. A `#` inside an existing mention's label — the label
+   * is ordinary editable text — would nest a token inside a token. Neither
+   * corrupts the reference map; both leave junk on screen that the user then
+   * has to unpick.
+   */
+  private _shortNameQueryIsClear(state: EditorState, from: number): boolean {
+    if (from >= 2 && state.doc.sliceString(from - 2, from) === "[[") {
+      return false;
+    }
+    return !mentionRefs(state).some((ref) => from > ref.from && from < ref.to);
+  }
+
+  /**
+   * The universe rows whose own short name begins with `query`, each with the
+   * index that addresses it and the name that matched.
    */
   private _matchingShortNames(
     query: string,
@@ -2172,8 +2208,18 @@ export class CFCodeEditor extends BaseElement {
   private _cleanupRefDestinationSubscriptions(): void {
     for (const { unsub } of this._refDestinationSubscriptions.values()) unsub();
     this._refDestinationSubscriptions.clear();
+    // Clearing the names announces nothing, because nothing mirrors them: the
+    // one reader, `_detectRefLabelChanges`, reads this map. Until the new
+    // destinations deliver, it finds no name and reads an edited label as the
+    // user's own wording — the safe direction, since a rename arriving later
+    // then leaves the person's text alone instead of overwriting it.
     this._refNames.clear();
+    // The short names DO have a second copy, in `refShortNameField`, so the
+    // cleared map is published rather than left for a later write to notice
+    // it — a write for a destination that publishes no name has nothing to
+    // carry, and the pill would keep the previous destination's number.
     this._refShortNames.clear();
+    this._publishRefShortNames();
   }
 
   private _cleanup(): void {
@@ -3414,7 +3460,6 @@ export class CFCodeEditor extends BaseElement {
     if (!this.references || !this._editorView) return;
 
     const activeKeys = new Set<string>();
-    let dropped = false;
 
     for (const ref of this._documentRefs()) {
       activeKeys.add(ref.key);
@@ -3429,7 +3474,7 @@ export class CFCodeEditor extends BaseElement {
         existing.unsub();
         this._refDestinationSubscriptions.delete(ref.key);
         this._refNames.delete(ref.key);
-        dropped = this._refShortNames.delete(ref.key) || dropped;
+        this._refShortNames.delete(ref.key);
       }
 
       const destination = this._refDestination(ref.key);
@@ -3458,16 +3503,15 @@ export class CFCodeEditor extends BaseElement {
         subscription.unsub();
         this._refDestinationSubscriptions.delete(key);
         this._refNames.delete(key);
-        dropped = this._refShortNames.delete(key) || dropped;
+        this._refShortNames.delete(key);
       }
     }
 
-    if (dropped) this._publishRefShortNames();
+    this._publishRefShortNames();
   }
 
   /**
-   * Record the short name a destination published, and hand the change to the
-   * editor state.
+   * Record the short name a destination published.
    *
    * A destination that publishes none loses whatever it had, so a pill drops
    * the number when its member does rather than keeping a spelling nothing
@@ -3477,18 +3521,31 @@ export class CFCodeEditor extends BaseElement {
     const published = typeof shortName === "string" && shortName.length > 0
       ? shortName
       : undefined;
-    if (this._refShortNames.get(key) === published) return;
-
     if (published === undefined) this._refShortNames.delete(key);
     else this._refShortNames.set(key, published);
     this._publishRefShortNames();
   }
 
-  /** Tell the editor state what each mention's destination calls itself. */
+  /**
+   * Bring the editor state into step with what each mention's destination
+   * calls itself.
+   *
+   * Every write to `_refShortNames` ends here, and what decides whether to
+   * dispatch is a comparison against the FIELD rather than against the map.
+   * A caller cannot see whether its own mutation changed anything the view has
+   * been told, so a caller that guessed would leave the two disagreeing — a
+   * key whose destination is replaced by one that publishes no name reaches
+   * `_trackRefShortName` with the map already cleared, and a guess of
+   * "unchanged" there is a pill still showing the previous destination's
+   * number. Judging from the field is what makes that unrepresentable.
+   */
   private _publishRefShortNames(): void {
-    this._editorView?.dispatch({
-      effects: setRefShortNames.of(Object.fromEntries(this._refShortNames)),
-    });
+    const view = this._editorView;
+    if (!view) return;
+
+    const published = Object.fromEntries(this._refShortNames);
+    if (sameShortNames(refShortNames(view.state), published)) return;
+    view.dispatch({ effects: setRefShortNames.of(published) });
   }
 
   /**

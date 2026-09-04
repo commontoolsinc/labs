@@ -109,6 +109,14 @@ read and is never stored. The name reaches the view as a `setRefShortNames`
 effect, is held in `refShortNameField`, and lands on the pill as a
 `data-short-name` attribute the stylesheet renders.
 
+Being display, it does not travel. Generated content sits in no text node, so
+the number is absent from `textContent`, from a copy taken out of the editor,
+and from anything reading the raw body — a copy carries the document's own text,
+which is the label and the key. That is a bound rather than a gap: the spelling
+a reference needs once it leaves is the fully qualified form
+`docs/specs/collection-naming.md` describes under "Copying", which is a
+clipboard flavor nothing here writes yet.
+
 ## Two triggers, one mention
 
 `[[` opens a query over the universe's display names. `#` followed by digits
