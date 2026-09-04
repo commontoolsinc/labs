@@ -1,7 +1,7 @@
 // Runs before every test module in this package (wired in through `--preload`
 // on the package's test task). It installs the shared fake clock in
 // "auto-advance" mode: the service's own positive-delay timers (armed from
-// `src/` — `SpaceManager.execLoop`'s poll interval, `SpaceManager.stop`'s
+// `src/` — `SpaceManager.#execLoop`'s poll interval, `SpaceManager.stop`'s
 // deactivation deadline, and `WorkerController.exec`'s request timeout, all
 // reached through the `sleep` helper in `@commonfabric/utils`) advance logical
 // time on their own, so a poll elapses instantly and an unanswered worker
