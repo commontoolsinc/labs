@@ -1163,6 +1163,105 @@ describe("CodeMirror operation collaboration", () => {
     }
   });
 
+  it("submits an edit once when several waiters wake from the same drain", async () => {
+    // Waiters woken by one drain's end each re-read the queue. Only the first
+    // may own the next drain; the others must see that drain in flight and
+    // wait again, or the same update goes out under two submission ids.
+
+    for (let offset = 0; offset < 6; offset++) {
+      const applies: ApplyRequest[] = [];
+      const { controller, view, errors } = controllerHarness({
+        initial: inactiveSnapshot("abc"),
+        followups: [
+          activeSnapshotAt("abcX", 1),
+          activeSnapshotAt("abcXY", 2),
+        ],
+        apply: (request) => {
+          applies.push(request);
+          return resolutionFor(request);
+        },
+      });
+      await controller.start();
+      let late: Promise<void> | undefined;
+      controller.observeSynchronization((snapshot) => {
+        if (late !== undefined || snapshot?.confirmedCursor.version !== 1) {
+          return;
+        }
+        late = Promise.resolve().then(async () => {
+          for (let hop = 0; hop < offset; hop++) await Promise.resolve();
+          view.dispatch({ changes: { from: 4, insert: "Y" } });
+        });
+      });
+      view.dispatch({ changes: { from: 3, insert: "X" } });
+      const sends = [
+        controller.localDocChanged(),
+        controller.localDocChanged(),
+        controller.localDocChanged(),
+      ];
+      await Promise.all(sends);
+      await late;
+      await controller.localDocChanged();
+
+      expect(errors).toEqual([]);
+      const submitted = applies.flatMap((request) =>
+        (request.payload as { updates: unknown[] }).updates
+      );
+      expect(submitted).toHaveLength(2);
+      expect(view.state.doc.toString()).toBe("abcXY");
+      expect(sendableUpdates(view.state)).toHaveLength(0);
+      await controller.stop();
+    }
+  });
+
+  it("confirms a rewrite Memory suppressed as a duplicate through the intervening operation", async () => {
+    // Bob integrated the same rewrite first, so Memory accepts alice's
+    // submission with no operations of its own; the follow-up query carries
+    // bob's, and its dedupe id confirms alice's queue head.
+
+    const applies: ApplyRequest[] = [];
+    const bobRewrite = {
+      opId: "op:bob:2",
+      cursor: { epoch: 1, version: 2 },
+      submissionId: "bob:2",
+      payload: {
+        updates: [{
+          clientId: "bob",
+          changes: ChangeSet.of({ from: 0, to: 3, insert: "new" }, 3).toJSON(),
+          dedupeId: "title:old:new",
+        }],
+      } as ApplyOpResolution["operations"][number]["payload"],
+    };
+    const { controller, view, errors } = controllerHarness({
+      initial: activeSnapshotAt("old", 1),
+      followup: { ...activeSnapshotAt("new", 2), operations: [bobRewrite] },
+      apply: (request) => {
+        applies.push(request);
+        return {
+          ...resolutionFor(request),
+          from: { epoch: 1, version: 2 },
+          to: { epoch: 1, version: 2 },
+          operations: [],
+        };
+      },
+    });
+
+    await controller.start();
+    view.dispatch({
+      changes: { from: 0, to: 3, insert: "new" },
+      effects: codeMirrorRewriteDedupeEffect.of("title:old:new"),
+    });
+    await controller.localDocChanged();
+
+    expect(errors).toEqual([]);
+    expect(applies).toHaveLength(1);
+    expect(view.state.doc.toString()).toBe("new");
+    expect(sendableUpdates(view.state)).toHaveLength(0);
+    expect(controller.synchronizationSnapshot?.confirmedCursor).toEqual({
+      epoch: 1,
+      version: 2,
+    });
+  });
+
   it("isolates synchronization observers from the Memory operation path", async () => {
     const accepted = acceptedResolution("abc", 1, "X");
     const { controller, view, errors } = controllerHarness({
