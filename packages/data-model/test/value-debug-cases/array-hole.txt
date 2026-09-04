@@ -3,12 +3,12 @@
 }
 
 with holes:
-[1,<hole>,3,<2 holes>,6,<hole>]
+[1,void,3,void*2,6,void]
 [
   1,
-  <hole>,
+  void,
   3,
-  <2 holes>,
+  void * 2,
   6,
-  <hole>
+  void
 ]

@@ -9,9 +9,9 @@
 }
 
 holes across the limit:
-[1,<99 holes>,...length:250]
+[1,void*99,...length:250]
 [
   1,
-  <99 holes>,
+  void * 99,
   ... length: 250
 ]
