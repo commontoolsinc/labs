@@ -23,9 +23,7 @@ export class ExecutableRegistry {
   // ref), so resolution must never lose an implementation whose module
   // evaluated this session. Retention is bounded by the set of DISTINCT
   // verified implementations evaluated per session.
-  // TypeScript-private rather than a `#` name: `test/cfc-nonexported-binding-identity.test.ts` drives
-  // this member directly.
-  private readonly verifiedImplementationsByEntryRef = new Map<
+  readonly #verifiedImplementationsByEntryRef = new Map<
     string,
     Map<string, HarnessedFunction>
   >();
@@ -39,8 +37,21 @@ export class ExecutableRegistry {
   #nextHostModuleId = 0;
   readonly #hostRegisteredFunctions = new WeakSet<HarnessedFunction>();
 
+  /** The implementation index, which a test reads directly. */
+  get accessForTestingOnly(): {
+    readonly verifiedImplementationsByEntryRef: Map<
+      string,
+      Map<string, HarnessedFunction>
+    >;
+  } {
+    return {
+      verifiedImplementationsByEntryRef:
+        this.#verifiedImplementationsByEntryRef,
+    };
+  }
+
   clear(): void {
-    this.verifiedImplementationsByEntryRef.clear();
+    this.#verifiedImplementationsByEntryRef.clear();
     this.#nextHostModuleId = 0;
     // `#hostRegisteredFunctions` is a WeakSet (uniterable); entries age out
     // with their functions. Stale membership after clear() is harmless: it
@@ -60,10 +71,10 @@ export class ExecutableRegistry {
     symbol: string,
     implementation: HarnessedFunction,
   ): void {
-    let bucket = this.verifiedImplementationsByEntryRef.get(identity);
+    let bucket = this.#verifiedImplementationsByEntryRef.get(identity);
     if (!bucket) {
       bucket = new Map();
-      this.verifiedImplementationsByEntryRef.set(identity, bucket);
+      this.#verifiedImplementationsByEntryRef.set(identity, bucket);
     }
     bucket.set(symbol, implementation);
   }
@@ -72,7 +83,7 @@ export class ExecutableRegistry {
     identity: string,
     symbol: string,
   ): HarnessedFunction | undefined {
-    return this.verifiedImplementationsByEntryRef.get(identity)?.get(symbol);
+    return this.#verifiedImplementationsByEntryRef.get(identity)?.get(symbol);
   }
 
   /**

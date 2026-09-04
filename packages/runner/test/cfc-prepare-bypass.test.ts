@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import type { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
@@ -64,8 +65,8 @@ describe("CFC prepareCfc verification bypass", () => {
       // public transaction surfaces, there is no way to feed it to prepareCfc:
       // the parameter was removed (audit S2) so verification always runs. Pin
       // that prepareCfc accepts no argument and still rejects the violation.
-      // deno-lint-ignore no-explicit-any
-      const attackerInput = (tx as any).buildPreparedDigestInput?.();
+      const attackerInput = (tx as ExtendedStorageTransaction)
+        .accessForTestingOnly.buildPreparedDigestInput();
       expect(attackerInput).toBeDefined();
       // deno-lint-ignore no-explicit-any
       expect(() => (tx as any).prepareCfc(attackerInput)).not.toThrow();

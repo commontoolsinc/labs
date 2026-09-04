@@ -679,25 +679,15 @@ describe("Engine in SES mode", () => {
 
     expect(next(1)).toBe(2);
     expect(
-      (engine as unknown as {
-        sesRuntime: {
-          callbackEvaluator: {
-            callbackCreatorCache: Map<string, () => unknown>;
-          };
-        };
-      }).sesRuntime.callbackEvaluator.callbackCreatorCache.size,
+      engine.accessForTestingOnly.sesRuntime!.accessForTestingOnly
+        .callbackEvaluator.accessForTestingOnly.callbackCreatorCache.size,
     ).toBe(1);
 
     engine.dispose();
 
     expect(
-      (engine as unknown as {
-        sesRuntime?: {
-          callbackEvaluator: {
-            callbackCreatorCache: Map<string, () => unknown>;
-          };
-        };
-      }).sesRuntime?.callbackEvaluator.callbackCreatorCache.size ?? 0,
+      engine.accessForTestingOnly.sesRuntime?.accessForTestingOnly
+        .callbackEvaluator.accessForTestingOnly.callbackCreatorCache.size ?? 0,
     ).toBe(0);
   });
 });

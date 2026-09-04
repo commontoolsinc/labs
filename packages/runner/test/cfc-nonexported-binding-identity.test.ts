@@ -62,11 +62,8 @@ function recordedBindingPaths(rt: Runtime): string[][] {
   // The binding identity lives on each registered function's content-addressed
   // provenance (the former `verifiedBindingMetadata` map is gone — PR E2);
   // enumerate the engine's implementation index to reach the registered fns.
-  const reg = (rt.harness as any).executableRegistry;
-  const byRef = reg.verifiedImplementationsByEntryRef as Map<
-    string,
-    Map<string, unknown>
-  >;
+  const byRef = rt.harness.accessForTestingOnly.executableRegistry
+    .accessForTestingOnly.verifiedImplementationsByEntryRef;
   const out: string[][] = [];
   for (const bucket of byRef.values()) {
     for (const fn of bucket.values()) {
