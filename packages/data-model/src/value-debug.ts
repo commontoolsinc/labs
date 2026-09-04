@@ -1076,6 +1076,15 @@ class DebugStringifier {
 }
 
 /**
+ * Renders a value an option check refuses, for the error which refuses it:
+ * quoted for the message, and cut short, since what the value is matters
+ * more than what it holds.
+ */
+function renderRefused(value: unknown): string {
+  return toCompactDebugString(value, { maxLength: 20, backtickQuote: true });
+}
+
+/**
  * Helper for `checkedLimits()`, which validates `options` as a whole. What
  * each option holds is validated as it is read, by `checkedLimit()`.
  *
@@ -1083,10 +1092,7 @@ class DebugStringifier {
  */
 function checkOptions(options: DebugValueOptions | undefined): void {
   if ((options !== undefined) && !isPlainObject(options)) {
-    const badOptions = toCompactDebugString(options, {
-      maxLength: 20,
-      backtickQuote: true,
-    });
+    const badOptions = renderRefused(options);
     throw new Error(
       `\`options\` must be a plain object or \`undefined\`; got ${badOptions}`,
     );
@@ -1122,10 +1128,7 @@ function checkedLimit(
     }
   }
 
-  const badValue = toCompactDebugString(value, {
-    maxLength: 20,
-    backtickQuote: true,
-  });
+  const badValue = renderRefused(value);
   throw new Error(
     `\`${name}\` must be a positive integer, \`Infinity\`, or \`undefined\`; got ${badValue}`,
   );
