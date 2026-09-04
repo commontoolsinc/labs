@@ -12,8 +12,9 @@ This block is LIVE: the change that moves a stage updates it here.
 
 | stage | state |
 | --- | --- |
-| S0 — decisions ruled, plan filed | on main with S1 |
-| S1 — the library and the exemplar board own a member namespace | built, in review |
+| S0 — decisions ruled, plan filed | on main (#6882) |
+| S1 — the library and the exemplar board own a member namespace | on main (#6882) |
+| S1b — index rows are the members | built, in review |
 | S2 — `top/42` resolves at the CLI | not started |
 | S2b — assignment refuses by default | not started |
 | S3 — the shell opens `/<space>/top/42` | not started |
@@ -66,6 +67,11 @@ ruled. A later reversal is a decision recorded here, not a discovery.
     composing the real `Topic` from `../topics/topic.tsx` unmodified through
     the library. Board-side naming is proven there. Item-side display is
     proven on the exemplar item and grafted onto `topic.tsx` in S6.
+13. **Index rows are the members.** Ruled 2026-09-03: the exemplar's index
+    rows are the members themselves, as Topics' are, and a name reaches a row
+    through the member's `shortName` with a default; the rehearsal over the
+    unmodified Topic proves naming through the names table and the reverse
+    lookup.
 
 ## Gates and review
 
@@ -105,8 +111,9 @@ Scope: `packages/patterns/collection-naming/` (new): `naming.ts`, `board.tsx`,
    distinct name.
 5. A backfill verb names every unnamed member in filing order, skips named
    ones, and is idempotent: a second run writes nothing.
-6. Index rows carry `name` with a default, so a board holding older members
-   still reads whole.
+6. Index rows are the members, declared through a row demand that carries
+   `shortName` with a default, so a board holding older members still reads
+   whole.
 7. The exemplar item renders its own name from the board's names table,
    wired at creation the way Topics wires `boardCrossrefs`; an item without
    the wiring shows no name and does not fail.
@@ -116,9 +123,9 @@ Scope: `packages/patterns/collection-naming/` (new): `naming.ts`, `board.tsx`,
    declared schema holds the values as unread references.
 10. The Topics-shape rehearsal passes: a test-only board over the unmodified
     `Topic` pattern, wired through `naming.ts`, allocates on create,
-    backfills a pre-existing list, publishes index rows with `name`, and
-    returns the names-table row for a given topic. `topic.tsx` and
-    `topics/main.tsx` are untouched by the stage.
+    backfills a pre-existing list, and proves the names-table lookup and the
+    reverse lookup for a given topic. `topic.tsx` and `topics/main.tsx` are
+    untouched by the stage.
 11. `README.md` describes the library and the exemplar; `cfcheck`, pattern
     tests, and coverage green.
 
