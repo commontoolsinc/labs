@@ -45,6 +45,7 @@ import {
   isConflictRejection,
   isStorageTransactionInconsistent,
 } from "../storage/rejection.ts";
+import { isCfcRejectedCommitError } from "../scheduler/cfc-rejection-report.ts";
 import { onSchemaRegistryClear } from "../schema-registry.ts";
 import {
   enrollRuntimeOwnedStore,
@@ -1037,10 +1038,38 @@ function writeIntervalNowTick(
       cell.withTx(tx).set(coarsened);
     }
   }).then(({ error }) => {
-    if (error) {
-      console.error("[wish] #now interval tick failed:", error);
+    if (!error) return;
+    if (isCfcRejectedCommitError(error)) {
+      // CFC enforcement refused the labels this transaction carries, and the
+      // instant being written has no part in that verdict, so the next tick
+      // would carry the same labels to the same cell for the same answer.
+      // The beat stops here rather than schedule one refused write per
+      // interval; the next acquire of this interval starts a fresh one.
+      //
+      // The other two rejections the vocabulary calls terminal leave the
+      // beat running. Each is terminal for its own transaction rather than
+      // for a writer that runs again later: a `SpeculativeBasisError` names
+      // the next derivation as its recovery, and a `RowLabelCommitError`
+      // reads server state a later tick may find changed.
+      stopIntervalNowTimer(timer);
+      console.error(
+        "[wish] #now interval tick refused; the tick is stopped:",
+        error,
+      );
+      return;
     }
+    console.error("[wish] #now interval tick failed:", error);
   });
+}
+
+// Stop a timer's beat. Clearing the pending timeout drops a tick that has not
+// fired; bumping the generation makes one that has fired a no-op. A cleared
+// `timerId` is also what marks the timer as not beating, which is what an
+// acquire reads to decide whether to start one.
+function stopIntervalNowTimer(timer: IntervalNowTimer): void {
+  clearTimeout(timer.timerId);
+  timer.timerId = undefined;
+  timer.generation++;
 }
 
 // Schedule the next tick on a wall-clock-aligned boundary, so patterns cannot
@@ -1081,14 +1110,21 @@ function acquireIntervalNowTimer(
     );
     timer = { cell, timerId: undefined, generation: 0, refCount: 0 };
     timers.set(key, timer);
+  }
 
-    // Initialize the value if the cell is empty or stale (e.g. after reload),
-    // then start the aligned timer. sample() reads without subscribing the
-    // acquiring action, so ticks never re-trigger it.
+  if (timer.timerId === undefined) {
+    // Nothing is beating this cell — a timer just minted, or one a refused
+    // tick stopped. Initialize the value if the cell is empty or stale (e.g.
+    // after reload, or after a stop the grid moved on from), then start the
+    // aligned timer. sample() reads without subscribing the acquiring
+    // action, so ticks never re-trigger it.
     const coarsened = coarsenTimestamp(Date.now(), intervalMs);
-    const existing = cell.withTx(tx).sample() as number | null | undefined;
+    const existing = timer.cell.withTx(tx).sample() as
+      | number
+      | null
+      | undefined;
     if (existing == null) {
-      cell.withTx(tx).set(coarsened);
+      timer.cell.withTx(tx).set(coarsened);
     } else if (existing !== coarsened) {
       writeIntervalNowTick(runtime, timer, intervalMs);
     }
@@ -1112,13 +1148,11 @@ function releaseIntervalNowTimer(
   if (timer.refCount > 0) return;
 
   // Last user gone: stop the recurring timer and drop the registry entry so an
-  // unused interval no longer consumes resources. Bumping the generation makes
-  // any already-queued tick a no-op. The durable cell (one small value per
-  // distinct interval per space, possibly shared with other tabs) is left in
-  // place; deleting it would race a re-acquire of the same content-addressed
-  // cell and could blank another tab still ticking it.
-  clearTimeout(timer.timerId);
-  timer.generation++;
+  // unused interval no longer consumes resources. The durable cell (one small
+  // value per distinct interval per space, possibly shared with other tabs) is
+  // left in place; deleting it would race a re-acquire of the same
+  // content-addressed cell and could blank another tab still ticking it.
+  stopIntervalNowTimer(timer);
   timers!.delete(key);
 }
 
