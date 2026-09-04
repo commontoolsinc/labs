@@ -2,9 +2,8 @@
 
 ## Status
 
-Proposed. This asks for one ruling — whether shuttle addresses a place by the
-route it walked as well as by the cell that route ends at — and offers a shape
-for the route if the answer is yes. Nothing here is built.
+Ruled. The split is taken, and the five decisions below carry their rulings.
+Nothing here is built.
 
 ## The problem
 
@@ -24,6 +23,14 @@ destination of the last one.
 
 A route is the other thing. It is how the destination was reached, and it is
 not recoverable from the destination.
+
+The difference is not whether links are crossed. A path already crosses them:
+`resolveLink` resolves to "a document that no longer has any links between the
+top and the value at `link.path`", so a reference whose path runs through a
+chain of links is valid and resolves. It is simply not the canonical spelling
+of where it lands, because the destination has an address of its own. **Both
+forms traverse. A cell reference forgets the crossings; a route remembers
+them.**
 
 ## The split
 
@@ -89,7 +96,7 @@ A filesystem crosses a symbolic link without being asked: `cd link` works, and
 nothing in the path says a boundary was passed. The alternative is a written
 crossing, which makes a path reference say what it did.
 
-**Recommend implicit.** `cd owner/name` should work whether `owner` holds a
+**Ruled implicit.** `cd owner/name` should work whether `owner` holds a
 record or a link, because a person browsing does not know which it is and the
 distinction is not theirs to track. The crossing stays visible where it is
 useful — a listing can mark which rows are links, and `where` can show the
@@ -116,22 +123,24 @@ Two spellings, and both cost something:
   matching the reference grammar's rule exactly, and reads as "the
   arguments of what `owner` points at".
 
-**Recommend the suffix.** It preserves one meaning per character across both
+**Ruled the suffix.** It preserves one meaning per character across both
 forms: `#` is a member introducer on a segment that names a cell, whether that
 segment is a piece in an address or a crossing in a route. A person who learns
 one has learned the other.
 
 ### 3. What does `..` do after a crossing?
 
-**Recommend: back through the crossing**, to the field that held the link, not
-up within the destination cell. That is the shell convention, it is what the
+**Ruled: back through the crossing**, to the field that held the link, not up
+within the destination cell. That is the shell convention, it is what the
 existing trail already implements for the moves shuttle has, and it is the
 behavior that makes a route worth keeping at all — a `..` that ignores the
 route makes the route decorative.
 
-Reaching the destination's own parent stays available by addressing it: a
-person who wants the cell rather than the route can take the cell reference and
-walk it.
+There is no other candidate, because a cell has no parent. Only a path has
+one, by dropping its last segment. A crossing that lands at a cell's root
+therefore has nothing above it but the crossing itself; one that lands at a
+path inside the cell has a path-parent, and `..` still takes the crossing
+rather than that parent, so the rule is the same either way.
 
 ### 4. What does `pwd` print?
 
@@ -139,10 +148,17 @@ walk it.
 short surface. A route does not change that so much as split it: there are now
 two complete answers, the route and the address.
 
-**Recommend `pwd` prints the route and `pwd -P` the address**, matching the
-shell exactly, with `where` showing both since it is the surface for the
-ambient record. The address remains what you hand to anything outside shuttle,
-which is the property that made `pwd` complete in the first place.
+**Ruled: `pwd` prints the route**, and the canonical address is a `where`
+dimension rather than a `pwd` flag. `-P` would name it wrongly: it means the
+same path physically resolved, and the address is not that — it is a different
+address, a different piece with different segments, arrived at by forgetting
+the route rather than by resolving it.
+
+What `pwd` gets instead is a mode over the same route: how much of each
+crossing to show. The route is the answer at every setting, and the settings
+differ in annotation. The address stays what you hand to anything outside
+shuttle, which is the property that made `pwd` complete in the first place, and
+`where` is where it is printed.
 
 ### 5. What bounds a route?
 
@@ -153,9 +169,9 @@ links — but a route that has revisited a position is worth *saying* so, and an
 unbounded trail is worth a limit that is a limit on memory rather than on where
 a person may go.
 
-**Recommend**: keep the whole route, mark a revisited position where the route
-is printed, and set no maximum until one is measured to matter. A cap chosen
-now would be a number nobody could defend.
+**Ruled**: no bound. Keep the whole route and let `where` note a revisited
+position, since walking in a circle is a legitimate thing to do and a cap
+chosen now would be a number nobody could defend.
 
 ## How this sits beside the cell reference grammar
 
@@ -181,14 +197,18 @@ Three couplings are worth stating so they are not discovered later:
 
 ## Open questions
 
-- **Does a path reference need to be typeable at all?** It has to be
-  *printable*, so a person can see where they are. Whether someone can paste
-  one back is a separate question, and a route that is only printed is a
-  smaller thing to build. The round-trip property argues for typeable, since it
-  is what the existing test drives.
+- **Typeable, not only printable.** Pasting a route back and having it work is
+  wanted, and nothing argues against it — the round-trip property already
+  drives exactly that for the forms shuttle prints today.
 - **What does a listing show for a row that holds a link?** Marking it is
   cheap and is where the implicit crossing of decision 1 becomes visible. The
   form belongs with `ls`, not here.
-- **Does `get` follow a link?** `cd` crossing implicitly does not settle
-  whether a read does. A shell answers this with two verbs rather than one
-  rule, and shuttle may want the same.
+- **`get` follows a link.** `cd` crossing implicitly and a read not following
+  would be the surprise, and the alternative asks a person to split a path into
+  the part `cd` takes and the part `get` takes, which nothing about the path
+  tells them. Seeing the link itself stays available as a *mode* on the read
+  rather than a second verb: `LastNode` is already `"value" | "writeRedirect" |
+  "top"`, so stopping a resolution before a crossing is a supported act, and
+  `--select '@'` already answers a position's address. What `set` does through
+  a link is a separate question, and a real one, because a write-redirect link
+  carries `overwrite: "redirect"` — it is about the write path, not this one.
