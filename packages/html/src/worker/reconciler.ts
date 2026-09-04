@@ -213,11 +213,8 @@ export class WorkerReconciler {
 
   // Root-of-tree render policy: the host's default ceiling when configured
   // (spec §8.10.6), otherwise the historical unbounded policy. Authored
-  // boundaries can only narrow from here. TypeScript-private rather than a `#`
-  // name, because `runtime-client/test/backends/runtime-processor.test.ts`
-  // reaches it across the package boundary, through the reconciler a mount
-  // holds.
-  private readonly rootRenderPolicy: RenderPolicy;
+  // boundaries can only narrow from here.
+  readonly #rootRenderPolicy: RenderPolicy;
   // Runner-side display-boundary resolver (Epic H3b): rewrites a cell's
   // confidentiality label through the exchange rules before the ceiling fit,
   // admitting `Space(...)`-via-`HasRole` principal forms. Undefined = H3a
@@ -243,10 +240,37 @@ export class WorkerReconciler {
     const ceiling = normalizeRenderConfidentialityCeiling(
       options.renderConfidentialityCeiling,
     );
-    this.rootRenderPolicy = ceiling === undefined ? DEFAULT_RENDER_POLICY : {
+    this.#rootRenderPolicy = ceiling === undefined ? DEFAULT_RENDER_POLICY : {
       declassifyConfidentiality: [],
       maxConfidentiality: [...(ceiling.atoms ?? [])],
       caveatKindAllow: [...(ceiling.caveatKinds ?? [])],
+    };
+  }
+
+  /**
+   * The root render policy and the two admission checks, which a test
+   * drives directly.
+   */
+  get accessForTestingOnly(): {
+    readonly rootRenderPolicy: RenderPolicy;
+    atomRenderableUnderPolicy(atom: unknown, policy: RenderPolicy): boolean;
+    canRenderCellUnderPolicy(
+      cell: Cell<unknown>,
+      policy: RenderPolicy,
+    ): boolean;
+  } {
+    return {
+      rootRenderPolicy: this.#rootRenderPolicy,
+      atomRenderableUnderPolicy: (atom, policy) =>
+        this.#atomRenderableUnderPolicy(atom, policy),
+      // Forwards to the TypeScript-private member so that a test which
+      // replaces it by assignment is honored here too.
+      // TODO(danfuzz): Find a way to make `canRenderCellUnderPolicy()` a `#`
+      // method, which needs `test/worker-reconciler-cell-child.test.ts` to stop
+      // replacing it by assignment: a seam this class offers, or a test written
+      // against the public behavior.
+      canRenderCellUnderPolicy: (cell, policy) =>
+        this.canRenderCellUnderPolicy(cell, policy),
     };
   }
 
@@ -335,14 +359,14 @@ export class WorkerReconciler {
         if (
           !this.canRenderCellUnderPolicy(
             vnode as Cell<unknown>,
-            this.rootRenderPolicy,
+            this.#rootRenderPolicy,
           )
         ) {
           this.#reconcileIntoWrapper(
             ctx,
             wrapperState,
             this.#blockedPlaceholderVNode(),
-            this.rootRenderPolicy,
+            this.#rootRenderPolicy,
           );
           this.#rootChildId = wrapperState.currentChild?.nodeId ?? null;
           return;
@@ -360,7 +384,7 @@ export class WorkerReconciler {
           ctx,
           wrapperState,
           resolvedVnode as WorkerRenderNode,
-          this.rootRenderPolicy,
+          this.#rootRenderPolicy,
         );
         // Track the root child for cleanup
         this.#rootChildId = wrapperState.currentChild?.nodeId ?? null;
@@ -375,7 +399,7 @@ export class WorkerReconciler {
         ctx,
         vnode,
         new Set(),
-        this.rootRenderPolicy,
+        this.#rootRenderPolicy,
       );
       if (state) {
         addCancel(state.cancel);
@@ -1118,9 +1142,9 @@ export class WorkerReconciler {
   }
 
   /**
-   * TypeScript-private rather than a `#` name:
-   * `test/worker-reconciler-cfc-atom-admission.test.ts` drives this member
-   * directly.
+   * TypeScript-private rather than a `#` name, because
+   * `test/worker-reconciler-cell-child.test.ts` replaces this member by
+   * assignment, which a `#` method does not allow.
    */
   private canRenderCellUnderPolicy(
     cell: Cell<unknown>,
@@ -1159,7 +1183,7 @@ export class WorkerReconciler {
         return true;
       }
       return schemaLabels.every((atom) =>
-        this.atomRenderableUnderPolicy(atom, policy)
+        this.#atomRenderableUnderPolicy(atom, policy)
       );
     }
 
@@ -1172,7 +1196,7 @@ export class WorkerReconciler {
       );
     }
     for (const atom of confidentiality) {
-      if (!this.atomRenderableUnderPolicy(atom, policy)) {
+      if (!this.#atomRenderableUnderPolicy(atom, policy)) {
         return false;
       }
     }
@@ -1238,12 +1262,8 @@ export class WorkerReconciler {
    * neither author declassification nor a ceiling entry — even one naming
    * the exported marker string — may admit it. Every other atom checks
    * declassification first, then the ceiling.
-   *
-   * TypeScript-private rather than a `#` name:
-   * `test/worker-reconciler-cfc-atom-admission.test.ts` drives this member
-   * directly.
    */
-  private atomRenderableUnderPolicy(
+  #atomRenderableUnderPolicy(
     atom: unknown,
     policy: RenderPolicy,
   ): boolean {
