@@ -1,5 +1,3 @@
-import { backtickQuote } from "@commonfabric/utils/markdown";
-
 import { toCompactDebugString } from "@/value-debug.ts";
 
 /** Length a rendering is cut to. */
@@ -12,5 +10,8 @@ const MAX_LENGTH = 50;
  * for what it cannot render, so this holds up on the failure path it serves.
  */
 export function quotedDebugString(value: unknown): string {
-  return backtickQuote(toCompactDebugString(value, { maxLength: MAX_LENGTH }));
+  return toCompactDebugString(value, {
+    maxLength: MAX_LENGTH,
+    backtickQuote: true,
+  });
 }

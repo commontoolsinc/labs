@@ -99,6 +99,30 @@ describe("value-debug", () => {
       }
     });
 
+    describe("with `backtickQuote`", () => {
+      it("renders the result as a code span", () => {
+        expect(toCompactDebugString({ a: 1 }, { backtickQuote: true }))
+          .toBe("`{a:1}`");
+      });
+
+      it("renders a result holding backticks with a longer delimiter", () => {
+        expect(toCompactDebugString("a`b", { backtickQuote: true }))
+          .toBe('``"a`b"``');
+      });
+
+      it("renders the truncated result as the code span, when both are asked for", () => {
+        const options = { maxLength: 8, backtickQuote: true };
+        expect(toCompactDebugString({ abc: "defghij" }, options))
+          .toBe("`{abc:...`");
+      });
+
+      it("renders the result bare when the option is `false` or absent", () => {
+        expect(toCompactDebugString({ a: 1 }, { backtickQuote: false }))
+          .toBe("{a:1}");
+        expect(toCompactDebugString({ a: 1 })).toBe("{a:1}");
+      });
+    });
+
     describe("with `maxDepth`", () => {
       it("renders to the given depth rather than to the default", () => {
         const value = { a: { b: { c: 1 } } };

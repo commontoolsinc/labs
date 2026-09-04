@@ -519,4 +519,12 @@ export interface CompactDebugStringOptions extends DebugValueOptions {
    * as three.
    */
   readonly maxLength?: number;
+
+  /**
+   * Whether to quote the result as a Markdown code span, the way
+   * `backtickQuote()` does, for splicing into message text. `maxLength`
+   * bounds the rendering, not the quoted result. When absent, the result is
+   * not quoted.
+   */
+  readonly backtickQuote?: boolean;
 }

@@ -26,7 +26,6 @@ import {
 } from "@commonfabric/runner/shared";
 import { IndexTrackingStack } from "@commonfabric/utils/index-tracking-stack";
 import type { LoggerFlagsBreakdown } from "@commonfabric/utils/logger";
-import { backtickQuote } from "@commonfabric/utils/markdown";
 
 import { isCellRef } from "@/protocol/mod.ts";
 import { CellRef, type LoggerFlagsData, PieceRef } from "@/protocol/types.ts";
@@ -168,7 +167,9 @@ export function assertFabricLoggerFlags(
 
   throw new Error(
     "Cannot send logger flags on this connection, not being a " +
-      `\`FabricValue\`: ${backtickQuote(toCompactDebugString(breakdown))}`,
+      `\`FabricValue\`: ${
+        toCompactDebugString(breakdown, { backtickQuote: true })
+      }`,
   );
 }
 

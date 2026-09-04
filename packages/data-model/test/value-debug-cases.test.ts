@@ -29,7 +29,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
 
 import { REALM_CODEC } from "@/codec-interface/interface.ts";
@@ -86,9 +85,10 @@ function evaluateExpression(expression: string): Record<string, unknown> {
   const result = fn(...values);
 
   if (!isPlainObject(result, false)) {
-    const rendered = backtickQuote(
-      toCompactDebugString(result, { maxLength: 60 }),
-    );
+    const rendered = toCompactDebugString(result, {
+      maxLength: 60,
+      backtickQuote: true,
+    });
     throw new Error(
       `Case expression must produce a plain object; got ${rendered}`,
     );

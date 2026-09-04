@@ -1,4 +1,3 @@
-import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
 import { isDeepFrozen } from "./deep-freeze.ts";
 import {
@@ -148,7 +147,9 @@ function objectSubtypeOf(
     return "plain";
   } else {
     throw new Error(
-      `Cannot compare value ${backtickQuote(toCompactDebugString(value))}`,
+      `Cannot compare value ${
+        toCompactDebugString(value, { backtickQuote: true })
+      }`,
     );
   }
 }
