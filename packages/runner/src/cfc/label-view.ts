@@ -5,6 +5,7 @@ import {
   type NormalizedFullLink,
   parseLink,
 } from "../link-utils.ts";
+import { resolveLink } from "../link-resolution.ts";
 import type { Runtime } from "../runtime.ts";
 import { readStoredCfcMetadata } from "./metadata.ts";
 import type { CfcMetadata } from "./types.ts";
@@ -158,6 +159,100 @@ export const cfcLabelViewForCellWithStatus = (
 export const cfcLabelViewForCell = (
   cell: unknown,
 ): CfcLabelView | undefined => cfcLabelViewForCellWithStatus(cell).view;
+
+type ResolvedMetadataResult = StoredMetadataResult & {
+  /** The resolved doc's path, which the view is rebased against. */
+  path: readonly string[];
+};
+
+/**
+ * Stored metadata of the doc that actually HOLDS the value at `link`, found by
+ * the runtime's own link resolution — the following `.get()` performs.
+ *
+ * `storedMetadataForCell` reads the doc the cell names, and
+ * `linkedValueMetadataForCell` follows one link when the selected path lands ON
+ * one. Neither reaches a doc behind a link the path crosses part way through,
+ * and a labeled read commonly has one: a sqlite query result splits each row
+ * into its own entity doc and stores the row's labels there, so
+ * `q/result/0/secret` crosses a link at `result/0` and its label is two docs
+ * away from the doc the path started in.
+ */
+const resolvedMetadataForCell = (
+  cell: LabelQueryableCell,
+  link: NormalizedFullLink,
+): ResolvedMetadataResult => {
+  if (!cell.runtime) {
+    return { metadata: undefined, readFailed: false, path: link.path };
+  }
+  try {
+    const tx = cell.runtime.readTx(cell.tx);
+    // `markIfcCrossings` is what a read entry point passes. On the CLI's path
+    // it changes nothing observable: the cell carries no transaction, so
+    // `readTx` mints a throwaway that is never committed and the marks die
+    // with it. It is here for a caller that hands in a cell with a LIVE
+    // transaction, where an ifc-bearing link crossed to reach a label counts
+    // against that transaction's accounting like any other crossing.
+    const resolved = resolveLink(cell.runtime, tx, link, "value", {
+      markIfcCrossings: true,
+    });
+    return {
+      metadata: readStoredCfcMetadata(tx, {
+        space: resolved.space,
+        id: resolved.id,
+        scope: resolved.scope,
+      }),
+      readFailed: false,
+      path: resolved.path,
+    };
+  } catch {
+    return { metadata: undefined, readFailed: true, path: link.path };
+  }
+};
+
+/**
+ * {@link cfcLabelViewForCellWithStatus}, plus the label stored on the doc the
+ * selected path RESOLVES to.
+ *
+ * For an inspection surface that answers "what is the label here" about a path
+ * a person typed, the one-hop read is not enough: a path that crosses a link
+ * part way through reports no label for a value that plainly carries one. This
+ * merges the resolved doc's stored label into the same view, rebased so its
+ * entries stay relative to the selected cell.
+ *
+ * Strictly additive. Every view the one-hop read produces is still in the
+ * merge, and merging is keyed per (observation class, path) with a union of the
+ * labels, so a leaf-link read — where the resolution lands on the same doc the
+ * one hop already found — returns exactly what it returns today. `readFailed`
+ * stays fail-closed across both: a resolution that throws is a failed read, not
+ * an absent label.
+ */
+export const cfcLabelViewForResolvedCellWithStatus = (
+  cell: unknown,
+): CfcLabelViewStatus => {
+  const unresolved = cfcLabelViewForCellWithStatus(cell);
+  if (
+    !isObjectOrArray(cell) ||
+    typeof cell.getAsNormalizedFullLink !== "function"
+  ) {
+    return unresolved;
+  }
+
+  let link: NormalizedFullLink;
+  try {
+    link = (cell as LabelQueryableCell).getAsNormalizedFullLink();
+  } catch {
+    return unresolved;
+  }
+
+  const resolved = resolvedMetadataForCell(cell as LabelQueryableCell, link);
+  return {
+    view: mergeCfcLabelViews([
+      unresolved.view,
+      cfcLabelViewFromMetadata(resolved.metadata, resolved.path),
+    ]),
+    readFailed: unresolved.readFailed || resolved.readFailed,
+  };
+};
 
 /**
  * Fail-closed label acquisition for the LLM-observation egress path (audit 22).

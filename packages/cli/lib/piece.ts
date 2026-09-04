@@ -67,7 +67,7 @@ import {
 } from "@commonfabric/runner";
 import {
   type CfcLabelView,
-  cfcLabelViewForCellWithStatus,
+  cfcLabelViewForResolvedCellWithStatus,
   cfcLabelViewFromSchema,
   cfcSchemaChildRoot,
   getCarriedCfcLabelView,
@@ -124,7 +124,11 @@ import { loadIdentity } from "./identity.ts";
 import { stderrConsoleHandler } from "./json-output.ts";
 import { validateEmbeddedSpaces } from "./llm-friendly-ref.ts";
 import { claimProcessDeployment } from "./process-deployment.ts";
-import { deriveDiskHandleId } from "./sqlite-source.ts";
+import {
+  deriveDiskHandleId,
+  diskHandleSeed,
+  type DiskHandleValue,
+} from "./sqlite-source.ts";
 import { timeCliPhase } from "./trace-timing.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
 import { startVersionCheck } from "./version-check.ts";
@@ -273,11 +277,21 @@ export function parseCellCfcLabelUpdate(
   } as CellCfcLabelUpdate;
 }
 
+/**
+ * The label view both label commands answer from, read through the RESOLVED
+ * reader — the doc the selected path lands in once its links are followed.
+ *
+ * Each command needs that doc for its own reason. An INSPECTION read must not
+ * answer "none" for a value carrying a label behind a link the path crosses
+ * part way through. A read that feeds a WRITE needs it because the write
+ * resolves too: `applyCfcSchemaToExistingValue` follows the same links, so the
+ * doc this view describes is the doc the update lands in.
+ */
 function cfcLabelViewForCommand(
   cell: unknown,
   path: readonly (string | number)[],
 ): CfcLabelView | null {
-  const { view, readFailed } = cfcLabelViewForCellWithStatus(cell);
+  const { view, readFailed } = cfcLabelViewForResolvedCellWithStatus(cell);
   if (readFailed) {
     const location = path.length === 0 ? "<root>" : path.join("/");
     throw new Error(`Could not read CFC labels at "${location}".`);
@@ -3851,12 +3865,21 @@ export async function linkPieces(
 /**
  * Phase 7: link a pattern field to an injected on-disk SQLite source
  * (`cf piece link sqlite:<absPath> <piece>/<field>`, read-only v1). Derives a
- * stable handle id from (space, absPath), creates the handle cell at that id with
- * value `{ id, tables: {}, rev: 0 }`, registers the on-disk source with the server
- * (so reads attach the file read-only for that id), then links the handle into
- * the target field. Idempotent: re-linking the same path resolves to the same
- * handle id (same cell, same registration). v1 is read-only — `db.exec` against an
- * injected source is rejected by the server (Q13/Q14).
+ * stable handle id from (space, absPath), settles the handle cell at that id,
+ * registers the on-disk source with the server (so reads attach the file
+ * read-only for that id), then links the handle into the target field.
+ *
+ * What the handle cell ends up holding is `diskHandleSeed`'s decision, made
+ * against whatever is already there. A first link seeds the empty contract
+ * `{ id, tables: {}, rev: 0 }`. A RE-link — the same path, so the same handle
+ * id (same cell, same registration) — leaves a handle whose `id` is already
+ * the derived one exactly as it stands, contract included, and says on stderr
+ * how many tables it kept. A handle whose stored `id` is missing, empty, or
+ * names a different source is unusable and gets REPAIRED: the id is rewritten,
+ * a declared contract is carried onto it rather than dropped (labels may only
+ * strengthen), and the repair is reported on stderr when it carried one. v1 is
+ * read-only — `db.exec` against an injected source is rejected by the server
+ * (Q13/Q14).
  */
 export async function linkSqliteDiskSource(
   config: SpaceConfig,
@@ -3864,26 +3887,65 @@ export async function linkSqliteDiskSource(
   targetPieceId: string,
   targetPath: (string | number)[],
   options?: { start?: boolean; targetScope?: CellScope },
+  deps: PieceOperationDependencies = {},
 ): Promise<void> {
-  const pieces = await loadPieces(config);
+  const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const space = pieces.getSpace();
   const id = deriveDiskHandleId(space, absPath);
 
   // 1. Seed the handle cell AT the deterministic id. Its entity id == its
   //    value.id == the server registry key, so a pattern read of the linked
-  //    handle resolves to the id the server holds a disk descriptor for. tables
-  //    is empty — v1 does not migrate external files (the on-disk db owns its
-  //    schema); the server skips ensureTables for a registered source.
+  //    handle resolves to the id the server holds a disk descriptor for.
+  //    `diskHandleSeed` decides whether to write at all: a first link seeds an
+  //    empty contract, and a RE-link leaves a committed handle alone rather
+  //    than lowering labels someone has since declared on it. The sync is what
+  //    makes that decision see a handle this process has not loaded.
   const handle = pieces.runtime.getCellFromEntityId(
     space,
     entityIdFrom(id),
     [],
     undefined,
   );
+  await handle.sync();
+  let kept: DiskHandleValue | undefined;
+  let repaired: DiskHandleValue | undefined;
   const writeRes = await pieces.runtime.editWithRetry((tx) => {
-    handle.withTx(tx).set({ id, tables: {}, rev: 0 });
+    const target = handle.withTx(tx);
+    const prior = target.get() as DiskHandleValue | undefined;
+    const seed = diskHandleSeed(id, prior);
+    if (seed !== undefined) target.set(seed);
+    kept = seed === undefined ? prior : undefined;
+    // A first link seeds an empty contract, so a written seed that carries
+    // tables can only be a contract this repair brought across from a handle
+    // whose own `id` was unusable.
+    repaired = seed !== undefined && Object.keys(seed.tables ?? {}).length > 0
+      ? seed
+      : undefined;
   });
   if (writeRes.error) throw writeRes.error;
+  if (repaired !== undefined) {
+    // The same reporting obligation as the kept-contract warning below, for
+    // the same reason: the contract now sitting on this handle was declared
+    // against a handle that named something else, so its per-column labels may
+    // describe a different database. Keeping it is the monotone-safe direction
+    // and still worth saying out loud.
+    const tables = Object.keys(repaired.tables ?? {}).length;
+    console.warn(
+      `cf piece link: repaired an unusable handle id, keeping the existing ` +
+        `contract, ${tables} ${tables === 1 ? "table" : "tables"}`,
+    );
+  }
+  if (kept !== undefined) {
+    // Say so. Keeping the contract is right — its per-column `ifc` may only
+    // strengthen — but the file on disk can have moved on since someone
+    // declared it, and a schema kept silently is the same unreported state the
+    // clobber this replaced used to produce, pointing the other way.
+    const tables = Object.keys(kept.tables ?? {}).length;
+    console.warn(
+      `cf piece link: kept the existing contract, ${tables} ` +
+        `${tables === 1 ? "table" : "tables"} (re-linking does not reset it)`,
+    );
+  }
   // The handle is committed, so the space has been written to whether or not
   // the registration and link below succeed.
   noteWroteTo(config.space);
@@ -3902,6 +3964,7 @@ export async function linkSqliteDiskSource(
     pieces,
     targetPieceId,
     targetPath,
+    deps,
   );
   await pieces.link(id, [], resolvedTarget.piece, resolvedTarget.pathAfter, {
     start: options?.start,
@@ -4428,6 +4491,9 @@ async function verbReadRefusalOrNull(
  * Paths in the returned view are relative to the selected cell. The view
  * includes stored declared, derived, and link-carried labels and uses the same
  * display redaction as the runtime-client boundary.
+ *
+ * The path is followed through the links it crosses, so the answer describes
+ * the doc that holds the value rather than the doc the path started in.
  */
 export async function getCellCfcLabel(
   config: PieceConfig,
@@ -4488,6 +4554,11 @@ export async function setCellCfcLabel(
     await (options.input ? piece.input.getCell() : piece.result.getCell());
   const targetCell = rootCell.key(...path);
   await targetCell.pull();
+  // The guard's "what classes already exist here" question is asked of the doc
+  // the write lands in. Asked of the unresolved doc it was asked about a doc
+  // the write never touches: the row doc's `observes` was invisible to it, so
+  // the update silently REPLACED a value-class entry with a class-less one,
+  // and the command returned null while having written a label.
   const currentView = cfcLabelViewForCommand(targetCell, path);
   const value = targetCell.getRaw();
   if (value === undefined) {
