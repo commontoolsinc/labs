@@ -596,6 +596,11 @@ export class CfHarnessEngine {
             options.credentialOwnerKey,
         }
         : {}),
+      // A resumed run goes on executing at the mode it recorded, so that
+      // mode is what this resolution inherits.
+      ...(options.runState !== undefined
+        ? { inheritedCfcEnforcementMode: options.runState.cfcEnforcementMode }
+        : {}),
       ...(options.runState !== undefined && recordedOwner !== undefined
         ? { credentialOwner: recordedOwner }
         : {}),
