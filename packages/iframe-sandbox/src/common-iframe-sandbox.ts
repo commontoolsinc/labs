@@ -37,29 +37,6 @@ export class CommonIframeSandboxElement extends LitElement {
     this.requestUpdate("bridge", previousValue);
   }
 
-  /**
-   * The frame, the window whose readiness was last acted on, and the
-   * outer-ready step, which a test drives directly: it asserts the
-   * outer-ready refusal where the refusal is made, since a frame reports
-   * itself ready exactly once, from a window nothing outside this element
-   * can speak for.
-   */
-  get accessForTestingOnly(): {
-    readonly iframeRef: Ref<HTMLIFrameElement>;
-    readonly readyWindow: Window | undefined;
-    onOuterReady(source: Window): void;
-  } {
-    // deno-lint-ignore no-this-alias
-    const outerThis = this;
-    return {
-      iframeRef: this.#iframeRef,
-      get readyWindow() {
-        return outerThis.#readyWindow;
-      },
-      onOuterReady: (source) => this.#onOuterReady(source),
-    };
-  }
-
   @property({ attribute: "load-state", reflect: true })
   accessor loadState: CommonIframeLoadState = "";
 
@@ -92,6 +69,29 @@ export class CommonIframeSandboxElement extends LitElement {
    * context, so the frame reattaching brings is a different window.
    */
   #readyWindow: Window | undefined;
+
+  /**
+   * The frame, the window whose readiness was last acted on, and the
+   * outer-ready step, which a test drives directly: it asserts the
+   * outer-ready refusal where the refusal is made, since a frame reports
+   * itself ready exactly once, from a window nothing outside this element
+   * can speak for.
+   */
+  get accessForTestingOnly(): {
+    readonly iframeRef: Ref<HTMLIFrameElement>;
+    readonly readyWindow: Window | undefined;
+    onOuterReady(source: Window): void;
+  } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      iframeRef: this.#iframeRef,
+      get readyWindow() {
+        return outerThis.#readyWindow;
+      },
+      onOuterReady: (source) => this.#onOuterReady(source),
+    };
+  }
 
   /**
    * Handles the outer frame reporting itself ready, which it does on its own
@@ -290,7 +290,7 @@ export class CommonIframeSandboxElement extends LitElement {
 
   /**
    * Reloads on a change to `src` or `bridge`, once the frame is ready; until
-   * then `onOuterReady` does the first load. Reacting here rather than in the
+   * then `#onOuterReady` does the first load. Reacting here rather than in the
    * setters folds a batch of changes into one load: assigning both properties
    * asks for one document, carrying both new values, rather than reloading
    * the old document under the new bridge on the way.
