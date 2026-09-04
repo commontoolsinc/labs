@@ -173,7 +173,7 @@ describe("value-debug", () => {
           .toBe("{a:1,b:2}");
       });
 
-      it("renders a primitive's realm state to the limit as well", () => {
+      it("renders a `FabricPrimitive`'s realm state to the limit as well", () => {
         class Wide extends FabricPrimitive {
           static get [REALM_CODEC]() {
             return {
@@ -188,7 +188,7 @@ describe("value-debug", () => {
           .toBe("/Wide(\n  p: 1,\n  q: 2,\n  ... count: 3\n)");
       });
 
-      it("renders a fabric instance's contents to the limit as well", () => {
+      it("renders a `FabricInstance`'s contents to the limit as well", () => {
         const link = new FabricLink({ id: "of:fid1:abc", a: 1, b: 2 });
         expect(toCompactDebugString(link, { maxProperties: 2 }))
           .toBe('/Link(id:"of:fid1:abc",a:1,...count:3)');

@@ -473,7 +473,7 @@ export interface DebugValueOptions {
    * key order, converted, and after them a form suggestive of the elision,
    * which includes the object's actual property count. This applies wherever
    * properties are laid out: a plain object, a class instance's own
-   * properties, and the contents of a fabric special object. When absent,
+   * properties, and the contents of a `FabricSpecialObject`. When absent,
    * the limit is one hundred. A large value is capped.
    */
   readonly maxProperties?: number;
