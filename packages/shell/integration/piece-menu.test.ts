@@ -532,7 +532,10 @@ describe("piece context menu", () => {
     // announcement, the portalled overlay, and the worker read all line up.
 
     const page = shell.page();
-    const { identity } = await writeTempIdentity({ implementation: "noble" });
+    await using tempIdentity = await writeTempIdentity({
+      implementation: "noble",
+    });
+    const { identity } = tempIdentity;
 
     await shell.goto({
       frontendUrl: FRONTEND_URL,
@@ -658,198 +661,195 @@ describe("piece context menu", () => {
   it("targets and highlights the innermost nested piece", async () => {
     const page = shell.page();
     const slug = `nested-piece-menu-${crypto.randomUUID()}`;
-    const { identity, path: identityPath } = await writeTempIdentity({
+    await using tempIdentity = await writeTempIdentity({
       implementation: "noble",
     });
+    const { identity, path: identityPath } = tempIdentity;
 
-    try {
-      await createNestedPiece(identityPath, slug);
-      await shell.goto({
-        frontendUrl: FRONTEND_URL,
-        view: { spaceName: SPACE_NAME, pieceSlug: slug },
-        identity,
-      });
-      await waitForCondition(
-        page,
-        (probe) => probe.collect("#inner-piece-button").length === 1,
+    await createNestedPiece(identityPath, slug);
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: { spaceName: SPACE_NAME, pieceSlug: slug },
+      identity,
+    });
+    await waitForCondition(
+      page,
+      (probe) => probe.collect("#inner-piece-button").length === 1,
+    );
+
+    const result = await page.evaluate(async () => {
+      const rootView = document.querySelector("x-root-view");
+      const appView = rootView?.shadowRoot?.querySelector("x-app-view");
+      const bodyView = appView?.shadowRoot?.querySelector("x-body-view");
+      const render = bodyView?.shadowRoot?.querySelector("cf-render") as
+        | (HTMLElement & {
+          cell?: { id(): string };
+        })
+        | null;
+      const inner = render?.shadowRoot?.querySelector(
+        "#inner-piece-root",
+      ) as HTMLElement | null;
+      const middle = render?.shadowRoot?.querySelector(
+        "#middle-piece-root",
+      ) as HTMLElement | null;
+      const button = render?.shadowRoot?.querySelector(
+        "#inner-piece-button",
       );
-
-      const result = await page.evaluate(async () => {
-        const rootView = document.querySelector("x-root-view");
-        const appView = rootView?.shadowRoot?.querySelector("x-app-view");
-        const bodyView = appView?.shadowRoot?.querySelector("x-body-view");
-        const render = bodyView?.shadowRoot?.querySelector("cf-render") as
-          | (HTMLElement & {
-            cell?: { id(): string };
-          })
-          | null;
-        const inner = render?.shadowRoot?.querySelector(
-          "#inner-piece-root",
-        ) as HTMLElement | null;
-        const middle = render?.shadowRoot?.querySelector(
-          "#middle-piece-root",
-        ) as HTMLElement | null;
-        const button = render?.shadowRoot?.querySelector(
-          "#inner-piece-button",
-        );
-        const clip = render?.shadowRoot?.querySelector(
-          "#nested-piece-clip",
-        ) as HTMLElement | null;
-        if (!render || !inner || !middle || !button || !clip) {
-          throw new Error("nested piece fixture did not render");
-        }
-
-        const measure = (element: Element): MeasuredRect => {
-          const { x, y, width, height } = element.getBoundingClientRect();
-          return { x, y, width, height };
-        };
-        const outerBefore = measure(render);
-        const middleBefore = measure(middle);
-        const innerBefore = measure(inner);
-        const clipBorder = clip.getBoundingClientRect();
-        const clipScaleX = clipBorder.width / clip.offsetWidth;
-        const clipScaleY = clipBorder.height / clip.offsetHeight;
-        const clipBefore = {
-          x: clipBorder.x + clip.clientLeft * clipScaleX,
-          y: clipBorder.y + clip.clientTop * clipScaleY,
-          width: clip.clientWidth * clipScaleX,
-          height: clip.clientHeight * clipScaleY,
-        };
-        let middlePieceId: string | undefined;
-        render.addEventListener("cf-piece-context-menu", (event) => {
-          event.preventDefault();
-          middlePieceId = (event as CustomEvent<{ pieceId: string }>).detail
-            .pieceId;
-        }, { once: true });
-        middle.dispatchEvent(
-          new MouseEvent("contextmenu", {
-            bubbles: true,
-            composed: true,
-            cancelable: true,
-          }),
-        );
-
-        let innerPieceId: string | undefined;
-        render.addEventListener("cf-piece-context-menu", (event) => {
-          event.preventDefault();
-          innerPieceId = (event as CustomEvent<{ pieceId: string }>).detail
-            .pieceId;
-        }, { once: true });
-        inner.dispatchEvent(
-          new MouseEvent("contextmenu", {
-            bubbles: true,
-            composed: true,
-            cancelable: true,
-          }),
-        );
-
-        let announcedPieceId: string | undefined;
-        render.addEventListener("cf-piece-context-menu", (event) => {
-          announcedPieceId = (event as CustomEvent<{ pieceId: string }>).detail
-            .pieceId;
-        }, { once: true });
-
-        button.dispatchEvent(
-          new MouseEvent("contextmenu", {
-            bubbles: true,
-            composed: true,
-            cancelable: true,
-            clientX: innerBefore.x + 4,
-            clientY: innerBefore.y + 4,
-          }),
-        );
-        const menu = document.querySelector("cf-piece-menu") as
-          | (HTMLElement & { updateComplete: Promise<unknown> })
-          | null;
-        if (!menu) throw new Error("nested piece menu did not open");
-        await menu.updateComplete;
-        const overlay = menu.shadowRoot?.querySelector(
-          ".nested-piece-highlight",
-        );
-        if (!overlay) throw new Error("nested highlight did not render");
-        const overlayStyle = getComputedStyle(overlay);
-        const outerAfter = measure(render);
-        const middleAfter = measure(middle);
-        const innerAfter = measure(inner);
-        const overlayBeforeScroll = measure(overlay);
-        clip.scrollLeft = 24;
-        clip.dispatchEvent(new Event("scroll"));
-        await new Promise<void>((resolve) =>
-          requestAnimationFrame(() => resolve())
-        );
-        await menu.updateComplete;
-        const innerAfterScroll = measure(inner);
-        const overlayAfterScroll = measure(overlay);
-
-        return {
-          outerId: render.cell?.id(),
-          middleId: middlePieceId,
-          innerId: innerPieceId,
-          announcedPieceId,
-          outerMarked: render.hasAttribute("data-cf-piece-menu-open"),
-          innerMarked: inner.hasAttribute("data-cf-piece-menu-open"),
-          outerBefore,
-          outerAfter,
-          middleBefore,
-          middleAfter,
-          innerBefore,
-          innerAfter,
-          clipBefore,
-          overlayBeforeScroll,
-          innerAfterScroll,
-          overlayAfterScroll,
-          visual: {
-            position: overlayStyle.position,
-            pointerEvents: overlayStyle.pointerEvents,
-            backgroundImage: overlayStyle.backgroundImage,
-            boxShadow: overlayStyle.boxShadow,
-            animationName: overlayStyle.animationName,
-            animationIterationCount: overlayStyle.animationIterationCount,
-            reducedMotion: matchMedia("(prefers-reduced-motion: reduce)")
-              .matches,
-          },
-        };
-      });
-
-      expect(result.outerId).toBeDefined();
-      expect(result.middleId).toBeDefined();
-      expect(result.innerId).toBeDefined();
-      expect(result.innerId).not.toBe(result.middleId);
-      expect(result.innerId).not.toBe(result.outerId);
-      expect(result.middleId).not.toBe(result.outerId);
-      expect(result.announcedPieceId).toBe(result.innerId);
-      expect(result.outerMarked).toBe(false);
-      expect(result.innerMarked).toBe(false);
-      expect(result.outerAfter).toEqual(result.outerBefore);
-      expect(result.middleAfter).toEqual(result.middleBefore);
-      expect(result.innerAfter).toEqual(result.innerBefore);
-      const visibleRect = (inner: MeasuredRect, clip: MeasuredRect) => {
-        const x = Math.max(inner.x, clip.x);
-        const y = Math.max(inner.y, clip.y);
-        const right = Math.min(inner.x + inner.width, clip.x + clip.width);
-        const bottom = Math.min(inner.y + inner.height, clip.y + clip.height);
-        return { x, y, width: right - x, height: bottom - y };
-      };
-      expect(result.overlayBeforeScroll).toEqual(
-        visibleRect(result.innerBefore, result.clipBefore),
-      );
-      expect(result.overlayAfterScroll).toEqual(
-        visibleRect(result.innerAfterScroll, result.clipBefore),
-      );
-      expect(result.visual.position).toBe("fixed");
-      expect(result.visual.pointerEvents).toBe("none");
-      expect(result.visual.backgroundImage).not.toBe("none");
-      expect(result.visual.boxShadow).not.toBe("none");
-      if (result.visual.reducedMotion) {
-        expect(result.visual.animationName).toBe("none");
-      } else {
-        expect(result.visual.animationName).toBe(
-          "cf-nested-piece-menu-shine",
-        );
-        expect(result.visual.animationIterationCount).toBe("1");
+      const clip = render?.shadowRoot?.querySelector(
+        "#nested-piece-clip",
+      ) as HTMLElement | null;
+      if (!render || !inner || !middle || !button || !clip) {
+        throw new Error("nested piece fixture did not render");
       }
-    } finally {
-      await Deno.remove(identityPath).catch(() => {});
+
+      const measure = (element: Element): MeasuredRect => {
+        const { x, y, width, height } = element.getBoundingClientRect();
+        return { x, y, width, height };
+      };
+      const outerBefore = measure(render);
+      const middleBefore = measure(middle);
+      const innerBefore = measure(inner);
+      const clipBorder = clip.getBoundingClientRect();
+      const clipScaleX = clipBorder.width / clip.offsetWidth;
+      const clipScaleY = clipBorder.height / clip.offsetHeight;
+      const clipBefore = {
+        x: clipBorder.x + clip.clientLeft * clipScaleX,
+        y: clipBorder.y + clip.clientTop * clipScaleY,
+        width: clip.clientWidth * clipScaleX,
+        height: clip.clientHeight * clipScaleY,
+      };
+      let middlePieceId: string | undefined;
+      render.addEventListener("cf-piece-context-menu", (event) => {
+        event.preventDefault();
+        middlePieceId = (event as CustomEvent<{ pieceId: string }>).detail
+          .pieceId;
+      }, { once: true });
+      middle.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          composed: true,
+          cancelable: true,
+        }),
+      );
+
+      let innerPieceId: string | undefined;
+      render.addEventListener("cf-piece-context-menu", (event) => {
+        event.preventDefault();
+        innerPieceId = (event as CustomEvent<{ pieceId: string }>).detail
+          .pieceId;
+      }, { once: true });
+      inner.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          composed: true,
+          cancelable: true,
+        }),
+      );
+
+      let announcedPieceId: string | undefined;
+      render.addEventListener("cf-piece-context-menu", (event) => {
+        announcedPieceId = (event as CustomEvent<{ pieceId: string }>).detail
+          .pieceId;
+      }, { once: true });
+
+      button.dispatchEvent(
+        new MouseEvent("contextmenu", {
+          bubbles: true,
+          composed: true,
+          cancelable: true,
+          clientX: innerBefore.x + 4,
+          clientY: innerBefore.y + 4,
+        }),
+      );
+      const menu = document.querySelector("cf-piece-menu") as
+        | (HTMLElement & { updateComplete: Promise<unknown> })
+        | null;
+      if (!menu) throw new Error("nested piece menu did not open");
+      await menu.updateComplete;
+      const overlay = menu.shadowRoot?.querySelector(
+        ".nested-piece-highlight",
+      );
+      if (!overlay) throw new Error("nested highlight did not render");
+      const overlayStyle = getComputedStyle(overlay);
+      const outerAfter = measure(render);
+      const middleAfter = measure(middle);
+      const innerAfter = measure(inner);
+      const overlayBeforeScroll = measure(overlay);
+      clip.scrollLeft = 24;
+      clip.dispatchEvent(new Event("scroll"));
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => resolve())
+      );
+      await menu.updateComplete;
+      const innerAfterScroll = measure(inner);
+      const overlayAfterScroll = measure(overlay);
+
+      return {
+        outerId: render.cell?.id(),
+        middleId: middlePieceId,
+        innerId: innerPieceId,
+        announcedPieceId,
+        outerMarked: render.hasAttribute("data-cf-piece-menu-open"),
+        innerMarked: inner.hasAttribute("data-cf-piece-menu-open"),
+        outerBefore,
+        outerAfter,
+        middleBefore,
+        middleAfter,
+        innerBefore,
+        innerAfter,
+        clipBefore,
+        overlayBeforeScroll,
+        innerAfterScroll,
+        overlayAfterScroll,
+        visual: {
+          position: overlayStyle.position,
+          pointerEvents: overlayStyle.pointerEvents,
+          backgroundImage: overlayStyle.backgroundImage,
+          boxShadow: overlayStyle.boxShadow,
+          animationName: overlayStyle.animationName,
+          animationIterationCount: overlayStyle.animationIterationCount,
+          reducedMotion: matchMedia("(prefers-reduced-motion: reduce)")
+            .matches,
+        },
+      };
+    });
+
+    expect(result.outerId).toBeDefined();
+    expect(result.middleId).toBeDefined();
+    expect(result.innerId).toBeDefined();
+    expect(result.innerId).not.toBe(result.middleId);
+    expect(result.innerId).not.toBe(result.outerId);
+    expect(result.middleId).not.toBe(result.outerId);
+    expect(result.announcedPieceId).toBe(result.innerId);
+    expect(result.outerMarked).toBe(false);
+    expect(result.innerMarked).toBe(false);
+    expect(result.outerAfter).toEqual(result.outerBefore);
+    expect(result.middleAfter).toEqual(result.middleBefore);
+    expect(result.innerAfter).toEqual(result.innerBefore);
+    const visibleRect = (inner: MeasuredRect, clip: MeasuredRect) => {
+      const x = Math.max(inner.x, clip.x);
+      const y = Math.max(inner.y, clip.y);
+      const right = Math.min(inner.x + inner.width, clip.x + clip.width);
+      const bottom = Math.min(inner.y + inner.height, clip.y + clip.height);
+      return { x, y, width: right - x, height: bottom - y };
+    };
+    expect(result.overlayBeforeScroll).toEqual(
+      visibleRect(result.innerBefore, result.clipBefore),
+    );
+    expect(result.overlayAfterScroll).toEqual(
+      visibleRect(result.innerAfterScroll, result.clipBefore),
+    );
+    expect(result.visual.position).toBe("fixed");
+    expect(result.visual.pointerEvents).toBe("none");
+    expect(result.visual.backgroundImage).not.toBe("none");
+    expect(result.visual.boxShadow).not.toBe("none");
+    if (result.visual.reducedMotion) {
+      expect(result.visual.animationName).toBe("none");
+    } else {
+      expect(result.visual.animationName).toBe(
+        "cf-nested-piece-menu-shine",
+      );
+      expect(result.visual.animationIterationCount).toBe("1");
     }
   });
 });
