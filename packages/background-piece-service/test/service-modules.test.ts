@@ -1050,9 +1050,9 @@ describe("WorkerController", () => {
       });
       await assertRejects(
         () =>
-          (timeoutController as never as {
-            exec: (type: WorkerIPCMessageType) => Promise<void>;
-          }).exec(WorkerIPCMessageType.Cleanup),
+          timeoutController.accessForTestingOnly.exec(
+            WorkerIPCMessageType.Cleanup,
+          ),
         Error,
         "Worker timed out.",
       );
@@ -1084,19 +1084,17 @@ describe("WorkerController", () => {
       );
       assertThrows(
         () =>
-          (controller as never as {
-            exec: (type: WorkerIPCMessageType) => Promise<void>;
-          }).exec(WorkerIPCMessageType.Initialize),
+          controller.accessForTestingOnly.exec(WorkerIPCMessageType.Initialize),
         Error,
         "invalid IPC request.",
       );
 
-      (controller as never as {
-        onWorkerMessage: (event: MessageEvent) => void;
-      }).onWorkerMessage(new MessageEvent("message", { data: { bad: true } }));
-      (controller as never as {
-        onWorkerMessage: (event: MessageEvent) => void;
-      }).onWorkerMessage(new MessageEvent("message", { data: { msgId: 999 } }));
+      controller.accessForTestingOnly.onWorkerMessage(
+        new MessageEvent("message", { data: { bad: true } }),
+      );
+      controller.accessForTestingOnly.onWorkerMessage(
+        new MessageEvent("message", { data: { msgId: 999 } }),
+      );
     });
   });
 
@@ -1135,13 +1133,11 @@ describe("WorkerController", () => {
       const worker = MockWorker.instances.at(-1)!;
       worker.respond = false;
 
-      const pending = (controller as never as {
-        exec: (type: WorkerIPCMessageType) => Promise<void>;
-      }).exec(WorkerIPCMessageType.Cleanup);
+      const pending = controller.accessForTestingOnly.exec(
+        WorkerIPCMessageType.Cleanup,
+      );
       const message = worker.messages.at(-1) as { msgId: number };
-      (controller as never as {
-        onWorkerMessage: (event: MessageEvent) => void;
-      }).onWorkerMessage(
+      controller.accessForTestingOnly.onWorkerMessage(
         new MessageEvent("message", {
           data: { msgId: message.msgId, error: "worker failed" },
         }),

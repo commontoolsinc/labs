@@ -89,7 +89,7 @@ export class WorkerController extends EventTarget {
         name: `worker-${this.#did}`,
       },
     );
-    this.#worker.addEventListener("message", this.onWorkerMessage);
+    this.#worker.addEventListener("message", this.#onWorkerMessage);
     this.#worker.addEventListener("error", this.#onWorkerError);
   }
 
@@ -99,7 +99,7 @@ export class WorkerController extends EventTarget {
     }
     this.#state = WorkerState.Initializing;
     try {
-      await this.exec(WorkerIPCMessageType.Initialize, {
+      await this.#exec(WorkerIPCMessageType.Initialize, {
         did: this.#did,
         toolshedUrl: this.#toolshedUrl,
         encodedIdentity: realmValueFromKeyPair(this.#identity.keyPair),
@@ -118,7 +118,7 @@ export class WorkerController extends EventTarget {
     if (this.#state !== WorkerState.Ready) {
       throw new Error("Worker not ready.");
     }
-    return await this.exec(WorkerIPCMessageType.Run, {
+    return await this.#exec(WorkerIPCMessageType.Run, {
       pieceId: bg.get().pieceId,
     });
   }
@@ -138,7 +138,7 @@ export class WorkerController extends EventTarget {
     this.#pending.clear();
 
     try {
-      await this.exec(WorkerIPCMessageType.Cleanup);
+      await this.#exec(WorkerIPCMessageType.Cleanup);
     } catch (err) {
       console.warn(
         `Failed to shutdown worker gracefully: ${err}`,
@@ -153,12 +153,25 @@ export class WorkerController extends EventTarget {
   }
 
   /**
-   * Sends a message and returns a promise that resolves with the response.
+   * The two steps of this instance that a test drives directly: sending a
+   * request to the worker, and receiving a message from it.
    *
-   * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
-   * drives this member directly.
+   * The name is the documentation. Nothing here is part of what this class
+   * promises, and code that reaches through it is written against internals
+   * that are free to change.
    */
-  private exec(type: WorkerIPCMessageType, data?: unknown): Promise<void> {
+  get accessForTestingOnly(): {
+    exec(type: WorkerIPCMessageType, data?: unknown): Promise<void>;
+    onWorkerMessage(event: MessageEvent): void;
+  } {
+    return {
+      exec: (type, data) => this.#exec(type, data),
+      onWorkerMessage: (event) => this.#onWorkerMessage(event),
+    };
+  }
+
+  /** Sends a message and returns a promise that resolves with the response. */
+  #exec(type: WorkerIPCMessageType, data?: unknown): Promise<void> {
     const msgId = this.#msgId++;
 
     const message: Record<string, unknown> = {
@@ -202,11 +215,7 @@ export class WorkerController extends EventTarget {
     });
   }
 
-  /**
-   * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
-   * drives this member directly.
-   */
-  private onWorkerMessage = (event: MessageEvent) => {
+  #onWorkerMessage = (event: MessageEvent) => {
     const response = event.data;
     if (!isWorkerIPCResponse(response)) {
       console.error(
