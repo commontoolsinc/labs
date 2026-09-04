@@ -87,6 +87,12 @@ type PrimitiveState = RealmCodecValue | FabricValue;
 type TaggedForm = { readonly tag: string; readonly payload: FabricValue };
 
 /**
+ * The payload of the conversion's string-length form: the length of the
+ * whole string, and the excerpt of it that was carried.
+ */
+type PartialString = { readonly length: number; readonly excerpt: string };
+
+/**
  * The limits a conversion runs within, each resolved from the option of the
  * same name: the limit stated, or its default when none was, capped at its
  * absolute maximum.
@@ -818,48 +824,34 @@ class DebugStringifier {
   }
 
   /**
-   * Renders the given lines of a string, as `#linesOf()` splits them. When
-   * the rendering is multi-line and there is more than one, each renders
-   * quoted on a line of its own, every line but the last followed by ` +` and
-   * every line but the first indented by `inner`. Otherwise they render as
-   * the one quoted string they came from.
-   */
-  #renderLines(lines: readonly string[], inner: string): string {
-    if (this.#isCompact || (lines.length === 1)) {
-      return JSON.stringify(lines.join(""));
-    }
-
-    return lines.map((line) => JSON.stringify(line)).join(` +\n${inner}`);
-  }
-
-  /**
    * Renders the string-length form: the excerpt as `#renderString()` renders
    * it, followed by the length of the whole. The length follows on the same
    * line, or when the rendering is multi-line, on a line of its own, indented
-   * by `inner`.
+   * by the inner indentation of `indent`.
    */
-  #renderPartialString(
-    partial: { readonly length: number; readonly excerpt: string },
-    indent: string,
-  ): string {
-    const inner = this.#innerIndent(indent);
+  #renderPartialString(partial: PartialString, indent: string): string {
     const rendered = this.#renderString(partial.excerpt, indent);
-    const separator = this.#isCompact ? " " : `\n${inner}`;
+    const separator = this.#isCompact ? " " : `\n${this.#innerIndent(indent)}`;
 
     return `${rendered} +${separator}... length: ${partial.length}`;
   }
 
   /**
    * Renders a string. When the rendering is multi-line and the string holds a
-   * line break, each of its lines renders on a line of its own, the first in
-   * place and the rest indented by the inner indentation of `indent`, joined
-   * by ` +`. Otherwise the string renders whole, quoted.
+   * line break, each of its lines renders quoted on a line of its own, every
+   * line but the last followed by ` +` and every line but the first indented
+   * by the inner indentation of `indent`. Otherwise the string renders whole,
+   * quoted.
    */
   #renderString(value: string, indent: string): string {
-    return this.#renderLines(
-      DebugStringifier.#linesOf(value),
-      this.#innerIndent(indent),
-    );
+    const lines = DebugStringifier.#linesOf(value);
+
+    if (this.#isCompact || (lines.length === 1)) {
+      return JSON.stringify(value);
+    }
+
+    const inner = this.#innerIndent(indent);
+    return lines.map((line) => JSON.stringify(line)).join(` +\n${inner}`);
   }
 
   //
@@ -938,9 +930,7 @@ class DebugStringifier {
    * shape of the string-length form, a plain object whose `length` is a
    * number and whose `excerpt` is a string, and `undefined` when it is not.
    */
-  static #partialStringOf(
-    value: FabricValue,
-  ): { readonly length: number; readonly excerpt: string } | undefined {
+  static #partialStringOf(value: FabricValue): PartialString | undefined {
     const length = DebugStringifier.#lengthOf(value);
     // deno-coverage-ignore-start
     // The conversion shapes the form no other way; see the `partialString`
