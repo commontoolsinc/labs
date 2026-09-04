@@ -1,8 +1,12 @@
-(() => {
-  const shared = { v: 1 };
-  return { a: shared, b: shared, c: [shared, { d: shared }] };
-})()
+{
+  "one object at four places": (() => {
+    const shared = { v: 1 };
+    return { a: shared, b: shared, c: [shared, { d: shared }] };
+  })(),
+}
 
+one object at four places:
+{a:{v:1},b:{v:1},c:[{v:1},{d:{v:1}}]}
 {
   a: {
     v: 1
@@ -21,5 +25,3 @@
     }
   ]
 }
-
-{a:{v:1},b:{v:1},c:[{v:1},{d:{v:1}}]}

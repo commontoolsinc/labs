@@ -1,21 +1,25 @@
-(() => {
-  // No shipped primitive's realm encoding nests, so this one stands in: its
-  // state holds an array with a buffer inside it, and an object with another
-  // object inside that.
-  class Nested extends FabricPrimitive {
-    static get [REALM_CODEC]() {
-      return {
-        tagForValue: () => "Nested@1",
-        encode: () => ({
-          list: [1, new Uint8Array([1, 2]).buffer, [true]],
-          inner: { b: new ArrayBuffer(0), deeper: { n: 3n } },
-        }),
-      };
+{
+  "nested state": (() => {
+    // No shipped primitive's realm encoding nests, so this one stands in: its
+    // state holds an array with a buffer inside it, and an object with another
+    // object inside that.
+    class Nested extends FabricPrimitive {
+      static get [REALM_CODEC]() {
+        return {
+          tagForValue: () => "Nested@1",
+          encode: () => ({
+            list: [1, new Uint8Array([1, 2]).buffer, [true]],
+            inner: { b: new ArrayBuffer(0), deeper: { n: 3n } },
+          }),
+        };
+      }
     }
-  }
-  return new Nested();
-})()
+    return new Nested();
+  })(),
+}
 
+nested state:
+/Nested(list:[1,buf[0102],[true]],inner:{b:buf[],deeper:{n:3n}})
 /Nested(
   list: [
     1,
@@ -31,5 +35,3 @@
     }
   }
 )
-
-/Nested(list:[1,buf[0102],[true]],inner:{b:buf[],deeper:{n:3n}})

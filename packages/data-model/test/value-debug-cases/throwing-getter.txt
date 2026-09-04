@@ -1,16 +1,18 @@
-(() => {
-  const v = {};
-  Object.defineProperty(v, "x", {
-    get: () => {
-      throw new Error("nope");
-    },
-    enumerable: true,
-  });
-  return v;
-})()
+{
+  "with a throwing getter": (() => {
+    const v = {};
+    Object.defineProperty(v, "x", {
+      get: () => {
+        throw new Error("nope");
+      },
+      enumerable: true,
+    });
+    return v;
+  })(),
+}
 
+with a throwing getter:
+{x:/unconvertible("nope")}
 {
   x: /unconvertible("nope")
 }
-
-{x:/unconvertible("nope")}

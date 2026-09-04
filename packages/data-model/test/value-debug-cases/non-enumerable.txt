@@ -1,12 +1,14 @@
-(() => {
-  // A non-enumerable property is left out of the rendering entirely.
-  const v = { shown: 1 };
-  Object.defineProperty(v, "hidden", { value: 2, enumerable: false });
-  return v;
-})()
+{
+  "with a non-enumerable property": (() => {
+    // A non-enumerable property is left out of the rendering entirely.
+    const v = { shown: 1 };
+    Object.defineProperty(v, "hidden", { value: 2, enumerable: false });
+    return v;
+  })(),
+}
 
+with a non-enumerable property:
+{shown:1}
 {
   shown: 1
 }
-
-{shown:1}

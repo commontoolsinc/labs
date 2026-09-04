@@ -4,10 +4,14 @@
   "object key": new Map([[{ k: 1 }, "v"]]),
 }
 
-{
-  empty: /Map(...),
-  "string keys": /Map(...),
-  "object key": /Map(...)
-}
+empty:
+/Map(...)
+/Map(...)
 
-{empty:/Map(...),"string keys":/Map(...),"object key":/Map(...)}
+string keys:
+/Map(...)
+/Map(...)
+
+object key:
+/Map(...)
+/Map(...)

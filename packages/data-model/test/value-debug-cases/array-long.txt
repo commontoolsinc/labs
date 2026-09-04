@@ -1,10 +1,14 @@
-(() => {
-  // An array with more elements than the default limit of 100 renders the
-  // elements below the limit, and then its actual length in place of the
-  // rest.
-  return Array.from({ length: 250 }, (_, i) => i);
-})()
+{
+  "250 elements": (() => {
+    // An array with more elements than the default limit of 100 renders the
+    // elements below the limit, and then its actual length in place of the
+    // rest.
+    return Array.from({ length: 250 }, (_, i) => i);
+  })(),
+}
 
+250 elements:
+[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,3...
 [
   0,
   1,
@@ -108,5 +112,3 @@
   99,
   ... length: 250
 ]
-
-[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,3...

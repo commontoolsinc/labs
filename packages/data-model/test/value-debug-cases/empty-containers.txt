@@ -4,19 +4,23 @@
   nested: [{}, [], { deeper: [[], {}] }],
 }
 
-{
-  object: {},
-  array: [],
-  nested: [
-    {},
-    [],
-    {
-      deeper: [
-        [],
-        {}
-      ]
-    }
-  ]
-}
+object:
+{}
+{}
 
-{object:{},array:[],nested:[{},[],{deeper:[[],{}]}]}
+array:
+[]
+[]
+
+nested:
+[{},[],{deeper:[[],{}]}]
+[
+  {},
+  [],
+  {
+    deeper: [
+      [],
+      {}
+    ]
+  }
+]

@@ -7,17 +7,18 @@
   return { data: new Data(), empty: new (class Empty {})() };
 })()
 
-{
-  data: /Data(
-    x: 1,
-    y: "two",
-    nested: {
-      z: [
-        3
-      ]
-    }
-  ),
-  empty: /Empty(...)
-}
+data:
+/Data(x:1,y:"two",nested:{z:[3]})
+/Data(
+  x: 1,
+  y: "two",
+  nested: {
+    z: [
+      3
+    ]
+  }
+)
 
-{data:/Data(x:1,y:"two",nested:{z:[3]}),empty:/Empty(...)}
+empty:
+/Empty(...)
+/Empty(...)

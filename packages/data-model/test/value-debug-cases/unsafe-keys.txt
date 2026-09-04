@@ -4,17 +4,21 @@
   several: { constructor: 3, prototype: 4 },
 }
 
+single:
+{constructor:1}
 {
-  single: {
-    constructor: 1
-  },
-  proto: {
-    __proto__: 2
-  },
-  several: {
-    constructor: 3,
-    prototype: 4
-  }
+  constructor: 1
 }
 
-{single:{constructor:1},proto:{__proto__:2},several:{constructor:3,prototype:4}}
+proto:
+{__proto__:2}
+{
+  __proto__: 2
+}
+
+several:
+{constructor:3,prototype:4}
+{
+  constructor: 3,
+  prototype: 4
+}

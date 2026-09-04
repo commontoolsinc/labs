@@ -29,11 +29,18 @@
   };
 })()
 
-{
-  cyclic: /Cyclic(<circle>),
-  set: /ToSet(/Set(...)),
-  fn: /ToFunction((...) => {...}),
-  symbol: /ToSymbol(Symbol("d"))
-}
+cyclic:
+/Cyclic(<circle>)
+/Cyclic(<circle>)
 
-{cyclic:/Cyclic(<circle>),set:/ToSet(/Set(...)),fn:/ToFunction((...)=>{...}),symbol:/ToSymbol(Sym...
+set:
+/ToSet(/Set(...))
+/ToSet(/Set(...))
+
+fn:
+/ToFunction((...)=>{...})
+/ToFunction((...) => {...})
+
+symbol:
+/ToSymbol(Symbol("d"))
+/ToSymbol(Symbol("d"))

@@ -1,15 +1,17 @@
-(() => {
-  // A function whose `name` cannot be read renders under the `/function` tag
-  // with the failure in place of the name.
-  const f = () => 1;
-  Object.defineProperty(f, "name", {
-    get() {
-      throw new Error("name trap");
-    },
-  });
-  return f;
-})()
+{
+  "name throws": (() => {
+    // A function whose `name` cannot be read renders under the `/function` tag
+    // with the failure in place of the name.
+    const f = () => 1;
+    Object.defineProperty(f, "name", {
+      get() {
+        throw new Error("name trap");
+      },
+    });
+    return f;
+  })(),
+}
 
+name throws:
 /function(/unconvertible("name trap"))
-
 /function(/unconvertible("name trap"))

@@ -5,11 +5,12 @@
   })(),
 }
 
-{
-  instance: /<anonymous>(...),
-  "with props": /<anonymous>(
-    x: 1
-  )
-}
+instance:
+/<anonymous>(...)
+/<anonymous>(...)
 
-{instance:/<anonymous>(...),"with props":/<anonymous>(x:1)}
+with props:
+/<anonymous>(x:1)
+/<anonymous>(
+  x: 1
+)

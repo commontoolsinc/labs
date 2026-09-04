@@ -1,13 +1,15 @@
-(() => {
-  const a = [1, 2];
-  a.push(a);
-  return a;
-})()
+{
+  "array holding itself": (() => {
+    const a = [1, 2];
+    a.push(a);
+    return a;
+  })(),
+}
 
+array holding itself:
+[1,2,<circle>]
 [
   1,
   2,
   <circle>
 ]
-
-[1,2,<circle>]

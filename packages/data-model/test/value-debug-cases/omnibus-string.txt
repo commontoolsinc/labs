@@ -10,6 +10,12 @@
   "reads like a bigint": "42n",
   "reads like a symbol": "@k",
   "lone surrogate": "\ud800",
+  "with quotes and a newline": "a string with \"quotes\" and a\nnewline",
+  "exactly 200 characters": "x".repeat(200),
+  "300 characters": "abcdefghij".repeat(30),
+  "seven lines": ["one", "two", "three", "four", "five", "six", "seven"].join("\n"),
+  "three lines of 90, cut inside the third":
+    "a".repeat(90) + "\n" + "b".repeat(90) + "\n" + "c".repeat(90) + "\n",
   "in an array": [
     "one line",
     "x".repeat(250),
@@ -18,33 +24,94 @@
   ],
 }
 
-{
-  empty: "",
-  plain: "hello",
-  "with quotes": "say \"hi\"",
-  "with newline": "a\n" +
-    "b",
-  "with backslash": "a\\b",
-  "non-ASCII": "héllo ☃",
-  "control character": "\u0001",
-  "reads like a token": "undefined",
-  "reads like a bigint": "42n",
-  "reads like a symbol": "@k",
-  "lone surrogate": "\ud800",
-  "in an array": [
-    "one line",
-    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" +
-      ... length: 250,
-    "one\n" +
-      "two\n" +
-      "three",
-    "one\n" +
-      "two\n" +
-      "three\n" +
-      "four\n" +
-      "five\n" +
-      ... length: 33
-  ]
-}
+empty:
+""
+""
 
-{empty:"",plain:"hello","with quotes":"say \"hi\"","with newline":"a\nb","with backslash":"a\\b",...
+plain:
+"hello"
+"hello"
+
+with quotes:
+"say \"hi\""
+"say \"hi\""
+
+with newline:
+"a\nb"
+"a\n" +
+  "b"
+
+with backslash:
+"a\\b"
+"a\\b"
+
+non-ASCII:
+"héllo ☃"
+"héllo ☃"
+
+control character:
+"\u0001"
+"\u0001"
+
+reads like a token:
+"undefined"
+"undefined"
+
+reads like a bigint:
+"42n"
+"42n"
+
+reads like a symbol:
+"@k"
+"@k"
+
+lone surrogate:
+"\ud800"
+"\ud800"
+
+with quotes and a newline:
+"a string with \"quotes\" and a\nnewline"
+"a string with \"quotes\" and a\n" +
+  "newline"
+
+exactly 200 characters:
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+
+300 characters:
+"abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdef...
+"abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij" +
+  ... length: 300
+
+seven lines:
+"one\ntwo\nthree\nfour\nfive\n"+...length:33
+"one\n" +
+  "two\n" +
+  "three\n" +
+  "four\n" +
+  "five\n" +
+  ... length: 33
+
+three lines of 90, cut inside the third:
+"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nbbbb...
+"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n" +
+  "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n" +
+  "cccccccccccccccccc" +
+  ... length: 273
+
+in an array:
+["one line","xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...
+[
+  "one line",
+  "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" +
+    ... length: 250,
+  "one\n" +
+    "two\n" +
+    "three",
+  "one\n" +
+    "two\n" +
+    "three\n" +
+    "four\n" +
+    "five\n" +
+    ... length: 33
+]

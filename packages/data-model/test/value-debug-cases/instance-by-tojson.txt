@@ -13,14 +13,15 @@
   return { object: new HasJson(), array: new JsonArray() };
 })()
 
-{
-  object: /HasJson(
-    j: 1
-  ),
-  array: /JsonArray([
-    1,
-    2
-  ])
-}
+object:
+/HasJson(j:1)
+/HasJson(
+  j: 1
+)
 
-{object:/HasJson(j:1),array:/JsonArray([1,2])}
+array:
+/JsonArray([1,2])
+/JsonArray([
+  1,
+  2
+])

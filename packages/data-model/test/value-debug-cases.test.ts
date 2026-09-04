@@ -1,10 +1,14 @@
 /**
  * The two debug string renderers, run over the cases recorded as files in
- * `value-debug-cases/`. Each file holds three items separated by blank lines:
- * a JavaScript expression which produces a value, the value's
- * `toIndentedDebugString()` rendering, and its `toCompactDebugString()`
- * rendering at a maximum length of 100. A recorded rendering is a fact about
- * the renderer, to be read as such when it changes.
+ * `value-debug-cases/`. A file opens with a JavaScript expression which
+ * produces a plain object, each of whose properties is one case: the key
+ * labels it, and the value is what gets rendered, on its own. After a blank
+ * line, the file records one section per property, the sections separated by
+ * blank lines: the label followed by a colon on a line of its own, then the
+ * value's `toCompactDebugString()` rendering at a maximum length of 100, then
+ * its `toIndentedDebugString()` rendering, which can run to several lines. A
+ * recorded rendering is a fact about the renderer, to be read as such when it
+ * changes.
  *
  * The expression is evaluated with every `FabricInstance` and
  * `FabricPrimitive` class in scope under its own name, along with the three
@@ -66,38 +70,64 @@ const SCOPE: Record<string, unknown> = Object.fromEntries([
   }),
 ]);
 
-/** Evaluates a case's expression, producing the value it describes. */
-function evaluateExpression(expression: string): unknown {
+/**
+ * Evaluates a case's expression, producing the cases it describes.
+ *
+ * @throws {Error} if the expression produces other than a plain object.
+ */
+function evaluateExpression(expression: string): Record<string, unknown> {
   const names = Object.keys(SCOPE);
   const values = names.map((name) => SCOPE[name]);
   const fn = new Function(
     ...names,
     `"use strict";\nreturn (\n${expression}\n);`,
   );
-  return fn(...values);
-}
+  const result = fn(...values);
 
-/**
- * Splits a case file into its expression and its two recorded renderings. A
- * file with other than three blank-line-separated parts is malformed, except
- * that a file with nothing but an expression is accepted when the recordings
- * are about to be rewritten.
- */
-function parseCaseFile(text: string): {
-  expression: string;
-  indented: string;
-  compact: string;
-} {
-  const parts = text.trimEnd().split("\n\n");
-
-  if (!((parts.length === 3) || (UPDATE_GOLDENS && (parts.length === 1)))) {
+  if (
+    (result === null) || (typeof result !== "object") ||
+    (Object.getPrototypeOf(result) !== Object.prototype)
+  ) {
+    const rendered = toCompactDebugString(result, { maxLength: 60 });
     throw new Error(
-      `Case file has ${parts.length} part(s) rather than three.`,
+      `Case expression must produce a plain object; got ${rendered}`,
     );
   }
 
-  const [expression = "", indented = "", compact = ""] = parts;
-  return { expression, indented, compact };
+  return result;
+}
+
+/**
+ * Splits a case file into its expression and its recorded sections, one per
+ * case. The expression runs to the first blank line, and the sections are
+ * what follow it, separated by blank lines; a rendering never holds a blank
+ * line, so the split is unambiguous. A file with nothing but an expression is
+ * accepted when the recordings are about to be rewritten.
+ */
+function parseCaseFile(text: string): {
+  expression: string;
+  sections: string[];
+} {
+  const [expression = "", ...sections] = text.trimEnd().split("\n\n");
+
+  if ((sections.length === 0) && !UPDATE_GOLDENS) {
+    throw new Error("Case file records no sections.");
+  }
+
+  return { expression, sections };
+}
+
+/**
+ * Renders one case as its recorded section: the label and a colon, the
+ * compact rendering, and the indented rendering, each starting on a line of
+ * its own.
+ */
+function renderSection(label: string, value: unknown): string {
+  const compact = toCompactDebugString(value, {
+    maxLength: COMPACT_MAX_LENGTH,
+  });
+  const indented = toIndentedDebugString(value);
+  return `${label}:\n${compact}\n${indented}`;
 }
 
 /** Names of the case files, sorted for a stable test order. */
@@ -111,22 +141,20 @@ describe("value-debug-cases", () => {
     it(`renders \`${name}\` as recorded`, async () => {
       const url = new URL(`${name}.txt`, CASES_DIR);
       const recorded = parseCaseFile(await Deno.readTextFile(url));
-      const value = evaluateExpression(recorded.expression);
-      const actual = {
-        indented: toIndentedDebugString(value),
-        compact: toCompactDebugString(value, { maxLength: COMPACT_MAX_LENGTH }),
-      };
+      const cases = evaluateExpression(recorded.expression);
+      const actual = Object.entries(cases).map(([label, value]) =>
+        renderSection(label, value)
+      );
 
       if (UPDATE_GOLDENS) {
         await Deno.writeTextFile(
           url,
-          `${recorded.expression}\n\n${actual.indented}\n\n${actual.compact}\n`,
+          `${recorded.expression}\n\n${actual.join("\n\n")}\n`,
         );
         return;
       }
 
-      expect(actual.indented).toBe(recorded.indented);
-      expect(actual.compact).toBe(recorded.compact);
+      expect(actual).toEqual(recorded.sections);
     });
   }
 });

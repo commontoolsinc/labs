@@ -1,10 +1,12 @@
-(() => {
-  // A `FabricPrimitive` with no `[CODEC]` makes `codecOf()` throw, and the
-  // renderer reports the class rather than the failure.
-  class RoguePrimitive extends FabricPrimitive {}
-  return new RoguePrimitive();
-})()
+{
+  "no codec": (() => {
+    // A `FabricPrimitive` with no `[CODEC]` makes `codecOf()` throw, and the
+    // renderer reports the class rather than the failure.
+    class RoguePrimitive extends FabricPrimitive {}
+    return new RoguePrimitive();
+  })(),
+}
 
+no codec:
 /RoguePrimitive(...)
-
 /RoguePrimitive(...)

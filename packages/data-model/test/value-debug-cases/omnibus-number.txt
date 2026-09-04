@@ -16,22 +16,62 @@
   "negative infinity": -Infinity,
 }
 
-{
-  zero: 0,
-  "negative zero": -0,
-  integer: 42,
-  "negative integer": -7,
-  fraction: 3.14,
-  large: 1e+21,
-  small: 1e-7,
-  "max safe integer": 9007199254740991,
-  "min safe integer": -9007199254740991,
-  "max value": 1.7976931348623157e+308,
-  "min value": 5e-324,
-  epsilon: 2.220446049250313e-16,
-  NaN: NaN,
-  "positive infinity": Infinity,
-  "negative infinity": -Infinity
-}
+zero:
+0
+0
 
-{zero:0,"negative zero":-0,integer:42,"negative integer":-7,fraction:3.14,large:1e+21,small:1e-7,...
+negative zero:
+-0
+-0
+
+integer:
+42
+42
+
+negative integer:
+-7
+-7
+
+fraction:
+3.14
+3.14
+
+large:
+1e+21
+1e+21
+
+small:
+1e-7
+1e-7
+
+max safe integer:
+9007199254740991
+9007199254740991
+
+min safe integer:
+-9007199254740991
+-9007199254740991
+
+max value:
+1.7976931348623157e+308
+1.7976931348623157e+308
+
+min value:
+5e-324
+5e-324
+
+epsilon:
+2.220446049250313e-16
+2.220446049250313e-16
+
+NaN:
+NaN
+NaN
+
+positive infinity:
+Infinity
+Infinity
+
+negative infinity:
+-Infinity
+-Infinity
