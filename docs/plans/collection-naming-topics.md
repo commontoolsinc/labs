@@ -14,11 +14,11 @@ This block is LIVE: the change that moves a stage updates it here.
 | --- | --- |
 | S0 — decisions ruled, plan filed | on main (#6882) |
 | S1 — the library and the exemplar board own a member namespace | on main (#6882) |
-| S1b — index rows are the members | built, in review |
-| S2 — `top/42` resolves at the CLI | built, in review |
-| S2b — assignment refuses by default | built, in review |
-| S3 — the shell opens `/<space>/top/42` | not started |
-| S4 — `#42` in text | building |
+| S1b — index rows are the members | on main (#6886) |
+| S2 — `top/42` resolves at the CLI | on main (#6890) |
+| S2b — assignment refuses by default | built, in review (#6898) |
+| S3 — the shell opens `/<space>/top/42` | built, in review (#6896) |
+| S4 — `#42` in text | on main (#6887) |
 | S6 — graft onto Topics | not started; Mike's call after S4 |
 | S5 — deferred, not scheduled | — |
 

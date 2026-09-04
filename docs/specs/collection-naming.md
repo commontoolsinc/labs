@@ -494,10 +494,13 @@ and read by `handlePieceGetSlug`
 (`packages/runtime-client/backends/runtime-processor.ts`); the shell rewrites a
 visited identity URL to that name. One slot cannot hold both a member name and a
 space-level name, so the canonical URL becomes whichever was written last. Two
-further gaps close here: the entry is never cleared from a previous target when
-a name is retargeted, and `setPieceSlug` writes target metadata only for piece
-roots, so a collection-targeted name has no reverse entry at all. The map needs
-a structured form that distinguishes the two and designates one as canonical.
+further gaps were to close here, and one of them has closed ahead of this
+step: an assignment clears the `slug` entry from the holder it takes a name
+from, in the transaction that writes the new redirect, so a retarget no longer
+leaves a document claiming a name it has lost (step 2). The other remains —
+`setPieceSlug` writes target metadata only for piece roots, so a
+collection-targeted name has no reverse entry at all. The map needs a
+structured form that distinguishes the two and designates one as canonical.
 **This is a prerequisite: giving collections member names before it lands makes
 URL rewriting nondeterministic.**
 
