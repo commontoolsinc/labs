@@ -9,8 +9,11 @@ function. Both are called an inline import here.
 
 How the declarations at the top are then grouped, collated and sorted, and how
 many statements one module may take, is the `Imports` section of
-[`DEVELOPMENT.md`](DEVELOPMENT.md). This document is about what may not be
-written outside that list at all.
+[`DEVELOPMENT.md`](DEVELOPMENT.md). One rule of that section is enforced too,
+by `cf-import-list/one-statement-per-kind` in
+[`tasks/lint-import-list.ts`](../../tasks/lint-import-list.ts): a module is
+imported in one statement of each kind, never two. That section documents it.
+This document is about what may not be written outside the list at all.
 
 Two lint rules keep them out. They live in
 [`tasks/lint-inline-imports.ts`](../../tasks/lint-inline-imports.ts) and are
