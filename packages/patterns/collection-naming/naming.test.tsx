@@ -10,7 +10,9 @@ import {
   assignName,
   nameOf,
   type NamesMap,
+  namesTable,
   nextNameAmong,
+  ownName,
   SEQUENCE_NAMING,
 } from "./naming.ts";
 
@@ -106,6 +108,29 @@ export default pattern(() => {
     Object.keys(names.get()).toSorted().join(",") === "007,1,1e3,2,3,4,abc"
   );
 
+  // The table publishes exactly the names the grammar admits. A map holding
+  // `1`, `abc`, and `007` yields one row, and the member stored under the
+  // foreign keys has no name by the table's own lookup.
+  const tableMap = new Writable<NamesMap>({});
+  const named = new Writable({ title: "named" });
+  const underForeign = new Writable({ title: "under a foreign key" });
+  const table = namesTable({ names: tableMap });
+  const nameOfNamed = ownName({ table, self: named });
+  const nameUnderForeign = ownName({ table, self: underForeign });
+  const action_fill_the_table_map = action(() => {
+    tableMap.key("1").set(named);
+    tableMap.key("abc").set(underForeign);
+    tableMap.key("007").set(underForeign);
+  });
+  const assert_table_publishes_only_names = assert(() =>
+    Object.keys(tableMap.get()).toSorted().join(",") === "007,1,abc" &&
+    (table ?? []).length === 1 &&
+    table?.[0]?.name === "1" &&
+    equals(table?.[0]?.member as object, named) &&
+    nameOfNamed === "1" &&
+    nameUnderForeign === undefined
+  );
+
   // The reverse lookup matches by identity, and a member the table does not
   // hold has no name.
   const assert_reverse_lookup = assert(() => {
@@ -141,6 +166,8 @@ export default pattern(() => {
       { action: action_foreign_keys_land },
       { action: action_allocate_after_them },
       { assertion: assert_allocation_ignores_foreign_keys },
+      { action: action_fill_the_table_map },
+      { assertion: assert_table_publishes_only_names },
       { assertion: assert_reverse_lookup },
       { assertion: assert_declaration },
     ],

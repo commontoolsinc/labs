@@ -226,9 +226,11 @@ export function nameOf(
 
 /**
  * The names table derived from the namespace: one row per named member,
- * addressed by the member. A collection derives this once and hands it to
- * each member it creates, so a member's reverse lookup is a scan of the rows
- * rather than a read of the map.
+ * addressed by the member. The table publishes exactly the names the grammar
+ * admits — `isMemberName()` — so a key a foreign writer put in the map is no
+ * member's name here, as it is no name to the allocator. A collection derives
+ * this once and hands it to each member it creates, so a member's reverse
+ * lookup is a scan of the rows rather than a read of the map.
  */
 export const namesTable = lift(
   (
@@ -242,13 +244,15 @@ export const namesTable = lift(
       names: Default<Record<string, ReadonlyCell<unknown>>, {}>;
     },
   ): NamesTableRow[] => {
-    // An entry with nothing behind it yet (mid-sync) reads as `undefined`,
-    // has no identity to address a row by, and gets no row rather than a
-    // junk one. Nothing else is filtered: the values are cells, so a value a
-    // foreign writer stored under a key — `null`, a scalar — arrives as a
-    // cell too, and telling it apart would mean reading through the member.
+    // An entry under a key the grammar does not admit is not a name and gets
+    // no row. An entry with nothing behind it yet (mid-sync) reads as
+    // `undefined`, has no identity to address a row by, and gets no row
+    // rather than a junk one. Nothing else is filtered: the values are cells,
+    // so a value a foreign writer stored under a name — `null`, a scalar —
+    // arrives as a cell too, and telling it apart would mean reading through
+    // the member.
     const rows: unknown[] = Object.entries(names)
-      .filter(([, member]) => member !== undefined)
+      .filter(([name, member]) => isMemberName(name) && member !== undefined)
       .map(([name, member]) =>
         Writable.for<NamesTableRow>(member).set({ member, name })
       );
