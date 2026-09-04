@@ -592,11 +592,11 @@ Deno.test("a supplied genesis ACL is the space's first and only commit — no wi
       [1],
       "genesis must be the only commit — no intermediate default was written",
     );
-    assertEquals((await server.readDocument(space, aclId))?.value, supplied);
-    assert(
-      !("*" in (await server.readDocument(space, aclId))!.value as object),
-      "no wildcard row",
-    );
+    const stored = (await server.readDocument(space, aclId))?.value as
+      | Record<string, unknown>
+      | undefined;
+    assertEquals(stored, supplied);
+    assert(stored !== undefined && !("*" in stored), "no wildcard row");
     assertEquals(factory.principals, [
       daemon.did(),
       spaceIdentity.did(),
