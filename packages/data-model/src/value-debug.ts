@@ -53,6 +53,21 @@ const ABSOLUTE_MAX_STRING_LENGTH = 100000;
 const DEFAULT_MAX_STRING_LENGTH = 200;
 
 /**
+ * Number of lines of a string a conversion carries whole whatever its options
+ * say, so that a result is bounded in size whatever the input.
+ */
+const ABSOLUTE_MAX_STRING_LINES = 1000;
+
+/**
+ * Number of lines of a string a conversion carries whole, when its options do
+ * not say.
+ */
+const DEFAULT_MAX_STRING_LINES = 5;
+
+/** Matches one line break, of any of the three forms a string can hold. */
+const LINE_BREAK_REGEX = /\r\n|[\r\n]/g;
+
+/**
  * What a `FabricPrimitive`'s codec hands back to be rendered: the
  * realm-crossing encoding of a terminal codec, or the expansion of a
  * nonterminal one into other `FabricValue`s.
@@ -74,6 +89,7 @@ type ConversionLimits = {
   readonly maxDepth: number;
   readonly maxArrayLength: number;
   readonly maxStringLength: number;
+  readonly maxStringLines: number;
 };
 
 /**
@@ -230,23 +246,29 @@ class DebugConverter {
   }
 
   /**
-   * Converts a string. A string longer than the maximum string length is
-   * converted to a `/partialString` form carrying its length and an excerpt:
-   * its first characters up to that limit, less a final high surrogate, so
-   * that the excerpt does not end in half of a surrogate pair. That form
-   * nests two levels, so a result holding one can run one level past the
-   * maximum nesting depth.
+   * Converts a string. A string longer than the maximum string length, or
+   * holding more lines than the maximum string lines, is converted to a
+   * `/partialString` form carrying its length and an excerpt: its first
+   * characters up to the length limit, or its first lines up to the line
+   * limit, whichever is shorter. A character cut can land inside a surrogate
+   * pair, so an excerpt so cut loses a final high surrogate; a line cut lands
+   * just past a line break, which the excerpt keeps. That form nests two
+   * levels, so a result holding one can run one level past the maximum
+   * nesting depth.
    */
   #convertString(value: string): FabricValue {
+    const { maxStringLength, maxStringLines } = this.#limits;
     const length = value.length;
-    const maxLength = this.#limits.maxStringLength;
+    const lengthCut = Math.min(length, maxStringLength);
+    const lineCut = DebugConverter.#lineCutOf(value, maxStringLines);
+    const cut = Math.min(lengthCut, lineCut);
 
-    if (length <= maxLength) {
+    if (cut === length) {
       return value;
     }
 
-    let excerpt = value.slice(0, maxLength);
-    if (/[\uD800-\uDBFF]$/.test(excerpt)) {
+    let excerpt = value.slice(0, cut);
+    if ((cut < lineCut) && /[\uD800-\uDBFF]$/.test(excerpt)) {
       excerpt = excerpt.slice(0, -1);
     }
 
@@ -362,6 +384,26 @@ class DebugConverter {
   //
   // Static members
   //
+
+  /**
+   * Returns the index at which `value` ends were it cut to its first
+   * `maxLines` lines: the index just past the line break which ends that many
+   * lines, or the length of `value` when it holds no more lines than that. A
+   * line break at the very end of `value` ends its last line rather than
+   * starting an empty one, which is a consequence of the cut landing past it.
+   */
+  static #lineCutOf(value: string, maxLines: number): number {
+    let lines = 1;
+
+    for (const lineBreak of value.matchAll(LINE_BREAK_REGEX)) {
+      if (lines === maxLines) {
+        return lineBreak.index + lineBreak[0].length;
+      }
+      lines++;
+    }
+
+    return value.length;
+  }
 
   /**
    * Produces the `/unconvertible` result form which stands in for a value whose
@@ -920,8 +962,9 @@ function checkedLimit(
 /**
  * Helper for the entry points, which validates `options` and returns the
  * limits they call for: each limit stated, or when not, `defaultMaxDepth` for
- * the depth and the default for either length, all capped at their absolute
- * maximums.
+ * the depth and the default for each of the others, all capped at their
+ * absolute maximums. The string length defaults to `Infinity` rather than
+ * to its usual default when the options state a line count.
  *
  * @throws {Error} if `options` is not a plain object, or if one of its limits
  * is none of a positive integer, `Infinity`, or `undefined`.
@@ -931,6 +974,12 @@ function checkedLimits(
   defaultMaxDepth: number,
 ): ConversionLimits {
   checkOptions(options);
+
+  // A caller who states a line count and no length gets a line bound alone,
+  // not the default length on top of it.
+  const defaultMaxStringLength = (options?.maxStringLines === undefined)
+    ? DEFAULT_MAX_STRING_LENGTH
+    : Infinity;
 
   return {
     maxDepth: checkedLimit(
@@ -948,8 +997,14 @@ function checkedLimits(
     maxStringLength: checkedLimit(
       "maxStringLength",
       options?.maxStringLength,
-      DEFAULT_MAX_STRING_LENGTH,
+      defaultMaxStringLength,
       ABSOLUTE_MAX_STRING_LENGTH,
+    ),
+    maxStringLines: checkedLimit(
+      "maxStringLines",
+      options?.maxStringLines,
+      DEFAULT_MAX_STRING_LINES,
+      ABSOLUTE_MAX_STRING_LINES,
     ),
   };
 }
@@ -1100,12 +1155,15 @@ export function toDebugKindString(value: unknown): string {
  * be reasonably achieved.
  *
  * The limits of the result -- its nesting, the number of elements of an array
- * it represents, and the length of a string it carries whole -- and a replacer
- * to consult are the `maxDepth`, `maxArrayLength`, `maxStringLength`, and
- * `replacer` of `options`. When there is no nesting limit given, the result
- * nests as deep as reasonably possible; when there is no array length given,
- * an array is represented to one hundred elements; and when there is no
- * string length given, a string is carried whole to two hundred characters.
+ * it represents, and the length and number of lines of a string it carries
+ * whole -- and a replacer to consult are the `maxDepth`, `maxArrayLength`,
+ * `maxStringLength`, `maxStringLines`, and `replacer` of `options`. When
+ * there is no nesting limit given, the result nests as deep as reasonably
+ * possible; when there is no array length given, an array is represented to
+ * one hundred elements; when there is no string line count given, a string is
+ * carried whole to five lines; and when there is no string length given, a
+ * string is carried whole to two hundred characters, or as long as the
+ * conversion allows when a line count is given.
  *
  * If the conversion could not be completed (stack overflow, object
  * `toJSON()` conversion error, etc.), this function returns the literal value

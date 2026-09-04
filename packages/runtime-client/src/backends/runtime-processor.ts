@@ -631,7 +631,7 @@ function newConsoleDebugReplacer(): (value: any) => any {
 export function toConsoleDebugValue(value: unknown): FabricValue {
   return toStructuredDebugValue(value, {
     maxDepth: MAX_CONSOLE_DEBUG_DEPTH,
-    maxStringLength: Infinity,
+    maxStringLines: Infinity,
     replacer: newConsoleDebugReplacer(),
   });
 }
