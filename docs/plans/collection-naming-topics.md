@@ -147,10 +147,15 @@ Scope: `packages/piece/src/slugs.ts`, `packages/runner/src/slug-resolution.ts`,
 1. `cf piece set-slug top <board>/names` writes a slug at a non-root path,
    and `cf piece slugs` lists it, naming the containing piece. Both demos run
    on the exemplar board.
-2. `resolvePieceAddress` accepts a slug whose target, after the path, is a
-   link to a piece: `cf cell get //<space>/top/42 title`,
+2. A reference that names a collection and then a member resolves to that
+   member: `cf cell get //<space>/top/42 title`,
    `cf piece describe --cell //<space>/top/42`, and
-   `cf piece call --cell //<space>/top/42 <verb>` all reach the member.
+   `cf piece call --cell //<space>/top/42 <verb>` all reach it. A reference
+   that stops at the collection refuses, naming the piece that holds it. The
+   walk lives in `resolvePieceReference`, which takes an address and the path
+   written after it; `resolvePieceAddress` is its no-path case and refuses a
+   collection, because a caller holding an address alone has nothing to walk
+   with.
 3. A slug resolving to a non-piece with no further path fails with a message
    naming the containing piece.
 4. `//<space>/top/999` fails with "no member 999 in top".

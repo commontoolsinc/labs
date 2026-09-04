@@ -266,10 +266,16 @@ in-scope identity that the collection lacks makes the survey exit nonzero,
 naming the piece. A `--list` survey reads exactly the pieces named and makes no
 containment claim; each entry takes either reference form, and a canonical
 entry's embedded space composes the way it does on `--cell` — supplying the
-space when `--space` is absent, agreeing with it otherwise. Read-only. To watch
-the surface work rather than read about it, `integration/bulk-ops-demo.sh`
-narrates the whole of it — survey, repair, retarget, and the reversal — end to
-end against a running server.
+space when `--space` is absent, agreeing with it otherwise. Read-only.
+
+The holder is a piece and `--path` names the collection inside it, so neither
+the holder's address nor a `--list` entry carries a path of its own, and one
+that does is refused rather than dropped. A collection's member is therefore
+addressed as a holder by its own handle rather than as `/top/2`.
+
+To watch the surface work rather than read about it,
+`integration/bulk-ops-demo.sh` narrates the whole of it — survey, repair,
+retarget, and the reversal — end to end against a running server.
 
 `cf piece repair` runs a caller-supplied fixer — a TypeScript module whose
 default export is a pure transform from a piece's stored input document to the
@@ -339,6 +345,12 @@ or for a slug into a cell inside a piece, that piece and the path, printed
 assignments made since it existed, so a slug written by an older client still
 resolves but is not listed — a slug document's id is derived from its name, and
 nothing can enumerate names it was never told.
+
+Completion for a `piece/path` slot — both `cf piece link` endpoints and the
+source of `set-slug` — offers the space's slugs and piece ids before the
+separator and that piece's cell keys after it. After a slug naming a collection
+it offers nothing: reading the member names means reading the map, and that is a
+second load for a keystroke to start.
 
 `cf piece set-slug <slug> <source>` takes any address as its source. A handle
 with a path, `/of:fid1:…/names`, names a cell inside that piece, which is how a
