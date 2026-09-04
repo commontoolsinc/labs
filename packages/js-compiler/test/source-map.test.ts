@@ -9,6 +9,7 @@ import {
   getTypeScriptEnvironmentTypes,
   identitySourceMap,
   InMemoryProgram,
+  parseSourceMap,
   type SourceMap,
   SourceMapParser,
   TypeScriptCompiler,
@@ -961,5 +962,13 @@ describe("deferred composition inputs and lazy registration (CT-1819)", () => {
     // evicts rather than grows). A plain Map would give 4096 then 8192.
     expect(afterFirst).toBeLessThan(4096);
     expect(afterSecond).toBe(afterFirst);
+  });
+});
+
+describe("parseSourceMap()", () => {
+  it("throws naming what the document holds, given JSON that is not a source map", () => {
+    expect(() => parseSourceMap('{"foo": 1}')).toThrow(
+      "Could not parse source map: {\n  foo: 1\n}",
+    );
   });
 });

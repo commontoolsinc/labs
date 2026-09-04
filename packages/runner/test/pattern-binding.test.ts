@@ -234,6 +234,10 @@ describe("pattern-binding", () => {
       // A genuine mismatch throws.
       expect(() => sendValueToBinding(tx, testCell, argumentCellLink, 42, 43))
         .toThrow("Got 43 instead of 42");
+      // A produced object is rendered, not stringified as `[object Object]`.
+      expect(() =>
+        sendValueToBinding(tx, testCell, argumentCellLink, 42, { a: 1 })
+      ).toThrow("Got {a:1} instead of 42");
     });
 
     it("normalizes cell values before writing a narrower scoped binding", () => {

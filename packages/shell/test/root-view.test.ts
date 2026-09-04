@@ -99,6 +99,20 @@ function templateMarkup(value: unknown): string {
 }
 
 describe("XRootView", () => {
+  it("throws naming the value, given a command event carrying a non-command", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const event = new CustomEvent("command", { detail: { type: "bogus" } });
+      expect(() => view.onCommand(event)).toThrow(
+        'Received a non-command: `{type:"bogus"}`',
+      );
+    } finally {
+      restore();
+    }
+  });
+
   it("constructs with default app state and renders the app view", async () => {
     const restore = installBrowserGlobals();
     try {

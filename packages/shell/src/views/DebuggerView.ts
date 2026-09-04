@@ -39,6 +39,15 @@ const DEBUGGER_VALUE_OPTIONS: DebugValueOptions = {
 };
 
 /**
+ * Rendering options for the runs of a non-idempotent report: the debugger's,
+ * but deep enough to reach the values under each run's `reads` and `writes`.
+ */
+const RUN_DETAIL_OPTIONS: DebugValueOptions = {
+  ...DEBUGGER_VALUE_OPTIONS,
+  maxDepth: 6,
+};
+
+/**
  * Hierarchical topic definitions for filtering telemetry events.
  * Topics can have subtopics for more granular filtering.
  */
@@ -2544,7 +2553,10 @@ export class XDebuggerView extends LitElement {
                             </summary>
                             <pre
                               style="margin: 0.25rem 0 0; font-size: 0.625rem; color: #cbd5e1; overflow: auto; max-height: 8rem;"
-                            >${JSON.stringify(report.runs, null, 2)}</pre>
+                            >${toIndentedDebugString(
+                              report.runs,
+                              RUN_DETAIL_OPTIONS,
+                            )}</pre>
                           </details>
                         </div>
                       `,

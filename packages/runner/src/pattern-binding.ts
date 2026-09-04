@@ -471,7 +471,13 @@ function sendValueToBindingInner<T>(
     // `Object.is`, not `===`: a constant `NaN` binding legitimately matches a
     // produced `NaN`, and `0` vs `-0` is a genuine mismatch.
     if (!Object.is(binding, value)) {
-      throw new Error(`Got ${value} instead of ${binding}`);
+      throw new Error(
+        `Got ${
+          toCompactDebugString(value, { maxLength: MAX_BINDING_RENDER })
+        } instead of ${
+          toCompactDebugString(binding, { maxLength: MAX_BINDING_RENDER })
+        }`,
+      );
     }
   }
 }

@@ -1,3 +1,4 @@
+import { toCompactDebugString } from "@commonfabric/data-model";
 import { type DID, type Identity, KeyStore } from "@commonfabric/identity";
 import { resolveSpaceDid, RuntimeInternals } from "@commonfabric/lib-shell";
 import {
@@ -638,7 +639,11 @@ export class XRootView extends BaseView implements ShellApp {
       case "set-config":
         return this.setConfig(command.key, command.value);
     }
-    throw new Error(`Received a non-command: ${JSON.stringify(command)}`);
+    throw new Error(
+      `Received a non-command: ${
+        toCompactDebugString(command, { maxLength: 200, backtickQuote: true })
+      }`,
+    );
   }
 
   state(): AppState {

@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { stub } from "@std/testing/mock";
 import {
   ADOPT_SERVER_FLAGS_ENV,
   adoptServerExperimentalOptions,
@@ -407,6 +408,19 @@ describe("runtimePresets conformance (CT-1814)", () => {
           serverExecution: false,
           readerSchemaPrecedence: false,
         });
+      });
+
+      it("warns naming the value, and skips the flag, given a value that is not a boolean", () => {
+        const warn = stub(console, "warn");
+        let parsed;
+        try {
+          parsed = parseServerExperimentalOptions({ modernCellRep: "yes" });
+        } finally {
+          warn.restore();
+        }
+        expect(parsed).toEqual({ readerSchemaPrecedence: false });
+        expect(warn.calls.length).toBe(1);
+        expect(warn.calls[0].args[0]).toContain('modernCellRep=`"yes"`');
       });
 
       it("adopts legacy false for an absent readerSchemaPrecedence declaration", () => {
