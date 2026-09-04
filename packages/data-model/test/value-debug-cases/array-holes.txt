@@ -1,0 +1,91 @@
+{
+  // A hole renders as `void`, and a run of holes as `void` times the length
+  // of the run.
+  "with holes in the middle": [1, , 3, , , 6],
+  "hole at the start": [, 1],
+  "two holes at the start": [, , 1],
+  "hole at the end": [1, , ],
+  "two holes at the end": [1, , , ],
+  "all holes, length 1": [,],
+  "all holes, length 2": [, ,],
+  "all holes, length 50": new Array(50),
+  "all holes across the limit": new Array(500),
+  "holes across the limit": (() => {
+    // A run of holes which crosses the default limit of 100 renders as only
+    // the holes below the limit.
+    const a = [1];
+    a.length = 250;
+    return a;
+  })(),
+}
+
+with holes in the middle:
+[1,void,3,void*2,6]
+[
+  1,
+  void,
+  3,
+  void * 2,
+  6
+]
+
+hole at the start:
+[void,1]
+[
+  void,
+  1
+]
+
+two holes at the start:
+[void*2,1]
+[
+  void * 2,
+  1
+]
+
+hole at the end:
+[1,void]
+[
+  1,
+  void
+]
+
+two holes at the end:
+[1,void*2]
+[
+  1,
+  void * 2
+]
+
+all holes, length 1:
+[void]
+[
+  void
+]
+
+all holes, length 2:
+[void*2]
+[
+  void * 2
+]
+
+all holes, length 50:
+[void*50]
+[
+  void * 50
+]
+
+all holes across the limit:
+[void*100,...length:500]
+[
+  void * 100,
+  ... length: 500
+]
+
+holes across the limit:
+[1,void*99,...length:250]
+[
+  1,
+  void * 99,
+  ... length: 250
+]

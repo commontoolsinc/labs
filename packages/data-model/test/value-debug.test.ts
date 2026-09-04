@@ -162,11 +162,11 @@ describe("value-debug", () => {
 
       it("renders only the holes below the limit of a run of holes which crosses it", () => {
         expect(toCompactDebugString([1, , , , , 6], { maxArrayLength: 3 }))
-          .toBe("[1,<2 holes>,...length:6]");
+          .toBe("[1,void*2,...length:6]");
         expect(toCompactDebugString([1, , , , , 6], { maxArrayLength: 2 }))
-          .toBe("[1,<hole>,...length:6]");
+          .toBe("[1,void,...length:6]");
         expect(toCompactDebugString([1, , 3, , , , 7], { maxArrayLength: 4 }))
-          .toBe("[1,<hole>,3,<hole>,...length:7]");
+          .toBe("[1,void,3,void,...length:7]");
       });
 
       it("renders no more than 100 elements when the limit is not given", () => {
@@ -331,7 +331,7 @@ describe("value-debug", () => {
 
     it("renders the array's length on its own line in place of the elements past the limit", () => {
       expect(toIndentedDebugString([1, , , 4, 5], { maxArrayLength: 3 }))
-        .toBe("[\n  1,\n  <2 holes>,\n  ... length: 5\n]");
+        .toBe("[\n  1,\n  void * 2,\n  ... length: 5\n]");
     });
 
     it("renders the object's property count on its own line in place of the properties past the limit", () => {

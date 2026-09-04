@@ -524,9 +524,10 @@ class DebugStringifier {
     const parts: string[] = [];
 
     // Iterated by index rather than by element, so that a hole is noticed. A
-    // run of holes renders as a single part which says how long the run is.
-    // The length form the conversion leaves at the end of a truncated array is
-    // an element like any other, so a run of holes ends at it.
+    // hole renders as `void`, and a run of holes as a single `void` times the
+    // length of the run. The length form the conversion leaves at the end of
+    // a truncated array is an element like any other, so a run of holes ends
+    // at it.
     for (let i = 0; i < value.length; i++) {
       if (i in value) {
         parts.push(this.#renderSubvalue(value[i], inner));
@@ -538,7 +539,11 @@ class DebugStringifier {
         holeCount++;
         i++;
       }
-      parts.push((holeCount === 1) ? "<hole>" : `<${holeCount} holes>`);
+      parts.push(
+        (holeCount === 1)
+          ? "void"
+          : `void${this.#spacer}*${this.#spacer}${holeCount}`,
+      );
     }
 
     return this.#renderContainer("[", "]", parts, indent);
