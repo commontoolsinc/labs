@@ -10,6 +10,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Cast-free patterns](cast-free-patterns.md) sequences shared type and API
+  repairs, migration of authored patterns and their tests, and enforcement
+  through lint and new-source admission.
 - [Acquiring skills from the open internet](external-skill-acquisition.md)
   splits discovery from acquisition against a public skill registry: the
   registry answers what exists, a digest-verified `.well-known` entry or a git
