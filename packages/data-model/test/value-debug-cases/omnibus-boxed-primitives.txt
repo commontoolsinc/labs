@@ -11,27 +11,48 @@
 number:
 /Number("3")
 /Number("3")
+{
+  "/Number": "3"
+}
 
 negative zero:
 /Number("0")
 /Number("0")
+{
+  "/Number": "0"
+}
 
 string:
 /String("x")
 /String("x")
+{
+  "/String": "x"
+}
 
 empty string:
 /String("")
 /String("")
+{
+  "/String": ""
+}
 
 boolean:
 /Boolean("true")
 /Boolean("true")
+{
+  "/Boolean": "true"
+}
 
 bigint:
 /BigInt("42")
 /BigInt("42")
+{
+  "/BigInt": "42"
+}
 
 symbol:
 /Symbol("Symbol(s)")
 /Symbol("Symbol(s)")
+{
+  "/Symbol": "Symbol(s)"
+}

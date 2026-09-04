@@ -12,3 +12,6 @@
 instance:
 /unconvertible("nope")
 /unconvertible("nope")
+{
+  "/unconvertible": "nope"
+}

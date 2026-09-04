@@ -19,3 +19,18 @@ object holding itself:
   },
   self: <circle>
 }
+{
+  x: 1,
+  inner: {
+    y: 2,
+    root: {
+      "/circle": 0
+    },
+    self: {
+      "/circle": 1
+    }
+  },
+  self: {
+    "/circle": 0
+  }
+}

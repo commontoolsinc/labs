@@ -13,3 +13,10 @@ array holding itself:
   2,
   <circle>
 ]
+[
+  1,
+  2,
+  {
+    "/circle": 0
+  }
+]

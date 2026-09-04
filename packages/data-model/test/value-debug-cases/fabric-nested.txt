@@ -7,9 +7,14 @@
 when:
 /EpochNsec(1n)
 /EpochNsec(1n)
+/EpochNsec(1n)
 
 list:
 [/EpochNsec(2n),/Bytes(buf[01])]
+[
+  /EpochNsec(2n),
+  /Bytes(buf [01])
+]
 [
   /EpochNsec(2n),
   /Bytes(buf [01])
@@ -23,4 +28,13 @@ deeper:
     path: [],
     space: "did:key:z"
   )
+}
+{
+  link: {
+    "/Link@1": {
+      id: "of:fid1:abc",
+      path: [],
+      space: "did:key:z"
+    }
+  }
 }

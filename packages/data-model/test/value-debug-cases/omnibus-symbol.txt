@@ -18,6 +18,11 @@ interned:
   "other key": @"my-key",
   "empty key": @""
 }
+{
+  "identifier key": @k,
+  "other key": @"my-key",
+  "empty key": @""
+}
 
 unique:
 {described:Symbol("d"),"no description":Symbol(),"empty description":Symbol("")}
@@ -25,4 +30,15 @@ unique:
   described: Symbol("d"),
   "no description": Symbol(),
   "empty description": Symbol("")
+}
+{
+  described: {
+    "/uniqueSymbol": "d"
+  },
+  "no description": {
+    "/uniqueSymbol": undefined
+  },
+  "empty description": {
+    "/uniqueSymbol": ""
+  }
 }

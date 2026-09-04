@@ -15,3 +15,7 @@ with symbol keys:
   shown: 1,
   alsoShown: 4
 }
+{
+  shown: 1,
+  alsoShown: 4
+}

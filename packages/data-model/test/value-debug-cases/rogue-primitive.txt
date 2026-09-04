@@ -16,7 +16,9 @@
 no codec:
 /RoguePrimitive(...)
 /RoguePrimitive(...)
+/RoguePrimitive(...)
 
 no codec, name not an identifier:
+/"Rogue Primitive"(...)
 /"Rogue Primitive"(...)
 /"Rogue Primitive"(...)

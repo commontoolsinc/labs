@@ -29,10 +29,22 @@ plain:
   ],
   space: "did:key:z"
 )
+{
+  "/Link@1": {
+    id: "of:fid1:abc",
+    path: [
+      "x"
+    ],
+    space: "did:key:z"
+  }
+}
 
 empty payload:
 /Link()
 /Link()
+{
+  "/Link@1": {}
+}
 
 empty path, no space:
 /Link(id:"of:fid1:abc",path:[])
@@ -40,6 +52,12 @@ empty path, no space:
   id: "of:fid1:abc",
   path: []
 )
+{
+  "/Link@1": {
+    id: "of:fid1:abc",
+    path: []
+  }
+}
 
 mixed path:
 /Link(id:"of:fid1:abc",path:["items",3,"name"])
@@ -51,6 +69,16 @@ mixed path:
     "name"
   ]
 )
+{
+  "/Link@1": {
+    id: "of:fid1:abc",
+    path: [
+      "items",
+      3,
+      "name"
+    ]
+  }
+}
 
 other keys:
 /Link(id:"of:fid1:abc",path:[],schema:{type:"object"},overwrite:"this")
@@ -62,6 +90,16 @@ other keys:
   },
   overwrite: "this"
 )
+{
+  "/Link@1": {
+    id: "of:fid1:abc",
+    path: [],
+    schema: {
+      type: "object"
+    },
+    overwrite: "this"
+  }
+}
 
 fabric values in the payload:
 /Link(id:"of:fid1:abc",at:/EpochNsec(1n),bytes:/Bytes(buf[0102]))
@@ -70,6 +108,13 @@ fabric values in the payload:
   at: /EpochNsec(1n),
   bytes: /Bytes(buf [0102])
 )
+{
+  "/Link@1": {
+    id: "of:fid1:abc",
+    at: /EpochNsec(1n),
+    bytes: /Bytes(buf [0102])
+  }
+}
 
 link in the payload:
 /Link(id:"of:fid1:abc",target:/Link(id:"of:fid1:def",path:["y"]))
@@ -82,3 +127,16 @@ link in the payload:
     ]
   )
 )
+{
+  "/Link@1": {
+    id: "of:fid1:abc",
+    target: {
+      "/Link@1": {
+        id: "of:fid1:def",
+        path: [
+          "y"
+        ]
+      }
+    }
+  }
+}

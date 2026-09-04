@@ -17,3 +17,16 @@ three levels:
     }
   }
 }
+{
+  a: {
+    b: {
+      c: [
+        1n,
+        {
+          d: undefined
+        },
+        @s
+      ]
+    }
+  }
+}

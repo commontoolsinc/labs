@@ -14,3 +14,7 @@ with a named property:
   1,
   2
 ]
+[
+  1,
+  2
+]
