@@ -95,7 +95,14 @@ Scope: `packages/patterns/collection-naming/` (new): `naming.ts`, `board.tsx`,
 4. Two overlapping `addItem` calls end with distinct consecutive names. A
    test drives the overlap through the runtime's retry; if the harness cannot
    express the overlap, the allocator is tested against a stale read and the
-   limitation is recorded here.
+   limitation is recorded here. Recorded: the pattern-test harness runs one
+   runtime and dispatches events one at a time, so two `addItem` calls never
+   overlap in it, and the multi-user harness runs its participants
+   concurrently but offers no step that forces two of their events to
+   overlap. `naming.test.tsx` tests the allocator against a stale read on one
+   map cell instead: a first allocation, a concurrent writer's key landing,
+   and a re-run over the map as the winner left it, which takes the next
+   distinct name.
 5. A backfill verb names every unnamed member in filing order, skips named
    ones, and is idempotent: a second run writes nothing.
 6. Index rows carry `name` with a default, so a board holding older members

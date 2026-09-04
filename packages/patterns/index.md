@@ -74,12 +74,13 @@ profile roster — every participant's cross-space profile badge), `self.tsx`,
 
 App and integration directories: `activity-log/`, `agent/`, `airtable/`,
 `auth/`, `base/`, `battleship/`, `budget-tracker/`, `calendar/`, `card-piles/`,
-`contacts/`, `cozy-poll/`, `examples/`, `experimental/` (explicitly unhardened
-explorations), `google/` (the `core/` tree; `google/WIP/` is legacy),
-`habit-tracker/`, `lobby/`, `lunch-poll/`, `profile-group-chat/`,
-`project-list/`, `router/`, `scoped-group-chat/`, `scoped-user-directory/`,
-`scrabble/`, `shared-profile-demo/`, `shared-profile-roster/`, `suggestable/`,
-`weekly-calendar/`.
+`collection-naming/` (the member-naming library and the exemplar board that uses
+it; its README is the reference), `contacts/`, `cozy-poll/`, `examples/`,
+`experimental/` (explicitly unhardened explorations), `google/` (the `core/`
+tree; `google/WIP/` is legacy), `habit-tracker/`, `lobby/`, `lunch-poll/`,
+`profile-group-chat/`, `project-list/`, `router/`, `scoped-group-chat/`,
+`scoped-user-directory/`, `scrabble/`, `shared-profile-demo/`,
+`shared-profile-roster/`, `suggestable/`, `weekly-calendar/`.
 
 Connector-owned patterns live with their connector families: the
 [agent debug view](../connectors/agents/debug-view/README.md) and
