@@ -93,6 +93,20 @@ export class WorkerController extends EventTarget {
     this.#worker.addEventListener("error", this.#onWorkerError);
   }
 
+  /**
+   * The two steps of this instance that a test drives directly: sending a
+   * request to the worker, and receiving a message from it.
+   */
+  get accessForTestingOnly(): {
+    exec(type: WorkerIPCMessageType, data?: unknown): Promise<void>;
+    onWorkerMessage(event: MessageEvent): void;
+  } {
+    return {
+      exec: (type, data) => this.#exec(type, data),
+      onWorkerMessage: (event) => this.#onWorkerMessage(event),
+    };
+  }
+
   async startInitialize() {
     if (this.#state !== WorkerState.Uninitialized) {
       throw new Error("Worker is not uninitialized.");
@@ -152,20 +166,6 @@ export class WorkerController extends EventTarget {
     return this.#state === WorkerState.Ready;
   }
 
-  /**
-   * The two steps of this instance that a test drives directly: sending a
-   * request to the worker, and receiving a message from it.
-   */
-  get accessForTestingOnly(): {
-    exec(type: WorkerIPCMessageType, data?: unknown): Promise<void>;
-    onWorkerMessage(event: MessageEvent): void;
-  } {
-    return {
-      exec: (type, data) => this.#exec(type, data),
-      onWorkerMessage: (event) => this.#onWorkerMessage(event),
-    };
-  }
-
   /** Sends a message and returns a promise that resolves with the response. */
   #exec(type: WorkerIPCMessageType, data?: unknown): Promise<void> {
     const msgId = this.#msgId++;
@@ -211,6 +211,10 @@ export class WorkerController extends EventTarget {
     });
   }
 
+  /**
+   * Handles one message from the worker: a `ready` starts initialization,
+   * and anything else settles the pending request it answers.
+   */
   #onWorkerMessage = (event: MessageEvent) => {
     const response = event.data;
     if (!isWorkerIPCResponse(response)) {
