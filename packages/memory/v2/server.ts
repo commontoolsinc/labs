@@ -271,7 +271,9 @@ export type SlowQuery = {
   /** Query and watch operations: summed elapsed time of those root visits.
    * Against the entry's own `elapsed` this is the share of the request
    * that traversal accounts for; the remainder is entity assembly,
-   * schema-closure staging, and operation-field attachment. */
+   * schema-closure staging, operation-field attachment, and (for
+   * `watch.add`, whose `elapsed` runs through response assembly) mapping
+   * the delivered snapshots to the wire. */
   rootsElapsedMs?: number;
 
   /** Query and watch operations: engine document reads across every branch
