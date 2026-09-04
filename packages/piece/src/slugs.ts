@@ -98,6 +98,11 @@ export class SlugReleasedError extends Error {
  * whole maps racing. The names are the whole content — where a name points
  * stays the slug cell's own answer, because a copy of the target here would
  * be a second answer able to disagree with it. */
+const SLUG_INDEX_SCHEMA = {
+  type: "object",
+  additionalProperties: { type: "boolean" },
+} as const satisfies JSONSchema;
+
 /**
  * The schema the redirect write carries. It exists to stop the write asking
  * what the name currently resolves to: a handle with no schema resolves its
@@ -111,11 +116,6 @@ export class SlugReleasedError extends Error {
  * same single document pulled, and the same stored value.
  */
 const SLUG_REDIRECT_SCHEMA = { type: "object" } as const satisfies JSONSchema;
-
-const SLUG_INDEX_SCHEMA = {
-  type: "object",
-  additionalProperties: { type: "boolean" },
-} as const satisfies JSONSchema;
 
 /** The document a name's redirect lives in, whose id derives from the name. */
 function slugCellFor(pieces: PiecesController, validSlug: string) {
