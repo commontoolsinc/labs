@@ -501,11 +501,7 @@ ${GUEST_EPILOG}`;
     // ready once and nothing outside it can send that message: the element
     // takes it only from the window it rendered. So the refusal is asserted
     // where it is made.
-    const inner = iframe as unknown as {
-      iframeRef: { value?: HTMLIFrameElement };
-      onOuterReady: (source: Window) => void;
-      readyWindow?: Window;
-    };
+    const inner = iframe.accessForTestingOnly;
     const reporting = inner.iframeRef.value!.contentWindow!;
     assertEquals(inner.readyWindow, reporting);
 
@@ -549,9 +545,7 @@ ${GUEST_EPILOG}`;
     // a successor shows activity -- so a guest refusing the extra offer keeps
     // the session it has, subscriptions included. The repeat is synthesized,
     // as the real one turns on navigation timing inside the frame.
-    const inner = iframe as unknown as {
-      iframeRef: { value?: HTMLIFrameElement };
-    };
+    const inner = iframe.accessForTestingOnly;
     globalThis.dispatchEvent(
       new MessageEvent("message", {
         data: { type: "load" },
@@ -589,14 +583,11 @@ ${GUEST_EPILOG}`;
     // frame reports itself ready once, and the report cannot be sent from
     // anywhere else. A window this element has not seen stands for the frame a
     // reattach would bring.
-    const inner = iframe as unknown as {
-      onOuterReady: (source: Window) => void;
-      loadState: string;
-    };
+    const inner = iframe.accessForTestingOnly;
     // @ts-ignore This is a lit property.
     iframe.src = "";
     inner.onOuterReady({} as Window);
-    assertEquals(inner.loadState, "");
+    assertEquals(iframe.loadState, "");
   } finally {
     cleanupFixtures();
   }
