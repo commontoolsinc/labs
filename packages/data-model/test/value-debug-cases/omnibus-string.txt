@@ -16,7 +16,8 @@
   empty: "",
   plain: "hello",
   "with quotes": "say \"hi\"",
-  "with newline": "a\nb",
+  "with newline": "a\n" +
+    "b",
   "with backslash": "a\\b",
   "non-ASCII": "héllo ☃",
   "control character": "\u0001",

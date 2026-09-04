@@ -5,7 +5,12 @@
 })()
 
 {
-  text: "one\ntwo\nthree\nfour\nfive\n" + ... length: 33
+  text: "one\n" +
+    "two\n" +
+    "three\n" +
+    "four\n" +
+    "five\n" +
+    ... length: 33
 }
 
 {text:"one\ntwo\nthree\nfour\nfive\n" + ... length: 33}
