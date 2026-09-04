@@ -19,7 +19,9 @@ import {
 
 import { type NamesTableRow, ownName } from "./naming.ts";
 
+/** What an item holds, and the one thing its board hands it. */
 export interface ItemInput {
+  /** The item's title, trimmed by the board's create before it is stored. */
   title?: Writable<string | Default<"">>;
 
   /** The item's body, verbatim Markdown. */
@@ -28,11 +30,13 @@ export interface ItemInput {
   /** When the item was filed (epoch milliseconds), stamped at create. */
   createdAt?: number | Default<0>;
 
-  /** The board's names table, one row per named member. The item reads its
+  /**
+   * The board's names table, one row per named member. The item reads its
    * own row out of it and nothing else; absent, the item shows no name.
    *
    * Readable, not writable: the table is the board's derivation, and an item
-   * has no business writing into it. */
+   * has no business writing into it.
+   */
   boardNames?: ReadonlyCell<NamesTableRow[] | Default<[]>>;
 }
 
@@ -44,15 +48,21 @@ export interface ItemInput {
 export interface ItemOutput {
   [NAME]: string;
   [UI]: VNode;
+
+  /** The item's title, as stored. */
   title: string | Default<"">;
+
+  /** The item's body, verbatim Markdown. */
   body: string | Default<"">;
 
   /** When the item was filed (epoch milliseconds). */
   createdAt: number;
 
-  /** The name the board calls this item by, read out of the board's names
+  /**
+   * The name the board calls this item by, read out of the board's names
    * table; `undefined` for an item no board has named, or one wired to no
-   * board. */
+   * board.
+   */
   shortName: string | undefined;
 }
 

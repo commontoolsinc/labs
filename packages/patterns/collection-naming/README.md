@@ -34,7 +34,9 @@ collection does with it:
   it may be reused, and what allocates it. `SEQUENCE_NAMING` is the declaration
   for this sequence: unique across history, permanent, never reused, and
   eligible for the compact `<collection>-42` spelling because a decimal name
-  holds no hyphen.
+  holds no hyphen. Its `name` — the collection's own — is optional and absent on
+  the exemplar: the stage that binds the board's namespace as a slug fills it,
+  and that binding is what a resolver can then check the declaration against.
 
 Nothing in the library knows what kind of piece a member is. A member is a cell,
 compared by identity and never read through, which is what keeps every read here
@@ -87,11 +89,12 @@ and needs nothing else.
 Headless, against a deployed board:
 
 ```bash
-cf piece call --piece <board> addItem '{"title":"...","agentName":"Sol"}'
+cf piece call --cell /of:<board> addItem --json '{"title":"...","agentName":"Sol"}'
 # -> { "result": { "item": { "member": { "$link": ... }, "name": "1", ... } } }
-cf cell get --piece <board> names --select @
-cf cell get --piece <board> index
-cf piece call --piece <board> backfillNames '{"agentName":"Sol"}'
+cf cell get /of:<board> names
+# -> { "1": {}, "2": {} }
+cf cell get /of:<board> index
+cf piece call --cell /of:<board> backfillNames --json '{"agentName":"Sol"}'
 ```
 
 ## Tests

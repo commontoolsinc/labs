@@ -45,20 +45,26 @@ export interface ItemDemand {
   createdAt: number;
 }
 
+/** What the board holds: its item list and its member namespace. */
 export interface BoardInput {
-  /** The board's durable item list, in filing order. `addItem` appends here;
-   * a whole-array write forfeits the mergeability the append keeps. */
+  /**
+   * The board's durable item list, in filing order. `addItem` appends here; a
+   * whole-array write forfeits the mergeability the append keeps.
+   */
   items?: Writable<ItemDemand[] | Default<[]>>;
 
-  /** The board's member namespace: each name to the item it names, held as an
+  /**
+   * The board's member namespace: each name to the item it names, held as an
    * unread reference. `addItem` writes one key per create and `backfillNames`
    * one key per member it names; nothing rewrites the map whole. Reads as
    * empty on a board from before it numbered anything, in the default form
-   * `NamesMap` explains. */
+   * `NamesMap` explains.
+   */
   // deno-lint-ignore ban-types
   names?: Writable<Default<NamesMap, {}>>;
 }
 
+/** What `addItem` takes: the item's content and the agent filing it. */
 export interface AddItemEvent {
   /** The item's title, trimmed before it is stored. Must be non-empty. */
   title: string;
@@ -66,10 +72,12 @@ export interface AddItemEvent {
   /** The item's initial body, stored verbatim. */
   body?: string;
 
-  /** The agent making this mutation. Fabric records the human principal
+  /**
+   * The agent making this mutation. Fabric records the human principal
    * behind the key; this names which agent acted under it. Required, and
    * checked rather than stored: a create that could be unsigned is a
-   * tolerance the verb could never withdraw. */
+   * tolerance the verb could never withdraw.
+   */
   agentName: string;
 }
 
@@ -86,29 +94,41 @@ export interface ItemIndexRow {
   /** The item, written as a reference and never read through here. */
   member: unknown;
 
+  /** The item's title, as stored. */
   title: string | Default<"">;
+
+  /** When the item was filed (epoch milliseconds). */
   createdAt: number | Default<0>;
 
-  /** The board's name for the item. Defaulted so a board holding members
-   * from before it numbered anything still reads whole: a member the board
-   * has not named reads as the empty string. */
+  /**
+   * The board's name for the item. Defaulted so a board holding members from
+   * before it numbered anything still reads whole: a member the board has
+   * not named reads as the empty string.
+   */
   name: string | Default<"">;
 }
 
+/** What `addItem` returns. */
 export interface AddItemResult {
-  /** The item this call created, as its index row: the reference, the
-   * scalars as stored, and the name the create allocated. */
+  /**
+   * The item this call created, as its index row: the reference, the scalars
+   * as stored, and the name the create allocated.
+   */
   item: ItemIndexRow;
 }
 
+/** What `backfillNames` takes: the agent running it. */
 export interface BackfillNamesEvent {
   /** The agent running the backfill, checked as `addItem` checks it. */
   agentName: string;
 }
 
+/** What `backfillNames` returns. */
 export interface BackfillNamesResult {
-  /** The names this run wrote, in filing order; empty when every member was
-   * already named, which is what a second run returns. */
+  /**
+   * The names this run wrote, in filing order; empty when every member was
+   * already named, which is what a second run returns.
+   */
   assigned: string[];
 }
 
@@ -123,26 +143,34 @@ export interface BoardOutput {
   [NAME]: string;
   [UI]: VNode;
 
-  /** The board's items, in filing order, through the shape the board demands
-   * of them. */
+  /**
+   * The board's items, in filing order, through the shape the board demands
+   * of them.
+   */
   items: ItemDemand[];
 
   /** The survey surface: one row per item, scalars copied, name included. */
   index: ItemIndexRow[] | Default<[]>;
 
-  /** The namespace itself: each name to the item it names. A slug pointing
+  /**
+   * The namespace itself: each name to the item it names. A slug pointing
    * here is what makes a member addressable as `<board>/<name>`. Published
-   * under the default its input carries. */
+   * under the default its input carries.
+   */
   // deno-lint-ignore ban-types
   names: Default<NamesMap, {}>;
 
-  /** The names table, one row per named member, which every item the board
+  /**
+   * The names table, one row per named member, which every item the board
    * creates reads its own name from. Published so an item composed outside
-   * `addItem` can be wired to the same table. */
+   * `addItem` can be wired to the same table.
+   */
   namesTable: NamesTableRow[] | Default<[]>;
 
-  /** What the board declares about its names, for a consumer deciding
-   * whether a name may be held rather than an identity. */
+  /**
+   * What the board declares about its names, for a consumer deciding whether
+   * a name may be held rather than an identity.
+   */
   naming: NamingDeclaration;
 
   /** How many items the board holds. */

@@ -6,6 +6,7 @@
  * index rows carrying `name`, and the names table giving a topic its name by
  * identity. The item side is proven on the exemplar item.
  */
+
 import {
   action,
   assert,
@@ -25,6 +26,7 @@ import Topic, {
   rejectMutation,
   topicAuthorFromAgent,
 } from "../topics/topic.tsx";
+import { indexRowsOf, type ItemIndexRow } from "./board.tsx";
 import {
   assignName,
   backfillNames,
@@ -48,28 +50,23 @@ interface AddShapeEvent {
   agentName: string;
 }
 
-/** The index row the rehearsal publishes: the topic as a reference, the
- * scalars a survey reads, and the board's name for it, defaulted. */
-interface ShapeIndexRow {
-  member: unknown;
-  title: string | Default<"">;
-  createdAt: number | Default<0>;
-  name: string | Default<"">;
-}
-
 interface ShapeOutput {
   [NAME]: string;
   topics: TopicDemand[];
-  index: ShapeIndexRow[] | Default<[]>;
+  index: ItemIndexRow[] | Default<[]>;
   // deno-lint-ignore ban-types
   names: Default<NamesMap, {}>;
   namesTable: NamesTableRow[] | Default<[]>;
   naming: NamingDeclaration;
-  addTopic: Stream<AddShapeEvent, { topic: ShapeIndexRow }>;
+  addTopic: Stream<AddShapeEvent, { topic: ItemIndexRow }>;
   backfillNames: Stream<{ agentName: string }, { assigned: string[] }>;
 }
 
-/** The rehearsal's index rows, addressed by the topic each describes. */
+/**
+ * The rehearsal's index rows: the exemplar's derivation over the two scalars
+ * a Topic and an item both publish, each row addressed by the topic it
+ * describes.
+ */
 const shapeIndex = lift(
   (
     { members, table }: {
@@ -81,22 +78,7 @@ const shapeIndex = lift(
         | Default<[]>;
       table: { member: ComparableCell<unknown>; name: string }[] | Default<[]>;
     },
-  ): ShapeIndexRow[] => {
-    const rows: unknown[] = [];
-    for (const member of Array.from(members)) {
-      const value = member?.get();
-      if (!member || !value) continue;
-      const name = nameOf(member, table);
-      const row = {
-        member,
-        title: value.title ?? "",
-        createdAt: value.createdAt ?? 0,
-        ...(name === undefined ? {} : { name }),
-      } as ShapeIndexRow;
-      rows.push(Writable.for<ShapeIndexRow>(member).set(row));
-    }
-    return rows as ShapeIndexRow[];
-  },
+  ): ItemIndexRow[] => indexRowsOf(Array.from(members), table),
 );
 
 /**
@@ -109,7 +91,7 @@ const ShapeBoard = pattern<ShapeInput, ShapeOutput>(({ topics, names }) => {
   const table = namesTable({ names });
   const index = shapeIndex({ members: topics, table });
 
-  const addTopic = action<AddShapeEvent, { topic: ShapeIndexRow }>(
+  const addTopic = action<AddShapeEvent, { topic: ItemIndexRow }>(
     ({ title, body, agentName }) => {
       const trimmed = (title ?? "").trim();
       const author = topicAuthorFromAgent(agentName) ??
@@ -246,20 +228,6 @@ export default pattern(() => {
       older.topics?.[1] as object,
     )
   );
-  const action_backfill_again = action(() => {
-    older.backfillNames.send({ agentName: "Sol" });
-  });
-  const assert_second_backfill_leaves_the_map = assert(() =>
-    Object.keys((older.names ?? {}) as NamesMap).join(",") === "1,2" &&
-    equals(
-      ((older.names ?? {}) as NamesMap)["1"] as object,
-      older.topics?.[0] as object,
-    ) &&
-    equals(
-      ((older.names ?? {}) as NamesMap)["2"] as object,
-      older.topics?.[1] as object,
-    )
-  );
   // A create after the backfill continues the sequence.
   const action_add_after_backfill = action(() => {
     older.addTopic.send({ title: "Newer one", agentName: "Sol" });
@@ -268,6 +236,26 @@ export default pattern(() => {
     (older.topics ?? []).length === 3 &&
     older.index?.[2]?.name === "3" &&
     Object.keys((older.names ?? {}) as NamesMap).join(",") === "1,2,3"
+  );
+  // A second backfill, over the list the create has grown, writes nothing:
+  // the map holds what the first run and the create left.
+  const action_backfill_again = action(() => {
+    older.backfillNames.send({ agentName: "Sol" });
+  });
+  const assert_second_backfill_leaves_the_map = assert(() =>
+    Object.keys((older.names ?? {}) as NamesMap).join(",") === "1,2,3" &&
+    equals(
+      ((older.names ?? {}) as NamesMap)["1"] as object,
+      older.topics?.[0] as object,
+    ) &&
+    equals(
+      ((older.names ?? {}) as NamesMap)["2"] as object,
+      older.topics?.[1] as object,
+    ) &&
+    equals(
+      ((older.names ?? {}) as NamesMap)["3"] as object,
+      older.topics?.[2] as object,
+    )
   );
 
   const assert_declaration = assert(() =>
@@ -288,10 +276,22 @@ export default pattern(() => {
       { assertion: assert_unnamed_rows_read_the_default },
       { action: action_backfill },
       { assertion: assert_backfilled_in_filing_order },
-      { action: action_backfill_again },
-      { assertion: assert_second_backfill_leaves_the_map },
       { action: action_add_after_backfill },
       { assertion: assert_create_continues_the_sequence },
+      // Some runs log two `sync-load-failure` lines at teardown, and they are
+      // acceptable. Each Topic's `#profile` wish finds no profile in the test
+      // space and opens its profile-create surface, a sidecar pattern the test
+      // runtime has no server to load (`packages/runner/src/builtins/wish.ts`),
+      // and a topic created late in the run can still be syncing for that when
+      // the harness disposes the runtime after the final assertion; the storage
+      // layer then logs the cut-short sync once per distinct error
+      // (`packages/runner/test/sync-load-failure-surfacing.test.ts`). It turns
+      // on timing, not on wiring: a topic composed with `mentionable` and
+      // `boardCrossrefs` logs the same lines as a bare one. The run ends on
+      // the write-free second backfill so that less is in flight at teardown,
+      // and no assertion here depends on the wish.
+      { action: action_backfill_again },
+      { assertion: assert_second_backfill_leaves_the_map },
       { assertion: assert_declaration },
     ],
   };

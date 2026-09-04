@@ -8,6 +8,7 @@
  * errors are required, and the count is exact: a guard quietly reverting to
  * a silent return fails the suite.
  */
+
 import {
   action,
   assert,
@@ -20,7 +21,7 @@ import {
   Writable,
 } from "commonfabric";
 import { findElement, hasText } from "../test/vnode-helpers.ts";
-import Board, { type ItemDemand } from "./board.tsx";
+import Board, { indexRowsOf, type ItemDemand } from "./board.tsx";
 import Item from "./item.tsx";
 import { backfillNames, type NamesMap } from "./naming.ts";
 
@@ -172,6 +173,14 @@ export default pattern(() => {
     hasText(wired[UI], "Wired item") &&
     hasText(wired[UI], "No body yet.")
   );
+  // The index skips a member with nothing behind it yet — one appended a
+  // moment ago, still mid-sync, which reads as `undefined` — and rows the
+  // rest.
+  const midSyncNeighbor = new Writable({ title: "Settled", createdAt: 4 });
+  const assert_index_skips_a_mid_sync_member = assert(() =>
+    indexRowsOf([undefined, midSyncNeighbor], []).length === 1
+  );
+
   const solo = Item({ title: "Solo item", body: "A body of its own." });
   const assert_solo_item_has_no_name = assert(() =>
     solo.shortName === undefined &&
@@ -376,6 +385,7 @@ export default pattern(() => {
       { assertion: assert_wired_item_reads_its_name },
       { render: wired[UI] },
       { assertion: assert_wired_item_renders_its_badge },
+      { assertion: assert_index_skips_a_mid_sync_member },
       { assertion: assert_solo_item_has_no_name },
       { render: solo[UI] },
       { assertion: assert_solo_item_renders_no_badge },

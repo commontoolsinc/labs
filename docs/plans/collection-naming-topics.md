@@ -13,7 +13,7 @@ This block is LIVE: the change that moves a stage updates it here.
 | stage | state |
 | --- | --- |
 | S0 — decisions ruled, plan filed | on main with S1 |
-| S1 — the library and the exemplar board own a member namespace | building |
+| S1 — the library and the exemplar board own a member namespace | built, in review |
 | S2 — `top/42` resolves at the CLI | not started |
 | S2b — assignment refuses by default | not started |
 | S3 — the shell opens `/<space>/top/42` | not started |
@@ -123,8 +123,8 @@ Scope: `packages/patterns/collection-naming/` (new): `naming.ts`, `board.tsx`,
     tests, and coverage green.
 
 Demo: local dev server. Two `cf piece call addItem` on the exemplar board
-return names `1` and `2`; `cf cell get $BOARD names --select @` lists both;
-the Topics-shape test is green in the same run.
+return names `1` and `2`; `cf cell get /of:$BOARD names` lists both keys; the
+Topics-shape test is green in the same run.
 
 ### S2 — `top/42` resolves at the CLI
 

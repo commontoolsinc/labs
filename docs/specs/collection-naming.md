@@ -599,7 +599,11 @@ member carries of its own. Every candidate is verified before display; what is
 unsettled is the order among them.
 
 **Whether a name policy is machine-readable**, so a consumer can branch on it,
-or is documentation that a consumer's author reads.
+or is documentation that a consumer's author reads. The first customer
+publishes one — `NamingDeclaration` in
+`packages/patterns/collection-naming/naming.ts`, ruled 2026-09-03 in
+`docs/plans/collection-naming-topics.md` (decision 7) — and whether that shape
+becomes the standard every collection declares is what remains open.
 
 **Whether a synced read inside an `editWithRetry` body becomes a commit
 precondition**, which is what step 2 rests on.

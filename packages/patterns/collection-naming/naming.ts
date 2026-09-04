@@ -35,8 +35,10 @@ import {
  * has one.
  */
 export interface NamingPolicy {
-  /** Whether a name is unique across the collection's whole history, or
-   * only among its current members. */
+  /**
+   * Whether a name is unique across the collection's whole history, or only
+   * among its current members.
+   */
   unique: "history" | "current";
 
   /** Whether a name, once assigned, is never retired or reassigned. */
@@ -45,23 +47,29 @@ export interface NamingPolicy {
   /** Whether a retired name may be given to another member. */
   reuse: boolean;
 
-  /** What a name is made of: a monotonic sequence, a random code, a string a
-   * person chose, or a derivation from the member's own content. */
+  /**
+   * What a name is made of: a monotonic sequence, a random code, a string a
+   * person chose, or a derivation from the member's own content.
+   */
   allocator: "sequence" | "random" | "human" | "derived";
 }
 
 /** What a collection declares about the names it gives its members. */
 export interface NamingDeclaration {
-  /** The collection's own name, which a binding uses to reach it. Absent
-   * when the collection makes no claim about what it is bound as. */
+  /**
+   * The collection's own name, which a binding uses to reach it. Absent when
+   * the collection makes no claim about what it is bound as.
+   */
   name?: string;
 
   /** The policy the names are held to. */
   policy: NamingPolicy;
 
-  /** Whether the collection offers the compact spelling that joins its name
-   * to a member's with a hyphen. Only a collection whose member names cannot
-   * contain a hyphen may say so. */
+  /**
+   * Whether the collection offers the compact spelling that joins its name to
+   * a member's with a hyphen. Only a collection whose member names cannot
+   * contain a hyphen may say so.
+   */
   compact: boolean;
 }
 
@@ -130,8 +138,10 @@ export interface NamesMapCell {
  * writes nothing.
  */
 export interface NamesTableRow {
-  /** The member. `unknown` because it is written as a reference and only
-   * ever compared; anything wider would read the member back whole. */
+  /**
+   * The member. `unknown` because it is written as a reference and only ever
+   * compared; anything wider would read the member back whole.
+   */
   member: unknown;
 
   /** The member's name. */
@@ -232,10 +242,13 @@ export const namesTable = lift(
       names: Default<Record<string, ReadonlyCell<unknown>>, {}>;
     },
   ): NamesTableRow[] => {
-    // An entry with nothing behind it yet (mid-sync) has no identity to
-    // address a row by; it gets no row rather than a junk one.
+    // An entry with nothing behind it yet (mid-sync) reads as `undefined`,
+    // has no identity to address a row by, and gets no row rather than a
+    // junk one. Nothing else is filtered: the values are cells, so a value a
+    // foreign writer stored under a key — `null`, a scalar — arrives as a
+    // cell too, and telling it apart would mean reading through the member.
     const rows: unknown[] = Object.entries(names)
-      .filter(([, member]) => member !== undefined && member !== null)
+      .filter(([, member]) => member !== undefined)
       .map(([name, member]) =>
         Writable.for<NamesTableRow>(member).set({ member, name })
       );

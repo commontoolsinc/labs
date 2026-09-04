@@ -4,6 +4,7 @@
  * against a stale read — the shape a lost commit race leaves behind — the
  * reverse lookup, and the declaration.
  */
+
 import { action, assert, equals, pattern, TESTS, Writable } from "commonfabric";
 import {
   assignName,
