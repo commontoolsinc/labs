@@ -421,6 +421,10 @@ export interface TestRunnerOptions {
    * run reached: the runtime that wrote it can no longer commit into it. A
    * teardown that does not complete is RAISED, so a caller never reads a store
    * whose writer never stopped.
+   *
+   * A multi-user test refuses this option: its participants instantiate and
+   * write in workers of their own, against a storage server the multi-user
+   * runner starts, so neither the store nor the observer below would see them.
    */
   storageHost?: {
     identity: Identity;
