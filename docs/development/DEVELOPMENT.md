@@ -231,23 +231,24 @@ A test sometimes needs what a class keeps to itself: a threshold to straddle,
 a table to seed, a step to run on its own. Casting the instance to get at it —
 `as unknown as { ... }`, `as never as { ... }`, `as any` — is not the way, and
 the `#` convention takes it off the table: a `#` name is out of a cast's reach,
-and a member left TypeScript-`private` so that a cast can find it is an own
-enumerable property with a comment apologizing for it. The cast also types the
+and a member left TypeScript-`private` so that a cast can find it is, if a
+field, an own enumerable property, and either way a member the class promised
+to keep to itself, with a comment apologizing for it. The cast also types the
 member however the test finds convenient, so nothing checks that what the test
 reads is what the class holds, and a renamed member leaves the test reading
 `undefined` and passing.
 
-The way is one public getter named `accessForTestingOnly`, which hands over
+The way is a public getter named `accessForTestingOnly`, which hands over
 exactly what a test needs and nothing else. The name is the documentation:
 everything behind it is internals free to change, and a reader who sees it in
 a test knows the test is written against them. Its doc comment says what it
 exposes, and the name says the rest.
 
 - Instance members go behind an instance getter; static members behind a
-  static one. A class may have both.
+  static one. A class may have both, and never more than one of each.
 - The getter's return type is written inline on the getter, and the body is an
-  object literal. Nothing else is exported, so the class's public surface grows
-  by one member.
+  object literal. No named type is declared for it, so the class's public
+  surface grows by one member and nothing else.
 - A field the class never reassigns — a `Map` it mutates in place — is handed
   over as a plain property holding the reference. A field the class reassigns
   is a getter, so that a read is live, and gains a setter only when a test
@@ -266,7 +267,7 @@ exposes, and the name says the rest.
 ```ts
 // Shown at module scope.
 
-/** A fryer whose oil temperature a test has to set and whose log it reads. */
+/** A fryer that records the temperature each item was fried at. */
 export class Fryer {
   #temperature = 190;
   #log = new Map<string, number>();
@@ -321,8 +322,10 @@ different answer:
   rewrite the test against public behavior. Until then the member stays
   TypeScript-`private`, with a comment naming the test that replaces it.
 - **A method called off the prototype against a stand-in receiver** —
-  `Class.prototype.step.call(fake, ...)`. A `#` member throws on any receiver
-  that is not a real instance, so the test wants rewriting to build one.
+  `Class.prototype.step.call(fake, ...)`. A `#` method is not on the prototype
+  to be called, and a public method reached that way throws the moment it
+  touches a `#` member of a receiver that is not a real instance, so the test
+  wants rewriting to build one.
 - **A helper that uses no instance state.** Make it `static #` behind the
   static getter, or a module-level function the test imports.
 
