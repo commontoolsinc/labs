@@ -10,9 +10,12 @@
  * `Deno.ChildProcess.status` covers one process.
  *
  * Every process in the tree inherits the two pipes the browser was spawned
- * with, so their read ends reach end of file once the last of them has
- * exited. The browser is spawned here and astral attached to the running
- * browser, which is what keeps those pipes in reach.
+ * with, and holds a pipe until it exits or closes that pipe. Both read ends
+ * are waited for, so the wait ends once the last process holding either of
+ * them has gone. Piping both also keeps the browser's output out of the
+ * caller's own, which a spawn leaves inherited for any stream it asks no pipe
+ * for. The browser is spawned here and astral attached to the running browser,
+ * which is what keeps those pipes in reach.
  */
 
 import {

@@ -14,6 +14,7 @@ import { expect } from "@std/expect";
 import { afterEach, describe, it } from "@std/testing/bdd";
 
 import {
+  BOOT_FAILURE_MESSAGE,
   BrowserProcess,
   readToEnd,
   stopBrowserProcess,
@@ -223,7 +224,7 @@ describe("browser-process", () => {
           const options = await fakeBrowser("no endpoint", 1);
 
           await expect(BrowserProcess.start(options)).rejects.toThrow(
-            "Your binary refused to boot",
+            BOOT_FAILURE_MESSAGE,
           );
         });
 
@@ -256,7 +257,7 @@ describe("browser-process", () => {
           // A launch that left standard output unread would stop here, with
           // the stand-in blocked on a pipe nobody is emptying.
           await expect(BrowserProcess.start(options)).rejects.toThrow(
-            "Your binary refused to boot",
+            BOOT_FAILURE_MESSAGE,
           );
         });
 
@@ -265,7 +266,7 @@ describe("browser-process", () => {
           astralBinaryPathIs(options.path);
 
           await expect(BrowserProcess.start({ args: options.args })).rejects
-            .toThrow("Your binary refused to boot");
+            .toThrow(BOOT_FAILURE_MESSAGE);
         });
 
         it("throws when the launch names no `--user-data-dir`", async () => {
