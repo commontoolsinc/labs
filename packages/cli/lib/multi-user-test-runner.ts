@@ -46,6 +46,7 @@
  * after a marker is therefore read once, and a false value is a failure.
  */
 
+import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import { Identity, realmValueFromKeyPair } from "@commonfabric/identity";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import type {
@@ -195,11 +196,45 @@ interface ParticipantState {
   allowConsoleWarnings: boolean;
 }
 
+/**
+ * Check one participant against the rung the run named.
+ *
+ * A participant builds its own runtime in its own worker, so the mode a run
+ * names is honored in as many places as there are participants. The rung read
+ * back off each built runtime is checked here, and the participant that is not
+ * on it is named. A run that names no mode leaves every participant to its
+ * preset.
+ */
+export function assertParticipantRung(
+  participant: string,
+  named: CfcEnforcementMode | undefined,
+  reached: CfcEnforcementMode,
+): void {
+  if (named !== undefined && reached !== named) {
+    throw new Error(
+      `participant "${participant}" came up at CFC ${reached}, not the ` +
+        `${named} this run names`,
+    );
+  }
+}
+
 export async function runMultiUserTestPattern(
   testPath: string,
   meta: MultiUserDescriptorMeta,
   options: TestRunnerOptions = {},
 ): Promise<TestRunResult> {
+  // A caller supplying a store means to read what the run wrote, and to be
+  // told what it instantiated (see `TestRunnerOptions.storageHost`). The
+  // participants do both in workers of their own, against a storage server
+  // this function starts, so the caller's store and observer come back empty
+  // while the participants' assertions pass.
+  if (options.storageHost !== undefined) {
+    throw new Error(
+      `${testPath} is a multi-user test: its participants run in workers of ` +
+        `their own, against a storage server this runner starts, so a ` +
+        `caller-supplied \`storageHost\` would be handed back unwritten`,
+    );
+  }
   const startTime = performance.now();
   const stepTimeout = options.timeout ?? 5000;
   const results: TestResult[] = [];
@@ -245,7 +280,15 @@ export async function runMultiUserTestPattern(
           participant: spec.name,
           participants: meta.participants.map((p) => p.name),
           seedDefaults: index === 0,
+          // A test that names a mode names it for every participant, the way
+          // the single-user runner honors it.
+          cfcEnforcementMode: options.cfcEnforcementMode,
         }) as ParticipantInitResult;
+        assertParticipantRung(
+          spec.name,
+          options.cfcEnforcementMode,
+          init.cfcEnforcementMode,
+        );
         participants.push({
           spec,
           worker,
