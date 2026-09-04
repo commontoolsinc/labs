@@ -2757,7 +2757,7 @@ export class Scheduler {
     if (record.status === "invalid") {
       this.nodes.setStatus(action, "clean");
     }
-    record.invalidCauses = [];
+    record.invalidCauses.clear();
   }
 
   private markAndScheduleInvalidAction(

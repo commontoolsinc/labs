@@ -135,7 +135,7 @@ function getStaleSchedulerInternals(
       ) =>
         | {
           status: "never-ran" | "clean" | "invalid";
-          invalidCauses: unknown[];
+          invalidCauses: Map<string, unknown>;
         }
         | undefined;
     };
@@ -158,7 +158,7 @@ function getStaleSchedulerInternals(
       if (record.status === "invalid") {
         record.status = "clean";
       }
-      record.invalidCauses = [];
+      record.invalidCauses.clear();
     },
     markDirty: (action) => internal.markAndScheduleInvalidAction(action),
     registerEffect: (action) => {
