@@ -1,13 +1,17 @@
-(() => {
-  // The rendering stops descending at its depth limit, and whatever lies
-  // below is elided.
-  let value = "bottom";
-  for (let i = 0; i < 15; i++) {
-    value = { d: value };
-  }
-  return value;
-})()
+{
+  "15 levels": (() => {
+    // The rendering stops descending at its depth limit, and whatever lies
+    // below is elided.
+    let value = "bottom";
+    for (let i = 0; i < 15; i++) {
+      value = { d: value };
+    }
+    return value;
+  })(),
+}
 
+15 levels:
+{d:{d:{d:{d:{d:{d:{d:{d:{d:...}}}}}}}}}
 {
   d: {
     d: {
@@ -27,5 +31,3 @@
     }
   }
 }
-
-{d:{d:{d:{d:{d:{d:{d:{d:{d:...}}}}}}}}}

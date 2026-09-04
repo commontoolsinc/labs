@@ -4,10 +4,14 @@
   url: new URL("https://example.com/x?y=1"),
 }
 
-{
-  regexp: /RegExp("/ab+c/gi"),
-  error: /Error("Error: boom"),
-  url: /URL("https://example.com/x?y=1")
-}
+regexp:
+/RegExp("/ab+c/gi")
+/RegExp("/ab+c/gi")
 
-{regexp:/RegExp("/ab+c/gi"),error:/Error("Error: boom"),url:/URL("https://example.com/x?y=1")}
+error:
+/Error("Error: boom")
+/Error("Error: boom")
+
+url:
+/URL("https://example.com/x?y=1")
+/URL("https://example.com/x?y=1")

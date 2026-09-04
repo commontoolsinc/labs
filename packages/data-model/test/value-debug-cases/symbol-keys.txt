@@ -1,15 +1,17 @@
 {
-  // A symbol-keyed property, interned or unique, is left out of the rendering
-  // entirely. Only the string-keyed properties show.
-  shown: 1,
-  [Symbol.for("interned")]: 2,
-  [Symbol("unique")]: 3,
-  alsoShown: 4,
+  "with symbol keys": {
+    // A symbol-keyed property, interned or unique, is left out of the rendering
+    // entirely. Only the string-keyed properties show.
+    shown: 1,
+    [Symbol.for("interned")]: 2,
+    [Symbol("unique")]: 3,
+    alsoShown: 4,
+  },
 }
 
+with symbol keys:
+{shown:1,alsoShown:4}
 {
   shown: 1,
   alsoShown: 4
 }
-
-{shown:1,alsoShown:4}

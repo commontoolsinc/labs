@@ -1,14 +1,16 @@
-(() => {
-  // A named (non-index) property on an array is left out of the rendering
-  // entirely.
-  const a = [1, 2];
-  a.extra = "x";
-  return a;
-})()
+{
+  "with a named property": (() => {
+    // A named (non-index) property on an array is left out of the rendering
+    // entirely.
+    const a = [1, 2];
+    a.extra = "x";
+    return a;
+  })(),
+}
 
+with a named property:
+[1,2]
 [
   1,
   2
 ]
-
-[1,2]

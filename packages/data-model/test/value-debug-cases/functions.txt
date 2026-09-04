@@ -14,16 +14,38 @@
   "with properties": Object.assign(function bar() {}, { prop: 1 }),
 }
 
-{
-  named: function foo(...) {...},
-  arrow: function arrow(...) {...},
-  method: function method(...) {...},
-  anonymous: (...) => {...},
-  "empty name": (...) => {...},
-  class: function Foo(...) {...},
-  generator: function gen(...) {...},
-  async: function af(...) {...},
-  "with properties": function bar(...) {...}
-}
+named:
+function foo(...){...}
+function foo(...) {...}
 
-{named:function foo(...){...},arrow:function arrow(...){...},method:function method(...){...},ano...
+arrow:
+function arrow(...){...}
+function arrow(...) {...}
+
+method:
+function method(...){...}
+function method(...) {...}
+
+anonymous:
+(...)=>{...}
+(...) => {...}
+
+empty name:
+(...)=>{...}
+(...) => {...}
+
+class:
+function Foo(...){...}
+function Foo(...) {...}
+
+generator:
+function gen(...){...}
+function gen(...) {...}
+
+async:
+function af(...){...}
+function af(...) {...}
+
+with properties:
+function bar(...){...}
+function bar(...) {...}

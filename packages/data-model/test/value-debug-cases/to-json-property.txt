@@ -1,16 +1,18 @@
 {
-  // This is a plain object which happens to have a property named `toJSON`,
-  // and the rendering treats it as exactly that: the property is rendered as
-  // the function it is, and is never called. (Had it been called, its error
-  // would be what got rendered.) Honoring `toJSON()` is the JSON protocol's
-  // business, and this is not that.
-  toJSON: () => {
-    throw new Error("nope");
+  "with a toJSON property": {
+    // This is a plain object which happens to have a property named `toJSON`,
+    // and the rendering treats it as exactly that: the property is rendered as
+    // the function it is, and is never called. (Had it been called, its error
+    // would be what got rendered.) Honoring `toJSON()` is the JSON protocol's
+    // business, and this is not that.
+    toJSON: () => {
+      throw new Error("nope");
+    },
   },
 }
 
+with a toJSON property:
+{toJSON:function toJSON(...){...}}
 {
   toJSON: function toJSON(...) {...}
 }
-
-{toJSON:function toJSON(...){...}}

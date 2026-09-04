@@ -1,5 +1,9 @@
-[1, , 3, , , 6, , ]
+{
+  "with holes": [1, , 3, , , 6, , ],
+}
 
+with holes:
+[1,<hole>,3,<2 holes>,6,<hole>]
 [
   1,
   <hole>,
@@ -8,5 +12,3 @@
   6,
   <hole>
 ]
-
-[1,<hole>,3,<2 holes>,6,<hole>]

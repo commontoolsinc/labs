@@ -11,17 +11,18 @@
   },
 }
 
+interned:
+{"identifier key":@k,"other key":@"my-key","empty key":@""}
 {
-  interned: {
-    "identifier key": @k,
-    "other key": @"my-key",
-    "empty key": @""
-  },
-  unique: {
-    described: Symbol("d"),
-    "no description": Symbol(),
-    "empty description": Symbol("")
-  }
+  "identifier key": @k,
+  "other key": @"my-key",
+  "empty key": @""
 }
 
-{interned:{"identifier key":@k,"other key":@"my-key","empty key":@""},unique:{described:Symbol("d...
+unique:
+{described:Symbol("d"),"no description":Symbol(),"empty description":Symbol("")}
+{
+  described: Symbol("d"),
+  "no description": Symbol(),
+  "empty description": Symbol("")
+}

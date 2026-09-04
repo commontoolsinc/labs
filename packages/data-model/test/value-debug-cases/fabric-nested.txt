@@ -4,19 +4,23 @@
   deeper: { link: new FabricLink({ id: "of:fid1:abc", path: [], space: "did:key:z" }) },
 }
 
-{
-  when: /EpochNsec(1n),
-  list: [
-    /EpochNsec(2n),
-    /Bytes(buf [01])
-  ],
-  deeper: {
-    link: /Link(
-      id: "of:fid1:abc",
-      path: [],
-      space: "did:key:z"
-    )
-  }
-}
+when:
+/EpochNsec(1n)
+/EpochNsec(1n)
 
-{when:/EpochNsec(1n),list:[/EpochNsec(2n),/Bytes(buf[01])],deeper:{link:/Link(id:"of:fid1:abc",pa...
+list:
+[/EpochNsec(2n),/Bytes(buf[01])]
+[
+  /EpochNsec(2n),
+  /Bytes(buf [01])
+]
+
+deeper:
+{link:/Link(id:"of:fid1:abc",path:[],space:"did:key:z")}
+{
+  link: /Link(
+    id: "of:fid1:abc",
+    path: [],
+    space: "did:key:z"
+  )
+}

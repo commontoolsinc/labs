@@ -1,6 +1,0 @@
-"a string with \"quotes\" and a\nnewline"
-
-"a string with \"quotes\" and a\n" +
-  "newline"
-
-"a string with \"quotes\" and a\nnewline"
