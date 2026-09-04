@@ -80,6 +80,7 @@ const DIRS = [
   "packages/test-support",
   "packages/toolshed",
   "packages/ts-transformers/src",
+  "packages/ui",
   "packages/utils",
 ];
 
@@ -114,44 +115,6 @@ const GLOBS = [
   "packages/patterns/google/WIP/*.tsx",
 ];
 
-// The ui components entry replicates the shell pattern
-// `packages/ui/src/v2/components/*[!outliner]/*.ts*`: a component directory
-// is included unless its name ends with one of the characters of
-// "outliner". The character class reads as a name filter for the outliner
-// component but excludes every directory with one of those trailing
-// letters, and this port preserves that behavior exactly rather than
-// silently widening the checked set.
-const UI_COMPONENTS_DIR = "packages/ui/src/v2/components";
-const UI_EXCLUDED_TRAILING = new Set("outliner");
-
-async function uiComponentFiles(root: string): Promise<string[]> {
-  const files: string[] = [];
-  const directories: Deno.DirEntry[] = [];
-  try {
-    for await (const entry of Deno.readDir(`${root}/${UI_COMPONENTS_DIR}`)) {
-      directories.push(entry);
-    }
-  } catch (error) {
-    // This task is the single type-checking point for these paths, so a
-    // component tree that cannot be enumerated fails the task rather than
-    // silently dropping the whole ui group from coverage.
-    throw new Error(`cannot enumerate ${UI_COMPONENTS_DIR}: ${error}`);
-  }
-  for (const entry of directories) {
-    if (!entry.isDirectory) continue;
-    const last = entry.name.at(-1);
-    if (last !== undefined && UI_EXCLUDED_TRAILING.has(last)) continue;
-    for await (
-      const file of Deno.readDir(`${root}/${UI_COMPONENTS_DIR}/${entry.name}`)
-    ) {
-      if (file.isFile && /\.tsx?$/.test(file.name)) {
-        files.push(`${UI_COMPONENTS_DIR}/${entry.name}/${file.name}`);
-      }
-    }
-  }
-  return files.sort();
-}
-
 /** The owning scope of a checked path: the workspace member's name. */
 export function scopeOfPath(checkPath: string): string {
   const parts = checkPath.split("/");
@@ -180,7 +143,6 @@ export async function collectPathsByScope(
       );
     }
   }
-  paths.push(...await uiComponentFiles(root));
   const byScope = new Map<string, string[]>();
   for (const checkPath of paths.sort()) {
     const scope = scopeOfPath(checkPath);

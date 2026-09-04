@@ -1,6 +1,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { dirname, fromFileUrl, join } from "@std/path";
+import { walk } from "@std/fs";
+import { dirname, fromFileUrl, join, relative } from "@std/path";
 
 import { recordsSpooledBy } from "@commonfabric/test-support/records";
 
@@ -47,10 +48,7 @@ describe("typecheck", () => {
       expect(byScope.get("test-support")).toContain("packages/test-support");
       // Glob entries expand to repository-relative files.
       expect(byScope.get("tasks")).toContain("tasks/typecheck.ts");
-      // The ui component walk contributes files, none from the outliner.
-      const ui = byScope.get("ui") ?? [];
-      expect(ui.length).toBeGreaterThan(0);
-      expect(ui.every((path) => !path.includes("/outliner/"))).toBe(true);
+      expect(byScope.get("ui")).toContain("packages/ui");
       // Every path in every group belongs to the group's scope.
       for (const [scope, paths] of byScope) {
         for (const path of paths) {
@@ -59,13 +57,34 @@ describe("typecheck", () => {
       }
     });
 
+    it("covers every TypeScript file the ui package holds", async () => {
+      // A group naming part of a package type-checks that part and
+      // reports a clean run over the rest, so what this asserts is
+      // coverage rather than the shape of the entry that gives it. It
+      // reads the tree rather than a fixture, so a directory added to
+      // the package later is held to the same claim.
+
+      const byScope = await collectPathsByScope(REPO_ROOT);
+      const checked = byScope.get("ui") ?? [];
+      const uncovered: string[] = [];
+      for await (
+        const entry of walk(join(REPO_ROOT, "packages", "ui"), {
+          includeDirs: false,
+          exts: [".ts", ".tsx"],
+        })
+      ) {
+        const file = relative(REPO_ROOT, entry.path);
+        const covered = checked.some((checkPath) =>
+          file === checkPath || file.startsWith(`${checkPath}/`)
+        );
+        if (!covered) uncovered.push(file);
+      }
+      expect(uncovered).toEqual([]);
+    });
+
     it("includes iframe guests of either extension under arbitrary names", async () => {
       const root = await Deno.makeTempDir({ prefix: "typecheck-guests-" });
       try {
-        await Deno.mkdir(
-          join(root, "packages", "ui", "src", "v2", "components"),
-          { recursive: true },
-        );
         for (
           const [name, guest] of [
             ["custom-board", "guest.ts"],
@@ -112,6 +131,24 @@ describe("typecheck", () => {
         const result = await checkGroup("probe", [file], false);
         expect(result.success).toBe(false);
         expect(result.output).toContain("TS2322");
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("fails a group whose path is not in the tree", async () => {
+      // A checked path that went missing would otherwise report a clean
+      // check over a package nothing looked at.
+
+      const dir = await Deno.makeTempDir({ prefix: "typecheck-group-" });
+      try {
+        const result = await checkGroup(
+          "probe",
+          [join(dir, "gone")],
+          false,
+        );
+        expect(result.success).toBe(false);
+        expect(result.output).toContain("Cannot find module");
       } finally {
         await Deno.remove(dir, { recursive: true });
       }
@@ -273,21 +310,6 @@ describe("main()", () => {
     } finally {
       console.log = log;
       console.error = err;
-    }
-  });
-});
-
-describe("collectPathsByScope()", () => {
-  it("raises when the tree holds none of the paths it walks", async () => {
-    // A group that silently collected nothing would report a clean
-    // check over files it never looked at.
-    const root = await Deno.makeTempDir({ prefix: "typecheck-bare-" });
-    try {
-      await expect(collectPathsByScope(root)).rejects.toThrow(
-        "cannot enumerate",
-      );
-    } finally {
-      await Deno.remove(root, { recursive: true });
     }
   });
 });
