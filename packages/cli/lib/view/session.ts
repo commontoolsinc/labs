@@ -492,10 +492,12 @@ export class Session {
       prepareContextEdit: () => this.#prepareContextEdit(),
       // Forwards to the TypeScript-private member so that a test which
       // replaces it by assignment is honored here too.
-      // TODO(danfuzz): Find a way to make `adjustHunkCounts()` a `#` method,
-      // which needs `test/view-diffedit.test.ts` to stop replacing it by
-      // assignment: a seam this class offers, or a test written against the
-      // public behavior.
+      // TODO(danfuzz): Make `adjustHunkCounts()` a `#` method. That needs
+      // `test/view-diffedit.test.ts` to stop replacing it by assignment, and
+      // the refusal it stands in for is reachable from the public surface: a
+      // malformed `@@` header makes the real method return `false`, and the
+      // `doctoredDiffSession()` helper in `test/view-session-cov2.test.ts`
+      // already builds a session with such a header.
       adjustHunkCounts: (oldDelta, newDelta, hunkHeader) =>
         this.adjustHunkCounts(oldDelta, newDelta, hunkHeader),
       editStart: () => this.#editStart(),
