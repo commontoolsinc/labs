@@ -322,4 +322,32 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "that lets a fresh space have an admin at all.",
     record: "docs/history/parking-admin-profile-subject-break.md",
   },
+  {
+    // The exemplar's index rows became the members themselves. A row's own
+    // address is the item's address, so nothing in a row carries a separate
+    // reference to it; and a row reads the board's name for its item out of
+    // the item's own `shortName`, so the demand carries that member too.
+    pattern: "collection-naming/board.tsx",
+    baselines: [
+      "20260904T001531Z-WRSzkgeFJQmQt1ZM",
+      "20260904T022635Z-OsLnrwxWR4PfC0gG",
+    ],
+    // The one ruling seen from the two roles a contract has: the published
+    // row lost the reference the derived row document carried, and the demand
+    // gained the defaulted `shortName` a row reads its name from.
+    paths: [
+      "argument.items[]",
+      "result.index[].member",
+    ],
+    reason:
+      "An index row IS the member, so the derived row document's `member` " +
+      "reference is what the ruling removed, and no shape of the board both " +
+      "keeps it and makes a row the member. The row demand's `shortName` " +
+      "needs its `| undefined` arm, without which the pattern compiler " +
+      "refuses the board where an item meets the row type, and that arm moves " +
+      "the demand's defaults below a constraint the proof cannot prove stable " +
+      "under default insertion. The exemplar had no instance beyond a " +
+      "throwaway local demo, so no piece held the contract this replaces.",
+    record: "docs/history/collection-naming-index-rows-break.md",
+  },
 ];
