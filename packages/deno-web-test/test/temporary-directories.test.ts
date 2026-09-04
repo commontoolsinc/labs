@@ -14,8 +14,9 @@
 
 import { describe, it } from "@std/testing/bdd";
 
+import { removeDirectory } from "@commonfabric/utils/remove-directory";
+
 import { RUN_DIRECTORY_PREFIX } from "../manifest.ts";
-import { removeDirectory } from "../remove-directory.ts";
 import { runDenoWebTest } from "./utils.ts";
 
 describe("a harness run", () => {

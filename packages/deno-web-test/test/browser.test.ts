@@ -1,8 +1,8 @@
 import { assertEquals, assertRejects } from "@std/assert";
 
 import type { LaunchOptions } from "@astral/astral";
+import type { BrowserProcess } from "@commonfabric/integration/browser-process";
 
-import type { BrowserProcess } from "../browser-process.ts";
 import { isRetryableAstralLaunchError, launchWithRetry } from "../browser.ts";
 
 Deno.test("isRetryableAstralLaunchError matches transient browser-launch failures", () => {

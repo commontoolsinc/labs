@@ -1,7 +1,8 @@
 import * as path from "@std/path";
 
+import { removeDirectory } from "@commonfabric/utils/remove-directory";
+
 import { Config, getConfig } from "./config.ts";
-import { removeDirectory } from "./remove-directory.ts";
 
 // The name a run's directory carries. A directory a killed run leaves behind
 // has nothing but its name to say what made it.

@@ -1,7 +1,10 @@
 import { ConsoleEvent, LaunchOptions, Page } from "@astral/astral";
+import {
+  BOOT_FAILURE_MESSAGE,
+  BrowserProcess,
+} from "@commonfabric/integration/browser-process";
 import { sleep } from "@commonfabric/utils/sleep";
 
-import { BrowserProcess } from "./browser-process.ts";
 import { DEFAULT_TEST_TIMEOUT_MS, extractAstralConfig } from "./config.ts";
 import { TestResult } from "./interface.ts";
 import { Manifest } from "./manifest.ts";
@@ -9,14 +12,13 @@ import { tsToJs } from "./utils.ts";
 
 const LAUNCH_RETRY_ATTEMPTS = 5;
 const LAUNCH_RETRYABLE_ETXTBSY = "Text file busy (os error 26)";
-const LAUNCH_RETRYABLE_BOOT_FAILURE = "Your binary refused to boot";
 
 type LaunchFn = (options: LaunchOptions) => Promise<BrowserProcess>;
 type SleepFn = (ms: number) => Promise<unknown>;
 
 export function isRetryableAstralLaunchError(error: unknown): boolean {
   return String(error).includes(LAUNCH_RETRYABLE_ETXTBSY) ||
-    error instanceof Error && error.message === LAUNCH_RETRYABLE_BOOT_FAILURE;
+    error instanceof Error && error.message === BOOT_FAILURE_MESSAGE;
 }
 
 export async function launchWithRetry(

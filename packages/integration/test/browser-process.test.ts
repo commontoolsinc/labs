@@ -1,13 +1,12 @@
 /**
- * How a run's browser is stopped, which is what says when the run's directory
- * can go.
+ * How a browser is stopped, which is what says when its profile directory can
+ * go.
  *
  * The two exports covered here are the ones that can be driven without a
  * browser: a shell process tree stands in for Chrome's, and a shell script
  * stands in for a browser binary that never starts. What a real browser does
- * is covered by the harness runs in `base.test.ts`, `config.test.ts` and
- * `temporary-directories.test.ts`, each of which drives Chrome through
- * `BrowserProcess`.
+ * is covered by `browser.test.ts` here, and by the harness runs in
+ * `deno-web-test`, each of which drives Chrome through `BrowserProcess`.
  */
 
 import type { Browser as AstralBrowser } from "@astral/astral";
@@ -76,7 +75,9 @@ async function fakeBrowser(
   code: number,
   first = "true",
 ): Promise<{ path: string; args: string[] }> {
-  const directory = await Deno.makeTempDir({ prefix: "deno-web-test-fake-" });
+  const directory = await Deno.makeTempDir({
+    prefix: "integration-fake-browser-",
+  });
   madeByTest.push(() => Deno.remove(directory, { recursive: true }));
   const path = `${directory}/browser`;
   await Deno.writeTextFile(

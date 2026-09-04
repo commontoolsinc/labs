@@ -1,10 +1,10 @@
 /**
- * The browser a run drives: how it is spawned, and how it is stopped in a way
- * the run can wait out.
+ * The browser a caller drives: how it is spawned, and how it is stopped in a
+ * way the caller can wait out.
  *
  * Chrome recreates the directory `--user-data-dir` names, every missing parent
  * included, whenever it writes into it, and the crash handler and rendering
- * processes it starts outlive the browser process. Removing the run's
+ * processes it starts outlive the browser process. Removing the profile
  * directory while one of those is alive puts the directory back, so the
  * removal has to follow the last process in the tree, and
  * `Deno.ChildProcess.status` covers one process.
@@ -12,19 +12,31 @@
  * Every process in the tree inherits the two pipes the browser was spawned
  * with, so their read ends reach end of file once the last of them has
  * exited. The browser is spawned here and astral attached to the running
- * browser with `connect()`, which is what keeps those pipes in reach.
+ * browser, which is what keeps those pipes in reach.
  */
 
 import {
-  type Browser as AstralBrowser,
+  Browser as AstralBrowser,
   connect,
   generateBinArgs,
   getBinary,
   type LaunchOptions,
   type Page,
+  type SandboxOptions,
+  type UserAgentOptions,
+  type WaitForOptions,
   WEBSOCKET_ENDPOINT_REGEX,
+  websocketReady,
 } from "@astral/astral";
-import { isChildProcessGone } from "@commonfabric/integration/astral-adapter";
+
+import { isChildProcessGone } from "./astral-adapter.ts";
+
+/**
+ * The message a launch throws when the browser exited without naming an
+ * endpoint. Exported so that whoever decides what to do about such a launch
+ * names the same string the throw does.
+ */
+export const BOOT_FAILURE_MESSAGE = "Your binary refused to boot";
 
 /** A browser that has started, and how to reach and wait out its tree. */
 type SpawnedBrowser = {
@@ -118,8 +130,8 @@ function readBrowserOutput(
       endpoint.reject(
         new Error(
           printed.includes("error while loading shared libraries")
-            ? "Your binary refused to boot due to missing system dependencies"
-            : "Your binary refused to boot",
+            ? `${BOOT_FAILURE_MESSAGE} due to missing system dependencies`
+            : BOOT_FAILURE_MESSAGE,
         ),
       );
     }
@@ -150,9 +162,10 @@ async function spawnBrowser(options: LaunchOptions): Promise<SpawnedBrowser> {
     headless: options.headless,
   });
 
-  // The profile directory belongs to the run and goes when the run ends. A
-  // launch naming none would reach the profile of the browser the developer
-  // uses, and write into the directory that profile lives in.
+  // The profile directory belongs to whoever launched the browser, and goes
+  // when they are done with it. A launch naming none would reach the profile
+  // of the browser the developer uses, and write into the directory that
+  // profile lives in.
   if (!args.some((argument) => argument.startsWith("--user-data-dir="))) {
     throw new Error("A browser launch has to name a `--user-data-dir`.");
   }
@@ -169,6 +182,43 @@ async function spawnBrowser(options: LaunchOptions): Promise<SpawnedBrowser> {
     await stopBrowserProcess(child, closed);
     throw error;
   }
+}
+
+/**
+ * Connects astral to the browser listening at `endpoint`, running in `child`.
+ *
+ * Astral's `connect()` hands back a browser holding no process, which reports
+ * itself remote, and closing a remote browser's page closes only that page's
+ * connection: the target stays open and goes on running, and the pages that
+ * are still open grow slow. So the connection `connect()` makes is used for
+ * the check it carries -- that the browser speaks the protocol version
+ * astral's bindings were generated against -- and then dropped, and the
+ * browser handed back is built on a connection of its own, holding the
+ * process.
+ *
+ * That check is what takes two connections: astral holds the protocol version
+ * in a binding it does not export, so `connect()` is the only way to ask for
+ * it. One connection does when astral exports the version.
+ */
+async function connectToBrowser(
+  child: Deno.ChildProcess,
+  endpoint: string,
+  options: LaunchOptions,
+): Promise<AstralBrowser> {
+  const product = options.product ?? "chrome";
+  const userAgent = options.userAgent;
+
+  const checked = await connect({ endpoint, product, userAgent });
+  const socketUrl = checked.wsEndpoint();
+  await checked.disconnect();
+
+  const socket = new WebSocket(socketUrl);
+  await websocketReady(socket);
+  return new AstralBrowser(socket, child, {
+    product,
+    userAgent,
+    headless: options.headless,
+  });
 }
 
 /** A running browser, and the process tree the run can wait out. */
@@ -192,9 +242,20 @@ export class BrowserProcess {
     this.#browser = browser;
   }
 
-  /** Opens a page on `url`. */
-  newPage(url: string): Promise<Page> {
-    return this.#browser.newPage(url);
+  /** Opens a page, on `url` where one is given. */
+  newPage(
+    url?: string,
+    options?: WaitForOptions & SandboxOptions & UserAgentOptions,
+  ): Promise<Page> {
+    return this.#browser.newPage(url, options);
+  }
+
+  /**
+   * The browser-level developer-tools websocket endpoint. Chrome takes several
+   * connections at once, so a second one can attach alongside astral's.
+   */
+  wsEndpoint(): string {
+    return this.#browser.wsEndpoint();
   }
 
   /**
@@ -221,11 +282,11 @@ export class BrowserProcess {
   static async start(options: LaunchOptions): Promise<BrowserProcess> {
     const spawned = await spawnBrowser(options);
     try {
-      const browser = await connect({
-        endpoint: spawned.endpoint,
-        product: options.product ?? "chrome",
-        userAgent: options.userAgent,
-      });
+      const browser = await connectToBrowser(
+        spawned.child,
+        spawned.endpoint,
+        options,
+      );
       return new BrowserProcess(
         spawned.child,
         spawned.outputClosed,
