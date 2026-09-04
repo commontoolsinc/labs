@@ -4,7 +4,7 @@ import {
   hasDataUriScheme,
   valueFromDataUri,
 } from "@commonfabric/data-model/codec-data-uri";
-import { aclDocId } from "@commonfabric/memory/acl";
+import { aclDocId, sameAcl } from "@commonfabric/memory/acl";
 import type { ACL, Entity } from "@commonfabric/memory/interface";
 import {
   type AuthorizationError as IAuthorizationError,
@@ -624,16 +624,6 @@ const defaultGenesisAcl = (owner: string): ACL => ({
   ...DEFAULT_GENESIS_GRANTS,
 });
 
-/** Whether a stored ACL document is exactly `expected`: same principals,
- *  same capabilities, nothing more. Key order is not part of the contract. */
-const sameAcl = (stored: unknown, expected: ACL): boolean => {
-  if (typeof stored !== "object" || stored === null) return false;
-  const actual = stored as Record<string, unknown>;
-  const expectedKeys = Object.keys(expected);
-  return Object.keys(actual).length === expectedKeys.length &&
-    expectedKeys.every((key) => actual[key] === expected[key as keyof ACL]);
-};
-
 export interface Options {
   as: Signer;
 
@@ -1150,6 +1140,18 @@ export class StorageManager implements IStorageManager {
         `registerSpaceIdentity(${space}): supply either owner or genesisAcl, ` +
           "not both — genesisAcl is the whole genesis document, and owner " +
           "only names the OWNER of the default one",
+      );
+    }
+    if (
+      genesisAcl !== undefined &&
+      this.#sessionFactory.supportsAclBootstrap !== true
+    ) {
+      // A document nobody will write is a seal that never lands; the
+      // caller asked for a closed space and would get an ACL-less one.
+      throw new Error(
+        `registerSpaceIdentity(${space}): this manager's session factory ` +
+          "cannot bootstrap an ACL, so the supplied genesisAcl would never " +
+          "be written",
       );
     }
     this.#spaceIdentities.set(space, identity);

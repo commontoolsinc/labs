@@ -38,6 +38,7 @@ import { isDeno } from "@commonfabric/utils/env";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
 import { getDirectTransactionReadActivities } from "./storage/transaction-inspection.ts";
+import { sameAcl } from "@commonfabric/memory/acl";
 import type {
   ACL,
   ChangeGroup,
@@ -1031,6 +1032,9 @@ export class Runtime {
 
   /** Cache of resolved PatternFactory.inSpace("name") space DIDs. */
   readonly #spaceNameToDid = new Map<string, MemorySpace>();
+  /** The genesisAcl each name was first resolved with, so an identical
+   * re-resolution is a retry and a different one is refused. */
+  readonly #spaceNameGenesisAcls = new Map<string, ACL>();
 
   #defaultFrame?: Frame;
   #queues = new Map<string, AsyncSemaphoreQueue>();
@@ -3358,6 +3362,31 @@ export class Runtime {
     options?: { owner?: DID; genesisAcl?: ACL },
   ): Promise<MemorySpace> {
     const cached = this.resolveSpaceNameSync(name);
+    if (options?.genesisAcl !== undefined) {
+      // A document the resolution cannot honor is refused, never dropped:
+      // the caller asked for a space born closed.
+      if (isMemorySpaceDID(name)) {
+        throw new Error(
+          `space-name resolution for the DID ${name} cannot register a ` +
+            "genesisAcl: the runtime derives no space key for a bare DID, " +
+            "so nothing would write the document (register the identity " +
+            "with the storage manager directly)",
+        );
+      }
+      if (cached !== undefined) {
+        const recorded = this.#spaceNameGenesisAcls.get(name);
+        if (recorded === undefined || !sameAcl(recorded, options.genesisAcl)) {
+          throw new Error(
+            `space-name "${name}" was already resolved` +
+              (recorded === undefined
+                ? " without a genesisAcl"
+                : " with a different genesisAcl") +
+              "; the supplied document cannot be the space's genesis",
+          );
+        }
+        return cached;
+      }
+    }
     if (cached !== undefined) return cached;
     if (this.servingPosture && options?.genesisAcl !== undefined) {
       throw new Error(
@@ -3399,6 +3428,9 @@ export class Runtime {
     }
     const did = session.space as MemorySpace;
     this.#spaceNameToDid.set(name, did);
+    if (options?.genesisAcl !== undefined) {
+      this.#spaceNameGenesisAcls.set(name, { ...options.genesisAcl });
+    }
     return did;
   }
 

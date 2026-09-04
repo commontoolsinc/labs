@@ -759,6 +759,7 @@ Deno.test("a supplied genesis ACL is inert on a populated ACL-less named space (
       { [space]: "OWNER" },
     );
     assertEquals(withAcl, without);
+    assertEquals(without.syncFailed, false, "legacy-public reads succeed");
     assertEquals(without.acl, null, "the legacy space must not be claimed");
     assertEquals(without.principals, [user.did()], "no bootstrap session");
   } finally {
@@ -806,6 +807,7 @@ Deno.test("a supplied genesis ACL is inert on a retracted named ACL (a tombstone
       [space]: "OWNER",
     });
     assertEquals(withAcl, without);
+    assertEquals(without.syncFailed, true, "a retracted ACL fails closed");
     assertEquals(without.acl, null, "the tombstone must stand");
     assertEquals(without.commits, [1, 2], "no third commit");
   } finally {
@@ -1109,6 +1111,93 @@ Deno.test("a refused genesis does not wedge the space: retries surface the real 
     assertEquals((await server.readDocument(space, aclId))?.value, corrected);
     const sync = await manager.open(space).sync(aclId);
     assert(!sync.error, sync.error?.message);
+  } finally {
+    await manager.close();
+    await server.close();
+  }
+});
+
+Deno.test("runtime.resolveSpaceName refuses a genesis ACL it cannot honor: a cached name, a bare DID; an identical re-resolution is fine", async () => {
+  const user = await Identity.fromPassphrase("acl genesis cached user");
+  const server = createServer("runner-acl-genesis-cached");
+  const factory = new RecordingLoopbackSessionFactory(server);
+  const manager = TestStorageManager.overServer({ as: user }, factory);
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: manager,
+  });
+  const sealed = { [user.did()]: "OWNER" as const };
+  try {
+    // Red-first witnessed: the cache short-circuit returned before
+    // registration, so a name anything else had already resolved made the
+    // sealing call a silent no-op and the space was born with the default.
+    const first = await runtime.resolveSpaceName("genesis-acl-cached");
+    await assertRejects(
+      () =>
+        runtime.resolveSpaceName("genesis-acl-cached", { genesisAcl: sealed }),
+      Error,
+      "already resolved",
+    );
+    // A bare DID derives no key, so there is nothing to register the
+    // document against; refuse rather than open an ACL-less space.
+    await assertRejects(
+      () => runtime.resolveSpaceName(first, { genesisAcl: sealed }),
+      Error,
+      "DID",
+    );
+    // The same caller resolving the same name with the same document is a
+    // retry, not a conflict.
+    const space = await runtime.resolveSpaceName("genesis-acl-retry", {
+      genesisAcl: sealed,
+    });
+    assertEquals(
+      await runtime.resolveSpaceName("genesis-acl-retry", {
+        genesisAcl: sealed,
+      }),
+      space,
+    );
+    await assertRejects(
+      () =>
+        runtime.resolveSpaceName("genesis-acl-retry", {
+          genesisAcl: { [user.did()]: "OWNER", "*": "READ" },
+        }),
+      Error,
+      "already resolved",
+    );
+    await manager.ensureSpaceInitialized(space);
+    assertEquals(
+      (await server.readDocument(space, `of:${space}`))?.value,
+      sealed,
+    );
+  } finally {
+    await runtime.dispose();
+    await manager.close();
+    await server.close();
+  }
+});
+
+Deno.test("registerSpaceIdentity refuses a genesis ACL on a manager whose session factory cannot bootstrap", async () => {
+  const user = await Identity.fromPassphrase("acl genesis no-bootstrap user");
+  const spaceIdentity = await Identity.fromPassphrase(
+    "acl genesis no-bootstrap space",
+  );
+  const server = createServer("runner-acl-genesis-no-bootstrap");
+  const factory = new RecordingLoopbackSessionFactory(server);
+  (factory as { supportsAclBootstrap: boolean }).supportsAclBootstrap = false;
+  const manager = TestStorageManager.overServer({ as: user }, factory);
+  try {
+    // Red-first witnessed: the document was accepted and never written —
+    // the space opened ACL-less with no error.
+    assertThrows(
+      () =>
+        manager.registerSpaceIdentity(spaceIdentity, {
+          genesisAcl: { [user.did()]: "OWNER" },
+        }),
+      Error,
+      "cannot bootstrap",
+    );
+    // The owner option keeps its pre-existing, ignorable semantics.
+    manager.registerSpaceIdentity(spaceIdentity, { owner: user.did() });
   } finally {
     await manager.close();
     await server.close();

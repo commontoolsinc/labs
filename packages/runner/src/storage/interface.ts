@@ -285,7 +285,10 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * (its first and only commit; no intermediate default is ever written),
    * validated by the memory server's genesis admission rather than here.
    * It is inert outside true genesis and never reaches the home arm.
-   * Supplying it together with `owner` is refused.
+   * Supplying it together with `owner` in one registration is refused; a
+   * later registration for the same space replaces an earlier one. A
+   * manager that cannot bootstrap an ACL refuses it rather than accept a
+   * document it would never write.
    */
   registerSpaceIdentity?(
     identity: Signer,
