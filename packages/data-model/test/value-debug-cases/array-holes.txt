@@ -2,6 +2,8 @@
   // A hole renders as `void`, and a run of holes as `void` times the length
   // of the run.
   "with holes": [1, , 3, , , 6, , ],
+  "hole at the start": [, 1],
+  "two holes at the start": [, , 1],
   "holes across the limit": (() => {
     // A run of holes which crosses the default limit of 100 renders as only
     // the holes below the limit.
@@ -20,6 +22,20 @@ with holes:
   void * 2,
   6,
   void
+]
+
+hole at the start:
+[void,1]
+[
+  void,
+  1
+]
+
+two holes at the start:
+[void*2,1]
+[
+  void * 2,
+  1
 ]
 
 holes across the limit:
