@@ -628,7 +628,9 @@ export class CodeMirrorCollaborationController {
    * submission before the update this caller observed, so waiting and then
    * re-reading is what makes that update the responsibility of a submission
    * serialized after it was recorded: this call's, or that of a drain another
-   * waiter started first.
+   * waiter started first. Waiting again whenever a drain is in flight is what
+   * keeps several waiters woken by the same drain from each starting one and
+   * submitting the same update under two submission ids.
    */
   async #flush(): Promise<void> {
     while (this.#flushPromise !== undefined) {
@@ -702,12 +704,16 @@ export class CodeMirrorCollaborationController {
         ...(base === null ? { baselineHash: this.#baselineHash } : {}),
         payload: submission.payload,
       }, this.#operationSessionId);
+      // A superseding controller owns the compartment once this one is
+      // disposed; a late resolution must not be dispatched into it.
+      if (this.#disposed) return;
       this.#receiveResolution(resolution);
       const snapshot = await this.#runtime.queryOperationField(
         this.#cell,
         this.#cursor ?? undefined,
         this.#operationSessionId,
       );
+      if (this.#disposed) return;
       this.#receive(snapshot);
     } catch (error) {
       this.#fail(error);

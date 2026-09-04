@@ -1262,6 +1262,35 @@ describe("CodeMirror operation collaboration", () => {
     });
   });
 
+  it("leaves the editor alone once disposed during a round trip", async () => {
+    // A superseding controller reinstalls the shared compartment, so a
+    // resolution arriving for the disposed one must not be dispatched.
+
+    const applied = Promise.withResolvers<void>();
+    const captured = Promise.withResolvers<void>();
+    const { controller, view, errors } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followup: activeSnapshotAt("aXbc", 1),
+      apply: async (request) => {
+        captured.resolve();
+        await applied.promise;
+        return resolutionFor(request);
+      },
+    });
+
+    await controller.start();
+    view.dispatch({ changes: { from: 1, insert: "X" } });
+    const sending = controller.localDocChanged();
+    await captured.promise;
+    controller.dispose();
+    const untouched = view.state;
+    applied.resolve();
+    await sending;
+
+    expect(errors).toEqual([]);
+    expect(view.state).toBe(untouched);
+  });
+
   it("isolates synchronization observers from the Memory operation path", async () => {
     const accepted = acceptedResolution("abc", 1, "X");
     const { controller, view, errors } = controllerHarness({
