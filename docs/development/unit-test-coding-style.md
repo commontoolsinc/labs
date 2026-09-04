@@ -410,3 +410,16 @@ as `FabricHash {}` rather than as a hash string, which is the tell. A
 confidently reported defect that turns out not to exist costs more than a
 missed gap: it consumes the reporter, the reviewer, and everyone downstream of
 both.
+
+**A cast onto a class's internals reads whatever it is told to.** Writing
+`(thing as unknown as { count: number }).count` declares the member's name and
+type from the test's side, and nothing checks either. Rename the member and
+the read yields `undefined`, which `assert(!thing.count)` accepts, so the test
+stays green while asserting nothing. Reach internals through the class's
+`accessForTestingOnly` getter instead, which types each member as the class
+does and turns a wrong name into a type error;
+[`DEVELOPMENT.md`](DEVELOPMENT.md#making-a-private-member-reachable-from-a-test)
+says how a class shapes one, and what to do about the reaches it cannot
+cover. A stand-in the test hands the class declares itself as one where it is
+passed in, with an `as` on the argument or a small typed helper, never with a
+cast on the receiver.
