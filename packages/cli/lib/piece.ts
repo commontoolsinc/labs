@@ -4189,7 +4189,13 @@ export async function inspectPiece(
   } catch (error) {
     if (
       error instanceof SlugResolutionError &&
-      error.code === "not-piece"
+      error.code === "not-piece" &&
+      // The fallback reports the cell the slug itself points at, which is an
+      // answer only where the address named the slug and nothing after it.
+      // With a path, `not-piece` says the member that path selected is no
+      // piece, and reporting the slug's own target would answer about
+      // something the caller did not ask for.
+      !config.piecePath?.length
     ) {
       return await inspectSlugTargetCell(pieces, config.piece);
     }

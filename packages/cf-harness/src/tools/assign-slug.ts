@@ -155,7 +155,7 @@ const slugAvailability = async (
 ): Promise<
   | { state: "free" }
   | { state: "taken"; pieceId: string }
-  | { state: "in-use"; reason: string }
+  | { state: "in-use" }
   | { state: "unknown"; reason: string }
 > => {
   try {
@@ -166,8 +166,12 @@ const slugAvailability = async (
         error.code !== undefined
       ? SLUG_CODE_STATES[error.code]
       : "unknown";
-    if (state === "free") return { state };
-    return { state, reason: errorMessage(error) };
+    // Only `unknown` carries the resolver's text. The other two are answers
+    // about what the space holds, and their refusals name the caller's own
+    // slug and nothing the caller did not already have.
+    return state === "unknown"
+      ? { state, reason: errorMessage(error) }
+      : { state };
   }
 };
 
@@ -335,7 +339,7 @@ export const assignSlugTool: HarnessToolDefinition<
     }
     if (availability.state === "in-use") {
       return errorOutput(
-        `assign_slug slug "${slug}" already names a collection in this space, and assigning would repoint that address. Choose another slug. The resolver reported: ${availability.reason}`,
+        `assign_slug slug "${slug}" already names a collection in this space, and assigning would repoint that address. Choose another slug.`,
       );
     }
     if (availability.state === "unknown") {

@@ -244,6 +244,10 @@ describe("assign-slug", () => {
       expect(output.status).toBe("error");
       expect(output.message).toContain("already names a collection");
       expect(output.message).not.toContain("could not establish");
+      // The refusal names the caller's own slug and nothing behind it, the
+      // way the refusal for a name already taken by a piece does: the address
+      // the name resolves to stays trusted-side.
+      expect(output.message).not.toContain(held.pieceId);
       // The name still points into the piece it pointed into, so the refusal
       // protected the address rather than merely reporting on it.
       expect(await resolveSlugTarget(pieces, "doubling-report")).toEqual({
