@@ -52,6 +52,11 @@ except health must carry the per-process token the page is handed as a
 
 ## Running it
 
+To run this server against the fabric a loom instance serves, so a piece a run
+builds lands in the person's own loom space and Weaver's pill can drive it,
+follow [`../docs/WEAVER.md`](../docs/WEAVER.md); the environment below is the
+same, with loom's values filled in.
+
 ```sh
 export CF_HARNESS_FABRIC_API_URL=http://localhost:8000
 export CF_HARNESS_FABRIC_IDENTITY="$HOME/.cf/my-key.pkcs8"
