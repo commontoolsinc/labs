@@ -29,6 +29,7 @@ import {
   resolveSlugTargetCell,
   setSlugLink,
   SlugAssignedError,
+  SlugReleasedError,
   SlugResolutionError,
 } from "../src/slugs.ts";
 
@@ -337,6 +338,43 @@ describe("piece slugs", () => {
     expect(readRootMeta(pieceId(held)!, "slug")).toBeUndefined();
   });
 
+  it("clears the name from a holder reached through a redirect with a path", async () => {
+    // The stamp lands on the RESOLVED root, so the clear has to ask the same
+    // question of the old holder. A stored redirect carrying a path can still
+    // resolve to a root: reading the path off the redirect answers about the
+    // redirect, and the root it reaches keeps the name it no longer holds —
+    // two roots stamped `demo`, which is the state the reverse map cannot
+    // represent.
+    const output = runtime.getCell(
+      pieces.getSpace(),
+      { space: pieces.getSpace(), random: "redirect-output" },
+    );
+    const intermediate = runtime.getCell(
+      pieces.getSpace(),
+      { space: pieces.getSpace(), random: "redirect-intermediate" },
+    );
+    await runtime.editWithRetry((tx) => {
+      output.withTx(tx).set({ value: 1 });
+      intermediate.withTx(tx).key("child").setRawUntyped(
+        output.withTx(tx).getAsWriteRedirectLink({
+          base: intermediate.withTx(tx).key("child"),
+        }),
+      );
+    });
+    const outputId = String(output.getAsNormalizedFullLink().id)
+      .replace(/^of:/, "");
+    await setSlugLink(pieces, "demo", intermediate.key("child"), {
+      writeTargetMetadata: true,
+    });
+    expect(readRootMeta(outputId, "slug")).toBe("demo");
+    const taking = await createPiece("slug-taking");
+
+    await assignSlug(pieces, taking, "demo", { force: true });
+
+    expect(readRootMeta(pieceId(taking)!, "slug")).toBe("demo");
+    expect(readRootMeta(outputId, "slug")).toBeUndefined();
+  });
+
   it("leaves a holder's own name alone when the name taken from it is another", async () => {
     // The entry is single-valued, so the last name assigned is the one the
     // root claims. Taking `demo` back must not drop the claim to `latest`,
@@ -383,6 +421,29 @@ describe("piece slugs", () => {
       `/${moved.getAsNormalizedFullLink().id}`,
     );
     expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(moved));
+  });
+
+  it("refuses a name the caller named a target for that now points nowhere", async () => {
+    // The fifth state of the claim, and the one an extra clause used to let
+    // through: `takeFrom` says commit only while the name points at that
+    // target, and a name pointing NOWHERE is not that target. A caller that
+    // named none is asking for a free name and gets one — the tests above —
+    // so nothing about the default rests on this.
+    const taking = await createPiece("slug-taking");
+    const elsewhere = await createPiece("slug-elsewhere");
+    const gone = `/${elsewhere.getAsNormalizedFullLink().id}`;
+
+    const failure = await failureOf(
+      assignSlug(pieces, taking, "demo", { takeFrom: gone }),
+    );
+
+    expect(failure).toBeInstanceOf(SlugReleasedError);
+    expect((failure as SlugReleasedError).expected).toBe(gone);
+    // Refused, so the name was not written: the caller's rule was about a
+    // target that is not there, and taking it anyway is what it excluded.
+    await expect(resolvePieceAddress(pieces, "demo")).rejects.toThrow(
+      /Slug "demo" not found/,
+    );
   });
 
   it("gives one name to exactly one of two writers claiming it at once", async () => {

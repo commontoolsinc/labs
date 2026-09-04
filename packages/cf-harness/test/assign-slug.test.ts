@@ -193,9 +193,11 @@ describe("assign-slug", () => {
     });
 
     it("refuses a slug that already names another piece, leaving the address where it pointed", async () => {
-      // Assigning a slug is a blind write, so a second call naming the same
-      // slug would repoint an address a person already opens. The refusal is
-      // a pre-flight one, so the attempt costs a message and nothing else.
+      // A second call naming the same slug would repoint an address a person
+      // already opens. The refusal is a pre-flight one, so the attempt costs
+      // a message and nothing else — and it is the one that names which kind
+      // of address is in the way, where the assignment's own refusal
+      // underneath would only say the name is taken.
       await linkDefaultPattern();
       const engine = createEngine();
       const first = await createPiece(engine, 21);

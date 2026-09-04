@@ -10,6 +10,7 @@ export {
   resolveSlugTargetCell,
   setSlugLink,
   SlugAssignedError,
+  SlugReleasedError,
   SlugResolutionError,
   type SlugTarget,
 } from "./slugs.ts";

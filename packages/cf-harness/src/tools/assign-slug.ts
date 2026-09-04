@@ -6,6 +6,7 @@ import {
   readSlugBinding,
   resolvePieceAddress,
   SlugAssignedError,
+  SlugReleasedError,
   SlugResolutionError,
 } from "@commonfabric/piece";
 import type { PiecesController } from "@commonfabric/piece/ops";
@@ -386,6 +387,16 @@ export const assignSlugTool: HarnessToolDefinition<
           `assign_slug slug "${slug}" was taken while this call was ` +
             `deciding, and assigning would repoint that address. Choose ` +
             `another slug.`,
+        );
+      }
+      // The name moved the other way and now points nowhere, so nobody is
+      // holding it and the answer is the one an unestablished availability
+      // gets: read it again rather than choose another name.
+      if (error instanceof SlugReleasedError) {
+        return errorOutput(
+          `assign_slug slug "${slug}" changed while this call was deciding ` +
+            `and now names nothing. Nothing was assigned. Try the same call ` +
+            `again.`,
         );
       }
       return errorOutput(

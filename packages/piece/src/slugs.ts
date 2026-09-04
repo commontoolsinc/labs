@@ -57,6 +57,40 @@ export class SlugAssignedError extends Error {
   }
 }
 
+/**
+ * A name that had moved on when an assignment reached it, and now points
+ * nowhere. The sibling of {@link SlugAssignedError}, and a different outcome:
+ * nobody holds the name, so the caller's answer is to read it again and try,
+ * where a name someone else holds is one to leave alone.
+ *
+ * Only a caller naming what to take the name from can see this, since a
+ * caller that names none is asking for a free name and has found one.
+ */
+export class SlugReleasedError extends Error {
+  #slug: string;
+  #expected: string;
+
+  constructor(slug: string, expected: string, remedy?: string) {
+    super(
+      `Slug "${slug}" no longer points at ${expected}, and now points ` +
+        `nowhere.` + (remedy === undefined ? "" : ` ${remedy}`),
+    );
+    this.name = "SlugReleasedError";
+    this.#slug = slug;
+    this.#expected = expected;
+  }
+
+  /** The name the assignment asked for. */
+  get slug(): string {
+    return this.#slug;
+  }
+
+  /** The reference the caller said to take the name from. */
+  get expected(): string {
+    return this.#expected;
+  }
+}
+
 /** The slug index's shape: names to `true`. Written one key at a time, so
  * two clients assigning different slugs merge as two keys rather than two
  * whole maps racing. The names are the whole content — where a name points
@@ -89,6 +123,26 @@ function bindingRefOf(
   return held === undefined
     ? null
     : createLLMFriendlyLink(held, pieces.getSpace());
+}
+
+/**
+ * The document root that carries a name for `cell`, or `undefined` when
+ * `cell` names a position inside a document rather than a document of its
+ * own. The stored `slug` entry belongs to a root, so a name pointing into one
+ * has no root of its own to stamp.
+ *
+ * One question for both sides of a reassignment — the stamp on the target
+ * taking the name and the clear on the holder losing it — because the two
+ * disagreeing is what leaves a root claiming a name that moved: a stored
+ * redirect can carry a path and still resolve to a root, and asking about the
+ * path before resolving answers about the redirect rather than about the
+ * document the name reaches.
+ */
+function slugStampRoot(cell: Cell<unknown>): Cell<unknown> | undefined {
+  const resolved = cell.resolveAsCell();
+  return resolved.getAsNormalizedFullLink().path.length === 0
+    ? resolved
+    : undefined;
 }
 
 function slugIndexCell(pieces: PiecesController) {
@@ -154,8 +208,10 @@ export async function assignSlug(
  * Points `slug` at `source`, and records the name in the space's slug index.
  *
  * A name pointing somewhere other than `takeFrom` — nowhere, for a caller
- * that names none — is refused with a {@link SlugAssignedError} naming what
- * it holds. `force` takes it whatever it holds, and ignores `takeFrom`.
+ * that names none — is refused: with a {@link SlugAssignedError} naming what
+ * it holds, or a {@link SlugReleasedError} when it has come to point nowhere,
+ * which is a name to read again rather than one to leave alone. `force` takes
+ * it whatever it holds, and ignores `takeFrom`.
  *
  * The refusal is a claim rather than a check: the name is read inside the
  * transaction the assignment commits in, so a writer that binds it between
@@ -197,13 +253,18 @@ export async function setSlugLink(
 
   const slugCell = slugCellFor(pieces, validSlug);
 
+  // Where the caller says the name points now, and so what the assignment
+  // commits only while it still points at. A caller that names none is asking
+  // for a free name, which is a name pointing nowhere.
+  const takeFrom = options?.takeFrom ?? null;
+
   const indexCell = slugIndexCell(pieces);
   await indexCell.sync();
   // The name is synced so the claim below reads what the space holds rather
   // than an absence this client never checked.
   await slugCell.sync();
 
-  const { ok: bound, error } = await pieces.runtime.editWithRetry((tx) => {
+  const { ok: refusal, error } = await pieces.runtime.editWithRetry((tx) => {
     const targetWithTx = target.withTx(tx);
     const slugWithTx = slugCell.withTx(tx);
     const metadataTargetWithTx = metadataTarget?.withTx(tx);
@@ -215,37 +276,28 @@ export async function setSlugLink(
     const heldRef = held === undefined
       ? null
       : createLLMFriendlyLink(held, pieces.getSpace());
-    if (
-      !options?.force && heldRef !== null &&
-      heldRef !== (options?.takeFrom ?? null)
-    ) {
-      return heldRef;
+    if (!options?.force && heldRef !== takeFrom) {
+      // `null` is a refusal too: a caller that named what to take the name
+      // from has not got it, whether somebody else holds the name now or
+      // nobody does.
+      return { held: heldRef };
     }
 
     // The name is being taken from a holder, so the holder stops claiming
-    // it. Only a document root carries the entry, and only its own name is
-    // cleared: another name pointing at the same root is not this
-    // assignment's to drop. Ahead of the stamp below, so a target that is
-    // both the old holder and the new one ends up stamped.
-    if (held !== undefined && held.path.length === 0) {
-      const holder = pieces.runtime.getCellFromLink(held).withTx(tx);
-      if (holder.getMetaRaw("slug") === validSlug) {
-        holder.setMetaRaw("slug", undefined, rawMetaWriteAuthorization);
-      }
+    // it. Only its own name is cleared: another name pointing at the same
+    // root is not this assignment's to drop. Ahead of the stamp below, so a
+    // root that is both the old holder and the new one ends up stamped.
+    const previousRoot = held === undefined ? undefined : slugStampRoot(
+      pieces.runtime.getCellFromLink(held).withTx(tx),
+    );
+    if (previousRoot?.getMetaRaw("slug") === validSlug) {
+      previousRoot.setMetaRaw("slug", undefined, rawMetaWriteAuthorization);
     }
 
-    const metadataTargetLink = metadataTargetWithTx
-      ?.getAsNormalizedFullLink();
-    if (
-      metadataTargetWithTx !== undefined &&
-      metadataTargetLink?.path.length === 0
-    ) {
-      metadataTargetWithTx.setMetaRaw(
-        "slug",
-        validSlug,
-        rawMetaWriteAuthorization,
-      );
-    }
+    const stampRoot = metadataTargetWithTx === undefined
+      ? undefined
+      : slugStampRoot(metadataTargetWithTx);
+    stampRoot?.setMetaRaw("slug", validSlug, rawMetaWriteAuthorization);
     slugWithTx.setMetaRaw("slug", validSlug, rawMetaWriteAuthorization);
     slugWithTx.setRawUntyped(
       targetWithTx.getAsWriteRedirectLink({ base: slugWithTx }),
@@ -261,7 +313,15 @@ export async function setSlugLink(
       { cause: error },
     );
   }
-  if (bound !== undefined) throw new SlugAssignedError(validSlug, bound);
+  if (refusal !== undefined) {
+    if (refusal.held !== null) {
+      throw new SlugAssignedError(validSlug, refusal.held);
+    }
+    // A name pointing nowhere only refuses a caller that named somewhere for
+    // it to point, because `takeFrom` of `null` is what a name pointing
+    // nowhere matches. So there is a reference to report here.
+    throw new SlugReleasedError(validSlug, takeFrom!);
+  }
 
   await pieces.runtime.idle();
   await pieces.synced();
