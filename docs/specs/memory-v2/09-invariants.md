@@ -488,7 +488,9 @@ Checked by: example-based server tests only.
 or write a new space", "the space identity initializes a private space",
 "service DIDs have implicit OWNER and do not claim spaces", "acl observe:
 fresh-space genesis remains a hard invariant", "direct writes cannot create or
-mutate ACL state", "a retracted ACL fails closed instead of becoming public".
+mutate ACL state", "a retracted ACL fails closed instead of becoming public",
+"a genesis ACL without a concrete OWNER is refused and the space stays
+uninitialized".
 
 ### INV-14 — Reconnect convergence
 

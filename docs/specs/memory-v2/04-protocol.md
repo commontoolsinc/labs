@@ -929,7 +929,7 @@ document against a confirmed absent ACL, closes that bootstrap session, and
 mounts the durable session as the active user. The document is whichever the
 caller registered beside the space key
 (`registerSpaceIdentity(identity, { genesisAcl })` — the space is then born
-with exactly that ACL, sealed by construction, and this admission check is the
+with exactly that ACL, and this admission check is the
 only validation it receives), else the fallback
 `{ [activeUser]: "OWNER", "*": "WRITE" }`. The wildcard grant is the rollout
 default until ACL management has a UI, spelled once as the runner's

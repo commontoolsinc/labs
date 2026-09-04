@@ -617,6 +617,13 @@ export const DEFAULT_GENESIS_GRANTS: Readonly<ACL> = Object.freeze({
   "*": "WRITE",
 });
 
+/** The fallback genesis document for a fresh non-home space: `owner` as
+ *  OWNER plus the rollout default grants. */
+const defaultGenesisAcl = (owner: string): ACL => ({
+  [owner]: "OWNER",
+  ...DEFAULT_GENESIS_GRANTS,
+});
+
 export interface Options {
   as: Signer;
 
@@ -910,15 +917,14 @@ export class StorageManager implements IStorageManager {
 
   #spaceIdentities = new Map<MemorySpace, Signer>();
 
-  /** Genesis ACL owners registered beside a space identity (OW31): the
-   * ACTING user a serving-side provisioning run supplied. Keyed apart so
-   * the client path (no owner registered) stays byte-identical. */
-  #spaceGenesisOwners = new Map<MemorySpace, string>();
-
-  /** Genesis ACL documents registered beside a space identity: the exact
-   * document the space is born with, in place of the owner + rollout
-   * default shape. Keyed apart from the owners so a space names one or
-   * the other, never both. */
+  /** Genesis ACL documents registered beside a space identity — the exact
+   * document a fresh space is born with. `{ owner }` (OW31: the ACTING
+   * user a serving-side provisioning run supplied) is stored here already
+   * expanded into the fallback shape, so there is one representation and
+   * one reader. Absent (every client that registered nothing), the
+   * fallback is computed at genesis from the signer, byte-identical to the
+   * pre-OW31 shape. A later registration for the same space replaces an
+   * earlier one, as re-registering an owner always did. */
   #spaceGenesisAcls = new Map<MemorySpace, ACL>();
 
   /** Seed map from Options — fixed for the manager's lifetime. */
@@ -1117,7 +1123,7 @@ export class StorageManager implements IStorageManager {
     }
     this.#spaceIdentities.set(space, identity);
     if (owner !== undefined) {
-      this.#spaceGenesisOwners.set(space, owner);
+      this.#spaceGenesisAcls.set(space, defaultGenesisAcl(owner));
     }
     if (genesisAcl !== undefined) {
       // Snapshot: what genesis writes is what was registered, not what the
@@ -1142,14 +1148,6 @@ export class StorageManager implements IStorageManager {
     return this.#servingHomeSpace !== undefined
       ? { actingAs: "space-owner" }
       : {};
-  }
-
-  /** The fallback genesis document for a fresh non-home space no caller
-   *  supplied one for: the registered owner (else the signer) as OWNER,
-   *  plus the rollout default grants. */
-  #defaultGenesisAcl(space: MemorySpace, signer: Signer): ACL {
-    const genesisOwner = this.#spaceGenesisOwners.get(space) ?? signer.did();
-    return { [genesisOwner]: "OWNER", ...DEFAULT_GENESIS_GRANTS };
   }
 
   /** The serving manager's HOME space (Options.servingHomeSpace) —
@@ -1434,15 +1432,15 @@ export class StorageManager implements IStorageManager {
           try {
             // The HOME arm is untouched — a home space is its own
             // identity and owner, and no registered document reaches it.
-            // Non-home: the caller's registered genesis document verbatim
-            // (sealed by construction), else the fallback shape whose
-            // owner is the acting user registered beside the space
-            // identity (OW31, RULED 2026-08-18) or, absent that, the
-            // signer — the active user on a client.
+            // Non-home: the document registered beside the space identity
+            // — a caller's own, or the fallback shape around the acting
+            // user a serving run supplied (OW31, RULED 2026-08-18) — else
+            // the fallback shape around the signer, the active user on a
+            // client.
             const bootstrapAcl = isHomeSpace
               ? { [signer.did()]: "OWNER" }
               : this.#spaceGenesisAcls.get(space) ??
-                this.#defaultGenesisAcl(space, signer);
+                defaultGenesisAcl(signer.did());
             await bootstrap.session.transact({
               localSeq: 1,
               reads: {
