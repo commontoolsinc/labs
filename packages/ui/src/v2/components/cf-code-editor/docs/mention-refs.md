@@ -88,6 +88,70 @@ The destination is never renamed from here. In the wiki-link form editing a pill
 writes `destination.title`, which makes every local wording a rename; in the
 reference form the label is local and the destination is untouched.
 
+## The short name a destination publishes
+
+A destination that publishes `shortName` — the name its own collection calls it
+by, `42` for a member of a board that numbers its members — has it rendered
+beside the label, inside the pill. It rides the same subscription that keeps the
+label in step with a rename, so a mention already in a document gains the number
+as soon as its destination starts publishing one, and loses it again when the
+destination stops. The two arrive independently: a destination with a short name
+and no name yet still shows its number.
+
+`shortName` is the one property for this fact at both ends. A universe row
+carries the collection's copy of it for the completion above; a destination
+publishes its own for the pill here.
+
+The document's own text does not change. The label is the person's wording and
+the short name is display, which is what `docs/specs/collection-naming.md`
+settles under "Rendering": a reference's spelling is computed from where it is
+read and is never stored. The name reaches the view as a `setRefShortNames`
+effect, is held in `refShortNameField`, and lands on the pill as a
+`data-short-name` attribute the stylesheet renders.
+
+Being display, it does not travel. Generated content sits in no text node, so
+the number is absent from `textContent`, from a copy taken out of the editor,
+and from anything reading the raw body — a copy carries the document's own text,
+which is the label and the key. That is a bound rather than a gap: the spelling
+a reference needs once it leaves is the fully qualified form
+`docs/specs/collection-naming.md` describes under "Copying", which is a
+clipboard flavor nothing here writes yet.
+
+## Two triggers, one mention
+
+`[[` opens a query over the universe's display names. `#` followed by digits
+opens one over each row's own `shortName` — what the collection publishing the
+universe calls that member. Both are sources of the same `autocompletion`
+extension, both offer the same rows, and picking from either mints the same
+reference-form mention. What differs is only what opens the query.
+
+`shortName` is optional in the `Mentionable` contract
+(`packages/ui/src/v2/core/mentionable.ts`), so a universe whose collection names
+nothing offers nothing to a `#` query, and a member the collection has not named
+is a row that query never reaches. The match is a PREFIX rather than a
+substring, because a member name is a number and `4` offering `42` beside `14`
+and `24` buries the one being typed. The `[[` query matches a row's `shortName`
+as well as its display name, so someone who knows the number reaches the member
+without switching sigils; what Enter completes there is unchanged, because an
+exact match is still asked of the display name alone.
+
+Enter does not complete a `#` query at all: it is picked from the list, or it
+stays text. The `[[` handler's fallthrough CREATES a piece for a query that
+matched nothing, and a stray `#7` must never create anything, so the sigil is
+left out of that handler rather than given a branch inside it.
+
+A sigil that does not open its token opens no query: `abc#4` is one word and
+`##4` is no citation. The boundary is asked in Unicode letters, marks and
+numbers rather than JavaScript's ASCII-only `\w`, because a member's names are
+ASCII by the spec's decision but the prose around them is any script — `Ω#4` is
+inside a word too. At least one digit is required, which is what keeps a
+markdown heading from opening a query over every named member.
+
+Nor does a sigil inside a gesture the backlink source owns. Anywhere within an
+unclosed `[[…` the query is that source's — it reads back over the brackets and
+extends across an auto-closed `]]`, which this one does not — and anywhere
+inside an existing mention's label a completion would nest a token in a token.
+
 ## Collection
 
 An entry whose token has left the document is removed by
@@ -148,6 +212,23 @@ document and would need a read before it could name the piece.
 The label starts as the pasted text and becomes the destination's name when the
 subscription delivers it. Nothing special does that: `modifiedTitle` is false,
 so this is the same rewrite a rename gets.
+
+## Pasted prose is left alone
+
+Nothing scans prose for citations. A `#42` that arrives by paste — or one typed
+and never completed — is ordinary text, and stays ordinary text however long the
+document lives. The pasted URL above is the one exception, and it is the
+exception for a reason that says why the rest is the rule: a URL names its
+destination outright, while `#42` names a member of whichever collection is
+being read through.
+
+A mention is therefore made where an author picks a destination, and what gets
+stored is the destination. That is `docs/specs/collection-naming.md` under
+"Storage": references canonicalize on write, and the bare form is settled at
+authoring time, in the context the author is typing in. Scanning later would
+resolve it in whatever context the text ended up in, against a namespace that
+has since grown — a `#42` written on one board and pasted into a note under
+another would acquire a destination nobody chose.
 
 ## What the form gives up
 

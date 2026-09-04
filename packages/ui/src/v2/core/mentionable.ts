@@ -19,6 +19,22 @@ export interface Mentionable {
    */
   piece?: unknown;
 
+  /**
+   * The name the collection that owns this member calls it by — `42` for a
+   * member of a board that numbers its members.
+   *
+   * One property for one fact, read at both ends of a mention. On a universe
+   * row it is a COPY the collection publishes, so matching a `#42` query
+   * costs no read of the member behind it; on a destination piece it is what
+   * that piece publishes for itself, which is what lets a mention already in
+   * a document gain the name once its member is named.
+   *
+   * Optional, and absent wherever no collection has named the member, which
+   * is what keeps such an entry out of every short-name query rather than
+   * matching them all.
+   */
+  shortName?: string;
+
   [key: string]: unknown;
 }
 
@@ -33,6 +49,10 @@ export const MentionableSchema = {
     // crosses the client boundary as an empty object — so a reader reaches
     // the piece by ADDRESS and never reads through it under this schema.
     piece: { type: "object", properties: {}, asCell: ["cell"] },
+    // One scalar serving both positions this schema is used at: a universe
+    // row's copy, and a destination piece's own. Neither read reaches past
+    // the string.
+    shortName: { type: "string" },
   },
   required: [NAME],
   // While Mentionable may have extra properies on it,

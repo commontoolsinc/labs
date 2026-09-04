@@ -21,5 +21,15 @@ describe("mentionable", () => {
       expect(MentionableSchema.properties.piece.asCell).toEqual(["cell"]);
       expect(MentionableSchema.properties.piece.properties).toEqual({});
     });
+
+    it("reads the member name as a plain string", () => {
+      // One property read at both ends of a mention: a universe row's copy of
+      // what its collection calls the member, and what a destination piece
+      // publishes for itself. Neither read goes past the string, so a `#42`
+      // query and a pill's number cost no read of a piece.
+      expect(MentionableSchema.properties.shortName).toEqual({
+        type: "string",
+      });
+    });
   });
 });

@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   autocompletion,
+  type Completion,
   CompletionContext,
   type CompletionResult,
   completionStatus,
@@ -11,7 +12,13 @@ import type { EditorView } from "@codemirror/view";
 import { NAME } from "@commonfabric/runner/shared";
 import { type CellHandle, type CellRef } from "@commonfabric/runtime-client";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
+import type { MentionRefMap } from "../../core/mention-refs.ts";
 import type { Mentionable, MentionableArray } from "../../core/mentionable.ts";
+import {
+  mentionRefField,
+  refShortNameField,
+  setKnownRefKeys,
+} from "./features/mention-refs.ts";
 import { CFCodeEditor, MimeType } from "./index.ts";
 
 describe("CFCodeEditor", () => {
@@ -373,7 +380,7 @@ describe("CFCodeEditor mention-piece resolution", () => {
     _editorView: EditorView | undefined;
     _resolvePieceIds(): Promise<void>;
     _resolvedPieceCells: Map<number, CellHandle<Mentionable>>;
-    _backlinkCompletionAwaitingResolution: boolean;
+    _completionAwaitingResolution: boolean;
     _getPieceId(index: number): string;
     findPieceById(id: string): CellHandle<Mentionable> | null;
     getFilteredMentionable(query: string): Array<[unknown, number]>;
@@ -552,7 +559,7 @@ describe("CFCodeEditor mention-piece resolution", () => {
 
     expect(creations).toBe(0);
     expect(view.state.doc.toString()).toBe("[[Existing Topic");
-    expect(element._backlinkCompletionAwaitingResolution).toBe(true);
+    expect(element._completionAwaitingResolution).toBe(true);
     await element._resolvePieceIds();
   });
 
@@ -679,5 +686,330 @@ describe("CFCodeEditor mention-piece resolution", () => {
     release();
     await older;
     expect(element._resolvedPieceCells.get(0)?.id()).toBe(fastId);
+  });
+});
+
+describe("CFCodeEditor short-name completion", () => {
+  // The `#42` trigger over a universe whose rows carry their collection's
+  // name for each member. A row's piece is stored as a LINK, as the
+  // resolution block above explains, so the fixtures hold raw `$link` sigils
+  // and the mock network follows them exactly as the runtime does.
+
+  type ShortNameInternals = {
+    mentionable: CellHandle<MentionableArray> | null;
+    references?: CellHandle<MentionRefMap> | null;
+    _editorView: EditorView | undefined;
+    _resolvePieceIds(): Promise<void>;
+    getFilteredMentionable(query: string): Array<[unknown, number]>;
+    createShortNameCompletionSource(): (
+      context: CompletionContext,
+    ) => CompletionResult | null;
+    createBacklinkCompletionSource(): (
+      context: CompletionContext,
+    ) => CompletionResult | null;
+  };
+
+  const link = (id: string) => ({ "$link": { id, path: [] } });
+
+  const REF_KEY = "a3f9zz";
+
+  const UNIVERSE = [
+    {
+      [NAME]: "First item",
+      title: "First item",
+      shortName: "1",
+      piece: link("of:aa1"),
+    },
+    {
+      [NAME]: "Second item",
+      title: "Second item",
+      shortName: "42",
+      piece: link("of:zz9"),
+    },
+    {
+      [NAME]: "Third item",
+      title: "Third item",
+      shortName: "43",
+      piece: link("of:bb3"),
+    },
+    // No name of its own, and a display name that a `#42` query would match
+    // were the query asked of anything but `shortName`.
+    { [NAME]: "42 apples", title: "42 apples", piece: link("of:none") },
+  ];
+
+  /** A view stub carrying the mention state the editor reads. */
+  function createView(
+    source: (context: CompletionContext) => CompletionResult | null,
+    doc: string,
+  ) {
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: doc.length },
+      extensions: [
+        autocompletion({ override: [source] }),
+        mentionRefField,
+        refShortNameField,
+      ],
+    });
+    return {
+      state,
+      hasFocus: true,
+      dispatch(spec: TransactionSpec) {
+        this.state = this.state.update(spec).state;
+      },
+    };
+  }
+
+  /** An editor bound to `UNIVERSE`, with every row's piece resolved. */
+  async function editorOver(
+    doc: string,
+    references?: CellHandle<MentionRefMap>,
+  ) {
+    const element = new CFCodeEditor() as unknown as ShortNameInternals;
+    element.mentionable = createMockCellHandle(
+      UNIVERSE,
+    ) as unknown as CellHandle<MentionableArray>;
+    if (references) {
+      // Defined rather than assigned, so Lit's reactive property setter does
+      // not run against an element with no editor behind it.
+      Object.defineProperty(element, "references", {
+        value: references,
+        writable: true,
+      });
+    }
+    await element._resolvePieceIds();
+
+    const source = element.createShortNameCompletionSource();
+    const view = createView(source, doc);
+    element._editorView = view as unknown as EditorView;
+    return { element, source, view };
+  }
+
+  it("offers every row whose name begins with the typed digits", async () => {
+    const { source, view } = await editorOver("see #4");
+    const result = source(new CompletionContext(view.state, 6, true));
+    expect(result?.options.map((option) => option.label)).toEqual([
+      "#42",
+      "#43",
+    ]);
+    expect(result?.from).toBe(4);
+  });
+
+  it("offers no row carrying no name of its own", async () => {
+    const { source, view } = await editorOver("see #42");
+    const result = source(new CompletionContext(view.state, 7, true));
+    expect(result?.options.map((option) => option.detail)).toEqual([
+      "Second item",
+    ]);
+  });
+
+  it("offers no row whose name the query does not begin", async () => {
+    const { source, view } = await editorOver("see #9");
+    expect(source(new CompletionContext(view.state, 6, true))?.options)
+      .toEqual([]);
+  });
+
+  it("returns null for a sigil opening a backlink query", async () => {
+    // `[[#4` is the backlink gesture, which owns the brackets around it: this
+    // source replaces neither, so completing here would nest a mention inside
+    // them.
+    const { source, view } = await editorOver("[[#4");
+    expect(source(new CompletionContext(view.state, 4, true))).toBeNull();
+  });
+
+  it("returns null for a sigil further inside an unclosed backlink query", async () => {
+    // The whole `[[…` gesture belongs to the backlink source, not just the
+    // two characters at its head: `[[note #4` is still inside it.
+    const { source, view } = await editorOver("[[note #4");
+    expect(source(new CompletionContext(view.state, 9, true))).toBeNull();
+  });
+
+  it("offers a short-name query once a `]` has closed the brackets", async () => {
+    // The guard asks whether the query is still open, so text that is no
+    // longer a backlink query does not suppress the sigil for the rest of
+    // the line.
+    const { source, view } = await editorOver("[[a]] then #4");
+    expect(source(new CompletionContext(view.state, 13, true))?.options)
+      .toHaveLength(2);
+  });
+
+  it("applies over the range the callback is given, not the one captured", async () => {
+    // A transaction between offering the option and applying it maps the
+    // query's position; an insertion that used the captured `from` would
+    // replace text the query no longer covers.
+    const { source, view } = await editorOver("see #42");
+    const result = source(new CompletionContext(view.state, 7, true))!;
+    view.dispatch({ changes: { from: 0, to: 0, insert: ">> " } });
+
+    const [option] = result.options;
+    (option.apply as (
+      view: EditorView,
+      completion: Completion,
+      from: number,
+      to: number,
+    ) => void)(view as unknown as EditorView, option, 7, 10);
+
+    expect(view.state.doc.toString()).toBe(">> see [[Second item (zz9)]]");
+  });
+
+  it("returns null for a sigil typed inside an existing mention's label", async () => {
+    // A label is ordinary editable text, so a sigil can land in one; inserting
+    // there would put a token inside a token.
+    const { source, view } = await editorOver(`[My #42Note][${REF_KEY}]`);
+    view.dispatch({ effects: setKnownRefKeys.of([REF_KEY]) });
+    expect(source(new CompletionContext(view.state, 7, true))).toBeNull();
+  });
+
+  it("returns null where the sigil sits inside a word", async () => {
+    const { source, view } = await editorOver("issue#4");
+    expect(source(new CompletionContext(view.state, 7, true))).toBeNull();
+  });
+
+  it("inserts a reference-form mention naming the row's piece", async () => {
+    const references = createMockCellHandle<MentionRefMap>({});
+    const { source, view } = await editorOver("see #42", references);
+    const result = source(new CompletionContext(view.state, 7, true))!;
+    const [option] = result.options;
+
+    (option.apply as (
+      view: EditorView,
+      completion: Completion,
+      from: number,
+      to: number,
+    ) => void)(view as unknown as EditorView, option, result.from, 7);
+
+    expect(view.state.doc.toString()).toMatch(
+      /^see \[Second item\]\[[0-9a-z]{6}\]$/,
+    );
+    const entries = Object.entries(references.get() ?? {});
+    expect(entries).toHaveLength(1);
+    const [key, entry] = entries[0];
+    expect(view.state.doc.toString()).toBe(`see [Second item][${key}]`);
+    // The mock network stores what the write serialized to, which is the cell
+    // the row's `piece` link named — the item, not the row that listed it.
+    expect((entry.destination as { id: string }).id).toBe("of:zz9");
+    expect(entry.modifiedTitle).toBe(false);
+  });
+
+  it("inserts a wiki-link mention without a reference map", async () => {
+    const { source, view } = await editorOver("see #42");
+    const result = source(new CompletionContext(view.state, 7, true))!;
+    const [option] = result.options;
+
+    (option.apply as (
+      view: EditorView,
+      completion: Completion,
+      from: number,
+      to: number,
+    ) => void)(view as unknown as EditorView, option, result.from, 7);
+
+    // The id, not the short name: the fixture's `of:zz9` resolves to an
+    // embed id nothing else in the row spells, so an insertion that reached
+    // for `shortName` instead could not pass this.
+    expect(view.state.doc.toString()).toBe("see [[Second item (zz9)]]");
+  });
+
+  it("restarts a short-name completion once the withheld row resolves", async () => {
+    // A row is withheld until its piece resolves, so the query that asked for
+    // it saw nothing. Without a reopen the user is left typing at a list that
+    // will never fill.
+    const element = new CFCodeEditor() as unknown as ShortNameInternals;
+    element.mentionable = createMockCellHandle(
+      UNIVERSE,
+    ) as unknown as CellHandle<MentionableArray>;
+    const source = element.createShortNameCompletionSource();
+    const view = createView(source, "see #42");
+    element._editorView = view as unknown as EditorView;
+
+    expect(source(new CompletionContext(view.state, 7, true))?.options)
+      .toEqual([]);
+    expect(completionStatus(view.state)).toBe(null);
+
+    await element._resolvePieceIds();
+
+    expect(completionStatus(view.state)).toBe("pending");
+  });
+
+  it("restarts a backlink completion the row matched only by short name", async () => {
+    // The same signal from the other trigger: `[[43` offers a row on its
+    // number, so a row withheld for that reason owes the same reopen. The
+    // query is one NO display name contains, so what reopens the completion
+    // can only be the short name.
+    const element = new CFCodeEditor() as unknown as ShortNameInternals;
+    element.mentionable = createMockCellHandle(
+      UNIVERSE,
+    ) as unknown as CellHandle<MentionableArray>;
+    const source = element.createBacklinkCompletionSource();
+    const view = createView(source, "[[43");
+    element._editorView = view as unknown as EditorView;
+
+    expect(source(new CompletionContext(view.state, 4, true))?.options)
+      .toEqual([]);
+    expect(completionStatus(view.state)).toBe(null);
+
+    await element._resolvePieceIds();
+
+    expect(completionStatus(view.state)).toBe("pending");
+  });
+
+  it("mentions the row that was picked after the universe reorders", async () => {
+    // The option carries the row's identity, not its position: a universe
+    // that recomputes between the dropdown opening and the pick would
+    // otherwise make the same index name a different member.
+    const references = createMockCellHandle<MentionRefMap>({});
+    const { element, source, view } = await editorOver("see #42", references);
+    const result = source(new CompletionContext(view.state, 7, true))!;
+    const [option] = result.options;
+
+    element.mentionable = createMockCellHandle(
+      [...UNIVERSE].reverse(),
+    ) as unknown as CellHandle<MentionableArray>;
+    await element._resolvePieceIds();
+
+    (option.apply as (
+      view: EditorView,
+      completion: Completion,
+      from: number,
+      to: number,
+    ) => void)(view as unknown as EditorView, option, result.from, 7);
+
+    const [[, entry]] = Object.entries(references.get() ?? {});
+    expect((entry.destination as { id: string }).id).toBe("of:zz9");
+  });
+
+  it("inserts a wiki-link the parser reads back for a name holding a bracket", async () => {
+    // `]` closes the token, so a name carrying one would mint a wiki-link no
+    // parse recognizes — unstyled, unprotected, and absent from `$mentioned`.
+    const element = new CFCodeEditor() as unknown as ShortNameInternals;
+    element.mentionable = createMockCellHandle([
+      {
+        [NAME]: "Bracket ] name",
+        title: "Bracket ] name",
+        shortName: "7",
+        piece: link("of:br7"),
+      },
+    ]) as unknown as CellHandle<MentionableArray>;
+    await element._resolvePieceIds();
+
+    const source = element.createShortNameCompletionSource();
+    const view = createView(source, "see #7");
+    element._editorView = view as unknown as EditorView;
+    const result = source(new CompletionContext(view.state, 6, true))!;
+    const [option] = result.options;
+
+    (option.apply as (
+      view: EditorView,
+      completion: Completion,
+      from: number,
+      to: number,
+    ) => void)(view as unknown as EditorView, option, result.from, 6);
+
+    expect(view.state.doc.toString()).toBe("see [[Bracket ) name (br7)]]");
+  });
+
+  it("offers a row by its collection name from the backlink query too", async () => {
+    const { element } = await editorOver("");
+    expect(element.getFilteredMentionable("43")).toHaveLength(1);
+    expect(element.getFilteredMentionable("9")).toEqual([]);
   });
 });

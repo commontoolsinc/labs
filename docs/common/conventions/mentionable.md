@@ -65,6 +65,27 @@ property named `piece` on its mentionable entries; doing so silently
 redirects every mention of that entry. How consumers resolve rows is in
 [`mentionable-internals.md`](../../../packages/ui/docs/mentionable-internals.md).
 
+### The member name, `shortName`
+
+One further key carries a collection's name for a member — `42` for a board
+that numbers its members — and it is read at both ends of a mention. It is an
+optional plain string.
+
+On a ROW it is the collection's copy. `cf-code-editor` matches a `#42`
+completion against it, and the copy is what lets that query run without reading
+a member. A producer whose collection names nothing leaves it out, and a row
+without it is one no such query reaches.
+
+On a PIECE it is what the piece publishes for itself, read live off the
+destination. A mention's pill renders it beside the label, so a mention already
+written gains the number as soon as its destination starts publishing one, and
+loses it again when the destination stops. A member pattern publishes it; a
+universe row has no need to.
+
+The name is never written into any document. A citation's spelling is computed
+where it is read, which is the rule
+[Naming in collections](../../specs/collection-naming.md) states.
+
 ## Wishing for Mentionables
 
 Patterns can discover mentionables in the current space using `wish()`:

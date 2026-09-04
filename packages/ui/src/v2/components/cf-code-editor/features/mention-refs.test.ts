@@ -3,13 +3,18 @@ import { expect } from "@std/expect";
 import { EditorState } from "@codemirror/state";
 import {
   findRefToken,
+  mentionRefDecorations,
   mentionRefEditFilter,
   mentionRefField,
   type MentionRefInfo,
   mentionRefs,
   parseMentionRefs,
+  refShortNameField,
+  refShortNames,
   scanRefKeys,
   setKnownRefKeys,
+  setRefShortNames,
+  shortNameQueryAt,
 } from "./mention-refs.ts";
 
 const KEY = "a3f9zz";
@@ -19,9 +24,57 @@ const OTHER_KEY = "b7k2m1";
 function createState(doc: string, keys: string[] = [KEY]): EditorState {
   const state = EditorState.create({
     doc,
-    extensions: [mentionRefField, mentionRefEditFilter],
+    extensions: [mentionRefField, mentionRefEditFilter, refShortNameField],
   });
   return state.update({ effects: setKnownRefKeys.of(keys) }).state;
+}
+
+/** `state`, with `names` announced as what its destinations call themselves. */
+function withShortNames(
+  state: EditorState,
+  names: Record<string, string>,
+): EditorState {
+  return state.update({ effects: setRefShortNames.of(names) }).state;
+}
+
+/** Every pill a state's mentions take, in document order. */
+function pills(
+  state: EditorState,
+  hasFocus = false,
+): Array<{ from: number; to: number; shortName: string | undefined }> {
+  const found: Array<
+    { from: number; to: number; shortName: string | undefined }
+  > = [];
+  mentionRefDecorations(state, hasFocus).between(
+    0,
+    state.doc.length,
+    (from, to, value) => {
+      const spec = value.spec as {
+        class?: string;
+        attributes?: Record<string, string>;
+      };
+      if (spec.class !== "cm-mention-ref-pill") return;
+      found.push({ from, to, shortName: spec.attributes?.["data-short-name"] });
+    },
+  );
+  return found;
+}
+
+/** Every range a state's mentions hide from the reader, in document order. */
+function hidden(
+  state: EditorState,
+  hasFocus = false,
+): Array<{ from: number; to: number }> {
+  const found: Array<{ from: number; to: number }> = [];
+  mentionRefDecorations(state, hasFocus).between(
+    0,
+    state.doc.length,
+    (from, to, value) => {
+      if (value.spec.class !== undefined) return;
+      found.push({ from, to });
+    },
+  );
+  return found;
 }
 
 describe("mention-refs", () => {
@@ -296,6 +349,172 @@ describe("mention-refs", () => {
         ],
       });
       expect(edited.state.doc.toString()).toBe(`pre [A][${KEY}] suffix`);
+    });
+  });
+
+  describe("refShortNameField", () => {
+    it("returns no short names before any are announced", () => {
+      expect(refShortNames(createState(`[A][${KEY}]`))).toEqual({});
+    });
+
+    it("returns an empty record for a state without the field", () => {
+      const state = EditorState.create({
+        doc: `[A][${KEY}]`,
+        extensions: [mentionRefField],
+      });
+      expect(refShortNames(state)).toEqual({});
+    });
+
+    it("returns the short names last announced", () => {
+      const state = withShortNames(createState(`[A][${KEY}]`), { [KEY]: "42" });
+      expect(refShortNames(state)).toEqual({ [KEY]: "42" });
+    });
+
+    it("drops a name the newer announcement leaves out", () => {
+      const named = withShortNames(createState(`[A][${KEY}]`), { [KEY]: "42" });
+      expect(refShortNames(withShortNames(named, {}))).toEqual({});
+    });
+
+    it("keeps the short names across a document edit", () => {
+      // A short name comes from the destination cell and not from the text,
+      // so an edit neither produces one nor invalidates one.
+
+      const named = withShortNames(createState(`[A][${KEY}]`), { [KEY]: "42" });
+      const edited = named.update({
+        changes: { from: 0, to: 0, insert: "x " },
+      });
+      expect(refShortNames(edited.state)).toEqual({ [KEY]: "42" });
+    });
+  });
+
+  describe("mentionRefDecorations()", () => {
+    it("returns a pill over the label of an unfocused mention", () => {
+      const [pill] = pills(createState(`See [My Note][${KEY}].`));
+      expect(pill.from).toBe(5);
+      expect(pill.to).toBe(12);
+      expect(pill.shortName).toBeUndefined();
+    });
+
+    it("returns a pill carrying the short name its destination published", () => {
+      const state = withShortNames(createState(`[My Note][${KEY}]`), {
+        [KEY]: "42",
+      });
+      expect(pills(state)[0].shortName).toBe("42");
+    });
+
+    it("returns a pill with no short name beside one that has it", () => {
+      const state = withShortNames(
+        createState(`[A][${KEY}] [B][${OTHER_KEY}]`, [KEY, OTHER_KEY]),
+        { [KEY]: "42" },
+      );
+      expect(pills(state).map((pill) => pill.shortName)).toEqual([
+        "42",
+        undefined,
+      ]);
+    });
+
+    it("returns a pill over a label the short name does not lengthen", () => {
+      // The label in the document is the person's wording, and the number is
+      // display: a mention that gains one covers the same range it did.
+
+      const plain = createState(`[My Note][${KEY}]`);
+      const named = withShortNames(plain, { [KEY]: "42" });
+      expect(pills(named)[0].to).toBe(pills(plain)[0].to);
+    });
+
+    it("returns no pill for a mention the cursor is inside", () => {
+      const state = withShortNames(createState(`[My Note][${KEY}]`), {
+        [KEY]: "42",
+      }).update({ selection: { anchor: 3 } }).state;
+      expect(pills(state, true)).toEqual([]);
+    });
+
+    it("returns a pill for a mention the cursor is inside while unfocused", () => {
+      const state = createState(`[My Note][${KEY}]`).update({
+        selection: { anchor: 3 },
+      }).state;
+      expect(pills(state, false)).toHaveLength(1);
+    });
+
+    it("leaves a mention whose label is empty visible and unpilled", () => {
+      // What a deleted label leaves is `[]`, and it stays on screen so it can
+      // be typed back into: hiding it would leave a token the document holds
+      // and nobody can see or reach.
+      const state = createState(`[][${KEY}]`);
+      expect(pills(state)).toEqual([]);
+      expect(hidden(state)).toEqual([{ from: 2, to: 10 }]);
+    });
+  });
+
+  describe("shortNameQueryAt()", () => {
+    it("returns the digits typed after a sigil at the cursor", () => {
+      expect(shortNameQueryAt("see #42")).toEqual({ from: 4, query: "42" });
+    });
+
+    it("returns a query for a sigil opening the line", () => {
+      expect(shortNameQueryAt("#7")).toEqual({ from: 0, query: "7" });
+    });
+
+    it("returns a query for a sigil after a mention token", () => {
+      expect(shortNameQueryAt(`[A][${KEY}]#3`)).toEqual({
+        from: 11,
+        query: "3",
+      });
+    });
+
+    it("returns null for a sigil with no digits after it", () => {
+      expect(shortNameQueryAt("# heading")).toBeNull();
+      expect(shortNameQueryAt("a #")).toBeNull();
+    });
+
+    it("returns null for a sigil inside a word", () => {
+      expect(shortNameQueryAt("issue#42")).toBeNull();
+    });
+
+    it("returns null for a sigil after a word in any script", () => {
+      // A member's names are ASCII by the spec's decision; the prose around
+      // them is not. JavaScript's `\w` is ASCII-only, so a boundary written
+      // with it reads every non-Latin letter as a word break and opens a
+      // query inside a word.
+      expect(shortNameQueryAt("Ω#42")).toBeNull();
+      expect(shortNameQueryAt("名#42")).toBeNull();
+      expect(shortNameQueryAt("café#42")).toBeNull();
+      expect(shortNameQueryAt("Привет#42")).toBeNull();
+    });
+
+    it("returns null for a sigil after a letter outside the basic plane", () => {
+      // An astral letter is a surrogate PAIR, so a boundary that reads one
+      // UTF-16 unit tests its low half, which matches no Unicode property and
+      // reads as a word break.
+      expect(shortNameQueryAt("\u{1D400}#42")).toBeNull();
+      expect(shortNameQueryAt("\u{1D7DC}#42")).toBeNull();
+    });
+
+    it("returns a query for a sigil after an astral symbol", () => {
+      // The other half: an astral code point that is NOT a letter, mark or
+      // number is a boundary, so reading the pair whole must not reject it.
+      expect(shortNameQueryAt("\u{1F642}#42")).toEqual({
+        from: 2,
+        query: "42",
+      });
+    });
+
+    it("returns a query for a sigil after punctuation in any script", () => {
+      // The other half: a boundary that rejected every non-ASCII character
+      // would stop the sigil working after ordinary foreign punctuation.
+      expect(shortNameQueryAt("見よ、#42")).toEqual({ from: 3, query: "42" });
+    });
+
+    it("returns null for a doubled sigil", () => {
+      expect(shortNameQueryAt("##42")).toBeNull();
+    });
+
+    it("returns null for digits carrying no sigil", () => {
+      expect(shortNameQueryAt("42")).toBeNull();
+    });
+
+    it("returns null where the digits do not end at the cursor", () => {
+      expect(shortNameQueryAt("#42 and more")).toBeNull();
     });
   });
 });

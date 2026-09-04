@@ -2,11 +2,20 @@
  * Pattern tests for the exemplar board and its item: allocation on create,
  * density, a name never reused, a name kept whatever happens to its item, the
  * backfill and its idempotence, index rows that are the members and the
- * default an unnamed member's `shortName` reads as, the item reading its own
- * name out of the board's table, the declaration, the bound on what a read of
- * the namespace expands, and the rejections. Every rejection here is a thrown
+ * default an unnamed member's `shortName` reads as, the mention universe and
+ * the name each of its rows carries, the item reading its own name out of the
+ * board's table, the declaration, the bound on what a read of the namespace or
+ * the universe expands, and the rejections. Every rejection here is a thrown
  * verb, so the runtime errors are required, and the count is exact: a guard
  * quietly reverting to a silent return fails the suite.
+ *
+ * A property worth knowing before adding another guard test here: a guard that
+ * PREVENTS a write can only be caught where the value it would have written
+ * differs from the value already stored. Where the two are equal — a draft
+ * seeded from the very field it would overwrite — removing the guard changes
+ * nothing observable, and the test passes against a system carrying the
+ * defect. Move the stored value between the seeding and the guarded call, then
+ * assert the stored value survives rather than the draft.
  */
 
 import {
@@ -22,7 +31,7 @@ import {
 } from "commonfabric";
 import { findElement, hasText } from "../test/vnode-helpers.ts";
 import Board, { type ItemDemand } from "./board.tsx";
-import Item from "./item.tsx";
+import Item, { type ItemMentionRefMap } from "./item.tsx";
 import { backfillNames, nameOf, type NamesMap } from "./naming.ts";
 
 export default pattern(() => {
@@ -154,12 +163,50 @@ export default pattern(() => {
       !serialized.includes("vnode");
   });
 
+  // The mention universe: one row per member, carrying the board's name for
+  // it and the member itself as a reference. This is what an item's editor
+  // completes a `#42` citation over.
+  const assert_mentionable_rows_carry_names = assert(() =>
+    (board.mentionable ?? []).length === 3 &&
+    board.mentionable?.[0]?.[NAME] === "First item, renamed" &&
+    board.mentionable?.[0]?.title === "First item, renamed" &&
+    board.mentionable?.[0]?.shortName === "1" &&
+    board.mentionable?.[1]?.shortName === "8" &&
+    board.mentionable?.[2]?.shortName === "9" &&
+    equals(
+      board.mentionable?.[0]?.piece as object,
+      board.items?.[0] as object,
+    )
+  );
+  // The same bound the index keeps: the rows carry copied strings and a
+  // reference, and nothing behind the reference. `shortName` is one of those
+  // copies here, so what says no member was expanded is a field the item
+  // publishes and the row does not.
+  const assert_universe_read_expands_no_member = assert(() => {
+    const serialized = JSON.stringify(board.mentionable);
+    return serialized.includes('"title"') &&
+      serialized.includes('"shortName"') &&
+      !serialized.includes('"body"') &&
+      !serialized.includes('"createdAt"') &&
+      !serialized.includes('"references"') &&
+      !serialized.includes("vnode");
+  });
+
   // An item wired to the board's table reads its own name out of it by
   // identity, and renders it as a badge; an item wired to nothing has no
   // name, renders no badge, and does not fail.
+  const wiredBody = new Writable("");
+  // A mention map with something in it, so a save that erased would be seen
+  // to erase both halves rather than only the prose. The destination is a
+  // stand-in: what these assertions turn on is the entry surviving, not what
+  // it points at, and a seeded cell takes static data only.
+  const wiredRefs = new Writable<ItemMentionRefMap>({
+    a3f9zz: { destination: {}, modifiedTitle: false },
+  });
   const wired = Item({
     title: "Wired item",
-    body: "",
+    body: wiredBody,
+    references: wiredRefs,
     boardNames: board.namesTable,
   });
   const action_name_the_wired_item = action(() => {
@@ -175,6 +222,107 @@ export default pattern(() => {
     hasText(wired[UI], "Wired item") &&
     hasText(wired[UI], "No body yet.")
   );
+  // Opening seeds the drafts from the stored body and map, which is the whole
+  // reason opening is a verb: a save right after an open writes back what the
+  // open read, so it preserves the body rather than erasing it with an
+  // uninitialized draft. Take the seeding out of `startEditBody` and this
+  // pair goes red on the save.
+  const action_open_the_wired_editor = action(() => {
+    wired.startEditBody.send();
+  });
+  const assert_opening_shows_the_editor = assert(() =>
+    findElement(wired[UI], "cf-code-editor") !== undefined &&
+    findElement(wired[UI], "cf-markdown") === undefined
+  );
+  const action_save_the_wired_body = action(() => {
+    wired.saveBody.send();
+  });
+  const assert_save_preserves_the_body = assert(() =>
+    wired.body === "The seeded body." &&
+    findElement(wired[UI], "cf-code-editor") === undefined
+  );
+
+  // A save that never followed an open writes nothing. The drafts are seeded
+  // only by `startEditBody`, so an ungated save would put an empty draft over
+  // both the prose and the mention map — the first P1's erasure reached
+  // through the save rather than through the open.
+  const action_save_without_opening = action(() => {
+    wired.saveBody.send();
+  });
+  const assert_cold_save_writes_nothing = assert(() =>
+    wired.body === "The seeded body." &&
+    Object.keys((wired.references ?? {}) as ItemMentionRefMap).join(",") ===
+      "a3f9zz"
+  );
+
+  // Cancel leaves the drafts behind and writes nothing, so the stored body is
+  // what it was however the editor is closed.
+  const action_reopen_the_wired_editor = action(() => {
+    wired.startEditBody.send();
+  });
+  const action_cancel_the_wired_edit = action(() => {
+    wired.cancelEditBody.send();
+  });
+  const assert_cancel_preserves_the_body = assert(() =>
+    wired.body === "The seeded body." &&
+    findElement(wired[UI], "cf-code-editor") === undefined
+  );
+
+  // The second door: a save sent after a cancel. The stored content moves
+  // between the cancel and the save, which is what makes the guard visible —
+  // the abandoned draft still holds what the open read, so an ungated save
+  // resurrects it over the newer content instead of writing it back unchanged.
+  const action_change_content_after_cancelling = action(() => {
+    wiredBody.set("Changed after the cancel.");
+    wiredRefs.set({ b7k2m1: { destination: {}, modifiedTitle: false } });
+  });
+  const action_save_after_cancelling = action(() => {
+    wired.saveBody.send();
+  });
+  const assert_save_after_cancel_writes_nothing = assert(() =>
+    wired.body === "Changed after the cancel." &&
+    Object.keys((wired.references ?? {}) as ItemMentionRefMap).join(",") ===
+      "b7k2m1"
+  );
+
+  // Opening twice is opening once. What makes that observable is a stored
+  // body that moves between the two opens: the save writes what the editor
+  // has held since it opened, so the first open's draft is what lands. An
+  // unguarded second open would re-seed from the newer body and this would
+  // read `Changed elsewhere` instead.
+  const action_open_before_the_change = action(() => {
+    wired.startEditBody.send();
+  });
+  const action_change_the_body_elsewhere = action(() => {
+    wiredBody.set("Changed elsewhere.");
+  });
+  const action_open_again_mid_edit = action(() => {
+    wired.startEditBody.send();
+  });
+  const assert_second_open_keeps_the_first_draft = assert(() =>
+    wired.body === "Changed after the cancel." &&
+    findElement(wired[UI], "cf-code-editor") === undefined
+  );
+
+  // The body view follows the body, in both directions: a member that gains
+  // prose shows it, and one whose prose is cleared shows the empty state
+  // again. Both, because a view pinned to the value it first read passes
+  // whichever direction it happened to start in.
+  const action_give_the_wired_item_a_body = action(() => {
+    wiredBody.set("The seeded body.");
+  });
+  const assert_body_shows_as_markdown = assert(() =>
+    findElement(wired[UI], "cf-markdown") !== undefined &&
+    !hasText(wired[UI], "No body yet.")
+  );
+  const action_clear_the_wired_body = action(() => {
+    wiredBody.set("");
+  });
+  const assert_cleared_body_shows_the_empty_state = assert(() =>
+    findElement(wired[UI], "cf-markdown") === undefined &&
+    hasText(wired[UI], "No body yet.")
+  );
+
   const solo = Item({ title: "Solo item", body: "A body of its own." });
   const assert_solo_item_has_no_name = assert(() =>
     solo.shortName === undefined &&
@@ -220,6 +368,14 @@ export default pattern(() => {
     legacy.index?.[1]?.title === "Older two" &&
     (legacy.namesTable ?? []).length === 0
   );
+  // A universe row for a member the board has not named carries the empty
+  // name, which is a row no `#42` query matches.
+  const assert_unnamed_universe_rows_have_no_name = assert(() =>
+    (legacy.mentionable ?? []).length === 2 &&
+    legacy.mentionable?.[0]?.[NAME] === "Older one" &&
+    legacy.mentionable?.[0]?.shortName === "" &&
+    legacy.mentionable?.[1]?.shortName === ""
+  );
   // The library call itself, so its return is observable: the names it
   // wrote, in filing order.
   const action_backfill_directly = action(() => {
@@ -237,6 +393,12 @@ export default pattern(() => {
       ((legacy.names ?? {}) as NamesMap)["2"] as object,
       legacy.items?.[1] as object,
     )
+  );
+  // The universe follows the namespace: a member named by the backfill
+  // carries its name in the row an editor completes over.
+  const assert_backfill_reaches_the_universe = assert(() =>
+    legacy.mentionable?.[0]?.shortName === "1" &&
+    legacy.mentionable?.[1]?.shortName === "2"
   );
   // Idempotent: the second run returns no names — it writes exactly the
   // names it returns — and the map holds what the first run left.
@@ -277,6 +439,16 @@ export default pattern(() => {
     legacy.index?.[3]?.title === "Older three" &&
     nameOf(legacyItems.key(3), legacy.namesTable ?? []) === "4" &&
     Object.keys((legacy.names ?? {}) as NamesMap).join(",") === "1,2,3,4"
+  );
+  // The universe reads an unwired member the way its index row does: blank,
+  // however the namespace names it. Both take the member's own `shortName`,
+  // so one derivation gives one answer, and a caller that needs to tell a
+  // missing bind from a missing name reads the namespace for both.
+  const assert_universe_follows_the_wiring = assert(() =>
+    legacy.mentionable?.[2]?.shortName === "3" &&
+    legacy.mentionable?.[3]?.[NAME] === "Older three" &&
+    legacy.mentionable?.[3]?.shortName === "" &&
+    nameOf(legacyItems.key(3), legacy.namesTable ?? []) === "4"
   );
 
   // One member at two positions, backfilled over an empty namespace: named
@@ -390,25 +562,57 @@ export default pattern(() => {
       { assertion: assert_fourth_does_not_reuse_two },
       { assertion: assert_namespace_read_expands_no_member },
       { assertion: assert_index_read_expands_no_member },
+      { assertion: assert_mentionable_rows_carry_names },
+      { assertion: assert_universe_read_expands_no_member },
       { render: board[UI] },
       { action: action_name_the_wired_item },
       { assertion: assert_wired_item_reads_its_name },
       { render: wired[UI] },
       { assertion: assert_wired_item_renders_its_badge },
+      { action: action_give_the_wired_item_a_body },
+      { action: action_save_without_opening },
+      { assertion: assert_cold_save_writes_nothing },
+      { action: action_open_the_wired_editor },
+      { render: wired[UI] },
+      { assertion: assert_opening_shows_the_editor },
+      { action: action_save_the_wired_body },
+      { render: wired[UI] },
+      { assertion: assert_save_preserves_the_body },
+      { action: action_reopen_the_wired_editor },
+      { action: action_cancel_the_wired_edit },
+      { render: wired[UI] },
+      { assertion: assert_cancel_preserves_the_body },
+      { action: action_change_content_after_cancelling },
+      { action: action_save_after_cancelling },
+      { assertion: assert_save_after_cancel_writes_nothing },
+      { action: action_open_before_the_change },
+      { action: action_change_the_body_elsewhere },
+      { action: action_open_again_mid_edit },
+      { action: action_save_the_wired_body },
+      { render: wired[UI] },
+      { assertion: assert_second_open_keeps_the_first_draft },
+      { render: wired[UI] },
+      { assertion: assert_body_shows_as_markdown },
+      { action: action_clear_the_wired_body },
+      { render: wired[UI] },
+      { assertion: assert_cleared_body_shows_the_empty_state },
       { assertion: assert_solo_item_has_no_name },
       { render: solo[UI] },
       { assertion: assert_solo_item_renders_no_badge },
       { assertion: assert_untitled_item_has_a_display_name },
       { action: action_file_two_unnamed },
       { assertion: assert_unnamed_rows_read_the_default },
+      { assertion: assert_unnamed_universe_rows_have_no_name },
       { action: action_backfill_directly },
       { assertion: assert_backfill_named_in_filing_order },
+      { assertion: assert_backfill_reaches_the_universe },
       { action: action_backfill_again },
       { assertion: assert_second_backfill_writes_nothing },
       { action: action_create_a_named_item },
       { action: action_file_a_late_unnamed },
       { action: action_backfill_verb },
       { assertion: assert_backfill_skips_the_named },
+      { assertion: assert_universe_follows_the_wiring },
       { action: action_list_one_item_twice },
       { action: action_backfill_the_twins },
       { assertion: assert_twin_is_named_once },
