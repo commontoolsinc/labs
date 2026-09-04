@@ -187,6 +187,23 @@ type NavigationDetail = {
 };
 
 describe("RuntimeInternals", () => {
+  /** Fails the test if anything reaches for a dedicated worker. */
+  async function withNoWorkerConstructible<T>(
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const OriginalWorker = (globalThis as { Worker: unknown }).Worker;
+    (globalThis as { Worker: unknown }).Worker = class {
+      constructor() {
+        throw new Error("a supplied transport must spawn no worker");
+      }
+    };
+    try {
+      return await run();
+    } finally {
+      (globalThis as { Worker: unknown }).Worker = OriginalWorker;
+    }
+  }
+
   describe("getSpaceRootPattern", () => {
     it("caches a successful root-pattern lookup", async () => {
       const client = new MockRuntimeClient();
@@ -1021,6 +1038,26 @@ describe("RuntimeInternals", () => {
     });
   });
 
+  it("refuses bad options before spawning a worker it would own", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+
+    // With no transport supplied, `create` spawns the worker itself and owns
+    // it. Options are built first, so a snapshot this host cannot render for
+    // is refused while there is still nothing to dispose.
+    await expect(
+      withNoWorkerConstructible(() =>
+        RuntimeInternals.create({
+          identity,
+          apiUrl: new URL("http://shell.test/"),
+          trustSnapshot: {
+            id: "principal:loom-host",
+            actingPrincipal: "loom-host",
+          },
+        })
+      ),
+    ).rejects.toThrow("acting principal must be a DID");
+  });
+
   describe("worker URL versioning", () => {
     // A deployed page must keep its worker and lazy chunks on the same
     // immutable module graph. Local/legacy builds retain the root worker URL
@@ -1313,23 +1350,6 @@ describe("RuntimeInternals", () => {
       dispose(): Promise<void> {
         this.disposals += 1;
         return Promise.resolve();
-      }
-    }
-
-    /** Fails the test if anything reaches for a dedicated worker. */
-    async function withNoWorkerConstructible<T>(
-      run: () => Promise<T>,
-    ): Promise<T> {
-      const OriginalWorker = (globalThis as { Worker: unknown }).Worker;
-      (globalThis as { Worker: unknown }).Worker = class {
-        constructor() {
-          throw new Error("a supplied transport must spawn no worker");
-        }
-      };
-      try {
-        return await run();
-      } finally {
-        (globalThis as { Worker: unknown }).Worker = OriginalWorker;
       }
     }
 

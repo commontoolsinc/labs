@@ -950,15 +950,8 @@ export class RuntimeInternals extends EventTarget {
       `[Identity] User DID: ${identity.did()}`,
     );
 
-    const connection = transport ??
-      await WebWorkerRuntimeTransport.connect({
-        workerUrl: await resolveWorkerUrl({
-          workerUrl,
-          clientVersion,
-          getBuildHash,
-        }),
-      });
-
+    // Built before anything is connected, so a host's bad options are
+    // refused while a worker this page would own is still unspawned.
     const clientOptions = createRuntimeClientOptions({
       session,
       apiUrl,
@@ -972,6 +965,15 @@ export class RuntimeInternals extends EventTarget {
       patternCoverage,
       concurrentWatchRefresh,
     });
+
+    const connection = transport ??
+      await WebWorkerRuntimeTransport.connect({
+        workerUrl: await resolveWorkerUrl({
+          workerUrl,
+          clientVersion,
+          getBuildHash,
+        }),
+      });
     const client = attach
       ? await RuntimeClient.attach(
         connection,
