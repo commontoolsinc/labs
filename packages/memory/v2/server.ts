@@ -280,10 +280,12 @@ export type SlowQuery = {
    * the complete request rather than only its costliest root. */
   managerReads?: number;
 
-  /** watch.add only: changed entity snapshots returned to the client. This is
-   * the delivered-width counterpart to `watches` and `managerReads`: a wide
-   * traversal that yields few upserts is repeated server work, while a wide
-   * response is also transport and client-ingest work. */
+  /** watch.add and watch.refresh: changed entity snapshots delivered to the
+   * client. This is the delivered-width counterpart to `watches` and
+   * `managerReads`: a wide traversal that yields few upserts is repeated
+   * server work, while a wide frame is also transport and client-ingest
+   * work. A refresh that produced no upserts answers with an empty catch-up
+   * and is not recorded, so a refresh entry never reports zero here. */
   upserts?: number;
 
   /** Query and watch operations: the costliest single root, which is what
@@ -5369,6 +5371,7 @@ export class Server {
             }
             recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
               watches: session.watches.length,
+              upserts: upserts.length,
             });
             const message = await finishCatchUp({
               type: "sync",
