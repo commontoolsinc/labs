@@ -354,9 +354,8 @@ export function createRuntimeClientOptions({
 }) {
   // The identity the runtime acts and renders as. A delegated host names it
   // in its own trust snapshot; a snapshot that names nobody leaves the
-  // session identity acting. A name that is not a DID is a host's own
-  // configuration error, and it surfaces here rather than as a ceiling built
-  // for somebody else: the runner reads this same field as a DID, and the
+  // session identity acting, which is the rule the worker applies to the same
+  // field in `runtime-processor.ts`. A named principal must be a DID: the
   // ceiling's entries are identity atoms over one.
   const namedPrincipal = trustSnapshot?.actingPrincipal;
   if (namedPrincipal !== undefined && !isDID(namedPrincipal)) {

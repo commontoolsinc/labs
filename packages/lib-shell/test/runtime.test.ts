@@ -802,9 +802,8 @@ describe("RuntimeInternals", () => {
     const options = createRuntimeClientOptions({
       session,
       apiUrl: new URL("http://shell.test/"),
-      // Stated rather than inherited from a host default: what this test is
-      // about is which principal the ceiling admits, not whether a host
-      // builds a ceiling at all.
+      // Stated, not inherited from a host default: the subject here is
+      // which principal the ceiling admits.
       cfcRenderCeiling: true,
       trustSnapshot: { id: `principal:${delegate}`, actingPrincipal: delegate },
     });
@@ -863,10 +862,8 @@ describe("RuntimeInternals", () => {
       spaceName: "lib-shell-cfc-render-ceiling-non-did",
     });
 
-    // The ceiling's entries are identity atoms over a DID, and the runner
-    // reads the same field as a DID. Building the ceiling for the session
-    // identity instead would leave the host acting as one principal and
-    // rendering to another.
+    // A principal that is not a DID names no audience, and the check runs
+    // whether or not this host asks for a ceiling.
     expect(() =>
       createRuntimeClientOptions({
         session,
