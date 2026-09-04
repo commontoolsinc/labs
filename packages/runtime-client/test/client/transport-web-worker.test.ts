@@ -78,9 +78,7 @@ function posted(data: unknown): MessageEvent {
 function handlerOf(
   transport: WebWorkerRuntimeTransport,
 ): (event: MessageEvent) => void {
-  return (transport as unknown as {
-    _handleMessage: (event: MessageEvent) => void;
-  })._handleMessage;
+  return transport.accessForTestingOnly.handleMessage;
 }
 
 describe("WebWorkerRuntimeTransport", () => {
@@ -196,7 +194,7 @@ describe("WebWorkerRuntimeTransport", () => {
       // `connect()` awaits `ready()`, so a pre-ready failure reported into an
       // emitter nobody is listening to yet would leave that promise pending
       // for good -- and a caller waiting on a promise that will not settle has
-      // no way back. `_handleError()` puts a pre-ready worker error on the
+      // no way back. `#handleError()` puts a pre-ready worker error on the
       // promise for the same reason; this is the decode's half of that.
       const transport = makeTransport();
       const emitted: unknown[] = [];
