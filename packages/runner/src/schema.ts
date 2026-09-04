@@ -1397,11 +1397,7 @@ class TransformObjectCreator
   implements IObjectCreator<AnyCellWrapping<FabricValue>> {
   #runtime: Runtime;
 
-  /**
-   * TypeScript-private rather than a `#` name: `test/schema-streams.test.ts`
-   * drives this member directly.
-   */
-  private tx: IExtendedStorageTransaction;
+  #tx: IExtendedStorageTransaction;
 
   #synced: boolean;
   #baseLink: NormalizedFullLink;
@@ -1415,7 +1411,7 @@ class TransformObjectCreator
     cfcLabelView: CfcLabelView | undefined,
   ) {
     this.#runtime = runtime;
-    this.tx = tx;
+    this.#tx = tx;
     this.#synced = synced;
     this.#baseLink = baseLink;
     this.#cfcLabelView = cfcLabelView;
@@ -1522,7 +1518,7 @@ class TransformObjectCreator
   ): T | undefined {
     return processDefaultValue(
       this.#runtime,
-      this.tx,
+      this.#tx,
       link,
       value,
       this.#synced,
@@ -1548,7 +1544,7 @@ class TransformObjectCreator
     return createOpaqueReference(
       this.#runtime,
       link,
-      this.tx,
+      this.#tx,
       this.#synced,
       this.#labelViewFor(link),
     ) as AnyCellWrapping<FabricValue>;
@@ -1568,7 +1564,7 @@ class TransformObjectCreator
       value,
       this.#runtime,
       link,
-      this.tx,
+      this.#tx,
       this.#synced,
       this.#labelViewFor(link),
     );
@@ -1588,7 +1584,7 @@ class TransformObjectCreator
     if (link.schema === undefined || link.schema === true) {
       return createQueryResultProxy(
         this.#runtime,
-        this.tx,
+        this.#tx,
         link,
         0,
         this.#labelViewFor(link),
@@ -1634,7 +1630,7 @@ class TransformObjectCreator
             ...handleLink,
             schema: unwrapAsCellSchema(schema as JSONSchemaObj),
           },
-          getTransactionForChildCells(this.tx),
+          getTransactionForChildCells(this.#tx),
           this.#synced,
           cellKind,
           this.#labelViewFor(link),
@@ -1645,7 +1641,7 @@ class TransformObjectCreator
       if (ContextualFlowControl.isTrueSchema(schema)) {
         return createQueryResultProxy(
           this.#runtime,
-          this.tx,
+          this.#tx,
           link,
           0,
           this.#labelViewFor(link),
@@ -1657,7 +1653,7 @@ class TransformObjectCreator
         // processDefaultValue already annotates with back to cell
         return processDefaultValue(
           this.#runtime,
-          this.tx,
+          this.#tx,
           link,
           schema.default,
           this.#synced,
@@ -1688,7 +1684,7 @@ class TransformObjectCreator
             if (valueObj[propName] === undefined) {
               valueObj[propName] = processDefaultValue(
                 this.#runtime,
-                this.tx,
+                this.#tx,
                 {
                   ...link,
                   path: [...link.path, propName],
@@ -1709,7 +1705,7 @@ class TransformObjectCreator
       value,
       this.#runtime,
       link,
-      this.tx,
+      this.#tx,
       this.#synced,
       this.#labelViewFor(link),
     );

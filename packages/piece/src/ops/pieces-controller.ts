@@ -1605,7 +1605,7 @@ export class PiecesController<T = unknown> {
     const ref =
       (pattern !== undefined
         ? this.runtime.patternManager.getArtifactEntryRef(pattern)
-        : undefined) ?? await this.readPatternIdentity(piece);
+        : undefined) ?? await this.#readPatternIdentity(piece);
 
     return await timePiecePhase(
       "syncPattern.loadPattern",
@@ -1613,7 +1613,7 @@ export class PiecesController<T = unknown> {
     );
   }
 
-  private async readPatternIdentity(piece: Cell<unknown>) {
+  async #readPatternIdentity(piece: Cell<unknown>) {
     await timePiecePhase("syncPattern.synced", () => this.synced());
     await timePiecePhase("syncPattern.piece.sync", () => piece.sync());
 
