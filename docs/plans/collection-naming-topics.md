@@ -182,6 +182,15 @@ The first half of the spec's step 2.
    is settled by that test and recorded in the spec's open-questions list.
 3. `--force` has a completion slot and a README sentence.
 
+What a forced steal costs, found while demonstrating one: the assignment
+stamps `slug` on the target document's root, and pointing the name back at
+its old target does not clear the entry from the one that took it. So a
+member a steal passed through keeps a canonical URL naming a slug it no
+longer holds, which is the reverse-map gap step 1 of the spec's
+implementation road closes, and until then nothing in the `cf` surface clears
+it — the demo's restoration needed a raw metadata write. S3 renders URLs from
+that entry, so a steal on the exemplar board poisons what S3 displays.
+
 ### S3 — The shell opens `/<space>/top/42`
 
 Scope: `packages/shell`, `packages/runtime-client`, shell integration tests.

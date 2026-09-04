@@ -575,9 +575,7 @@ discovery. Five of these block work rather than merely awaiting it, and a plan
 should sequence around them: the sigil question and the renderer's preference
 order both block step 5 outright, a machine-readable policy is what the
 consumer rules in Part 1 rest on, the collection-scope claim path is part of
-step 3, and sibling bindings decide the second rung of the resolver. Step 2
-names a sixth in its own text, the commit precondition it asks to be confirmed
-first.
+step 3, and sibling bindings decide the second rung of the resolver.
 
 **A qualifier for revision, time, or branch.** No slot is reserved for naming a
 thing *as of* something, and this is not hypothetical: memory carries causal
