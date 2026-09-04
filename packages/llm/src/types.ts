@@ -75,6 +75,12 @@ export function isLLMNativeModelToolResults(
   return Array.isArray(input) && input.every(isLLMNativeModelToolResult);
 }
 
+/**
+ * A tool call in its compact form: an identifier, the name of the tool, and
+ * the input to call it with. This is not the shape a tool call has in a
+ * message. There it is a `BuiltInLLMToolCallPart` within the content, naming
+ * those same three things `toolCallId`, `toolName`, and `input`.
+ */
 export type LLMToolCall = {
   id: string;
   name: string;
@@ -158,15 +164,6 @@ export function isLLMContent(input: unknown): input is LLMContent {
   ));
 }
 
-// The parameter is `value` rather than `input` because `LLMToolCall` carries a
-// field of that name, and the guard has to read it.
-export function isLLMToolCall(value: unknown): value is LLMToolCall {
-  return isObjectNotArray(value) &&
-    typeof value.id === "string" &&
-    typeof value.name === "string" &&
-    isObjectNotArray(value.input);
-}
-
 export function isLLMToolResult(input: unknown): input is LLMToolResult {
   return isObjectNotArray(input) &&
     typeof input.toolCallId === "string" &&
@@ -185,8 +182,6 @@ export function isLLMMessage(input: unknown): input is BuiltInLLMMessage {
     (input.role === "user" || input.role === "assistant" ||
       input.role === "tool") &&
     isLLMContent(input.content) &&
-    (!("toolCalls" in input) || (Array.isArray(input.toolCalls) &&
-      input.toolCalls.every((tc: unknown) => isLLMToolCall(tc)))) &&
     (!("toolCallId" in input) || typeof input.toolCallId === "string");
 }
 
