@@ -2413,26 +2413,7 @@ export const piece = targetOptions(
     "--dangerously-allow-incompatible-schema",
     "Accepted for deploy-script symmetry; a new piece has no previous schema to compare.",
   )
-  .action(async (options, main) => {
-    setQuietMode(!!options.quiet);
-    const spaceConfig = parseSpaceOptions(options);
-    const pieceId = await newPiece(
-      spaceConfig,
-      localPatternEntry(main, options),
-      {
-        start: options.start,
-        slug: options.slug,
-        force: !!(options as any).force,
-      },
-    );
-    render(pieceId);
-    const browserPieceRef = options.slug ?? pieceId;
-    hint(cliText(`NEXT STEPS:
-  → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${browserPieceRef}
-  → Update code:     cf piece setsrc --cell ${pieceId} ${main} ...
-  → Test a callable: cf piece call --cell ${pieceId} <callableName> ...
-  → Inspect state:   cf piece inspect --cell ${pieceId} ...`));
-  })
+  .action(newPieceFromCommand)
   /* piece set-slug */
   .command(
     "set-slug",
@@ -4807,6 +4788,44 @@ export async function restoreFromCommand(
         `--apply writes it`,
     );
   }
+}
+
+export interface NewPieceCommandDependencies {
+  newPiece?: typeof newPiece;
+}
+
+/**
+ * `cf piece new`'s action, as a function a test can call.
+ *
+ * The registration chain around it is not reachable from a test, so an action
+ * left inline is not either — and what this one decides is worth reaching:
+ * which options become the naming request `newPiece` receives, and that the
+ * address it points a reader at is the slug when there is one.
+ */
+export async function newPieceFromCommand(
+  // deno-lint-ignore no-explicit-any
+  options: any,
+  main: string,
+  deps: NewPieceCommandDependencies = {},
+): Promise<void> {
+  setQuietMode(!!options.quiet);
+  const spaceConfig = parseSpaceOptions(options);
+  const pieceId = await (deps.newPiece ?? newPiece)(
+    spaceConfig,
+    localPatternEntry(main, options),
+    {
+      start: options.start,
+      slug: options.slug,
+      force: !!options.force,
+    },
+  );
+  render(pieceId);
+  const browserPieceRef = options.slug ?? pieceId;
+  hint(cliText(`NEXT STEPS:
+  → Open in browser: ${spaceConfig.apiUrl}/${spaceConfig.space}/${browserPieceRef}
+  → Update code:     cf piece setsrc --cell ${pieceId} ${main} ...
+  → Test a callable: cf piece call --cell ${pieceId} <callableName> ...
+  → Inspect state:   cf piece inspect --cell ${pieceId} ...`));
 }
 
 export interface SlugListCommandDependencies {

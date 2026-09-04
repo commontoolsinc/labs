@@ -13,6 +13,7 @@ import { pieceId, resolvePieceAddress } from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { type Cell, createBuilder, Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { newPieceFromCommand } from "../commands/piece.ts";
 import { newPiece } from "../lib/piece.ts";
 import { resetWriteReceipts } from "../lib/write-receipt.ts";
 import { captureStderr } from "./utils.ts";
@@ -97,6 +98,62 @@ describe("newPiece() naming", () => {
     });
   }
 
+  describe("newPieceFromCommand()", () => {
+    // The command's own action, which the registration chain around it puts
+    // out of a test's reach when it is left inline. What it decides is the
+    // naming request: which flags become the options `newPiece` receives, and
+    // which address the next-steps hint points a reader at.
+
+    /**
+     * Runs the action with a stub for the creation, answering the options it
+     * passed on and the hint it wrote.
+     */
+    async function runAction(
+      // deno-lint-ignore no-explicit-any
+      options: Record<string, any>,
+    ): Promise<{ seen?: unknown; hint: string }> {
+      let seen: unknown;
+      const lines = await captureStderr(async () => {
+        await newPieceFromCommand(
+          { ...CONFIG, ...options },
+          "/repo/main.tsx",
+          {
+            newPiece: (_config, _entry, given) => {
+              seen = given;
+              return Promise.resolve("fid1:created");
+            },
+          },
+        );
+      });
+      return { seen, hint: lines.join("\n") };
+    }
+
+    it("carries the slug and the flag that takes it into the creation", async () => {
+      const { seen } = await runAction({ slug: "notes", force: true });
+
+      expect(seen).toEqual({ start: undefined, slug: "notes", force: true });
+    });
+
+    it("leaves the flag off when it was not given", async () => {
+      const { seen } = await runAction({ slug: "notes" });
+
+      expect(seen).toEqual({ start: undefined, slug: "notes", force: false });
+    });
+
+    it("sends the reader to the name when there is one, and to the id when there is not", async () => {
+      const named = await runAction({ slug: "notes" });
+      expect(named.hint).toContain(`${CONFIG.apiUrl}/${CONFIG.space}/notes`);
+      expect(named.hint).not.toContain(
+        `${CONFIG.apiUrl}/${CONFIG.space}/fid1:created`,
+      );
+
+      const unnamed = await runAction({});
+      expect(unnamed.hint).toContain(
+        `${CONFIG.apiUrl}/${CONFIG.space}/fid1:created`,
+      );
+    });
+  });
+
   it("names the new piece when the slug points nowhere", async () => {
     const piece = await makePiece("new-free");
 
@@ -125,6 +182,22 @@ describe("newPiece() naming", () => {
     // The name still points at the piece that held it, not at the one the
     // refused run created.
     expect(await resolvePieceAddress(pieces, "notes")).toBe(pieceId(held));
+  });
+
+  it("lets a failure that is not a name being taken reach the caller unchanged", async () => {
+    // The same bound as `set-slug`'s: only a name someone holds is rewritten
+    // to name the flag that takes it, so a name the space refuses arrives as
+    // the refusal it is.
+    const piece = await makePiece("new-invalid");
+
+    const failure = await createWithSlug(piece, "not a slug").then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("Slug must use lowercase");
+    expect((failure as Error).message).not.toContain("--force");
   });
 
   it("takes a slug that already points somewhere when forced", async () => {

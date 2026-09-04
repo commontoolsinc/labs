@@ -171,15 +171,17 @@ The first half of the spec's step 2.
 
 1. `set-slug` on a bound name refuses and names the current target; `--force`
    steals. The check is a claim inside the transaction: a test with two
-   writers has exactly one win. Recorded: the overlap is expressible at one
-   runtime, because `editWithRetry` runs its body synchronously, so two
-   assignments started together both run before either transaction commits,
-   and the second reads the name as already pointing at the first's target
-   and declines — no rejection, no retry. What that shape does not reach is
-   the cross-session case, where the loser's replica is behind and the
-   stale-basis rejection and the re-run off it are what serialize the two;
-   that is the shape `packages/runner/src/ensure-space-root.ts` states for
-   the space root, and criterion 2's pair pins the read it depends on.
+   writers has exactly one win. Recorded, after three attempts to describe
+   the interleaving a one-runtime test achieves: it does not pin one, and
+   the paragraph should not claim one. Two things are true and both are
+   tested. The single-runtime test asserts the outcome — two assignments of
+   one free name leave exactly one holder — and its assertions hold however
+   the two were ordered. The racing path is a runtime guarantee, pinned by
+   the cross-session pair: the claim's read joins the commit's read set, so a
+   commit another writer overtakes is rejected and `editWithRetry` re-runs
+   the body against what that writer left, which then declines. That is the
+   shape `packages/runner/src/ensure-space-root.ts` states for the space
+   root.
 2. Whether a synced read inside `editWithRetry` becomes a commit precondition
    is settled by that test and recorded in the spec's open-questions list.
 3. `--force` has a completion slot and a README sentence, on both commands

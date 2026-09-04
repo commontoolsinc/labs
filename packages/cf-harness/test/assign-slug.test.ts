@@ -418,6 +418,59 @@ describe("assign-slug", () => {
       expect(output.message).toContain("space root unavailable");
     });
 
+    it("reports a name released between the availability read and the write as one to retry", async () => {
+      // The tool judges a name free, and the name comes to point nowhere
+      // before the write lands. That is not the same outcome as a name
+      // somebody else took: nobody holds it, so the answer is to read it
+      // again rather than to choose another name. The registry join sits
+      // between the two, which is where the release is staged.
+      await linkDefaultPattern();
+      const engine = createEngine();
+      const created = await createPiece(engine);
+      // A name pointing at a plain document: free by this tool's rule, and a
+      // binding the claim carries, so the release below is a change to it.
+      const plain = pieces.runtime.getCell(
+        pieces.getSpace(),
+        { space: pieces.getSpace(), random: "released-target" },
+      );
+      await pieces.runtime.editWithRetry((tx) => {
+        plain.withTx(tx).set({ value: 1 });
+      });
+      await setSlugLink(pieces, "doubling-report", plain);
+
+      const slugCell = pieces.runtime.getCellFromEntityId(
+        pieces.getSpace(),
+        entityIdFrom(slugIdForSpace(pieces.getSpace(), "doubling-report")),
+      );
+      const originalAdd = pieces.add.bind(pieces);
+      pieces.add = async (cells) => {
+        await originalAdd(cells);
+        // The join has landed and the availability answer is already read;
+        // the name now points at nothing.
+        await pieces.runtime.editWithRetry((tx) => {
+          slugCell.withTx(tx).setRawUntyped("not a redirect");
+        });
+      };
+      const result = await engine.invokeBuiltinTool("assign_slug", {
+        token: created.resultRef,
+        slug: "doubling-report",
+      });
+      pieces.add = originalAdd;
+
+      const output = result.output as AssignSlugToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("doubling-report");
+      expect(output.message).toContain("names nothing");
+      expect(output.message).toContain("Try the same call again");
+      // The registry join landed before the refusal, so the answer says the
+      // piece is listed rather than that nothing happened.
+      expect(output.message).toContain("the piece is listed");
+      expect(output.message).not.toContain("Nothing was assigned");
+      // Told to retry rather than to choose another name, which is the
+      // answer a name somebody else holds gets.
+      expect(output.message).not.toContain("Choose another slug");
+    });
+
     it("does not list the piece twice when retried after a failed assignment", async () => {
       // A first call can join the registry and then fail at the slug write.
       // The retry must settle the name without appending a second entry.
@@ -489,8 +542,9 @@ describe("assign-slug", () => {
     it("refuses when the slug's availability could not be established, assigning nothing", async () => {
       // A resolution that fails operationally — storage error, sync that
       // never landed — says nothing about what the slug holds. Reading it as
-      // vacancy would send the call on to the blind assignment the
-      // availability check exists to prevent.
+      // vacancy would send the call on to take a name this side never
+      // established was free, which is what the availability check exists to
+      // prevent.
       await linkDefaultPattern();
       const engine = createEngine();
       const created = await createPiece(engine);

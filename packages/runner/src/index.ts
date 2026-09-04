@@ -374,7 +374,9 @@ export {
 export { type PinRewrite, rewriteFabricPins } from "./fabric-pin-rewrite.ts";
 export { DEFAULT_CELL_SCOPE } from "./scope.ts";
 export {
+  isPieceDocument,
   isPieceRoot,
+  parseSlugRedirect,
   resolveSlugReference,
   resolveSlugTargetCell,
   resolveSlugTargetInPiece,

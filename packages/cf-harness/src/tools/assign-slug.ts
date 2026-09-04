@@ -382,10 +382,15 @@ export const assignSlugTool: HarnessToolDefinition<
       // The name was bound between this call's reading of it and its write,
       // so the answer is the same one a name found taken gets, and for the
       // same reason: assigning now would repoint an address someone holds.
+      // The registry join above has already committed, so every refusal from
+      // here reports what it left: the name was not assigned, and the piece
+      // is listed. A caller told "nothing was assigned" would read that as
+      // all-or-nothing and never look for the piece it did not mean to list.
       if (error instanceof SlugAssignedError) {
         return errorOutput(
           `assign_slug slug "${slug}" was taken while this call was ` +
-            `deciding, and assigning would repoint that address. Choose ` +
+            `deciding, and assigning would repoint that address. The slug ` +
+            `was not assigned and the piece is listed in this space. Choose ` +
             `another slug.`,
         );
       }
@@ -395,12 +400,14 @@ export const assignSlugTool: HarnessToolDefinition<
       if (error instanceof SlugReleasedError) {
         return errorOutput(
           `assign_slug slug "${slug}" changed while this call was deciding ` +
-            `and now names nothing. Nothing was assigned. Try the same call ` +
-            `again.`,
+            `and now names nothing. The slug was not assigned and the piece ` +
+            `is listed in this space. Try the same call again.`,
         );
       }
       return errorOutput(
-        `assign_slug failed while naming the piece: ${errorMessage(error)}`,
+        `assign_slug failed while naming the piece: ${
+          errorMessage(error)
+        }. The piece is listed in this space.`,
       );
     }
     const url = namedPieceUrl(pieces, slug);

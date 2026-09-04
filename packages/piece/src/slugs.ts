@@ -1,10 +1,12 @@
 import type { CellScope, JSONSchema } from "@commonfabric/api";
-import type { Cell } from "@commonfabric/runner";
+import type { Cell, IExtendedStorageTransaction } from "@commonfabric/runner";
 import {
   DEFAULT_CELL_SCOPE,
   entityIdFrom,
+  isPieceDocument,
   isSlugAddress,
-  parseLink,
+  type NormalizedFullLink,
+  parseSlugRedirect,
   resolveSlugReference,
   resolveSlugTargetCell as resolveRuntimeSlugTargetCell,
   resolveSlugTargetInPiece,
@@ -109,20 +111,66 @@ function slugCellFor(pieces: PiecesController, validSlug: string) {
   );
 }
 
+/** What a name holds, in the three forms the module asks about. */
+interface SlugBinding {
+  /** The redirect the name's document holds, for the holder it takes from. */
+  held: NormalizedFullLink | undefined;
+
+  /** The reference it reads as, which is what a refusal names. */
+  ref: string | null;
+
+  /** What an assignment compares. See {@link readSlugBinding}. */
+  claim: string | null;
+}
+
 /**
- * The reference a name's redirect reads as, or `null` for a name pointing
- * nowhere. One spelling for the whole module: what a refusal names, what
- * {@link readSlugBinding} answers, and what an assignment compares against
- * are the same string, so a caller can compare them.
+ * What a name holds. A payload that is no redirect — absent, structurally
+ * invalid, or shaped like a link and malformed inside — is a name pointing
+ * nowhere, which is what `parseSlugRedirect` answers and therefore what every
+ * reader of this name agrees it is. Asking any other way would let a name the
+ * resolver calls malformed throw out of an assignment instead.
+ *
+ * `withTargetFacts` adds what the name points AT to the claim: whether that
+ * document is a piece, which is a fact a caller's own rule about a free name
+ * can turn on. Only a caller naming a target to take the name from compares
+ * it — the default rule turns on whether anything is bound at all — so it is
+ * read only for those, rather than putting the target document in the read
+ * set of every assignment.
  */
-function bindingRefOf(
+function slugBindingOf(
   pieces: PiecesController,
   slugCell: Cell<unknown>,
-): string | null {
-  const held = parseLink(slugCell.getRaw(), slugCell);
-  return held === undefined
-    ? null
-    : createLLMFriendlyLink(held, pieces.getSpace());
+  withTargetFacts: boolean,
+): SlugBinding {
+  const held = parseSlugRedirect(slugCell.getRaw(), slugCell);
+  if (held === undefined) return { held, ref: null, claim: null };
+  const ref = createLLMFriendlyLink(held, pieces.getSpace());
+  if (!withTargetFacts) return { held, ref, claim: ref };
+  return { held, ref, claim: `${ref} ${targetKindOf(pieces, held, slugCell)}` };
+}
+
+/**
+ * What a name's target is, as the claim records it: whether the document it
+ * resolves to is a piece, which is the fact a caller's own rule about a free
+ * name turns on.
+ *
+ * A target that will not resolve at all — a redirect cycle, including the
+ * self-cycle an assignment can point a name at — is a third state rather than
+ * a failure. It is as stable to compare as the other two: a name stops
+ * resolving nowhere only by being written.
+ */
+function targetKindOf(
+  pieces: PiecesController,
+  held: NormalizedFullLink,
+  base: Cell<unknown>,
+): string {
+  try {
+    const target = pieces.runtime.getCellFromLink(held, undefined, base.tx)
+      .resolveAsCell();
+    return isPieceDocument(pieces.runtime, target) ? "piece" : "not-piece";
+  } catch {
+    return "unresolvable";
+  }
 }
 
 /**
@@ -143,6 +191,30 @@ function slugStampRoot(cell: Cell<unknown>): Cell<unknown> | undefined {
   return resolved.getAsNormalizedFullLink().path.length === 0
     ? resolved
     : undefined;
+}
+
+/**
+ * {@link slugStampRoot} for the holder a name is taken FROM, where a target
+ * that will not resolve is an answer rather than a failure: there is no root
+ * that could be carrying the name, so there is nothing to clear.
+ *
+ * The two sides ask one question and differ only here, in what an
+ * unanswerable one means. Taking a name is what an operator reaches for when
+ * its current target is broken — a redirect cycle above all — so the cleanup
+ * that rides along must not be able to block the replacement.
+ */
+function heldStampRoot(
+  pieces: PiecesController,
+  held: NormalizedFullLink,
+  tx: IExtendedStorageTransaction,
+): Cell<unknown> | undefined {
+  try {
+    return slugStampRoot(
+      pieces.runtime.getCellFromLink(held).withTx(tx),
+    );
+  } catch {
+    return undefined;
+  }
 }
 
 function slugIndexCell(pieces: PiecesController) {
@@ -170,13 +242,17 @@ export async function listSlugs(pieces: PiecesController): Promise<string[]> {
 }
 
 /**
- * What `slug` points at now, as the reference a refusal names, or `null` for
+ * What `slug` holds now, as an opaque value: the value a caller hands back as
+ * `takeFrom` when it has its own rule about which states count as a free
+ * name. Read it, judge it, and carry it into the assignment, where the commit
+ * holds the judgment against the state the write actually lands on. `null` is
  * a name pointing nowhere.
  *
- * The value a caller hands back as `takeFrom` when it has its own rule about
- * which of those states counts as free: read it, judge it, and carry it into
- * the assignment, where the commit holds the judgment against the state the
- * write actually lands on.
+ * Opaque because it covers more than where the name points. A rule that calls
+ * a name free because it resolves to no piece is judging the target as well
+ * as the pointer, and a comparison over the pointer alone would let the
+ * target become a piece under the caller and still match. Read it, do not
+ * parse it.
  */
 export async function readSlugBinding(
   pieces: PiecesController,
@@ -184,7 +260,15 @@ export async function readSlugBinding(
 ): Promise<string | null> {
   const slugCell = slugCellFor(pieces, validateSlug(slug));
   await slugCell.sync();
-  return bindingRefOf(pieces, slugCell);
+  // The target too, so the facts below are read from what the space holds
+  // rather than from whatever this client happens to have. A name that
+  // resolves nowhere has no target to load, and reads as that state.
+  try {
+    await slugCell.resolveAsCell().sync();
+  } catch {
+    // Nothing to load, which `targetKindOf` records as its own state.
+  }
+  return slugBindingOf(pieces, slugCell, true).claim;
 }
 
 /**
@@ -269,27 +353,26 @@ export async function setSlugLink(
     const slugWithTx = slugCell.withTx(tx);
     const metadataTargetWithTx = metadataTarget?.withTx(tx);
 
-    // The claim, ahead of every write so that declining stages nothing: a
-    // read here joins the commit's read set, so binding the name under this
-    // transaction rejects it and the body re-runs against the new holder.
-    const held = parseLink(slugWithTx.getRaw(), slugWithTx);
-    const heldRef = held === undefined
-      ? null
-      : createLLMFriendlyLink(held, pieces.getSpace());
-    if (!options?.force && heldRef !== takeFrom) {
-      // `null` is a refusal too: a caller that named what to take the name
-      // from has not got it, whether somebody else holds the name now or
-      // nobody does.
-      return { held: heldRef };
+    // The claim, ahead of every write so that declining stages nothing: the
+    // reads here join the commit's read set, so a change to what the name
+    // holds under this transaction rejects it and the body re-runs against
+    // what the change left.
+    const binding = slugBindingOf(pieces, slugWithTx, takeFrom !== null);
+    const held = binding.held;
+    if (!options?.force && binding.claim !== takeFrom) {
+      // A `null` reference is a refusal too: a caller that named what to
+      // take the name from has not got it, whether somebody else holds the
+      // name now or nobody does.
+      return { held: binding.ref };
     }
 
     // The name is being taken from a holder, so the holder stops claiming
     // it. Only its own name is cleared: another name pointing at the same
     // root is not this assignment's to drop. Ahead of the stamp below, so a
     // root that is both the old holder and the new one ends up stamped.
-    const previousRoot = held === undefined ? undefined : slugStampRoot(
-      pieces.runtime.getCellFromLink(held).withTx(tx),
-    );
+    const previousRoot = held === undefined
+      ? undefined
+      : heldStampRoot(pieces, held, tx);
     if (previousRoot?.getMetaRaw("slug") === validSlug) {
       previousRoot.setMetaRaw("slug", undefined, rawMetaWriteAuthorization);
     }

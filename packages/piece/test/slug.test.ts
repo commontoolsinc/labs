@@ -446,18 +446,126 @@ describe("piece slugs", () => {
     );
   });
 
-  it("gives one name to exactly one of two writers claiming it at once", async () => {
-    // A genuine overlap, not a sequence: `editWithRetry` runs its body
-    // synchronously, so both bodies run before either transaction commits,
-    // and the second reads the name as already pointing at the first's
-    // target. It declines there, with no rejection and no retry.
+  it("assigns over a name whose document holds a payload no redirect can be read from", async () => {
+    // A slug document can be written by a foreign client over the memory
+    // protocol, and this runtime's own write path rejects such a value — so
+    // the read is where one has to be presented. `parseSlugRedirect` folds a
+    // sigil-shaped payload with broken internals into the same "points
+    // nowhere" the resolver reports as malformed; reading it any other way
+    // throws out of an assignment over a name nothing resolves through.
+    const piece = await createPiece("malformed-target");
+    const slugEntity = JSON.stringify(
+      entityIdFrom(slugIdForSpace(pieces.getSpace(), "demo")),
+    );
+    const poisoned = {
+      "/": {
+        "link@1": {
+          id: "of:fid1:whatever",
+          path: "not-an-array",
+          overwrite: "redirect",
+        },
+      },
+    };
+    const poison = (cell: Cell<unknown>): Cell<unknown> =>
+      new Proxy(cell, {
+        get(target, property) {
+          if (property === "getRaw") return () => poisoned;
+          if (property === "withTx") {
+            return (tx: unknown) =>
+              poison(
+                (target.withTx as (tx: unknown) => Cell<unknown>)(tx),
+              );
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    const originalGetCell = runtime.getCellFromEntityId.bind(runtime);
+    runtime.getCellFromEntityId = ((
+      ...args: Parameters<Runtime["getCellFromEntityId"]>
+    ) => {
+      const cell = originalGetCell(...args);
+      return JSON.stringify(args[1]) === slugEntity ? poison(cell) : cell;
+    }) as Runtime["getCellFromEntityId"];
+
+    try {
+      await assignSlug(pieces, piece, "demo");
+    } finally {
+      runtime.getCellFromEntityId = originalGetCell;
+    }
+
+    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(piece));
+  });
+
+  it("refuses when the target the caller judged free has become a piece", async () => {
+    // The rule a `takeFrom` caller applies can read the TARGET — the harness
+    // calls a name free when it resolves to no piece — and the redirect does
+    // not change when the target becomes one. A claim over the pointer alone
+    // would match and repoint a name that now names a piece, which is the
+    // race this whole guard exists to close, one level down.
+    const plain = runtime.getCell(
+      pieces.getSpace(),
+      { space: pieces.getSpace(), random: "becomes-a-piece" },
+    );
+    await runtime.editWithRetry((tx) => {
+      plain.withTx(tx).set({ value: 1 });
+    });
+    await setSlugLink(pieces, "demo", plain);
+    const seen = await readSlugBinding(pieces, "demo");
+    // The target gains a pattern identity, so the same redirect now names a
+    // piece and the caller's rule would no longer call the name free.
+    await runtime.editWithRetry((tx) => {
+      plain.withTx(tx).setMetaRaw(
+        "patternIdentity",
+        { identity: "pattern-late", symbol: "default" },
+        rawMetaWriteAuthorization,
+      );
+    });
+    const taking = await createPiece("slug-taking");
+
+    const failure = await failureOf(
+      assignSlug(pieces, taking, "demo", { takeFrom: seen }),
+    );
+
+    expect(failure).toBeInstanceOf(SlugAssignedError);
+    expect(await resolveSlugTarget(pieces, "demo")).toEqual({
+      piece: String(plain.getAsNormalizedFullLink().id).replace(/^of:/, ""),
+      pathInside: [],
+    });
+  });
+
+  it("reads a name whose target is a redirect cycle as its own state", async () => {
+    // A cycle is a state a caller's rule has to be able to hold an opinion
+    // about, so the claim records it rather than throwing out of the read.
+    // It compares like any other: a name stops resolving nowhere only by
+    // being written.
+    const slugCell = runtime.getCellFromEntityId(
+      pieces.getSpace(),
+      entityIdFrom(slugIdForSpace(pieces.getSpace(), "demo")),
+    );
+    await runtime.editWithRetry((tx) => {
+      const cell = slugCell.withTx(tx);
+      cell.setRawUntyped(cell.getAsWriteRedirectLink({ base: cell }));
+    });
+
+    const seen = await readSlugBinding(pieces, "demo");
+
+    expect(seen).toContain("unresolvable");
+  });
+
+  it("gives one name to the first of two assignments and refuses the second", async () => {
+    // Two assignments of one free name, started together and settling one
+    // after the other. What this asserts is the outcome — exactly one writer
+    // takes the name — and nothing about the interleaving: the assertions
+    // hold whether the two overlapped or ran in sequence, so the test does
+    // not establish which, and no comment here should claim one.
     //
-    // Two writers whose replicas are behind each other are serialized by
-    // something else — the stale-basis rejection, and the re-run
-    // `editWithRetry` drives off it, which is the shape
-    // `packages/runner/src/ensure-space-root.ts` states for the space root.
-    // The pair under "the read a refusal claims on" below is what pins the
-    // read that shape depends on.
+    // What the runtime guarantees is separate and stated where it is pinned:
+    // the claim's read joins the commit's read set, so a commit racing
+    // another is rejected and the body re-runs against the new holder and
+    // then declines. The pair under "the read a refusal claims on" below is
+    // what establishes that read, over two sessions where the losing
+    // replica is provably behind.
     //
     // The two targets differ, so a guard that let both through would leave
     // the loser's target standing, which the last assertion would see.

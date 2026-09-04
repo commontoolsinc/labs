@@ -173,6 +173,21 @@ describe("setPieceSlug()", () => {
     });
   });
 
+  it("lets a failure that is not a name being taken reach the caller unchanged", async () => {
+    // Only a refusal to take a bound name is rewritten, to add the flag that
+    // takes it. Everything else — a name the space will not accept, a storage
+    // rejection — has to arrive as itself, or the run reports a naming
+    // conflict for something that was never about the name being held.
+    const failure = await setSlug("not a slug", boardId, ["names"]).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain("Slug must use lowercase");
+    expect((failure as Error).message).not.toContain("--force");
+  });
+
   it("refuses a scope written on a bare slug, which has no cell of its own to scope", async () => {
     await setSlug("top", boardId, ["names"]);
 
