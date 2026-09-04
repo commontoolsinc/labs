@@ -246,10 +246,7 @@ Deno.test("session: a card jump uses the full unannotated width", () => {
     destLine: 0,
     destCol: 4,
   };
-  const jump = s as unknown as {
-    jumpToTarget(target: CardTarget): void;
-  };
-  jump.jumpToTarget(target);
+  s.accessForTestingOnly.jumpToTarget(target);
   assertEquals(s.view().left, 0);
   assertEquals(renderFrame(s.displayDoc(), s.view())[0], "▶abcdX ");
 });

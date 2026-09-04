@@ -99,7 +99,7 @@ export class FsTree {
    * test drives directly.
    */
   get accessForTestingOnly(): {
-    cfcEntryIndexes: Map<bigint, Map<string, number>>;
+    readonly cfcEntryIndexes: Map<bigint, Map<string, number>>;
   } {
     return {
       cfcEntryIndexes: this.#cfcEntryIndexes,

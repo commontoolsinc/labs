@@ -53,8 +53,8 @@ export class SpaceManager {
    */
   get accessForTestingOnly(): {
     activePiece: Cell<BGPieceEntry> | null;
-    enabledPieces: Map<string, Cell<BGPieceEntry>>;
-    failureTracking: Map<string, number>;
+    readonly enabledPieces: Map<string, Cell<BGPieceEntry>>;
+    readonly failureTracking: Map<string, number>;
     isRunning: boolean;
     pendingTasks: Task[];
     workerController: WorkerController;

@@ -256,6 +256,10 @@ exposes, and the name says the rest.
   object-literal getter cannot see the class's `this`, so an accessor with one
   takes `const outerThis = this;` under `// deno-lint-ignore no-this-alias`;
   an accessor of plain properties and arrows needs no alias.
+- An entry with no setter is `readonly` in the type. A getter without a
+  setter throws on assignment, and a plain property would take the write into
+  the literal and never reach the instance, so the type refuses the write
+  where a test would make it.
 - Each entry is typed as the class types the member. A stand-in the test
   supplies then declares itself where it is passed in — an `as` on the
   argument, or one small helper taking a `Partial<T>` — rather than on the
@@ -278,7 +282,7 @@ export class Fryer {
    */
   get accessForTestingOnly(): {
     temperature: number;
-    log: Map<string, number>;
+    readonly log: Map<string, number>;
     drain(): void;
   } {
     // deno-lint-ignore no-this-alias

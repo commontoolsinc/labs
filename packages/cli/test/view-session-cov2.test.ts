@@ -251,20 +251,13 @@ Deno.test("diffcov2: adjustHunkCounts rejects a malformed explicit hunk header",
   ];
   const { s, done } = doctoredDiffSession(lines, 2); // on the added line
   try {
-    const internals = s as unknown as {
-      buffer: { lines: string[] };
-      adjustHunkCounts(
-        oldDelta: number,
-        newDelta: number,
-        hunkHeader?: number | null,
-      ): boolean;
-    };
-    const headerBefore = internals.buffer.lines[0];
+    const internals = s.accessForTestingOnly;
+    const headerBefore = internals.buffer!.lines[0];
     assert(headerBefore.startsWith("@@ "), headerBefore);
     const adjusted = internals.adjustHunkCounts(0, 1, 0);
     assertEquals(adjusted, false, "the malformed header was rejected");
     assertEquals(
-      internals.buffer.lines[0],
+      internals.buffer!.lines[0],
       headerBefore,
       "the malformed header was not rewritten",
     );
