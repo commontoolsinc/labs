@@ -95,8 +95,8 @@ export class FsTree {
   }
 
   /**
-   * The lookup index this tree keeps per annotated directory, which a test
-   * drives directly.
+   * The lookup indexes this tree keeps, one per annotated directory, which a
+   * test drives directly.
    */
   get accessForTestingOnly(): {
     cfcEntryIndexes: Map<bigint, Map<string, number>>;
