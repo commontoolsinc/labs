@@ -173,23 +173,32 @@ The first half of the spec's step 2.
    steals. The check is a claim inside the transaction: a test with two
    writers has exactly one win. Recorded: the overlap is expressible at one
    runtime, because `editWithRetry` runs its body synchronously, so two
-   assignments started together both read the name before either transaction
-   commits and the second reads what the first staged. What that shape does
-   not reach is the cross-session case, where the loser's replica is stale
-   and the commit precondition is what serializes them; criterion 2's pair
-   covers that at the transaction level.
+   assignments started together both run before either transaction commits,
+   and the second reads the name as already pointing at the first's target
+   and declines — no rejection, no retry. What that shape does not reach is
+   the cross-session case, where the loser's replica is behind and the
+   stale-basis rejection and the re-run off it are what serialize the two;
+   that is the shape `packages/runner/src/ensure-space-root.ts` states for
+   the space root, and criterion 2's pair pins the read it depends on.
 2. Whether a synced read inside `editWithRetry` becomes a commit precondition
    is settled by that test and recorded in the spec's open-questions list.
-3. `--force` has a completion slot and a README sentence.
+3. `--force` has a completion slot and a README sentence, on both commands
+   that assign a name: `set-slug` and `piece new --slug`.
+4. A caller whose own rule about a free name is wider than the library's
+   carries that rule's answer into the transaction as `takeFrom` rather than
+   forcing over what it read. Forcing after a standalone read spends the
+   claim — two callers that both read a name as free would both take it — so
+   the rule and the claim are held at once, and two concurrent callers still
+   end with one holder whichever notion of free they hold.
 
-What a forced steal costs, found while demonstrating one: the assignment
-stamps `slug` on the target document's root, and pointing the name back at
-its old target does not clear the entry from the one that took it. So a
-member a steal passed through keeps a canonical URL naming a slug it no
-longer holds, which is the reverse-map gap step 1 of the spec's
-implementation road closes, and until then nothing in the `cf` surface clears
-it — the demo's restoration needed a raw metadata write. S3 renders URLs from
-that entry, so a steal on the exemplar board poisons what S3 displays.
+What a forced reassignment leaves behind. Taking a name now clears the `slug`
+entry from the document it takes it from, in the transaction that writes the
+new redirect, so no piece is left claiming a name it no longer holds. What
+remains is structural and still step 1's: the entry is single-valued, so a
+document reachable under two names only ever claims the later one, and a name
+pointing inside a piece stamps no entry at all, which leaves a
+collection-targeted name absent from the reverse map. S3 renders URLs from
+that map, so those two shape what it can say about a member.
 
 ### S3 — The shell opens `/<space>/top/42`
 

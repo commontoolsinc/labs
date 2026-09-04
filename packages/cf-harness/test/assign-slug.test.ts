@@ -260,7 +260,8 @@ describe("assign-slug", () => {
       // The tool's availability rule competes only with pieces and
       // collections, so a name redirecting to a plain document is free here
       // even though the assignment underneath refuses a bound name by
-      // default. Forcing is what keeps the two rules from disagreeing.
+      // default. Carrying the binding this rule was judged against into the
+      // write is what lets the wider rule stand without spending the claim.
       await linkDefaultPattern();
       const engine = createEngine();
       const created = await createPiece(engine);
@@ -282,6 +283,46 @@ describe("assign-slug", () => {
       expect(output.status).toBe("ok");
       expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
         created.pieceId,
+      );
+    });
+
+    it("gives a free name to exactly one of two calls racing for it", async () => {
+      // Both calls read the name as free, so both reach the write, and the
+      // write is where exactly one of them can win. Forcing over the read
+      // instead would let the loser overwrite the winner and report success.
+      // The two tokens name different pieces, so the address the name ends
+      // up holding says which call won rather than being true either way.
+      await linkDefaultPattern();
+      const engine = createEngine();
+      const first = await createPiece(engine, 21);
+      const second = await createPiece(engine, 22);
+      expect(first.pieceId).not.toBe(second.pieceId);
+
+      const results = await Promise.all([
+        engine.invokeBuiltinTool("assign_slug", {
+          token: first.resultRef,
+          slug: "doubling-report",
+        }),
+        engine.invokeBuiltinTool("assign_slug", {
+          token: second.resultRef,
+          slug: "doubling-report",
+        }),
+      ]);
+      const outputs = results.map((result) =>
+        result.output as AssignSlugToolSuccessOutput | AssignSlugToolErrorOutput
+      );
+
+      expect(outputs.filter((output) => output.status === "ok")).toHaveLength(
+        1,
+      );
+      const loser = outputs.find((output) => output.status === "error") as
+        | AssignSlugToolErrorOutput
+        | undefined;
+      expect(loser?.message).toContain("doubling-report");
+      expect(loser?.message).toContain("Choose another slug");
+      const winner = outputs[0].status === "ok" ? first : second;
+      expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
+        winner.pieceId,
       );
     });
 

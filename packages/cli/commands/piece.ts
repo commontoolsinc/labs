@@ -2373,6 +2373,12 @@ export const piece = targetOptions(
     ),
     `Create a piece that can import from parent directories within ./patterns.`,
   )
+  .example(
+    cliText(
+      `cf piece new ${EX_ID} ${EX_COMP} ./main.tsx --slug project-notes --force`,
+    ),
+    `Create a piece and take "project-notes" from whatever it names now.`,
+  )
   .arguments("<main:string>")
   .option("--no-start", "Only set up the piece without starting it")
   .option(
@@ -2399,6 +2405,11 @@ export const piece = targetOptions(
   )
   .option("--slug <slug:string>", "Slug URL/address for this piece.")
   .option(
+    "--force",
+    "Take the slug even when it already points somewhere.",
+    { depends: ["slug"] },
+  )
+  .option(
     "--dangerously-allow-incompatible-schema",
     "Accepted for deploy-script symmetry; a new piece has no previous schema to compare.",
   )
@@ -2411,6 +2422,7 @@ export const piece = targetOptions(
       {
         start: options.start,
         slug: options.slug,
+        force: !!(options as any).force,
       },
     );
     render(pieceId);

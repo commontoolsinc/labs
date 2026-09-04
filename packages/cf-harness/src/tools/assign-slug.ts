@@ -3,7 +3,9 @@ import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
 import {
   assignSlug,
   pieceId,
+  readSlugBinding,
   resolvePieceAddress,
+  SlugAssignedError,
   SlugResolutionError,
 } from "@commonfabric/piece";
 import type { PiecesController } from "@commonfabric/piece/ops";
@@ -142,9 +144,15 @@ const SLUG_CODE_STATES: Readonly<
  * different reason than the write does. The write's rule is "bound at all";
  * this one is "names a piece or a collection a person opens", and a name
  * whose document holds no usable redirect competes with nothing. Asking here
- * is what lets the refusal name which of the two it is, and the assignment
- * that follows an answer of "free" is forced, so the two rules never disagree
- * about one name.
+ * is what lets the refusal name which of the two it is.
+ *
+ * The answer is carried into the write as `takeFrom` rather than forced over
+ * whatever is there. Forcing would spend the claim the assignment makes: two
+ * calls that both read this name as free would both take it, and one would
+ * overwrite the other silently — the very race the claim closes. Handing the
+ * binding this rule was judged against to the transaction keeps the rule and
+ * the claim at once, so a name bound under this call is refused by the write
+ * even though this read called it free.
  *
  * That also makes an unanswered question a refusal rather than a "free": a
  * resolution that failed operationally says nothing about what the slug
@@ -158,11 +166,21 @@ const slugAvailability = async (
   pieces: PiecesController,
   slug: string,
 ): Promise<
-  | { state: "free" }
+  | { state: "free"; binding: string | null }
   | { state: "taken"; pieceId: string }
   | { state: "in-use" }
   | { state: "unknown"; reason: string }
 > => {
+  // The binding this rule is about to be applied to, read before the rule
+  // runs so that an answer of "free" and the state it was reached from are
+  // the same observation. A binding that cannot be read is an unestablished
+  // answer for the same reason a failed resolution is.
+  let binding: string | null;
+  try {
+    binding = await readSlugBinding(pieces, slug);
+  } catch (error) {
+    return { state: "unknown", reason: errorMessage(error) };
+  }
   try {
     const holder = await resolvePieceAddress(pieces, slug);
     return { state: "taken", pieceId: holder };
@@ -174,9 +192,8 @@ const slugAvailability = async (
     // Only `unknown` carries the resolver's text. The other two are answers
     // about what the space holds, and their refusals name the caller's own
     // slug and nothing the caller did not already have.
-    return state === "unknown"
-      ? { state, reason: errorMessage(error) }
-      : { state };
+    if (state === "unknown") return { state, reason: errorMessage(error) };
+    return state === "free" ? { state, binding } : { state };
   }
 };
 
@@ -359,10 +376,18 @@ export const assignSlugTool: HarnessToolDefinition<
       // ensured rather than appended: a retry after exactly that failure
       // must not list the piece twice.
       await ensureRegistered(pieces, cell, targetId);
-      // Forced because `slugAvailability` above is this tool's own answer to
-      // whether the name is free, and it is the narrower of the two rules.
-      await assignSlug(pieces, cell, slug, { force: true });
+      await assignSlug(pieces, cell, slug, { takeFrom: availability.binding });
     } catch (error) {
+      // The name was bound between this call's reading of it and its write,
+      // so the answer is the same one a name found taken gets, and for the
+      // same reason: assigning now would repoint an address someone holds.
+      if (error instanceof SlugAssignedError) {
+        return errorOutput(
+          `assign_slug slug "${slug}" was taken while this call was ` +
+            `deciding, and assigning would repoint that address. Choose ` +
+            `another slug.`,
+        );
+      }
       return errorOutput(
         `assign_slug failed while naming the piece: ${errorMessage(error)}`,
       );

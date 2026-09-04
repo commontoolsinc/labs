@@ -144,10 +144,16 @@ describe("setPieceSlug()", () => {
     );
 
     expect(failure).toBeInstanceOf(Error);
-    // The refusal names what the slug points at now, in the spelling the
-    // command takes as a source, so putting it back is a paste.
-    expect((failure as Error).message).toContain(`/of:${boardId}/names`);
-    expect((failure as Error).message).toContain("--force");
+    // The whole remedy, not a substring of it: the target and the flag both
+    // appear in wordings that say quite different things about what the
+    // caller should do, so an assertion on either alone cannot tell them
+    // apart. The target is named in the spelling the command takes as a
+    // source, so pointing the name back afterwards is a paste.
+    expect((failure as Error).message).toBe(
+      `Slug "top" already points at /of:${boardId}/names, so assigning it ` +
+        `would take that address from whoever holds it. Pass \`--force\` to ` +
+        `take it anyway; that target is what to point it back at afterwards.`,
+    );
     // The collection kept the name: the refused run neither took it nor
     // repointed it at the member it named.
     expect(await resolveSlugTarget(pieces, "top")).toEqual({

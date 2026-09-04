@@ -22,6 +22,7 @@ import { PiecesController } from "../src/ops/pieces-controller.ts";
 import {
   assignSlug,
   listSlugs,
+  readSlugBinding,
   resolvePieceAddress,
   resolvePieceReference,
   resolveSlugTarget,
@@ -322,10 +323,81 @@ describe("piece slugs", () => {
     expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(taking));
   });
 
+  it("clears the name from the holder a forced assignment takes it from", async () => {
+    const held = await createPiece("slug-held");
+    const taking = await createPiece("slug-taking");
+    await assignSlug(pieces, held, "demo");
+    expect(readRootMeta(pieceId(held)!, "slug")).toBe("demo");
+
+    await assignSlug(pieces, taking, "demo", { force: true });
+
+    // Both sides, because a test of the new side alone passes against a
+    // system that never clears the old one.
+    expect(readRootMeta(pieceId(taking)!, "slug")).toBe("demo");
+    expect(readRootMeta(pieceId(held)!, "slug")).toBeUndefined();
+  });
+
+  it("leaves a holder's own name alone when the name taken from it is another", async () => {
+    // The entry is single-valued, so the last name assigned is the one the
+    // root claims. Taking `demo` back must not drop the claim to `latest`,
+    // which is a different name that still resolves here.
+    const held = await createPiece("slug-held");
+    const taking = await createPiece("slug-taking");
+    await assignSlug(pieces, held, "demo");
+    await assignSlug(pieces, held, "latest");
+    expect(readRootMeta(pieceId(held)!, "slug")).toBe("latest");
+
+    await assignSlug(pieces, taking, "demo", { force: true });
+
+    expect(readRootMeta(pieceId(held)!, "slug")).toBe("latest");
+  });
+
+  it("takes a name still pointing where the caller last read it", async () => {
+    // A caller whose own rule calls this state free carries that answer in
+    // rather than forcing over whatever is there.
+    const held = await createPiece("slug-held");
+    const taking = await createPiece("slug-taking");
+    await assignSlug(pieces, held, "demo");
+
+    const seen = await readSlugBinding(pieces, "demo");
+    await assignSlug(pieces, taking, "demo", { takeFrom: seen });
+
+    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(taking));
+  });
+
+  it("refuses a name that moved since the caller read it, naming where it went", async () => {
+    const first = await createPiece("slug-first");
+    const moved = await createPiece("slug-moved");
+    const taking = await createPiece("slug-taking");
+    await assignSlug(pieces, first, "demo");
+    const seen = await readSlugBinding(pieces, "demo");
+    // Somebody else takes the name between the caller's read and its write.
+    await assignSlug(pieces, moved, "demo", { force: true });
+
+    const failure = await failureOf(
+      assignSlug(pieces, taking, "demo", { takeFrom: seen }),
+    );
+
+    expect(failure).toBeInstanceOf(SlugAssignedError);
+    expect((failure as SlugAssignedError).target).toBe(
+      `/${moved.getAsNormalizedFullLink().id}`,
+    );
+    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(moved));
+  });
+
   it("gives one name to exactly one of two writers claiming it at once", async () => {
     // A genuine overlap, not a sequence: `editWithRetry` runs its body
-    // synchronously, so the second body reads the name while the first
-    // transaction is still open, and the second sees what the first staged.
+    // synchronously, so both bodies run before either transaction commits,
+    // and the second reads the name as already pointing at the first's
+    // target. It declines there, with no rejection and no retry.
+    //
+    // Two writers whose replicas are behind each other are serialized by
+    // something else — the stale-basis rejection, and the re-run
+    // `editWithRetry` drives off it, which is the shape
+    // `packages/runner/src/ensure-space-root.ts` states for the space root.
+    // The pair under "the read a refusal claims on" below is what pins the
+    // read that shape depends on.
+    //
     // The two targets differ, so a guard that let both through would leave
     // the loser's target standing, which the last assertion would see.
     const first = await createPiece("slug-race-first");

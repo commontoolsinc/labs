@@ -67,6 +67,30 @@ const SLUG_INDEX_SCHEMA = {
   additionalProperties: { type: "boolean" },
 } as const satisfies JSONSchema;
 
+/** The document a name's redirect lives in, whose id derives from the name. */
+function slugCellFor(pieces: PiecesController, validSlug: string) {
+  return pieces.runtime.getCellFromEntityId(
+    pieces.getSpace(),
+    entityIdFrom(slugIdForSpace(pieces.getSpace(), validSlug)),
+  );
+}
+
+/**
+ * The reference a name's redirect reads as, or `null` for a name pointing
+ * nowhere. One spelling for the whole module: what a refusal names, what
+ * {@link readSlugBinding} answers, and what an assignment compares against
+ * are the same string, so a caller can compare them.
+ */
+function bindingRefOf(
+  pieces: PiecesController,
+  slugCell: Cell<unknown>,
+): string | null {
+  const held = parseLink(slugCell.getRaw(), slugCell);
+  return held === undefined
+    ? null
+    : createLLMFriendlyLink(held, pieces.getSpace());
+}
+
 function slugIndexCell(pieces: PiecesController) {
   return pieces.runtime.getCellFromEntityId(
     pieces.getSpace(),
@@ -92,6 +116,24 @@ export async function listSlugs(pieces: PiecesController): Promise<string[]> {
 }
 
 /**
+ * What `slug` points at now, as the reference a refusal names, or `null` for
+ * a name pointing nowhere.
+ *
+ * The value a caller hands back as `takeFrom` when it has its own rule about
+ * which of those states counts as free: read it, judge it, and carry it into
+ * the assignment, where the commit holds the judgment against the state the
+ * write actually lands on.
+ */
+export async function readSlugBinding(
+  pieces: PiecesController,
+  slug: string,
+): Promise<string | null> {
+  const slugCell = slugCellFor(pieces, validateSlug(slug));
+  await slugCell.sync();
+  return bindingRefOf(pieces, slugCell);
+}
+
+/**
  * Points `slug` at a piece and stamps the piece with the name, refusing a
  * name that is already bound the way {@link setSlugLink} does.
  */
@@ -99,24 +141,34 @@ export async function assignSlug(
   pieces: PiecesController,
   piece: Cell<unknown>,
   slug: string,
-  options?: { force?: boolean },
+  options?: { force?: boolean; takeFrom?: string | null },
 ): Promise<void> {
   await setSlugLink(pieces, slug, piece, {
     writeTargetMetadata: true,
     force: options?.force,
+    takeFrom: options?.takeFrom,
   });
 }
 
 /**
  * Points `slug` at `source`, and records the name in the space's slug index.
  *
- * A name already pointing somewhere is refused with a {@link
- * SlugAssignedError} naming the target it holds, unless `force` says to take
- * it. The refusal is a claim rather than a check: the name is read inside the
+ * A name pointing somewhere other than `takeFrom` — nowhere, for a caller
+ * that names none — is refused with a {@link SlugAssignedError} naming what
+ * it holds. `force` takes it whatever it holds, and ignores `takeFrom`.
+ *
+ * The refusal is a claim rather than a check: the name is read inside the
  * transaction the assignment commits in, so a writer that binds it between
  * that read and the commit conflicts, and `editWithRetry` re-runs the body
  * against what that writer left. Two assignments of one free name therefore
- * end with one holder, not with whichever committed last.
+ * end with one holder, not with whichever committed last — and that holds for
+ * a caller whose own rule about a free name is wider than this module's,
+ * because `takeFrom` carries that rule's answer into the transaction rather
+ * than leaving it in a read the write has outlived.
+ *
+ * Taking a name from a holder clears the `slug` entry the holder's document
+ * root carries for it, in the same transaction as the new redirect, so no
+ * document is left claiming a name it no longer holds.
  *
  * Throws when storage refuses the transaction, so a caller never reads a name
  * as assigned that never landed.
@@ -129,6 +181,7 @@ export async function setSlugLink(
     resolveBeforeLinking?: boolean;
     writeTargetMetadata?: boolean;
     force?: boolean;
+    takeFrom?: string | null;
   },
 ): Promise<void> {
   const validSlug = validateSlug(slug);
@@ -142,10 +195,7 @@ export async function setSlugLink(
     : undefined;
   await metadataTarget?.sync();
 
-  const slugCell = pieces.runtime.getCellFromEntityId(
-    pieces.getSpace(),
-    entityIdFrom(slugIdForSpace(pieces.getSpace(), validSlug)),
-  );
+  const slugCell = slugCellFor(pieces, validSlug);
 
   const indexCell = slugIndexCell(pieces);
   await indexCell.sync();
@@ -161,11 +211,27 @@ export async function setSlugLink(
     // The claim, ahead of every write so that declining stages nothing: a
     // read here joins the commit's read set, so binding the name under this
     // transaction rejects it and the body re-runs against the new holder.
-    const held = options?.force
-      ? undefined
-      : parseLink(slugWithTx.getRaw(), slugWithTx);
-    if (held !== undefined) {
-      return createLLMFriendlyLink(held, pieces.getSpace());
+    const held = parseLink(slugWithTx.getRaw(), slugWithTx);
+    const heldRef = held === undefined
+      ? null
+      : createLLMFriendlyLink(held, pieces.getSpace());
+    if (
+      !options?.force && heldRef !== null &&
+      heldRef !== (options?.takeFrom ?? null)
+    ) {
+      return heldRef;
+    }
+
+    // The name is being taken from a holder, so the holder stops claiming
+    // it. Only a document root carries the entry, and only its own name is
+    // cleared: another name pointing at the same root is not this
+    // assignment's to drop. Ahead of the stamp below, so a target that is
+    // both the old holder and the new one ends up stamped.
+    if (held !== undefined && held.path.length === 0) {
+      const holder = pieces.runtime.getCellFromLink(held).withTx(tx);
+      if (holder.getMetaRaw("slug") === validSlug) {
+        holder.setMetaRaw("slug", undefined, rawMetaWriteAuthorization);
+      }
     }
 
     const metadataTargetLink = metadataTargetWithTx

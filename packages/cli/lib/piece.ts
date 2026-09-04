@@ -1520,11 +1520,18 @@ export async function resolveLinkEndpointAddress(
   }
 }
 
-// Creates a new piece from source code and optional input.
+/**
+ * Creates a new piece from source code and optional input.
+ *
+ * A `slug` that already points somewhere is refused the way `set-slug`
+ * refuses one, and `force` takes it. The refusal arrives after the piece
+ * exists, so it names the piece as well as the flag: an operator who meant to
+ * repoint has an id to name, and one who did not has a piece to find.
+ */
 export async function newPiece(
   config: SpaceConfig,
   entry: EntryConfig,
-  options?: { start?: boolean; slug?: string },
+  options?: { start?: boolean; slug?: string; force?: boolean },
   deps: PieceOperationDependencies = {},
 ): Promise<string> {
   const pieces = await timeCliPhase(
@@ -1603,10 +1610,25 @@ export async function newPiece(
   noteWroteTo(config.space);
 
   if (options?.slug) {
-    await timeCliPhase(
-      "newPiece.assignSlug",
-      () => assignSlug(pieces, piece.getCell(), options.slug!),
-    );
+    try {
+      await timeCliPhase(
+        "newPiece.assignSlug",
+        () =>
+          assignSlug(pieces, piece.getCell(), options.slug!, {
+            force: options.force,
+          }),
+      );
+    } catch (error) {
+      if (error instanceof SlugAssignedError) {
+        throw new SlugAssignedError(
+          error.slug,
+          error.target,
+          `Pass \`--force\` to take it anyway. The piece was created as ` +
+            `${piece.id} and carries no name.`,
+        );
+      }
+      throw error;
+    }
   }
 
   // Explicitly add the piece to the space's registry.
@@ -1669,8 +1691,8 @@ export async function setPieceSlug(
       throw new SlugAssignedError(
         error.slug,
         error.target,
-        `Pass \`--force\` to take it anyway, or name it back with ` +
-          `\`${error.target}\`.`,
+        `Pass \`--force\` to take it anyway; that target is what to point ` +
+          `it back at afterwards.`,
       );
     }
     throw error;

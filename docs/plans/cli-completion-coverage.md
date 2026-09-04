@@ -366,9 +366,11 @@ id. Both are values the flag takes, and the slug is the readable half of that
 vocabulary, so it leads. The annotation says which a candidate is and, where the
 slug resolves to a piece the listing named, what it points at.
 
-`piece set-slug`'s slug positional completes the same set: naming an existing
-slug re-points it, which is the case completion helps with, and a slug being
-coined for the first time is a word nothing can offer.
+`piece set-slug`'s slug positional completes the same set. Naming an existing
+slug is refused unless `--force` says to take it, and that is the case
+completion helps with: a name the caller means to move has to be spelled
+exactly to be moved, while a slug being coined for the first time is a word
+nothing can offer.
 
 The listing is bounded by the space's index, which names slugs assigned since it
 existed — so an older slug still resolves and is not offered. Nothing can

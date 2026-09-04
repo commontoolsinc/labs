@@ -3,6 +3,7 @@ export {
   assignSlug,
   listSlugs,
   type PieceReference,
+  readSlugBinding,
   resolvePieceAddress,
   resolvePieceReference,
   resolveSlugTarget,
