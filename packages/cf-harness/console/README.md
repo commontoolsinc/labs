@@ -2,8 +2,9 @@
 
 Type a task, watch the harness work, open what it built — and read what the run
 left behind when the feed's elided summaries are not enough. One Deno HTTP
-server holding one in-process interactive chat service, and one Lit page reading
-its events over Server-Sent Events.
+server holding one in-process interactive chat service, and two Lit pages
+reading its events over Server-Sent Events: the console itself, and the live
+pane a host embeds to show one session working.
 
 The server binds `127.0.0.1`, and it treats loopback as an address rather than
 as an authorization: a page anywhere on the web can drive requests at the
@@ -132,21 +133,23 @@ durable: restarting the server and reopening the page replays the log.
 ## HTTP routes
 
 Every route retains the console's loopback `Host` and `Origin` checks. The token
-column refers to the per-process cookie obtained by loading `/`.
+column refers to the per-process cookie, which is handed to whichever of the two
+pages is loaded — `/` or `/live/<sessionId>` — and to the assets they pull.
 
-| Method | Route                        | Token | Result                                                                                  |
-| ------ | ---------------------------- | ----- | --------------------------------------------------------------------------------------- |
-| `GET`  | `/api/health`                | No    | Console health, configured Fabric API URL, and honestly limited Fabric-session liveness |
-| `POST` | `/api/task`                  | Yes   | Starts a session or a follow-up turn                                                    |
-| `POST` | `/api/cancel`                | Yes   | Cancels the active turn                                                                 |
-| `GET`  | `/api/sessions`              | Yes   | Durable session summaries                                                               |
-| `GET`  | `/api/status`                | Yes   | Session status and artifact roots                                                       |
-| `GET`  | `/api/policy`                | Yes   | What a new session here would run under                                                 |
-| `GET`  | `/api/turns/<turnId>/result` | Yes   | Durable structured result for a completed turn                                          |
-| `GET`  | `/api/events`                | Yes   | Live and replayed chat events over SSE                                                  |
-| `GET`  | `/api/runs`                  | Yes   | Run summaries                                                                           |
-| `GET`  | `/api/runs/<runId>/...`      | Yes   | Run detail, flow, graph, artifacts, and tool outputs                                    |
-| `POST` | `/api/index/call`            | Yes   | One allowlisted pattern-index read                                                      |
+| Method | Route                        | Token | Result                                                                                                                         |
+| ------ | ---------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `GET`  | `/api/health`                | No    | Console health, configured Fabric API URL, and honestly limited Fabric-session liveness                                        |
+| `POST` | `/api/task`                  | Yes   | Starts a session or a follow-up turn                                                                                           |
+| `POST` | `/api/cancel`                | Yes   | Cancels the active turn                                                                                                        |
+| `GET`  | `/api/sessions`              | Yes   | Durable session summaries                                                                                                      |
+| `GET`  | `/api/status`                | Yes   | Session status and artifact roots                                                                                              |
+| `GET`  | `/api/policy`                | Yes   | What a new session here would run under                                                                                        |
+| `GET`  | `/api/turns/<turnId>/result` | Yes   | Durable structured result for a completed turn                                                                                 |
+| `GET`  | `/api/events`                | Yes   | Live and replayed chat events over SSE                                                                                         |
+| `GET`  | `/api/runs`                  | Yes   | Run summaries                                                                                                                  |
+| `GET`  | `/api/runs/<runId>/...`      | Yes   | Run detail, flow, graph, artifacts, and tool outputs                                                                           |
+| `POST` | `/api/index/call`            | Yes   | One allowlisted pattern-index read                                                                                             |
+| `GET`  | `/live/<sessionId>`          | No    | The live pane for one session, which is handed the token the way `/` is; takes `?turn=<turnId>` and `?piecesBase=<url-prefix>` |
 
 Health returns `ok`, `fabricApiUrl`, and `fabricSession`. The last field is
 `unverified`: the console has no inspectable Fabric-session connection state,
@@ -252,6 +255,50 @@ appearing, the Runs view below reads it back.
 Cancel stops the running turn. The session survives a cancel and a page reload
 both — the stream resumes from the last event the page rendered rather than
 replaying the feed.
+
+## The live pane
+
+`GET /live/<sessionId>` is the same work in a column, for a host that can show a
+task running beside the thing that asked for it and can only open a plain web
+address. It is served from the same build as the console page and handed the
+same token cookie, so its own script reaches `/api` on this origin and nothing
+else does: the `Host` gate covers it, and the content security policy that keeps
+the console page out of a frame keeps this one out too. It is opened at the top
+level of a view, never framed.
+
+`?turn=<turnId>` narrows the pane to one turn. Without it the pane shows the
+session's activity in order, however many turns it has taken.
+
+`?piecesBase=<url-prefix>` says where the host renders a piece. A piece's own
+address is the one `assign_slug` recorded, which is the Fabric API's; a host
+that shows pieces somewhere else — a pane of its own, say, where the API's
+address answers with a login gate instead of the piece — names its prefix here,
+and every piece link on the page is composed as `<piecesBase>/<space>/<slug>`
+from the space and slug the turn's result carries, each escaped. With no prefix
+named, the recorded URL is used as it stands rather than rebuilt. The prefix has
+to be an absolute `http` or `https` URL: it arrives from whatever opened the
+page and ends up in an `href`, so anything else — a `javascript:` URL, a
+relative path — is refused, the page says so, and the links stay on the recorded
+address. The console composes against a prefix it is given and knows nothing
+about the host that gave it.
+
+The pane reads the same event stream the console page reads, from sequence zero
+— so a pane opened halfway through a turn shows the steps that already happened
+rather than only the ones that follow, and a reconnect resumes from the last
+event it rendered. What the stream carries is the order and the outcome; what a
+call was given, what CFC decided about it, and what it withheld from the model
+come from the turn's own run, which the pane re-reads when one of its tool calls
+completes. The run id of a console turn is the turn id, so no route composes
+that address and no lookup stands between the two.
+
+Each step is one line — the tool, how it ended, and what it was about: the
+numbered `run_pattern` attempt and the compiler's word on it, the slug
+`assign_slug` registered, the query a search was given, the question
+`query_docs` asked. Under a line whose run recorded a CFC decision sits the same
+CFC line the console's timeline draws, and a result that held anything back from
+the model carries the same omission block, openable in place. A completed turn
+ends the pane with the piece link the turn produced, which is what the pane is
+watched for.
 
 ## Sessions
 

@@ -173,6 +173,14 @@ const cookieValue = (
 const ASSET_PATH = /^\/(scripts\/|styles\/|build-manifest\.json$|$)/;
 
 /**
+ * The live pane's address, which names the session it shows. It is served the
+ * same built page whatever session it names — the page reads the session out
+ * of its own address — and it is one of the paths served from the build, so it
+ * is handed the token cookie its own script needs to reach `/api`.
+ */
+const LIVE_PATH = /^\/live\/[^/]+\/?$/;
+
+/**
  * What the page is allowed to load and where it may send what it holds.
  * Everything it needs comes from this origin, so `'self'` covers its script,
  * its stylesheet, its fetches and its event stream; `style-src` allows inline
@@ -942,7 +950,10 @@ export class ConsoleServer {
         fabricSession: "unverified",
       });
     }
-    if (request.method === "GET" && ASSET_PATH.test(url.pathname)) {
+    if (
+      request.method === "GET" &&
+      (ASSET_PATH.test(url.pathname) || LIVE_PATH.test(url.pathname))
+    ) {
       const response = await this.#asset(url.pathname);
       response.headers.set(
         "content-security-policy",
@@ -1155,12 +1166,18 @@ export class ConsoleServer {
   }
 
   /**
-   * One file of the built page. The page is a felt build under `dist/`, so a
+   * One file of the built pages. They are a felt build under `dist/`, so a
    * server started before `deno task console:build` has nothing to serve and
    * says which command produces it rather than answering an empty 404.
    */
   async #asset(pathname: string): Promise<Response> {
-    const relativePath = pathname === "/" ? "index.html" : pathname.slice(1);
+    const live = LIVE_PATH.test(pathname);
+    const page = pathname === "/" || live;
+    const relativePath = pathname === "/"
+      ? "index.html"
+      : live
+      ? "live.html"
+      : pathname.slice(1);
     if (relativePath.split("/").some((segment) => segment === "..")) {
       return new Response("not found", { status: 404 });
     }
@@ -1172,7 +1189,7 @@ export class ConsoleServer {
       });
     } catch {
       return new Response(
-        pathname === "/"
+        page
           ? "the console page is not built; run `deno task --cwd packages/cf-harness console:build`"
           : "not found",
         {

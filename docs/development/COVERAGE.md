@@ -49,11 +49,16 @@ and `tasks/write-coverage-lcov.ts` acts on the difference:
   cache holds no transpiled form of it. For a file the debt metric tracks that is
   a file the report should have carried: the script names those files and exits
   non-zero, after writing the report of what did convert so it can be read while
-  the cause is found. Two things cause it. The profiles were collected by one
+  the cause is found. Three things cause it. The profiles were collected by one
   Deno version and reported by another, which happens when a test starts the Deno
   on `PATH` instead of the Deno running it. Or they were collected from a working
   directory under a different Deno configuration, because the cache key covers
-  the configuration in scope where the file was compiled.
+  the configuration in scope where the file was compiled. Or the run that
+  collected them could not write the cache at all, which is what an agent
+  sandbox that denies writes to `DENO_DIR` produces: the tests pass, because
+  the transpiled form is held in memory, and every file is then missing from
+  the report, so `deno coverage` says the profile covered nothing rather than
+  naming the denial. Collect coverage outside the sandbox.
 - `Source not found for "<url>"` — the source is gone, so a test compiled the
   file and then deleted it. No report could name it, so the script warns and
   carries on.
