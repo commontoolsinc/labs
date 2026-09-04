@@ -12,6 +12,11 @@
 # cwd. Neither depends on where the copy itself lives, so no particular
 # checkout has to survive for the install to keep working.
 #
+# `bin/cfsh` is installed beside it, and survives being copied for a simpler
+# reason: it is a forward to `cf sh` and finds `cf` by name, so it depends on
+# PATH and on nothing about where it sits. It has no checkout to bake in,
+# which is why only `cf` is rewritten on the way through.
+#
 # The one thing a copy cannot infer is which checkout to use when you are
 # outside every checkout. That is baked in here as DEFAULT_LABS_ROOT, pointed
 # at the PRIMARY checkout, since worktrees are removed routinely.
@@ -47,10 +52,11 @@ Usage: deno task install-cf [--dir <path>] [--dry-run]
   --dir <path>   Install into <path> instead of an auto-detected directory.
   --dry-run      Report what would happen; change nothing.
 
-Installs a copy of bin/cf onto PATH, carrying the checkout lookup with it and
-baking in the primary checkout as the default for when you are outside every
-checkout. Re-run it to upgrade. Prints the shell-completion line to add; never
-edits your shell rc.
+Installs copies of bin/cf and bin/cfsh onto PATH. bin/cf carries the checkout
+lookup with it and bakes in the primary checkout as the default for when you
+are outside every checkout; bin/cfsh opens a shuttle, the interactive shell,
+and finds cf on PATH rather than baking anything in. Re-run it to upgrade both.
+Prints the shell-completion line to add; never edits your shell rc.
 USAGE
       exit 0
       ;;
@@ -123,6 +129,12 @@ EOF
 fi
 
 install_path="${target_dir}/cf"
+shell_install_path="${target_dir}/cfsh"
+shell_source_path="${repo_root}/bin/cfsh"
+if [ ! -f "${shell_source_path}" ]; then
+  echo "install-cf: ${shell_source_path} not found." >&2
+  exit 1
+fi
 
 # Checked before the dry-run exit, so a dry run predicts the real run rather
 # than reporting a success the real run would not deliver.
@@ -142,25 +154,32 @@ fi
 
 if [ "${dry_run}" -eq 1 ]; then
   echo "install-cf: would install ${install_path} (default checkout: ${primary})"
+  echo "install-cf: would install ${shell_install_path}"
   exit 0
 fi
 
 # Replace only something this script wrote. A file someone put there by hand is
 # not ours to clobber, and neither is a symlink pointing somewhere unrelated.
-if [ -e "${install_path}" ] || [ -L "${install_path}" ]; then
-  if ! grep -q '^# installed by scripts/install-cf.sh$' "${install_path}" 2>/dev/null; then
-    echo "install-cf: ${install_path} exists and was not installed by this script;" >&2
-    echo "            leaving it alone. Remove it first, or use --dir." >&2
-    exit 1
+refuse_foreign_file() {
+  if [ -e "$1" ] || [ -L "$1" ]; then
+    if ! grep -q '^# installed by scripts/install-cf.sh$' "$1" 2>/dev/null; then
+      echo "install-cf: $1 exists and was not installed by this script;" >&2
+      echo "            leaving it alone. Remove it first, or use --dir." >&2
+      exit 1
+    fi
   fi
-fi
+}
 
-# Bake the default checkout into the copy. Written to a temp file and moved into
-# place so a failure part-way cannot leave a half-written cf on PATH.
+refuse_foreign_file "${install_path}"
+refuse_foreign_file "${shell_install_path}"
+
+# Both copies are written to a temp file and moved into place, so a failure
+# part-way cannot leave half a file on PATH. The marker goes after the shebang,
+# which has to stay on line 1.
 tmp_path="${install_path}.install-cf.$$"
-trap 'rm -f "${tmp_path}"' EXIT
+shell_tmp_path="${shell_install_path}.install-cf.$$"
+trap 'rm -f "${tmp_path}" "${shell_tmp_path}"' EXIT
 
-# The marker goes after the shebang, which has to stay on line 1.
 {
   head -n 1 "${source_path}"
   echo "# installed by scripts/install-cf.sh"
@@ -174,11 +193,21 @@ if ! grep -q "^DEFAULT_LABS_ROOT=\"${primary}\"$" "${tmp_path}"; then
   exit 1
 fi
 
-chmod +x "${tmp_path}"
+# `cfsh` takes the marker and nothing else: it holds no checkout to bake in,
+# reaching whichever one `cf` resolves.
+{
+  head -n 1 "${shell_source_path}"
+  echo "# installed by scripts/install-cf.sh"
+  tail -n +2 "${shell_source_path}"
+} >"${shell_tmp_path}"
+
+chmod +x "${tmp_path}" "${shell_tmp_path}"
 mv "${tmp_path}" "${install_path}"
+mv "${shell_tmp_path}" "${shell_install_path}"
 trap - EXIT
 
 echo "install-cf: installed ${install_path}"
+echo "install-cf: installed ${shell_install_path}"
 echo "install-cf: default checkout ${primary} (used only outside any checkout)"
 
 if [ "${fell_back}" -eq 1 ] && [ "${primary}" != "$(dirname "${common_dir}")" ]; then

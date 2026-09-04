@@ -5,29 +5,29 @@ as small landable pull requests. Stage A is seam work inside `packages/cli`
 — each PR stands on its own merits there, shuttle or no shuttle, because a
 seam that lets a sibling inject a connection is the same seam that lets a
 unit test run the action body (the documented rationale of the
-`*FromCommand` family). Stage B is the shuttle package itself, in vertical
-slices. A-PRs go first in line because they gate everything and review
-latency is the scarce resource; B milestones start as soon as their named
-prerequisites land.
+`*FromCommand` family). Stage B is the shell itself, in vertical slices,
+under `packages/cli/lib/shuttle/`. A-PRs go first in line because they gate
+everything and review latency is the scarce resource; B milestones start as
+soon as their named prerequisites land.
 
 ## Stage A — seams in `packages/cli`
 
-**A1 — export entries.** Done (#6626). Importing `@commonfabric/cli`'s `.`
-entry runs CLI startup, so the package carries workspace-internal entries
-for the modules a sibling calls: `./lib/piece`, `./commands/piece`,
-`./lib/wish`, `./lib/piece-render`, and `./lib/llm-friendly-ref`, which a
-place reads every reference operand through. The completion listing is not a
-plain
-entry: it is `listCellKeys` in `packages/cli/lib/cell-listing.ts`,
-exported as `./lib/cell-listing` behind a `PieceResolutionDeps` seam with
-`keysOf` beside it. The providers are designed to fail silently and
-empty — right for tab completion, wrong for `ls` — so the listing raises
-its errors and completion's provider dispatch swallows them at its own
-call site. Keep the list to what shuttle names — an export entry is a
-contract, and the short list is the record of which internals have a
-second caller. (The view substrate's entries are not on it, nothing having
-named them yet; each lands with the milestone that first calls it, which is
-how a module earns its place on that record.)
+**A1 — the library seams a place reads through.** Done (#6626). Each is
+reachable on its own, without the module that builds the command tree:
+`lib/piece`, `commands/piece`, `lib/wish`, `lib/piece-render`, and
+`lib/llm-friendly-ref`, which a place reads every reference operand through.
+The completion listing is the one that took work: `listCellKeys`
+(`packages/cli/lib/cell-listing.ts`) sits behind a `PieceResolutionDeps` seam
+with `keysOf` beside it, and the providers are designed to fail silently and
+empty — right for tab completion, wrong for `ls` — so the listing raises its
+errors and completion's provider dispatch swallows them at its own call site.
+The shell reads four of them — `lib/piece`, `lib/wish`,
+`lib/llm-friendly-ref` and `lib/cell-listing` — with `lib/cell-selection`
+beside them and `commands/piece` read by the command rather than by a place;
+`lib/piece-render` waits for the milestone that renders a piece. Each is
+reached by relative path, the view substrate with them: the shell is this
+package's own code, so `packages/cli/deno.jsonc` carries `.` alone, under the
+rule the map states.
 
 **A2 — connection injection for the write path.** Done (#6646). The write
 path takes the connection as a parameter, so a held `PiecesController`
@@ -102,22 +102,16 @@ limit are all in `packages/cli`; the inventory, both bounds, and the
 globals in the other two packages, recorded there and nowhere else, are
 in item 6 of [`runtime-integration.md`](runtime-integration.md).
 
-## Stage B — the shuttle package
+## Stage B — the shell itself
 
-**B0 — scaffold** (after A1). Done (#6741). `packages/shuttle` is a
-workspace member: its path sits in the root `deno.jsonc` workspace array,
-and its
-own `deno.jsonc` carries the `tasks.test` entry — without which a
-`deno task test` run there resolves the root workspace task instead and
-re-runs the whole suite inside itself. The scaffold is configuration
-alone: no package name and no exports, because nothing imports shuttle
-and an export entry is a contract, and no dependency, because
-`deno task check-unused-deps` fails an alias no source file imports. It
-ships no source either. That is what the working rule below asks for —
-shuttle joins `deno task check`'s path list with B1's code — and it
-leaves `coverage-debt: packages/shuttle`, a metric group the gate
-derives from the path with no allowlist, at zero, so B1 lands its code
-and the tests covering it together.
+**B0 — scaffold** (after A1). Done (#6741). The shell needs no
+configuration of its own. It sits under `packages/cli/lib/shuttle/`, so
+`deno task check` reaches it through that package's path entry, its tests run
+under that package's runner, and its uncovered lines land in that package's
+coverage group. What a package of its own would have needed — a path in the
+root `deno.jsonc` workspace array, and a `tasks.test` entry in its own, without
+which a `deno task test` run there resolves the root workspace task instead and
+re-runs the whole suite inside itself — `cli` has already.
 
 **B1 — walking skeleton** (after A1; A2 for nothing yet). Landing in
 slices, and open until the last of them lands. Each slice moves what it
@@ -126,7 +120,7 @@ built into the first list.
 Landed:
 
 - **B1a — the place value and its owner module**
-  (`packages/shuttle/src/place.ts`). The whole pair, position *and* scope,
+  (`packages/cli/lib/shuttle/place.ts`). The whole pair, position *and* scope,
   because scope is half of what a place is (decision 20): `cd` over relative
   segments, `..`, `-`, `/`, a scope-only `@scope`, and rooted and complete
   references; the `slugs/` and `pieces/` facets a space root reserves, and
@@ -141,7 +135,7 @@ Landed:
   caller resolves the name and hands the move back with the space it resolved
   to, and the place is landed or refused there.
 - **B1b (slice 1) — the held connection**
-  (`packages/shuttle/src/connection.ts`). One `PiecesController` for the
+  (`packages/cli/lib/shuttle/connection.ts`). One `PiecesController` for the
   process, opened on the first ask and served to every ask after, where `cf`
   builds one per invocation. The connection half of the ambient record maps
   onto `SpaceConfig` and is handed to `loadPieces`, so shuttle reaches the
@@ -159,7 +153,7 @@ Landed:
   revisits this trade rather than inheriting it. No verb reaches the
   connection yet, and the place is untouched.
 
-- **B1b (slice 2) — the line grammar** (`packages/shuttle/src/line.ts`). How
+- **B1b (slice 2) — the line grammar** (`packages/cli/lib/shuttle/line.ts`). How
   a line becomes tokens, and how a value prints as one of them. `cf` is
   handed words the operating system's shell already split; shuttle is handed
   the line, and both halves are its own. The split is POSIX quoting —
@@ -178,7 +172,7 @@ Landed:
   yet.
 
 - **B1b (slice 3) — `ls`, and the vocabulary a segment speaks**
-  (`packages/shuttle/src/listing.ts`). What stands at a place — a space root's
+  (`packages/cli/lib/shuttle/listing.ts`). What stands at a place — a space root's
   facets, the slugs the index records, the space's pieces, the keys directly
   under the cell a place names — read over the held connection through
   `listSpaceSlugs`, `listPieces` and `listCellKeys`, each of which takes that
@@ -209,10 +203,10 @@ Landed:
   characterizes the routes no further. Which keys are spelled through one door
   and
   not the other is pinned case by case in
-  `packages/shuttle/test/place.test.ts`, so the record moves when the behavior
+  `packages/cli/test/shuttle-place.test.ts`, so the record moves when the behavior
   does and not otherwise.
 
-- **B1b (slice 4) — the verbs** (`packages/shuttle/src/verbs.ts`). A line
+- **B1b (slice 4) — the verbs** (`packages/cli/lib/shuttle/verbs.ts`). A line
   splits, its first token names a verb, and the tokens after it are that
   verb's operands: `cd`, `ls`, `pwd`, `get` and `wish`, over the one held
   connection and over the listing above. Nothing writes. A verb returns what
@@ -238,9 +232,9 @@ Landed:
   separator is written with. A session opened by a DID recorded no name and is
   refused, which is the honest arm rather than an error path: whether a name
   denotes that space is exactly what it cannot say, and the refusal names
-  starting against that name as what would. The `./lib/cell-selection` export
-  entry lands with this slice, `--select`'s own parser being what `cd` asks a
-  wish through.
+  starting against that name as what would. What `cd` asks a wish through is
+  `--select`'s own parser (`lib/cell-selection.ts`), read by relative path as
+  every seam here is.
 
   `get`'s operand goes through the door `cd`'s goes through *plus the
   `#argument` suffix that door turns down*, read from where shuttle stands
@@ -260,34 +254,53 @@ Landed:
   second way as well as a second time, so taking it would put a second answer
   in reach.
 
-Still to come:
-
-- **The prompt and a readline loop** (B1c) — a prompt carrying the place, and
-  a line read off it and handed to the dispatch above.
+- **B1c — the prompt, `where`, and the launcher.** A line read off a terminal,
+  handed to the dispatch above, and its outcome written under it. Where a run's
+  output comes from is one place: a verb returns what it did rather than
+  writing it, so everything a line puts on screen passes through the prompt in
+  the order the person caused it, and a case drives the whole loop with a
+  scripted key stream and reads back what it produced. A refusal and a read
+  that failed both land there as text and the loop reads the next line — what
+  the seam's distinction buys here is that a shell whose server went away is
+  still a shell.
 
   The line editor is the view substrate's rather than `node:readline`'s.
-  `EditBuffer` (`packages/cli/lib/view/editbuffer.ts`) holds the motions and
-  the substrate's key handler binds them to emacs keys, and `decodeKeys`
-  (`packages/cli/lib/view/keys.ts`) supplies the key stream a binding table
-  reads — where `node:readline` offers no keymap hook at all, so a second
-  binding table is unreachable behind it. That is what keeps modal editing
-  an option later ([`futures.md`](futures.md)), and it is what brings the
-  view substrate's export entries with the prompt: the line editor calls
-  those modules, and an entry lands with the milestone that first calls one.
+  `EditBuffer` holds the motions and `decodeKeys` supplies the key stream a
+  binding table reads, so the bindings are a value with room for a second table
+  beside it — which is what keeps modal editing an option
+  ([`futures.md`](futures.md)). `node:readline` has no supported place for a
+  second table: its exported surface is an interface, three cursor helpers and
+  a keypress decoder, and that interface's prototype carries one public method,
+  `question()` — everything else on it, the key dispatch `_ttyWrite` among
+  them, is underscore-prefixed.
+  What is exported and would have helped — the keypress decoder — is the job
+  `decodeKeys` already does, so the interface is the part that cannot be
+  reused and the decoder is the part there is no need to.
 
-- **`where`** (B1c), the printing surface for the ambient record; later
-  milestones add their dimensions to it as they add the dimensions themselves.
-  It prints the record `pwd` prints, so it chooses the format for both — a
-  test helper reads that format back by slicing a label width, which is what a
-  change to it has to move with. `pwd` is complete and has no short form, the
-  prompt being the short surface, so a format that shortens has to stay
-  pasteable — and decision 13's shortened-id fallback is a prefix spelled
-  exactly like a whole handle, which is the part that does not. The format's
-  own hazards belong with it: a newline in a part is refused before it reaches
-  a place, because it would leave a shorter reference naming another cell,
-  while a carriage return, a vertical tab, a form feed, a no-break space and
-  the Unicode line and paragraph separators all read back whole and reach only
-  a terminal.
+  `where` prints the whole ambient record, and so chooses the format `pwd`
+  prints two dimensions of: one dimension to a line, its name in a column of
+  fixed width, and the width exported so a caller reading a value back slices
+  it rather than spelling the label again. Each dimension is named by whatever
+  owns it — the connection's three by the connection, the place's two by the
+  place — and `where` reads nothing, so it still prints for a shuttle whose
+  connection will not open.
+
+  The prompt carries the place short, and the only shortening it does is
+  leaving the space out: one connection serves one space, so that part is the
+  same on every line of a run and `where` prints it. Nothing else is
+  abbreviated, which leaves decision 13's checked names and the shortened-id
+  question they raise exactly where [`grammar.md`](grammar.md) has them — the
+  prompt is no address, and `pwd` is what to copy.
+
+  The launcher is decision 19's pair. `cf sh` is a command in the `cf`
+  tree, with the three flags every command taking a space and an identity
+  declares, read once by `parseSpaceOptions` and handed on as a settled
+  connection; its action imports what it runs, the shell being this package's
+  own code. `bin/cfsh` forwards to `cf sh` and carries no checkout logic
+  of its own.
+
+Still to come:
+
 - **Liveness, in two halves.** Recovery of an *established* connection needs
   nothing from shuttle: the memory client reconnects and
   re-arms its watches by itself
@@ -320,8 +333,7 @@ schema-derived flag machinery `cf` already exports (`pieceCallRawArgs`,
 `pieceCallInvocation`), so no arc step gates it either. Reaching-in-warms
 lands here, since `set` is what makes stale computed state visible.
 
-**B3 — watch and views** (after A4; the substrate modules it is first to call
-bring their export entries with them). `Cell.sink` with the guard-plus-`idle()`
+**B3 — watch and views** (after A4). `Cell.sink` with the guard-plus-`idle()`
 settling discipline; the value, list, and structured piece-overview views on
 the `cf view` pager substrate; session watches (`watch`, `watches`, `unwatch`)
 with prompt event lines. Governed by [`views.md`](views.md); it opens with the
@@ -337,6 +349,18 @@ with place-derived flags injected. With the external location, `where`
 reaches its v1 surface: every dimension printed, the light ones settable
 (decision 22).
 
+One question B4 settles rather than inherits: what a rendering carries when
+it is not going to a terminal. Up to here there is one destination, and it
+is what the treatment of a control character rests on — a message is
+glyphed and a name refused because a person is reading them on a terminal
+([`grammar.md`](grammar.md)). `>` to a `file:` external and `|!` into a
+pipeline are the second destination, and the same treatment reads
+differently there: glyphs in a file are noise rather than safety, and a
+redirected `get` is where somebody wants the value as the fabric holds it.
+Which way that goes is open. The canonical output form
+([`futures.md`](futures.md)) forks on the same fact for the same reason, so
+whichever answer B4 takes is the one that form inherits.
+
 B4 closes v1. The deferred set — the pinned strip, cold-browse mode, the
 native tool set, heavyweight `where` edits, the `fuse/` facet,
 fabric-to-fabric redirection, `https:` read ends, and `search` — is
@@ -350,5 +374,9 @@ its own slice when scheduled.
   prevent.
 - `packages/cli` coverage gates apply to stage A; the extraction PRs are
   coverage-positive by construction, which is the order's second reason.
-- Shuttle stays out of `deno task check`'s path list until B1 gives it
-  real code, and registers there in the same PR that does.
+- A slice adds no configuration of its own: the shell is `packages/cli`'s
+  code, so it rides that package's entry in `deno task check`'s path list, its
+  test runner, and its coverage group. A test file that stands in for a
+  process-wide member — an environment variable, a `Deno` member — goes in that
+  runner's `SERIAL_TESTS` list, because the parallel pass runs every other file
+  on a thread of one process.

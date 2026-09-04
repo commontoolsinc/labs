@@ -4,7 +4,7 @@
  * the controller, for how long, and who closes it are all decisions a
  * long-lived process has to make, and this module is where they are made.
  *
- * The connect sequence belongs to `loadPieces` (`@commonfabric/cli/lib/piece`),
+ * The connect sequence belongs to `loadPieces` (`lib/piece.ts`),
  * which this module calls. What it adds is two memos, whose retry policies
  * are opposites. A construction is not held when it fails, so a later ask
  * opens again; that covers the connection that never opened, and a connection
@@ -14,8 +14,11 @@
  * after it.
  */
 
-import { loadPieces, type SpaceConfig } from "@commonfabric/cli/lib/piece";
 import type { PiecesController } from "@commonfabric/piece/ops";
+
+import { loadPieces, type SpaceConfig } from "../piece.ts";
+import { escapeControlCharacters } from "./place.ts";
+import type { RecordEntry } from "./record.ts";
 
 /**
  * The connection half of the ambient record: what one shuttle process
@@ -30,6 +33,30 @@ export interface ConnectionRecord {
 
   /** The identity to act as, as the path to its PKCS#8 key file. */
   readonly identity: string;
+}
+
+/**
+ * The connection's dimensions of the ambient record, as `where` prints them
+ * (`record.ts`).
+ *
+ * The space prints as the process was launched with it, which is a name where
+ * a name was given. That is not what the position dimension prints: a place
+ * holds the DID the session settled the name on, and both are worth seeing —
+ * one is what a person typed and the other is what it denotes.
+ *
+ * All three are escaped, because all three arrive from a launch flag or the
+ * environment behind it rather than through a door: no place reads them, so
+ * nothing has refused a character a terminal acts on before they are printed.
+ * The glyph is what a message gets, this being prose somebody reads.
+ */
+export function connectionEntries(
+  record: ConnectionRecord,
+): readonly RecordEntry[] {
+  return [
+    { label: "api", value: escapeControlCharacters(record.apiUrl) },
+    { label: "identity", value: escapeControlCharacters(record.identity) },
+    { label: "space", value: escapeControlCharacters(record.space) },
+  ];
 }
 
 /** Opens a connection over `config` and returns the controller on it. */

@@ -8,9 +8,12 @@
  * exception and drives the real derivation: which space a name denotes is a
  * fact two callers have to agree about, so that case asks both.
  *
- * The connection is a borrowed one throughout. No verb opens or closes one, so
- * which arm a case stands it up through decides nothing here, and the borrowed
- * arm is the one that needs no opener behind it.
+ * The connection is a borrowed one in every case but one. No verb opens or
+ * closes one, so which arm a case stands it up through decides nothing here,
+ * and the borrowed arm is the one that needs no opener behind it. The
+ * exception is `where` over a connection that will not open, which is the one
+ * question the arm decides: the borrowed arm has a controller already, so only
+ * an owned one can be asked what it answers when the opening fails.
  *
  * Two properties the file exists for run through it. A read never moves the
  * place, and a move never happens twice, so each of the two verbs that resolve
@@ -22,24 +25,24 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { LINK_MARKER_KEY } from "@commonfabric/cli/lib/cell-selection";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { PiecesController } from "@commonfabric/piece/ops";
+
+import { LINK_MARKER_KEY } from "../lib/cell-selection.ts";
 import type {
   GetCellValueOptions,
   PieceConfig,
   SpaceConfig,
-} from "@commonfabric/cli/lib/piece";
-import type { WishReadConfig } from "@commonfabric/cli/lib/wish";
-import type { MemorySpace } from "@commonfabric/memory/interface";
-import type { PiecesController } from "@commonfabric/piece/ops";
-
-import { HeldConnection } from "../src/connection.ts";
-import { CurrentPlace } from "../src/place.ts";
+} from "../lib/piece.ts";
+import { HeldConnection } from "../lib/shuttle/connection.ts";
+import { CurrentPlace } from "../lib/shuttle/place.ts";
 import {
   type Outcome,
   runLine,
   type Shuttle,
   type VerbDeps,
-} from "../src/verbs.ts";
+} from "../lib/shuttle/verbs.ts";
+import type { WishReadConfig } from "../lib/wish.ts";
 
 const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;
 const OTHER_SPACE = "did:key:z6MkHomeSpace" as MemorySpace;
@@ -156,6 +159,11 @@ function addressed(link: string): VerbDeps {
   return wishing({ [LINK_MARKER_KEY]: link });
 }
 
+/** Helper for the cases below, which is the text `outcome` composed. */
+function textOf(outcome: Outcome): string {
+  return outcome.kind === "text" ? outcome.text : `not text: ${outcome.kind}`;
+}
+
 /** Helper for the cases below, which is the reason `outcome` was refused. */
 function reasonOf(outcome: Outcome): string {
   return outcome.kind === "refused"
@@ -175,7 +183,7 @@ describe("verbs", () => {
       expect(await runLine("frob x", shuttleIn(), READS_NOTHING)).toEqual({
         kind: "refused",
         reason: "`frob` is not a verb. The verbs are `cd`, `get`, `ls`, " +
-          "`pwd`, and `wish`.",
+          "`pwd`, `where`, and `wish`.",
       });
     });
 
@@ -201,7 +209,7 @@ describe("verbs", () => {
         expect(await runLine(word, shuttleIn(), READS_NOTHING)).toEqual({
           kind: "refused",
           reason: `\`${word}\` is not a verb. The verbs are \`cd\`, \`get\`, ` +
-            "`ls`, `pwd`, and `wish`.",
+            "`ls`, `pwd`, `where`, and `wish`.",
         });
       }
     });
@@ -246,7 +254,16 @@ describe("verbs", () => {
           listing: { listCellKeys: () => Promise.resolve(["title"]) },
         };
         const shuttle = atPiece();
-        for (const line of ["pwd", "ls", "get", "wish #favorites", "cd .."]) {
+        for (
+          const line of [
+            "pwd",
+            "where",
+            "ls",
+            "get",
+            "wish #favorites",
+            "cd ..",
+          ]
+        ) {
           await runLine(line, shuttle, answers);
         }
       } finally {
@@ -634,6 +651,94 @@ describe("verbs", () => {
       expect(reasonOf(await runLine("pwd /", shuttleIn(), READS_NOTHING))).toBe(
         "`pwd` takes no operand, and was given 1.",
       );
+    });
+  });
+
+  describe("where", () => {
+    it("returns every dimension of the ambient record, the connection's first", async () => {
+      expect(await runLine("where", atPiece("title"), READS_NOTHING)).toEqual({
+        kind: "text",
+        text: `api       ${CONFIG.apiUrl}\n` +
+          `identity  ${CONFIG.identity}\n` +
+          `space     ${SPACE}\n` +
+          `position  /@${SPACE}/${HANDLE}@space/title\n` +
+          "scope     @space",
+      });
+    });
+
+    it("returns the place's dimensions written exactly as `pwd` writes them", async () => {
+      // What makes the two one format rather than two that agree today: the
+      // dimensions `pwd` prints are the end of what `where` prints, character
+      // for character.
+
+      const shuttle = atPiece("title");
+      const whole = await runLine("where", shuttle, READS_NOTHING);
+      const place = await runLine("pwd", shuttle, READS_NOTHING);
+      expect(whole.kind === "text" && place.kind === "text").toBe(true);
+      expect(textOf(whole).endsWith(`\n${textOf(place)}`)).toBe(true);
+    });
+
+    it("returns the record over a connection that will not open", async () => {
+      // Nothing here reads, and this is what that is worth: a shuttle whose
+      // server has gone away can still say what it was connected as and where
+      // it stands.
+
+      const shuttle: Shuttle = {
+        config: CONFIG,
+        place: new CurrentPlace(SPACE),
+        connection: new HeldConnection({
+          kind: "owned",
+          record: CONFIG,
+          open: () => Promise.reject(new Error("The server refused.")),
+        }),
+      };
+      expect(textOf(await runLine("where", shuttle, READS_NOTHING)))
+        .toBe(
+          `api       ${CONFIG.apiUrl}\n` +
+            `identity  ${CONFIG.identity}\n` +
+            `space     ${SPACE}\n` +
+            `position  @${SPACE}/\n` +
+            "scope     @space",
+        );
+    });
+
+    it("returns the space the connection names beside the one the place settled on", async () => {
+      // The two dimensions carry different things and both are worth seeing:
+      // a person names a space and the fabric answers with a DID, and the
+      // record shows the naming as well as what it denotes.
+
+      const shuttle: Shuttle = {
+        config: { ...CONFIG, space: SPACE_NAME },
+        place: new CurrentPlace(SPACE),
+        connection: new HeldConnection({ kind: "borrowed", pieces: PIECES }),
+      };
+      expect(textOf(await runLine("where", shuttle, READS_NOTHING))).toContain(
+        `space     ${SPACE_NAME}\nposition  @${SPACE}/`,
+      );
+    });
+
+    it("returns the connection's own values shown as a message is shown", async () => {
+      // The three arrive from a launch flag or the environment behind it, so
+      // no door has held them to the class a terminal acts on. They are prose
+      // somebody reads, which is the glyph rather than the JSON escape.
+
+      const shuttle: Shuttle = {
+        config: { ...CONFIG, space: "boa\u009brd", identity: "/k\u007fey" },
+        place: new CurrentPlace(SPACE),
+        connection: new HeldConnection({ kind: "borrowed", pieces: PIECES }),
+      };
+      const text = textOf(await runLine("where", shuttle, READS_NOTHING));
+      expect(text).toContain("space     boa␦rd");
+      expect(text).toContain("identity  /k␡ey");
+      expect(/\p{Cc}/u.test(text.replaceAll("\n", ""))).toBe(false);
+    });
+
+    it("refuses an operand", async () => {
+      expect(
+        reasonOf(
+          await runLine("where scope @user", shuttleIn(), READS_NOTHING),
+        ),
+      ).toBe("`where` takes no operand, and was given 2.");
     });
   });
 

@@ -15,18 +15,21 @@
  */
 
 import type { CellScope } from "@commonfabric/api";
-import {
-  type NormalizedLLMFriendlyRef,
-  normalizeLLMFriendlyRef,
-  validatePieceSegment,
-} from "@commonfabric/cli/lib/llm-friendly-ref";
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import { glyphFor } from "../view/display.ts";
 import {
   CELL_SCOPE_VALUES,
   encodeJsonPointer,
   linkPathSegmentToCellPathSegment,
   parseScopedIdSegment,
 } from "@commonfabric/runner/shared";
+
+import {
+  type NormalizedLLMFriendlyRef,
+  normalizeLLMFriendlyRef,
+  validatePieceSegment,
+} from "../llm-friendly-ref.ts";
+import { type RecordEntry, renderRecord } from "./record.ts";
 
 /** One segment of a path inside a piece, in the form cell traversal takes. */
 export type PathSegment = string | number;
@@ -190,6 +193,72 @@ export interface ResolvedTarget {
   readonly path?: readonly string[];
 }
 
+/**
+ * Whether `text` holds a character a terminal acts on rather than prints.
+ *
+ * It is the question a door and a printing surface both ask. A place refuses a
+ * part holding one — {@link ACTED_ON} carries which characters those are and
+ * why — and a listing with no name left to offer for such a row describes it
+ * rather than writing it, which is the one place a refusal still leaves the
+ * name to be shown.
+ */
+export function holdsControlCharacter(text: string): boolean {
+  return ACTED_ON.test(text);
+}
+
+/**
+ * `text` with every character a terminal acts on shown as the glyph that names
+ * it, and everything else as it stands.
+ *
+ * This is the opposite treatment from a name, and what each is for is the
+ * difference. A name is something a person types back, so one that cannot be
+ * printed safely is better replaced by a description of why it is missing. A
+ * message is something a person reads, so it has to arrive whole and merely
+ * inert: every character survives, and the ones a terminal would act on
+ * survive as the picture of themselves.
+ *
+ * The glyph is `lib/view/display.ts`'s, which is this package's answer to the
+ * question already and draws exactly this class — C0 as `U+2400` plus the
+ * code, `DEL` as its own picture, and C1 as the substitute. A glyph is what a
+ * message wants and an escape is what a value wants;
+ * {@link escapeControlCharactersInJson} is the other of the pair and carries
+ * why the two differ.
+ *
+ * The class is walked a character at a time rather than replaced through a
+ * global expression, because a global one carries a `lastIndex` between calls
+ * and {@link holdsControlCharacter} tests the same class.
+ */
+export function escapeControlCharacters(text: string): string {
+  return [...text].map((character) =>
+    holdsControlCharacter(character) ? glyphFor(character) : character
+  ).join("");
+}
+
+/**
+ * `json` with every character a terminal acts on written as the escape JSON
+ * spells it with, except the line feed, which is left alone.
+ *
+ * Two surfaces escape this class and they use different conventions, which is
+ * a decision rather than an oversight. A message is prose somebody reads, so
+ * {@link escapeControlCharacters} shows each character as one glyph naming
+ * it. A serialized value is text somebody may parse or paste back, so it stays
+ * JSON: `\uXXXX` is what JSON already writes an escape with, and extending it
+ * to the rest of the class leaves output that still parses and still reads
+ * back as the same value.
+ *
+ * The line feed is exempt because of what it can be by then. `JSON.stringify`
+ * escapes every C0 character that came out of a value, the line feed among
+ * them, so one still standing raw in its output is the pretty printer's own
+ * formatting. Escaping that would fold the whole value onto one line.
+ */
+export function escapeControlCharactersInJson(json: string): string {
+  return [...json].map((character) =>
+    character !== "\n" && holdsControlCharacter(character)
+      ? `\\u${character.codePointAt(0)!.toString(16).padStart(4, "0")}`
+      : character
+  ).join("");
+}
+
 /** The place a shuttle starts in: the space's root, read at the base scope. */
 export function placeAtSpaceRoot(space: MemorySpace): Place {
   return { position: { kind: "root", space }, scope: "space" };
@@ -235,7 +304,8 @@ export function operandForChild(
 }
 
 /**
- * What `pwd` prints: both halves of the place, each on its own line.
+ * The place's two dimensions, as the ambient record prints one (`record.ts`):
+ * what `pwd` prints whole, and what `where` prints under the connection's.
  *
  * A leading `/` is what makes a string a reference, so it marks the one
  * position that is a cell. A piece therefore renders as a fully qualified
@@ -264,9 +334,11 @@ export function operandForChild(
  * wrote — whatever the piece holds, and independently of any rule about
  * what a piece may hold.
  */
-function renderPlace(place: Place): string {
-  return `position  ${renderPosition(place)}\n` +
-    `scope     ${renderScope(place.scope)}`;
+function placeEntries(place: Place): readonly RecordEntry[] {
+  return [
+    { label: "position", value: renderPosition(place) },
+    { label: "scope", value: renderScope(place.scope) },
+  ];
 }
 
 /**
@@ -379,9 +451,35 @@ export class CurrentPlace {
     return outcomeOf(this.#settled(move, confirmed));
   }
 
+  /**
+   * This place written short, for the prompt to carry: its position without
+   * the space, and its scope after a space.
+   *
+   * The space is the one thing left out, and leaving it out costs nothing: one
+   * connection serves one space, so the omitted part is the same on every line
+   * of a run and `where` prints it. Nothing else is shortened — no id is cut
+   * down to a prefix that would print exactly as a whole one, and no name is
+   * shown that this process did not read — so what is here is what the place
+   * holds. It is not an address for all that: the space is missing, a
+   * container is written with the trailing separator that says it is one, and
+   * the scope sits last rather than where a reference carries it.
+   */
+  label(): string {
+    const place = this.#here.place;
+    return `${labelPosition(place.position)} ${renderScope(place.scope)}`;
+  }
+
+  /**
+   * The two dimensions of this place, for `where` to print under the ones the
+   * connection contributes.
+   */
+  entries(): readonly RecordEntry[] {
+    return placeEntries(this.#here.place);
+  }
+
   /** What `pwd` prints for this place. */
   render(): string {
-    return renderPlace(this.#here.place);
+    return renderRecord(this.entries());
   }
 
   /**
@@ -963,6 +1061,35 @@ const NO_SUCH_NAME = "no piece carries that name: a slug is lowercase " +
   "`of:fid1:` and unpadded base64url";
 
 /**
+ * The reason a part a terminal would act on rather than print is refused.
+ *
+ * Everything a place is written into goes to a terminal — the prompt carrying
+ * it, the listing offering it, the rendering `pwd` prints — and a terminal
+ * reads these characters as instructions rather than as text. One moves the
+ * cursor, one opens a sequence that colors or clears what follows. So the
+ * screen stops saying what the fabric holds, and a name read off it is not the
+ * name that was printed.
+ */
+const ACTS_ON_A_TERMINAL = "a terminal would act on it rather than print it";
+
+/**
+ * The characters a terminal acts on: Unicode's `Cc` category, which is C0
+ * (`U+0000`–`U+001F`), `DEL`, and C1 (`U+0080`–`U+009F`).
+ *
+ * The category is the rule rather than a list of the ones anybody has seen
+ * misbehave, because what makes them one class is what a terminal does with
+ * them and not which of them a person has met. C1 is in it for a reason worth
+ * naming: `U+009B` is the single-character form of the sequence introducer,
+ * so a name holding one opens a sequence with no escape in front of it.
+ *
+ * What is not here is as decided as what is. `U+00A0` prints as a space and
+ * instructs nothing. `U+2028` and `U+2029` separate lines for a reader of text
+ * rather than for a terminal, and the printer quotes both, being whitespace to
+ * the split. Refusing either would take a name away for no harm.
+ */
+const ACTED_ON = /\p{Cc}/u;
+
+/**
  * Helper for the movers, which names what stops a rendering of a path holding
  * `segment` from naming that path back, and returns nothing when nothing
  * does.
@@ -975,9 +1102,14 @@ const NO_SUCH_NAME = "no piece carries that name: a slug is lowercase " +
  * naming another cell. Both are refused wherever a segment sits and not only
  * last, because `..` makes any segment the last one. Leading whitespace
  * survives both and is admitted: the parse trims the whole string, which no
- * leading character of a segment sits at the end of. What a terminal does with
- * the other control characters is the format's concern rather than this one's,
- * since a reference carrying them reads back whole.
+ * leading character of a segment sits at the end of.
+ *
+ * A control character survives both losses and is refused all the same, for a
+ * reason the round trip cannot see ({@link ACTS_ON_A_TERMINAL}): the rendering
+ * goes to a terminal, where these are instructions rather than text. That the
+ * reference reads back whole is what makes them dangerous rather than what
+ * excuses them — the screen no longer shows the name, so what a person copies
+ * off it is what the terminal did.
  */
 function unnameableSegment(segment: PathSegment): Fault | undefined {
   if (typeof segment !== "number") {
@@ -987,6 +1119,12 @@ function unnameableSegment(segment: PathSegment): Fault | undefined {
     }
     if (segment.includes("\n")) {
       return { what: "a segment holding a line break", so: NAMES_ANOTHER };
+    }
+    if (holdsControlCharacter(segment)) {
+      return {
+        what: "a segment holding a control character",
+        so: ACTS_ON_A_TERMINAL,
+      };
     }
     return undefined;
   }
@@ -1018,7 +1156,7 @@ const READ_INSIDE_AN_ID = ["@", "#"];
  * Helper for the movers, which names what stops a piece from being one a place
  * may stand on, and returns nothing when nothing does.
  *
- * Only the newline costs a piece its name. The scope suffix the rendering
+ * Of what a rendering loses, only the newline costs a piece its name. The scope suffix the rendering
  * always writes sits between the piece and the end of the string, so the trim
  * takes the suffix rather than the piece, and the split at the last `@` takes
  * the suffix's own — a piece with something in it comes back whole from both.
@@ -1032,10 +1170,12 @@ const READ_INSIDE_AN_ID = ["@", "#"];
  * and every colon-less name that is no slug on its own account. What this door
  * adds is the handle-shaped piece: `isPieceHandle` is a length rule, so a
  * trailing space and either of {@link READ_INSIDE_AN_ID} ride past it and are
- * refused here. Other characters no vocabulary holds ride past it too — a `.`
- * or an escaped separator — and are admitted, their renderings reading back
- * whole; what is refused here is what a rendering would lose or a reading
- * would take.
+ * refused here, and so does a control character, which no vocabulary holds
+ * either: no slug carries one and base64url has none. Other characters no
+ * vocabulary holds ride past it too — a `.` or an escaped separator — and are
+ * admitted, their renderings reading back whole; what is refused here is what
+ * a rendering would lose, what a reading would take, and what no name the
+ * fabric made could have held.
  */
 function unnameablePiece(piece: string): Fault | undefined {
   if (piece.includes("\n")) {
@@ -1049,6 +1189,9 @@ function unnameablePiece(piece: string): Fault | undefined {
     if (piece.includes(character)) {
       return { what: `a piece holding \`${character}\``, so: NO_SUCH_NAME };
     }
+  }
+  if (holdsControlCharacter(piece)) {
+    return { what: "a piece holding a control character", so: NO_SUCH_NAME };
   }
   return undefined;
 }
@@ -1113,13 +1256,35 @@ function outcomeOf(step: Step): Move {
   return step.kind === "moved" ? { kind: "moved", place: step.to.place } : step;
 }
 
-/** Helper for the movers, which reads the message off a thrown value. */
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+/**
+ * The message a thrown value carries, for every surface that reports one.
+ *
+ * Total, which the obvious spelling is not. `String` throws on a value with no
+ * `toString` — `Object.create(null)` is the reachable one, out of a rejection
+ * built from a bare record — and on one whose conversion throws; an `Error`
+ * may carry a `message` that is a getter which throws, or that is not a string
+ * at all, which the next reader of it would be the one to fail on. Every
+ * caller is already on its way to reporting a failure, so a throw raised here
+ * replaces the failure being reported with itself: at the prompt that ends the
+ * session on the read that failed, rather than answering the line and reading
+ * the next one.
+ *
+ * A value that will not describe itself gets the sentence below instead. It
+ * tells a reader less than a real message would and a great deal more than a
+ * run that stopped.
+ */
+export function messageOf(thrown: unknown): string {
+  try {
+    const message = thrown instanceof Error ? thrown.message : String(thrown);
+    if (typeof message === "string") return message;
+  } catch {
+    // The conversion is what failed, which is the case this exists for.
+  }
+  return "The failure carries nothing that can be written as a message.";
 }
 
 /**
- * Helper for {@link renderPlace}, which writes the position half. A piece
+ * Helper for {@link placeEntries}, which writes the position. A piece
  * carries the scope, since only a piece is a cell for a scope to select
  * within; a container renders its own name and leaves the scope to the line
  * below.
@@ -1142,7 +1307,31 @@ function renderPosition(place: Place): string {
   }
 }
 
-/** Helper for {@link renderPlace}, which writes the scope half. */
+/**
+ * Helper for {@link CurrentPlace.label}, which writes the position half of the
+ * short form: everything the position holds except the space.
+ *
+ * The separator is escaped in every segment, as it is in the rendering `pwd`
+ * prints, so a key holding one is one segment here too. What differs is the
+ * leading separator: it marks a cell in a place's rendering and marks nothing
+ * here, a short form being no reference for it to mark one in, so a container
+ * takes it and reads as the walk down from the root that it is.
+ */
+function labelPosition(position: Position): string {
+  switch (position.kind) {
+    case "root":
+      return encodeJsonPointer(["", ""]);
+    case "facet":
+      return encodeJsonPointer(["", position.facet, ""]);
+    case "piece":
+      return encodeJsonPointer([
+        position.piece,
+        ...position.path.map(String),
+      ]);
+  }
+}
+
+/** Helper for the renderings, which writes the scope. */
 function renderScope(scope: CellScope): string {
   return `@${scope}`;
 }
