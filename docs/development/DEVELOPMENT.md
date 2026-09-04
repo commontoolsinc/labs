@@ -241,7 +241,7 @@ The way is one public getter named `accessForTestingOnly`, which hands over
 exactly what a test needs and nothing else. The name is the documentation:
 everything behind it is internals free to change, and a reader who sees it in
 a test knows the test is written against them. Its doc comment says what it
-exposes and that none of it is part of the class's contract.
+exposes, and the name says the rest.
 
 - Instance members go behind an instance getter; static members behind a
   static one. A class may have both.
@@ -274,10 +274,6 @@ export class Fryer {
   /**
    * The oil temperature, the batch log, and the drain step, which a test
    * drives directly.
-   *
-   * The name is the documentation. Nothing here is part of what this class
-   * promises, and code that reaches through it is written against internals
-   * that are free to change.
    */
   get accessForTestingOnly(): {
     temperature: number;
