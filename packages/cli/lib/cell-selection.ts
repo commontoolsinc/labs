@@ -71,7 +71,7 @@ export interface ParsedSelectionFilter {
 }
 
 /** The key a caller writes beside `properties` to ask for an address. */
-const LINK_MARKER_KEY = "$link";
+export const LINK_MARKER_KEY = "$link";
 
 /**
  * The character a concise field path ends a segment with to ask for the

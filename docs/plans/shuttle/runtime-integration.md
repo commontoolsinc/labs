@@ -197,29 +197,62 @@ it rather than opening one per call.
 
 Not every v1 verb lands on a `*FromCommand` action, and which ones do not
 is what decides whether a bare `Deno.exit` in some Cliffy action is
-shuttle's problem. `get`, `set`, `call` and `describe` go through the
-named exports (`getCellValueFromCommand`, `setCellValueFromCommand`,
-`callFromCommand`, `describePieceFromCommand`); `wish` goes through
-`readWish`. Three are composed from the library instead:
-**`link` calls `linkPieces` (`lib/piece.ts`) directly**, which is the seam
-A2 gave it and which raises `LinkValidationError` as a value, so the
-inline action behind `cf piece link` — exit and all — is not on shuttle's
-path; **`verbs` composes `listPieceCallables` (`lib/piece.ts`) with
-the exported `verbListingLines` / `verbListingJson` / `verbListingNotes`
-and `partitionVerbListing`**, rendering the rows itself rather than
-running that command's inline action; and **`ls` composes `listSpaceSlugs`
-and `listPieces` (`lib/piece.ts`) with `listCellKeys`
-(`lib/cell-listing.ts`)**, handing each the held connection as
-`deps.loadPieces`. `listSlugsFromCommand` and `listPiecesFromCommand` are
-not that seam, and not because they refuse a connection: each takes a `deps`
-with its lister and its renderer both injectable, so a caller can substitute
-a lister bound to a held one. It is what is left after that. The default
-lister is called with a config and no `deps`, so threading a connection means
-substituting the lister; the default renderer writes to the process's own
-stdout, so a caller drawing its own screen substitutes that too; and what the
-wrapper then contributes is `parseSpaceOptions` over a Cliffy options object
-and a `--json` flag. Shuttle builds its own `SpaceConfig` and has no such
-object, so nothing of the wrapper is left to call.
+shuttle's problem. One does: **`call` goes through `callFromCommand`**.
+`wish` goes through `readWish`, which takes a `WishReadConfig` — a
+`SpaceConfig` with the query beside it — accepts `deps.loadPieces`, and
+returns the resolution as a value. The rest are composed from the library:
+
+- **`link` calls `linkPieces` (`lib/piece.ts`) directly**, which is the seam
+  A2 gave it and which raises `LinkValidationError` as a value, so the
+  inline action behind `cf piece link` — exit and all — is not on shuttle's
+  path.
+- **`verbs` composes `listPieceCallables` (`lib/piece.ts`) with the exported
+  `verbListingLines` / `verbListingJson` / `verbListingNotes` and
+  `partitionVerbListing`**, rendering the rows itself rather than running that
+  command's inline action.
+- **`ls` composes `listSpaceSlugs` and `listPieces` (`lib/piece.ts`) with
+  `listCellKeys` (`lib/cell-listing.ts`)**, handing each the held connection as
+  `deps.loadPieces`.
+- **`get` calls `getCellValue` and `set` calls `setCellValue`**
+  (`lib/piece.ts`), each over a `PieceConfig` built from the place and each
+  handed the connection as `deps.loadPieces`. A read that fails on a data
+  condition is `pieceGetDataErrorReport` beside `exitWithDataError`, both
+  exported, so a caller composing the read keeps the report `cf cell get`
+  prints.
+- **`describe` composes `describePiece` (`lib/piece.ts`) with the exported
+  `pieceDescribeLines` and `pieceDescribeJson`**, choosing the page shape
+  itself.
+
+What rules the wrappers out is one fact repeated across five of them, and it
+is not that any refuses a connection or a sink. Each takes its read, its
+dispatch and its outputs as injectable deps, so a caller can bind every one
+of those to a connection it holds and to a screen it draws. It is what is
+left after that. Each parses a Cliffy options object into the config it then
+hands on — `listSlugsFromCommand` and `listPiecesFromCommand` through
+`parseSpaceOptions` and a `--json` flag, `describePieceFromCommand` through
+`parsePieceOptions`, `getCellValueFromCommand` and `setCellValueFromCommand`
+through `readTargetPositionals`, `parsePieceOptions` and `mergePiecePath`
+— and shuttle holds a place rather than a `--cell` string: a piece, a path
+already in segments, and a scope. Reaching any of those wrappers would mean
+rendering the place to an address, hanging it on an options object nobody
+typed, and letting the intake parse it back, the path through `parseCellPath`
+included. Each also calls its own default read with no `deps` argument, so
+threading a connection means substituting that read, which leaves the intake
+as the whole of what the wrapper still contributes. Two further facts hold of
+the cell pair and of `describePieceFromCommand`: each writes the process's
+hint posture on the way in (`setQuietMode`, which the connection limit in
+item 6 covers rather than forbids), and `getCellValueFromCommand` returns
+nothing — the value it read reaches `deps.render` and no caller, where
+shuttle renders the value itself.
+
+`callFromCommand` is the one that survives that test, because what it
+contributes is not intake. The step-10 read section, the invocation identity
+and the wait control, the phase observer, the settlement bound, the outcome
+rendering, and the three exits A4 threaded are all its own, and its two argv
+arrays are ordinary parameters rather than something read off a bound
+command. Its `deps` bag holds collaborators only, so a caller holding a
+connection passes an `executePieceCallable` bound to it and drives the rest
+as written.
 
 ## Prerequisite work in `packages/cli`
 
@@ -238,14 +271,18 @@ Each of these is small and lands on its own; together they are what decision
    below that line is the named export, which needs no binding.
 4. **Exit discipline.** Done. `exitWithDataError` and `exitPieceCallFailure`
    default to `Deno.exit(1)` (typed `never`) and take a `deps` override in
-   its place, which the seams a v1 verb reaches forward:
+   its place, which the seams that report through one forward:
    `getCellValueFromCommand` on a data error, and `callFromCommand` at each
-   of its three exits. Shuttle's shim therefore throws rather than returns —
-   what an `exit` typed `never` requires — and shuttle catches it beside the
-   `ValidationError` that `exitPieceCallFailure` rethrows for Cliffy's usage
-   rendering. `callFromCommand` reports its payload rejection from inside
-   the dispatch's promise chain, so it records that an exit ran and rethrows
-   rather than describing the shim's own throw as a second failure.
+   of its three exits. `callFromCommand` is the one of those two a v1 verb
+   lands on; a `get` composed from `getCellValue` reaches `exitWithDataError`
+   only where it builds the report itself, and the override is what lets it
+   do that without ending the process. Shuttle's shim therefore throws
+   rather than returns — what an `exit` typed `never` requires — and shuttle
+   catches it beside the `ValidationError` that `exitPieceCallFailure`
+   rethrows for Cliffy's usage rendering. `callFromCommand` reports its
+   payload rejection from inside the dispatch's promise chain, so it records
+   that an exit ran and rethrows rather than describing the shim's own throw
+   as a second failure.
 5. **Output capture.** What a caller captures is the seam's own output:
    for every seam a v1 verb reaches, the value or page goes to `render`,
    the next steps to `hint`, a failure's report to `printError`, and the

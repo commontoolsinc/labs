@@ -1406,6 +1406,115 @@ describe("place", () => {
         });
       });
 
+      describe("aim()", () => {
+        // The read door. It differs from `cd()` in two ways and this block is
+        // both of them: nothing moves, and a trailing `#argument` is read
+        // rather than refused. Everything else is `cd()`'s reading, so what is
+        // asked here is only that the operand arrives at it — the readings
+        // themselves are `cd()`'s block above.
+
+        /** Helper for the cases below, which is where `operand` points. */
+        function pointsAt(place: CurrentPlace, operand: string): Move {
+          return place.aim(operand).move;
+        }
+
+        it("returns where a relative operand points", () => {
+          expect(pointsAt(atPiece(), "topics/3")).toEqual({
+            kind: "moved",
+            place: {
+              position: {
+                kind: "piece",
+                space: SPACE,
+                piece: "board",
+                path: ["topics", 3],
+              },
+              scope: "space",
+            },
+          });
+        });
+
+        it("leaves shuttle where it stood", () => {
+          const place = atPiece();
+          const before = place.place;
+          place.aim("topics/3");
+          expect(place.place).toBe(before);
+        });
+
+        it("returns no selection of the arguments cell for an operand carrying no suffix", () => {
+          expect(atPiece().aim("topics").input).toBe(false);
+        });
+
+        it("returns the arguments cell selected for an operand ending in `#argument`", () => {
+          expect(atPiece().aim("topics#argument").input).toBe(true);
+        });
+
+        it("returns the position the operand names with the suffix off it", () => {
+          expect(atPiece().aim("topics/3#argument").move).toEqual(
+            pointsAt(atPiece(), "topics/3"),
+          );
+        });
+
+        it("reads the suffix off a bare piece designation, which `cd` refuses", () => {
+          // The asymmetry the door exists for, on the one spelling where the
+          // two doors visibly disagree: `cd` turns the suffix down because a
+          // place is result-rooted, and a read is not standing anywhere.
+          const place = inSlugs();
+          expect(place.aim("board#argument")).toEqual({
+            input: true,
+            move: pointsAt(inSlugs(), "board"),
+          });
+          expect(inSlugs().cd("board#argument").kind).toBe("refused");
+        });
+
+        it("reads the suffix off a rooted reference", () => {
+          expect(atSpaceRoot().aim(`/${HANDLE}/title#argument`)).toEqual({
+            input: true,
+            move: pointsAt(atSpaceRoot(), `/${HANDLE}/title`),
+          });
+        });
+
+        it("refuses the suffix written with nothing in front of it", () => {
+          expect(atPiece().aim("#argument")).toEqual({
+            input: false,
+            move: {
+              kind: "refused",
+              reason: "`#argument` selects a piece's arguments cell, so it " +
+                "follows the target it selects, as in `get topics#argument`.",
+            },
+          });
+        });
+
+        it("hands a `#name` target on whole, the head reading being another one", () => {
+          expect(atPiece().aim("#favorites")).toEqual({
+            input: false,
+            move: { kind: "wish", target: "#favorites" },
+          });
+        });
+
+        it("takes a `#` inside a piece as a character of a key", () => {
+          // The suffix reading is the one spelling it accepts and nothing
+          // wider, so every other `#` reaches the door that decides it — here
+          // the walk, where `#` is data.
+          expect(atPiece().aim("a#b")).toEqual({
+            input: false,
+            move: pointsAt(atPiece(), "a#b"),
+          });
+          expect(pointsAt(atPiece(), "a#b").kind).toBe("moved");
+        });
+
+        it("carries the reason a reference gave a fragment that is no suffix", () => {
+          expect(atSpaceRoot().aim(`/${HANDLE}/a#b`)).toEqual({
+            input: false,
+            move: {
+              kind: "refused",
+              reason: 'Unknown suffix "#b". The one supported suffix is ' +
+                '"#argument", which selects the piece\'s arguments cell the ' +
+                'way "--input" does.',
+            },
+          });
+        });
+      });
+
       describe("enter()", () => {
         it("moves to a target that resolved in the connected space", () => {
           const place = atSpaceRoot();
@@ -1612,7 +1721,8 @@ describe("place", () => {
             reason:
               "`#profile` resolves in space `did:key:z6MkOtherSpace`, and " +
               "this shuttle is connected to `did:key:z6MkConnectedSpace`. " +
-              "One connection serves one space.",
+              "One connection serves one space, so reaching that cell means " +
+              "a shuttle started against that space.",
           });
         });
 
@@ -1664,7 +1774,8 @@ describe("place", () => {
             reason: "`estuary` resolves to space `did:key:z6MkOtherSpace`, " +
               "and this shuttle is connected to " +
               "`did:key:z6MkConnectedSpace`. One connection serves one " +
-              "space.",
+              "space, so reaching that cell means a shuttle started against " +
+              "that space.",
           });
           expect(place.place).toEqual(placeAtSpaceRoot(SPACE));
         });

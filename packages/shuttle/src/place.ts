@@ -8,8 +8,10 @@
  * (`normalizeLLMFriendlyRef` over the runner's `parseReferenceParts`) and this
  * module consumes it; what it adds is the navigation spellings that grammar
  * has no room for — `..`, `-`, `/`, and a scope-only `@scope` — the refusals a
- * place is subject to, and the operand that reaches a child, which is those
- * same readings asked in the other direction.
+ * place is subject to, the operand that reaches a child, which is those same
+ * readings asked in the other direction, and the one reading that differs
+ * between moving somewhere and reading it: a place cannot stand in an
+ * arguments cell, and an operand may still name one.
  */
 
 import type { CellScope } from "@commonfabric/api";
@@ -107,10 +109,10 @@ export interface Place {
 }
 
 /**
- * A move whose reference named its space by name rather than by DID, which
- * needs a session to derive the one from the other. Resolving that name —
- * `validateEmbeddedSpaces` does it — and handing this back to
- * {@link CurrentPlace.settle} with the space it resolved to is what lands it.
+ * A move whose reference named its space by name rather than by DID, which no
+ * value can tell apart from the space this place holds. Settling that name
+ * against a connection and handing this back to {@link CurrentPlace.settle}
+ * with the space it stands for is what lands it.
  *
  * It carries what the reference determined and no space, because whether the
  * name denotes the connected space is the one thing not yet known: an arm
@@ -151,6 +153,24 @@ export type Move =
   /** The move landed, and `place` is where shuttle now stands. */
   | { readonly kind: "moved"; readonly place: Place }
   | Unlanded;
+
+/**
+ * What an operand named when it was read rather than moved to: where it
+ * points, and which of a piece's two cells it selects.
+ */
+export interface Aim {
+  /**
+   * True where the operand ended in `#argument`, which selects the piece's
+   * arguments cell — the same selection `--input` spells as a flag. The move
+   * beside it carries the operand with that suffix taken off, so the position
+   * is the same either way and this is the whole of what tells the two cells
+   * apart.
+   */
+  readonly input: boolean;
+
+  /** Where the operand points, with any `#argument` suffix off it. */
+  readonly move: Move;
+}
 
 /** What resolving a named entry point against the fabric produced. */
 export interface ResolvedTarget {
@@ -252,7 +272,8 @@ function renderPlace(place: Place): string {
 /**
  * The one owner of a shuttle's place: it holds where shuttle stands, where it
  * stood before, and the levels it walked through to get there, moves between
- * them, and refuses what the design refuses.
+ * them, answers where an operand points without going there, and refuses what
+ * the design refuses.
  *
  * Per instance rather than per process, so that several places — tabs, split
  * views, an agent holding more than one — stay reachable.
@@ -298,6 +319,37 @@ export class CurrentPlace {
   }
 
   /**
+   * Where `operand` points and which of a piece's two cells it selects,
+   * without going there.
+   *
+   * It differs from {@link CurrentPlace.cd} in the two ways a read differs
+   * from a move. Nothing moves, so shuttle stays where it stood whatever
+   * comes back. And a trailing `#argument` is read rather than refused: a
+   * place is result-rooted and cannot *stand* in an arguments cell, which is
+   * why `cd` turns the suffix down in every spelling it is written in, but
+   * reading one is a different act and the suffix is how an operand asks for
+   * it.
+   *
+   * Everything else is `cd`'s reading exactly, asked from where shuttle
+   * actually stands rather than from a standing built for the occasion. That
+   * is what makes the two agree about `..`, which walks the trail shuttle
+   * took and not the levels a position happens to name.
+   */
+  aim(operand: string): Aim {
+    const trimmed = operand.trim();
+    if (trimmed === ARGUMENT_SUFFIX) {
+      return { input: false, move: outcomeOf(refuse(SUFFIX_NAMES_NO_TARGET)) };
+    }
+    const stripped = argumentSuffixOff(trimmed);
+    return {
+      input: stripped !== undefined,
+      move: outcomeOf(
+        movePlace(this.#here, stripped ?? trimmed, this.#previous),
+      ),
+    };
+  }
+
+  /**
    * Moves into a target the fabric resolved, `operand` being the spelling that
    * named it. A target that resolved in another space is refused: one
    * connection serves one space.
@@ -316,24 +368,61 @@ export class CurrentPlace {
    * space by name.
    */
   settle(move: SpaceNamedMove, confirmed: MemorySpace): Move {
+    return this.#commit(this.#settled(move, confirmed));
+  }
+
+  /**
+   * Like {@link CurrentPlace.settle}, except that it moves nothing: what comes
+   * back is where the settled move names, and shuttle stays where it stood.
+   */
+  resolveNamedSpace(move: SpaceNamedMove, confirmed: MemorySpace): Move {
+    return outcomeOf(this.#settled(move, confirmed));
+  }
+
+  /** What `pwd` prints for this place. */
+  render(): string {
+    return renderPlace(this.#here.place);
+  }
+
+  /**
+   * Helper for the movers, which adopts a step that landed and reduces every
+   * step to the outcome a caller sees. The trail is navigation history rather
+   * than part of the place, so it stops here.
+   */
+  #commit(step: Step): Move {
+    if (step.kind === "moved") {
+      this.#previous = this.#here;
+      this.#here = step.to;
+    }
+    return outcomeOf(step);
+  }
+
+  /**
+   * Helper for {@link CurrentPlace.settle} and
+   * {@link CurrentPlace.resolveNamedSpace}, which is where `move` lands once
+   * `confirmed` is known. The comparison the reference deferred is made here
+   * rather than left to the caller, so a name that resolved to any space but
+   * the connected one is refused whichever of the two asked.
+   */
+  #settled(move: SpaceNamedMove, confirmed: MemorySpace): Step {
     const connected = this.#here.place.position.space;
     if (confirmed !== connected) {
-      return this.#commit(refuseOtherSpace(
+      return refuseOtherSpace(
         `\`${move.name}\` resolves to space \`${confirmed}\``,
         connected,
-      ));
+      );
     }
     const fault = unnameablePiece(move.piece) ??
       firstUnnameableSegment(move.path);
     if (fault !== undefined) {
-      return this.#commit(refuse(
+      return refuse(
         `The reference naming space \`${move.name}\` has ${fault.what}, ` +
           `so ${fault.so}.`,
-      ));
+      );
     }
     const outside = outsideVocabulary(move.piece);
-    if (outside !== undefined) return this.#commit(outside);
-    return this.#commit(land({
+    if (outside !== undefined) return outside;
+    return land({
       position: {
         kind: "piece",
         space: connected,
@@ -350,24 +439,7 @@ export class CurrentPlace {
         ),
       },
       scope: move.scope,
-    }, []));
-  }
-
-  /** What `pwd` prints for this place. */
-  render(): string {
-    return renderPlace(this.#here.place);
-  }
-
-  /**
-   * Helper for the movers, which adopts a step that landed and reduces every
-   * step to the outcome a caller sees. The trail is navigation history rather
-   * than part of the place, so it stops here.
-   */
-  #commit(step: Step): Move {
-    if (step.kind !== "moved") return step;
-    this.#previous = this.#here;
-    this.#here = step.to;
-    return { kind: "moved", place: step.to.place };
+    }, []);
   }
 }
 
@@ -783,6 +855,50 @@ function samePosition(one: Position, other: Position): boolean {
 }
 
 /**
+ * The suffix an operand ends in to select a piece's arguments cell, which is
+ * the selection `--input` spells as a flag.
+ */
+const ARGUMENT_SUFFIX = "#argument";
+
+/**
+ * The reason {@link ARGUMENT_SUFFIX} written with nothing in front of it is
+ * refused. It selects a piece's arguments cell, so what it wants in front of
+ * it is a target.
+ */
+const SUFFIX_NAMES_NO_TARGET =
+  `\`${ARGUMENT_SUFFIX}\` selects a piece's arguments cell, so it follows ` +
+  `the target it selects, as in \`get topics${ARGUMENT_SUFFIX}\`.`;
+
+/**
+ * Helper for {@link CurrentPlace.aim}, which is `operand` with a trailing
+ * {@link ARGUMENT_SUFFIX} taken off, and nothing where it carries none.
+ *
+ * The rule is narrower than `splitArgumentSuffix`'s
+ * (`packages/cli/lib/llm-friendly-ref.ts`), which additionally refuses every
+ * other fragment. That is right where that one runs — at `cf`'s intake, and
+ * inside the parse a rooted operand goes through here — and wrong for a
+ * relative operand, where `#` is an ordinary character of a data key. So this
+ * reads the one spelling it accepts and leaves every other `#` to whichever
+ * door decides it: a reference refuses a fragment through that same function,
+ * a walk inside a piece takes it as data, and a `#` at the head is a wish
+ * target rather than a suffix on one.
+ *
+ * What it costs is one shape, and the reference door pays the same one: a data
+ * key whose name ends in the suffix has no relative spelling, since this
+ * reading takes the suffix off before the walk splits the operand.
+ *
+ * The suffix on its own never reaches here, {@link CurrentPlace.aim} having
+ * answered it already, so what this returns for one is not a case: it names no
+ * target, and the refusal it gets says that rather than pointing at the empty
+ * operand taking the suffix off would leave.
+ */
+function argumentSuffixOff(operand: string): string | undefined {
+  return operand.endsWith(ARGUMENT_SUFFIX)
+    ? operand.slice(0, -ARGUMENT_SUFFIX.length)
+    : undefined;
+}
+
+/**
  * Helper for the movers, which refuses the `#argument` suffix on a `cd`
  * operand. A place is result-rooted, so no spelling of the suffix moves one
  * and the reason never turns on which spelling carried it.
@@ -805,7 +921,8 @@ function refuseArgumentSuffix(): Step {
 function refuseOtherSpace(clause: string, connected: MemorySpace): Step {
   return refuse(
     `${clause}, and this shuttle is connected to \`${connected}\`. One ` +
-      `connection serves one space.`,
+      `connection serves one space, so reaching that cell means a shuttle ` +
+      `started against that space.`,
   );
 }
 
@@ -985,6 +1102,15 @@ function refuse(reason: string): Step {
 /** Helper for the movers, which builds a step landing on `place`. */
 function land(place: Place, trail: Trail): Step {
   return { kind: "moved", to: { place, trail } };
+}
+
+/**
+ * Helper for the movers, which is what a caller sees of `step`. The trail is
+ * navigation history rather than part of a place, so it stops here whether or
+ * not the step was adopted.
+ */
+function outcomeOf(step: Step): Move {
+  return step.kind === "moved" ? { kind: "moved", place: step.to.place } : step;
 }
 
 /** Helper for the movers, which reads the message off a thrown value. */
