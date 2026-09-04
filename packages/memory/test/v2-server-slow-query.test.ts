@@ -15,10 +15,13 @@ import {
 
 const TEST_AUDIENCE = "did:key:z6Mk-memory-v2-slow-query-test-audience";
 
-const createServer = (store: string) =>
+const createServer = (
+  store: string,
+  subscriptionRefreshDelayMs: number | "manual" = 0,
+) =>
   new Server({
     store: new URL(store),
-    subscriptionRefreshDelayMs: 0,
+    subscriptionRefreshDelayMs,
     authorizeSessionOpen() {
       return "did:key:z6Mk-memory-v2-slow-query-principal";
     },
@@ -297,6 +300,63 @@ describe("v2 server slow queries", () => {
       expect(slowest!.path).toBe("");
       expect(slowest!.reads).toBeGreaterThan(0);
       expect(slowest!.walk.dagTraversals).toBeGreaterThan(0);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("records the upserts a slow watch.refresh delivered", async () => {
+    const space = "did:key:z6Mk-slow-query-watch-refresh";
+    // Manual refresh: the flush below is the refresh under test, not a
+    // timer racing it.
+    const server = createServer("memory://slow-query-watch-refresh", "manual");
+    const messages: ServerMessage[] = [];
+    const connection = server.connect((message) => messages.push(message));
+    try {
+      const sessionId = await openSession(connection, messages, space);
+      const seeded = await server.transact(
+        transactMessage(space, sessionId, {
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [
+            { op: "set", id: "of:refreshed", value: { value: { n: 1 } } },
+          ],
+        }),
+      );
+      expect(seeded.error).toBeUndefined();
+      await connection.receive(encodeMemoryBoundary({
+        type: "session.watch.add",
+        requestId: "watch-refresh",
+        space,
+        sessionId,
+        watches: [{
+          id: "watch-refresh-id",
+          kind: "graph",
+          query: {
+            roots: [
+              { id: "of:refreshed", selector: { path: [], schema: true } },
+            ],
+          },
+        }],
+      }));
+
+      // A refresh re-evaluates by dirty document, so it has no roots to
+      // attribute (see `rootsVisited`); the width it delivered is the one
+      // shape it can report. Same clock trick as the watch.add case.
+      performance.now = () => {
+        nowOffsetMs += 60;
+        return realNow() + nowOffsetMs;
+      };
+      await server.writeDocument(space, "of:refreshed", { n: 2 });
+      await server.flushSessions();
+
+      const entry = getSlowQueries().find((slow) =>
+        slow.space === space && slow.operation === "session.watch.refresh"
+      );
+      expect(entry).toBeDefined();
+      expect(entry!.watches).toBe(1);
+      expect(entry!.upserts).toBe(1);
+      expect(entry!.rootsVisited).toBeUndefined();
     } finally {
       connection.close();
     }
