@@ -110,10 +110,19 @@ const SLUG_INDEX_SCHEMA = {
  * throw — so without it a forced assignment could not repoint the very state
  * an operator forces to escape.
  *
- * An object with no properties describes the shape a redirect payload has and
- * names nothing to follow, so the sync it kicks is the one document it
- * writes. Measured against a schemaless write over a five-document chain: the
- * same single document pulled, and the same stored value.
+ * It costs one sync, and the cost is worth stating precisely because the
+ * obvious summary overstates the equivalence. `asSchema` resets the handle's
+ * synced flag, so the write kicks a second provider sync of the slug
+ * document: two calls where a schemaless write makes one, both for that same
+ * document.
+ *
+ * What it does not do is widen what a sync reaches. An object with no
+ * properties describes the shape a redirect payload has and names nothing to
+ * follow, so that second sync loads that document and no further one, and the
+ * stored bytes are identical either way. Measured with a five-document chain
+ * behind the name: those five are loaded by the sync `setSlugLink` performs
+ * before its transaction, which runs with or without this schema, so none of
+ * them are this schema's doing.
  */
 const SLUG_REDIRECT_SCHEMA = { type: "object" } as const satisfies JSONSchema;
 
