@@ -4,6 +4,7 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 import { Runtime } from "../src/runtime.ts";
 import { MAX_RETRIES_FOR_REACTIVE } from "../src/scheduler/constants.ts";
 import {
+  addInvalidCause,
   markInvalid,
   processStorageNotification,
   type StorageNotificationState,
@@ -85,7 +86,7 @@ describe("invalid cause dedup keys", () => {
       },
     );
 
-    expect(record.invalidCauses.length).toBe(3);
+    expect(record.invalidCauses.size).toBe(3);
   });
 });
 
@@ -180,7 +181,7 @@ describe("trigger reads follow the scheduling decision", () => {
 
       process(state, makeCommitNotification(sourceTx));
 
-      expect(state.nodes.get(action)?.invalidCauses.length).toBe(0);
+      expect(state.nodes.get(action)?.invalidCauses.size).toBe(0);
     });
 
     it(`${mode}: skip-same-change-group records no trigger read`, () => {
@@ -197,7 +198,7 @@ describe("trigger reads follow the scheduling decision", () => {
 
       process(state, makeCommitNotification(sourceTx));
 
-      expect(state.nodes.get(action)?.invalidCauses.length).toBe(0);
+      expect(state.nodes.get(action)?.invalidCauses.size).toBe(0);
     });
 
     it(`${mode}: a scheduling change records the trigger read`, () => {
@@ -209,10 +210,9 @@ describe("trigger reads follow the scheduling decision", () => {
 
       process(state, makeCommitNotification({} as IStorageTransaction));
 
-      const causes = state.nodes.get(action)?.invalidCauses;
-      expect(causes).toBeDefined();
-      expect(causes!.length).toBe(1);
-      expect(causes![0]).toMatchObject({
+      const causes = [...state.nodes.get(action)!.invalidCauses.values()];
+      expect(causes.length).toBe(1);
+      expect(causes[0]).toMatchObject({
         space,
         id: "of:cell",
         path: [],
@@ -408,16 +408,17 @@ describe("unsubscribe clears pending trigger reads", () => {
       }).nodes;
       const record = nodes.get(action);
       expect(record).toBeDefined();
-      record!.invalidCauses = [{
+      addInvalidCause(record!, {
         space,
         scope: "space",
         id: "of:stale",
         path: ["value"],
-      }];
+      });
+      expect(record!.invalidCauses.size).toBe(1);
 
       runtime.scheduler.unsubscribe(action);
 
-      expect(record!.invalidCauses.length).toBe(0);
+      expect(record!.invalidCauses.size).toBe(0);
     } finally {
       await runtime.dispose();
       await storageManager.close();

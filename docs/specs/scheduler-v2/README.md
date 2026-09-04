@@ -228,7 +228,7 @@ interface SchedulerNode {
   // Dynamic:
   reads: ReadSet;                // registered read set (drives the reader index)
   status: "never-ran" | "clean" | "invalid";
-  invalidCauses: Address[];      // CFC trigger reads (§10); cleared on run
+  invalidCauses: Map<Key, Address>; // CFC trigger reads (§10), one per address; cleared on run
   liveRefs: number;              // demand refcount (§5)
   provisionalDemand: boolean;    // (§5.3)
   gate: GateState;               // debounce/throttle/backoff (§8)
@@ -478,7 +478,7 @@ ancestor-path, or child-key-set changes.
 `markInvalid(N, cause)`:
 
 ```
-N.invalidCauses += cause                       // CFC §8.9.2 accumulation
+N.invalidCauses[key(cause)] = cause            // CFC §8.9.2 accumulation; an address already recorded stays recorded once
 if N.status == "clean": N.status = "invalid"
 ```
 

@@ -901,7 +901,7 @@ describe("scheduler v2 cutover fixtures", () => {
         get(action: Action): {
           status: string;
           declaredReads: unknown[];
-          invalidCauses: unknown[];
+          invalidCauses: Map<string, unknown>;
         } | undefined;
       };
     };
@@ -913,7 +913,7 @@ describe("scheduler v2 cutover fixtures", () => {
       const record = internal.nodes.get(writer);
       expect(record?.status).toBe("never-ran");
       expect(record?.declaredReads).toEqual([sourceAddress]);
-      expect(record?.invalidCauses).toEqual([]);
+      expect(record?.invalidCauses.size).toBe(0);
       expect(runs).toBe(0);
 
       source.withTx(tx).send(2);
@@ -921,7 +921,7 @@ describe("scheduler v2 cutover fixtures", () => {
       tx = runtime.edit();
       await runtime.scheduler.idle();
 
-      expect(internal.nodes.get(writer)?.invalidCauses).toEqual([]);
+      expect(internal.nodes.get(writer)?.invalidCauses.size).toBe(0);
       expect(runs).toBe(0);
       expect(output.get()).toBe(0);
     } finally {

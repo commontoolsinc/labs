@@ -33,7 +33,14 @@ export interface SchedulerNode {
   children?: Set<Action>;
   status: NodeStatus;
   declaredReads: IMemorySpaceAddress[];
-  invalidCauses: IMemorySpaceAddress[];
+
+  /**
+   * The addresses whose changes invalidated this node since it last ran, in
+   * arrival order, keyed by `invalidCauseKey` (scheduler/invalidation.ts) so
+   * that a cause arriving again — from a later notification, or restored by
+   * a retry — is recorded once. Taken by the run that consumes them.
+   */
+  invalidCauses: Map<string, IMemorySpaceAddress>;
   liveRefs: number;
   provisionalDemand: boolean;
   provisionalDemandPass?: number;
@@ -115,7 +122,7 @@ export class NodeRegistry {
       kind,
       status: "never-ran",
       declaredReads: [],
-      invalidCauses: [],
+      invalidCauses: new Map(),
       liveRefs: 0,
       provisionalDemand: false,
       gate: { backoffStreak: 0, convergenceHoldPasses: 0 },

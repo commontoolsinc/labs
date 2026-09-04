@@ -285,7 +285,7 @@ export function markInvalid(
 }
 
 /**
- * Dedup key for a pending invalid cause. Scope participates (an
+ * The key a pending invalid cause is recorded under. Scope participates (an
  * omitted scope normalizes to `space`, matching storage), and JSON keeps
  * path segments unambiguous: ["a","b"] never collides with ["a/b"].
  */
@@ -299,26 +299,29 @@ function invalidCauseKey(address: IMemorySpaceAddress): string {
 }
 
 /**
- * Add a pending invalid cause, deduping repeats of the same address across
- * notifications and retry restoration.
+ * Record a pending invalid cause. An address already recorded — by an
+ * earlier notification, or by a retry restoring what its run took — stays
+ * recorded once, at the position it first arrived.
  */
 export function addInvalidCause(
   record: SchedulerNode,
   address: IMemorySpaceAddress,
 ): void {
   const key = invalidCauseKey(address);
-  if (record.invalidCauses.some((cause) => invalidCauseKey(cause) === key)) {
-    return;
-  }
-  record.invalidCauses.push(address);
+  if (record.invalidCauses.has(key)) return;
+  record.invalidCauses.set(key, address);
 }
 
+/**
+ * Hand the pending invalid causes to the run that consumes them, in arrival
+ * order, leaving none recorded.
+ */
 export function takeInvalidCauses(
   record: SchedulerNode,
 ): readonly IMemorySpaceAddress[] | undefined {
-  if (record.invalidCauses.length === 0) return undefined;
-  const causes = record.invalidCauses;
-  record.invalidCauses = [];
+  if (record.invalidCauses.size === 0) return undefined;
+  const causes = [...record.invalidCauses.values()];
+  record.invalidCauses.clear();
   return causes;
 }
 
