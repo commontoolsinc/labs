@@ -251,8 +251,7 @@ difficulties getting coverage checks to pass, consider the information in
 there), and that list now names every workspace package. Most are covered in
 full; a few are partial by design. The `*.input.ts` transformer fixtures under
 `schema-generator` and `ts-transformers` name ambient wrappers the transformer
-supplies, so they do not compile on their own and are left out. `ui` is checked
-only for its `v2` components, and not the outliner among them.
+supplies, so they do not compile on their own and are left out.
 
 Patterns are the exception `deno task check` does not own. It lists some pattern
 directories and checks them through the automatic-JSX environment the rest of
