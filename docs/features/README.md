@@ -109,6 +109,9 @@ Add a line for each new document to the index below.
 
 - [`logger-internals.md`](logger-internals.md) — the TypeScript side of the
   structured logging system: creating a logger, severity, timing, and flags
+- [`cfc-denial-reporting.md`](cfc-denial-reporting.md) — how each Contextual
+  Flow Control gate says what it turned away, what may be said at warning level
+  and what reaches only debug, and how often a gate reports
 - [`llm-testing.md`](llm-testing.md) — testing patterns and server routes that
   call a language model, covering the test-environment guard, the mocks, and
   the conversation fixtures
