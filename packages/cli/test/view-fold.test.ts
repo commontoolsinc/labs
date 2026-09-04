@@ -318,20 +318,7 @@ Deno.test("fold: a summary omits markers for a hidden expansion edge", () => {
   );
   assertEquals(rendered[7].at(-1), "◢");
 
-  const internals = s as unknown as {
-    displayDiffAnnotations(expand: {
-      row: number;
-      markerLine: number;
-      line: number;
-      up: boolean;
-    }): readonly unknown[];
-    displayAdjacentDiffMetadataRows(expand: {
-      row: number;
-      markerLine: number;
-      line: number;
-      up: boolean;
-    }): readonly number[];
-  };
+  const internals = s.accessForTestingOnly;
   const hiddenEdge = {
     row: 5,
     markerLine: 5,

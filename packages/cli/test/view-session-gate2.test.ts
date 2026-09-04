@@ -10,7 +10,6 @@
 import { assertEquals } from "@std/assert";
 import { parseDocument, SAMPLE } from "./view-helpers.ts";
 import { Session } from "../lib/view/session.ts";
-import type { Key } from "../lib/view/keys.ts";
 
 function makeSession(): Session {
   return new Session(parseDocument(SAMPLE), {
@@ -20,23 +19,7 @@ function makeSession(): Session {
 }
 
 /** The private surface these tests reach into. */
-type SessionPrivates = {
-  selectNode(idx: number): void;
-  moveCardSelection(delta: number): void;
-  revealMatch(): void;
-  handleOverlayKey(key: Key): void;
-  prepareContextEdit(): void;
-  editStart(): number | null;
-  ensureCursorVisible(): void;
-  computeEditedFiles(): string[];
-  refreshPicker(): void;
-  pickerUp(): void;
-  activatePicked(): void;
-  openPickedFile(absPath: string): void;
-  adjustHunkCounts(oldDelta: number, newDelta: number): void;
-};
-
-const priv = (s: Session) => s as unknown as SessionPrivates;
+const priv = (s: Session) => s.accessForTestingOnly;
 
 Deno.test("selectNode: an out-of-range index leaves the selection untouched", () => {
   const s = makeSession();

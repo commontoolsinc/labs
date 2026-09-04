@@ -232,10 +232,6 @@ interface JumpEntry {
 }
 
 export class Session {
-  // A member below declared `private` rather than `#` is one the view tests
-  // reach and drive directly, `test/view-session-gate2.test.ts` chief among
-  // them; a `#` name would put it out of their reach.
-
   /** The parsed source document used for editing, offsets, and source cards. */
   #sourceDoc: Document;
 
@@ -362,7 +358,7 @@ export class Session {
   //
 
   #source?: EditableSource;
-  private buffer?: EditBuffer;
+  #buffer?: EditBuffer;
 
   /** Incremental highlighter for the current buffer, created lazily on the first
    * edit and discarded (re-baselined) on each deferred re-parse and file swap. */
@@ -440,7 +436,7 @@ export class Session {
     // The edit buffer mirrors the document text; for an editable file the two
     // stay in lock-step (the document is a re-parse of the buffer).
     if (source) {
-      this.buffer = new EditBuffer(
+      this.#buffer = new EditBuffer(
         doc.text,
         source.lineEndingProvenance?.(doc.text),
       );
@@ -450,6 +446,69 @@ export class Session {
       this.#viewMode = "rendered";
       this.#setSourceDocument(doc);
     }
+  }
+
+  /**
+   * The edit buffer and the steps of this session that a test drives
+   * directly: selection and navigation, overlay keys, diff editing, layout
+   * of diff metadata, and the file picker.
+   */
+  get accessForTestingOnly(): {
+    buffer: EditBuffer | undefined;
+    selectNode(idx: number): void;
+    moveCardSelection(delta: number): void;
+    jumpToTarget(target: CardTarget): void;
+    revealMatch(): void;
+    handleOverlayKey(key: Key): void;
+    prepareContextEdit(): void;
+    adjustHunkCounts(
+      oldDelta: number,
+      newDelta: number,
+      hunkHeader?: number | null,
+    ): boolean;
+    editStart(): number | null;
+    ensureCursorVisible(): void;
+    computeEditedFiles(): string[];
+    displayAdjacentDiffMetadataRows(
+      expand: ExpandOffer | null,
+    ): readonly number[];
+    displayDiffAnnotations(expand: ExpandOffer | null): DiffAnnotation[];
+    refreshPicker(): void;
+    pickerUp(): void;
+    activatePicked(): void;
+    openPickedFile(absPath: string): void;
+  } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      get buffer() {
+        return outerThis.#buffer;
+      },
+      selectNode: (idx) => this.#selectNode(idx),
+      moveCardSelection: (delta) => this.#moveCardSelection(delta),
+      jumpToTarget: (target) => this.#jumpToTarget(target),
+      revealMatch: () => this.#revealMatch(),
+      handleOverlayKey: (key) => this.#handleOverlayKey(key),
+      prepareContextEdit: () => this.#prepareContextEdit(),
+      // Forwards to the TypeScript-private member so that a test which
+      // replaces it by assignment is honored here too.
+      // TODO(danfuzz): Find a way to make `adjustHunkCounts()` a `#` method,
+      // which needs `test/view-diffedit.test.ts` to stop replacing it by
+      // assignment: a seam this class offers, or a test written against the
+      // public behavior.
+      adjustHunkCounts: (oldDelta, newDelta, hunkHeader) =>
+        this.adjustHunkCounts(oldDelta, newDelta, hunkHeader),
+      editStart: () => this.#editStart(),
+      ensureCursorVisible: () => this.#ensureCursorVisible(),
+      computeEditedFiles: () => this.#computeEditedFiles(),
+      displayAdjacentDiffMetadataRows: (expand) =>
+        this.#displayAdjacentDiffMetadataRows(expand),
+      displayDiffAnnotations: (expand) => this.#displayDiffAnnotations(expand),
+      refreshPicker: () => this.#refreshPicker(),
+      pickerUp: () => this.#pickerUp(),
+      activatePicked: () => this.#activatePicked(),
+      openPickedFile: (absPath) => this.#openPickedFile(absPath),
+    };
   }
 
   get doc(): Document {
@@ -894,8 +953,8 @@ export class Session {
    * under the viewport (or the cursor, when editing), else the single file the
    * view is of, else null (a bare pipe). */
   #currentFile(): string | null {
-    const line = this.#cursorOn && this.buffer
-      ? this.buffer.row
+    const line = this.#cursorOn && this.#buffer
+      ? this.#buffer.row
       : this.#toDoc(this.top);
     // The innermost file/section node whose range holds the line (diff file
     // nodes and `// transformed:` blocks are both `section` kind).
@@ -978,7 +1037,7 @@ export class Session {
     const offeredExpand = expand && !("blocked" in expand) ? expand : null;
     const diffMargin = this.#hasDiffMargin();
     let diffAnnotations = diffMargin
-      ? this.displayDiffAnnotations(offeredExpand)
+      ? this.#displayDiffAnnotations(offeredExpand)
       : [];
     diffAnnotations = this.#syncWrapDecorations(diffAnnotations);
     if (!this.#wrapLines) {
@@ -1036,8 +1095,8 @@ export class Session {
         : null,
       dialog: this.#promptDialog(),
       overlay: ov,
-      cursor: this.#cursorOn && this.buffer
-        ? { line: this.#toFolded(this.buffer.row), col: this.buffer.col }
+      cursor: this.#cursorOn && this.#buffer
+        ? { line: this.#toFolded(this.#buffer.row), col: this.#buffer.col }
         : null,
       editHint: this.#cursorOn ? this.#editHint() : null,
       canExpand: offeredExpand !== null,
@@ -1047,7 +1106,7 @@ export class Session {
       expandRow,
       expandUp: offeredExpand?.up ?? null,
       diffMetadataRows: diffMargin
-        ? this.displayAdjacentDiffMetadataRows(offeredExpand)
+        ? this.#displayAdjacentDiffMetadataRows(offeredExpand)
         : [],
       canEdit: !this.#cursorOn && !!this.#source?.editable,
       canRender: !!this.#source?.render &&
@@ -1103,8 +1162,11 @@ export class Session {
   #saveDialog(): DialogState {
     const files = this.#editedFiles;
     const n = files.length;
-    const amend = this.#source && this.buffer
-      ? this.#source.pendingAmend?.(this.buffer.baseline(), this.buffer.text())
+    const amend = this.#source && this.#buffer
+      ? this.#source.pendingAmend?.(
+        this.#buffer.baseline(),
+        this.#buffer.text(),
+      )
       : null;
     const what = n === 0
       ? (amend ? "the commit message" : "your edits")
@@ -1131,8 +1193,11 @@ export class Session {
 
   /** The amend-commit confirmation, naming the commit and its subject. */
   #amendDialog(): DialogState {
-    const amend = this.#source && this.buffer
-      ? this.#source.pendingAmend?.(this.buffer.baseline(), this.buffer.text())
+    const amend = this.#source && this.#buffer
+      ? this.#source.pendingAmend?.(
+        this.#buffer.baseline(),
+        this.#buffer.text(),
+      )
       : null;
     const sha = amend?.sha.slice(0, 9) ?? "";
     const full = amend?.subject ?? "";
@@ -1209,7 +1274,7 @@ export class Session {
       return;
     }
     if (this.#overlay) {
-      this.handleOverlayKey(key);
+      this.#handleOverlayKey(key);
       return;
     }
     this.#handleNormalKey(key);
@@ -1341,7 +1406,7 @@ export class Session {
     );
   }
 
-  private selectNode(idx: number): void {
+  #selectNode(idx: number): void {
     if (idx < 0 || idx >= this.doc.flatStructure.length) return;
     const viewport = this.#wrapLines ? this.#viewportAnchor() : null;
     this.#selectedIndex = idx;
@@ -1477,7 +1542,7 @@ export class Session {
   }
 
   /** Move the card's reference selection and keep it visible. */
-  private moveCardSelection(delta: number): void {
+  #moveCardSelection(delta: number): void {
     const o = this.#overlay;
     if (!o || o.mode !== "info" || o.targets.length === 0) return;
     if (delta > 0) {
@@ -1545,7 +1610,7 @@ export class Session {
 
   /** Jump the main view to a card target, selecting the relevant node. This
    * leaves the overlay for the main view, so the whole navigation stack goes. */
-  private jumpToTarget(target: CardTarget): void {
+  #jumpToTarget(target: CardTarget): void {
     this.#overlay = null;
     this.#overlayScroll = 0;
     this.#overlayStack = [];
@@ -1617,15 +1682,15 @@ export class Session {
     const anchor = this.#toDoc(this.top) - 1;
     const idx = nextMatchIndex(this.#matches, anchor, -1, jumpForward);
     this.#currentMatch = idx < 0 ? 0 : idx;
-    this.revealMatch();
+    this.#revealMatch();
   }
 
   /** Begin a search from edit mode (Ctrl-S): anchor it at the cursor so the
    * focused match is the next one at or after the cursor, and seed the input
    * with the last query so a bare Ctrl-S then Enter repeats it. */
   #enterEditSearch(): void {
-    this.#searchAnchor = this.buffer
-      ? { row: this.buffer.row, col: this.buffer.col }
+    this.#searchAnchor = this.#buffer
+      ? { row: this.#buffer.row, col: this.#buffer.col }
       : null;
     this.#mode = "search";
     this.#input = this.#query;
@@ -1649,7 +1714,7 @@ export class Session {
         nextMatchIndex(this.#matches, a.row, a.col - 1, true),
       )
       : 0;
-    this.revealMatch();
+    this.#revealMatch();
   }
 
   /** The first editable match at or after index `from` (wrapping), for an
@@ -1668,16 +1733,16 @@ export class Session {
   #isEditableLine(line: number): boolean {
     const pol = this.#source?.policy;
     if (!pol) return true;
-    const lines = this.buffer?.lines ?? this.doc.lines.map((l) => l.text);
+    const lines = this.#buffer?.lines ?? this.doc.lines.map((l) => l.text);
     return pol.editStart(lines, line) !== null;
   }
 
   /** Land the edit cursor on the focused match (edit-mode search commit). */
   #placeCursorAtMatch(): void {
     const m = this.#matches[this.#currentMatch];
-    if (!m || !this.#cursorOn || !this.buffer) return;
-    this.buffer.place(m.line, m.start);
-    this.ensureCursorVisible();
+    if (!m || !this.#cursorOn || !this.#buffer) return;
+    this.#buffer.place(m.line, m.start);
+    this.#ensureCursorVisible();
   }
 
   #stepMatch(forward: boolean): void {
@@ -1709,10 +1774,10 @@ export class Session {
     // An edit-mode search (Ctrl-S) steps only between editable matches.
     if (this.#searchAnchor) idx = this.#firstEditableMatch(idx);
     this.#currentMatch = idx;
-    this.revealMatch();
+    this.#revealMatch();
   }
 
-  private revealMatch(): void {
+  #revealMatch(): void {
     const m = this.#matches[this.#currentMatch];
     if (!m) return;
     const col = this.#displayCol(m.line, m.start);
@@ -1770,7 +1835,7 @@ export class Session {
       if (this.#query.length === 0) this.#matches = [];
       // An edit-mode search scrolled to matches while the cursor stayed put;
       // bring the viewport back so the text cursor is on screen.
-      if (this.#cursorOn) this.ensureCursorVisible();
+      if (this.#cursorOn) this.#ensureCursorVisible();
       return;
     }
     // Ctrl-S inside a search steps to the next match (Emacs-style repeat).
@@ -1810,7 +1875,7 @@ export class Session {
     }
   }
 
-  private handleOverlayKey(key: Key): void {
+  #handleOverlayKey(key: Key): void {
     const overlay = this.#overlay;
     if (!overlay) return;
     const maxScroll = this.#overlayMaxScroll(overlay);
@@ -1872,7 +1937,7 @@ export class Session {
           this.#pushOverlay();
           this.#openExternalFile(reveal);
         } else if (reveal) {
-          this.jumpToTarget(reveal); // exits the card viewer entirely
+          this.#jumpToTarget(reveal); // exits the card viewer entirely
         }
         break;
       }
@@ -1886,13 +1951,13 @@ export class Session {
       case "down":
       case "j":
       case "J":
-        if (hasTargets) this.moveCardSelection(1);
+        if (hasTargets) this.#moveCardSelection(1);
         else this.#overlayScroll = clamp(this.#overlayScroll + 1, 0, maxScroll);
         break;
       case "up":
       case "k":
       case "K":
-        if (hasTargets) this.moveCardSelection(-1);
+        if (hasTargets) this.#moveCardSelection(-1);
         else this.#overlayScroll = clamp(this.#overlayScroll - 1, 0, maxScroll);
         break;
       case "pagedown":
@@ -2318,7 +2383,7 @@ export class Session {
 
   /** Show the text cursor at the top of the viewport, if the view is editable. */
   #revealCursor(): void {
-    if (!this.#source?.editable || !this.buffer) {
+    if (!this.#source?.editable || !this.#buffer) {
       this.#message = this.#source?.reason ??
         "This view has no underlying file to edit.";
       return;
@@ -2344,9 +2409,9 @@ export class Session {
     // display row becomes its document line.
     this.#clearFolds();
     this.top = topDoc;
-    this.buffer.place(topDoc, cursorCol);
+    this.#buffer.place(topDoc, cursorCol);
     this.#seedHighlighter();
-    this.ensureCursorVisible();
+    this.#ensureCursorVisible();
     if (leftRenderedView && wasWrapped) {
       this.#message = "Source view; line wrapping turned off for editing.";
     } else if (leftRenderedView) {
@@ -2374,14 +2439,14 @@ export class Session {
    * can reuse the workspace-colored lines for everything an edit doesn't touch. */
   #seedHighlighter(): void {
     this.#highlighter = this.#source?.createHighlighter?.(
-      this.buffer!.text(),
+      this.#buffer!.text(),
       this.#currentDoc.lines,
-      this.buffer!.lineEndingProvenance(),
+      this.#buffer!.lineEndingProvenance(),
     );
   }
 
   #handleEditKey(key: Key): void {
-    const b = this.buffer!;
+    const b = this.#buffer!;
     if (key.alt) {
       switch (key.name) {
         case "f":
@@ -2484,7 +2549,7 @@ export class Session {
       case "escape":
         this.#cursorOn = false;
         this.reparse(); // refresh structure before returning to navigation
-        this.ensureCursorVisible();
+        this.#ensureCursorVisible();
         return;
       case "ctrl-s":
         this.#enterEditSearch();
@@ -2526,7 +2591,7 @@ export class Session {
         if (prefix !== undefined) {
           if (this.#allowEdit(false, false)) {
             const hunkHeader = this.#hunkHeaderAt(b.row);
-            const start = this.editStart() ?? 1;
+            const start = this.#editStart() ?? 1;
             const line = b.lines[b.row] ?? "";
             const onContext = line[0] === " ";
             const logicalEnd = this.#logicalLineEnd();
@@ -2568,7 +2633,7 @@ export class Session {
               }
               this.#splitRow = null;
             } else if (onContext && b.col < logicalEnd) {
-              this.prepareContextEdit();
+              this.#prepareContextEdit();
               this.#splitDiffLine(prefix);
             } else if (onContext) {
               b.spliceLines(
@@ -2650,12 +2715,12 @@ export class Session {
    * the hunk header stays valid. A no-op on an added or removed line, or a file
    * (no diff policy).
    */
-  private prepareContextEdit(): void {
-    if (!this.#source?.policy || !this.buffer) return;
+  #prepareContextEdit(): void {
+    if (!this.#source?.policy || !this.#buffer) return;
     // A commit-message line is plain indented text, not a diff line: editing it
     // must not split it into a removed/added pair.
     if (this.#inMessageRow()) return;
-    const b = this.buffer;
+    const b = this.#buffer;
     const line = b.lines[b.row];
     if (line === undefined || line[0] !== " ") return;
     const content = line.slice(1);
@@ -2670,7 +2735,7 @@ export class Session {
 
   /** Split an added diff line while retaining its newline transport. */
   #splitDiffLine(prefix: string): void {
-    const b = this.buffer!;
+    const b = this.#buffer!;
     const chars = [...b.lines[b.row]];
     const logicalEnd = this.#logicalLineEnd();
     const transport = logicalEnd < chars.length ? "\r" : "";
@@ -2690,7 +2755,7 @@ export class Session {
    * saved back to disk. */
   #canResurrectRemovedLine(): boolean {
     const pol = this.#source?.policy;
-    const b = this.buffer;
+    const b = this.#buffer;
     return !!pol && !!b && b.lines[b.row]?.[0] === "-" &&
       pol.regionKind(b.lines, b.row) === "removed";
   }
@@ -2699,7 +2764,7 @@ export class Session {
    * new encoding markers differ remain a removed/added pair. */
   #resurrectRemovedLine(): boolean {
     if (!this.#canResurrectRemovedLine()) return false;
-    const b = this.buffer!;
+    const b = this.#buffer!;
     const targetRow = b.row;
     const parsed = this.#parsedHunkAt(b.row);
     const hunkHeader = parsed?.hunk.headerLine ?? null;
@@ -2762,8 +2827,8 @@ export class Session {
    * (`splitRow`), so editing an author-written `-`/`+` pair to match does not
    * silently drop their removed line. Count-neutral, the inverse of the split. */
   #collapseUnchangedPair(): void {
-    if (!this.#source?.policy || !this.buffer) return;
-    const b = this.buffer;
+    if (!this.#source?.policy || !this.#buffer) return;
+    const b = this.#buffer;
     if (b.row !== this.#splitRow) return;
     const cur = b.lines[b.row];
     const above = b.lines[b.row - 1];
@@ -2786,10 +2851,10 @@ export class Session {
   #parsedHunkAt(
     row: number,
   ): { model: DiffModel; hunk: DiffHunk } | null {
-    if (!this.buffer) return null;
+    if (!this.#buffer) return null;
     const policyLookup = this.#source?.policy?.hunkAt;
-    if (policyLookup) return policyLookup(this.buffer.lines, row);
-    const model = parseDiff(this.buffer.text());
+    if (policyLookup) return policyLookup(this.#buffer.lines, row);
+    const model = parseDiff(this.#buffer.text());
     if (!model) return null;
     for (const file of model.files) {
       for (const hunk of file.hunks) {
@@ -2808,7 +2873,7 @@ export class Session {
       if (
         (kind === "ctx" || kind === "add") &&
         model.lines[row]?.newLine === 0 &&
-        this.buffer?.lines[row]?.[1] === "\uFEFF"
+        this.#buffer?.lines[row]?.[1] === "\uFEFF"
       ) {
         return row;
       }
@@ -2832,19 +2897,24 @@ export class Session {
 
   /** Grow or shrink a parsed hunk header after its body changes. A zero-count
    * unified-diff range names the line before its insertion point, so crossing
-   * zero also moves the range start. */
+   * zero also moves the range start.
+   *
+   * TypeScript-private rather than a `#` name, because
+   * `test/view-diffedit.test.ts` replaces this member by assignment, which a
+   * `#` method does not allow.
+   */
   private adjustHunkCounts(
     oldDelta: number,
     newDelta: number,
-    hunkHeader = this.#hunkHeaderAt(this.buffer?.row ?? -1),
+    hunkHeader = this.#hunkHeaderAt(this.#buffer?.row ?? -1),
   ): boolean {
     if (
-      !this.#source?.policy || !this.buffer ||
+      !this.#source?.policy || !this.#buffer ||
       (oldDelta === 0 && newDelta === 0)
     ) {
       return false;
     }
-    const b = this.buffer;
+    const b = this.#buffer;
     if (hunkHeader === null) return false;
     const m = b.lines[hunkHeader]?.match(
       /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@([^\r]*)(\r?)$/,
@@ -2873,15 +2943,15 @@ export class Session {
 
   /** The first editable column on the cursor's line under the source's policy
    * (a diff), or null when the line cannot be edited. No policy → column 0. */
-  private editStart(): number | null {
+  #editStart(): number | null {
     const pol = this.#source?.policy;
     if (!pol) return 0;
-    return pol.editStart(this.buffer!.lines, this.buffer!.row);
+    return pol.editStart(this.#buffer!.lines, this.#buffer!.row);
   }
 
   /** The current line's last editable column, before source-owned transport. */
-  #logicalLineEnd(row = this.buffer!.row): number {
-    const b = this.buffer!;
+  #logicalLineEnd(row = this.#buffer!.row): number {
+    const b = this.#buffer!;
     const line = b.lines[row] ?? "";
     const physicalEnd = [...line].length;
     const ordinaryEnd = line.endsWith("\r") && row < b.lines.length - 1
@@ -2893,7 +2963,7 @@ export class Session {
 
   /** The character before LF in the nearest newline of an ordinary file. */
   #plainNewlineSuffix(): string {
-    const b = this.buffer!;
+    const b = this.#buffer!;
     if (b.row < b.lines.length - 1) {
       const line = b.lines[b.row] ?? "";
       return line.endsWith("\r") ? "\r" : "";
@@ -2907,7 +2977,7 @@ export class Session {
 
   /** Keep a right-arrow motion able to cross a protected CRLF boundary. */
   #moveRightAcrossTransport(): void {
-    const b = this.buffer!;
+    const b = this.#buffer!;
     const logicalEnd = this.#logicalLineEnd();
     if (
       b.col >= logicalEnd && logicalEnd < b.currentLineLength() &&
@@ -2921,7 +2991,7 @@ export class Session {
 
   /** Keep source-owned transport outside the text cursor. */
   #clampToLogicalLine(): void {
-    const b = this.buffer;
+    const b = this.#buffer;
     if (!b) return;
     const end = this.#logicalLineEnd();
     if (b.col > end) b.place(b.row, end);
@@ -2931,8 +3001,8 @@ export class Session {
    * text, edited without the diff's removed/added pairing. */
   #inMessageRow(): boolean {
     const pol = this.#source?.policy;
-    return !!pol && !!this.buffer &&
-      pol.regionKind(this.buffer.lines, this.buffer.row) === "message";
+    return !!pol && !!this.#buffer &&
+      pol.regionKind(this.#buffer.lines, this.#buffer.row) === "message";
   }
 
   /**
@@ -2947,15 +3017,15 @@ export class Session {
       this.#message = MULTILINE_MSG;
       return false;
     }
-    const b = this.buffer!;
-    const start = this.editStart();
+    const b = this.#buffer!;
+    const start = this.#editStart();
     if (start === null) {
       this.#message = this.#notEditableMessage();
       return false;
     }
     this.#clampToLogicalLine();
     if (b.col < start) b.place(b.row, start);
-    if (split) this.prepareContextEdit();
+    if (split) this.#prepareContextEdit();
     return true;
   }
 
@@ -2964,8 +3034,8 @@ export class Session {
    * is Backspace at its start instead. */
   #guardForwardEdit(): boolean {
     if (!this.#source?.policy) return true;
-    const b = this.buffer!;
-    const start = this.editStart();
+    const b = this.#buffer!;
+    const start = this.#editStart();
     if (start === null) {
       this.#message = this.#notEditableMessage();
       return false;
@@ -2976,15 +3046,15 @@ export class Session {
       this.#message = JOIN_MSG;
       return false;
     }
-    this.prepareContextEdit();
+    this.#prepareContextEdit();
     return true;
   }
 
   /** Gate a forward word kill that would consume a diff line boundary. */
   #guardForwardWordEdit(): boolean {
     if (!this.#source?.policy) return true;
-    const b = this.buffer!;
-    const start = this.editStart();
+    const b = this.#buffer!;
+    const start = this.#editStart();
     if (start === null) {
       this.#message = this.#notEditableMessage();
       return false;
@@ -2994,7 +3064,7 @@ export class Session {
       this.#message = JOIN_MSG;
       return false;
     }
-    this.prepareContextEdit();
+    this.#prepareContextEdit();
     return true;
   }
 
@@ -3002,21 +3072,21 @@ export class Session {
    * remove the whole line when its content is empty (an added line taken back),
    * else protect the marker. A plain file just deletes backward. */
   #handleBackspace(): void {
-    const b = this.buffer!;
+    const b = this.#buffer!;
     if (!this.#source?.policy) {
       b.deleteBackward(
         b.row > 0 ? this.#logicalLineEnd(b.row - 1) : undefined,
       );
       return this.#afterEdit();
     }
-    const start = this.editStart();
+    const start = this.#editStart();
     if (start === null) {
       this.#message = this.#notEditableMessage();
       return;
     }
     this.#clampToLogicalLine();
     if (b.col > start) {
-      this.prepareContextEdit();
+      this.#prepareContextEdit();
       b.deleteBackward();
       return this.#afterEdit();
     }
@@ -3030,7 +3100,7 @@ export class Session {
   /** Remove an empty added line. An empty context line becomes a removal so its
    * original old-side coordinate and content provenance remain represented. */
   #removeDiffLine(markerLen: number): void {
-    const b = this.buffer!;
+    const b = this.#buffer!;
     const marker = b.lines[b.row][0] ?? "";
     const context = marker === " " &&
       this.#source?.policy?.regionKind(b.lines, b.row) === "hunk";
@@ -3064,8 +3134,8 @@ export class Session {
     markerLen: number,
     parsed: { model: DiffModel; hunk: DiffHunk } | null,
   ): void {
-    if (!this.buffer || markerLen <= 1 || parsed === null) return;
-    const b = this.buffer;
+    if (!this.#buffer || markerLen <= 1 || parsed === null) return;
+    const b = this.#buffer;
     const prefix = [...b.lines[b.row]].slice(1, markerLen).join("");
     if (prefix.length === 0) return;
     const { model, hunk } = parsed;
@@ -3088,8 +3158,8 @@ export class Session {
   /** Gate a backward word kill (M-Backspace): refuse reaching the marker. */
   #guardBackwardEdit(): boolean {
     if (!this.#source?.policy) return true;
-    const b = this.buffer!;
-    const start = this.editStart();
+    const b = this.#buffer!;
+    const start = this.#editStart();
     if (start === null) {
       this.#message = this.#notEditableMessage();
       return false;
@@ -3104,7 +3174,7 @@ export class Session {
       this.#message = MARKER_MSG;
       return false;
     }
-    this.prepareContextEdit();
+    this.#prepareContextEdit();
     return true;
   }
 
@@ -3112,7 +3182,7 @@ export class Session {
    * into the diff marker. */
   #guardRegionEdit(): boolean {
     if (!this.#source?.policy) return true;
-    const b = this.buffer!;
+    const b = this.#buffer!;
     const mark = b.mark;
     if (!mark) {
       this.#message = "Set the mark first (Ctrl-Space).";
@@ -3122,7 +3192,7 @@ export class Session {
       this.#message = MULTILINE_MSG;
       return false;
     }
-    const start = this.editStart();
+    const start = this.#editStart();
     if (start === null) {
       this.#message = this.#notEditableMessage();
       return false;
@@ -3135,7 +3205,7 @@ export class Session {
       this.#message = JOIN_MSG;
       return false;
     }
-    this.prepareContextEdit();
+    this.#prepareContextEdit();
     return true;
   }
 
@@ -3143,7 +3213,7 @@ export class Session {
     if (this.#canResurrectRemovedLine()) {
       return "This removed line isn't editable; press R to resurrect it.";
     }
-    const b = this.buffer;
+    const b = this.#buffer;
     const policy = this.#source?.policy;
     return (b ? policy?.notEditableMessage?.(b.lines, b.row) : null) ??
       NOT_EDITABLE_MSG;
@@ -3151,15 +3221,15 @@ export class Session {
 
   #afterMove(): void {
     this.#clampToLogicalLine();
-    this.ensureCursorVisible();
+    this.#ensureCursorVisible();
   }
 
   #afterEdit(): void {
     this.#selectedIndex = null;
     this.#collapseUnchangedPair();
     this.#clampToLogicalLine();
-    if (this.#source && this.buffer) {
-      const text = this.buffer.text();
+    if (this.#source && this.#buffer) {
+      const text = this.#buffer.text();
       const lines = this.#liveHighlight(text);
       if (lines) {
         // Re-highlight on every keystroke — correct for multi-line tokens, and a
@@ -3171,13 +3241,13 @@ export class Session {
         this.needsReparse = true;
       } else {
         this.#setSourceDocument(
-          this.#source.parse(text, this.buffer.lineEndingProvenance()),
+          this.#source.parse(text, this.#buffer.lineEndingProvenance()),
         );
         this.needsReparse = false;
       }
     }
     this.#clampScroll();
-    this.ensureCursorVisible();
+    this.#ensureCursorVisible();
   }
 
   /** Take away a message that was set to go away on its own, once the driver has
@@ -3197,7 +3267,7 @@ export class Session {
     if (this.#highlighter) {
       return this.#highlighter.update(
         text,
-        this.buffer?.lineEndingProvenance(),
+        this.#buffer?.lineEndingProvenance(),
       );
     }
     return this.#source?.highlight?.(text) ?? null;
@@ -3208,11 +3278,11 @@ export class Session {
    * current but not the structure). The incremental highlighter is discarded so
    * the next edit re-seeds it from this authoritative parse. */
   reparse(): void {
-    if (!this.#source || !this.buffer || !this.needsReparse) return;
+    if (!this.#source || !this.#buffer || !this.needsReparse) return;
     this.#setSourceDocument(
       this.#source.parse(
-        this.buffer.text(),
-        this.buffer.lineEndingProvenance(),
+        this.#buffer.text(),
+        this.#buffer.lineEndingProvenance(),
       ),
     );
     this.needsReparse = false;
@@ -3221,11 +3291,11 @@ export class Session {
     if (this.#cursorOn) this.#seedHighlighter();
     else this.#highlighter = undefined;
     this.#clampScroll();
-    this.ensureCursorVisible();
+    this.#ensureCursorVisible();
   }
 
   #cursorPage(dir: number): void {
-    const b = this.buffer!;
+    const b = this.#buffer!;
     const step = Math.max(1, this.#contentRows() - 1);
     b.place(b.row + dir * step, b.col);
     this.top = clamp(
@@ -3233,12 +3303,12 @@ export class Session {
       0,
       maxTop(this.doc.lines.length, this.height),
     );
-    this.ensureCursorVisible();
+    this.#ensureCursorVisible();
   }
 
-  private ensureCursorVisible(): void {
-    if (!this.buffer) return;
-    const b = this.buffer;
+  #ensureCursorVisible(): void {
+    if (!this.#buffer) return;
+    const b = this.#buffer;
     const rows = this.#contentRows();
     if (b.row < this.top) this.top = b.row;
     else if (b.row >= this.top + rows) this.top = b.row - rows + 1;
@@ -3270,7 +3340,7 @@ export class Session {
     }
     const expand = this.#expandOffer();
     return expand && !("blocked" in expand)
-      ? this.displayDiffAnnotations(expand)
+      ? this.#displayDiffAnnotations(expand)
       : [];
   }
 
@@ -3448,7 +3518,7 @@ export class Session {
   }
 
   #requestSave(target?: "amend" | "workspace"): boolean {
-    if (!this.#source || !this.buffer) {
+    if (!this.#source || !this.#buffer) {
       this.#message = "Nothing to save.";
       return false;
     }
@@ -3456,9 +3526,9 @@ export class Session {
       this.#message = this.#source.reason ?? "This view is read-only.";
       return false;
     }
-    const baseline = this.buffer.baseline();
-    const current = this.buffer.text();
-    if (!this.buffer.dirty()) {
+    const baseline = this.#buffer.baseline();
+    const current = this.#buffer.text();
+    if (!this.#buffer.dirty()) {
       this.#message = "Saved 0 files";
       return true;
     }
@@ -3480,7 +3550,7 @@ export class Session {
     try {
       this.#message = this.#source.save(
         current,
-        this.buffer.lineEndingProvenance(),
+        this.#buffer.lineEndingProvenance(),
         baseline,
         options,
       );
@@ -3489,17 +3559,17 @@ export class Session {
         current,
         options,
       ) ?? current;
-      this.buffer.setBaseline(savedBaseline);
+      this.#buffer.setBaseline(savedBaseline);
       const refreshedLineEndings = this.#source.lineEndingProvenance?.(current);
       if (refreshedLineEndings) {
-        const retainedLineEndings = this.buffer.lineEndingProvenance();
-        this.buffer.setLineEndingProvenance(
-          this.buffer.lines.map((_, index) =>
+        const retainedLineEndings = this.#buffer.lineEndingProvenance();
+        this.#buffer.setLineEndingProvenance(
+          this.#buffer.lines.map((_, index) =>
             refreshedLineEndings[index] ?? retainedLineEndings[index]
           ),
         );
       }
-      if (target === "workspace" && this.buffer.dirty()) {
+      if (target === "workspace" && this.#buffer.dirty()) {
         this.#message += "; commit message remains unsaved";
       }
       return true;
@@ -3517,7 +3587,7 @@ export class Session {
       this.#mode = "normal";
       this.#editedFiles = [];
       if (
-        ok && this.#savePromptThen === "quit" && !this.buffer?.dirty()
+        ok && this.#savePromptThen === "quit" && !this.#buffer?.dirty()
       ) {
         this.quit = true;
       }
@@ -3531,7 +3601,7 @@ export class Session {
   }
 
   #requestQuit(): void {
-    if (this.buffer?.dirty()) {
+    if (this.#buffer?.dirty()) {
       // A quit signal can arrive with a peek overlay still open; the modal save
       // prompt replaces it rather than drawing over it.
       this.#overlay = null;
@@ -3539,7 +3609,7 @@ export class Session {
       this.#overlayStack = [];
       this.#mode = "savePrompt";
       this.#savePromptThen = "quit";
-      this.#editedFiles = this.computeEditedFiles();
+      this.#editedFiles = this.#computeEditedFiles();
       this.#focusDefaultButton();
       this.#message = "";
     } else {
@@ -3551,11 +3621,11 @@ export class Session {
    * every file a diff spans. A diff source reports this exactly (an empty list
    * when only the commit message changed); a plain file falls back to its one
    * label. */
-  private computeEditedFiles(): string[] {
-    if (!this.#source || !this.buffer) return [];
+  #computeEditedFiles(): string[] {
+    if (!this.#source || !this.#buffer) return [];
     const labels = this.#source.dirtyLabels?.(
-      this.buffer.baseline(),
-      this.buffer.text(),
+      this.#buffer.baseline(),
+      this.#buffer.text(),
     );
     if (labels !== undefined) return labels;
     return this.#source.label ? [this.#source.label] : [];
@@ -3569,7 +3639,7 @@ export class Session {
    */
   requestQuitFromSignal(): boolean {
     if (this.#mode === "savePrompt") return false;
-    const willPrompt = this.buffer?.dirty() ?? false;
+    const willPrompt = this.#buffer?.dirty() ?? false;
     this.#requestQuit();
     return willPrompt;
   }
@@ -3669,7 +3739,7 @@ export class Session {
    * scopes that apply where the cursor is — the hunk and/or file it is in, or
    * the commit message it is in — plus all; a plain file reverts wholesale. */
   #openRevertPrompt(): void {
-    if (!this.buffer?.dirty()) {
+    if (!this.#buffer?.dirty()) {
       this.#message = "Nothing to revert.";
       return;
     }
@@ -3686,11 +3756,11 @@ export class Session {
     file: boolean;
     message: boolean;
   } {
-    const row = this.buffer!.row;
+    const row = this.#buffer!.row;
     const message = this.#inMessageRow();
     let file = false;
     let chunk = false;
-    const model = parseDiff(this.buffer!.text());
+    const model = parseDiff(this.#buffer!.text());
     const f = model?.files.find((f) => row >= f.headerLine && row <= f.endLine);
     if (f) {
       file = true;
@@ -3730,22 +3800,22 @@ export class Session {
   /** Restore the chosen scope to its original form, keeping the dirty baseline
    * so any remaining edits still count. */
   #performRevert(scope: RevertScope): void {
-    if (!this.#source?.revert || !this.buffer) {
+    if (!this.#source?.revert || !this.#buffer) {
       this.#message = "Revert isn't available here.";
       return;
     }
     const result = this.#source.revert(
-      this.buffer.baseline(),
-      this.buffer.text(),
-      this.buffer.row,
+      this.#buffer.baseline(),
+      this.#buffer.text(),
+      this.#buffer.row,
       scope,
-      this.buffer.lineEndingProvenance(),
+      this.#buffer.lineEndingProvenance(),
     );
     if (!result) {
       this.#message = "Nothing to revert there.";
       return;
     }
-    this.buffer.setText(
+    this.#buffer.setText(
       result.text,
       result.cursorLine,
       0,
@@ -3754,12 +3824,12 @@ export class Session {
     this.#splitRow = null;
     this.#snapCursorToEditable();
     this.#setSourceDocument(
-      this.#source.parse(result.text, this.buffer.lineEndingProvenance()),
+      this.#source.parse(result.text, this.#buffer.lineEndingProvenance()),
     );
     this.needsReparse = false;
     if (this.#cursorOn) this.#seedHighlighter();
     this.#clampScroll();
-    this.ensureCursorVisible();
+    this.#ensureCursorVisible();
     this.#message = `Reverted ${
       scope === "all" ? "all edits" : "the " + scope
     }.`;
@@ -3768,7 +3838,7 @@ export class Session {
   /** Move the cursor down to the first editable line at or after it, so it does
    * not sit on a non-editable header after a revert restores a hunk or file. */
   #snapCursorToEditable(): void {
-    const b = this.buffer;
+    const b = this.#buffer;
     const pol = this.#source?.policy;
     if (!b || !pol) return;
     while (
@@ -3785,14 +3855,14 @@ export class Session {
    * lines open a gap in front of the user. The extra context is applied to the
    * baseline too, so it does not count as an unsaved edit. */
   #performExpand(): void {
-    if (!this.#source?.expandContext || !this.buffer) {
+    if (!this.#source?.expandContext || !this.#buffer) {
       this.#message = "Expanding context isn't available here.";
       return;
     }
     let refLine: number;
     let up: boolean | undefined;
     if (this.#cursorOn) {
-      refLine = this.buffer.row; // the cursor names a point, not an edge
+      refLine = this.#buffer.row; // the cursor names a point, not an edge
     } else {
       const offer = this.#expandOffer();
       // Ctrl-L is not offered in any of these, so it changes nothing and there
@@ -3815,12 +3885,12 @@ export class Session {
       refLine = offer.line;
       up = offer.up;
       if (this.#wrapLines) {
-        this.#syncWrapDecorations(this.displayDiffAnnotations(offer));
+        this.#syncWrapDecorations(this.#displayDiffAnnotations(offer));
       }
     }
     const r = this.#source.expandContext(
-      this.buffer.text(),
-      this.buffer.baseline(),
+      this.#buffer.text(),
+      this.#buffer.baseline(),
       refLine,
       up,
     );
@@ -3846,11 +3916,11 @@ export class Session {
     }
     for (
       let row = 0;
-      row < this.buffer.lineEndingProvenance().length;
+      row < this.#buffer.lineEndingProvenance().length;
       row++
     ) {
       if (row === r.removedAt) continue;
-      const ending = this.buffer.lineEndingProvenance()[row];
+      const ending = this.#buffer.lineEndingProvenance()[row];
       if (ending !== undefined) lineEndings[moved(row)] = ending;
     }
     // The line held still on screen: the one just outside the edge the revealed
@@ -3863,9 +3933,9 @@ export class Session {
       ? (r.up ? r.removedAt - 1 : r.removedAt + 1)
       : (r.up ? r.insertedAt - 1 : r.insertedAt);
     const pinRow = this.#toDisplay(pinDoc) - this.top;
-    const col = this.#cursorOn ? this.buffer.col : 0;
-    this.buffer.setBaseline(r.baseline);
-    this.buffer.setText(
+    const col = this.#cursorOn ? this.#buffer.col : 0;
+    this.#buffer.setBaseline(r.baseline);
+    this.#buffer.setText(
       r.text,
       r.cursorLine,
       col,
@@ -3873,7 +3943,7 @@ export class Session {
     );
     this.#splitRow = null;
     this.#setSourceDocument(
-      this.#source.parse(r.text, this.buffer.lineEndingProvenance()),
+      this.#source.parse(r.text, this.#buffer.lineEndingProvenance()),
     );
     this.needsReparse = false;
     this.#wrapDecorations = new Map();
@@ -3883,7 +3953,7 @@ export class Session {
     if (this.#cursorOn) {
       this.#seedHighlighter();
       this.#clampScroll();
-      this.ensureCursorVisible();
+      this.#ensureCursorVisible();
       this.#reportReveal(r);
       return;
     }
@@ -3902,7 +3972,7 @@ export class Session {
       this.top = baseTop;
       const next = this.#expandOffer();
       const nextOffer = next && !("blocked" in next) ? next : null;
-      let nextAnnotations = this.displayDiffAnnotations(nextOffer);
+      let nextAnnotations = this.#displayDiffAnnotations(nextOffer);
       let state = this.#wrapDecorationState(nextAnnotations);
       this.#wrapDecorations = state.decorations;
       this.#wrapDecorationKey = state.key;
@@ -4079,7 +4149,7 @@ export class Session {
   }
 
   /** Screen rows of metadata directly beyond the marked expansion edge. */
-  private displayAdjacentDiffMetadataRows(
+  #displayAdjacentDiffMetadataRows(
     expand: ExpandOffer | null,
   ): readonly number[] {
     const line = this.#adjacentDiffMetadataLine(expand);
@@ -4095,7 +4165,7 @@ export class Session {
   }
 
   /** Annotations for an expansion triangle visible in the base layout. */
-  private displayDiffAnnotations(
+  #displayDiffAnnotations(
     expand: ExpandOffer | null,
   ): DiffAnnotation[] {
     const { top } = this.#expansionLayout();
@@ -4366,7 +4436,7 @@ export class Session {
     // navigation, which reads the structure tree. Refresh it here as leaving
     // edit mode by Esc does, so that return lands on a current tree.
     this.reparse();
-    if (wasCursorOn) this.ensureCursorVisible();
+    if (wasCursorOn) this.#ensureCursorVisible();
     else this.#clampScroll();
     this.#overlay = null;
     this.#overlayStack = [];
@@ -4375,7 +4445,7 @@ export class Session {
     this.#pickerSel = 0;
     this.#overlayScroll = 0;
     this.#mode = "filePicker";
-    this.refreshPicker();
+    this.#refreshPicker();
   }
 
   /** Open at the current file's directory, else the gateway's cwd. */
@@ -4386,7 +4456,7 @@ export class Session {
   }
 
   /** Re-list the current directory, filtered by what has been typed. */
-  private refreshPicker(): void {
+  #refreshPicker(): void {
     if (!this.#files) return;
     const all = this.#files.list(this.#pickerDir) ?? [];
     const f = this.#pickerFilter.toLowerCase();
@@ -4449,47 +4519,47 @@ export class Session {
         if (this.#pickerFilter.length > 0) {
           this.#pickerFilter = this.#pickerFilter.slice(0, -1);
           this.#pickerSel = 0;
-          this.refreshPicker();
+          this.#refreshPicker();
         } else {
-          this.pickerUp();
+          this.#pickerUp();
         }
         return;
       case "tab":
       case "enter":
-        this.activatePicked();
+        this.#activatePicked();
         return;
     }
     if (key.char && key.char >= " " && !key.ctrl) {
       this.#pickerFilter += key.char;
       this.#pickerSel = 0;
-      this.refreshPicker();
+      this.#refreshPicker();
     }
   }
 
-  private pickerUp(): void {
+  #pickerUp(): void {
     if (!this.#files) return;
     this.#pickerDir = this.#files.parent(this.#pickerDir);
     this.#pickerFilter = "";
     this.#pickerSel = 0;
     this.#overlayScroll = 0;
-    this.refreshPicker();
+    this.#refreshPicker();
   }
 
   /** Act on the highlighted entry: step up, descend a directory, or open a
    * file. With nothing highlighted, treat the typed text as a filename. */
-  private activatePicked(): void {
+  #activatePicked(): void {
     if (!this.#files) return;
     const entry = this.#pickerEntries[this.#pickerSel];
     if (!entry) {
       if (this.#pickerFilter.length > 0) {
-        this.openPickedFile(
+        this.#openPickedFile(
           this.#files.join(this.#pickerDir, this.#pickerFilter),
         );
       }
       return;
     }
     if (entry.name === "..") {
-      this.pickerUp();
+      this.#pickerUp();
       return;
     }
     const target = this.#files.join(this.#pickerDir, entry.name);
@@ -4498,17 +4568,17 @@ export class Session {
       this.#pickerFilter = "";
       this.#pickerSel = 0;
       this.#overlayScroll = 0;
-      this.refreshPicker();
+      this.#refreshPicker();
     } else {
-      this.openPickedFile(target);
+      this.#openPickedFile(target);
     }
   }
 
   /** Replace the session's buffer/source/document with the chosen file. Refuses
    * when the current buffer has unsaved edits, to avoid losing them. */
-  private openPickedFile(absPath: string): void {
+  #openPickedFile(absPath: string): void {
     if (!this.#files) return;
-    if (this.buffer?.dirty()) {
+    if (this.#buffer?.dirty()) {
       this.#mode = "normal";
       this.#message =
         "Save or discard your changes before opening another file.";
@@ -4524,7 +4594,7 @@ export class Session {
     if (opened.source.defaultViewMode === "rendered") {
       this.#viewMode = "rendered";
     }
-    this.buffer = new EditBuffer(
+    this.#buffer = new EditBuffer(
       opened.text,
       opened.source.lineEndingProvenance?.(opened.text),
     );
@@ -4534,7 +4604,7 @@ export class Session {
     this.#setSourceDocument(
       opened.source.parse(
         opened.text,
-        this.buffer.lineEndingProvenance(),
+        this.#buffer.lineEndingProvenance(),
       ),
     );
     this.#semantics = undefined; // the old service was for the previous file
@@ -4876,12 +4946,12 @@ export class Session {
     const nav = this.#navigableIndices();
     const navNodes = nav.map((i) => this.doc.flatStructure[i]);
     if (this.#selectedIndex === null) {
-      this.selectNode(nav[this.#viewportNodeIndex(navNodes)]);
+      this.#selectNode(nav[this.#viewportNodeIndex(navNodes)]);
       return;
     }
     let cur = nav.indexOf(this.#selectedIndex);
     if (cur < 0) cur = this.#reselectAfterCollapse(navNodes); // hidden by a fold
-    this.selectNode(nav[step(navNodes, cur)]);
+    this.#selectNode(nav[step(navNodes, cur)]);
   }
 
   /** The full-flatStructure indices navigation may land on: every node except
