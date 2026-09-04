@@ -447,7 +447,7 @@ export class CFCodeEditor extends BaseElement {
   private _deferredMentionedContent: string | null = null;
   // A completion source that withheld a matching index row asks the current
   // resolution pass to query it again once the row has a usable identity.
-  private _backlinkCompletionAwaitingResolution = false;
+  private _completionAwaitingResolution = false;
   private _referencesUnsub: (() => void) | null = null;
   // Label text last seen for each reference key, to detect a user's edit.
   private _previousRefLabels = new Map<string, string>();
@@ -464,6 +464,8 @@ export class CFCodeEditor extends BaseElement {
   // A key is absent while its destination publishes none, which is what a
   // pill with no number beside its label means.
   private _refShortNames = new Map<string, string>();
+  // Whether a publication of those names is already waiting to run.
+  private _refShortNamesPublishPending = false;
   // Keys the document held when it loaded, plus those this editor minted.
   // Collection only removes entries from this set, so a key another client
   // added while this one was open is never swept away. Null until the
@@ -541,7 +543,7 @@ export class CFCodeEditor extends BaseElement {
    */
   private createBacklinkCompletionSource() {
     return (context: CompletionContext): CompletionResult | null => {
-      this._backlinkCompletionAwaitingResolution = false;
+      this._completionAwaitingResolution = false;
       // Look for incomplete backlinks: [[ followed by optional text (not yet closed)
       const backlink = context.matchBefore(/\[\[([^\]]*)?/);
 
@@ -564,7 +566,7 @@ export class CFCodeEditor extends BaseElement {
       const query = backlink.text.slice(2); // Remove [[ prefix
 
       const mentionable = this.getFilteredMentionable(query);
-      this._backlinkCompletionAwaitingResolution = this
+      this._completionAwaitingResolution = this
         ._hasUnresolvedIndexRowFor(query);
 
       // Check if auto-close added ]] after cursor
@@ -574,7 +576,11 @@ export class CFCodeEditor extends BaseElement {
       const options: Completion[] = mentionable.map(([piece, index]) => {
         const pieceId = this._getPieceId(index);
         const pieceName = piece.key(NAME).get() || "";
-        const insertText = `${pieceName} (${pieceId})`;
+        // Identity now, for the reason the short-name source takes one: the
+        // index is a position, and the list it indexes may recompute before
+        // this option is picked.
+        const destination = this._resolvedPieceCells.get(index);
+        const insertText = `${labelForToken(pieceName)} (${pieceId})`;
         return {
           label: pieceName,
           // Use apply function to handle auto-closed brackets
@@ -588,8 +594,10 @@ export class CFCodeEditor extends BaseElement {
             // it silently.
             const opensQuery = view.state.doc.sliceString(from - 2, from) ===
               "[[";
-            if (this._refMode && opensQuery) {
-              const key = this._createRefEntry(index);
+            if (this._refMode && opensQuery && destination) {
+              const key = this._writeRefEntry(
+                destination as CellHandle<unknown>,
+              );
               if (key) {
                 this._insertRefToken(view, from - 2, replaceTo, pieceName, key);
                 return;
@@ -635,21 +643,45 @@ export class CFCodeEditor extends BaseElement {
 
       const from = line.from + query.from;
       if (!this._shortNameQueryIsClear(context.state, from)) return null;
+
+      // A row withheld for want of a resolved piece is one this query would
+      // have offered, so the resolution pass owes it a second look.
+      this._completionAwaitingResolution = this._hasUnresolvedIndexRowFor(
+        query.query,
+      );
+
       const options: Completion[] = this._matchingShortNames(query.query).map(
         ([row, index, name]) => {
           const rowName = row.key(NAME).get() || "";
+          // The row's IDENTITY, taken now. An index is a position in a list
+          // that recomputes, so a universe reordered or shortened between the
+          // dropdown opening and a pick would make the same index name a
+          // different member — or none.
+          const destination = this._resolvedPieceCells.get(index);
+          const pieceId = this._getPieceId(index);
           return {
             // The sigil is part of the label so that CodeMirror's own
             // filtering measures what was typed against what is offered.
             label: `#${name}`,
             detail: rowName,
+            // The range comes from the CALLBACK, not from the closure: a
+            // transaction between offering this option and applying it maps
+            // the query's position, and the captured `from` would then
+            // replace text the query no longer covers.
             apply: (
               view: EditorView,
               _completion: Completion,
-              _from: number,
-              to: number,
+              applyFrom: number,
+              applyTo: number,
             ) => {
-              this._insertMentionOf(view, from, to, rowName, index);
+              this._insertMentionOf(
+                view,
+                applyFrom,
+                applyTo,
+                rowName,
+                destination,
+                pieceId,
+              );
             },
             type: "text",
             info: `Link to ${rowName}`,
@@ -665,17 +697,20 @@ export class CFCodeEditor extends BaseElement {
    * Whether a `#` at `from` opens a citation, rather than sitting inside a
    * mention gesture that owns the text around it.
    *
-   * Two overlaps, and neither is caught by the sigil's own shape. A `#` just
-   * inside `[[` belongs to the backlink query, which owns that gesture: its
-   * source reads back over the two brackets and extends across an auto-closed
-   * `]]`, and inserting from here does neither, so `[[|]]` would complete to
-   * `[[[Label][key]]]`. A `#` inside an existing mention's label — the label
-   * is ordinary editable text — would nest a token inside a token. Neither
-   * corrupts the reference map; both leave junk on screen that the user then
-   * has to unpick.
+   * Two overlaps, and neither is caught by the sigil's own shape. A `#`
+   * anywhere inside an unclosed `[[` belongs to the backlink query, which owns
+   * that gesture: its source reads back over the two brackets and extends
+   * across an auto-closed `]]`, and inserting from here does neither, so
+   * `[[|]]` would complete to `[[[Label][key]]]`. The whole query is the
+   * gesture, not the two characters at its head — `[[note #4` is still inside
+   * it. A `#` inside an existing mention's label — the label is ordinary
+   * editable text — would nest a token inside a token. Neither corrupts the
+   * reference map; both leave junk on screen for the user to unpick.
    */
   private _shortNameQueryIsClear(state: EditorState, from: number): boolean {
-    if (from >= 2 && state.doc.sliceString(from - 2, from) === "[[") {
+    const line = state.doc.lineAt(from);
+    // The same shape `_currentBacklinkQuery` reads: `[[` with no `]` since.
+    if (/\[\[[^\]]*$/.test(state.doc.sliceString(line.from, from))) {
       return false;
     }
     return !mentionRefs(state).some((ref) => from > ref.from && from < ref.to);
@@ -722,17 +757,20 @@ export class CFCodeEditor extends BaseElement {
     from: number,
     to: number,
     label: string,
-    index: number,
+    destination: CellHandle<Mentionable> | undefined,
+    pieceId: string,
   ): void {
-    if (this._refMode) {
-      const key = this._createRefEntry(index);
+    if (this._refMode && destination) {
+      const key = this._writeRefEntry(destination as CellHandle<unknown>);
       if (key) {
         this._insertRefToken(view, from, to, label, key);
         return;
       }
     }
 
-    const insert = `[[${label} (${this._getPieceId(index)})]]`;
+    // Through the same sanitizer the reference form uses: a name holding a
+    // `]` or a newline would otherwise mint a token no parse reads back.
+    const insert = `[[${labelForToken(label)} (${pieceId})]]`;
     view.dispatch({
       changes: { from, to, insert },
       selection: { anchor: from + insert.length },
@@ -786,7 +824,15 @@ export class CFCodeEditor extends BaseElement {
     return matches;
   }
 
-  /** Whether an unresolved index row contains or exactly matches `query`. */
+  /**
+   * Whether an unresolved index row contains or exactly matches `query`.
+   *
+   * The loose form asks the short name as well as the display name, because
+   * both completion surfaces offer a row on either: a `#42` query, and a
+   * `[[42` query since the backlink source began matching numbers too. Only
+   * the display name settles an EXACT match, which is what decides whether
+   * Enter completes or creates.
+   */
   private _hasUnresolvedIndexRowFor(
     query: string,
     match: "contains" | "exact" = "contains",
@@ -798,21 +844,42 @@ export class CFCodeEditor extends BaseElement {
         return false;
       }
       const name = mention?.[NAME]?.toLowerCase();
-      return match === "exact"
-        ? name === queryLower
-        : !!name?.includes(queryLower);
+      if (match === "exact") return name === queryLower;
+      return !!name?.includes(queryLower) || shortNameMatches(mention, query);
     });
   }
 
-  /** Restarts a backlink query that withheld a matching index row. */
-  private _refreshBacklinkCompletion(): void {
-    if (!this._backlinkCompletionAwaitingResolution) return;
-    this._backlinkCompletionAwaitingResolution = false;
+  /**
+   * Restarts a query that withheld a matching index row.
+   *
+   * One signal for both triggers: a row is withheld for want of a resolved
+   * piece whichever sigil asked for it, and a completion that is not reopened
+   * leaves the user typing at a list that will never fill.
+   */
+  private _refreshCompletion(): void {
+    if (!this._completionAwaitingResolution) return;
+    this._completionAwaitingResolution = false;
 
     const view = this._editorView;
-    if (view?.hasFocus && this._currentBacklinkQuery(view) !== null) {
+    if (!view?.hasFocus) return;
+    if (
+      this._currentBacklinkQuery(view) !== null ||
+      this._currentShortNameQuery(view) !== null
+    ) {
       startCompletion(view);
     }
+  }
+
+  /** The `#42` query under the cursor, or null — the sigil's own reader. */
+  private _currentShortNameQuery(view: EditorView): string | null {
+    const state = view.state;
+    const pos = state.selection.main.head;
+    const line = state.doc.lineAt(pos);
+    const query = shortNameQueryAt(state.doc.sliceString(line.from, pos));
+    if (!query) return null;
+    return this._shortNameQueryIsClear(state, line.from + query.from)
+      ? query.query
+      : null;
   }
 
   /**
@@ -863,7 +930,7 @@ export class CFCodeEditor extends BaseElement {
     // to create another one. Keep the query intact and reopen its completion
     // after this pass, starting a fresh pass if the previous one failed.
     if (this._hasUnresolvedIndexRowFor(text, "exact")) {
-      this._backlinkCompletionAwaitingResolution = true;
+      this._completionAwaitingResolution = true;
       if (!this._mentionResolutionPending) void this._resolvePieceIds();
       return;
     }
@@ -899,7 +966,7 @@ export class CFCodeEditor extends BaseElement {
     const hasAutoClose = afterCursor === "]]";
 
     // Build the complete backlink
-    const fullBacklink = `[[${pieceName} (${pieceId})]]`;
+    const fullBacklink = `[[${labelForToken(pieceName)} (${pieceId})]]`;
 
     // Calculate replacement range
     const replaceFrom = bracketPos;
@@ -1547,7 +1614,7 @@ export class CFCodeEditor extends BaseElement {
       } else {
         this._updateMentionedFromContent(deferredContent);
       }
-      this._refreshBacklinkCompletion();
+      this._refreshCompletion();
     }
   }
 
@@ -2231,7 +2298,7 @@ export class CFCodeEditor extends BaseElement {
     this._resolveGeneration++;
     this._mentionResolutionPending = false;
     this._deferredMentionedContent = null;
-    this._backlinkCompletionAwaitingResolution = false;
+    this._completionAwaitingResolution = false;
     this._resolvedPieceIds.clear();
     this._resolvedPieceCells.clear();
     if (this._mentionableUnsub) {
@@ -2779,7 +2846,7 @@ export class CFCodeEditor extends BaseElement {
       Prec.highest(keymap.of([{
         key: "Escape",
         run: () => {
-          this._backlinkCompletionAwaitingResolution = false;
+          this._completionAwaitingResolution = false;
           return false;
         },
       }, {
@@ -3493,7 +3560,14 @@ export class CFCodeEditor extends BaseElement {
           const name = piece?.[NAME];
           if (typeof name !== "string" || name.length === 0) return;
           this._refNames.set(key, name);
-          void this._handleExternalRefTitleChange(key, name);
+          // Deferred for the reason the publication above is: this reaches a
+          // dispatch synchronously — an `async` body runs to its first
+          // `await`, and there is none before the rewrite when no
+          // collaboration is active — and this callback can be running
+          // inside an update.
+          queueMicrotask(() =>
+            void this._handleExternalRefTitleChange(key, name)
+          );
         }),
       });
     }
@@ -3540,12 +3614,25 @@ export class CFCodeEditor extends BaseElement {
    * number. Judging from the field is what makes that unrepresentable.
    */
   private _publishRefShortNames(): void {
-    const view = this._editorView;
-    if (!view) return;
+    if (this._refShortNamesPublishPending) return;
+    this._refShortNamesPublishPending = true;
+    // Off the current task, because a caller may be inside a CodeMirror
+    // update: a destination's subscription delivers synchronously the moment
+    // it is opened, and the pass that opens it runs from the update listener.
+    // A dispatch nested in an update can throw, taking the reference
+    // reconciliation around it with it. A microtask rather than a timer —
+    // the update is synchronous, so it has finished by the time this runs,
+    // and nothing here waits on the clock. Queueing one publication for many
+    // writes is the other half: a pass that changes ten keys dispatches once.
+    queueMicrotask(() => {
+      this._refShortNamesPublishPending = false;
+      const view = this._editorView;
+      if (!view) return;
 
-    const published = Object.fromEntries(this._refShortNames);
-    if (sameShortNames(refShortNames(view.state), published)) return;
-    view.dispatch({ effects: setRefShortNames.of(published) });
+      const published = Object.fromEntries(this._refShortNames);
+      if (sameShortNames(refShortNames(view.state), published)) return;
+      view.dispatch({ effects: setRefShortNames.of(published) });
+    });
   }
 
   /**

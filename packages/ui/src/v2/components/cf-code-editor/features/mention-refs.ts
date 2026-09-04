@@ -209,8 +209,18 @@ export function shortNameQueryAt(
   if (!match) return null;
 
   const from = textBefore.length - match[0].length;
-  const before = from > 0 ? textBefore[from - 1] : "";
-  if (/[\w#]/.test(before)) return null;
+  // The preceding CODE POINT, not the preceding UTF-16 unit. An astral letter
+  // is a surrogate pair, and testing its low half alone matches no property —
+  // which would read `𝐀#4` as a word boundary. Two units are enough to hold
+  // one code point, and iterating them yields it whole.
+  const before = Array.from(textBefore.slice(Math.max(0, from - 2), from))
+    .at(-1) ?? "";
+  // Letters, marks and numbers of ANY script, not JavaScript's ASCII-only
+  // `\w`: a member's names are ASCII by the spec's decision, but the prose
+  // they sit in is not, and this asks about the prose. Without the Unicode
+  // properties a `#4` typed straight after `Ω` or `名` opens a query inside a
+  // word.
+  if (/[\p{L}\p{M}\p{N}_#]/u.test(before)) return null;
   return { from, query: match[1] };
 }
 

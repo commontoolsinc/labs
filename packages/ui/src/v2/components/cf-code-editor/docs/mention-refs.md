@@ -141,8 +141,16 @@ matched nothing, and a stray `#7` must never create anything, so the sigil is
 left out of that handler rather than given a branch inside it.
 
 A sigil that does not open its token opens no query: `abc#4` is one word and
-`##4` is no citation. At least one digit is required, which is what keeps a
+`##4` is no citation. The boundary is asked in Unicode letters, marks and
+numbers rather than JavaScript's ASCII-only `\w`, because a member's names are
+ASCII by the spec's decision but the prose around them is any script — `Ω#4` is
+inside a word too. At least one digit is required, which is what keeps a
 markdown heading from opening a query over every named member.
+
+Nor does a sigil inside a gesture the backlink source owns. Anywhere within an
+unclosed `[[…` the query is that source's — it reads back over the brackets and
+extends across an auto-closed `]]`, which this one does not — and anywhere
+inside an existing mention's label a completion would nest a token in a token.
 
 ## Collection
 

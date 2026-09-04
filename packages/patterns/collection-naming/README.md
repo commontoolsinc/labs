@@ -114,14 +114,19 @@ reason its index row does, so the link-bind the backfill has to be paired with
 governs both.
 
 The item is the member: a title, a body, a filing time, and the board's names
-table wired in at creation as `boardNames`. It reads its own row out of that
-table by identity and publishes the result as `shortName`, rendering it as a
-badge beside the title when it has one; a mention of the item elsewhere reads
-that same `shortName` to show the number on its pill. The body is edited through
-`cf-code-editor`, which mints reference-form mentions into the item's own
-`references` map — saved with the prose in one transaction, so the tokens and
-the destinations they name land together. An item wired to no board shows no
-name and needs nothing else.
+table wired in at creation as `boardNames`. Its body is drafted per session and
+written with its mention map by one save, and the three streams that drive that
+— `startEditBody`, `saveBody`, `cancelEditBody` — are the whole editing surface.
+The drafts are seeded by the open and by nothing else, so the save refuses when
+no edit is open and a second open leaves one in progress alone: either would
+otherwise write an empty or stale draft over the stored body. It reads its own
+row out of that table by identity and publishes the result as `shortName`,
+rendering it as a badge beside the title when it has one; a mention of the item
+elsewhere reads that same `shortName` to show the number on its pill. The body
+is edited through `cf-code-editor`, which mints reference-form mentions into the
+item's own `references` map — saved with the prose in one transaction, so the
+tokens and the destinations they name land together. An item wired to no board
+shows no name and needs nothing else.
 
 Headless, against a deployed board:
 

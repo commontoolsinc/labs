@@ -161,18 +161,30 @@
         "description": "The item's body, verbatim Markdown.",
         "type": "string"
       },
+      "cancelEditBody": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "description": "Close the editor, leaving both drafts behind.",
+        "tier": "wrapper"
+      },
       "createdAt": {
         "description": "When the item was filed (epoch milliseconds).",
         "type": "number"
       },
-      "editingBody": {
-        "description": "Whether the body editor is open, session-local: a second tab opens on the\nstored body rather than on this one.\n\nThe toggle alone is published, and the drafts behind it are not. Opening\nthe editor is the whole of what a surface outside this item needs: the\nprose, the mention map and the Save that writes them together are the\nitem's own controls, rendered by the item, so an embedder that flips this\ngets the whole edit rather than the half `saveBody` exists to prevent.\nThe streams are deliberately unpublished too — a member's published value\nis written into its board's namespace map, and streams in it do not\nsurvive that write.",
-        "type": "boolean"
-      },
       "references": {
         "$ref": "#/$defs/ItemMentionRefMap",
         "default": {},
-        "description": "Where this item's mentions point, keyed by the token in the body. Written\nwhole by the body save, out of the draft the editor minted into."
+        "description": "Where this item's mentions point, keyed by the token in the body. Written\nwhole by the save, out of the draft the editor minted into, in the same\ntransaction as the prose those tokens sit in."
+      },
+      "saveBody": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "description": "Write the drafted body and its mention map together, and close.",
+        "tier": "wrapper"
       },
       "shortName": {
         "description": "The name the board calls this item by, read out of the board's names\ntable; `undefined` for an item no board has named, or one wired to no\nboard.\n\nPublished under the name a mention pill reads it by\n(`Mentionable.shortName` in `packages/ui/src/v2/core/mentionable.ts`), so\na mention of this item elsewhere gains the number as soon as the board\nnames it.",
@@ -180,6 +192,14 @@
           "string",
           "undefined"
         ]
+      },
+      "startEditBody": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "description": "Open the body editor on the stored body and its mention map.\n\nThese three are the whole editing surface, and opening is a verb rather\nthan a flag on purpose: the drafts are seeded here and nowhere else, so a\nsurface that could raise an `editingBody` flag directly would open an\neditor showing nothing and then save that over the stored body. No such\nflag is reachable — an unpublished session cell cannot be written from\noutside, and publishing one as a plain `PerSession<boolean>` is not an\noption either, because a published value carrying one cannot serve as an\naction's captured state, which is what naming a member makes of it.",
+        "tier": "wrapper"
       },
       "title": {
         "default": "",
@@ -193,7 +213,9 @@
       "createdAt",
       "shortName",
       "references",
-      "editingBody",
+      "startEditBody",
+      "saveBody",
+      "cancelEditBody",
       "$NAME",
       "$UI"
     ],

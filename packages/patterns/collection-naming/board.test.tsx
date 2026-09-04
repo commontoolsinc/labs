@@ -8,6 +8,14 @@
  * the universe expands, and the rejections. Every rejection here is a thrown
  * verb, so the runtime errors are required, and the count is exact: a guard
  * quietly reverting to a silent return fails the suite.
+ *
+ * A property worth knowing before adding another guard test here: a guard that
+ * PREVENTS a write can only be caught where the value it would have written
+ * differs from the value already stored. Where the two are equal — a draft
+ * seeded from the very field it would overwrite — removing the guard changes
+ * nothing observable, and the test passes against a system carrying the
+ * defect. Move the stored value between the seeding and the guarded call, then
+ * assert the stored value survives rather than the draft.
  */
 
 import {
@@ -23,7 +31,7 @@ import {
 } from "commonfabric";
 import { findElement, hasText } from "../test/vnode-helpers.ts";
 import Board, { type ItemDemand } from "./board.tsx";
-import Item from "./item.tsx";
+import Item, { type ItemMentionRefMap } from "./item.tsx";
 import { backfillNames, nameOf, type NamesMap } from "./naming.ts";
 
 export default pattern(() => {
@@ -187,9 +195,18 @@ export default pattern(() => {
   // An item wired to the board's table reads its own name out of it by
   // identity, and renders it as a badge; an item wired to nothing has no
   // name, renders no badge, and does not fail.
+  const wiredBody = new Writable("");
+  // A mention map with something in it, so a save that erased would be seen
+  // to erase both halves rather than only the prose. The destination is a
+  // stand-in: what these assertions turn on is the entry surviving, not what
+  // it points at, and a seeded cell takes static data only.
+  const wiredRefs = new Writable<ItemMentionRefMap>({
+    a3f9zz: { destination: {}, modifiedTitle: false },
+  });
   const wired = Item({
     title: "Wired item",
-    body: "",
+    body: wiredBody,
+    references: wiredRefs,
     boardNames: board.namesTable,
   });
   const action_name_the_wired_item = action(() => {
@@ -205,6 +222,107 @@ export default pattern(() => {
     hasText(wired[UI], "Wired item") &&
     hasText(wired[UI], "No body yet.")
   );
+  // Opening seeds the drafts from the stored body and map, which is the whole
+  // reason opening is a verb: a save right after an open writes back what the
+  // open read, so it preserves the body rather than erasing it with an
+  // uninitialized draft. Take the seeding out of `startEditBody` and this
+  // pair goes red on the save.
+  const action_open_the_wired_editor = action(() => {
+    wired.startEditBody.send();
+  });
+  const assert_opening_shows_the_editor = assert(() =>
+    findElement(wired[UI], "cf-code-editor") !== undefined &&
+    findElement(wired[UI], "cf-markdown") === undefined
+  );
+  const action_save_the_wired_body = action(() => {
+    wired.saveBody.send();
+  });
+  const assert_save_preserves_the_body = assert(() =>
+    wired.body === "The seeded body." &&
+    findElement(wired[UI], "cf-code-editor") === undefined
+  );
+
+  // A save that never followed an open writes nothing. The drafts are seeded
+  // only by `startEditBody`, so an ungated save would put an empty draft over
+  // both the prose and the mention map — the first P1's erasure reached
+  // through the save rather than through the open.
+  const action_save_without_opening = action(() => {
+    wired.saveBody.send();
+  });
+  const assert_cold_save_writes_nothing = assert(() =>
+    wired.body === "The seeded body." &&
+    Object.keys((wired.references ?? {}) as ItemMentionRefMap).join(",") ===
+      "a3f9zz"
+  );
+
+  // Cancel leaves the drafts behind and writes nothing, so the stored body is
+  // what it was however the editor is closed.
+  const action_reopen_the_wired_editor = action(() => {
+    wired.startEditBody.send();
+  });
+  const action_cancel_the_wired_edit = action(() => {
+    wired.cancelEditBody.send();
+  });
+  const assert_cancel_preserves_the_body = assert(() =>
+    wired.body === "The seeded body." &&
+    findElement(wired[UI], "cf-code-editor") === undefined
+  );
+
+  // The second door: a save sent after a cancel. The stored content moves
+  // between the cancel and the save, which is what makes the guard visible —
+  // the abandoned draft still holds what the open read, so an ungated save
+  // resurrects it over the newer content instead of writing it back unchanged.
+  const action_change_content_after_cancelling = action(() => {
+    wiredBody.set("Changed after the cancel.");
+    wiredRefs.set({ b7k2m1: { destination: {}, modifiedTitle: false } });
+  });
+  const action_save_after_cancelling = action(() => {
+    wired.saveBody.send();
+  });
+  const assert_save_after_cancel_writes_nothing = assert(() =>
+    wired.body === "Changed after the cancel." &&
+    Object.keys((wired.references ?? {}) as ItemMentionRefMap).join(",") ===
+      "b7k2m1"
+  );
+
+  // Opening twice is opening once. What makes that observable is a stored
+  // body that moves between the two opens: the save writes what the editor
+  // has held since it opened, so the first open's draft is what lands. An
+  // unguarded second open would re-seed from the newer body and this would
+  // read `Changed elsewhere` instead.
+  const action_open_before_the_change = action(() => {
+    wired.startEditBody.send();
+  });
+  const action_change_the_body_elsewhere = action(() => {
+    wiredBody.set("Changed elsewhere.");
+  });
+  const action_open_again_mid_edit = action(() => {
+    wired.startEditBody.send();
+  });
+  const assert_second_open_keeps_the_first_draft = assert(() =>
+    wired.body === "Changed after the cancel." &&
+    findElement(wired[UI], "cf-code-editor") === undefined
+  );
+
+  // The body view follows the body, in both directions: a member that gains
+  // prose shows it, and one whose prose is cleared shows the empty state
+  // again. Both, because a view pinned to the value it first read passes
+  // whichever direction it happened to start in.
+  const action_give_the_wired_item_a_body = action(() => {
+    wiredBody.set("The seeded body.");
+  });
+  const assert_body_shows_as_markdown = assert(() =>
+    findElement(wired[UI], "cf-markdown") !== undefined &&
+    !hasText(wired[UI], "No body yet.")
+  );
+  const action_clear_the_wired_body = action(() => {
+    wiredBody.set("");
+  });
+  const assert_cleared_body_shows_the_empty_state = assert(() =>
+    findElement(wired[UI], "cf-markdown") === undefined &&
+    hasText(wired[UI], "No body yet.")
+  );
+
   const solo = Item({ title: "Solo item", body: "A body of its own." });
   const assert_solo_item_has_no_name = assert(() =>
     solo.shortName === undefined &&
@@ -451,6 +569,33 @@ export default pattern(() => {
       { assertion: assert_wired_item_reads_its_name },
       { render: wired[UI] },
       { assertion: assert_wired_item_renders_its_badge },
+      { action: action_give_the_wired_item_a_body },
+      { action: action_save_without_opening },
+      { assertion: assert_cold_save_writes_nothing },
+      { action: action_open_the_wired_editor },
+      { render: wired[UI] },
+      { assertion: assert_opening_shows_the_editor },
+      { action: action_save_the_wired_body },
+      { render: wired[UI] },
+      { assertion: assert_save_preserves_the_body },
+      { action: action_reopen_the_wired_editor },
+      { action: action_cancel_the_wired_edit },
+      { render: wired[UI] },
+      { assertion: assert_cancel_preserves_the_body },
+      { action: action_change_content_after_cancelling },
+      { action: action_save_after_cancelling },
+      { assertion: assert_save_after_cancel_writes_nothing },
+      { action: action_open_before_the_change },
+      { action: action_change_the_body_elsewhere },
+      { action: action_open_again_mid_edit },
+      { action: action_save_the_wired_body },
+      { render: wired[UI] },
+      { assertion: assert_second_open_keeps_the_first_draft },
+      { render: wired[UI] },
+      { assertion: assert_body_shows_as_markdown },
+      { action: action_clear_the_wired_body },
+      { render: wired[UI] },
+      { assertion: assert_cleared_body_shows_the_empty_state },
       { assertion: assert_solo_item_has_no_name },
       { render: solo[UI] },
       { assertion: assert_solo_item_renders_no_badge },

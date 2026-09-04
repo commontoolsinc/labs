@@ -5,7 +5,10 @@
  * board's names table by identity, and an item no board has named shows no
  * name and needs nothing else. The body is edited through `cf-code-editor`,
  * which completes `#42` over the board's mention universe and mints a
- * reference-form mention into the item's own map.
+ * reference-form mention into the item's own map. The prose and that map are
+ * drafted per session and written together by one save, because a body is a
+ * single string with whole-value conflict semantics and a live-bound editor on
+ * one would conflict per keystroke.
  */
 
 import {
@@ -13,9 +16,9 @@ import {
   Default,
   NAME,
   pattern,
-  type PerSession,
   type ReadonlyCell,
   SELF,
+  Stream,
   UI,
   type VNode,
   Writable,
@@ -137,25 +140,31 @@ export interface ItemOutput {
 
   /**
    * Where this item's mentions point, keyed by the token in the body. Written
-   * whole by the body save, out of the draft the editor minted into.
+   * whole by the save, out of the draft the editor minted into, in the same
+   * transaction as the prose those tokens sit in.
    */
   // deno-lint-ignore ban-types
   references: ItemMentionRefMap | Default<{}>;
 
   /**
-   * Whether the body editor is open, session-local: a second tab opens on the
-   * stored body rather than on this one.
+   * Open the body editor on the stored body and its mention map.
    *
-   * The toggle alone is published, and the drafts behind it are not. Opening
-   * the editor is the whole of what a surface outside this item needs: the
-   * prose, the mention map and the Save that writes them together are the
-   * item's own controls, rendered by the item, so an embedder that flips this
-   * gets the whole edit rather than the half `saveBody` exists to prevent.
-   * The streams are deliberately unpublished too — a member's published value
-   * is written into its board's namespace map, and streams in it do not
-   * survive that write.
+   * These three are the whole editing surface, and opening is a verb rather
+   * than a flag on purpose: the drafts are seeded here and nowhere else, so a
+   * surface that could raise an `editingBody` flag directly would open an
+   * editor showing nothing and then save that over the stored body. No such
+   * flag is reachable — an unpublished session cell cannot be written from
+   * outside, and publishing one as a plain `PerSession<boolean>` is not an
+   * option either, because a published value carrying one cannot serve as an
+   * action's captured state, which is what naming a member makes of it.
    */
-  editingBody: PerSession<Writable<boolean>>;
+  startEditBody: Stream<void>;
+
+  /** Write the drafted body and its mention map together, and close. */
+  saveBody: Stream<void>;
+
+  /** Close the editor, leaving both drafts behind. */
+  cancelEditBody: Stream<void>;
 }
 
 export default pattern<ItemInput, ItemOutput>(
@@ -170,7 +179,7 @@ export default pattern<ItemInput, ItemOutput>(
       [SELF]: self,
     },
   ) => {
-    // Session-local editing state: a second tab opens on the stored body.
+    // Session-local: a second tab opens on the stored body, not on this view.
     const editingBody = new Writable.perSession(false);
     const bodyDraft = new Writable.perSession("");
     const referencesDraft = new Writable.perSession<ItemMentionRefMap>({});
@@ -181,7 +190,13 @@ export default pattern<ItemInput, ItemOutput>(
     const itemName = title.get().trim() || "(untitled item)";
     const hasBody = body.get().trim().length > 0;
 
+    // The one place an edit begins, which is what makes the drafts safe: the
+    // editor is reachable only through here, so it never opens on a draft the
+    // stored body has not been read into.
     const startEditBody = action(() => {
+      // Idempotent: a second open mid-edit would re-seed from the stored body
+      // and silently discard whatever the editor is holding.
+      if (editingBody.get()) return;
       bodyDraft.set(body.get());
       // Seeded together with the prose, so the editor opens on a map that
       // resolves every token the draft carries. Each `destination` crosses as
@@ -191,6 +206,13 @@ export default pattern<ItemInput, ItemOutput>(
     });
 
     const saveBody = action(() => {
+      // A save is only ever the end of an edit. The drafts are seeded by
+      // `startEditBody` and by nothing else, so a save arriving cold — before
+      // any open, or again after a cancel — would write an empty draft over
+      // the stored body and its mention map. Silent rather than thrown
+      // because this is a control's stream and not a contract verb: sending
+      // it with no edit open is pressing a button that is not on screen.
+      if (!editingBody.get()) return;
       body.set(bodyDraft.get());
       // The map publishes with the prose it describes, in this one
       // transaction: the tokens and the destinations they name are one
@@ -280,7 +302,9 @@ export default pattern<ItemInput, ItemOutput>(
       createdAt,
       shortName,
       references,
-      editingBody,
+      startEditBody,
+      saveBody,
+      cancelEditBody,
     };
   },
 );

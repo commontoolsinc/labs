@@ -66,10 +66,9 @@ export default pattern(() => {
     boardNames: board.namesTable,
     mentionable: board.mentionable,
   });
-  // Through the published toggle, which is the whole of what a surface
-  // outside the item needs to open its editor.
+  // Through the verb that opens it, which is the only route in.
   const action_open_the_editor = action(() => {
-    viewer.editingBody.set(true);
+    viewer.startEditBody.send();
   });
 
   const assert_editor_receives_the_universe = assert(() => {

@@ -471,6 +471,40 @@ describe("mention-refs", () => {
       expect(shortNameQueryAt("issue#42")).toBeNull();
     });
 
+    it("returns null for a sigil after a word in any script", () => {
+      // A member's names are ASCII by the spec's decision; the prose around
+      // them is not. JavaScript's `\w` is ASCII-only, so a boundary written
+      // with it reads every non-Latin letter as a word break and opens a
+      // query inside a word.
+      expect(shortNameQueryAt("Ω#42")).toBeNull();
+      expect(shortNameQueryAt("名#42")).toBeNull();
+      expect(shortNameQueryAt("café#42")).toBeNull();
+      expect(shortNameQueryAt("Привет#42")).toBeNull();
+    });
+
+    it("returns null for a sigil after a letter outside the basic plane", () => {
+      // An astral letter is a surrogate PAIR, so a boundary that reads one
+      // UTF-16 unit tests its low half, which matches no Unicode property and
+      // reads as a word break.
+      expect(shortNameQueryAt("\u{1D400}#42")).toBeNull();
+      expect(shortNameQueryAt("\u{1D7DC}#42")).toBeNull();
+    });
+
+    it("returns a query for a sigil after an astral symbol", () => {
+      // The other half: an astral code point that is NOT a letter, mark or
+      // number is a boundary, so reading the pair whole must not reject it.
+      expect(shortNameQueryAt("\u{1F642}#42")).toEqual({
+        from: 2,
+        query: "42",
+      });
+    });
+
+    it("returns a query for a sigil after punctuation in any script", () => {
+      // The other half: a boundary that rejected every non-ASCII character
+      // would stop the sigil working after ordinary foreign punctuation.
+      expect(shortNameQueryAt("見よ、#42")).toEqual({ from: 3, query: "42" });
+    });
+
     it("returns null for a doubled sigil", () => {
       expect(shortNameQueryAt("##42")).toBeNull();
     });
