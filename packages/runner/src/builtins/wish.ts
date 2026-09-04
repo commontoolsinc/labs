@@ -1039,7 +1039,11 @@ function writeIntervalNowTick(
     }
   }).then(({ error }) => {
     if (!error) return;
-    if (isCfcRejectedCommitError(error)) {
+    // The generation is what a refusal answers for. A tick armed before the
+    // beat was torn down or restarted speaks for a generation that is gone,
+    // so it reports what it dropped and leaves the timer alone: stopping
+    // there would take down a beat this tick was never part of.
+    if (isCfcRejectedCommitError(error) && generation === timer.generation) {
       // CFC enforcement refused the labels this transaction carries, and the
       // instant being written has no part in that verdict, so the next tick
       // would carry the same labels to the same cell for the same answer.
