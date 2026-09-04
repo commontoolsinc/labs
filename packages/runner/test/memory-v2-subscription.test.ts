@@ -8,6 +8,7 @@ import type { SessionSync } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import type { Server as MemoryV2Server } from "@commonfabric/memory/v2/server";
 import { defer } from "@commonfabric/utils/defer";
+import { getLogger } from "@commonfabric/utils/logger";
 
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -737,6 +738,52 @@ describe("Memory v2 storage notifications", () => {
 
     expect(result.error?.message).toBe("memory replica closed");
     expect((await view.subscribeSync().next()).done).toBe(true);
+    await testStorageManager.closeNow();
+  });
+
+  it("records a refresh's request span when the request itself fails", async () => {
+    // The refresh's sub-spans record in `finally` blocks, like its `total`:
+    // a failed refresh paid for its request, and a success-only span would
+    // leave that cost in `total` alone, so the halves would not add up
+    // across outcomes. Counts only — a duration is a property of the
+    // machine.
+    const timing = getLogger("storage.v2");
+    const counts = () => ({
+      watchAdd: timing.getTimeStats("watchRefresh", "watchAddSync")?.count ??
+        0,
+      apply: timing.getTimeStats("watchRefresh", "applySessionSync")?.count ??
+        0,
+      total: timing.getTimeStats("watchRefresh", "total")?.count ?? 0,
+    });
+    const client = {
+      close: () => Promise.resolve(),
+    } as unknown as MemoryV2Client.Client;
+    const session = {
+      watchAddSync: () => Promise.reject(new Error("scripted watch failure")),
+    } as unknown as MemoryV2Client.SpaceSession;
+    const sessionFactory: SessionFactory = {
+      create: () => Promise.resolve({ client, session }),
+    };
+    class TestStorageManager extends V2StorageManager {
+      constructor() {
+        super({ as: signer, memoryHost: new URL("memory://") }, sessionFactory);
+      }
+    }
+    const testStorageManager = new TestStorageManager();
+    const provider = testStorageManager.open(space);
+    const replica = provider.replica as unknown as WatchRefreshHarness;
+
+    const before = counts();
+    const result = await replica.refreshWatchSet([[
+      { id: "of:failed-refresh" as URI, type: "application/json" as MIME },
+      { path: [], schema: false },
+    ]]);
+    const after = counts();
+
+    expect(result.error?.message).toBe("scripted watch failure");
+    expect(after.watchAdd - before.watchAdd).toBe(1);
+    expect(after.apply - before.apply).toBe(0);
+    expect(after.total - before.total).toBe(1);
     await testStorageManager.closeNow();
   });
 
