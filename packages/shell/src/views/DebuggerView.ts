@@ -20,33 +20,19 @@ import "./SchedulerGraphView.ts";
 import type { Logger, LoggerBreakdown } from "@commonfabric/utils/logger";
 
 /**
- * Most properties of an object the debugger renders before standing in a
- * count for the whole object. The renderer bounds depth, arrays, and
- * strings, but walks every property of an object within those bounds, and
- * the search renders every marker on each keystroke; a wide object is cut
- * off before the walk rather than after it.
- */
-const MAX_MARKER_OBJECT_KEYS = 20;
-
-/**
- * Rendering options for a value shown in the debugger: a bounded glimpse,
- * since a marker can hold anything a cell can. The replacer keeps an
- * action's metadata, which it carries as enumerable properties on the
- * function, and stands a count in for an object wider than
- * `MAX_MARKER_OBJECT_KEYS`.
+ * Rendering options for a value shown in the debugger: a bounded glimpse on
+ * every axis, since a marker can hold anything a cell can and the search
+ * renders every marker on each keystroke. The replacer keeps an action's
+ * metadata, which it carries as enumerable properties on the function.
  */
 const DEBUGGER_VALUE_OPTIONS: DebugValueOptions = {
   maxDepth: 3,
   maxArrayLength: 5,
+  maxProperties: 20,
   maxStringLength: 200,
   replacer: (value) => {
     if (typeof value === "function") {
       return { name: value.name || "[anonymous]", ...value };
-    } else if (isObjectOrArray(value) && !Array.isArray(value)) {
-      const count = Object.keys(value).length;
-      if (count > MAX_MARKER_OBJECT_KEYS) {
-        return `[Object with ${count} keys]`;
-      }
     }
     return value;
   },

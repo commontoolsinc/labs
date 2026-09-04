@@ -508,6 +508,87 @@ describe("toStructuredDebugValue()", () => {
     });
   });
 
+  describe("with `maxProperties`", () => {
+    it("returns the first properties in key order, and `/...` with the count last", () => {
+      const value = { a: 1, b: 2, c: 3, d: 4 };
+      const result = toStructuredDebugValue(value, { maxProperties: 2 });
+      expect(result).toEqual({ a: 1, b: 2, "/...": { count: 4 } });
+      expect(Object.keys(result as object)).toEqual(["a", "b", "/..."]);
+    });
+
+    it("returns an object with as many properties as the limit whole", () => {
+      expect(toStructuredDebugValue({ a: 1, b: 2 }, { maxProperties: 2 }))
+        .toEqual({ a: 1, b: 2 });
+    });
+
+    it("returns the form in place of the properties of a nested object", () => {
+      expect(
+        toStructuredDebugValue(
+          { o: { a: 1, b: 2, c: 3 }, l: [{ a: 1, b: 2, c: 3 }] },
+          { maxProperties: 4 },
+        ),
+      ).toEqual({
+        o: { a: 1, b: 2, c: 3 },
+        l: [{ a: 1, b: 2, c: 3 }],
+      });
+      expect(
+        toStructuredDebugValue({ o: { a: 1, b: 2, c: 3 } }, {
+          maxProperties: 2,
+        }),
+      ).toEqual({ o: { a: 1, b: 2, "/...": { count: 3 } } });
+    });
+
+    it("returns the form in place of a class instance's properties past the limit", () => {
+      class Data {
+        a = 1;
+        b = 2;
+        c = 3;
+      }
+      expect(toStructuredDebugValue(new Data(), { maxProperties: 2 }))
+        .toEqual({ "/Data": { a: 1, b: 2, "/...": { count: 3 } } });
+    });
+
+    it("returns a user's `/...` key escaped, beside the form", () => {
+      expect(
+        toStructuredDebugValue({ "/...": 1, b: 2 }, { maxProperties: 1 }),
+      ).toEqual({ "//...": 1, "/...": { count: 2 } });
+    });
+
+    it("returns no more than 100 properties when the limit is not given", () => {
+      const value = Object.fromEntries(
+        Array.from({ length: 150 }, (_, i) => [`k${i}`, i]),
+      );
+      const result = toStructuredDebugValue(value) as Record<string, unknown>;
+      const keys = Object.keys(result);
+      expect(keys.length).toBe(101);
+      expect(keys[99]).toBe("k99");
+      expect(result["/..."]).toEqual({ count: 150 });
+    });
+
+    it("returns no more than 10000 properties given a larger limit", () => {
+      const value = Object.fromEntries(
+        Array.from({ length: 10500 }, (_, i) => [`k${i}`, i]),
+      );
+      for (const limit of [20000, Infinity]) {
+        const result = toStructuredDebugValue(
+          value,
+          { maxProperties: limit },
+        ) as Record<string, unknown>;
+        expect(Object.keys(result).length).toBe(10001);
+        expect(result["/..."]).toEqual({ count: 10500 });
+      }
+    });
+
+    it("throws given a `maxProperties` that is not a positive integer", () => {
+      for (const bad of [0, -1, 1.5, -Infinity, NaN, "3", null, {}]) {
+        const options = { maxProperties: bad as unknown as number };
+        expect(() => toStructuredDebugValue({}, options)).toThrow(
+          "`maxProperties` must be a positive integer, `Infinity`, or",
+        );
+      }
+    });
+  });
+
   describe("with `maxStringLength`", () => {
     it("returns `/partialString` with the length and an excerpt for a string past the limit", () => {
       expect(toStructuredDebugValue("abcdefgh", { maxStringLength: 5 }))

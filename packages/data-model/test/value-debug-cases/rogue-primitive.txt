@@ -5,8 +5,18 @@
     class RoguePrimitive extends FabricPrimitive {}
     return new RoguePrimitive();
   })(),
+  "no codec, name not an identifier": (() => {
+    class RoguePrimitive extends FabricPrimitive {
+      static name = "Rogue Primitive";
+    }
+    return new RoguePrimitive();
+  })(),
 }
 
 no codec:
 /RoguePrimitive(...)
 /RoguePrimitive(...)
+
+no codec, name not an identifier:
+/"Rogue Primitive"(...)
+/"Rogue Primitive"(...)

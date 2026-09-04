@@ -9,7 +9,10 @@ import {
   hashSchema,
   internSchema,
 } from "@commonfabric/data-model-schema";
-import { toCompactDebugString } from "@commonfabric/data-model";
+import {
+  type DebugValueOptions,
+  toCompactDebugString,
+} from "@commonfabric/data-model";
 import { favoriteListSchema } from "@commonfabric/home-schemas";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import { LRUCache } from "@commonfabric/utils/cache";
@@ -133,6 +136,16 @@ class WishError extends Error {
 const MIN_INTERVAL_SECONDS = 1;
 const MAX_INTERVAL_SECONDS = 24 * 60 * 60;
 const ONE_SHOT_RESOLUTION_MS = 1000;
+
+/**
+ * Rendering options for a commit failure shown in a sidecar: strings and
+ * objects whole, since the error's message can be an inconsistency report
+ * whose tail is the difference it reports.
+ */
+const COMMIT_FAILURE_RENDER_OPTIONS: DebugValueOptions = {
+  maxProperties: Infinity,
+  maxStringLines: Infinity,
+};
 
 /**
  * Quantize timestamp to resolution boundary.
@@ -2516,11 +2529,9 @@ export function wish(
             return;
           }
           if (disposition === "retry") continue;
-          // The error's message can be an inconsistency report whose tail is
-          // the difference it reports, so a string is rendered whole.
           await commitPatternErrorUI(
             resultCell,
-            toCompactDebugString(error, { maxStringLines: Infinity }),
+            toCompactDebugString(error, COMMIT_FAILURE_RENDER_OPTIONS),
           );
           return;
         }

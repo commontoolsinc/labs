@@ -44,6 +44,18 @@ const ABSOLUTE_MAX_ARRAY_LENGTH = 10000;
 const DEFAULT_MAX_ARRAY_LENGTH = 100;
 
 /**
+ * Number of properties of an object a conversion stops at whatever its
+ * options say, so that a result is bounded in size whatever the input.
+ */
+const ABSOLUTE_MAX_PROPERTIES = 10000;
+
+/**
+ * Number of properties of an object a conversion stops at, when its options
+ * do not say.
+ */
+const DEFAULT_MAX_PROPERTIES = 100;
+
+/**
  * Length of a string a conversion carries whole whatever its options say, so
  * that a result is bounded in size whatever the input.
  */
@@ -100,6 +112,7 @@ type PartialString = { readonly length: number; readonly excerpt: string };
 type ConversionLimits = {
   readonly maxDepth: number;
   readonly maxArrayLength: number;
+  readonly maxProperties: number;
   readonly maxStringLength: number;
   readonly maxStringLines: number;
 };
@@ -238,12 +251,18 @@ class DebugConverter {
   }
 
   /**
-   * Converts a plain object, which is known to be at the indicated nesting depth.
+   * Converts a plain object, which is known to be at the indicated nesting
+   * depth. An object with more properties than the maximum property count
+   * has the first that many converted, in key order, and after them a `/...`
+   * property carrying the count of the whole. That form nests two levels, so
+   * a result holding one can run one level past the maximum nesting depth.
    */
   #convertPlainObject(value: any, depth: number): FabricValue {
+    const maxProperties = this.#limits.maxProperties;
+    const keys: string[] = Object.keys(value);
     const result: Record<string, FabricValue> = {};
 
-    for (const key of Object.keys(value)) {
+    for (const key of keys.slice(0, maxProperties)) {
       const resultKey = (isUnsafeObjectKey(key) || (key[0] === "/"))
         ? `/${key}`
         : key;
@@ -252,6 +271,10 @@ class DebugConverter {
       } catch (e) {
         result[resultKey] = DebugConverter.#makeUnconvertibleResult(e);
       }
+    }
+
+    if (keys.length > maxProperties) {
+      result["/..."] = { count: keys.length };
     }
 
     return result;
@@ -449,6 +472,7 @@ class DebugConverter {
  */
 class DebugStringifier {
   readonly #options: DebugValueOptions;
+  readonly #limits: ConversionLimits;
   readonly #singleIndent: string | undefined;
   readonly #spacer: string;
   readonly #colon: string;
@@ -460,10 +484,16 @@ class DebugStringifier {
   /**
    * Constructs an instance which renders using `indent` spaces per nesting
    * level when given, and on a single line when not. A value which turns up
-   * unconverted while rendering is converted with `options`.
+   * unconverted while rendering is converted with `options`, and what the
+   * rendering lays out itself, unconverted, is bounded by `limits`.
    */
-  constructor(options: DebugValueOptions, indent?: number) {
+  constructor(
+    options: DebugValueOptions,
+    limits: ConversionLimits,
+    indent?: number,
+  ) {
     this.#options = options;
+    this.#limits = limits;
     this.#singleIndent = (indent === undefined)
       ? undefined
       : " ".repeat(indent);
@@ -560,7 +590,8 @@ class DebugStringifier {
       return DebugStringifier.#renderElidedInstance(classNameOf(value));
     }
 
-    const open = `/${DebugStringifier.#typeNameOf(tag)}(`;
+    const typeName = DebugStringifier.#typeNameOf(tag);
+    const open = `${DebugStringifier.#renderTypeName(typeName)}(`;
 
     if (isPlainObject(state)) {
       const parts = this.#renderProperties(
@@ -610,17 +641,17 @@ class DebugStringifier {
    * Renders a class instance which the conversion carried under its class
    * name, or a `FabricInstance` carried under its type name, as
    * `/Name(<props>)` when its payload is a plain object of properties and as
-   * `/Name(...)` when the conversion had nothing to show for it. Any other
-   * payload -- a `toString()` form, what `toJSON()` returned, or an encoding
-   * that is not a plain object -- is rendered as it stands inside the
-   * parentheses.
+   * `/Name(...)` when the conversion had nothing to show for it, the name
+   * rendered as `#renderTypeName()` renders it. Any other payload -- a
+   * `toString()` form, what `toJSON()` returned, or an encoding that is not a
+   * plain object -- is rendered as it stands inside the parentheses.
    */
   #renderInstance(
     className: string,
     payload: FabricValue,
     indent: string,
   ): string {
-    const open = `/${className}(`;
+    const open = `${DebugStringifier.#renderTypeName(className)}(`;
 
     if (payload === "/...") {
       return `${open}...)`;
@@ -665,27 +696,55 @@ class DebugStringifier {
   /**
    * Renders the properties of a plain object, one part per property, for a
    * container whose closing bracket is indented by `indent`, each value
-   * rendered by `render` (by default, as a converted value). When `unescape`
-   * is `true` (the default), a key is rendered as the original value's key:
-   * the conversion prefixes a slash to a key that starts with one and to an
-   * unsafe key, and that slash comes back off here.
+   * rendered by `render` (by default, as a converted value). When `converted`
+   * is `true` (the default), the object came through the conversion: a key is
+   * rendered as the original value's key, the slash the conversion prefixes
+   * to a key that starts with one and to an unsafe key coming back off here,
+   * and a final `/...` property is the property-count form, rendered as the
+   * count it carries. Otherwise the object is laid out as it stands, and one
+   * with more properties than the maximum property count has the first that
+   * many rendered and then the count of the whole.
    */
   #renderProperties<T>(
     value: { readonly [key: string]: T },
     indent: string,
     render: (value: T, indent: string) => string = (v, i) =>
       this.#renderSubvalue(v as unknown as FabricValue, i),
-    unescape = true,
+    converted = true,
   ): string[] {
     const inner = this.#innerIndent(indent);
+    const entries = Object.entries(value);
+    let count: number | undefined;
 
-    return Object.entries(value).map(([key, subvalue]) => {
-      const original = (unescape && (key[0] === "/")) ? key.slice(1) : key;
+    if (converted) {
+      const last = entries.at(-1);
+      const lastCount = (last?.[0] === "/...")
+        ? DebugStringifier.#countOf(last[1] as FabricValue)
+        : undefined;
+      if (lastCount !== undefined) {
+        count = lastCount;
+        entries.pop();
+      }
+    }
+
+    if (entries.length > this.#limits.maxProperties) {
+      count = entries.length;
+      entries.length = this.#limits.maxProperties;
+    }
+
+    const parts = entries.map(([key, subvalue]) => {
+      const original = (converted && (key[0] === "/")) ? key.slice(1) : key;
       const rendered = render(subvalue, inner);
       return `${
         DebugStringifier.#renderKey(original)
       }${this.#colon}${rendered}`;
     });
+
+    if (count !== undefined) {
+      parts.push(this.#renderElision("count", count));
+    }
+
+    return parts;
   }
 
   /**
@@ -799,7 +858,9 @@ class DebugStringifier {
         // whose payload -- what kind of value was elided -- is left out of
         // the rendering.
         const length = DebugStringifier.#lengthOf(payload);
-        return (length === undefined) ? "..." : this.#renderLength(length);
+        return (length === undefined)
+          ? "..."
+          : this.#renderElision("length", length);
       }
 
       case "partialString": {
@@ -843,11 +904,11 @@ class DebugStringifier {
   }
 
   /**
-   * Renders the note which stands for what a length limit cut: an ellipsis
-   * and the actual length.
+   * Renders the note which stands for what a limit cut: an ellipsis, then
+   * the actual measure under `label`, which names what was measured.
    */
-  #renderLength(length: number): string {
-    return `...${this.#spacer}length${this.#colon}${length}`;
+  #renderElision(label: string, measure: number): string {
+    return `...${this.#spacer}${label}${this.#colon}${measure}`;
   }
 
   /**
@@ -861,7 +922,7 @@ class DebugStringifier {
     const separator = this.#isCompact
       ? this.#spacer
       : `\n${this.#innerIndent(indent)}`;
-    const length = this.#renderLength(partial.length);
+    const length = this.#renderElision("length", partial.length);
 
     return `${rendered}${this.#spacer}+${separator}${length}`;
   }
@@ -894,7 +955,7 @@ class DebugStringifier {
    * than an instance of some random class.
    */
   static #renderElidedInstance(name: string): string {
-    return `/${name}(...)`;
+    return `${DebugStringifier.#renderTypeName(name)}(...)`;
   }
 
   /**
@@ -906,12 +967,33 @@ class DebugStringifier {
   }
 
   /**
-   * Renders a key -- an object property name or a symbol's key -- bare when it
-   * is a valid identifier, and as a quoted string otherwise. The identifier
-   * check is the ASCII one.
+   * Renders a key -- an object property name, a symbol's key, or a type name
+   * -- bare when it is a valid identifier, and as a quoted string otherwise.
+   * The identifier check is the ASCII one.
    */
   static #renderKey(key: string): string {
     return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? key : JSON.stringify(key);
+  }
+
+  /**
+   * Renders the type name a tagged form opens with: a slash, then the name as
+   * `#renderKey()` renders it. The `<anonymous>` marker, which stands for a
+   * class with no name, stays bare.
+   */
+  static #renderTypeName(name: string): string {
+    const rendered = (name === "<anonymous>")
+      ? name
+      : DebugStringifier.#renderKey(name);
+    return `/${rendered}`;
+  }
+
+  /**
+   * Returns the `count` of the given value when it is a plain object whose
+   * `count` is a number, which is the payload shape of the property-count
+   * form, and `undefined` when it is not.
+   */
+  static #countOf(value: FabricValue): number | undefined {
+    return DebugStringifier.#measureOf(value, "count");
   }
 
   /**
@@ -920,12 +1002,20 @@ class DebugStringifier {
    * form, and `undefined` when it is not.
    */
   static #lengthOf(value: FabricValue): number | undefined {
+    return DebugStringifier.#measureOf(value, "length");
+  }
+
+  /**
+   * Returns the property `name` of the given value when it is a plain object
+   * whose property so named is a number, and `undefined` when it is not.
+   */
+  static #measureOf(value: FabricValue, name: string): number | undefined {
     if (!isPlainObject(value)) {
       return undefined;
     }
 
-    const { length } = value as FabricPlainObject;
-    return (typeof length === "number") ? length : undefined;
+    const measure = (value as FabricPlainObject)[name];
+    return (typeof measure === "number") ? measure : undefined;
   }
 
   /**
@@ -1074,6 +1164,12 @@ function checkedLimits(
       DEFAULT_MAX_ARRAY_LENGTH,
       ABSOLUTE_MAX_ARRAY_LENGTH,
     ),
+    maxProperties: checkedLimit(
+      "maxProperties",
+      options?.maxProperties,
+      DEFAULT_MAX_PROPERTIES,
+      ABSOLUTE_MAX_PROPERTIES,
+    ),
     maxStringLength: checkedLimit(
       "maxStringLength",
       options?.maxStringLength,
@@ -1103,14 +1199,13 @@ function renderDebugString(
 ): string {
   // The limits are resolved here, ahead of the `try`, so that an invalid one
   // is refused rather than rendered as unrenderable.
-  const converterOptions: DebugValueOptions = {
-    ...options,
-    ...checkedLimits(options, DEFAULT_STRING_MAX_DEPTH),
-  };
+  const limits = checkedLimits(options, DEFAULT_STRING_MAX_DEPTH);
+  const converterOptions: DebugValueOptions = { ...options, ...limits };
 
   try {
     const converted = toStructuredDebugValue(value, converterOptions);
-    return new DebugStringifier(converterOptions, indent).render(converted);
+    return new DebugStringifier(converterOptions, limits, indent)
+      .render(converted);
     // deno-coverage-ignore-start
   } catch {
     // Neither the conversion nor the rendering is meant to throw. This `catch`
@@ -1145,7 +1240,9 @@ function renderDebugString(
  * The rendering stops at the nesting depth given in `options`, ten levels
  * when not given, below which a value is elided. It likewise stops at the
  * array length given in `options`, one hundred elements when not given, and
- * says the array's actual length in place of the elements past it; and a
+ * says the array's actual length in place of the elements past it; likewise
+ * at the property count given in `options`, one hundred when not given, and
+ * says the object's actual count in place of the properties past it; and a
  * string longer than the string length given in `options`, two hundred
  * characters when not given, renders as an excerpt of that length followed by
  * the string's actual length.
@@ -1240,12 +1337,15 @@ export function toDebugKindString(value: unknown): string {
  * be reasonably achieved.
  *
  * The limits of the result -- its nesting, the number of elements of an array
- * it represents, and the length and number of lines of a string it carries
- * whole -- and a replacer to consult are the `maxDepth`, `maxArrayLength`,
+ * it represents, the number of properties of an object it represents, and the
+ * length and number of lines of a string it carries whole -- and a replacer
+ * to consult are the `maxDepth`, `maxArrayLength`, `maxProperties`,
  * `maxStringLength`, `maxStringLines`, and `replacer` of `options`. When
  * there is no nesting limit given, the result nests as deep as reasonably
  * possible; when there is no array length given, an array is represented to
- * one hundred elements; when there is no string line count given, a string is
+ * one hundred elements; when there is no property count given, an object is
+ * represented to one hundred properties; when there is no string line count
+ * given, a string is
  * carried whole to five lines; and when there is no string length given, a
  * string is carried whole to two hundred characters, or as long as the
  * conversion allows when a line count is given.

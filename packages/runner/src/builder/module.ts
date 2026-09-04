@@ -366,6 +366,7 @@ export const assertCapture = <T>(
 const ASSERT_RENDER_OPTIONS: DebugValueOptions = {
   maxDepth: Infinity,
   maxArrayLength: Infinity,
+  maxProperties: Infinity,
   maxStringLines: Infinity,
 };
 
