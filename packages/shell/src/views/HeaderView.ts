@@ -525,6 +525,9 @@ export class XHeaderView extends BaseView {
 
   #unsubscribeFavorites: (() => void) | undefined;
 
+  /** Whether a favorite toggle is in flight, which refuses a second one. */
+  #isFavoriteLoading = false;
+
   /** Subscribe to the favorites list so the menu reflects current state. */
   #setupFavoritesSubscription(): void {
     this.#cleanupFavoritesSubscription();
@@ -904,9 +907,6 @@ export class XHeaderView extends BaseView {
     }
     this.menuOpen = false;
   }
-
-  /** Whether a favorite toggle is in flight, which refuses a second one. */
-  #isFavoriteLoading = false;
 
   /**
    * Toggle the current piece's favorite status. Uses optimistic UI —

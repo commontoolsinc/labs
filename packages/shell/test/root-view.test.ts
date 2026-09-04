@@ -467,27 +467,26 @@ describe("XRootView", () => {
       view.connectedCallback();
       view.disconnectedCallback();
 
-      const handler = view.accessForTestingOnly.onBeforeUnload as (
-        event: { preventDefault: () => void },
-      ) => void;
-      let prevented = 0;
-      const event = () => ({ preventDefault: () => prevented++ });
+      const handler = view.accessForTestingOnly.onBeforeUnload;
+      // A cancelable event records the prompt as `defaultPrevented`.
+      const unload = () => {
+        const event = new Event("beforeunload", { cancelable: true });
+        handler(event as BeforeUnloadEvent);
+        return event.defaultPrevented;
+      };
       const setRuntime = (runtime: unknown) =>
         (view as unknown as { runtime: unknown }).runtime = runtime;
 
       // No runtime yet: nothing to lose, so no prompt.
-      handler(event());
-      expect(prevented).toBe(0);
+      expect(unload()).toBe(false);
 
       // A runtime with no unconfirmed writes: no prompt.
       setRuntime({ hasPendingWrites: () => false });
-      handler(event());
-      expect(prevented).toBe(0);
+      expect(unload()).toBe(false);
 
       // Unconfirmed writes in flight: prompt the user before unload.
       setRuntime({ hasPendingWrites: () => true });
-      handler(event());
-      expect(prevented).toBe(1);
+      expect(unload()).toBe(true);
     } finally {
       restore();
     }

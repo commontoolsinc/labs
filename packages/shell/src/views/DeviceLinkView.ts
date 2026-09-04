@@ -196,6 +196,7 @@ export class XDeviceLinkView extends LitElement {
     super.disconnectedCallback();
   }
 
+  /** Answers the dialog once, dispatching the result the host listens for. */
   #finish(accepted: boolean) {
     // Exactly one answer, ever: a double-tap must not dispatch twice.
     if (this.#answered) return;
