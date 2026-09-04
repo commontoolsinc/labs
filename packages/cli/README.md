@@ -806,12 +806,13 @@ reaches stdout, not to control what travels.
 
 A selection also adds a computed read after the call. The shaped readback runs
 through the same shared read step as `cf cell get`, and waits for its output
-with `Cell.pull()`; it does not add an explicit runtime-wide idle and storage
-sync between its readiness and confirmation pulls. `Cell.pull()` still uses the
-runtime scheduler and its manager-wide linked-document convergence pool, so work
-already active in that runtime can still share the wait. When isolating the read
-matters, shape the collect instead: call plain (or `--no-wait`), then
-`cf cell get --cell <receipt id> --select …`.
+with one `Cell.pull()`. That pull drives the output's transitive computation and
+linked-document loads through the runtime scheduler and its manager-wide
+convergence pool, so work already active in that runtime can still share the
+wait. Declared object keys are then ordered locally from the projection before
+rendering; that step starts no graph or storage work. When isolating the read
+matters, shape the collect instead. Call plain (or `--no-wait`), then collect
+from the receipt with `cf cell get --cell <receipt id> --select …`.
 
 Three cases follow from that:
 

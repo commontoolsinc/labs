@@ -2055,7 +2055,7 @@ describe("cf cell get transforms", () => {
     }
   });
 
-  it("answers from the selected output without a storage-wide sync", async () => {
+  it("returns projection-ordered output without a storage-wide sync", async () => {
     const setup = runtime.edit();
     const source = runtime.getCell(
       space,
@@ -2066,6 +2066,7 @@ describe("cf cell get transforms", () => {
           type: "object",
           properties: {
             id: { type: "number" },
+            label: { type: "string" },
             ignored: { type: "string" },
           },
         },
@@ -2073,8 +2074,8 @@ describe("cf cell get transforms", () => {
       setup,
     );
     source.set([
-      { id: 1, ignored: "not selected" },
-      { id: 2, ignored: "not selected" },
+      { id: 1, label: "first", ignored: "not selected" },
+      { id: 2, label: "second", ignored: "not selected" },
     ]);
     expect((await setup.commit()).ok).toBeDefined();
 
@@ -2085,11 +2086,16 @@ describe("cf cell get transforms", () => {
       return originalSynced();
     };
     try {
-      expect(
-        await deriveSelectedValue(runtime, space, source, {
-          projection: parseSelectProjection("id"),
-        }),
-      ).toEqual([{ id: 1 }, { id: 2 }]);
+      const result = await deriveSelectedValue(runtime, space, source, {
+        projection: parseSelectProjection("label,id"),
+      });
+      expect(result).toEqual([
+        { label: "first", id: 1 },
+        { label: "second", id: 2 },
+      ]);
+      expect(JSON.stringify(result)).toBe(
+        '[{"label":"first","id":1},{"label":"second","id":2}]',
+      );
       expect(storageWideSyncs).toBe(0);
     } finally {
       storageManager.synced = originalSynced;

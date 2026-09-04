@@ -3404,17 +3404,20 @@ export async function deriveSelectedValue(
         `Could not apply get transform: ${committed.error}`,
       );
     }
-    // pull() is the narrowest existing readiness boundary for this output: it
-    // drives transitive computations, waits for linked documents those reads
-    // discover, and re-idles after each arrival. Keep the confirmation pull;
-    // besides being cheap once current, it preserves byte-identical projected
-    // object order across get, call, wish, and exec. Explicit runtime.idle()
-    // and storageManager.synced() calls between the pulls instead widen the
-    // boundary to unrelated reactive and storage work without strengthening
-    // the selected output's guarantee.
+    // pull() is the readiness boundary for this output: it drives transitive
+    // computations, waits for linked documents those reads discover, and
+    // re-idles after each arrival.
     await timeSelectionPhase("output.pull", () => outputCell.pull());
-    await timeSelectionPhase("output.pull.confirm", () => outputCell.pull());
     const outputValue = outputCell.get();
+    // Runtime materialization can expose object children in arrival order.
+    // Apply the resolved projection to the value in hand so declared fields
+    // instead follow schema order. This is local value work and starts no graph
+    // or storage operation.
+    const orderedOutput = projection === undefined ? outputValue : projectValue(
+      outputValue,
+      projection.projectionSchema,
+      implicitArrayTraversal,
+    );
     const recorded = errors.slice(errorCountBefore);
     if (recorded.length > 0) {
       // Translate the array-shape errors emitted by the runner filter/map
@@ -3446,10 +3449,10 @@ export async function deriveSelectedValue(
       );
     }
     deps.onOutputCell?.(outputCell);
-    return markers === undefined ? outputValue : await composeLinkAddresses(
+    return markers === undefined ? orderedOutput : await composeLinkAddresses(
       sourcePosition(sourceValueCell, space),
       markers,
-      outputValue,
+      orderedOutput,
       implicitArrayTraversal,
     );
   } finally {

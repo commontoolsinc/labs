@@ -191,9 +191,9 @@ export interface CallableExecutionDeps {
    * with `Cell.pull()`, whose scheduler and linked-document convergence pool
    * are runtime/manager-wide; a shaped call can therefore still share a wait
    * with active work that the plain call's transaction-local acknowledgment
-   * does not. It does not separately converge all storage. A verb that returns
-   * nothing keeps returning nothing — there is no value for a selection to be
-   * about. */
+   * does not. Declared object keys are ordered locally from the projection
+   * after that readiness boundary. A verb that returns nothing keeps returning
+   * nothing — there is no value for a selection to be about. */
   selection?: CellSelection;
 
   /** @internal Seam for tests, mirroring `getCellValue`'s. */
