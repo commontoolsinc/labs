@@ -14,7 +14,19 @@
 The shell supports these browser URL forms:
 
 - `/<space-name-or-did>`: opens the space root pattern.
-- `/<space-name-or-did>/<piece-id-or-slug>`: opens a specific piece.
+- `/<space-name-or-did>/<piece-id-or-slug>`: opens a specific piece. Where the
+  slug names a collection rather than a piece, this opens the piece that holds
+  the collection.
+- `/<space-name-or-did>/<collection-slug>/<member>`: opens the member the
+  collection calls `<member>`. One segment reaches one member, so a member's own
+  fields never answer to the collection's namespace. A member the collection
+  does not hold is reported by name, alongside the collection's. The header
+  offers the member's portable reference, `/@<space>/<collection>/<member>`,
+  which carries its own space and so depends on no binding of the reader's. `cf`
+  resolves it; this shell's own URLs and a pattern's `cellFromUrl` do not read
+  that grammar. Where the slug names a piece rather than a collection there are
+  no members to name, so the segment is dropped and the address settles on the
+  piece the page is showing.
 - `/.embed/<space-name-or-did>/<piece-id-or-slug>`: opens the same piece in
   embed mode.
 

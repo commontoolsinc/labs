@@ -93,16 +93,74 @@ class MockRuntimeClient {
    * START the piece (CT-1623: name listings must not start every piece) and
    * which space each call targets. */
   getPieceCalls: Array<
-    { pieceId: string; runIt: boolean | undefined; space: DID }
+    {
+      pieceId: string;
+      runIt: boolean | undefined;
+      space: DID;
+      scope?: string;
+    }
   > = [];
+
+  /** When set, the next `getPiece` rejects rather than answering. */
+  failNextGetPiece = false;
 
   getPiece(
     pieceId: string,
     space: DID,
     runIt?: boolean,
+    scope?: string,
   ): Promise<{ id: () => string }> {
-    this.getPieceCalls.push({ pieceId, runIt, space });
+    this.getPieceCalls.push({ pieceId, runIt, space, scope });
+    if (this.failNextGetPiece) {
+      this.failNextGetPiece = false;
+      return Promise.reject(new Error("the socket went away"));
+    }
     return Promise.resolve({ id: () => pieceId });
+  }
+
+  /**
+   * Where the next `resolveSlug` lands. A test sets its space and scope to
+   * say what the walk reached, that ref being the whole of what the caller
+   * can check the reference against.
+   */
+  slugReference: {
+    pieceId: string;
+    pathAfter: string[];
+    space: DID;
+    scope: string;
+  } | undefined = undefined;
+
+  resolveSlugCalls: Array<
+    { slug: string; space: DID; member: string | undefined }
+  > = [];
+
+  /** What the next `resolveSlug` refuses with, when it refuses. */
+  slugRefusal: { code: string; message: string } | undefined = undefined;
+
+  resolveSlug(
+    slug: string,
+    space: DID,
+    member?: string,
+  ): Promise<{
+    piece?: { id(): string; cell(): { ref(): { space: DID; scope: string } } };
+    pathAfter?: string[];
+    refusal?: { code: string; message: string };
+  }> {
+    this.resolveSlugCalls.push({ slug, space, member });
+    if (this.slugRefusal) {
+      return Promise.resolve({ refusal: this.slugRefusal });
+    }
+    const reference = this.slugReference;
+    if (!reference) return Promise.reject(new Error(`asking failed`));
+    return Promise.resolve({
+      piece: {
+        id: () => reference.pieceId,
+        cell: () => ({
+          ref: () => ({ space: reference.space, scope: reference.scope }),
+        }),
+      },
+      pathAfter: reference.pathAfter,
+    });
   }
 
   dispose(): Promise<void> {
@@ -282,6 +340,202 @@ describe("RuntimeInternals", () => {
       await expect(runtime.getSlug(spaceDid, "piece-789")).resolves.toBe(
         "demo",
       );
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  describe("resolveSlug", () => {
+    const space = "did:key:z6Mk-lib-shell-slug-reference" as DID;
+
+    it("returns the piece a member reference reached", async () => {
+      const client = new MockRuntimeClient();
+      client.slugReference = {
+        pieceId: "fid1:member-42",
+        pathAfter: [],
+        space,
+        scope: "space",
+      };
+      const runtime = new RuntimeInternals(client as any);
+
+      try {
+        await expect(runtime.resolveSlug(space, "top", "42")).resolves.toEqual({
+          pieceId: "fid1:member-42",
+          scope: "space",
+          pathAfter: [],
+        });
+        // The slug and the member cross as they were written, in the order
+        // the client reads them.
+        expect(client.resolveSlugCalls).toEqual([
+          { slug: "top", space, member: "42" },
+        ]);
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("hands back a member the walk did not spend", async () => {
+      const client = new MockRuntimeClient();
+      // A slug naming a piece at its root spends nothing, so the member is
+      // left over rather than silently becoming part of that piece's address.
+      client.slugReference = {
+        pieceId: "fid1:plain",
+        pathAfter: ["42"],
+        space,
+        scope: "space",
+      };
+      const runtime = new RuntimeInternals(client as any);
+
+      try {
+        await expect(runtime.resolveSlug(space, "plain", "42")).resolves
+          .toEqual({
+            pieceId: "fid1:plain",
+            scope: "space",
+            pathAfter: ["42"],
+          });
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("refuses a piece in another space, in those terms", async () => {
+      const client = new MockRuntimeClient();
+      // Following a member's links can land outside the space the reference
+      // was read in, and only the id crosses on to `getPattern`, which
+      // re-derives the space from the view. Refusing here says so; letting it
+      // through would report a piece that does not exist.
+      client.slugReference = {
+        pieceId: "fid1:elsewhere",
+        pathAfter: [],
+        space: "did:key:z6Mk-lib-shell-other-space" as DID,
+        scope: "space",
+      };
+      const runtime = new RuntimeInternals(client as any);
+
+      try {
+        await expect(runtime.resolveSlug(space, "top", "42")).rejects.toThrow(
+          "did:key:z6Mk-lib-shell-other-space",
+        );
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("returns a piece in a narrower scope, carrying that scope", async () => {
+      const client = new MockRuntimeClient();
+      // A member reached through a user- or session-scoped link is a piece
+      // like any other. Refusing it would turn a working address into a load
+      // error; what it needs is its scope carried, because the id alone
+      // addresses nothing.
+      client.slugReference = {
+        pieceId: "fid1:mine-only",
+        pathAfter: [],
+        space,
+        scope: "user",
+      };
+      const runtime = new RuntimeInternals(client as any);
+
+      try {
+        await expect(runtime.resolveSlug(space, "top", "42")).resolves.toEqual({
+          pieceId: "fid1:mine-only",
+          scope: "user",
+          pathAfter: [],
+        });
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("returns a refusal rather than throwing one", async () => {
+      const client = new MockRuntimeClient();
+      client.slugRefusal = {
+        code: "missing-member",
+        message: "no member 999 in top",
+      };
+      const runtime = new RuntimeInternals(client as any);
+
+      try {
+        await expect(runtime.resolveSlug(space, "top", "999")).resolves
+          .toEqual({
+            refusal: {
+              code: "missing-member",
+              message: "no member 999 in top",
+            },
+          });
+      } finally {
+        await runtime.dispose();
+      }
+    });
+
+    it("guards resolveSlug after dispose", async () => {
+      const client = new MockRuntimeClient();
+      const runtime = new RuntimeInternals(client as any);
+      await runtime.dispose();
+
+      await expect(runtime.resolveSlug(space, "top", "42")).rejects.toThrow(
+        "RuntimeInternals disposed.",
+      );
+    });
+  });
+
+  it("invalidates one piece without evicting another whose id ends the same", async () => {
+    // `of:fid1:X` and `fid1:X` are both id spellings this tree handles, and
+    // they are different pieces. Matching a flattened `<space>:<scope>:<id>`
+    // key by its ends answers about one and evicts the other.
+    const space = "did:key:z6Mk-lib-shell-invalidate" as DID;
+    const client = new MockRuntimeClient();
+    const runtime = new RuntimeInternals(client as any);
+
+    try {
+      await runtime.getPattern(space, "fid1:XYZ");
+      await runtime.getPattern(space, "of:fid1:XYZ");
+      const before = client.getPieceCalls.length;
+
+      runtime.invalidatePattern(space, "fid1:XYZ");
+
+      // The one named is gone and reloads; the other is still cached and
+      // answers without a second trip to the worker.
+      await runtime.getPattern(space, "of:fid1:XYZ");
+      expect(client.getPieceCalls.length).toBe(before);
+      await runtime.getPattern(space, "fid1:XYZ");
+      expect(client.getPieceCalls.length).toBe(before + 1);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("caches one id in two scopes as two pieces", async () => {
+    const space = "did:key:z6Mk-lib-shell-scope-cache" as DID;
+    const client = new MockRuntimeClient();
+    const runtime = new RuntimeInternals(client as any);
+
+    try {
+      await runtime.getPattern(space, "fid1:XYZ", { scope: "space" });
+      await runtime.getPattern(space, "fid1:XYZ", { scope: "user" });
+
+      // Two documents, so two loads — a cache keyed on the id alone would
+      // have handed the second caller the first one's piece.
+      expect(client.getPieceCalls).toEqual([
+        { pieceId: "fid1:XYZ", runIt: true, space, scope: "space" },
+        { pieceId: "fid1:XYZ", runIt: true, space, scope: "user" },
+      ]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("leaves no empty levels behind when a load fails", async () => {
+    // A nested cache holds a level per address component, so evicting only
+    // the piece leaves the scope and the space it sat in — and a run of
+    // failed lookups is a run of those, held for the runtime's lifetime.
+    const space = "did:key:z6Mk-lib-shell-cache-levels" as DID;
+    const client = new MockRuntimeClient();
+    client.failNextGetPiece = true;
+    const runtime = new RuntimeInternals(client as any);
+
+    try {
+      await expect(runtime.getPattern(space, "fid1:gone")).rejects.toThrow();
+      expect(runtime.accessForTestingOnly.patternCacheSize).toBe(0);
     } finally {
       await runtime.dispose();
     }
@@ -812,7 +1066,7 @@ describe("RuntimeInternals", () => {
       try {
         await runtime.getPattern(spaceDid, "piece-1");
         expect(client.getPieceCalls).toEqual([
-          { pieceId: "piece-1", runIt: true, space: spaceDid },
+          { pieceId: "piece-1", runIt: true, space: spaceDid, scope: "space" },
         ]);
       } finally {
         await runtime.dispose();
@@ -824,7 +1078,7 @@ describe("RuntimeInternals", () => {
       try {
         await runtime.getPattern(spaceDid, "piece-1", { start: false });
         expect(client.getPieceCalls).toEqual([
-          { pieceId: "piece-1", runIt: false, space: spaceDid },
+          { pieceId: "piece-1", runIt: false, space: spaceDid, scope: "space" },
         ]);
       } finally {
         await runtime.dispose();
@@ -837,8 +1091,8 @@ describe("RuntimeInternals", () => {
         await runtime.getPattern(spaceDid, "piece-1", { start: false });
         await runtime.getPattern(spaceDid, "piece-1");
         expect(client.getPieceCalls).toEqual([
-          { pieceId: "piece-1", runIt: false, space: spaceDid },
-          { pieceId: "piece-1", runIt: true, space: spaceDid },
+          { pieceId: "piece-1", runIt: false, space: spaceDid, scope: "space" },
+          { pieceId: "piece-1", runIt: true, space: spaceDid, scope: "space" },
         ]);
       } finally {
         await runtime.dispose();
@@ -852,7 +1106,7 @@ describe("RuntimeInternals", () => {
         await runtime.getPattern(spaceDid, "piece-1");
         await runtime.getPattern(spaceDid, "piece-1", { start: false });
         expect(client.getPieceCalls).toEqual([
-          { pieceId: "piece-1", runIt: true, space: spaceDid },
+          { pieceId: "piece-1", runIt: true, space: spaceDid, scope: "space" },
         ]);
       } finally {
         await runtime.dispose();
@@ -865,7 +1119,7 @@ describe("RuntimeInternals", () => {
         await runtime.getPattern(spaceDid, "piece-1", { start: false });
         await runtime.getPattern(spaceDid, "piece-1", { start: false });
         expect(client.getPieceCalls).toEqual([
-          { pieceId: "piece-1", runIt: false, space: spaceDid },
+          { pieceId: "piece-1", runIt: false, space: spaceDid, scope: "space" },
         ]);
       } finally {
         await runtime.dispose();
@@ -886,8 +1140,8 @@ describe("RuntimeInternals", () => {
   });
 
   describe("getPattern multi-space", () => {
-    // One runtime serves every space; a pattern's address is (space, id)
-    // and the cache is keyed by that address.
+    // One runtime serves every space; a pattern's address is
+    // (space, scope, id) and the cache is keyed by that whole address.
 
     const homeDid = "did:key:z6Mk-lib-shell-runtime-home" as DID;
     const otherDid = "did:key:z6Mk-lib-shell-runtime-other" as DID;
@@ -903,22 +1157,22 @@ describe("RuntimeInternals", () => {
       try {
         await runtime.getPattern(otherDid, "piece-1");
         expect(client.getPieceCalls).toEqual([
-          { pieceId: "piece-1", runIt: true, space: otherDid },
+          { pieceId: "piece-1", runIt: true, space: otherDid, scope: "space" },
         ]);
       } finally {
         await runtime.dispose();
       }
     });
 
-    it("caches per (space, id) — same id in two spaces are distinct", async () => {
+    it("caches per address — one id in two spaces is two pieces", async () => {
       const { client, runtime } = makeRuntime();
       try {
         await runtime.getPattern(homeDid, "piece-1");
         await runtime.getPattern(otherDid, "piece-1");
         await runtime.getPattern(otherDid, "piece-1");
         expect(client.getPieceCalls).toEqual([
-          { pieceId: "piece-1", runIt: true, space: homeDid },
-          { pieceId: "piece-1", runIt: true, space: otherDid },
+          { pieceId: "piece-1", runIt: true, space: homeDid, scope: "space" },
+          { pieceId: "piece-1", runIt: true, space: otherDid, scope: "space" },
         ]);
       } finally {
         await runtime.dispose();
@@ -934,9 +1188,9 @@ describe("RuntimeInternals", () => {
         await runtime.getPattern(homeDid, "piece-1"); // still cached
         await runtime.getPattern(otherDid, "piece-1"); // re-fetched
         expect(client.getPieceCalls).toEqual([
-          { pieceId: "piece-1", runIt: true, space: homeDid },
-          { pieceId: "piece-1", runIt: true, space: otherDid },
-          { pieceId: "piece-1", runIt: true, space: otherDid },
+          { pieceId: "piece-1", runIt: true, space: homeDid, scope: "space" },
+          { pieceId: "piece-1", runIt: true, space: otherDid, scope: "space" },
+          { pieceId: "piece-1", runIt: true, space: otherDid, scope: "space" },
         ]);
       } finally {
         await runtime.dispose();

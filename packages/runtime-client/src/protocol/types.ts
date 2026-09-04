@@ -1,3 +1,4 @@
+import type { CellScope } from "@commonfabric/api";
 import type { MetaField } from "@commonfabric/runner";
 import type {
   FabricArray,
@@ -379,6 +380,12 @@ export enum RequestType {
 
   /** Reads a piece's slug, which a piece need not have. */
   PieceGetSlug = "piece:getSlug",
+
+  /**
+   * Answers with the piece a slug reference names, without starting it: the
+   * piece the slug reaches, or the member of the collection it names.
+   */
+  SlugResolve = "slug:resolve",
 
   /** Removes a piece from its space's list. */
   PieceRemove = "piece:remove",
@@ -2106,6 +2113,13 @@ export type PieceGetRequest = BaseRequest & {
    * The space the piece lives in.
    */
   space: DID;
+
+  /**
+   * The scope the piece's document sits in, defaulting to the space. A piece
+   * reached through a link into a narrower scope is addressed by its id plus
+   * that scope, and the id alone reaches nothing.
+   */
+  scope?: CellScope;
 };
 
 /** The {@link RequestType.PieceGetSlug} request. */
@@ -2119,6 +2133,28 @@ export type PieceGetSlugRequest = BaseRequest & {
 
   /**
    * The space the piece lives in.
+   */
+  space: DID;
+};
+
+/** The {@link RequestType.SlugResolve} request. */
+export type SlugResolveRequest = BaseRequest & {
+  type: RequestType.SlugResolve;
+
+  /**
+   * The slug to resolve.
+   */
+  slug: string;
+
+  /**
+   * The member to select out of the collection the slug names, absent where
+   * the reference stops at the slug. One member name, never a path: a
+   * member's own fields are addressed inside the piece it resolves to.
+   */
+  member?: string;
+
+  /**
+   * The space the slug is bound in.
    */
   space: DID;
 };
@@ -2828,6 +2864,7 @@ export type IPCClientRequest =
   | RecreateSpaceRootPatternRequest
   | PieceGetRequest
   | PieceGetSlugRequest
+  | SlugResolveRequest
   | PieceRemoveRequest
   | PieceStartRequest
   | PieceStopRequest
@@ -2940,6 +2977,66 @@ export type PieceResponse = {
    */
   piece: PieceRef;
 };
+
+/**
+ * Why a slug reference reached nothing. This is an outcome, not a failure:
+ * a name nobody has bound, or a member a collection does not hold, is what a
+ * reader is asking about, so it crosses as data and leaves the error channel
+ * to transport and decoding faults.
+ */
+export type SlugRefusal = {
+  /**
+   * Which refusal it is, as the runner's slug resolution names them.
+   */
+  code: string;
+
+  /**
+   * What to tell a reader, naming the collection and the member where the
+   * refusal knows them.
+   */
+  message: string;
+};
+
+/**
+ * Where a slug reference landed: the piece it reached and the segments the
+ * walk did not spend, or the refusal that says it reached nothing.
+ *
+ * The two are arms of a union rather than optional fields of one object, so
+ * that a response carrying both cannot be built. Written as optionals, the
+ * contradiction is a shape the type admits and only a reader can catch, and a
+ * reader that checks the refusal first reports a malformed answer as an
+ * ordinary "no such member".
+ */
+export type SlugReferenceResponse =
+  | {
+    /**
+     * The piece the reference reached.
+     */
+    piece: PieceRef;
+
+    /**
+     * What is left of the reference after the piece. Empty where the member
+     * named a member; the member itself where the slug named a piece at its
+     * root, which spends no segment and leaves the member a cell path the
+     * piece's own address does not include.
+     */
+    pathAfter: string[];
+
+    /** Absent, which is what makes this the landing arm. */
+    refusal?: undefined;
+  }
+  | {
+    /** Absent, which is what makes this the refusal arm. */
+    piece?: undefined;
+
+    /** Absent with the piece. */
+    pathAfter?: undefined;
+
+    /**
+     * Why the reference reached nothing.
+     */
+    refusal: SlugRefusal;
+  };
 
 /** A piece's slug, `undefined` where the piece has none. */
 export type SlugResponse = {
@@ -3308,6 +3405,7 @@ export type RemoteResponse =
   | TriggerTraceResponse
   | WriteStackTraceResponse
   | PieceResponse
+  | SlugReferenceResponse
   | PieceSourceResponse
   | PieceSourceRevisionResponse
   | PieceUpdateSourceResponse
@@ -3568,6 +3666,10 @@ export type Commands = {
   [RequestType.PieceGetSlug]: {
     request: PieceGetSlugRequest;
     response: SlugResponse;
+  };
+  [RequestType.SlugResolve]: {
+    request: SlugResolveRequest;
+    response: SlugReferenceResponse;
   };
   [RequestType.PieceRemove]: {
     request: PieceRemoveRequest;

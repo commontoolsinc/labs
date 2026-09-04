@@ -1,0 +1,870 @@
+// deno-lint-ignore-file cf-imports/no-inline-module-import -- the view's module
+// graph reaches @commonfabric/ui, whose components extend a bare HTMLElement as
+// they load, so it can only load once the test has installed one.
+
+/**
+ * What the shell does with `/<space>/<collection>/<member>`: which piece it
+ * selects, which address it settles on, what it offers to cite, and how the
+ * watch behind it behaves as the reference stops and starts resolving.
+ *
+ * The view is driven directly rather than through a runtime. Every fact these
+ * tests are about is settled between a resolution's answer and the view's own
+ * state, so a stub answering as the worker would is the whole environment they
+ * need — and holding a resolution at a chosen outcome is the only way to
+ * assert what the view made of it.
+ */
+
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+import type { DID } from "@commonfabric/identity";
+import type { AppView } from "@commonfabric/navigation";
+
+function installBrowserGlobals(): () => void {
+  const originals = new Map<string, PropertyDescriptor | undefined>();
+  function setGlobal(name: string, value: unknown): void {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+    Object.defineProperty(globalThis, name, {
+      configurable: true,
+      writable: true,
+      value,
+    });
+  }
+  class TestHTMLElement extends EventTarget {
+    attachShadow() {
+      return {
+        adoptedStyleSheets: [],
+        appendChild() {},
+        append() {},
+      };
+    }
+  }
+  setGlobal("window", globalThis);
+  setGlobal("HTMLElement", TestHTMLElement);
+  setGlobal("customElements", {
+    define() {},
+    get() {},
+    whenDefined: () => Promise.resolve(),
+  });
+  setGlobal("document", {
+    documentElement: { style: {} },
+    addEventListener() {},
+    removeEventListener() {},
+    createElement: () => ({
+      style: {},
+      setAttribute() {},
+      append() {},
+      appendChild() {},
+    }),
+    createTreeWalker: () => ({}),
+  });
+  setGlobal("devicePixelRatio", 1);
+  setGlobal("screen", { deviceXDPI: 1, logicalXDPI: 1 });
+  setGlobal("navigator", { platform: "", userAgent: "deno" });
+  setGlobal("location", {
+    protocol: "http:",
+    host: "localhost:8000",
+    hostname: "localhost",
+    href: "http://localhost:8000/naming-demo/top/42",
+  });
+  // Captured but not replaced: `stubRuntime` installs its own timer
+  // functions, and recording the originals here is what puts them back. They
+  // are process-wide, so a test that left them replaced would quietly stop
+  // every later test from scheduling — with nothing going red to say so.
+  // Captured but not replaced: `stubRuntime` installs its own timer
+  // functions, and recording the originals here is what puts them back.
+  for (const name of ["setInterval", "clearInterval"]) {
+    originals.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
+  }
+  return () => {
+    for (const [name, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, name, descriptor);
+      else Reflect.deleteProperty(globalThis, name);
+    }
+  };
+}
+
+/** Return the rendered text of nested Lit template results. */
+function templateText(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return value.map(templateText).join("");
+  if (typeof value !== "object") return String(value);
+  const template = value as {
+    strings?: readonly string[];
+    values?: readonly unknown[];
+  };
+  const strings = template.strings ?? [];
+  const values = template.values ?? [];
+  let text = "";
+  for (let index = 0; index < strings.length; index++) {
+    text += strings[index];
+    if (index < values.length) text += templateText(values[index]);
+  }
+  return text;
+}
+
+/** Where a resolution lands, as the runtime answers it. */
+interface Resolved {
+  pieceId: string;
+  pathAfter: string[];
+  scope?: string;
+}
+
+/**
+ * A reference that reached nothing, as the runtime answers it: a resolved
+ * value, not a rejection. Modelling it as a throw would drive the fault path
+ * instead — the one a dropped transport takes — and prove nothing about what
+ * happens when a name simply is not bound.
+ */
+interface Refused {
+  refusal: { code: string; message: string };
+}
+
+/**
+ * A runtime that answers resolutions from a value the test controls, over a
+ * slug cell whose poll the test fires by hand.
+ *
+ * The interval is captured rather than scheduled. A wait on wall-clock time
+ * would decide nothing these tests are about, and the callback is the subject:
+ * firing it is how a test says "the reference was re-resolved" without
+ * standing still for a second to let it happen.
+ */
+interface StubRuntime {
+  /** Stands in for `RuntimeInternals`. */
+  rt: unknown;
+
+  /** The arguments of each resolution, in order. */
+  resolved: unknown[][];
+
+  /** The arguments of each `getPattern`, in order. */
+  started: unknown[][];
+
+  /** How many times the slug subscription has been cancelled. */
+  cancels: number;
+
+  /** Answer every resolution from here on with `next`. */
+  answer(next: Resolved | Refused | Error): void;
+
+  /** Fire the watch's poll once, and let what it starts settle. */
+  poll(): Promise<void>;
+
+  /** Let the subscription's own opening settle, without firing the poll. */
+  settle(): Promise<void>;
+
+  /** Fail every piece load from here on, or none when given `undefined`. */
+  failLoads(error: Error | undefined): void;
+
+  /** Hold every piece load from here on, to be released by hand. */
+  holdLoads(): void;
+
+  /** Release the held loads and let what they finish settle. */
+  releaseLoads(): Promise<void>;
+
+  /** Hold every answer from here on, to be released by hand. */
+  hold(): void;
+
+  /** Release the held answers, newest first. */
+  releaseNewestFirst(): Promise<void>;
+}
+
+function stubRuntime(
+  first: Resolved | Refused | Error,
+  aborted = false,
+): StubRuntime {
+  const resolved: unknown[][] = [];
+  const started: unknown[][] = [];
+  let answer = first;
+  let poll: (() => void) | undefined;
+  const stub: StubRuntime = {
+    resolved,
+    started,
+    cancels: 0,
+    answer: (next) => {
+      answer = next;
+    },
+    poll: async () => {
+      poll?.();
+      // A resolution and the reload it may start are each a microtask hop.
+      for (let hop = 0; hop < 4; hop++) await Promise.resolve();
+    },
+    settle: async () => {
+      for (let hop = 0; hop < 6; hop++) await Promise.resolve();
+    },
+    rt: undefined,
+    failLoads: () => {},
+    holdLoads: () => {},
+    releaseLoads: async () => {},
+    hold: () => {},
+    releaseNewestFirst: async () => {},
+  };
+  let loadFailure: Error | undefined;
+  stub.failLoads = (error) => {
+    loadFailure = error;
+  };
+  let heldLoads: Array<() => void> | undefined;
+  stub.holdLoads = () => {
+    heldLoads = [];
+  };
+  stub.releaseLoads = async () => {
+    const pending = heldLoads ?? [];
+    heldLoads = undefined;
+    for (const release of pending) release();
+    for (let hop = 0; hop < 6; hop++) await Promise.resolve();
+  };
+  let held: Array<() => void> | undefined;
+  stub.hold = () => {
+    held = [];
+  };
+  stub.releaseNewestFirst = async () => {
+    const pending = held ?? [];
+    held = undefined;
+    for (const release of [...pending].reverse()) release();
+    for (let hop = 0; hop < 6; hop++) await Promise.resolve();
+  };
+  stub.rt = {
+    signal: { aborted },
+    // A named space resolves to its DID before anything else runs; these
+    // tests address one space and it is the one they were handed.
+    resolveSpaceName: () => Promise.resolve(SPACE),
+    resolveSlug: (...args: unknown[]) => {
+      resolved.push(args);
+      const settled = answer instanceof Error
+        ? Promise.reject(answer)
+        : "refusal" in answer
+        ? Promise.resolve(answer)
+        : Promise.resolve({ scope: "space", ...answer });
+      settled.catch(() => {});
+      if (!held) return settled;
+      // Held: the caller decides when this answer lands, and in what order
+      // relative to the calls made after it.
+      const queue = held;
+      return new Promise((resolve, reject) => {
+        queue.push(() => settled.then(resolve, reject));
+      });
+    },
+    getPattern: (...args: unknown[]) => {
+      started.push(args);
+      if (loadFailure) return Promise.reject(loadFailure);
+      const loaded = { id: () => "fid1:whatever" };
+      if (!heldLoads) return Promise.resolve(loaded);
+      const queue = heldLoads;
+      return new Promise((resolve) => {
+        queue.push(() => resolve(loaded));
+      });
+    },
+    getSlugCell: () =>
+      Promise.resolve({
+        subscribe: () => () => {
+          stub.cancels++;
+        },
+      }),
+    invalidatePattern: () => {},
+  };
+  // Replaced, never scheduled: the poll is the subject, and firing it by
+  // hand is what a test does instead of standing still for a second.
+  // `installBrowserGlobals` captured these and puts them back.
+  Object.defineProperty(globalThis, "setInterval", {
+    configurable: true,
+    writable: true,
+    value: (callback: () => void) => {
+      poll = callback;
+      return 0 as unknown as number;
+    },
+  });
+  Object.defineProperty(globalThis, "clearInterval", {
+    configurable: true,
+    writable: true,
+    value: () => {},
+  });
+  return stub;
+}
+
+const SPACE = "did:key:z6Mk-shell-collection-member" as DID;
+
+/**
+ * The timer functions as this module found them, before any test ran. Every
+ * test here replaces them, and they are process-wide.
+ */
+const NATIVE_TIMERS = {
+  setInterval: globalThis.setInterval,
+  clearInterval: globalThis.clearInterval,
+} as const;
+
+/**
+ * Fire the watch's poll, and let the selection run if the watch asked for it.
+ *
+ * That second half is what Lit does when `_slugRevision` changes, and it is
+ * what marks a resolution APPLIED — the view has come to show what the answer
+ * named. A test that polls without it leaves every answer unapplied, which is
+ * a state the shell never sits in.
+ */
+async function pollAndSettle(
+  view: AppViewLike,
+  stub: StubRuntime,
+): Promise<void> {
+  const before = view.accessForTestingOnly.slugRevision;
+  await stub.poll();
+  if (view.accessForTestingOnly.slugRevision === before) return;
+  view._selectedPattern.run();
+  await view._selectedPattern.taskComplete.catch(() => {});
+}
+
+/** A view of the demo space holding `overrides`. */
+function viewOf(overrides: Record<string, unknown>): AppView {
+  return { spaceName: "naming-demo", ...overrides } as AppView;
+}
+
+/**
+ * What these tests set and read. All of it is the view's public surface
+ * except the slug revision, which comes through the class's own testing
+ * accessor: typed as the class types it, so a renamed member is a type error
+ * rather than an `undefined` that every comparison here would accept.
+ */
+interface AppViewLike {
+  app: unknown;
+  space: DID | undefined;
+  rt: unknown;
+  render(): unknown;
+  updated(changed: Map<string, unknown>): void;
+  _selectedPattern: { run(): void; taskComplete: Promise<unknown> };
+  readonly accessForTestingOnly: { readonly slugRevision: number };
+}
+
+/** A view element wired to `stub` and addressing `view`. */
+function appViewOver(
+  XAppView: new () => unknown,
+  stub: StubRuntime,
+  view: AppView,
+): AppViewLike {
+  const element = new XAppView() as AppViewLike;
+  element.app = { identity: {}, config: {}, view };
+  element.space = SPACE;
+  element.rt = stub.rt;
+  return element;
+}
+
+describe("AppView collection members", () => {
+  it("selects the member the reference names", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      expect(stub.resolved).toEqual([[SPACE, "top", "42"]]);
+      // The piece started is the one the reference resolved to, never the
+      // document the slug itself lives in — and it is loaded in the scope
+      // the resolution reached it in, which its id alone does not carry.
+      expect(stub.started).toEqual([
+        [SPACE, "fid1:member-42", { scope: "space" }],
+      ]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("cites a member by a reference carrying its own space", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      expect(templateText(view.render())).toContain("/@naming-demo/top/42");
+    } finally {
+      restore();
+    }
+  });
+
+  it("cites nothing for a reference that stops at the collection", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:board", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top" }),
+      );
+
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      // A collection's name with no member after it names no member, so
+      // there is nothing for a citation to resolve to.
+      expect(templateText(view.render())).not.toContain("/@naming-demo/top");
+    } finally {
+      restore();
+    }
+  });
+
+  it("drops a member the walk did not spend, and cites nothing for it", async () => {
+    const restore = installBrowserGlobals();
+    const replaced: AppView[] = [];
+    const listener = (event: Event) => {
+      replaced.push((event as CustomEvent<AppView>).detail);
+    };
+    globalThis.addEventListener("cf-replace-navigation", listener);
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      // A slug naming a piece at its root spends no segment, so the walk
+      // hands the member back: it named nothing, and the page is the one the
+      // collection's name alone addresses.
+      const stub = stubRuntime({ pieceId: "fid1:plain", pathAfter: ["42"] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "plain", pieceMember: "42" }),
+      );
+
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      // The address settles on what the page is showing.
+      expect(replaced).toEqual([{
+        spaceName: "naming-demo",
+        pieceSlug: "plain",
+      }]);
+      // And nothing offers `/@naming-demo/plain/42`, which would cite a cell
+      // inside the piece rather than the piece the reader is looking at.
+      expect(templateText(view.render())).not.toContain("/@naming-demo/plain");
+    } finally {
+      globalThis.removeEventListener("cf-replace-navigation", listener);
+      restore();
+    }
+  });
+
+  it("re-resolves the reference until it reaches somewhere else", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view.updated(new Map([["app", undefined]]));
+      await stub.poll();
+      const asked = stub.resolved.length;
+
+      stub.answer({ pieceId: "fid1:member-42-replaced", pathAfter: [] });
+      await stub.poll();
+
+      // Re-resolving is what notices a member pointed elsewhere; no event
+      // reports it, the slug document being the only thing watched.
+      expect(stub.resolved.length).toBeGreaterThan(asked);
+      expect(stub.resolved.at(-1)).toEqual([SPACE, "top", "42"]);
+    } finally {
+      restore();
+    }
+  });
+
+  it("opens a member that only arrives later", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({
+        refusal: { code: "missing-member", message: "no member 42 in top" },
+      });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view.updated(new Map([["app", undefined]]));
+      await pollAndSettle(view, stub);
+      const afterFailing = view.accessForTestingOnly.slugRevision;
+
+      // The same refusal again is no news — it is the answer the view is
+      // already showing — so nothing reloads.
+      stub.answer({
+        refusal: { code: "missing-member", message: "no member 42 in top" },
+      });
+      await pollAndSettle(view, stub);
+      expect(view.accessForTestingOnly.slugRevision).toBe(afterFailing);
+
+      // The member appearing is news, and the reload it triggers goes and
+      // gets it.
+      stub.answer({ pieceId: "fid1:member-42", pathAfter: [] });
+      await stub.poll();
+      expect(view.accessForTestingOnly.slugRevision).toBeGreaterThan(
+        afterFailing,
+      );
+
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+      expect(stub.started.map((call) => call[1])).toContain("fid1:member-42");
+    } finally {
+      restore();
+    }
+  });
+
+  it("stops citing a member once the collection stops holding one", async () => {
+    const restore = installBrowserGlobals();
+    const replaced: AppView[] = [];
+    const listener = (event: Event) => {
+      replaced.push((event as CustomEvent<AppView>).detail);
+    };
+    globalThis.addEventListener("cf-replace-navigation", listener);
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+      view.updated(new Map([["app", undefined]]));
+      await stub.poll();
+      expect(templateText(view.render())).toContain("/@naming-demo/top/42");
+
+      // `top` is repointed at that very piece's own root. The reference now
+      // reaches the SAME piece and spends nothing, so a comparison holding
+      // only the piece calls this no change — and everything derived from the
+      // member standing would go on standing under an address that no longer
+      // names one.
+      const before = view.accessForTestingOnly.slugRevision;
+      stub.answer({ pieceId: "fid1:member-42", pathAfter: ["42"] });
+      await stub.poll();
+
+      // The watch has to see this as a new answer. It is the only thing that
+      // reruns the selection, and everything below is what the rerun settles.
+      expect(view.accessForTestingOnly.slugRevision).toBeGreaterThan(before);
+
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      expect(replaced).toEqual([{
+        spaceName: "naming-demo",
+        pieceSlug: "top",
+      }]);
+      expect(templateText(view.render())).not.toContain("/@naming-demo/top/42");
+    } finally {
+      globalThis.removeEventListener("cf-replace-navigation", listener);
+      restore();
+    }
+  });
+
+  it("reloads when only the scope of the answer changes", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({
+        pieceId: "fid1:member-42",
+        pathAfter: [],
+        scope: "space",
+      });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view.updated(new Map([["app", undefined]]));
+      await stub.poll();
+      const before = view.accessForTestingOnly.slugRevision;
+
+      // Same piece, same leftover, different scope: a different document,
+      // and the only field that says so. A comparison built from a list of
+      // fields is one this walks straight past.
+      stub.answer({
+        pieceId: "fid1:member-42",
+        pathAfter: [],
+        scope: "user",
+      });
+      await stub.poll();
+
+      expect(view.accessForTestingOnly.slugRevision).toBeGreaterThan(before);
+    } finally {
+      restore();
+    }
+  });
+
+  it("opens a member that arrives while the watch is still opening", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      // The selected task refuses: member 42 is not there yet.
+      const stub = stubRuntime({
+        refusal: { code: "missing-member", message: "no member 42 in top" },
+      });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete.catch(() => {});
+      const before = view.accessForTestingOnly.slugRevision;
+
+      // The member lands in the window between that failure and the watch's
+      // first resolution, so the watch's FIRST answer already differs from
+      // what the task saw. Nothing later reports it: the failed task does not
+      // rerun on its own, and every poll after this one matches what the
+      // first recorded.
+      stub.answer({ pieceId: "fid1:member-42", pathAfter: [] });
+      view.updated(new Map([["app", undefined]]));
+      await stub.settle();
+
+      expect(view.accessForTestingOnly.slugRevision).toBeGreaterThan(before);
+    } finally {
+      restore();
+    }
+  });
+
+  it("resolves one at a time, coalescing a poll fired while one is running", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:first", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view.updated(new Map([["app", undefined]]));
+      await stub.settle();
+
+      // The resolver is slower than the interval, so a second poll fires
+      // while the first is still out.
+      stub.hold();
+      const before = stub.resolved.length;
+      await stub.poll();
+      await stub.poll();
+      await stub.poll();
+
+      // One in flight, whatever the polls did — two answers at once is the
+      // whole of the ordering problem, and there is never a second.
+      expect(stub.resolved.length).toBe(before + 1);
+
+      // What the extra polls asked for is not lost: one more resolution runs
+      // as soon as the first finishes.
+      await stub.releaseNewestFirst();
+      expect(stub.resolved.length).toBe(before + 2);
+    } finally {
+      restore();
+    }
+  });
+
+  it("applies an answer that took longer than the poll interval", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:first", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view.updated(new Map([["app", undefined]]));
+      await stub.settle();
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+      const before = view.accessForTestingOnly.slugRevision;
+
+      // A slow resolution finds the reference somewhere new. Under a guard
+      // that asks "am I the newest ISSUED", the polls behind it would each
+      // supersede it and the view would never learn anything at all.
+      stub.hold();
+      stub.answer({ pieceId: "fid1:moved", pathAfter: [] });
+      await stub.poll();
+      await stub.poll();
+      await stub.releaseNewestFirst();
+
+      expect(view.accessForTestingOnly.slugRevision).toBeGreaterThan(before);
+    } finally {
+      restore();
+    }
+  });
+
+  it("does not call a slow load's answer the newer one that arrived meanwhile", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:A", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+      view.updated(new Map([["app", undefined]]));
+      await stub.settle();
+
+      // The selection resolves A and waits in the load.
+      stub.holdLoads();
+      view._selectedPattern.run();
+      await stub.settle();
+
+      // The reference moves to B while that load is out, and the watch asks
+      // for a rerun.
+      stub.answer({ pieceId: "fid1:B", pathAfter: [] });
+      await stub.poll();
+
+      // A's load finishes. What is on screen is A, and saying so is all it
+      // may say: reporting "the newest answer is showing" would claim B.
+      await stub.releaseLoads();
+      const afterA = view.accessForTestingOnly.slugRevision;
+
+      // So a resolution finding B is still news, and the view goes and gets
+      // it rather than taking an early return on a claim that it already has.
+      await stub.poll();
+      expect(view.accessForTestingOnly.slugRevision).toBeGreaterThan(afterA);
+    } finally {
+      restore();
+    }
+  });
+
+  it("reloads when one refusal gives way to a different one", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      // `top` is not bound at all, so the reader is told the name is not
+      // found.
+      const stub = stubRuntime({
+        refusal: { code: "missing", message: 'Slug "top" not found.' },
+      });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "999" }),
+      );
+
+      view.updated(new Map([["app", undefined]]));
+      await stub.settle();
+      const before = view.accessForTestingOnly.slugRevision;
+
+      // `top` is then bound to a collection that has no member 999. Still a
+      // refusal, and a different one: keeping the first would leave the
+      // reader on the wrong error about the wrong thing.
+      stub.answer({
+        refusal: { code: "missing-member", message: "no member 999 in top" },
+      });
+      await stub.poll();
+
+      expect(view.accessForTestingOnly.slugRevision).toBeGreaterThan(before);
+    } finally {
+      restore();
+    }
+  });
+
+  it("retries a load that failed after the reference resolved", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      // The reference resolves, and loading the piece it names fails — a
+      // dropped connection, say. The answer is identified and the view is
+      // not showing it.
+      stub.failLoads(new Error("the socket went away"));
+      view.updated(new Map([["app", undefined]]));
+      await pollAndSettle(view, stub);
+      const afterFailedLoad = view.accessForTestingOnly.slugRevision;
+
+      // Nothing about the reference has changed, so no later poll brings a
+      // new answer. Recovery has to come from the answer still being
+      // unhandled — otherwise the view sits on the error for good.
+      stub.failLoads(undefined);
+      await pollAndSettle(view, stub);
+
+      expect(view.accessForTestingOnly.slugRevision).toBeGreaterThan(
+        afterFailedLoad,
+      );
+      expect(stub.started.map((call) => call[1])).toContain("fid1:member-42");
+    } finally {
+      restore();
+    }
+  });
+
+  it("watches each reference through a slug separately", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:member-1", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "1" }),
+      );
+
+      view.updated(new Map([["app", undefined]]));
+      await stub.poll();
+
+      // Two members of one collection are two references reaching two
+      // pieces, so the second cannot ride the first's subscription.
+      view.app = {
+        identity: {},
+        config: {},
+        view: viewOf({ pieceSlug: "top", pieceMember: "2" }),
+      } as never;
+      view.updated(new Map([["app", undefined]]));
+      await stub.poll();
+
+      expect(stub.cancels).toBe(1);
+      expect(stub.resolved.map((call) => call[2])).toContain("2");
+    } finally {
+      restore();
+    }
+  });
+
+  it("leaves the process-wide timers as it found them", () => {
+    // Last, and it reads what every test before it did. These are shared with
+    // the whole test process: left replaced, `setInterval` stops scheduling
+    // and `clearInterval` stops cancelling for everything that runs after,
+    // and no assertion anywhere goes red — things simply stop happening.
+    expect(globalThis.setInterval).toBe(NATIVE_TIMERS.setInterval);
+    expect(globalThis.clearInterval).toBe(NATIVE_TIMERS.clearInterval);
+  });
+
+  it("stops watching a runtime that has been disposed", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime(new Error("runtime gone"), true);
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view.updated(new Map([["app", undefined]]));
+      await stub.poll();
+
+      // A disposed runtime cannot answer, and asking it forever is no
+      // recovery: the watch drops so a replacement runtime takes it up.
+      const asked = stub.resolved.length;
+      await stub.poll();
+      expect(stub.resolved.length).toBe(asked);
+    } finally {
+      restore();
+    }
+  });
+});

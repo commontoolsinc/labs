@@ -481,12 +481,15 @@ describe("load-errors", () => {
           }
         });
 
-        it("resolves a slug target before starting its piece", async () => {
+        it("resolves a slug reference before starting the piece it names", async () => {
           const restore = installBrowserGlobals();
           try {
             const { XAppView } = await import("../src/views/AppView.ts");
             const space = "did:key:z6Mk-shell-slug-target-error" as DID;
-            const calls: unknown[][] = [];
+            // One log, so the ORDER the name claims is what is checked;
+            // two arrays would prove both calls happened and nothing about
+            // which came first.
+            const calls: Array<{ call: string; args: unknown[] }> = [];
             const view = new XAppView();
             view.app = {
               identity: {},
@@ -496,8 +499,16 @@ describe("load-errors", () => {
             view.space = space;
             view.rt = {
               signal: new AbortController().signal,
+              resolveSlug: (...args: unknown[]) => {
+                calls.push({ call: "resolveSlug", args });
+                return Promise.resolve({
+                  pieceId: "fid1:slug-target",
+                  pathAfter: [],
+                  scope: "space",
+                });
+              },
               getPattern: (...args: unknown[]) => {
-                calls.push(args);
+                calls.push({ call: "getPattern", args });
                 return Promise.resolve({ id: () => "fid1:slug-target" });
               },
             } as never;
@@ -505,9 +516,16 @@ describe("load-errors", () => {
             view._selectedPattern.run();
             await view._selectedPattern.taskComplete;
 
-            expect(calls).toHaveLength(2);
-            expect(calls[0]?.[2]).toEqual({ start: false });
-            expect(calls[1]?.[2]).toBeUndefined();
+            expect(calls).toEqual([
+              {
+                call: "resolveSlug",
+                args: [space, "broken-piece", undefined],
+              },
+              {
+                call: "getPattern",
+                args: [space, "fid1:slug-target", { scope: "space" }],
+              },
+            ]);
           } finally {
             restore();
           }

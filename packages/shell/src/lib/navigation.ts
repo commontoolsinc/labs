@@ -137,12 +137,11 @@ function mapNavigationView(
     "spaceDid" in view && view.spaceDid && currentSpaceName &&
     view.spaceDid === currentSpaceDID
   ) {
-    view = {
-      ...("pieceId" in view ? { pieceId: view.pieceId } : undefined),
-      ...("pieceSlug" in view ? { pieceSlug: view.pieceSlug } : undefined),
-      ...("mode" in view ? { mode: view.mode } : undefined),
-      spaceName: currentSpaceName,
-    };
+    // Only the space key is exchanged. Everything else the view holds is
+    // carried by spreading what is left, so a field added to a view later
+    // survives without this having to be taught about it.
+    const { spaceDid: _replaced, ...rest } = view;
+    view = { ...rest, spaceName: currentSpaceName };
   }
   return preserveAppViewMode(currentView, view);
 }

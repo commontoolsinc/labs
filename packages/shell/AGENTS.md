@@ -80,6 +80,7 @@ runtime and gives a user a way to move around their spaces. Entry point is
 | How a command is applied       | `onCommand` and the state setters in `src/views/RootView.ts`                                                 |
 | How a navigation becomes one   | `Navigation` in `src/lib/navigation.ts`                                                                      |
 | What a URL means, embed mode   | `packages/navigation/src/view.ts`                                                                            |
+| How a slug reaches a piece     | `handleSlugResolve` in `packages/runtime-client/src/backends/runtime-processor.ts`                           |
 | How the runtime is mounted     | `RuntimeInternals` in `packages/lib-shell/src/runtime.ts`                                                    |
 | Coding style and test commands | [`DEVELOPMENT.md`](../../docs/development/DEVELOPMENT.md), [`TESTING.md`](../../docs/development/TESTING.md) |
 | Writing a `cf-` component      | the `lit-component` skill                                                                                    |

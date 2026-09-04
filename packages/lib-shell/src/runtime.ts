@@ -1,3 +1,4 @@
+import type { CellScope } from "@commonfabric/api";
 import { createSession, DID, Identity, Session } from "@commonfabric/identity";
 import { CFC_CONCEPT_KIND, cfcAtom } from "@commonfabric/api/cfc";
 import type { FabricPlainObject } from "@commonfabric/data-model";
@@ -371,6 +372,51 @@ export function createRuntimeClientOptions({
   };
 }
 
+/** One loaded piece, and whether the load started it. */
+interface PatternCacheEntry {
+  promise: Promise<PieceHandle<NameSchema>>;
+  started: boolean;
+}
+
+/** Where a slug reference lands, as a page address can carry it. */
+export interface SlugReferenceTarget {
+  /** The piece the reference reached, in the routing form of its id. */
+  pieceId: string;
+
+  /**
+   * The scope the piece's document sits in. A member reached through a link
+   * into a narrower scope is a piece like any other, and its id addresses it
+   * only alongside this — which is why it is carried rather than assumed.
+   */
+  scope: CellScope;
+
+  /**
+   * What is left of the reference after that piece. Empty where a member
+   * named a member; the member itself where the slug named a piece at its
+   * root, whose address does not include it — an address the caller has to
+   * settle before citing what it is showing.
+   */
+  pathAfter: string[];
+
+  /** Absent, which is what distinguishes a landing from a refusal. */
+  refusal?: undefined;
+}
+
+/**
+ * Why a slug reference reached no piece. A name nobody bound, or a member a
+ * collection does not hold, is an answer to the question asked rather than a
+ * fault, and a caller tells the two apart by which of these it gets.
+ */
+export interface SlugReferenceRefusal {
+  refusal: {
+    /** Which refusal it is, as the runner's slug resolution names them. */
+    code: string;
+
+    /** What to tell a reader, naming the collection and member it knows. */
+    message: string;
+  };
+}
+
 /**
  * RuntimeInternals bundles all resources bound to an identity/host pair:
  * ONE runtime serving all of that identity's spaces over one worker.
@@ -393,9 +439,22 @@ export class RuntimeInternals extends EventTarget {
     DID,
     { pattern: Promise<PieceHandle<NameSchema>>; started: boolean }
   > = new Map();
+  /**
+   * Loaded pieces, nested space → scope → id: a piece's whole address, held
+   * as the three things it is. One id in two scopes is two documents, and an
+   * id carries colons of its own (`of:fid1:…` beside `fid1:…`), so an
+   * address flattened into one string is one a reader has to take apart
+   * again — and taking it apart is what answered about one piece and evicted
+   * another. Nested, there is nothing to parse: a lookup walks to the entry
+   * and an eviction deletes from the map it sits in.
+   *
+   * An entry carries whether the load was STARTED: a started piece answers a
+   * caller that only reads it, while one loaded without starting does not
+   * answer a caller that needs it running.
+   */
   #patternCache: Map<
-    string,
-    { promise: Promise<PieceHandle<NameSchema>>; started: boolean }
+    DID,
+    Map<CellScope, Map<string, PatternCacheEntry>>
   > = new Map();
   // TODO(runtime-worker-refactor)
   #telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
@@ -416,6 +475,20 @@ export class RuntimeInternals extends EventTarget {
     this.#client.on("navigaterequest", this.#onNavigateRequest);
     this.#client.on("error", this.#onError);
     this.#client.on("telemetry", this.#onTelemetry);
+  }
+
+  /**
+   * How many spaces the pattern cache is holding levels for, which a test
+   * reads to check that an eviction left none behind.
+   */
+  get accessForTestingOnly(): { readonly patternCacheSize: number } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      get patternCacheSize() {
+        return outerThis.#patternCache.size;
+      },
+    };
   }
 
   runtime(): RuntimeClient {
@@ -514,42 +587,92 @@ export class RuntimeInternals extends EventTarget {
    * (starting every registered piece on reload cost about ten seconds of
    * dependency collection, either during reload or on the first interaction).
    *
-   * Cached per (space, id) — a pattern's address. A cache entry created
-   * with `start: false` is upgraded (re-fetched with start) when a
+   * Cached per (space, scope, id) — a pattern's whole address. A cache entry
+   * created with `start: false` is upgraded (re-fetched with start) when a
    * starting caller asks for the same pattern.
    */
   getPattern(
     space: DID,
     id: string,
-    options?: { start?: boolean },
+    options?: { start?: boolean; scope?: CellScope },
   ): Promise<PieceHandle<NameSchema>> {
     this.#check();
     const start = options?.start ?? true;
-    const key = `${space}:${id}`;
-    const cached = this.#patternCache.get(key);
+    // One id in two scopes is two documents, so a caller that named no scope
+    // asks about the space's.
+    const scope = options?.scope ?? "space";
+    const byId = this.#patternCacheSlot(space, scope);
+    const cached = byId.get(id);
     if (cached && (cached.started || !start)) {
       return cached.promise;
     }
     const promise = (async () => {
-      const piece = await this.#client.getPiece<NameSchema>(id, space, start);
+      const piece = await this.#client.getPiece<NameSchema>(
+        id,
+        space,
+        start,
+        scope,
+      );
       if (!piece) {
         throw new Error(`Pattern not found: ${id}`);
       }
       return piece;
     })();
-    const entry = { promise, started: start };
-    this.#patternCache.set(key, entry);
+    const entry: PatternCacheEntry = { promise, started: start };
+    byId.set(id, entry);
     // Evict on rejection so the next request retries.
     promise.catch(() => {
-      if (this.#patternCache.get(key) === entry) {
-        this.#patternCache.delete(key);
-      }
+      if (byId.get(id) === entry) this.#dropPattern(space, scope, id);
     });
     return promise;
   }
 
+  /**
+   * Drop every cached load of `id` in `space`, whatever scope it was loaded
+   * in. A caller naming a piece to invalidate knows the piece, not which
+   * scope some other caller reached it through, and an entry left behind is
+   * a stale piece handed to the next reader.
+   *
+   * Reached by walking the address rather than by matching a spelling of it.
+   */
   invalidatePattern(space: DID, id: string): void {
-    this.#patternCache.delete(`${space}:${id}`);
+    for (const scope of [...this.#patternCache.get(space)?.keys() ?? []]) {
+      this.#dropPattern(space, scope, id);
+    }
+  }
+
+  /**
+   * Drop one loaded piece, and any level of the cache it was the last thing
+   * in. A nested map holds a level per address component, so a level left
+   * empty is a space or a scope the runtime goes on holding for a piece it
+   * no longer has — and a run of failed lookups is a run of them.
+   */
+  #dropPattern(space: DID, scope: CellScope, id: string): void {
+    const byScope = this.#patternCache.get(space);
+    const byId = byScope?.get(scope);
+    if (!byScope || !byId) return;
+    byId.delete(id);
+    if (byId.size > 0) return;
+    byScope.delete(scope);
+    if (byScope.size === 0) this.#patternCache.delete(space);
+  }
+
+  /** The map holding what `space` has loaded in `scope`, created on demand. */
+  #patternCacheSlot(
+    space: DID,
+    scope: CellScope,
+  ): Map<string, PatternCacheEntry> {
+    let byScope = this.#patternCache.get(space);
+    if (!byScope) {
+      byScope = new Map();
+      this.#patternCache.set(space, byScope);
+    }
+    let byId = byScope.get(scope);
+    if (!byId) {
+      byId = new Map();
+      byScope.set(scope, byId);
+    }
+    return byId;
   }
 
   async refreshPattern(
@@ -571,6 +694,46 @@ export class RuntimeInternals extends EventTarget {
   async getSlug(space: DID, id: string): Promise<string | undefined> {
     this.#check();
     return await this.#client.getPieceSlug(id, space);
+  }
+
+  /**
+   * Where a slug reference lands. Not cached and not started — `getPattern`
+   * on the id this answers with is what does both, and keying that cache on
+   * the piece rather than on the reference is what lets a reference reaching
+   * a new piece load it.
+   *
+   * A name nobody bound, and a member a collection does not hold, come back
+   * as a {@link SlugReferenceRefusal} rather than as a throw: they answer the
+   * question asked, and a caller that cannot tell them from a transport fault
+   * reports "ask again" for a name that will never resolve.
+   *
+   * @throws When the piece sits outside the space asked about. Only the id
+   *   and the scope travel on to `getPattern`, which takes the space from the
+   *   view, so a reference reaching another space is refused here in those
+   *   terms rather than reported as a piece that does not exist.
+   * @throws When the resolution itself fails — a transport fault, a document
+   *   that will not decode.
+   */
+  async resolveSlug(
+    space: DID,
+    slug: string,
+    member?: string,
+  ): Promise<SlugReferenceTarget | SlugReferenceRefusal> {
+    this.#check();
+    const landed = await this.#client.resolveSlug(slug, space, member);
+    if (landed.refusal) return { refusal: landed.refusal };
+    const reached = landed.piece.cell().ref();
+    if (reached.space !== space) {
+      throw new Error(
+        `Slug reference "${slug}" reaches a piece in space ${reached.space}, ` +
+          `and this view addresses ${space}.`,
+      );
+    }
+    return {
+      pieceId: landed.piece.id(),
+      scope: reached.scope,
+      pathAfter: landed.pathAfter,
+    };
   }
 
   async removePiece(space: DID, id: string): Promise<boolean> {

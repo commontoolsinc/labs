@@ -461,6 +461,18 @@ export class XHeaderView extends BaseView {
       min-width: 0;
     }
 
+    .menu-item-detail {
+      font-family: var(--font-primary, ui-monospace, monospace);
+      font-size: 0.75rem;
+      line-height: 1.5rem;
+      margin-left: auto;
+      opacity: 0.7;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+    }
+
     .divider {
       height: 1rem;
       display: flex;
@@ -488,6 +500,14 @@ export class XHeaderView extends BaseView {
 
   @property({ attribute: false })
   accessor pieceId: string | undefined = undefined;
+
+  /**
+   * How this piece is cited from anywhere, when it is a member of a named
+   * collection: `/@<space>/<collection>/<member>`. Undefined for a piece
+   * reached any other way, whose identity is already portable.
+   */
+  @property({ attribute: false })
+  accessor pieceReference: string | undefined = undefined;
 
   @property({ attribute: false })
   accessor spaceName: string | undefined = undefined;
@@ -589,7 +609,7 @@ export class XHeaderView extends BaseView {
   #resizeTimer?: ReturnType<typeof setTimeout>;
 
   /**
-   * The favorites subscription step, the favorite-toggle guard, and the two
+   * The favorites subscription step, the favorite-toggle guard, and the three
    * click handlers, which a test drives directly.
    */
   get accessForTestingOnly(): {
@@ -597,6 +617,7 @@ export class XHeaderView extends BaseView {
     ensureFavoritesSubscription(): void;
     handleLogoClick(e: Event): void;
     handleToggleFavorite(e: Event): Promise<void>;
+    copyReference(e: Event): Promise<void>;
   } {
     // deno-lint-ignore no-this-alias
     const outerThis = this;
@@ -607,6 +628,7 @@ export class XHeaderView extends BaseView {
       ensureFavoritesSubscription: () => this.#ensureFavoritesSubscription(),
       handleLogoClick: (e) => this.#handleLogoClick(e),
       handleToggleFavorite: (e) => this.#handleToggleFavorite(e),
+      copyReference: (e) => this.#handleCopyReference(e),
     };
   }
 
@@ -909,6 +931,26 @@ export class XHeaderView extends BaseView {
   }
 
   /**
+   * Copy this piece's portable reference to the clipboard. It carries its own
+   * space, so it depends on no binding of the copier's and resolves for
+   * whoever receives it — in `cf`, and in anything else that opens a session
+   * before it reads. Neither this shell's own URLs nor a pattern's
+   * `cellFromUrl` reads this grammar today.
+   */
+  async #handleCopyReference(e: Event) {
+    e.preventDefault();
+    e.stopPropagation();
+    const reference = this.pieceReference;
+    if (!reference) return;
+    try {
+      await navigator.clipboard.writeText(reference);
+    } catch {
+      console.warn("Failed to copy reference to clipboard");
+    }
+    this.menuOpen = false;
+  }
+
+  /**
    * Toggle the current piece's favorite status. Uses optimistic UI —
    * updates local state immediately, then syncs with the server.
    * Rolls back local state on error. Guarded against double-clicks
@@ -1114,6 +1156,23 @@ export class XHeaderView extends BaseView {
                 <span class="menu-item-icon">${iconLink()}</span>
                 <span class="menu-item-label">Copy link</span>
               </button>
+
+              ${this.pieceReference
+                ? html`
+                  <button
+                    class="menu-item"
+                    role="menuitem"
+                    test-id="header-copy-reference"
+                    @click="${this.#handleCopyReference}"
+                  >
+                    <span class="menu-item-icon">${iconLink()}</span>
+                    <span class="menu-item-label">Copy reference</span>
+                    <code class="menu-item-detail">
+                      ${this.pieceReference}
+                    </code>
+                  </button>
+                `
+                : nothing}
 
               <button
                 class="menu-item"

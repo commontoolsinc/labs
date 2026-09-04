@@ -65,12 +65,15 @@ import {
   popFrame,
   pushFrame,
   resolveExternalRootRefForStructure,
+  resolveSlugReference,
+  resolveSlugTargetInPiece,
   Runtime,
   runtimePresets,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
   setPatternEnvironment,
   type SigilLink,
+  SlugResolutionError,
   SpaceHostValidationError,
 } from "@commonfabric/runner";
 import type { RuntimeOptions } from "@commonfabric/runner";
@@ -196,6 +199,8 @@ import {
   type SettleStatsResponse,
   type SetTriggerTraceEnabledRequest,
   type SetWriteStackTraceMatchersRequest,
+  type SlugReferenceResponse,
+  type SlugResolveRequest,
   type SlugResponse,
   type SpaceAclResponse,
   type SpaceGetAclRequest,
@@ -2152,15 +2157,31 @@ export class RuntimeProcessor {
     };
   }
 
+  // Resolves a redirect here rather than through the runner's slug
+  // resolution, which `handleSlugResolve` uses. Do not copy the bare
+  // `parseLink` below into a new caller: a slug cell can be written by a
+  // foreign client over the memory protocol, and `parseSlugRedirect` in
+  // `packages/runner/src/slug-resolution.ts` exists to fold the TypeError a
+  // sigil-shaped payload with broken internals throws into a typed refusal.
+  // These are one walk with two implementations, and this is the copy to
+  // retire.
+  //
   // TODO(runtime-worker-refactor): Can this fail? What if the cell
   // is not a piece cell?
   async handlePieceGet(
     request: PieceGetRequest,
   ): Promise<PieceResponse> {
     const cc = this.getSpaceCtx(request.space);
+    // Probed in the scope the request names, because the id alone names a
+    // different document in every other scope: reading the default one would
+    // ask whether some unrelated document is a redirect.
     const requestedCell = this.runtime.getCellFromEntityId(
       cc.getSpace(),
       entityIdFrom(request.pieceId),
+      [],
+      undefined,
+      undefined,
+      request.scope ?? "space",
     );
     await requestedCell.sync();
     const redirect = parseLink(
@@ -2199,6 +2220,8 @@ export class RuntimeProcessor {
     const cell = await cc.getPieceCell(
       request.pieceId,
       request.runIt ?? false,
+      undefined,
+      request.scope,
     );
 
     return {
@@ -2217,6 +2240,62 @@ export class RuntimeProcessor {
     await cell.sync();
     const slug = cell.getMetaRaw("slug");
     return { slug: typeof slug === "string" ? slug : undefined };
+  }
+
+  /**
+   * Where a slug reference lands, unstarted: the piece it reached, and the
+   * segments the walk did not spend. Starting and caching stay with
+   * {@link handlePieceGet}, which a caller reaches through this piece's id.
+   *
+   * A reference naming no member asks a different question of the same slug —
+   * which piece is this name inside — because a page URL names a piece to
+   * render and a collection is a cell within one. {@link
+   * resolveSlugTargetInPiece} answers exactly that, so `/<space>/top` opens
+   * the piece holding the collection; the path from that piece's root down to
+   * the collection is no part of a page address and is dropped here.
+   *
+   * A reference naming a member spends that member only where the slug names
+   * a collection. A slug naming a piece at its root spends nothing, and the
+   * member comes back in `pathAfter` for the caller to reckon with, rather
+   * than being dropped into a page whose address still carries it.
+   *
+   * Fails as the runner's resolution fails — `missing-member` for a member
+   * the collection does not hold, naming both, and `not-piece` for a target
+   * that is neither a piece nor a member of one.
+   */
+  async handleSlugResolve(
+    request: SlugResolveRequest,
+  ): Promise<SlugReferenceResponse> {
+    const cc = this.getSpaceCtx(request.space);
+    const space = cc.getSpace();
+    try {
+      if (request.member === undefined) {
+        const { piece } = await resolveSlugTargetInPiece(
+          this.runtime,
+          space,
+          request.slug,
+        );
+        return { piece: createPieceRef(piece), pathAfter: [] };
+      }
+      const { piece, pathAfter } = await resolveSlugReference(
+        this.runtime,
+        space,
+        request.slug,
+        [request.member],
+      );
+      return { piece: createPieceRef(piece), pathAfter };
+    } catch (error) {
+      // A reference reaching nothing is what the caller asked about, so it
+      // comes back as an answer. Everything else — a transport fault, a
+      // document that will not decode — stays an error, which is the only
+      // way a caller can tell "this name is not bound" from "ask again".
+      if (error instanceof SlugResolutionError) {
+        return {
+          refusal: { code: error.code ?? "unresolved", message: error.message },
+        };
+      }
+      throw error;
+    }
   }
 
   async handlePieceRemove(
@@ -2764,6 +2843,8 @@ export class RuntimeProcessor {
         return await this.handlePieceGet(request);
       case RequestType.PieceGetSlug:
         return await this.handlePieceGetSlug(request);
+      case RequestType.SlugResolve:
+        return await this.handleSlugResolve(request);
       case RequestType.PieceRemove:
         return await this.handlePieceRemove(request);
       case RequestType.PieceStart:
