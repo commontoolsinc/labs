@@ -264,6 +264,30 @@ export default pattern(() => {
     Object.keys((legacy.names ?? {}) as NamesMap).join(",") === "1,2,3,4"
   );
 
+  // One member at two positions, backfilled over an empty namespace: named
+  // once. Membership is asked of identity, never of position, so the second
+  // position finds the name the first one took in this same run.
+  const twinItems = new Writable<ItemDemand[] | Default<[]>>([]);
+  const twinNames = new Writable<NamesMap>({});
+  const twinBoard = Board({ items: twinItems, names: twinNames });
+  const action_list_one_item_twice = action(() => {
+    const twin = Item({ title: "Twin", createdAt: 1 });
+    twinItems.push(twin);
+    twinItems.push(twin);
+  });
+  const action_backfill_the_twins = action(() => {
+    assigned.set(backfillNames(twinItems, twinNames));
+  });
+  const assert_twin_is_named_once = assert(() =>
+    twinBoard.itemCount === 2 &&
+    equals(twinItems.key(0), twinItems.key(1)) &&
+    assigned.get().join(",") === "1" &&
+    Object.keys((twinBoard.names ?? {}) as NamesMap).join(",") === "1" &&
+    (twinBoard.namesTable ?? []).length === 1 &&
+    twinBoard.index?.[0]?.name === "1" &&
+    twinBoard.index?.[1]?.name === "1"
+  );
+
   // A board given no namespace at all — the shape of one deployed before it
   // numbered anything — reads as having no names, and its first create
   // materializes the map with the first name.
@@ -366,6 +390,9 @@ export default pattern(() => {
       { action: action_file_a_late_unnamed },
       { action: action_backfill_verb },
       { assertion: assert_backfill_skips_the_named },
+      { action: action_list_one_item_twice },
+      { action: action_backfill_the_twins },
+      { assertion: assert_twin_is_named_once },
       { assertion: assert_bare_board_has_no_items },
       { assertion: assert_bare_board_names_read_empty },
       { action: action_bare_board_creates },

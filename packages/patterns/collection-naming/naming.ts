@@ -139,25 +139,53 @@ export interface NamesTableRow {
 }
 
 /**
- * Whether `key` is a name the sequence issues: a decimal integer written
- * without leading zeros. Any other key in the map was put there by another
- * allocator and does not move the sequence.
+ * Whether `key` is a member name: a canonical decimal string — `0`, or a
+ * non-zero digit followed by digits, with no leading zeros, no sign, and no
+ * exponent. The map can be written by any client over the memory protocol,
+ * so a key is not guaranteed to be a name this sequence issued; a key
+ * outside the grammar is not a name, and it neither counts as the largest
+ * nor blocks allocation.
  */
-const isSequenceName = (key: string): boolean => /^[1-9][0-9]*$/.test(key);
+const isMemberName = (key: string): boolean => /^(0|[1-9][0-9]*)$/.test(key);
 
 /**
- * The next name the sequence issues over the names in use: `1` when none of
- * them is a sequence name, otherwise one more than the largest. The sequence
+ * Whether canonical decimal `a` is larger than canonical decimal `b`. Names
+ * are compared as strings — by length, then lexicographically — and never
+ * as JavaScript numbers, which lose distinctness past `2^53` and would
+ * reuse a name there.
+ */
+const isLargerName = (a: string, b: string): boolean =>
+  a.length !== b.length ? a.length > b.length : a > b;
+
+/**
+ * Helper for `nextNameAmong()` and `backfillNames()`, which returns the
+ * canonical decimal one larger than `name`, as a string. The trailing run
+ * of nines turns to zeros and the digit before it goes up by one; a name
+ * that is all nines gains a leading `1`.
+ */
+const incrementName = (name: string): string => {
+  const [, head, nines] = name.match(/^([0-9]*?)(9*)$/)!;
+  const zeros = "0".repeat(nines.length);
+  if (head === "") return `1${zeros}`;
+  return `${head.slice(0, -1)}${Number(head.at(-1)) + 1}${zeros}`;
+};
+
+/**
+ * The next name the sequence issues over the keys in use: `1` when none of
+ * them is a member name, otherwise one more than the largest. The sequence
  * is dense from `1` and a name is never reused, so this is the whole of the
  * allocation rule; what makes it safe under concurrency is where it is
- * called, which `assignName()` states.
+ * called, which `assignName()` states. Keys that are not member names —
+ * `isMemberName()` says which — are ignored.
  */
 export function nextNameAmong(names: Iterable<string>): string {
   const largest = Array.from(names)
-    .filter(isSequenceName)
-    .map(Number)
-    .reduce((max, name) => Math.max(max, name), 0);
-  return String(largest + 1);
+    .filter(isMemberName)
+    .reduce<string | undefined>(
+      (max, name) => max === undefined || isLargerName(name, max) ? name : max,
+      undefined,
+    );
+  return largest === undefined ? "1" : incrementName(largest);
 }
 
 /**
@@ -219,8 +247,9 @@ export const namesTable = lift(
  * Names every member of `members` that has no name, in filing order, and
  * returns the names it wrote — exactly the keys it added to `names`, in the
  * order it added them. A member already named is skipped, whatever position
- * it holds. Idempotent: a run over a fully named list writes nothing and
- * returns `[]`.
+ * it holds, and a member listed at two positions is named once: membership
+ * is asked of IDENTITY, never of position. Idempotent: a run over a fully
+ * named list writes nothing and returns `[]`.
  *
  * Called from a verb body for the reason `assignName()` is: the keyset read
  * and the key writes are one transaction, so a create that lands while a
@@ -231,19 +260,24 @@ export function backfillNames(
   names: NamesMapCell,
 ): string[] {
   const map = names.get() ?? {};
-  const held = Object.values(map) as (object | undefined)[];
-  const first = Number(nextNameAmong(Object.keys(map)));
-  // The cell at each position rather than the value read out of it: a cell
-  // is an identity `equals` can match against the map's links, and it is
-  // what the map stores.
-  const unnamed = members.get()
-    .map((_, index) => members.key(index))
-    .filter((member) => !held.some((link) => equals(member, link)));
-  return unnamed.map((member, offset) => {
-    const name = String(first + offset);
-    names.key(name).set(member);
-    return name;
-  });
+  // The members with a name: those the map already holds, and — as the walk
+  // goes — those this run names, so a member met again is not named again.
+  const named = Object.values(map) as (object | undefined)[];
+  const count = members.get().length;
+  const written: string[] = [];
+  let next = nextNameAmong(Object.keys(map));
+  for (let index = 0; index < count; index++) {
+    // The cell at the position rather than the value read out of it: a cell
+    // is an identity `equals` can match against the map's links, and it is
+    // what the map stores.
+    const member = members.key(index);
+    if (named.some((other) => equals(member, other))) continue;
+    names.key(next).set(member);
+    written.push(next);
+    named.push(member);
+    next = incrementName(next);
+  }
+  return written;
 }
 
 /**

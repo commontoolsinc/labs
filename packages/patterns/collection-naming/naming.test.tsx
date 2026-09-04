@@ -15,14 +15,37 @@ import {
 
 export default pattern(() => {
   // The sequence rule, over keys a map could hold: one more than the largest
-  // sequence name present, compared as numbers, and unmoved by a key the
-  // sequence never issued.
+  // member name present, compared by length and then lexicographically, and
+  // unmoved by a key the sequence never issued.
   const assert_sequence_rule = assert(() =>
     nextNameAmong([]) === "1" &&
+    nextNameAmong(["0"]) === "1" &&
     nextNameAmong(["1", "2"]) === "3" &&
     nextNameAmong(["2", "10"]) === "11" &&
     nextNameAmong(["3", "5"]) === "6" &&
+    nextNameAmong(["99"]) === "100" &&
+    nextNameAmong(["1299", "1300"]) === "1301" &&
     nextNameAmong(["alpha", "07", "4"]) === "5"
+  );
+
+  // Names never pass through a JavaScript number. Past `2^53` a number
+  // cannot tell adjacent integers apart, and a wide enough one prints in
+  // exponent form; a name is a decimal string at every width.
+  const assert_names_stay_decimal_past_the_safe_integers = assert(() =>
+    nextNameAmong(["9007199254740992"]) === "9007199254740993" &&
+    nextNameAmong(["999999999999999999999999"]) ===
+      "1000000000000000000000000" &&
+    nextNameAmong(["9007199254740992", "9007199254740993"]) ===
+      "9007199254740994"
+  );
+
+  // A key that is not a canonical decimal — a foreign client can write any
+  // key into the map — is not a name: it neither counts as the largest nor
+  // blocks allocation.
+  const assert_foreign_keys_are_not_names = assert(() =>
+    nextNameAmong(["007", "1e3", "abc"]) === "1" &&
+    nextNameAmong(["007", "1e3", "abc", "4"]) === "5" &&
+    nextNameAmong(["+5", "-1", " 6", "6 ", "0x10"]) === "1"
   );
 
   // The allocator under a lost race, step by step. A verb reads the keys and
@@ -62,6 +85,26 @@ export default pattern(() => {
     equals(names.get()["3"] as object, loser)
   );
 
+  // Foreign keys on a real map, as a client over the memory protocol could
+  // leave them: they neither block allocation nor count as the largest, so
+  // the next name follows the sequence's own largest.
+  const foreign = new Writable({ title: "foreign" });
+  const afterForeign = new Writable({ title: "after foreign" });
+  const action_foreign_keys_land = action(() => {
+    names.key("007").set(foreign);
+    names.key("1e3").set(foreign);
+    names.key("abc").set(foreign);
+  });
+  const action_allocate_after_them = action(() => {
+    issued.push(assignName(names, afterForeign));
+  });
+  const assert_allocation_ignores_foreign_keys = assert(() =>
+    issued.get().join(",") === "1,3,4" &&
+    equals(names.get()["4"] as object, afterForeign) &&
+    equals(names.get()["007"] as object, foreign) &&
+    Object.keys(names.get()).toSorted().join(",") === "007,1,1e3,2,3,4,abc"
+  );
+
   // The reverse lookup matches by identity, and a member the table does not
   // hold has no name.
   const assert_reverse_lookup = assert(() => {
@@ -92,6 +135,11 @@ export default pattern(() => {
       { assertion: assert_stale_name_was_the_winners },
       { action: action_loser_reruns },
       { assertion: assert_rerun_takes_the_next_distinct_name },
+      { assertion: assert_names_stay_decimal_past_the_safe_integers },
+      { assertion: assert_foreign_keys_are_not_names },
+      { action: action_foreign_keys_land },
+      { action: action_allocate_after_them },
+      { assertion: assert_allocation_ignores_foreign_keys },
       { assertion: assert_reverse_lookup },
       { assertion: assert_declaration },
     ],
