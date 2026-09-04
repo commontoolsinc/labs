@@ -38,7 +38,7 @@ export class SlugResolutionError extends Error {
  * for every cell in a piece's document whatever its path; {@link isPieceRoot}
  * is the test for the piece itself.
  */
-export function isPieceDocument(
+function isPieceDocument(
   runtime: Runtime,
   cell: Cell<unknown>,
 ): boolean {

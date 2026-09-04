@@ -252,6 +252,15 @@ check "slug for Completion fixture" \
 step "3. The slug reaches its own positional too"
 check "board" "$(candidates_at "cf piece set-slug $LINE_ARGS ")" \
   "piece set-slug completes the slugs it can re-point"
+# A slug's source is a cell, not a piece: the name a collection gets is the
+# path inside the board that holds it, so the source slot spans a piece and
+# the keys under it, the way a link endpoint does.
+check ":cf:nospace" "$(directives_at "cf piece set-slug $LINE_ARGS name ")" \
+  "its source holds the cursor for the separator a path continues with"
+check "1" "$(complete_at "cf piece set-slug $LINE_ARGS name ${BOARD%??????????}" |
+  grep -c "^$BOARD\$")" "the source offers a piece before the separator"
+check "1" "$(complete_at "cf piece set-slug $LINE_ARGS name $BOARD/rev" |
+  grep -c "^$BOARD/revision\$")" "and that piece's keys after it"
 
 step "4. Both spellings of an option complete the same values"
 # `--piece=<TAB>` and `--piece <TAB>` are one slot. The inline spelling is the

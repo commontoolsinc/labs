@@ -1445,6 +1445,24 @@ export async function resolvePieceConfig(
 }
 
 /**
+ * The piece a config addresses, for a command whose intake is a piece and
+ * nothing inside it.
+ *
+ * Every such command resolves through here, because the refusal it owes a
+ * caller cannot be raised at the parse: a slug's embedded path may be spent
+ * selecting a member, and only the walk can tell that from a cell path the
+ * command has no use for. A command that resolved the address on its own
+ * would take the piece and drop the path without saying so.
+ */
+export async function resolveAddressedPieceId(
+  pieces: PiecesController,
+  config: PieceConfig,
+  deps: PieceResolutionDeps = {},
+): Promise<string> {
+  return (await resolvePieceConfigWithPieces(config, pieces, deps)).piece;
+}
+
+/**
  * Resolves a link endpoint's address together with the path written after it,
  * as every address resolves: a slug naming a collection spends the first
  * segment on the member, and what is left is a cell path inside the piece the
@@ -3684,6 +3702,10 @@ export async function linkPieces(
     "linkPieces.resolveTarget",
     () => resolveLinkEndpointAddress(pieces, targetPieceId, targetPath, deps),
   );
+  // Both halves name the piece the walk reached rather than the token that
+  // reached it: an address naming a collection's member checks its path on
+  // the member, and a message pairing that path with the collection's name
+  // would describe a read nobody made.
   const resolvedSourcePieceId = source.piece;
   const resolvedSourcePath = source.pathAfter;
   const resolvedTargetPieceId = target.piece;
@@ -3708,7 +3730,9 @@ export async function linkPieces(
     const sourceHasPattern =
       getPatternIdentityRef(sourcePiece.getCell()) !== undefined;
     if (!sourceHasPattern) {
-      errors.push(`Source piece ${sourcePieceId} does not have pattern`);
+      errors.push(
+        `Source piece ${resolvedSourcePieceId} does not have pattern`,
+      );
     } else if (resolvedSourcePath.length > 0) {
       const sourceData = await timeCliPhase(
         "linkPieces.readSourceResult",
@@ -3721,7 +3745,7 @@ export async function linkPieces(
           errors.push(
             `Source path "${
               resolvedSourcePath.join("/")
-            }" does not exist on piece ${sourcePieceId}`,
+            }" does not exist on piece ${resolvedSourcePieceId}`,
           );
           break;
         }
@@ -3731,7 +3755,7 @@ export async function linkPieces(
         errors.push(
           `Source path "${
             resolvedSourcePath.join("/")
-          }" does not exist on piece ${sourcePieceId}`,
+          }" does not exist on piece ${resolvedSourcePieceId}`,
         );
       }
     }
@@ -3750,7 +3774,9 @@ export async function linkPieces(
     const targetHasPattern =
       getPatternIdentityRef(targetPiece.getCell()) !== undefined;
     if (!targetHasPattern) {
-      errors.push(`Target piece ${targetPieceId} does not have pattern`);
+      errors.push(
+        `Target piece ${resolvedTargetPieceId} does not have pattern`,
+      );
     } else if (resolvedTargetPath.length > 0) {
       // Check target path resolves on the input cell
       const targetData = await timeCliPhase(
@@ -3763,7 +3789,7 @@ export async function linkPieces(
           errors.push(
             `Target path "${
               resolvedTargetPath.join("/")
-            }" does not exist on piece ${targetPieceId}`,
+            }" does not exist on piece ${resolvedTargetPieceId}`,
           );
           break;
         }
@@ -3773,7 +3799,7 @@ export async function linkPieces(
         errors.push(
           `Target path "${
             resolvedTargetPath.join("/")
-          }" does not exist on piece ${targetPieceId}`,
+          }" does not exist on piece ${resolvedTargetPieceId}`,
         );
       }
     }

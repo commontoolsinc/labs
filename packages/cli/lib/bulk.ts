@@ -42,12 +42,16 @@ import {
 import { retargetPieces } from "@commonfabric/piece/ops/bulk-retarget";
 import type { JSONSchema, RuntimeProgram } from "@commonfabric/runner";
 
-import { loadPieces, type PieceConfig, type SpaceConfig } from "./piece.ts";
+import {
+  loadPieces,
+  type PieceConfig,
+  type PieceResolutionDeps,
+  resolveAddressedPieceId,
+  type SpaceConfig,
+} from "./piece.ts";
 
-export interface SourcePinDependencies {
-  loadPieces?: typeof loadPieces;
-  resolvePieceAddress?: typeof resolvePieceAddress;
-}
+/** What {@link readSourcePin} resolves its address and connection through. */
+export type SourcePinDependencies = PieceResolutionDeps;
 
 /**
  * Read one piece's source pin — reference, current revision when a log
@@ -62,10 +66,7 @@ export async function readSourcePin(
   deps: SourcePinDependencies = {},
 ): Promise<PiecePin | undefined> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
-  const piece = await (deps.resolvePieceAddress ?? resolvePieceAddress)(
-    pieces,
-    config.piece,
-  );
+  const piece = await resolveAddressedPieceId(pieces, config, deps);
   return await readPiecePin(pieces, piece, new Map(), config.pieceScope);
 }
 
@@ -437,9 +438,7 @@ export interface RestoreRunRequest {
   apply?: boolean;
 }
 
-export interface RestoreRunDependencies {
-  loadPieces?: typeof loadPieces;
-  resolvePieceAddress?: typeof resolvePieceAddress;
+export interface RestoreRunDependencies extends PieceResolutionDeps {
   restorePiece?: typeof restorePiece;
 }
 
@@ -454,10 +453,7 @@ export async function runRestore(
   deps: RestoreRunDependencies = {},
 ): Promise<RestoreOutcome> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
-  const piece = await (deps.resolvePieceAddress ?? resolvePieceAddress)(
-    pieces,
-    config.piece,
-  );
+  const piece = await resolveAddressedPieceId(pieces, config, deps);
   return await (deps.restorePiece ?? restorePiece)(pieces, piece, {
     ...(request.revisionId === undefined
       ? {}

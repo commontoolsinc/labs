@@ -113,7 +113,10 @@ const errorMessage = (error: unknown): string =>
  * two disagree about the rule rather than that the space is empty.
  *
  * The map is total over the code union, so a code added to the resolver does
- * not compile until it is classified here.
+ * not compile until it is classified here. Totality is the point: only
+ * `inside-piece` can reach this from an address with no path, and
+ * `missing-member` is classified because it belongs to the same answer, not
+ * because it arrives.
  */
 const SLUG_CODE_STATES: Readonly<
   Record<

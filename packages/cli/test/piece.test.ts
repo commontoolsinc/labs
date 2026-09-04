@@ -938,19 +938,29 @@ describe("cli piece parsing", () => {
     const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
     const rendered: string[] = [];
     const hints: string[] = [];
-    await setCellValueFromCommand(base, "/top/2", "title", {
+    const reporting = {
       drainStdin: (() => Promise.resolve("Oven schedule")) as never,
-      setCellValue: (() =>
-        Promise.resolve({ piece: LLM_HANDLE, path: ["title"] })) as never,
+      setCellValue:
+        (() =>
+          Promise.resolve({ piece: LLM_HANDLE, path: ["title"] })) as never,
       render: ((text: string) => {
         rendered.push(text);
       }) as never,
       hint: ((text: string) => {
         hints.push(text);
       }) as never,
-    });
+    };
+    await setCellValueFromCommand(base, "/top/2", "title", reporting);
     expect(rendered).toEqual(["Set value at path: title"]);
     expect(hints[0]).toContain(`cf piece step --cell ${LLM_HANDLE}`);
+
+    // Where the walk spends nothing the address still names the piece, and
+    // the next command is one the reader can paste as they typed it.
+    rendered.length = 0;
+    hints.length = 0;
+    await setCellValueFromCommand(base, "/tracker", "title", reporting);
+    expect(rendered).toEqual(["Set value at path: title"]);
+    expect(hints[0]).toContain("cf piece step --cell tracker");
   });
 
   it("parsePieceOptions() throws on incomplete input", () => {

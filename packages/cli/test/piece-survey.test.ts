@@ -227,6 +227,21 @@ describe("piece-survey", () => {
       expect(hints).toEqual(["members: 1 on idA#default"]);
     });
 
+    it("refuses a path on the holder's address, which the selector cannot carry", async () => {
+      // `--path` names the collection, so a path on the address has nowhere
+      // to go. The parse lets a slug's through — only the walk can tell a
+      // member from a cell path — and a selector built without it would run
+      // against the piece the first segment named and say nothing.
+      await expect(
+        surveyFromCommand(
+          { ...OPTIONS, cell: "/board/topics", path: "topics" },
+          {
+            runSurvey: () => Promise.resolve(COMPLETE),
+          },
+        ),
+      ).rejects.toThrow(/drop the path on "topics"/);
+    });
+
     it("refuses a --side that is neither input nor result", async () => {
       await expect(
         surveyFromCommand({ ...OPTIONS, path: "topics", side: "bogus" }, {

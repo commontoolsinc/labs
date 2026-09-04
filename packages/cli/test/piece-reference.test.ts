@@ -12,8 +12,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { PieceReference } from "@commonfabric/piece";
+import type { RestoreOutcome } from "@commonfabric/piece/ops";
 import { parsePieceOptions } from "../commands/piece.ts";
-import { getCellValue, resolvePieceConfig } from "../lib/piece.ts";
+import { readSourcePin, runRestore } from "../lib/bulk.ts";
+import {
+  getCellValue,
+  type PieceResolutionDeps,
+  resolvePieceConfig,
+} from "../lib/piece.ts";
 
 const CONFIG = {
   apiUrl: "https://cf.dev",
@@ -86,6 +92,66 @@ describe("piece-reference", () => {
           resolvePieceAddress: () => Promise.resolve(MEMBER),
         }),
       ).rejects.toThrow(/embeds a path \("2"\)/);
+    });
+  });
+
+  describe("commands whose intake is a piece and nothing inside it", () => {
+    // Each hands the library a piece id and no path, and the parse lets a
+    // slug's embedded path through because only the walk can tell a member
+    // from a cell path. So a segment the walk leaves is refused here. Dropped
+    // instead, `cf piece restore --apply` would restore the whole piece the
+    // address's first segment reached, saying nothing about the rest.
+
+    const ADDRESSED = { ...CONFIG, piece: "top", piecePath: [2, "title"] };
+
+    /** Deps whose walk reaches {@link MEMBER} and leaves `pathAfter`. */
+    function walkLeaving(
+      pathAfter: (string | number)[],
+    ): PieceResolutionDeps {
+      return {
+        loadPieces: () => Promise.resolve({} as never),
+        resolvePieceReference: () =>
+          Promise.resolve({ piece: MEMBER, pathAfter }),
+      };
+    }
+
+    const OUTCOME: RestoreOutcome = {
+      piece: MEMBER,
+      revisions: [],
+      restored: false,
+    };
+
+    const entryPoints: ReadonlyArray<
+      [string, (deps: PieceResolutionDeps) => Promise<unknown>]
+    > = [
+      ["readSourcePin()", (deps) => readSourcePin(ADDRESSED, deps)],
+      ["runRestore()", (deps) =>
+        runRestore(ADDRESSED, { apply: true }, {
+          ...deps,
+          restorePiece: () => Promise.resolve(OUTCOME),
+        })],
+    ];
+
+    for (const [name, run] of entryPoints) {
+      it(`${name} refuses the segments the walk leaves`, async () => {
+        await expect(run(walkLeaving(["title"]))).rejects.toThrow(
+          /embeds a path \("title"\) but this command takes a piece id only/,
+        );
+      });
+    }
+
+    it("runRestore() writes the piece the walk reached when it leaves nothing", async () => {
+      const restored: string[] = [];
+      await runRestore({ ...CONFIG, piece: "top", piecePath: [2] }, {
+        apply: true,
+      }, {
+        ...walkLeaving([]),
+        restorePiece: (_pieces, piece) => {
+          restored.push(piece);
+          return Promise.resolve(OUTCOME);
+        },
+      });
+      expect(restored).toEqual([MEMBER]);
     });
   });
 

@@ -135,20 +135,25 @@ the piece, and the segments after it are a cell path inside that member. So
 `cf piece describe --cell /top/2` describes it, and
 `cf piece call --cell /top/2 <verb>` calls it. Exactly one segment reaches a
 member, so a field of a member never answers to the collection's namespace:
-`/top/2/comments` is the `comments` field of member `2`, never a member named
-`comments` of whatever `2` holds.
+`/top/2/title` is the `title` field of member `2`, never a member named `title`
+of whatever `2` holds. This is how an address reads wherever a `--cell` or
+positional one names the target, at both `cf piece link` endpoints, and for the
+source of `set-slug`.
 
 A collection's name with no member after it is refused, naming the piece that
 holds the collection; a member the collection does not hold is refused as
 `no member 999 in top`. The map itself is addressed by the `piece/path` handle
 `cf piece slugs` prints for the name, never by the name, which addresses
-members: `cf piece inspect --cell /of:fid1:…/names` shows the map, and
-`cf piece inspect --cell /top` is the refusal. Writing follows the same rule:
-`cf cell set /top/2 title <value>` writes the title, while a `cf cell set` whose
-address stops at `/top/2` is refused, because the address alone reaches the
-member's whole cell, and replacing that is what a path spells out. This is the
-rule wherever a `--cell` or positional address names the target, at both
-`cf piece link` endpoints, and for the source of `set-slug`.
+members: `cf cell get /of:fid1:…/names` reads the map and prints the member
+names it holds. `cf piece inspect` takes a piece id rather than a cell inside
+one, so it has no spelling for the map at all; given the name instead, as
+`cf piece inspect --cell /top`, it meets the collection's refusal the way every
+other command does. A write takes a path inside the member the address reaches,
+and the value on stdin: `echo '"Oven schedule"' | cf cell set /top/2 title`. A
+`cf cell set` whose address stops at `/top/2` is refused, because the address
+alone reaches the member's whole cell and replacing that is what a path spells
+out. The one spelling that does replace a whole cell is an explicit empty
+positional, `cf cell set <address> ""`, which has always named the root.
 
 Beside the reference, the CLI's bare form — `pieceId[@scope]`,
 `pieceId[@scope]/path` at link endpoints, and slugs — is a convenience alias for

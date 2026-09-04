@@ -3378,9 +3378,16 @@ export async function setCellValueFromCommand(
     },
   );
   (deps.render ?? render)(`Set value at path: ${written.path.join("/")}`);
+  // The address as written is what a reader pastes into the next command, and
+  // it still names the piece written to whenever the walk spent none of the
+  // path. Where the walk spent some, the address names a collection and only
+  // the piece it reached says what was written.
+  const wroteTo = written.path.length === pathSegments.length
+    ? pieceConfig.piece
+    : written.piece;
   (deps.hint ?? hint)(
     cliText(
-      `TIP: Computed values may be stale. Run 'cf piece step --cell ${written.piece} ...' to trigger recomputation.`,
+      `TIP: Computed values may be stale. Run 'cf piece step --cell ${wroteTo} ...' to trigger recomputation.`,
     ),
   );
 }
@@ -3945,6 +3952,19 @@ export function readBulkSelection(
     throw new ValidationError(
       "A scoped piece cannot hold the selected collection; drop the " +
         "@scope suffix.",
+      { exitCode: 1 },
+    );
+  }
+  // The holder is a piece, and `--path` is what names the collection inside
+  // it, so a path on the address has nowhere to go. Refused here rather than
+  // carried, because this is where the selector is built and a path it does
+  // not carry is a path the run would drop. The `--list` branch above refuses
+  // its own entries' paths for the same reason.
+  if (pieceConfig.piecePath?.length) {
+    throw new ValidationError(
+      `A bulk operation reads whole pieces; drop the path on ` +
+        `${JSON.stringify(pieceConfig.piecePath.join("/"))} and name the ` +
+        `collection with --path.`,
       { exitCode: 1 },
     );
   }
