@@ -2,9 +2,10 @@
  * Pattern tests for the exemplar board and its item: allocation on create,
  * density, a name never reused, a name kept whatever happens to its item, the
  * backfill and its idempotence, index rows that are the members and the
- * default an unnamed member's `shortName` reads as, the item reading its own
- * name out of the board's table, the declaration, the bound on what a read of
- * the namespace expands, and the rejections. Every rejection here is a thrown
+ * default an unnamed member's `shortName` reads as, the mention universe and
+ * the name each of its rows carries, the item reading its own name out of the
+ * board's table, the declaration, the bound on what a read of the namespace or
+ * the universe expands, and the rejections. Every rejection here is a thrown
  * verb, so the runtime errors are required, and the count is exact: a guard
  * quietly reverting to a silent return fails the suite.
  */
@@ -154,6 +155,31 @@ export default pattern(() => {
       !serialized.includes("vnode");
   });
 
+  // The mention universe: one row per member, carrying the board's name for
+  // it and the member itself as a reference. This is what an item's editor
+  // completes a `#42` citation over.
+  const assert_mentionable_rows_carry_names = assert(() =>
+    (board.mentionable ?? []).length === 3 &&
+    board.mentionable?.[0]?.[NAME] === "First item, renamed" &&
+    board.mentionable?.[0]?.title === "First item, renamed" &&
+    board.mentionable?.[0]?.name === "1" &&
+    board.mentionable?.[1]?.name === "8" &&
+    board.mentionable?.[2]?.name === "9" &&
+    equals(
+      board.mentionable?.[0]?.piece as object,
+      board.items?.[0] as object,
+    )
+  );
+  // The same bound the index keeps: the rows carry copied strings and a
+  // reference, and nothing behind the reference.
+  const assert_universe_read_expands_no_member = assert(() => {
+    const serialized = JSON.stringify(board.mentionable);
+    return serialized.includes('"title"') &&
+      !serialized.includes('"body"') &&
+      !serialized.includes('"shortName"') &&
+      !serialized.includes("vnode");
+  });
+
   // An item wired to the board's table reads its own name out of it by
   // identity, and renders it as a badge; an item wired to nothing has no
   // name, renders no badge, and does not fail.
@@ -220,6 +246,14 @@ export default pattern(() => {
     legacy.index?.[1]?.title === "Older two" &&
     (legacy.namesTable ?? []).length === 0
   );
+  // A universe row for a member the board has not named carries the empty
+  // name, which is a row no `#42` query matches.
+  const assert_unnamed_universe_rows_have_no_name = assert(() =>
+    (legacy.mentionable ?? []).length === 2 &&
+    legacy.mentionable?.[0]?.[NAME] === "Older one" &&
+    legacy.mentionable?.[0]?.name === "" &&
+    legacy.mentionable?.[1]?.name === ""
+  );
   // The library call itself, so its return is observable: the names it
   // wrote, in filing order.
   const action_backfill_directly = action(() => {
@@ -237,6 +271,12 @@ export default pattern(() => {
       ((legacy.names ?? {}) as NamesMap)["2"] as object,
       legacy.items?.[1] as object,
     )
+  );
+  // The universe follows the namespace: a member named by the backfill
+  // carries its name in the row an editor completes over.
+  const assert_backfill_reaches_the_universe = assert(() =>
+    legacy.mentionable?.[0]?.name === "1" &&
+    legacy.mentionable?.[1]?.name === "2"
   );
   // Idempotent: the second run returns no names — it writes exactly the
   // names it returns — and the map holds what the first run left.
@@ -390,6 +430,8 @@ export default pattern(() => {
       { assertion: assert_fourth_does_not_reuse_two },
       { assertion: assert_namespace_read_expands_no_member },
       { assertion: assert_index_read_expands_no_member },
+      { assertion: assert_mentionable_rows_carry_names },
+      { assertion: assert_universe_read_expands_no_member },
       { render: board[UI] },
       { action: action_name_the_wired_item },
       { assertion: assert_wired_item_reads_its_name },
@@ -401,8 +443,10 @@ export default pattern(() => {
       { assertion: assert_untitled_item_has_a_display_name },
       { action: action_file_two_unnamed },
       { assertion: assert_unnamed_rows_read_the_default },
+      { assertion: assert_unnamed_universe_rows_have_no_name },
       { action: action_backfill_directly },
       { assertion: assert_backfill_named_in_filing_order },
+      { assertion: assert_backfill_reaches_the_universe },
       { action: action_backfill_again },
       { assertion: assert_second_backfill_writes_nothing },
       { action: action_create_a_named_item },

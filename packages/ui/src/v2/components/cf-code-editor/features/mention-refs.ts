@@ -142,6 +142,78 @@ export function mentionRefs(state: EditorState): MentionRefInfo[] {
   return state.field(mentionRefField).refs;
 }
 
+/** Announce the short name each mention's destination publishes. */
+export const setRefShortNames = StateEffect.define<
+  Readonly<Record<string, string>>
+>();
+
+const NO_SHORT_NAMES: Readonly<Record<string, string>> = {};
+
+/**
+ * The short name each mention's destination publishes, by reference key.
+ *
+ * Held beside the parse rather than in it. A short name comes from the
+ * destination cell and not from the document, so an edit neither produces one
+ * nor invalidates one, and a name arriving late has to reach the pills of a
+ * document that has not changed since it loaded.
+ */
+export const refShortNameField = StateField.define<
+  Readonly<Record<string, string>>
+>({
+  create() {
+    return NO_SHORT_NAMES;
+  },
+  update(value, tr) {
+    let next = value;
+    for (const effect of tr.effects) {
+      if (effect.is(setRefShortNames)) next = effect.value;
+    }
+    return next;
+  },
+});
+
+/**
+ * The short names in a state, for readers outside this module. Empty where
+ * the field is not installed, which reads the same as a document no
+ * destination has published a name for.
+ */
+export function refShortNames(
+  state: EditorState,
+): Readonly<Record<string, string>> {
+  return state.field(refShortNameField, false) ?? NO_SHORT_NAMES;
+}
+
+/**
+ * The shape of a short-name citation ending at the cursor: the `#` sigil and
+ * the digits typed after it.
+ *
+ * At least one digit is required, which is what keeps a markdown heading —
+ * where a space follows the sigil — from opening a query over every named
+ * member.
+ */
+const SHORT_NAME_QUERY = /#([0-9]+)$/;
+
+/**
+ * Where the `#42` query the cursor sits at the end of begins, and the digits
+ * typed after its sigil. Null where there is none.
+ *
+ * `textBefore` runs from the start of the line to the cursor, so `from` is
+ * line-relative and a caller adds the line's own start. A sigil that does not
+ * open its token — one inside a word, or a second `#` — opens no citation, so
+ * `abc#4` and `##4` are ordinary text.
+ */
+export function shortNameQueryAt(
+  textBefore: string,
+): { from: number; query: string } | null {
+  const match = SHORT_NAME_QUERY.exec(textBefore);
+  if (!match) return null;
+
+  const from = textBefore.length - match[0].length;
+  const before = from > 0 ? textBefore[from - 1] : "";
+  if (/[\w#]/.test(before)) return null;
+  return { from, query: match[1] };
+}
+
 /**
  * Make the cursor skip the parts of a mention that are not its label: the
  * opening `[`, and the `][key]` that closes it.
@@ -238,20 +310,86 @@ export const mentionRefEditFilter = EditorState.transactionFilter.of((tr) => {
   return { changes: specs, effects: tr.effects };
 });
 
+/** The pill a mention's label wears when the cursor is elsewhere. */
+const PILL = Decoration.mark({ class: "cm-mention-ref-pill" });
+
+/** The brackets and the key, which a reader never sees. */
+const HIDDEN = Decoration.replace({});
+
+/**
+ * Helper for `mentionRefDecorations()`, which returns the pill a label wears,
+ * carrying `shortName` for the stylesheet to render beside it where the
+ * destination publishes one.
+ *
+ * A fresh decoration per call is what the redraw comparison expects: marks
+ * compare by class and attributes rather than by identity, so two calls over
+ * an unchanged document produce a set that compares equal.
+ */
+function pillDecoration(shortName: string | undefined): Decoration {
+  return shortName === undefined ? PILL : Decoration.mark({
+    class: "cm-mention-ref-pill",
+    attributes: { "data-short-name": shortName },
+  });
+}
+
+/**
+ * The decorations a state's mentions take: a pill outside, and `[Label]`
+ * revealed with the key hidden while the cursor is in one.
+ *
+ * The document's own text is the label alone. A short name reaches the pill as
+ * an attribute the stylesheet renders, because a reference's spelling is
+ * computed from where it is read and never stored
+ * (`docs/specs/collection-naming.md`, "Rendering").
+ *
+ * `hasFocus` belongs to the view rather than the state and is passed for that
+ * reason: an unfocused editor shows every mention as a pill, wherever its
+ * selection happens to sit.
+ */
+export function mentionRefDecorations(
+  state: EditorState,
+  hasFocus: boolean,
+): DecorationSet {
+  const decorations: Range<Decoration>[] = [];
+  const shortNames = refShortNames(state);
+  const { head, from: selectionFrom, to: selectionTo } = state.selection.main;
+
+  for (const ref of mentionRefs(state)) {
+    const cursorInside = hasFocus && head >= ref.from && head <= ref.to;
+    const selectionOverlaps = hasFocus && selectionFrom < ref.to &&
+      selectionTo > ref.from;
+    // A label the user has emptied has nothing to wear a pill, since a mark
+    // decoration may not be empty. It takes the editing rendering wherever the
+    // cursor is, so `[]` stays visible and can be typed back into instead of
+    // becoming a token the document holds and nobody can see.
+    const editing = cursorInside || selectionOverlaps ||
+      ref.labelFrom === ref.labelTo;
+
+    if (editing) {
+      // Editing: show [Label], hide only the [key] that follows it.
+      decorations.push(HIDDEN.range(ref.labelTo + 1, ref.to));
+    } else {
+      decorations.push(HIDDEN.range(ref.from, ref.labelFrom));
+      decorations.push(
+        pillDecoration(shortNames[ref.key]).range(ref.labelFrom, ref.labelTo),
+      );
+      decorations.push(HIDDEN.range(ref.labelTo, ref.to));
+    }
+  }
+
+  return Decoration.set(decorations, true);
+}
+
 /**
  * Render a mention as a pill, and reveal `[Label]` when the cursor is in it.
  * The key is never shown: it is a local token with nothing to say to a reader.
  */
 export function createMentionRefDecorationPlugin() {
-  const pillMark = Decoration.mark({ class: "cm-mention-ref-pill" });
-  const hiddenReplace = Decoration.replace({});
-
   return ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
 
       constructor(view: EditorView) {
-        this.decorations = this.getMentionRefDecorations(view);
+        this.decorations = mentionRefDecorations(view.state, view.hasFocus);
       }
 
       update(update: ViewUpdate) {
@@ -259,37 +397,16 @@ export function createMentionRefDecorationPlugin() {
           update.docChanged || update.viewportChanged ||
           update.selectionSet || update.focusChanged ||
           update.transactions.some((tr) =>
-            tr.effects.some((effect) => effect.is(setKnownRefKeys))
+            tr.effects.some((effect) =>
+              effect.is(setKnownRefKeys) || effect.is(setRefShortNames)
+            )
           )
         ) {
-          this.decorations = this.getMentionRefDecorations(update.view);
+          this.decorations = mentionRefDecorations(
+            update.view.state,
+            update.view.hasFocus,
+          );
         }
-      }
-
-      getMentionRefDecorations(view: EditorView) {
-        const decorations: Range<Decoration>[] = [];
-        const hasFocus = view.hasFocus;
-        const { head, from: selectionFrom, to: selectionTo } = view.state
-          .selection.main;
-
-        for (const ref of mentionRefs(view.state)) {
-          const cursorInside = hasFocus && head >= ref.from && head <= ref.to;
-          const selectionOverlaps = hasFocus && selectionFrom < ref.to &&
-            selectionTo > ref.from;
-
-          if (cursorInside || selectionOverlaps) {
-            // Editing: show [Label], hide only the [key] that follows it.
-            decorations.push(hiddenReplace.range(ref.labelTo + 1, ref.to));
-          } else {
-            decorations.push(hiddenReplace.range(ref.from, ref.labelFrom));
-            decorations.push(pillMark.range(ref.labelFrom, ref.labelTo));
-            decorations.push(hiddenReplace.range(ref.labelTo, ref.to));
-          }
-        }
-
-        decorations.sort((a, b) => a.from - b.from || a.to - b.to);
-
-        return Decoration.set(decorations);
       }
     },
     {

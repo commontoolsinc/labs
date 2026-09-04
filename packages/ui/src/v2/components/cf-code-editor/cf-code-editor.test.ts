@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   autocompletion,
+  type Completion,
   CompletionContext,
   type CompletionResult,
   completionStatus,
@@ -11,7 +12,9 @@ import type { EditorView } from "@codemirror/view";
 import { NAME } from "@commonfabric/runner/shared";
 import { type CellHandle, type CellRef } from "@commonfabric/runtime-client";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
+import type { MentionRefMap } from "../../core/mention-refs.ts";
 import type { Mentionable, MentionableArray } from "../../core/mentionable.ts";
+import { mentionRefField, refShortNameField } from "./features/mention-refs.ts";
 import { CFCodeEditor, MimeType } from "./index.ts";
 
 describe("CFCodeEditor", () => {
@@ -679,5 +682,173 @@ describe("CFCodeEditor mention-piece resolution", () => {
     release();
     await older;
     expect(element._resolvedPieceCells.get(0)?.id()).toBe(fastId);
+  });
+});
+
+describe("CFCodeEditor short-name completion", () => {
+  // The `#42` trigger over a universe whose rows carry their collection's
+  // name for each member. A row's piece is stored as a LINK, as the
+  // resolution block above explains, so the fixtures hold raw `$link` sigils
+  // and the mock network follows them exactly as the runtime does.
+
+  type ShortNameInternals = {
+    mentionable: CellHandle<MentionableArray> | null;
+    references?: CellHandle<MentionRefMap> | null;
+    _editorView: EditorView | undefined;
+    _resolvePieceIds(): Promise<void>;
+    getFilteredMentionable(query: string): Array<[unknown, number]>;
+    createShortNameCompletionSource(): (
+      context: CompletionContext,
+    ) => CompletionResult | null;
+  };
+
+  const link = (id: string) => ({ "$link": { id, path: [] } });
+
+  const UNIVERSE = [
+    {
+      [NAME]: "First item",
+      title: "First item",
+      name: "1",
+      piece: link("of:1"),
+    },
+    {
+      [NAME]: "Second item",
+      title: "Second item",
+      name: "42",
+      piece: link("of:42"),
+    },
+    {
+      [NAME]: "Third item",
+      title: "Third item",
+      name: "43",
+      piece: link("of:43"),
+    },
+    // No name of its own, and a display name that a `#42` query would match
+    // were the query asked of anything but `name`.
+    { [NAME]: "42 apples", title: "42 apples", piece: link("of:none") },
+  ];
+
+  /** A view stub carrying the mention state the editor reads. */
+  function createView(
+    source: (context: CompletionContext) => CompletionResult | null,
+    doc: string,
+  ) {
+    const state = EditorState.create({
+      doc,
+      selection: { anchor: doc.length },
+      extensions: [
+        autocompletion({ override: [source] }),
+        mentionRefField,
+        refShortNameField,
+      ],
+    });
+    return {
+      state,
+      hasFocus: true,
+      dispatch(spec: TransactionSpec) {
+        this.state = this.state.update(spec).state;
+      },
+    };
+  }
+
+  /** An editor bound to `UNIVERSE`, with every row's piece resolved. */
+  async function editorOver(
+    doc: string,
+    references?: CellHandle<MentionRefMap>,
+  ) {
+    const element = new CFCodeEditor() as unknown as ShortNameInternals;
+    element.mentionable = createMockCellHandle(
+      UNIVERSE,
+    ) as unknown as CellHandle<MentionableArray>;
+    if (references) {
+      // Defined rather than assigned, so Lit's reactive property setter does
+      // not run against an element with no editor behind it.
+      Object.defineProperty(element, "references", {
+        value: references,
+        writable: true,
+      });
+    }
+    await element._resolvePieceIds();
+
+    const source = element.createShortNameCompletionSource();
+    const view = createView(source, doc);
+    element._editorView = view as unknown as EditorView;
+    return { element, source, view };
+  }
+
+  it("offers every row whose name begins with the typed digits", async () => {
+    const { source, view } = await editorOver("see #4");
+    const result = source(new CompletionContext(view.state, 6, true));
+    expect(result?.options.map((option) => option.label)).toEqual([
+      "#42",
+      "#43",
+    ]);
+    expect(result?.from).toBe(4);
+  });
+
+  it("offers no row carrying no name of its own", async () => {
+    const { source, view } = await editorOver("see #42");
+    const result = source(new CompletionContext(view.state, 7, true));
+    expect(result?.options.map((option) => option.detail)).toEqual([
+      "Second item",
+    ]);
+  });
+
+  it("offers no row whose name the query does not begin", async () => {
+    const { source, view } = await editorOver("see #9");
+    expect(source(new CompletionContext(view.state, 6, true))?.options)
+      .toEqual([]);
+  });
+
+  it("returns null where the sigil sits inside a word", async () => {
+    const { source, view } = await editorOver("issue#4");
+    expect(source(new CompletionContext(view.state, 7, true))).toBeNull();
+  });
+
+  it("inserts a reference-form mention naming the row's piece", async () => {
+    const references = createMockCellHandle<MentionRefMap>({});
+    const { source, view } = await editorOver("see #42", references);
+    const result = source(new CompletionContext(view.state, 7, true))!;
+    const [option] = result.options;
+
+    (option.apply as (
+      view: EditorView,
+      completion: Completion,
+      from: number,
+      to: number,
+    ) => void)(view as unknown as EditorView, option, result.from, 7);
+
+    expect(view.state.doc.toString()).toMatch(
+      /^see \[Second item\]\[[0-9a-z]{6}\]$/,
+    );
+    const entries = Object.entries(references.get() ?? {});
+    expect(entries).toHaveLength(1);
+    const [key, entry] = entries[0];
+    expect(view.state.doc.toString()).toBe(`see [Second item][${key}]`);
+    // The mock network stores what the write serialized to, which is the cell
+    // the row's `piece` link named — the item, not the row that listed it.
+    expect((entry.destination as { id: string }).id).toBe("of:42");
+    expect(entry.modifiedTitle).toBe(false);
+  });
+
+  it("inserts a wiki-link mention without a reference map", async () => {
+    const { source, view } = await editorOver("see #42");
+    const result = source(new CompletionContext(view.state, 7, true))!;
+    const [option] = result.options;
+
+    (option.apply as (
+      view: EditorView,
+      completion: Completion,
+      from: number,
+      to: number,
+    ) => void)(view as unknown as EditorView, option, result.from, 7);
+
+    expect(view.state.doc.toString()).toBe("see [[Second item (42)]]");
+  });
+
+  it("offers a row by its collection name from the backlink query too", async () => {
+    const { element } = await editorOver("");
+    expect(element.getFilteredMentionable("43")).toHaveLength(1);
+    expect(element.getFilteredMentionable("9")).toEqual([]);
   });
 });
