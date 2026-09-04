@@ -2,7 +2,10 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import { type FabricValue } from "@commonfabric/data-model";
-import { FabricMap } from "@commonfabric/data-model/fabric-instances";
+import {
+  FabricError,
+  FabricMap,
+} from "@commonfabric/data-model/fabric-instances";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 
@@ -2034,21 +2037,78 @@ describe("determineTriggeredActions", () => {
       ).toThrow("`FabricMap`: not yet implemented");
     });
 
-    it("does not trigger a read below an instance it cannot descend", () => {
-      // An instance is a container this walk cannot address by key. A
-      // subscription that throws stops delivering, so the descent ends here
-      // as it does at any other value with no reachable keys, and the read
-      // below reads as unreachable on both sides.
+    it("triggers a read below an instance replaced by a scalar", () => {
+      // `value.a.b` is reachable while `a` is a container and absent once it
+      // is a scalar, so the two sides stop at different depths and the read
+      // is triggered. The same holds for each transition below.
 
-      const action = createAction("readBelowInstance");
+      const action = createAction("instanceToScalar");
       const dependencies = new Map<Action, SortedAndCompactPaths>([
         [action, [["value", "a", "b"]]],
       ]);
       const before = { value: { a: new FabricMap(new Map([["b", 1]])) } };
-      const after = { value: { a: new FabricMap(new Map([["b", 2]])) } };
+      const after = { value: { a: 5 } };
 
-      const result = determineTriggeredActions(dependencies, before, after);
-      expect(result).toEqual([]);
+      expect(determineTriggeredActions(dependencies, before, after))
+        .toEqual([action]);
+    });
+
+    it("triggers a read below an instance that was deleted", () => {
+      const action = createAction("instanceDeleted");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a", "b"]]],
+      ]);
+      const before = { value: { a: new FabricMap(new Map([["b", 1]])) } };
+      const after = { value: {} };
+
+      expect(determineTriggeredActions(dependencies, before, after))
+        .toEqual([action]);
+    });
+
+    it("triggers a read below a scalar replaced by an instance", () => {
+      const action = createAction("scalarToInstance");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a", "b"]]],
+      ]);
+      const before = { value: { a: 5 } };
+      const after = { value: { a: new FabricMap(new Map([["b", 1]])) } };
+
+      expect(determineTriggeredActions(dependencies, before, after))
+        .toEqual([action]);
+    });
+
+    it("triggers a read below an error that was deleted", () => {
+      const action = createAction("errorDeleted");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a", "message"]]],
+      ]);
+      const before = {
+        value: { a: FabricError.fromNativeError(new Error("boom")) },
+      };
+      const after = { value: {} };
+
+      expect(determineTriggeredActions(dependencies, before, after))
+        .toEqual([action]);
+    });
+
+    it("triggers a read of a property an error carries when it changes", () => {
+      // A `FabricInstance` is not stateless with respect to property names:
+      // `FabricError` reaches `message`, `name` and `type` through prototype
+      // accessors, so a descent through one reads values rather than vacancy.
+
+      const action = createAction("errorMessageChanged");
+      const dependencies = new Map<Action, SortedAndCompactPaths>([
+        [action, [["value", "a", "message"]]],
+      ]);
+      const before = {
+        value: { a: FabricError.fromNativeError(new Error("boom one")) },
+      };
+      const after = {
+        value: { a: FabricError.fromNativeError(new Error("boom two")) },
+      };
+
+      expect(determineTriggeredActions(dependencies, before, after))
+        .toEqual([action]);
     });
 
     it("triggers on a special object replaced at the read's own path", () => {

@@ -17,12 +17,12 @@ const hasOwnPathSegment = (
   segment: string | number,
 ): boolean => Object.hasOwn(value, segment);
 
-// Both descents below stop at a `FabricSpecialObject`, so a path into one
-// reports absent / `undefined` -- the same answer `getAtPath` in
-// `traverse.ts` gives for the same address. For a `FabricPrimitive` that is
-// the whole story: it is a leaf, and no path addresses anything inside one.
-// For a `FabricInstance` it is what property-name access can say, its
-// contents being reachable only through its codec.
+// Both descents below stop at a `FabricPrimitive`, so a path into one reports
+// absent / `undefined` -- the same answer `getAtPath` in `traverse.ts` gives
+// for the same address, and the whole story for a leaf that no path addresses
+// anything inside of. A `FabricInstance` is refused rather than answered
+// about, by the same predicate and for the same reason it is refused
+// everywhere else.
 export const hasValueAtPath = (
   root: FabricValue | undefined,
   path: readonly string[],

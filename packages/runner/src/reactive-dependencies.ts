@@ -105,13 +105,15 @@ export function addressesToPathByEntity(
 /**
  * Whether the descent below may address `value` by key.
  *
- * A `FabricInstance` answers `false` here, ending the descent at it. This walk
- * runs under a storage subscription, which has to keep delivering, so an
- * instance it cannot address is left to reachability: a path continuing below
- * one is absent on both sides at the same depth, and triggers nothing.
+ * This is {@link isWalkableObjectOrArray} with its refusal of a
+ * `FabricInstance` replaced by `true`. The descent reads an instance by
+ * property name, reaching the accessors a `FabricError` carries and finding
+ * nothing on a `FabricMap`. Answering `false` would make an instance
+ * indistinguishable from a leaf, and a read below one would then stop
+ * triggering when the instance is deleted or replaced by a scalar.
  */
 function isKeyable(value: unknown): boolean {
-  return !(value instanceof FabricInstance) && isWalkableObjectOrArray(value);
+  return value instanceof FabricInstance || isWalkableObjectOrArray(value);
 }
 
 /**
@@ -164,17 +166,18 @@ export function determineTriggeredActions(
   const beforeValues: FabricValue[] = [before];
   const afterValues: FabricValue[] = [after];
 
-  // *LastObject: Last key-able object along currentPath. A special object is
-  // not key-able: its state sits behind no property name, so the descent stops
-  // at one and a path continuing below reads as unreachable rather than as
-  // present-and-empty.
+  // *LastObject: Last key-able object along currentPath. A `FabricPrimitive`
+  // is not key-able: its state sits behind no property name, so the descent
+  // stops at one and a path continuing below reads as unreachable rather than
+  // as present-and-empty.
   //
-  // TODO(danfuzz): stopping is the right answer for a `FabricPrimitive` and
-  // an incomplete one for a `FabricInstance`. A subscriber path continuing
-  // below an instance is unreachable on both sides at the same depth, so its
-  // action still never triggers however the instance's contents changed. The
-  // `shallowEqual` marker at the bottom of this file covers the leaf
-  // comparison; this is the descent's half of the same gap.
+  // TODO(danfuzz): a `FabricInstance` is descended by property name, which
+  // reaches what its class exposes that way and not what its codec holds. A
+  // subscriber path below a `FabricMap` or `FabricSet` therefore reads as
+  // present-and-empty on both sides, and its action never triggers however
+  // the contents changed. The `shallowEqual` marker at the bottom of this
+  // file covers the leaf comparison; this is the descent's half of the same
+  // gap.
   let beforeLastObject = isKeyable(before) ? 0 : -1;
   let afterLastObject = isKeyable(after) ? 0 : -1;
 

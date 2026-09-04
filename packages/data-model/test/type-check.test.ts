@@ -687,6 +687,12 @@ describe("type-check", () => {
     });
 
     describe("given a non-container `FabricValue`", () => {
+      it("returns `false` for a direct `FabricSpecialObject` subclass", () => {
+        class DirectSpecialObject extends FabricSpecialObject {}
+
+        expect(isWalkableObjectNotArray(new DirectSpecialObject())).toBe(false);
+      });
+
       it("returns `false` for a `FabricPrimitive`", () => {
         // The whole of the difference from `isFabricObjectOrArray()`, which
         // accepts these: a `FabricPrimitive` self-freezes at construction and
@@ -1170,16 +1176,13 @@ describe("type-check", () => {
         ).toBe(false);
       });
 
-      it("returns `false` for a direct subclass that is neither arm", () => {
-        // The `false` arm is every special object other than an instance, and
-        // not the `FabricPrimitive` half of the pair alone. A subclass this
-        // module knows nothing else about still has no own properties, so it
-        // is a leaf as far as keys go.
+      it("returns `false` for a direct `FabricSpecialObject` subclass", () => {
+        // Every special object the refusal above does not claim is carried
+        // whole, decided by class rather than by what the subclass declares.
 
         class DirectSpecialObject extends FabricSpecialObject {}
 
         expect(isWalkableObjectOrArray(new DirectSpecialObject())).toBe(false);
-        expect(isWalkableObjectNotArray(new DirectSpecialObject())).toBe(false);
       });
 
       it("throws for each `FabricInstance` kind", () => {

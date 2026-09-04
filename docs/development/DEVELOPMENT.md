@@ -434,28 +434,29 @@ or a bare `typeof value === "object"` gets the wrong answer: it sees an empty
 record and then merges the value to `{}`, rebuilds it as `{}`, descends into it
 and finds nothing, or writes a property onto it.
 
-These are the whole of what a walk needs, and using them is not optional in
-code that can meet a stored value:
+Four functions from `@commonfabric/data-model` are the whole of what a walk
+needs, and using them is not optional in code that can reach a stored value:
 
-- `isWalkableObjectOrArray(value)` is the container question, and it separates
-  the two special-object arms because they differ on exactly that question. A
-  `FabricPrimitive` answers `false`: it is a leaf, so "carry this value whole"
-  is the whole story, and no path addresses anything inside one. A
+- `isWalkableObjectOrArray(value)` is the container question. A
   `FabricInstance` is refused, because it is a container a walk is *supposed*
   to descend and cannot yet — `false` would claim it holds nothing, `true`
-  would send you into a property surface its codec does not speak for.
-  Everything outside the type is untouched: arrays and non-fabric class
-  instances still answer `true`, so it is a drop-in wherever
-  `isObjectOrArray()` was standing in for the container question.
+  would send you into a property surface its codec does not speak for. Every
+  other `FabricSpecialObject` returns `false`, `FabricPrimitive` and any
+  further subclass alike: `false` says "carry this value whole", which is the
+  complete story for a value no path addresses anything inside of. Everything
+  outside the type is untouched: arrays and non-fabric class instances still
+  return `true`, so it is a drop-in wherever `isObjectOrArray()` was standing
+  in for the container question.
 - A walk that can meet an instance and has a better answer than a throw tests
-  for one first. Three such answers exist. `attestation.ts`'s `resolve()`
-  reports the `TypeMismatchError` its own signature already carries. A walk
-  that can meet a *link* tests `isPrimitiveCellLink()` first, since a link is a
-  reference rather than a container, and under `modernCellRep` it is a
-  `FabricInstance`. And a walk that must not throw at all ends its descent
-  instead: `reactive-dependencies.ts` runs under a storage subscription, which
-  has to keep delivering, so its `isKeyable()` stops at an instance and leaves
-  a path below one unreachable on both sides.
+  for one first. `attestation.ts`'s `resolve()` reports the
+  `TypeMismatchError` its own signature already carries. A walk that can meet a
+  *link* tests `isPrimitiveCellLink()` first, since a link is a reference
+  rather than a container, and under `modernCellRep` it is a `FabricInstance`.
+  And `reactive-dependencies.ts` keeps descending one by property name through
+  its own `isKeyable()`: a throw there costs the rest of the notification being
+  delivered, and `false` would make an instance indistinguishable from a leaf,
+  so a read below one would stop triggering when the instance is deleted or
+  replaced by a scalar.
 - `isWalkableObjectNotArray(value)` is the same test with arrays removed, for a
   walk to which an array is not merely a different shape but something it must
   not treat as a record.
@@ -469,8 +470,8 @@ code that can meet a stored value:
   stored value, a schema default against a materialized one, a write against
   the value it replaces, a request against the snapshot a policy was checked
   over. It asks `valueEqual()` first and falls back to a structural walk that
-  still decides any special object by content, so it is the value model's
-  answer where the model has one. Neither half serves alone: `valueEqual()`
+  still decides any special object by content, so the value model decides
+  wherever it can. Neither half serves alone: `valueEqual()`
   throws on a `Cell` or any other non-fabric instance, and `deepEqual()`
   compares by enumerable own properties, of which a special object has none.
   Where both operands are known to be `FabricValue`s, use `valueEqual()`
