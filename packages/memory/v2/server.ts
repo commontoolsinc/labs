@@ -271,8 +271,24 @@ export type SlowQuery = {
   /** Query and watch operations: summed elapsed time of those root visits.
    * Against the entry's own `elapsed` this is the share of the request
    * that traversal accounts for; the remainder is entity assembly,
-   * schema-closure staging, and operation-field attachment. */
+   * schema-closure staging, operation-field attachment, and (for
+   * `watch.add`, whose `elapsed` runs through response assembly) mapping
+   * the delivered snapshots to the wire. */
   rootsElapsedMs?: number;
+
+  /** Query and watch operations: engine document reads across every branch
+   * group. Unlike `rootsVisited`, this exposes roots whose declarations fan
+   * out over many documents, and unlike `slowestRoot.reads`, it accounts for
+   * the complete request rather than only its costliest root. */
+  managerReads?: number;
+
+  /** watch.add and watch.refresh: changed entity snapshots delivered to the
+   * client. This is the delivered-width counterpart to `watches` and
+   * `managerReads`: a wide traversal that yields few upserts is repeated
+   * server work, while a wide frame is also transport and client-ingest
+   * work. A refresh that produced no upserts answers with an empty catch-up
+   * and is not recorded, so a refresh entry never reports zero here. */
+  upserts?: number;
 
   /** Query and watch operations: the costliest single root, which is what
    * a watch COUNT cannot say. A `watch.add` unions the roots of every
@@ -289,12 +305,14 @@ export type SlowQuery = {
 type RootAttribution = {
   rootsVisited: number;
   rootsElapsedMs: number;
+  managerReads: number;
   slowestRoot?: SlowestQueryRoot;
 };
 
 const createRootAttribution = (): RootAttribution => ({
   rootsVisited: 0,
   rootsElapsedMs: 0,
+  managerReads: 0,
 });
 
 /**
@@ -310,6 +328,7 @@ const foldRootAttribution = (
 ): void => {
   into.rootsVisited += stats.rootsVisited;
   into.rootsElapsedMs += stats.rootsElapsedMs;
+  into.managerReads += stats.managerReads;
   if (
     stats.slowestRoot !== undefined &&
     (into.slowestRoot === undefined ||
@@ -759,9 +778,14 @@ class Connection {
   }
 
   #send(message: ServerMessage): void {
-    this.#sendRaw(
-      this.#syncSchemaTable ? compressServerMessageSchemas(message) : message,
-    );
+    const schemaStart = performance.now();
+    const prepared = this.#syncSchemaTable
+      ? compressServerMessageSchemas(message)
+      : message;
+    timing.time(schemaStart, "memory", "response", "prepareSchemas");
+    const sendStart = performance.now();
+    this.#sendRaw(prepared);
+    timing.time(sendStart, "memory", "response", "sendRaw");
   }
 
   hasSession(space: string, sessionId: string): boolean {
@@ -4612,13 +4636,7 @@ export class Server {
       session.lastSyncedSeq = serverSeq;
       session.operationCursors = nextOperationCursors;
       this.#notifyDemandChanged(message.space, "watch", session.principal);
-      recordSlowQueryDuration(
-        "session.watch.add",
-        message.space,
-        startedAt,
-        { watches: message.watches.length, ...attribution },
-      );
-      return {
+      const response: ResponseMessage<WatchAddResult> = {
         type: "response",
         requestId: message.requestId,
         ok: {
@@ -4634,6 +4652,18 @@ export class Server {
           },
         },
       };
+      recordSlowQueryDuration(
+        "session.watch.add",
+        message.space,
+        startedAt,
+        {
+          watches: message.watches.length,
+          upserts: upserts.length,
+          ...attribution,
+        },
+      );
+      timing.time(startedAt, "memory", "watchAdd", "total");
+      return response;
     } catch (error) {
       // Evaluation state is staged (the session's graphs and watches are
       // assigned only on success), so a failure answers the requester —
@@ -5343,6 +5373,7 @@ export class Server {
             }
             recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
               watches: session.watches.length,
+              upserts: upserts.length,
             });
             const message = await finishCatchUp({
               type: "sync",

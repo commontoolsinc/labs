@@ -1,5 +1,6 @@
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model";
+import { getLogger } from "@commonfabric/utils/logger";
 import { unsafeObjectKeyIn } from "@commonfabric/utils/types";
 
 import {
@@ -45,6 +46,11 @@ import type { Server } from "./server.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
+
+const logger = getLogger("memory.v2.client", {
+  enabled: true,
+  level: "error",
+});
 
 export type Transport = {
   /** Whether this transport can exchange negotiated compression envelopes. */
@@ -490,13 +496,17 @@ export class Client {
   #onMessage(payload: string): void {
     let message: unknown;
     try {
+      const decodeStart = performance.now();
       message = decodeMemoryBoundary(payload);
+      logger.time(decodeStart, "receive", "decodeBoundary");
       // A frame whose raw text lacks every reserved reference prefix cannot
       // carry a schema reference (strings serialize verbatim — see the note
       // on encodeMemoryBoundary), so the expansion walk over its upserts is
       // skipped entirely.
       if (containsReservedSchemaRefSubstring(payload)) {
+        const schemaExpansionStart = performance.now();
         message = expandServerMessageSchemas(message);
+        logger.time(schemaExpansionStart, "receive", "schemaExpansion");
       }
     } catch (cause) {
       const error = new Error("Unable to parse memory server message", {
@@ -1102,15 +1112,20 @@ export class SpaceSession {
   async watchAddSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
     this.#assertOpen();
     return await this.#runWatchMutation(
-      () =>
-        this.#client.request<WatchAddResult>({
+      async () => {
+        const requestStart = performance.now();
+        const result = await this.#client.request<WatchAddResult>({
           type: "session.watch.add",
           requestId: crypto.randomUUID(),
           space: this.space,
           sessionId: this.#sessionId,
           watches,
-        }),
+        });
+        logger.time(requestStart, "watchAdd", "request");
+        return result;
+      },
       (result) => {
+        const applyStart = performance.now();
         this.#noteResult(result.serverSeq);
         this.#watchSpecs = [
           ...new Map(
@@ -1124,11 +1139,13 @@ export class SpaceSession {
           this.#watchView.applySync(result.sync, false);
         }
         this.#scheduleAck(result.serverSeq);
-        return {
+        const mutation = {
           view: this.#watchView,
           precedingSyncs: this.#takePrecedingWatchSyncs(),
           sync: result.sync,
         };
+        logger.time(applyStart, "watchAdd", "apply");
+        return mutation;
       },
     );
   }

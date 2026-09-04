@@ -10,7 +10,13 @@ import {
   isMemoryMessageFrame,
   parseMemoryCompressionControlMessage,
 } from "@commonfabric/memory/v2/message-compression";
+import { getLogger } from "@commonfabric/utils/logger";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
+
+const logger = getLogger("storage.v2.remote", {
+  enabled: true,
+  level: "error",
+});
 
 export interface SessionFactory {
   /** Opt in to StorageManager's ACL genesis handshake. Scripted factories used
@@ -269,6 +275,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
               throw new Error("Unsupported memory websocket frame type");
             }
             let payload: string;
+            const decodeStart = performance.now();
             if (this.#receiveCompressionEnabled) {
               payload = await decodeCompressedMemoryMessage(frame);
             } else {
@@ -279,6 +286,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
               }
               payload = frame;
             }
+            logger.time(decodeStart, "receive", "decodeFrame");
             if (this.#socket !== socket) return;
             const control = parseMemoryCompressionControlMessage(payload);
             if (control) {
@@ -291,11 +299,13 @@ export class WebSocketTransport implements MemoryClient.Transport {
               }
               return;
             }
+            const receiverStart = performance.now();
             try {
               this.#receiver(payload);
             } catch (cause) {
               reportError(cause);
             }
+            logger.time(receiverStart, "receive", "dispatchPayload");
           } catch (cause) {
             if (this.#socket !== socket) return;
             const error = new Error(
