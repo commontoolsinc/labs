@@ -616,12 +616,14 @@ export function shapeProjectionCandidates(
 }
 
 /**
- * `pieceId/path/to/field` endpoints for `cf piece link`.
+ * A `pieceId/path/to/field` token, completed in both halves.
  *
- * Before the `/` the candidates are piece ids; after it they are that piece's
- * cell keys, so both halves of a link reference complete.
+ * Before the `/` the candidates are what a `--cell` takes — the space's slugs
+ * and its piece ids; after it they are that piece's cell keys, so one slot
+ * spans two vocabularies. `nospace` holds the cursor at the separator, which
+ * continues the same word.
  */
-async function linkEndpointCandidates(
+async function pieceWithPathCandidates(
   line: CompletionLine,
 ): Promise<ProviderResult> {
   const typed = line.word;
@@ -641,7 +643,7 @@ async function linkEndpointCandidates(
   const keys = await listCellKeys({ ...config, piece: pieceId }, parentPath);
   if (keys.length === 0) return NOTHING;
 
-  const prefix = linkEndpointPrefix(pieceId, parentPath);
+  const prefix = pieceWithPathPrefix(pieceId, parentPath);
   return {
     candidates: keys.map((key) => ({ value: `${prefix}${key}` })),
     directives: [{ kind: "nospace" }],
@@ -649,10 +651,11 @@ async function linkEndpointCandidates(
 }
 
 /**
- * Prefix for a `piece link` endpoint candidate. The empty parent path is the
- * case that matters: `id//key` would be a different, invalid reference.
+ * Prefix a `pieceId/path` candidate carries, so the shell replaces the whole
+ * token. The empty parent path is the case that matters: `id//key` would be a
+ * different, invalid reference.
  */
-export function linkEndpointPrefix(
+export function pieceWithPathPrefix(
   pieceId: string,
   parentPath: string,
 ): string {
@@ -1042,13 +1045,15 @@ const ARGUMENT_PROVIDERS: Readonly<
   "set:addressOrPath": cellPathCandidates,
   "cell set:path": cellPathCandidates,
   "set:path": cellPathCandidates,
-  "piece link:source": linkEndpointCandidates,
-  "piece link:target": linkEndpointCandidates,
+  "piece link:source": pieceWithPathCandidates,
+  "piece link:target": pieceWithPathCandidates,
   // Naming an existing slug re-points it, which is the case completion helps
   // with; a slug being coined for the first time is a word nothing can offer.
   "piece set-slug:slug": slugCandidates,
-  // The target a slug redirects to takes what `--cell` takes.
-  "piece set-slug:source": pieceCandidates,
+  // A slug redirects to a cell, which is a piece and a path inside it — the
+  // spelling that points a name at a collection. Same grammar as a link
+  // endpoint, so the same candidates.
+  "piece set-slug:source": pieceWithPathCandidates,
   "piece new:main": patternFiles,
   "piece setsrc:main": patternFiles,
   "check:files": patternFiles,

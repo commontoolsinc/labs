@@ -122,6 +122,39 @@ way and once the session opens when only a derivation can compare them. An
 address printed by one command therefore composes into the next with no flag
 beside it, whatever space the reader has configured.
 
+A slug may name a collection rather than a piece.
+`cf piece set-slug top /of:fid1:…/names` points `top` at the map a board keeps
+its members in, keyed by member name, and `/top/2` then names member `2`. Where
+the slug points is what decides how the path after it reads. A slug that points
+at a piece names that piece, and the path is a cell path inside it, as it is
+after a handle: `/tracker/items/0` is `items/0` inside the piece `tracker`
+names, whatever `items` holds. A slug that points anywhere else names a
+collection: the first segment selects a member, the cell that member holds is
+the piece, and the segments after it are a cell path inside that member. So
+`cf cell get /top/2 title` reads member `2`'s title,
+`cf piece describe --cell /top/2` describes it, and
+`cf piece call --cell /top/2 <verb>` calls it. Exactly one segment reaches a
+member, so a field of a member never answers to the collection's namespace:
+`/top/2/title` is the `title` field of member `2`, never a member named `title`
+of whatever `2` holds. This is how an address reads wherever a `--cell` or
+positional one names the target, at both `cf piece link` endpoints, and for the
+source of `set-slug`.
+
+A collection's name with no member after it is refused, naming the piece that
+holds the collection; a member the collection does not hold is refused as
+`no member 999 in top`. The map itself is addressed by the `piece/path` handle
+`cf piece slugs` prints for the name, never by the name, which addresses
+members: `cf cell get /of:fid1:…/names` reads the map and prints the member
+names it holds. `cf piece inspect` takes a piece id rather than a cell inside
+one, so it has no spelling for the map at all; given the name instead, as
+`cf piece inspect --cell /top`, it meets the collection's refusal the way every
+other command does. A write takes a path inside the member the address reaches,
+and the value on stdin: `echo '"Oven schedule"' | cf cell set /top/2 title`. A
+`cf cell set` whose address stops at `/top/2` is refused, because the address
+alone reaches the member's whole cell and replacing that is what a path spells
+out. The one spelling that does replace a whole cell is an explicit empty
+positional, `cf cell set <address> ""`, which has always named the root.
+
 Beside the reference, the CLI's bare form — `pieceId[@scope]`,
 `pieceId[@scope]/path` at link endpoints, and slugs — is a convenience alias for
 interactive use. New reference-syntax capabilities land in the reference first;
@@ -233,10 +266,16 @@ in-scope identity that the collection lacks makes the survey exit nonzero,
 naming the piece. A `--list` survey reads exactly the pieces named and makes no
 containment claim; each entry takes either reference form, and a canonical
 entry's embedded space composes the way it does on `--cell` — supplying the
-space when `--space` is absent, agreeing with it otherwise. Read-only. To watch
-the surface work rather than read about it, `integration/bulk-ops-demo.sh`
-narrates the whole of it — survey, repair, retarget, and the reversal — end to
-end against a running server.
+space when `--space` is absent, agreeing with it otherwise. Read-only.
+
+The holder is a piece and `--path` names the collection inside it, so neither
+the holder's address nor a `--list` entry carries a path of its own, and one
+that does is refused rather than dropped. A collection's member is therefore
+addressed as a holder by its own handle rather than as `/top/2`.
+
+To watch the surface work rather than read about it,
+`integration/bulk-ops-demo.sh` narrates the whole of it — survey, repair,
+retarget, and the reversal — end to end against a running server.
 
 `cf piece repair` runs a caller-supplied fixer — a TypeScript module whose
 default export is a pure transform from a piece's stored input document to the
@@ -300,10 +339,28 @@ still following an origin is not there: restoring severs the origin, so the run
 writes and names the origin it would cut.
 
 `cf piece slugs` lists the space's slug index: every name assigned through
-`--slug` or `set-slug`, each resolved to the piece it names. The index records
+`--slug` or `set-slug`, each resolved to where it points — the piece it names,
+or for a slug into a cell inside a piece, that piece and the path, printed
+`fid1:…/names` in the table and as a `path` array in the JSON. The index records
 assignments made since it existed, so a slug written by an older client still
 resolves but is not listed — a slug document's id is derived from its name, and
 nothing can enumerate names it was never told.
+
+Completion for a `piece/path` slot — both `cf piece link` endpoints and the
+source of `set-slug` — offers the space's slugs and piece ids before the
+separator and that piece's cell keys after it. After a slug naming a collection
+it offers nothing: reading the member names means reading the map, and that is a
+second load for a keystroke to start.
+
+`cf piece set-slug <slug> <source>` takes any address as its source. A handle
+with a path, `/of:fid1:…/names`, names a cell inside that piece, which is how a
+collection gets its name. A slug with a path after it resolves as a target does,
+so `set-slug two /top/2` names member `2`. A bare slug names whatever that slug
+points at, piece or not, which is how a collection's name is aliased; a scope
+written on a bare slug is refused, because the slug's own redirect names the
+scope of the cell it points at. `--resolve-before-linking` resolves the source
+cell's link before writing, so the new slug points at what the source's cell
+points at rather than at the cell.
 
 `cf piece search` also starts from the registry. It searches readable input and
 result data, but returns registered pieces only. `cf piece map` likewise shows

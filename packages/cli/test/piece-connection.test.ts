@@ -96,44 +96,104 @@ describe("piece-connection", () => {
       };
     }
 
-    it("writes the value at the path on the resolved piece's result cell", async () => {
+    it("writes the value at the path on the resolved piece's result cell, and reports where it landed", async () => {
       resetWriteReceipts();
       const writes: CellWrite[] = [];
-      const lines = await captureStderr(() =>
-        setCellValue(
+      let landed: unknown;
+      const lines = await captureStderr(async () => {
+        landed = await setCellValue(
           config,
           ["items", 0, "title"],
           "Milk",
           undefined,
           overResolving(stubController(writes)),
-        )
-      );
+        );
+      });
       expect(writes).toEqual([{
         piece: RESOLVED_PIECE,
         cell: "result",
         value: "Milk",
         path: ["items", 0, "title"],
       }]);
+      // The receipt a caller prints names the piece written to rather than
+      // the address that reached it, which is not the same thing once a
+      // collection's name has spent segments getting there.
+      expect(landed).toEqual({
+        piece: RESOLVED_PIECE,
+        path: ["items", 0, "title"],
+      });
       expect(lines).toContain(`wrote to space ${SPACE}`);
     });
 
     it("writes to the arguments cell given `input`", async () => {
       resetWriteReceipts();
       const writes: CellWrite[] = [];
-      await captureStderr(() =>
-        setCellValue(
+      await captureStderr(async () => {
+        await setCellValue(
           config,
           ["title"],
           "Bread",
           { input: true },
           overResolving(stubController(writes)),
-        )
-      );
+        );
+      });
       expect(writes).toEqual([{
         piece: RESOLVED_PIECE,
         cell: "input",
         value: "Bread",
         path: ["title"],
+      }]);
+    });
+
+    /**
+     * A held connection whose reference resolver spends the whole addressed
+     * path reaching a piece, the way a collection's name resolves a member:
+     * what comes back has nothing left to address inside it.
+     */
+    function overCollection(pieces: PiecesController): PieceResolutionDeps {
+      return {
+        loadPieces: () => Promise.resolve(pieces),
+        resolvePieceReference: () =>
+          Promise.resolve({ piece: RESOLVED_PIECE, pathAfter: [] }),
+      };
+    }
+
+    it("refuses a write that resolves to a whole cell under `refuseRootWrite`", async () => {
+      // The address carries a path, so nothing before resolution can tell
+      // that the write would land on a whole cell: the segments are spent
+      // selecting the member. Refusing after resolution is what keeps an
+      // address alone from replacing everything the member holds.
+      resetWriteReceipts();
+      const writes: CellWrite[] = [];
+      await expect(
+        setCellValue(
+          config,
+          ["2"],
+          "Milk",
+          { refuseRootWrite: true },
+          overCollection(stubController(writes)),
+        ),
+      ).rejects.toThrow(/A path is required/);
+      expect(writes).toEqual([]);
+    });
+
+    it("writes a whole cell where the caller allows a root write", async () => {
+      resetWriteReceipts();
+      const writes: CellWrite[] = [];
+      await captureStderr(async () => {
+        await setCellValue(
+          config,
+          ["2"],
+          { title: "Milk" },
+          { refuseRootWrite: false },
+          overCollection(stubController(writes)),
+        );
+      });
+      expect(writes).toEqual([{
+        piece: RESOLVED_PIECE,
+        cell: "result",
+        value: { title: "Milk" },
+        path: [],
       }]);
     });
   });
@@ -251,6 +311,39 @@ describe("piece-connection", () => {
         targetPath: ["feed"],
       }]);
       expect(lines).toContain(`wrote to space ${SPACE}`);
+    });
+
+    it("spends an endpoint's leading segments on the member and links what is left", async () => {
+      // A collection's name reaches a link endpoint the way it reaches every
+      // other address: `/top/2/items` is `items` on the piece member `2`
+      // holds, so that is the path validated and the path linked.
+      resetWriteReceipts();
+      const links: LinkCall[] = [];
+      await captureStderr(() =>
+        linkPieces(
+          config,
+          "top",
+          ["2", "items"],
+          "target-slug",
+          ["feed"],
+          undefined,
+          {
+            loadPieces: () => Promise.resolve(stubController(links, endpoints)),
+            resolvePieceReference: (_pieces, token, path) =>
+              Promise.resolve(
+                token === "top"
+                  ? { piece: "fid1:source", pathAfter: path.slice(1) }
+                  : { piece: "fid1:target", pathAfter: [...path] },
+              ),
+          },
+        )
+      );
+      expect(links).toEqual([{
+        source: "fid1:source",
+        sourcePath: ["items"],
+        target: "fid1:target",
+        targetPath: ["feed"],
+      }]);
     });
 
     it("throws for a path neither endpoint holds, and links nothing", async () => {

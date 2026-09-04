@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
-import { entityIdFrom, Runtime, type URI } from "@commonfabric/runner";
+import {
+  type Cell,
+  entityIdFrom,
+  Runtime,
+  type URI,
+} from "@commonfabric/runner";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../../runner/src/builder/factory.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
@@ -12,8 +18,11 @@ import {
   assignSlug,
   listSlugs,
   resolvePieceAddress,
+  resolvePieceReference,
+  resolveSlugTarget,
   resolveSlugTargetCell,
   setSlugLink,
+  SlugResolutionError,
 } from "../src/slugs.ts";
 
 const signer = await Identity.fromPassphrase("piece slug tests");
@@ -298,5 +307,128 @@ describe("piece slugs", () => {
     await expect(resolvePieceAddress(pieces, "malformed")).rejects.toThrow(
       /does not contain a valid redirect/,
     );
+  });
+
+  describe("a slug that names a collection", () => {
+    // The members are pieces the controller ran. The board is a document
+    // stamped as a piece's, holding its collection at `names` keyed by member
+    // name, with one key holding a plain value for a member that is no
+    // piece. `top` points at the collection and `one` at the first member.
+
+    let board: Cell<unknown>;
+    let boardId: string;
+    let item1: Cell<unknown>;
+    let item2: Cell<unknown>;
+
+    async function failureOf(work: Promise<unknown>): Promise<unknown> {
+      return await work.then(() => undefined, (error: unknown) => error);
+    }
+
+    beforeEach(async () => {
+      item1 = await createPiece("member-1");
+      item2 = await createPiece("member-2");
+      board = runtime.getCell(
+        pieces.getSpace(),
+        { space: pieces.getSpace(), random: "board" },
+      );
+      await runtime.editWithRetry((tx) => {
+        const withTx = board.withTx(tx);
+        withTx.set({ names: { "1": item1, "2": item2, "3": { plain: true } } });
+        withTx.setMetaRaw(
+          "patternIdentity",
+          { identity: "pattern-board", symbol: "default" },
+          rawMetaWriteAuthorization,
+        );
+      });
+      boardId = pieceId(board)!;
+      await setSlugLink(pieces, "top", board.key("names"));
+      await assignSlug(pieces, item1, "one");
+    });
+
+    describe("resolvePieceReference()", () => {
+      it("returns the member the first segment selects, and the rest of the path", async () => {
+        expect(await resolvePieceReference(pieces, "top", ["2", "value"]))
+          .toEqual({ piece: pieceId(item2), pathAfter: ["value"] });
+      });
+
+      it("reads a numeric segment as the member name it denotes", async () => {
+        expect(await resolvePieceReference(pieces, "top", [1]))
+          .toEqual({ piece: pieceId(item1), pathAfter: [] });
+      });
+
+      it("returns the piece and the whole path when the slug names a piece root", async () => {
+        expect(await resolvePieceReference(pieces, "one", ["value"]))
+          .toEqual({ piece: pieceId(item1), pathAfter: ["value"] });
+      });
+
+      it("returns a handle and its path untouched", async () => {
+        expect(await resolvePieceReference(pieces, "of:fid1:piece-123", ["x"]))
+          .toEqual({ piece: "of:fid1:piece-123", pathAfter: ["x"] });
+      });
+
+      it("fails with `missing-member` when the collection holds no such name", async () => {
+        const error = await failureOf(
+          resolvePieceReference(pieces, "top", ["999"]),
+        );
+        expect(error).toBeInstanceOf(SlugResolutionError);
+        expect((error as SlugResolutionError).code).toBe("missing-member");
+        expect((error as Error).message).toBe("no member 999 in top");
+      });
+
+      it("fails with `inside-piece` naming the containing piece when no member follows the collection's name", async () => {
+        for (
+          const work of [
+            resolvePieceReference(pieces, "top", []),
+            resolvePieceAddress(pieces, "top"),
+          ]
+        ) {
+          const error = await failureOf(work);
+          expect(error).toBeInstanceOf(SlugResolutionError);
+          expect((error as SlugResolutionError).code).toBe("inside-piece");
+          expect((error as Error).message).toContain(
+            `inside piece ${boardId}`,
+          );
+          expect((error as Error).message).toContain("top/<name>");
+        }
+      });
+
+      it("fails with `not-piece` when the member holds no piece", async () => {
+        const error = await failureOf(
+          resolvePieceReference(pieces, "top", ["3"]),
+        );
+        expect(error).toBeInstanceOf(SlugResolutionError);
+        expect((error as SlugResolutionError).code).toBe("not-piece");
+        expect((error as Error).message).toMatch(
+          /"top\/3" does not name a piece/,
+        );
+      });
+    });
+
+    describe("resolveSlugTarget()", () => {
+      it("returns the containing piece and the path for a slug into a piece", async () => {
+        expect(await resolveSlugTarget(pieces, "top"))
+          .toEqual({ piece: boardId, pathInside: ["names"] });
+      });
+
+      it("returns an empty path for a slug that names a piece", async () => {
+        expect(await resolveSlugTarget(pieces, "one"))
+          .toEqual({ piece: pieceId(item1), pathInside: [] });
+      });
+
+      it("fails with `not-piece` for a slug to a plain document", async () => {
+        const plain = runtime.getCell(
+          pieces.getSpace(),
+          { space: pieces.getSpace(), random: "plain" },
+        );
+        await runtime.editWithRetry((tx) => {
+          plain.withTx(tx).set({ value: 1 });
+        });
+        await setSlugLink(pieces, "plain", plain);
+
+        const error = await failureOf(resolveSlugTarget(pieces, "plain"));
+        expect(error).toBeInstanceOf(SlugResolutionError);
+        expect((error as SlugResolutionError).code).toBe("not-piece");
+      });
+    });
   });
 });

@@ -12,8 +12,8 @@ import {
   completionProviderKeys,
   descendProjection,
   entityListingView,
-  linkEndpointPrefix,
   liveCandidates,
+  pieceWithPathPrefix,
   projectionKeys,
   resolvePieceContext,
   resolveSpaceContext,
@@ -1241,9 +1241,9 @@ Deno.test("shaping: a typed path splits into parent and replacement prefix", () 
   });
 });
 
-Deno.test("shaping: a link endpoint prefix never doubles the separator", () => {
+Deno.test("shaping: a piece-and-path prefix never doubles the separator", () => {
   // `id//key` would be a different, invalid reference.
-  assertEquals(linkEndpointPrefix("fid1:a", ""), "fid1:a/");
-  assertEquals(linkEndpointPrefix("fid1:a", "items"), "fid1:a/items/");
-  assertEquals(linkEndpointPrefix("fid1:a", "items/0"), "fid1:a/items/0/");
+  assertEquals(pieceWithPathPrefix("fid1:a", ""), "fid1:a/");
+  assertEquals(pieceWithPathPrefix("fid1:a", "items"), "fid1:a/items/");
+  assertEquals(pieceWithPathPrefix("fid1:a", "items/0"), "fid1:a/items/0/");
 });

@@ -1,6 +1,7 @@
 import { ensureDir } from "@std/fs";
 import { dirname, join } from "@std/path";
 
+import { ValidationError } from "@cliffy/command";
 import type { CellScope, JSONSchema } from "@commonfabric/api";
 import {
   FabricPrimitive,
@@ -20,7 +21,9 @@ import {
   assignSlug,
   listSlugs,
   pieceId,
-  resolvePieceAddress as resolveStoredPieceAddress,
+  type PieceReference,
+  resolvePieceReference as resolveStoredPieceReference,
+  resolveSlugTarget,
   resolveSlugTargetCell,
   setSlugLink,
   SlugResolutionError,
@@ -405,10 +408,26 @@ export interface ExecutedPieceCallable {
 
 export interface PieceResolutionDeps {
   loadPieces?: typeof loadPieces;
+
+  /**
+   * Resolves an address to a piece id. Injected, it stands in for
+   * `resolvePieceReference` as well: the address names the piece, and the
+   * path a command addresses stays a cell path inside it.
+   */
   resolvePieceAddress?: (
     pieces: PiecesController,
     token: string,
   ) => Promise<string>;
+
+  /**
+   * Resolves an address and the path after it to a piece and the path left
+   * inside it — the step a slug that names a collection resolves through.
+   */
+  resolvePieceReference?: (
+    pieces: PiecesController,
+    token: string,
+    path: readonly (string | number)[],
+  ) => Promise<PieceReference>;
 }
 
 interface PieceOperationDependencies extends PieceResolutionDeps {
@@ -686,21 +705,29 @@ export async function listPieces(
   );
 }
 
-/** One `cf piece slugs` row: a name the space's slug index records, and the
- * piece it resolves to. A row carries `error` instead of `piece` when the
- * name does not resolve to one — a slug pointing at a plain cell path, or at
- * a document that no longer loads, is still a name the space has, and a
- * listing that dropped it would misreport the namespace. */
+/** One `cf piece slugs` row: a name the space's slug index records, and
+ * where it points — a piece, or with `path` a cell inside one, which is how a
+ * collection's name is listed. A row carries `error` instead of `piece` when
+ * the name points into no piece — a slug pointing at a plain document, or at
+ * one that no longer loads, is still a name the space has, and a listing that
+ * dropped it would misreport the namespace. */
 export interface SlugSummary {
   slug: string;
   piece?: string;
+
+  /**
+   * The path inside `piece` the slug points at; absent when the slug names
+   * the piece itself.
+   */
+  path?: string[];
+
   error?: string;
 }
 
-/** Every slug the space's index records, each resolved to the piece id
- * `--cell` would resolve it to. The index bounds the listing: it names
- * slugs assigned since it existed, so an older slug still resolves but is
- * not listed — nothing can enumerate what it was never told the name of. */
+/** Every slug the space's index records, each resolved to the piece it points
+ * into and the path inside it. The index bounds the listing: it names slugs
+ * assigned since it existed, so an older slug still resolves but is not
+ * listed — nothing can enumerate what it was never told the name of. */
 export async function listSpaceSlugs(
   config: SpaceConfig,
   deps: PieceOperationDependencies = {},
@@ -710,7 +737,12 @@ export async function listSpaceSlugs(
   return Promise.all(
     slugs.map(async (slug) => {
       try {
-        return { slug, piece: await resolveStoredPieceAddress(pieces, slug) };
+        const { piece, pathInside } = await resolveSlugTarget(pieces, slug);
+        return {
+          slug,
+          piece,
+          ...(pathInside.length > 0 && { path: pathInside }),
+        };
       } catch (err) {
         return {
           slug,
@@ -1298,16 +1330,117 @@ export async function searchPieces(
   );
 }
 
+/**
+ * The reference resolver a command's deps select: an injected
+ * `resolvePieceReference` as it is; an injected `resolvePieceAddress` lifted
+ * to one, so that it names the piece and the path stays a cell path inside
+ * it; and the stored resolution otherwise.
+ */
+function pieceReferenceResolver(
+  deps: PieceResolutionDeps,
+): NonNullable<PieceResolutionDeps["resolvePieceReference"]> {
+  if (deps.resolvePieceReference) return deps.resolvePieceReference;
+  const resolveAddress = deps.resolvePieceAddress;
+  if (resolveAddress) {
+    return async (pieces, token, path) => ({
+      piece: await resolveAddress(pieces, token),
+      pathAfter: [...path],
+    });
+  }
+  return resolveStoredPieceReference;
+}
+
+/**
+ * A command's target once its address has resolved: the piece, and the cell
+ * path inside it that the command addresses.
+ */
+interface ResolvedPieceTarget {
+  /** The config, naming the piece by id and carrying no embedded path. */
+  config: PieceConfig;
+
+  /** The cell path inside the piece. */
+  path: (string | number)[];
+}
+
+/**
+ * Resolves the piece a config addresses and the cell path inside it, from
+ * the address and `path` — the whole path the command addresses, the
+ * reference's embedded segments followed by its positional ones. A slug that
+ * names a collection spends the leading segments reaching the member, which
+ * is why the path resolves with the address rather than after it. The config
+ * returned carries no `piecePath`: the path returned is the whole of what is
+ * left to address.
+ */
+async function resolvePieceTargetWithPieces(
+  config: PieceConfig,
+  path: readonly (string | number)[],
+  pieces: PiecesController,
+  deps: PieceResolutionDeps = {},
+): Promise<ResolvedPieceTarget> {
+  const resolved = await pieceReferenceResolver(deps)(
+    pieces,
+    config.piece,
+    path,
+  );
+  const { piecePath: _embedded, ...rest } = config;
+  return {
+    config: {
+      ...rest,
+      piece: resolved.piece,
+      // The stored link is the authority on which instance of an id a member
+      // is, so a scope the walk reached it through stands over the one the
+      // command was addressing under.
+      ...(resolved.scope !== undefined && { pieceScope: resolved.scope }),
+    },
+    path: resolved.pathAfter,
+  };
+}
+
+/**
+ * Like {@link resolvePieceTargetWithPieces}, for a command whose intake is a
+ * piece and nothing inside it: the reference's embedded path is what
+ * resolves, and a segment left after the piece is refused.
+ */
 async function resolvePieceConfigWithPieces(
   config: PieceConfig,
   pieces: PiecesController,
-  resolver: PieceResolutionDeps["resolvePieceAddress"] =
-    resolveStoredPieceAddress,
+  deps: PieceResolutionDeps = {},
 ): Promise<PieceConfig> {
-  return {
-    ...config,
-    piece: await resolver(pieces, config.piece),
-  };
+  const target = await resolvePieceTargetWithPieces(
+    config,
+    config.piecePath ?? [],
+    pieces,
+    deps,
+  );
+  if (target.path.length > 0) {
+    throw new ValidationError(pieceIdOnlyPathRefusal(target.path), {
+      exitCode: 1,
+    });
+  }
+  return target.config;
+}
+
+/**
+ * The refusal for a path on a command that takes a piece and nothing inside
+ * it. Raised at parse time for a handle, whose path can only be a cell path,
+ * and after resolution for a slug, whose path a collection may have spent.
+ */
+export function pieceIdOnlyPathRefusal(
+  path: readonly (string | number)[],
+): string {
+  return `The piece reference embeds a path ("${
+    path.join("/")
+  }") but this command takes a piece id only.`;
+}
+
+/**
+ * The refusal a write meets when it names no path inside the piece it
+ * reaches: a bare address must not replace a whole cell, and a caller that
+ * means the root says so with an explicit empty path.
+ */
+export function pathRequiredRefusal(): string {
+  return `A path is required: embed it in the address (/of:.../title) or ` +
+    `pass it as an argument ("" writes the root).`;
 }
 
 export async function resolvePieceConfig(
@@ -1315,22 +1448,46 @@ export async function resolvePieceConfig(
   deps: PieceResolutionDeps = {},
 ): Promise<PieceConfig> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
-  return await resolvePieceConfigWithPieces(
-    config,
-    pieces,
-    deps.resolvePieceAddress,
-  );
+  return await resolvePieceConfigWithPieces(config, pieces, deps);
 }
 
+/**
+ * The config a command whose intake is a piece and nothing inside it should
+ * act on: the piece the address reached, and the scope it was reached
+ * through.
+ *
+ * Every such command resolves through here, because the refusal it owes a
+ * caller cannot be raised at the parse: a slug's embedded path may be spent
+ * selecting a member, and only the walk can tell that from a cell path the
+ * command has no use for. A command that resolved the address on its own
+ * would take the piece and drop the rest of what the walk reached.
+ */
+export async function resolveAddressedPieceConfig(
+  pieces: PiecesController,
+  config: PieceConfig,
+  deps: PieceResolutionDeps = {},
+): Promise<PieceConfig> {
+  return await resolvePieceConfigWithPieces(config, pieces, deps);
+}
+
+/**
+ * Resolves a link endpoint's address together with the path written after it,
+ * as every address resolves: a slug naming a collection spends the first
+ * segment on the member, and what is left is a cell path inside the piece the
+ * endpoint reached.
+ *
+ * `options.allowMissingSlugFallback` keeps an id-shaped token that names no
+ * slug document, so an endpoint may be a piece the space has not seen.
+ */
 export async function resolveLinkEndpointAddress(
   pieces: PiecesController,
   token: string,
-  resolver: PieceResolutionDeps["resolvePieceAddress"] =
-    resolveStoredPieceAddress,
+  path: readonly (string | number)[],
+  deps: PieceResolutionDeps = {},
   options?: { allowMissingSlugFallback?: boolean },
-): Promise<string> {
+): Promise<PieceReference> {
   try {
-    return await resolver(pieces, token);
+    return await pieceReferenceResolver(deps)(pieces, token, path);
   } catch (error) {
     if (
       options?.allowMissingSlugFallback &&
@@ -1342,7 +1499,7 @@ export async function resolveLinkEndpointAddress(
       // non-hash string reach `entityIdFrom`.
       !isSlugAddress(token)
     ) {
-      return token;
+      return { piece: token, pathAfter: [...path] };
     }
     throw error;
   }
@@ -1455,45 +1612,86 @@ export async function setPieceSlug(
     sourceScope?: PieceConfig["pieceScope"];
     resolveBeforeLinking?: boolean;
   },
+  deps: PieceResolutionDeps = {},
 ): Promise<void> {
   const pieces = await timeCliPhase(
     "setPieceSlug.loadPieces",
-    () => loadPieces(config),
+    () => (deps.loadPieces ?? loadPieces)(config),
   );
-  const resolvedSourcePieceId = await timeCliPhase(
-    "setPieceSlug.resolveSource",
-    () => resolveStoredPieceAddress(pieces, sourcePieceId),
+  const source = await resolveSlugSourceCell(
+    pieces,
+    sourcePieceId,
+    sourcePath,
+    options?.sourceScope,
+    deps,
   );
-  const source = sourcePath.length === 0
-    ? pieces.runtime.getCellFromEntityId(
-      pieces.getSpace(),
-      entityIdFrom(resolvedSourcePieceId),
-      [],
-      undefined,
-      undefined,
-      options?.sourceScope,
-    )
-    : (await timeCliPhase(
-      "setPieceSlug.getSourcePiece",
-      () => {
-        return pieces.get(
-          resolvedSourcePieceId,
-          false,
-          undefined,
-          options?.sourceScope,
-        );
-      },
-    )).getCell().key(...sourcePath);
   await timeCliPhase("setPieceSlug.source.sync", () => source.sync());
   await timeCliPhase(
     "setPieceSlug.setSlugLink",
     () =>
       setSlugLink(pieces, slug, source, {
         resolveBeforeLinking: options?.resolveBeforeLinking,
-        writeTargetMetadata: sourcePath.length === 0,
+        writeTargetMetadata: source.getAsNormalizedFullLink().path.length === 0,
       }),
   );
   noteWroteTo(config.space);
+}
+
+/**
+ * Helper for `setPieceSlug()`, which reads the cell a slug's source names.
+ *
+ * A handle names a piece, and the path after it a cell inside that piece. A
+ * slug with a path after it resolves the way every address does, so `/top/2`
+ * is the member piece and `/top/2/title` a cell inside it. A bare slug is the
+ * cell it points at, piece or not: naming one slug's target by another is an
+ * alias, and an alias of a collection's name needs no piece behind it. That
+ * one target is the slug's own redirect, which names its own scope, so a
+ * scope written beside a bare slug is refused rather than dropped.
+ */
+async function resolveSlugSourceCell(
+  pieces: PiecesController,
+  sourcePieceId: string,
+  sourcePath: (string | number)[],
+  sourceScope: PieceConfig["pieceScope"],
+  deps: PieceResolutionDeps,
+): Promise<Cell<unknown>> {
+  if (isSlugAddress(sourcePieceId) && sourcePath.length === 0) {
+    if (sourceScope !== undefined) {
+      throw new ValidationError(
+        `Slug "${sourcePieceId}" points at a cell whose own redirect names ` +
+          `its scope, so \`@${sourceScope}\` has nothing to apply to. Name ` +
+          `the cell itself to scope it.`,
+        { exitCode: 1 },
+      );
+    }
+    return await timeCliPhase(
+      "setPieceSlug.resolveSource",
+      () => resolveSlugTargetCell(pieces, sourcePieceId),
+    );
+  }
+  const { piece, pathAfter: path, scope } = await timeCliPhase(
+    "setPieceSlug.resolveSource",
+    () => pieceReferenceResolver(deps)(pieces, sourcePieceId, sourcePath),
+  );
+  // A member reached through a narrowed link is that instance, so the cell
+  // the slug is pointed at is read at the scope the walk reached, not the one
+  // the command was addressing under.
+  const resolvedScope = scope ?? sourceScope;
+  if (path.length === 0) {
+    return pieces.runtime.getCellFromEntityId(
+      pieces.getSpace(),
+      entityIdFrom(piece),
+      [],
+      undefined,
+      undefined,
+      resolvedScope,
+    );
+  }
+  const holder = await timeCliPhase(
+    "setPieceSlug.getSourcePiece",
+    () => pieces.get(piece, false, undefined, resolvedScope),
+  );
+  return holder.getCell().key(...path);
 }
 
 /** Replaces the piece's source and returns its setup transaction receipt. */
@@ -1507,7 +1705,7 @@ export async function setPiecePattern(
   const resolvedConfig = await resolvePieceConfigWithPieces(
     config,
     pieces,
-    deps.resolvePieceAddress,
+    deps,
   );
   const piece = await pieces.get(
     resolvedConfig.piece,
@@ -1547,7 +1745,7 @@ export async function checkPiecePattern(
   const resolvedConfig = await resolvePieceConfigWithPieces(
     config,
     pieces,
-    deps.resolvePieceAddress,
+    deps,
   );
   const piece = await pieces.get(
     resolvedConfig.piece,
@@ -3501,25 +3699,32 @@ export async function linkPieces(
     "linkPieces.loadPieces",
     () => (deps.loadPieces ?? loadPieces)(config),
   );
-  const resolvedSourcePieceId = await timeCliPhase(
+  const source = await timeCliPhase(
     "linkPieces.resolveSource",
     () =>
       resolveLinkEndpointAddress(
         pieces,
         sourcePieceId,
-        deps.resolvePieceAddress,
+        sourcePath,
+        deps,
         { allowMissingSlugFallback: true },
       ),
   );
-  const resolvedTargetPieceId = await timeCliPhase(
+  const target = await timeCliPhase(
     "linkPieces.resolveTarget",
-    () =>
-      resolveLinkEndpointAddress(
-        pieces,
-        targetPieceId,
-        deps.resolvePieceAddress,
-      ),
+    () => resolveLinkEndpointAddress(pieces, targetPieceId, targetPath, deps),
   );
+  // Both halves name the piece the walk reached rather than the token that
+  // reached it: an address naming a collection's member checks its path on
+  // the member, and a message pairing that path with the collection's name
+  // would describe a read nobody made. The scope travels with each half for
+  // the same reason — it says which instance of that id the link named.
+  const resolvedSourcePieceId = source.piece;
+  const resolvedSourcePath = source.pathAfter;
+  const resolvedSourceScope = source.scope ?? options?.sourceScope;
+  const resolvedTargetPieceId = target.piece;
+  const resolvedTargetPath = target.pathAfter;
+  const resolvedTargetScope = target.scope ?? options?.targetScope;
 
   // Validate that source and target pieces/paths exist by reading them
   if (!options?.allowNonExisting) {
@@ -3534,26 +3739,28 @@ export async function linkPieces(
           resolvedSourcePieceId,
           false,
           undefined,
-          options?.sourceScope,
+          resolvedSourceScope,
         ),
     );
     const sourceHasPattern =
       getPatternIdentityRef(sourcePiece.getCell()) !== undefined;
     if (!sourceHasPattern) {
-      errors.push(`Source piece ${sourcePieceId} does not have pattern`);
-    } else if (sourcePath.length > 0) {
+      errors.push(
+        `Source piece ${resolvedSourcePieceId} does not have pattern`,
+      );
+    } else if (resolvedSourcePath.length > 0) {
       const sourceData = await timeCliPhase(
         "linkPieces.readSourceResult",
         () => sourcePiece.result.get(),
       );
       // Check source path resolves
       let current: any = sourceData;
-      for (const segment of sourcePath) {
+      for (const segment of resolvedSourcePath) {
         if (current == null || typeof current !== "object") {
           errors.push(
             `Source path "${
-              sourcePath.join("/")
-            }" does not exist on piece ${sourcePieceId}`,
+              resolvedSourcePath.join("/")
+            }" does not exist on piece ${resolvedSourcePieceId}`,
           );
           break;
         }
@@ -3562,8 +3769,8 @@ export async function linkPieces(
       if (current === undefined) {
         errors.push(
           `Source path "${
-            sourcePath.join("/")
-          }" does not exist on piece ${sourcePieceId}`,
+            resolvedSourcePath.join("/")
+          }" does not exist on piece ${resolvedSourcePieceId}`,
         );
       }
     }
@@ -3576,26 +3783,28 @@ export async function linkPieces(
           resolvedTargetPieceId,
           false,
           undefined,
-          options?.targetScope,
+          resolvedTargetScope,
         ),
     );
     const targetHasPattern =
       getPatternIdentityRef(targetPiece.getCell()) !== undefined;
     if (!targetHasPattern) {
-      errors.push(`Target piece ${targetPieceId} does not have pattern`);
-    } else if (targetPath.length > 0) {
+      errors.push(
+        `Target piece ${resolvedTargetPieceId} does not have pattern`,
+      );
+    } else if (resolvedTargetPath.length > 0) {
       // Check target path resolves on the input cell
       const targetData = await timeCliPhase(
         "linkPieces.readTargetInput",
         () => targetPiece.input.get(),
       );
       let current: any = targetData;
-      for (const segment of targetPath) {
+      for (const segment of resolvedTargetPath) {
         if (current == null || typeof current !== "object") {
           errors.push(
             `Target path "${
-              targetPath.join("/")
-            }" does not exist on piece ${targetPieceId}`,
+              resolvedTargetPath.join("/")
+            }" does not exist on piece ${resolvedTargetPieceId}`,
           );
           break;
         }
@@ -3604,8 +3813,8 @@ export async function linkPieces(
       if (current === undefined) {
         errors.push(
           `Target path "${
-            targetPath.join("/")
-          }" does not exist on piece ${targetPieceId}`,
+            resolvedTargetPath.join("/")
+          }" does not exist on piece ${resolvedTargetPieceId}`,
         );
       }
     }
@@ -3622,10 +3831,18 @@ export async function linkPieces(
     () =>
       pieces.link(
         resolvedSourcePieceId,
-        sourcePath,
+        resolvedSourcePath,
         resolvedTargetPieceId,
-        targetPath,
-        options,
+        resolvedTargetPath,
+        {
+          ...options,
+          ...(resolvedSourceScope === undefined
+            ? {}
+            : { sourceScope: resolvedSourceScope }),
+          ...(resolvedTargetScope === undefined
+            ? {}
+            : { targetScope: resolvedTargetScope }),
+        },
       ),
   );
   noteWroteTo(config.space);
@@ -3684,10 +3901,11 @@ export async function linkSqliteDiskSource(
   const resolvedTarget = await resolveLinkEndpointAddress(
     pieces,
     targetPieceId,
+    targetPath,
   );
-  await pieces.link(id, [], resolvedTarget, targetPath, {
+  await pieces.link(id, [], resolvedTarget.piece, resolvedTarget.pathAfter, {
     start: options?.start,
-    targetScope: options?.targetScope,
+    targetScope: resolvedTarget.scope ?? options?.targetScope,
   });
   await pieces.synced();
 }
@@ -3989,12 +4207,18 @@ export async function inspectPiece(
     resolvedConfig = await resolvePieceConfigWithPieces(
       config,
       pieces,
-      deps.resolvePieceAddress,
+      deps,
     );
   } catch (error) {
     if (
       error instanceof SlugResolutionError &&
-      error.code === "not-piece"
+      error.code === "not-piece" &&
+      // The fallback reports the cell the slug itself points at, which is an
+      // answer only where the address named the slug and nothing after it.
+      // With a path, `not-piece` says the member that path selected is no
+      // piece, and reporting the slug's own target would answer about
+      // something the caller did not ask for.
+      !config.piecePath?.length
     ) {
       return await inspectSlugTargetCell(pieces, config.piece);
     }
@@ -4207,15 +4431,16 @@ async function verbReadRefusalOrNull(
  */
 export async function getCellCfcLabel(
   config: PieceConfig,
-  path: (string | number)[],
+  addressedPath: (string | number)[],
   options: { input?: boolean } = {},
   deps: PieceOperationDependencies = {},
 ): Promise<CfcLabelView | null> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
-  const resolvedConfig = await resolvePieceConfigWithPieces(
+  const { config: resolvedConfig, path } = await resolvePieceTargetWithPieces(
     config,
+    addressedPath,
     pieces,
-    deps.resolvePieceAddress,
+    deps,
   );
   const piece = await pieces.get(
     resolvedConfig.piece,
@@ -4240,17 +4465,18 @@ export async function getCellCfcLabel(
  */
 export async function setCellCfcLabel(
   config: PieceConfig,
-  path: (string | number)[],
+  addressedPath: (string | number)[],
   input: unknown,
   options: { input?: boolean } = {},
   deps: PieceOperationDependencies = {},
 ): Promise<CfcLabelView | null> {
   const update = parseCellCfcLabelUpdate(input);
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
-  const resolvedConfig = await resolvePieceConfigWithPieces(
+  const { config: resolvedConfig, path } = await resolvePieceTargetWithPieces(
     config,
+    addressedPath,
     pieces,
-    deps.resolvePieceAddress,
+    deps,
   );
   const piece = await pieces.get(
     resolvedConfig.piece,
@@ -4342,15 +4568,16 @@ export async function setCellCfcLabel(
 
 export async function getCellValue(
   config: PieceConfig,
-  path: (string | number)[],
+  addressedPath: (string | number)[],
   options: GetCellValueOptions = {},
   deps: PieceOperationDependencies = {},
 ): Promise<unknown> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
-  const resolvedConfig = await resolvePieceConfigWithPieces(
+  const { config: resolvedConfig, path } = await resolvePieceTargetWithPieces(
     config,
+    addressedPath,
     pieces,
-    deps.resolvePieceAddress,
+    deps,
   );
   const shouldStep = options.step === true;
   const piece = await timeCliPhase(
@@ -4527,22 +4754,44 @@ export async function getCellValue(
 }
 
 /**
- * Writes `value` at `path` on a piece's result cell, or on its arguments cell
- * under `options.input`, and receipts the space the write landed in.
+ * Where a {@link setCellValue} write landed: the piece it reached, and the
+ * path inside that piece it was written at.
+ */
+export interface CellWriteTarget {
+  /** The id of the piece written to. */
+  piece: string;
+
+  /** The path inside that piece, empty for a write at its root. */
+  path: (string | number)[];
+}
+
+/**
+ * Writes `value` at the path `addressedPath` resolves to on a piece's result
+ * cell, or on its arguments cell under `options.input`, receipts the space
+ * the write landed in, and reports where it landed.
+ *
+ * `options.refuseRootWrite` refuses a write whose resolved path is empty.
+ * Only resolution can decide that: a slug naming a collection spends the
+ * leading segments reaching the member, so an address carrying a path can
+ * still reach a piece's root.
  */
 export async function setCellValue(
   config: PieceConfig,
-  path: (string | number)[],
+  addressedPath: (string | number)[],
   value: unknown,
-  options?: { input?: boolean },
+  options?: { input?: boolean; refuseRootWrite?: boolean },
   deps: PieceResolutionDeps = {},
-): Promise<void> {
+): Promise<CellWriteTarget> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
-  const resolvedConfig = await resolvePieceConfigWithPieces(
+  const { config: resolvedConfig, path } = await resolvePieceTargetWithPieces(
     config,
+    addressedPath,
     pieces,
-    deps.resolvePieceAddress,
+    deps,
   );
+  if (options?.refuseRootWrite && path.length === 0) {
+    throw new ValidationError(pathRequiredRefusal(), { exitCode: 1 });
+  }
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
@@ -4555,6 +4804,7 @@ export async function setCellValue(
     await piece.result.set(value, path);
   }
   noteWroteTo(config.space);
+  return { piece: resolvedConfig.piece, path };
 }
 
 /**
@@ -4613,7 +4863,7 @@ export async function stepPiece(
   const resolvedConfig = await resolvePieceConfigWithPieces(
     config,
     pieces,
-    deps.resolvePieceAddress,
+    deps,
   );
   const piece = await timeCliPhase(
     "stepPiece.getPiece",
@@ -4647,7 +4897,7 @@ export async function removePiece(
   const resolvedConfig = await resolvePieceConfigWithPieces(
     config,
     pieces,
-    deps.resolvePieceAddress,
+    deps,
   );
   const removed = await pieces.remove(resolvedConfig.piece);
 

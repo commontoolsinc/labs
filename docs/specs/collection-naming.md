@@ -517,13 +517,24 @@ a target outside that space cannot be written today. Resolution already handles
 it, following a slug's redirect into the space its target link names, so this is
 a writer gap rather than a model gap.
 
-**3. Give collections member namespaces.** A collection declares the name it
-answers to, its name policy, and forward and reverse resolutions. Whatever
-allocator it needs is its own; a collection that accepts names from people can
-reuse the claim from step 2 at collection scope. Widen `resolvePieceAddress`
-(`packages/piece/src/slugs.ts`), which rejects a name whose target has no
-pattern identity, so that a name pointing at a collection nested in a piece is
-not treated as an error.
+**3. Give collections member namespaces.** Two halves, and only the second has
+landed.
+
+Still to build: a collection declares the name it answers to, its name policy,
+and forward and reverse resolutions. Whatever allocator it needs is its own; a
+collection that accepts names from people can reuse the claim from step 2 at
+collection scope, which is itself unbuilt.
+
+Landed: address resolution (`packages/piece/src/slugs.ts`) splits along what
+the caller is asking for. An address alone resolves through
+`resolvePieceAddress`, which names a piece and refuses a name pointing at a
+collection, because a collection is not a piece and nothing downstream of it
+could treat one as such. An address and the path written after it resolve
+together through `resolvePieceReference`, which is where the collection is
+walked: the first segment selects a member and the rest stays a cell path
+inside it. Resolving the two together is what the split is for — the path is
+the part that says which member, so a resolver handed the address on its own
+has nothing to walk with.
 
 **4. Walk segments in the URL layer.** `parseFabricUrl`
 (`packages/runner/src/fabric-url.ts`) reads a trailing segment as a slug and the

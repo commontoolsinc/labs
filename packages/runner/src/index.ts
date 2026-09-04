@@ -372,7 +372,13 @@ export {
   parseFabricRef,
 } from "./sandbox/fabric-import-specifier.ts";
 export { type PinRewrite, rewriteFabricPins } from "./fabric-pin-rewrite.ts";
+export { DEFAULT_CELL_SCOPE } from "./scope.ts";
 export {
+  isPieceRoot,
+  resolveSlugReference,
   resolveSlugTargetCell,
+  resolveSlugTargetInPiece,
+  type SlugReferenceTarget,
   SlugResolutionError,
+  type SlugTargetInPiece,
 } from "./slug-resolution.ts";

@@ -42,12 +42,16 @@ import {
 import { retargetPieces } from "@commonfabric/piece/ops/bulk-retarget";
 import type { JSONSchema, RuntimeProgram } from "@commonfabric/runner";
 
-import { loadPieces, type PieceConfig, type SpaceConfig } from "./piece.ts";
+import {
+  loadPieces,
+  type PieceConfig,
+  type PieceResolutionDeps,
+  resolveAddressedPieceConfig,
+  type SpaceConfig,
+} from "./piece.ts";
 
-export interface SourcePinDependencies {
-  loadPieces?: typeof loadPieces;
-  resolvePieceAddress?: typeof resolvePieceAddress;
-}
+/** What {@link readSourcePin} resolves its address and connection through. */
+export type SourcePinDependencies = PieceResolutionDeps;
 
 /**
  * Read one piece's source pin — reference, current revision when a log
@@ -62,11 +66,13 @@ export async function readSourcePin(
   deps: SourcePinDependencies = {},
 ): Promise<PiecePin | undefined> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
-  const piece = await (deps.resolvePieceAddress ?? resolvePieceAddress)(
+  const resolved = await resolveAddressedPieceConfig(pieces, config, deps);
+  return await readPiecePin(
     pieces,
-    config.piece,
+    resolved.piece,
+    new Map(),
+    resolved.pieceScope,
   );
-  return await readPiecePin(pieces, piece, new Map(), config.pieceScope);
 }
 
 /**
@@ -437,9 +443,7 @@ export interface RestoreRunRequest {
   apply?: boolean;
 }
 
-export interface RestoreRunDependencies {
-  loadPieces?: typeof loadPieces;
-  resolvePieceAddress?: typeof resolvePieceAddress;
+export interface RestoreRunDependencies extends PieceResolutionDeps {
   restorePiece?: typeof restorePiece;
 }
 
@@ -454,19 +458,18 @@ export async function runRestore(
   deps: RestoreRunDependencies = {},
 ): Promise<RestoreOutcome> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
-  const piece = await (deps.resolvePieceAddress ?? resolvePieceAddress)(
-    pieces,
-    config.piece,
-  );
-  return await (deps.restorePiece ?? restorePiece)(pieces, piece, {
+  const resolved = await resolveAddressedPieceConfig(pieces, config, deps);
+  return await (deps.restorePiece ?? restorePiece)(pieces, resolved.piece, {
     ...(request.revisionId === undefined
       ? {}
       : { revisionId: request.revisionId }),
     ...(request.apply === true ? { apply: true } : {}),
-    // The scope the address carried, threaded the way `readSourcePin`
+    // The scope the address resolved to, threaded the way `readSourcePin`
     // threads it: a scoped reference names a different cell, so a run that
     // dropped it would list and restore a piece nobody asked about.
-    ...(config.pieceScope === undefined ? {} : { scope: config.pieceScope }),
+    ...(resolved.pieceScope === undefined
+      ? {}
+      : { scope: resolved.pieceScope }),
   });
 }
 

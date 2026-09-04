@@ -20,7 +20,7 @@ import {
   type RestorableRevision,
 } from "@commonfabric/piece/ops";
 import ports from "@commonfabric/ports" with { type: "json" };
-import { parseCellPath, UI } from "@commonfabric/runner";
+import { isSlugAddress, parseCellPath, UI } from "@commonfabric/runner";
 import {
   encodeJsonPointer,
   parseScopedIdSegment,
@@ -99,7 +99,9 @@ import {
   MapFormat,
   newPiece,
   partitionVerbListing,
+  pathRequiredRefusal,
   PieceConfig,
+  pieceIdOnlyPathRefusal,
   PieceResultProjectionError,
   PieceVerbReadError,
   recreateSpaceRootPattern,
@@ -120,6 +122,7 @@ import type {
   ExecutedPieceCallable,
   PieceCallablesListing,
   PieceInspection,
+  SlugSummary,
 } from "../lib/piece.ts";
 import { render, safeStringify } from "../lib/render.ts";
 import { newSessionId } from "../lib/session.ts";
@@ -642,12 +645,13 @@ export function renderPieceSummaries(
   if (rows.length > 1) render(Table.from(rows).toString());
 }
 
-/** `cf piece slugs` output: one row per indexed name, the piece it resolves
- * to where it resolves to one, and the resolution's own error where it does
- * not. The error rides the JSON too — a machine reader has no table to read
- * a `<error: …>` marker off. */
+/** `cf piece slugs` output: one row per indexed name, where it points — the
+ * piece, or the piece and the path inside it, printed `piece/path` in the
+ * table and as a `path` array in the JSON — and the resolution's own error
+ * where it points into no piece. The error rides the JSON too — a machine
+ * reader has no table to read a `<error: …>` marker off. */
 export function renderSlugSummaries(
-  slugs: Array<{ slug: string; piece?: string; error?: string }>,
+  slugs: SlugSummary[],
   json: boolean,
 ): void {
   if (json) {
@@ -655,6 +659,7 @@ export function renderSlugSummaries(
       slugs.map((entry) => ({
         slug: entry.slug,
         piece: entry.piece ?? null,
+        ...(entry.path !== undefined ? { path: entry.path } : {}),
         ...(entry.error !== undefined ? { error: entry.error } : {}),
       })),
       { json: true },
@@ -666,7 +671,11 @@ export function renderSlugSummaries(
     ["SLUG", "PIECE"],
     ...slugs.map((entry) => [
       entry.slug,
-      entry.error !== undefined ? `<error: ${entry.error}>` : entry.piece!,
+      entry.error !== undefined
+        ? `<error: ${entry.error}>`
+        : entry.path !== undefined
+        ? `${entry.piece}/${entry.path.join("/")}`
+        : entry.piece!,
     ]),
   ];
   if (rows.length > 1) render(Table.from(rows).toString());
@@ -3327,12 +3336,17 @@ export async function getCellValueFromCommand(
 
 /**
  * The `cf cell set` action, with the same positional-address intake as
- * {@link getCellValueFromCommand}. The write needs a path spelled somewhere
- * — embedded in the address, positionally, or both — and an explicit empty
- * positional (`""`) is a spelling: it has always named the root, and the
- * fuse integration writes a whole input cell with it. What is refused is a
- * bare positional address with no path anywhere, so a pasted address cannot
- * silently overwrite a whole cell.
+ * {@link getCellValueFromCommand}. The write needs a path inside the piece it
+ * reaches, spelled in the address, positionally, or both. An explicit empty
+ * positional (`""`) is the exception, and the only spelling under which a
+ * write lands on a whole cell: it has always named the root, and the fuse
+ * integration writes a whole input cell with it. Everything else that reaches
+ * a root is refused, so no address silently overwrites a cell.
+ *
+ * Refused at two points, because the two halves are known at different
+ * moments. A line carrying no path at all is refused here, before stdin is
+ * drained; a line whose path a collection spends reaching a member is refused
+ * by the write, which is where what the address resolves to is known.
  */
 export async function setCellValueFromCommand(
   options: PieceLabelCLIOptions,
@@ -3347,21 +3361,33 @@ export async function setCellValueFromCommand(
     { acceptsPath: true, acceptsArgument: true },
   );
   const pathSegments = mergePiecePath(pieceConfig, target.pathString);
+  // An empty positional is the one spelling that names the root, so it is
+  // the one spelling under which a write may land on a whole cell.
+  const rootSpelled = target.pathString === "";
   if (pathSegments.length === 0 && target.pathString === undefined) {
-    throw new ValidationError(
-      `A path is required: embed it in the address (/of:.../title) or ` +
-        `pass it as an argument ("" writes the root).`,
-      { exitCode: 1 },
-    );
+    throw new ValidationError(pathRequiredRefusal(), { exitCode: 1 });
   }
   const value = await (deps.drainStdin ?? drainStdin)();
-  await (deps.setCellValue ?? setCellValue)(pieceConfig, pathSegments, value, {
-    input: options.input || pieceConfig.pieceInput,
-  });
-  (deps.render ?? render)(`Set value at path: ${pathSegments.join("/")}`);
+  const written = await (deps.setCellValue ?? setCellValue)(
+    pieceConfig,
+    pathSegments,
+    value,
+    {
+      input: options.input || pieceConfig.pieceInput,
+      refuseRootWrite: !rootSpelled,
+    },
+  );
+  (deps.render ?? render)(`Set value at path: ${written.path.join("/")}`);
+  // The address as written is what a reader pastes into the next command, and
+  // it still names the piece written to whenever the walk spent none of the
+  // path. Where the walk spent some, the address names a collection and only
+  // the piece it reached says what was written.
+  const wroteTo = written.path.length === pathSegments.length
+    ? pieceConfig.piece
+    : written.piece;
   (deps.hint ?? hint)(
     cliText(
-      `TIP: Computed values may be stale. Run 'cf piece step --cell ${pieceConfig.piece} ...' to trigger recomputation.`,
+      `TIP: Computed values may be stale. Run 'cf piece step --cell ${wroteTo} ...' to trigger recomputation.`,
     ),
   );
 }
@@ -3926,6 +3952,19 @@ export function readBulkSelection(
     throw new ValidationError(
       "A scoped piece cannot hold the selected collection; drop the " +
         "@scope suffix.",
+      { exitCode: 1 },
+    );
+  }
+  // The holder is a piece, and `--path` is what names the collection inside
+  // it, so a path on the address has nowhere to go. Refused here rather than
+  // carried, because this is where the selector is built and a path it does
+  // not carry is a path the run would drop. The `--list` branch above refuses
+  // its own entries' paths for the same reason.
+  if (pieceConfig.piecePath?.length) {
+    throw new ValidationError(
+      `A bulk operation reads whole pieces; drop the path on ` +
+        `${JSON.stringify(pieceConfig.piecePath.join("/"))} and name the ` +
+        `collection with --path.`,
       { exitCode: 1 },
     );
   }
@@ -4989,13 +5028,16 @@ export function parsePieceOptions(
     );
   }
   const config = options as PieceConfig;
-  if (config.piecePath?.length && !parseOptions?.acceptsPath) {
-    throw new ValidationError(
-      `The piece reference embeds a path ("${
-        config.piecePath.join("/")
-      }") but this command takes a piece id only.`,
-      { exitCode: 1 },
-    );
+  // A slug's path is not refused here: a slug may name a collection, whose
+  // member the path selects, and only resolution can tell. What the walk
+  // leaves is refused there, in these words.
+  if (
+    config.piecePath?.length && !parseOptions?.acceptsPath &&
+    !isSlugAddress(config.piece)
+  ) {
+    throw new ValidationError(pieceIdOnlyPathRefusal(config.piecePath), {
+      exitCode: 1,
+    });
   }
   if (config.pieceInput && !parseOptions?.acceptsArgument) {
     throw new ValidationError(

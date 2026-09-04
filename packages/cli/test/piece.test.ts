@@ -806,14 +806,18 @@ describe("cli piece parsing", () => {
         drainStdin: (() => Promise.resolve(30)) as never,
         setCellValue: ((...args: unknown[]) => {
           writes.push(args);
-          return Promise.resolve();
+          return Promise.resolve({ piece: "thermostat", path: ["target"] });
         }) as never,
         render: (() => {}) as never,
       },
     );
     expect(writes).toHaveLength(1);
     expect(writes[0]?.[0]).toMatchObject({ piece: "thermostat" });
-    expect(writes[0]?.slice(1)).toEqual([["target"], 30, { input: true }]);
+    expect(writes[0]?.slice(1)).toEqual([
+      ["target"],
+      30,
+      { input: true, refuseRootWrite: true },
+    ]);
   });
 
   it("getCellValueFromCommand() leaves an unresolved path on the caller's sinks rather than exiting", async () => {
@@ -858,14 +862,18 @@ describe("cli piece parsing", () => {
       drainStdin: (() => Promise.resolve("Milk")) as never,
       setCellValue: ((...args: unknown[]) => {
         writes.push(args);
-        return Promise.resolve();
+        return Promise.resolve({
+          piece: LLM_HANDLE,
+          path: args[1] as (string | number)[],
+        });
       }) as never,
       render: (() => {}) as never,
       hint: ((text: string) => {
         hints.push(text);
       }) as never,
     };
-    // The embedded path alone satisfies the path requirement.
+    // The embedded path alone satisfies the path requirement, and the write
+    // is still held to a path inside whatever piece the address reaches.
     await setCellValueFromCommand(
       base,
       `/${LLM_HANDLE}/title`,
@@ -875,21 +883,38 @@ describe("cli piece parsing", () => {
     expect(writes[0]?.slice(1)).toEqual([
       ["title"],
       "Milk",
-      { input: undefined },
+      { input: undefined, refuseRootWrite: true },
+    ]);
+    // A positional that is not the empty one is a path, not a root: what it
+    // reaches after resolution is still held to a path inside the piece.
+    await setCellValueFromCommand(base, "/top", "2", deps);
+    expect(writes[1]?.slice(1)).toEqual([
+      [2],
+      "Milk",
+      { input: undefined, refuseRootWrite: true },
     ]);
     expect(hints[0]).toContain("cf piece step");
     // An explicit empty positional has always named the root — the fuse
     // integration writes a whole input cell with `piece set "" --input` —
-    // so it stays a valid spelling, in both target forms.
+    // so it stays a valid spelling, in both target forms, and it is the one
+    // spelling that lets a write land on a whole cell.
     await setCellValueFromCommand(
       { ...base, cell: `/${LLM_HANDLE}`, input: true },
       "",
       undefined,
       deps,
     );
-    expect(writes[1]?.slice(1)).toEqual([[], "Milk", { input: true }]);
+    expect(writes[2]?.slice(1)).toEqual([
+      [],
+      "Milk",
+      { input: true, refuseRootWrite: false },
+    ]);
     await setCellValueFromCommand(base, `/${LLM_HANDLE}`, "", deps);
-    expect(writes[2]?.slice(1)).toEqual([[], "Milk", { input: undefined }]);
+    expect(writes[3]?.slice(1)).toEqual([
+      [],
+      "Milk",
+      { input: undefined, refuseRootWrite: false },
+    ]);
     // What stays refused is no path in any spelling: a bare pasted address
     // must not silently overwrite a whole cell.
     await expect(
@@ -904,6 +929,38 @@ describe("cli piece parsing", () => {
         deps,
       ),
     ).rejects.toThrow(/A path is required/);
+  });
+
+  it("setCellValueFromCommand() reports the piece and the path the write landed on", async () => {
+    // A collection's name spends its leading segments reaching a member, so
+    // the address the line carries names neither the piece written to nor the
+    // path written at. Both come back from the write.
+    const base = { apiUrl: API_URL, space: SPACE, identity: ID, quiet: true };
+    const rendered: string[] = [];
+    const hints: string[] = [];
+    const reporting = {
+      drainStdin: (() => Promise.resolve("Oven schedule")) as never,
+      setCellValue:
+        (() =>
+          Promise.resolve({ piece: LLM_HANDLE, path: ["title"] })) as never,
+      render: ((text: string) => {
+        rendered.push(text);
+      }) as never,
+      hint: ((text: string) => {
+        hints.push(text);
+      }) as never,
+    };
+    await setCellValueFromCommand(base, "/top/2", "title", reporting);
+    expect(rendered).toEqual(["Set value at path: title"]);
+    expect(hints[0]).toContain(`cf piece step --cell ${LLM_HANDLE}`);
+
+    // Where the walk spends nothing the address still names the piece, and
+    // the next command is one the reader can paste as they typed it.
+    rendered.length = 0;
+    hints.length = 0;
+    await setCellValueFromCommand(base, "/tracker", "title", reporting);
+    expect(rendered).toEqual(["Set value at path: title"]);
+    expect(hints[0]).toContain("cf piece step --cell tracker");
   });
 
   it("parsePieceOptions() throws on incomplete input", () => {
@@ -4713,11 +4770,14 @@ describe("cli piece parsing", () => {
     expect(resolved.piece).toBe("of:fid1:piece-123");
   });
 
-  it("preserves URI link endpoints without slug lookup", async () => {
+  it("preserves URI link endpoints and their paths without slug lookup", async () => {
     const token = "of:fid1:piece-123";
-    const resolved = await resolveLinkEndpointAddress({} as any, token);
+    const resolved = await resolveLinkEndpointAddress({} as any, token, [
+      "items",
+      0,
+    ]);
 
-    expect(resolved).toBe(token);
+    expect(resolved).toEqual({ piece: token, pathAfter: ["items", 0] });
   });
 
   it("rejects a bare endpoint with no slug document, even with the fallback", async () => {
@@ -4729,10 +4789,13 @@ describe("cli piece parsing", () => {
     await expect(resolveLinkEndpointAddress(
       manager as any,
       token,
-      () =>
-        Promise.reject(
-          new SlugResolutionError(`Slug "${token}" not found.`, "missing"),
-        ),
+      [],
+      {
+        resolvePieceAddress: () =>
+          Promise.reject(
+            new SlugResolutionError(`Slug "${token}" not found.`, "missing"),
+          ),
+      },
       { allowMissingSlugFallback: true },
     )).rejects.toThrow(/Slug "a-bare-name" not found/);
   });
@@ -4743,10 +4806,13 @@ describe("cli piece parsing", () => {
     await expect(resolveLinkEndpointAddress(
       manager as any,
       token,
-      () =>
-        Promise.reject(
-          new SlugResolutionError(`Slug "${token}" not found.`, "missing"),
-        ),
+      [],
+      {
+        resolvePieceAddress: () =>
+          Promise.reject(
+            new SlugResolutionError(`Slug "${token}" not found.`, "missing"),
+          ),
+      },
     )).rejects.toThrow(/Slug "demo" not found/);
   });
 });
