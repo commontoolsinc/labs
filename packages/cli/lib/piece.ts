@@ -26,6 +26,7 @@ import {
   resolveSlugTarget,
   resolveSlugTargetCell,
   setSlugLink,
+  SlugAssignedError,
   SlugResolutionError,
 } from "@commonfabric/piece";
 import {
@@ -1617,6 +1618,14 @@ export async function newPiece(
   return piece.id;
 }
 
+/**
+ * Points `slug` at the cell an address and the path after it name.
+ *
+ * A name already pointing somewhere is refused, naming what it points at, so
+ * that a slug someone opens is never taken by accident; `force` takes it. The
+ * refusal names the flag, because the remedy is the CLI's rather than the
+ * library's.
+ */
 export async function setPieceSlug(
   config: SpaceConfig,
   slug: string,
@@ -1625,6 +1634,7 @@ export async function setPieceSlug(
   options?: {
     sourceScope?: PieceConfig["pieceScope"];
     resolveBeforeLinking?: boolean;
+    force?: boolean;
   },
   deps: PieceResolutionDeps = {},
 ): Promise<void> {
@@ -1640,14 +1650,31 @@ export async function setPieceSlug(
     deps,
   );
   await timeCliPhase("setPieceSlug.source.sync", () => source.sync());
-  await timeCliPhase(
-    "setPieceSlug.setSlugLink",
-    () =>
-      setSlugLink(pieces, slug, source, {
-        resolveBeforeLinking: options?.resolveBeforeLinking,
-        writeTargetMetadata: source.getAsNormalizedFullLink().path.length === 0,
-      }),
-  );
+  try {
+    await timeCliPhase(
+      "setPieceSlug.setSlugLink",
+      () =>
+        setSlugLink(pieces, slug, source, {
+          resolveBeforeLinking: options?.resolveBeforeLinking,
+          writeTargetMetadata:
+            source.getAsNormalizedFullLink().path.length === 0,
+          force: options?.force,
+        }),
+    );
+  } catch (error) {
+    // Rethrown rather than wrapped: the name being taken is a fact about the
+    // space rather than a mistake in the line, and the same class carries it
+    // to the top level, where it prints its message and no usage page.
+    if (error instanceof SlugAssignedError) {
+      throw new SlugAssignedError(
+        error.slug,
+        error.target,
+        `Pass \`--force\` to take it anyway, or name it back with ` +
+          `\`${error.target}\`.`,
+      );
+    }
+    throw error;
+  }
   noteWroteTo(config.space);
 }
 

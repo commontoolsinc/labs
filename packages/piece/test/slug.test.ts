@@ -4,14 +4,19 @@ import { createSession, Identity } from "@commonfabric/identity";
 import {
   type Cell,
   entityIdFrom,
+  type MemorySpace,
   Runtime,
   type URI,
 } from "@commonfabric/runner";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import {
+  EmulatedStorageManager,
+  newLoopbackServer,
+  StorageManager,
+} from "@commonfabric/runner/storage/cache.deno";
 import { createBuilder } from "../../runner/src/builder/factory.ts";
 import { parseLink } from "../../runner/src/link-utils.ts";
-import { slugIdForSpace } from "../../runner/src/slugs.ts";
+import { slugIdForSpace, slugIndexIdForSpace } from "../../runner/src/slugs.ts";
 import { pieceId } from "../src/piece-id.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 import {
@@ -22,6 +27,7 @@ import {
   resolveSlugTarget,
   resolveSlugTargetCell,
   setSlugLink,
+  SlugAssignedError,
   SlugResolutionError,
 } from "../src/slugs.ts";
 
@@ -57,6 +63,11 @@ describe("piece slugs", () => {
       { value },
     ) => ({ value }));
     return await pieces.runPersistent(piecePattern, { value: 1 }, cause);
+  }
+
+  /** What `work` rejected with, or `undefined` when it resolved. */
+  async function failureOf(work: Promise<unknown>): Promise<unknown> {
+    return await work.then(() => undefined, (error: unknown) => error);
   }
 
   function readRootMeta(id: string, key: string): unknown {
@@ -129,7 +140,7 @@ describe("piece slugs", () => {
     await assignSlug(pieces, piece, "board");
     await setSlugLink(pieces, "tracker", other);
     // Repointing a name changes where it resolves, never how it is listed.
-    await setSlugLink(pieces, "board", other);
+    await setSlugLink(pieces, "board", other, { force: true });
 
     expect(await listSlugs(pieces)).toEqual(["board", "tracker"]);
     expect(await resolvePieceAddress(pieces, "board")).toBe(pieceId(other)!);
@@ -280,14 +291,68 @@ describe("piece slugs", () => {
     );
   });
 
-  it("overwrites an existing slug redirect", async () => {
-    const first = await createPiece("slug-first");
-    const second = await createPiece("slug-second");
+  it("refuses a name that is already bound, naming what it points at", async () => {
+    const held = await createPiece("slug-held");
+    const taking = await createPiece("slug-taking");
+    await assignSlug(pieces, held, "demo");
 
-    await assignSlug(pieces, first, "demo");
-    await assignSlug(pieces, second, "demo");
+    const failure = await failureOf(setSlugLink(pieces, "demo", taking));
 
-    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(second));
+    expect(failure).toBeInstanceOf(SlugAssignedError);
+    const refusal = failure as SlugAssignedError;
+    expect(refusal.slug).toBe("demo");
+    // The target is a reference the caller can read and write back, so the
+    // refusal says what taking the name would have cost.
+    expect(refusal.target).toBe(
+      `/${held.getAsNormalizedFullLink().id}`,
+    );
+    expect(refusal.message).toContain(refusal.target);
+    // The name still points where it did: the refusal protected the address
+    // rather than merely reporting on it.
+    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(held));
+  });
+
+  it("takes a bound name when the caller forces it", async () => {
+    const held = await createPiece("slug-held");
+    const taking = await createPiece("slug-taking");
+    await assignSlug(pieces, held, "demo");
+
+    await assignSlug(pieces, taking, "demo", { force: true });
+
+    expect(await resolvePieceAddress(pieces, "demo")).toBe(pieceId(taking));
+  });
+
+  it("gives one name to exactly one of two writers claiming it at once", async () => {
+    // A genuine overlap, not a sequence: `editWithRetry` runs its body
+    // synchronously, so the second body reads the name while the first
+    // transaction is still open, and the second sees what the first staged.
+    // The two targets differ, so a guard that let both through would leave
+    // the loser's target standing, which the last assertion would see.
+    const first = await createPiece("slug-race-first");
+    const second = await createPiece("slug-race-second");
+    expect(pieceId(first)).not.toBe(pieceId(second));
+
+    const outcomes = await Promise.all([
+      failureOf(setSlugLink(pieces, "contested", first)),
+      failureOf(setSlugLink(pieces, "contested", second)),
+    ]);
+
+    const [winner, loser] = outcomes[0] === undefined
+      ? [first, second]
+      : [second, first];
+    expect(outcomes.filter((outcome) => outcome === undefined)).toHaveLength(1);
+    const refusal = outcomes.find((outcome) => outcome !== undefined);
+    expect(refusal).toBeInstanceOf(SlugAssignedError);
+    // The refusal names the holder the loser lost to, not its own target.
+    expect((refusal as SlugAssignedError).target).toBe(
+      `/${winner.getAsNormalizedFullLink().id}`,
+    );
+    expect(await resolvePieceAddress(pieces, "contested")).toBe(
+      pieceId(winner),
+    );
+    expect(await resolvePieceAddress(pieces, "contested")).not.toBe(
+      pieceId(loser),
+    );
   });
 
   it("reports missing and malformed slug documents", async () => {
@@ -319,10 +384,6 @@ describe("piece slugs", () => {
     let boardId: string;
     let item1: Cell<unknown>;
     let item2: Cell<unknown>;
-
-    async function failureOf(work: Promise<unknown>): Promise<unknown> {
-      return await work.then(() => undefined, (error: unknown) => error);
-    }
 
     beforeEach(async () => {
       item1 = await createPiece("member-1");
@@ -429,6 +490,106 @@ describe("piece slugs", () => {
         expect(error).toBeInstanceOf(SlugResolutionError);
         expect((error as SlugResolutionError).code).toBe("not-piece");
       });
+    });
+  });
+  describe("the read a refusal claims on", () => {
+    // What `setSlugLink`'s refusal rests on: whether reading the name inside
+    // the transaction puts it in the commit's read set, so that binding the
+    // name under an assignment rejects the assignment instead of letting it
+    // write over the new holder.
+    //
+    // Two sessions on one server with fan-out held manual, so a stale basis
+    // is a gated state rather than a timing accident. The write under test
+    // lands on the slug INDEX, a different document from the slug the body
+    // reads, so nothing but the read can carry a conflict — the pair of
+    // tests differs in the read alone.
+
+    let server: ReturnType<typeof newLoopbackServer>;
+    let holderStorage: EmulatedStorageManager;
+    let holderRuntime: Runtime;
+    let takerStorage: EmulatedStorageManager;
+    let takerRuntime: Runtime;
+    let space: MemorySpace;
+    let slugCellId: string;
+
+    /** A cell in the shared space, addressed the same way from either side. */
+    function cellOf(runtime: Runtime, id: string) {
+      return runtime.getCellFromEntityId(space, entityIdFrom(id));
+    }
+
+    beforeEach(async () => {
+      server = newLoopbackServer({ subscriptionRefreshDelayMs: "manual" });
+      holderStorage = EmulatedStorageManager.connectTo(server, { as: signer });
+      holderRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: holderStorage,
+      });
+      takerStorage = EmulatedStorageManager.connectTo(server, { as: signer });
+      takerRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: takerStorage,
+      });
+      space = signer.did() as MemorySpace;
+      slugCellId = slugIdForSpace(space, "contested");
+
+      // The name starts bound to the first target, and both sessions hold
+      // that basis.
+      const first = holderRuntime.getCell(space, "contested-first");
+      const seed = holderRuntime.edit();
+      cellOf(holderRuntime, slugCellId).withTx(seed).setRawUntyped(
+        first.withTx(seed).getAsWriteRedirectLink({
+          base: cellOf(holderRuntime, slugCellId).withTx(seed),
+        }),
+      );
+      await seed.commit({ resolveAt: "verdict" });
+      await holderRuntime.storageManager.synced();
+      await cellOf(takerRuntime, slugCellId).sync();
+      await cellOf(takerRuntime, slugCellId).pull();
+      await cellOf(takerRuntime, slugIndexIdForSpace(space)).sync();
+
+      // The holder rebinds the name. The taker's basis is now behind, and
+      // the held fan-out keeps it there.
+      const second = holderRuntime.getCell(space, "contested-second");
+      const rebind = holderRuntime.edit();
+      cellOf(holderRuntime, slugCellId).withTx(rebind).setRawUntyped(
+        second.withTx(rebind).getAsWriteRedirectLink({
+          base: cellOf(holderRuntime, slugCellId).withTx(rebind),
+        }),
+      );
+      await rebind.commit({ resolveAt: "verdict" });
+      await holderRuntime.storageManager.synced();
+    });
+
+    afterEach(async () => {
+      await takerRuntime?.dispose();
+      await holderRuntime?.dispose();
+      await takerStorage?.close();
+      await holderStorage?.close();
+      await server?.close();
+    });
+
+    /**
+     * The taker's transaction: it writes the slug index the way an
+     * assignment does, having first read the name it is claiming when
+     * `readName` says so. Answers the commit's rejection, or `undefined`.
+     */
+    async function commitFromStaleBasis(
+      readName: boolean,
+    ): Promise<{ name?: string } | undefined> {
+      const tx = takerRuntime.edit();
+      if (readName) cellOf(takerRuntime, slugCellId).withTx(tx).getRaw();
+      cellOf(takerRuntime, slugIndexIdForSpace(space)).withTx(tx)
+        .key("contested").set(true);
+      const { error } = await tx.commit({ resolveAt: "verdict" });
+      return error;
+    }
+
+    it("rejects the commit when the body read the name another writer had bound", async () => {
+      expect((await commitFromStaleBasis(true))?.name).toBe("ConflictError");
+    });
+
+    it("commits the same write when the body did not read that name", async () => {
+      expect(await commitFromStaleBasis(false)).toBeUndefined();
     });
   });
 });

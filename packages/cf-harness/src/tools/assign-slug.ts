@@ -138,13 +138,18 @@ const SLUG_CODE_STATES: Readonly<
  * whether it names something else a person opens, or whether that could not
  * be established at all.
  *
- * Assignment is a blind write: the slug document is pointed at the piece
- * whatever it held before, and last writer wins. So without asking first, a
- * request naming a slug a person already opens would repoint that name at
- * whatever the caller passed. That makes an unanswered question a refusal
- * rather than a "free": a resolution that failed operationally says nothing
- * about what the slug holds, and treating it as vacancy would reopen exactly
- * the overwrite this asks to prevent.
+ * Assignment refuses a name that is already bound, so this asks first for a
+ * different reason than the write does. The write's rule is "bound at all";
+ * this one is "names a piece or a collection a person opens", and a name
+ * whose document holds no usable redirect competes with nothing. Asking here
+ * is what lets the refusal name which of the two it is, and the assignment
+ * that follows an answer of "free" is forced, so the two rules never disagree
+ * about one name.
+ *
+ * That also makes an unanswered question a refusal rather than a "free": a
+ * resolution that failed operationally says nothing about what the slug
+ * holds, and treating it as vacancy would repoint a name this side never
+ * established was free.
  *
  * The outcomes are told apart by the typed `code` `resolvePieceAddress`
  * carries on its `SlugResolutionError`, never by the message text.
@@ -354,7 +359,9 @@ export const assignSlugTool: HarnessToolDefinition<
       // ensured rather than appended: a retry after exactly that failure
       // must not list the piece twice.
       await ensureRegistered(pieces, cell, targetId);
-      await assignSlug(pieces, cell, slug);
+      // Forced because `slugAvailability` above is this tool's own answer to
+      // whether the name is free, and it is the narrower of the two rules.
+      await assignSlug(pieces, cell, slug, { force: true });
     } catch (error) {
       return errorOutput(
         `assign_slug failed while naming the piece: ${errorMessage(error)}`,

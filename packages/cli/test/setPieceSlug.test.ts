@@ -135,6 +135,38 @@ describe("setPieceSlug()", () => {
     });
   });
 
+  it("refuses a name that already points somewhere, naming it and the flag that takes it", async () => {
+    await setSlug("top", boardId, ["names"]);
+
+    const failure = await setSlug("top", memberId, []).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    expect(failure).toBeInstanceOf(Error);
+    // The refusal names what the slug points at now, in the spelling the
+    // command takes as a source, so putting it back is a paste.
+    expect((failure as Error).message).toContain(`/of:${boardId}/names`);
+    expect((failure as Error).message).toContain("--force");
+    // The collection kept the name: the refused run neither took it nor
+    // repointed it at the member it named.
+    expect(await resolveSlugTarget(pieces, "top")).toEqual({
+      piece: boardId,
+      pathInside: ["names"],
+    });
+  });
+
+  it("takes a name that already points somewhere when forced", async () => {
+    await setSlug("top", boardId, ["names"]);
+
+    await setSlug("top", memberId, [], { force: true });
+
+    expect(await resolveSlugTarget(pieces, "top")).toEqual({
+      piece: memberId,
+      pathInside: [],
+    });
+  });
+
   it("refuses a scope written on a bare slug, which has no cell of its own to scope", async () => {
     await setSlug("top", boardId, ["names"]);
 

@@ -16,7 +16,7 @@ This block is LIVE: the change that moves a stage updates it here.
 | S1 — the library and the exemplar board own a member namespace | on main (#6882) |
 | S1b — index rows are the members | built, in review |
 | S2 — `top/42` resolves at the CLI | built, in review |
-| S2b — assignment refuses by default | not started |
+| S2b — assignment refuses by default | built, in review |
 | S3 — the shell opens `/<space>/top/42` | not started |
 | S4 — `#42` in text | building |
 | S6 — graft onto Topics | not started; Mike's call after S4 |
@@ -171,7 +171,13 @@ The first half of the spec's step 2.
 
 1. `set-slug` on a bound name refuses and names the current target; `--force`
    steals. The check is a claim inside the transaction: a test with two
-   writers has exactly one win.
+   writers has exactly one win. Recorded: the overlap is expressible at one
+   runtime, because `editWithRetry` runs its body synchronously, so two
+   assignments started together both read the name before either transaction
+   commits and the second reads what the first staged. What that shape does
+   not reach is the cross-session case, where the loser's replica is stale
+   and the commit precondition is what serializes them; criterion 2's pair
+   covers that at the transaction level.
 2. Whether a synced read inside `editWithRetry` becomes a commit precondition
    is settled by that test and recorded in the spec's open-questions list.
 3. `--force` has a completion slot and a README sentence.

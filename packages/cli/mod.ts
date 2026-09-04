@@ -1,5 +1,6 @@
 import { ValidationError } from "@cliffy/command";
 import { CompilerError, TransformerError } from "@commonfabric/js-compiler";
+import { SlugAssignedError } from "@commonfabric/piece";
 import { SlugResolutionError } from "@commonfabric/runner";
 
 import { main as rootCommand } from "./commands/main.ts";
@@ -12,15 +13,15 @@ import { applyLogLevel } from "./lib/log-level.ts";
 
 /**
  * The value to print for a top-level CLI failure. Validation, transformer,
- * compiler, verb-input, and slug-resolution errors carry user-facing
- * messages, so print those without a stack trace. Other Errors print their
- * stack, falling back to the message. Anything else prints as-is.
+ * compiler, verb-input, and slug errors carry user-facing messages, so print
+ * those without a stack trace. Other Errors print their stack, falling back
+ * to the message. Anything else prints as-is.
  */
 export function renderCliError(e: unknown): unknown {
   if (
     e instanceof ValidationError || e instanceof TransformerError ||
     e instanceof CompilerError || e instanceof VerbInputValidationError ||
-    e instanceof SlugResolutionError
+    e instanceof SlugResolutionError || e instanceof SlugAssignedError
   ) {
     return e.message;
   }

@@ -2437,10 +2437,20 @@ export const piece = targetOptions(
     ),
     `Set slug "latest-note" to the cell currently resolved by "old-slug".`,
   )
+  .example(
+    cliText(
+      `cf piece set-slug ${EX_ID} ${EX_COMP} project-notes fid1:piece2 --force`,
+    ),
+    `Take "project-notes" from whatever it names now.`,
+  )
   .arguments("<slug:string> <source:string>")
   .option(
     "--resolve-before-linking",
     "Resolve the source cell before writing it as the slug redirect target.",
+  )
+  .option(
+    "--force",
+    "Take the name even when it already points somewhere.",
   )
   .action(async (options, slug, sourceRef) => {
     setQuietMode(!!options.quiet);
@@ -2455,6 +2465,7 @@ export const piece = targetOptions(
       {
         sourceScope: source.scope,
         resolveBeforeLinking: !!(options as any).resolveBeforeLinking,
+        force: !!(options as any).force,
       },
     );
     render(`Set slug ${slug} to ${sourceRef}`);

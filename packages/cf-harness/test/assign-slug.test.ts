@@ -256,6 +256,35 @@ describe("assign-slug", () => {
       });
     });
 
+    it("takes a name whose document points at no piece, which this tool calls free", async () => {
+      // The tool's availability rule competes only with pieces and
+      // collections, so a name redirecting to a plain document is free here
+      // even though the assignment underneath refuses a bound name by
+      // default. Forcing is what keeps the two rules from disagreeing.
+      await linkDefaultPattern();
+      const engine = createEngine();
+      const created = await createPiece(engine);
+      const plain = pieces.runtime.getCell(
+        pieces.getSpace(),
+        { space: pieces.getSpace(), random: "plain" },
+      );
+      await pieces.runtime.editWithRetry((tx) => {
+        plain.withTx(tx).set({ value: 1 });
+      });
+      await setSlugLink(pieces, "doubling-report", plain);
+
+      const result = await engine.invokeBuiltinTool("assign_slug", {
+        token: created.resultRef,
+        slug: "doubling-report",
+      });
+
+      const output = result.output as AssignSlugToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
+        created.pieceId,
+      );
+    });
+
     it("answers ok for a slug already pointing at the very piece the token names", async () => {
       // The request is already true, so saying so beats refusing it — a
       // retried call settles on the outcome instead of failing.

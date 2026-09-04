@@ -4,6 +4,7 @@ import {
   DEFAULT_CELL_SCOPE,
   entityIdFrom,
   isSlugAddress,
+  parseLink,
   resolveSlugReference,
   resolveSlugTargetCell as resolveRuntimeSlugTargetCell,
   resolveSlugTargetInPiece,
@@ -13,11 +14,48 @@ import {
   validateSlug,
 } from "@commonfabric/runner";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
+import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 import type { PiecesController } from "./ops/pieces-controller.ts";
 import { pieceId } from "./piece-id.ts";
 
 export { SlugResolutionError };
+
+/**
+ * A name that was already bound when an assignment reached it. The target it
+ * carries is a reference to what the name points at now, which is both what
+ * forcing the assignment would take and what a caller writes to put the name
+ * back.
+ *
+ * The condition is the library's and the remedy is the caller's, so a caller
+ * with a word for forcing — a CLI flag, a tool parameter — supplies its own
+ * and the message reads in that caller's vocabulary.
+ */
+export class SlugAssignedError extends Error {
+  #slug: string;
+  #target: string;
+
+  constructor(slug: string, target: string, remedy?: string) {
+    super(
+      `Slug "${slug}" already points at ${target}, so assigning it would ` +
+        `take that address from whoever holds it.` +
+        (remedy === undefined ? "" : ` ${remedy}`),
+    );
+    this.name = "SlugAssignedError";
+    this.#slug = slug;
+    this.#target = target;
+  }
+
+  /** The name the assignment asked for. */
+  get slug(): string {
+    return this.#slug;
+  }
+
+  /** A reference to what the name points at now. */
+  get target(): string {
+    return this.#target;
+  }
+}
 
 /** The slug index's shape: names to `true`. Written one key at a time, so
  * two clients assigning different slugs merge as two keys rather than two
@@ -53,14 +91,36 @@ export async function listSlugs(pieces: PiecesController): Promise<string[]> {
     .sort(utf8Compare);
 }
 
+/**
+ * Points `slug` at a piece and stamps the piece with the name, refusing a
+ * name that is already bound the way {@link setSlugLink} does.
+ */
 export async function assignSlug(
   pieces: PiecesController,
   piece: Cell<unknown>,
   slug: string,
+  options?: { force?: boolean },
 ): Promise<void> {
-  await setSlugLink(pieces, slug, piece, { writeTargetMetadata: true });
+  await setSlugLink(pieces, slug, piece, {
+    writeTargetMetadata: true,
+    force: options?.force,
+  });
 }
 
+/**
+ * Points `slug` at `source`, and records the name in the space's slug index.
+ *
+ * A name already pointing somewhere is refused with a {@link
+ * SlugAssignedError} naming the target it holds, unless `force` says to take
+ * it. The refusal is a claim rather than a check: the name is read inside the
+ * transaction the assignment commits in, so a writer that binds it between
+ * that read and the commit conflicts, and `editWithRetry` re-runs the body
+ * against what that writer left. Two assignments of one free name therefore
+ * end with one holder, not with whichever committed last.
+ *
+ * Throws when storage refuses the transaction, so a caller never reads a name
+ * as assigned that never landed.
+ */
 export async function setSlugLink(
   pieces: PiecesController,
   slug: string,
@@ -68,6 +128,7 @@ export async function setSlugLink(
   options?: {
     resolveBeforeLinking?: boolean;
     writeTargetMetadata?: boolean;
+    force?: boolean;
   },
 ): Promise<void> {
   const validSlug = validateSlug(slug);
@@ -88,11 +149,24 @@ export async function setSlugLink(
 
   const indexCell = slugIndexCell(pieces);
   await indexCell.sync();
+  // The name is synced so the claim below reads what the space holds rather
+  // than an absence this client never checked.
+  await slugCell.sync();
 
-  const { error } = await pieces.runtime.editWithRetry((tx) => {
+  const { ok: bound, error } = await pieces.runtime.editWithRetry((tx) => {
     const targetWithTx = target.withTx(tx);
     const slugWithTx = slugCell.withTx(tx);
     const metadataTargetWithTx = metadataTarget?.withTx(tx);
+
+    // The claim, ahead of every write so that declining stages nothing: a
+    // read here joins the commit's read set, so binding the name under this
+    // transaction rejects it and the body re-runs against the new holder.
+    const held = options?.force
+      ? undefined
+      : parseLink(slugWithTx.getRaw(), slugWithTx);
+    if (held !== undefined) {
+      return createLLMFriendlyLink(held, pieces.getSpace());
+    }
 
     const metadataTargetLink = metadataTargetWithTx
       ?.getAsNormalizedFullLink();
@@ -113,6 +187,7 @@ export async function setSlugLink(
     // The index entry rides the slug's own transaction, so a listing can
     // never see a name without its slug or a slug without its name.
     indexCell.withTx(tx).key(validSlug).set(true);
+    return undefined;
   });
   if (error) {
     throw new Error(
@@ -120,6 +195,7 @@ export async function setSlugLink(
       { cause: error },
     );
   }
+  if (bound !== undefined) throw new SlugAssignedError(validSlug, bound);
 
   await pieces.runtime.idle();
   await pieces.synced();

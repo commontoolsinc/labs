@@ -617,7 +617,16 @@ publishes one — `NamingDeclaration` in
 becomes the standard every collection declares is what remains open.
 
 **Whether a synced read inside an `editWithRetry` body becomes a commit
-precondition**, which is what step 2 rests on.
+precondition**, which is what step 2 rests on. Answered yes, 2026-09-04, and
+the answer is the read's alone rather than the surrounding write's. Two
+sessions over one memory server with fan-out held: the second loads a slug
+document, the first rewrites it, and the second then reads that document and
+writes a different one. Its commit is rejected `ConflictError`; the identical
+write with the read removed commits. That rejection is in the retryable class,
+so `editWithRetry` catches up and re-runs the body, which is what makes a
+read-then-refuse a claim rather than a time-of-check race.
+`packages/piece/test/slug.test.ts` holds the pair that differs in the read
+alone.
 
 **Whether a collection accepting names from people** reuses the space-level
 claim path or needs its own.
