@@ -1,5 +1,5 @@
 /**
- * `deno task install-cf` — putting `cf` on PATH without mise.
+ * `deno task install-cf` — putting `cf` and `cfsh` on PATH without mise.
  *
  * It installs a copy, not a link. `bin/cf` is self-contained: it works out
  * which checkout to run from `$CF_LABS_ROOT` or the cwd, neither of which
@@ -8,9 +8,11 @@
  * worktrees are created and removed routinely.
  *
  * The one thing a copy cannot infer is which checkout to use when you are
- * outside every checkout, so the installer bakes that in. The two properties
- * worth guarding are therefore that the copy is independent of its source, and
- * that the baked default actually lands.
+ * outside every checkout, so the installer bakes that in. `bin/cfsh` needs no
+ * such default: it opens a shuttle through whatever `cf` is on PATH, so it is
+ * shipped beside the other and baked with nothing. The properties worth
+ * guarding are therefore that a copy is independent of its source, that the
+ * baked default actually lands, and that both copies arrive and are named.
  *
  * Each case runs the real script against a fake checkout in a temp dir, with
  * an explicit `--dir`, so nothing touches the repository or the user's PATH.
@@ -27,7 +29,7 @@ import { dirname, fromFileUrl, join } from "@std/path";
 const repoRoot = join(dirname(fromFileUrl(import.meta.url)), "..", "..", "..");
 const installer = join(repoRoot, "scripts", "install-cf.sh");
 
-/** A git checkout with a `bin/cf`, standing in for a real one. */
+/** A git checkout with a `bin/cf` and a `bin/cfsh`, standing in for a real one. */
 async function makeCheckout(
   root: string,
   // The installer rewrites this line, and fails loudly if it is absent, so the
@@ -37,6 +39,13 @@ async function makeCheckout(
   await Deno.mkdir(join(root, "bin"), { recursive: true });
   await Deno.writeTextFile(join(root, "bin", "cf"), binContents);
   await Deno.chmod(join(root, "bin", "cf"), 0o755);
+  // The installer ships both, so a checkout missing one is not a checkout.
+  // This carries no checkout to rewrite, which is why it needs no marker line.
+  await Deno.writeTextFile(
+    join(root, "bin", "cfsh"),
+    '#!/bin/sh\nexec cf sh "$@"\n',
+  );
+  await Deno.chmod(join(root, "bin", "cfsh"), 0o755);
   const git = async (...args: string[]) => {
     await new Deno.Command("git", {
       args,
@@ -147,6 +156,10 @@ Deno.test("copies this checkout's script, but defaults to the primary", async ()
       join(worktree, "bin", "cf"),
       '#!/bin/sh\nDEFAULT_LABS_ROOT=""\necho worktree-version\n',
     );
+    await Deno.writeTextFile(
+      join(worktree, "bin", "cfsh"),
+      '#!/bin/sh\nexec cf sh "$@"\n',
+    );
 
     assertEquals((await runInstaller(worktree, ["--dir", target])).code, 0);
 
@@ -223,6 +236,28 @@ Deno.test("reports what it installed", async () => {
     assertEquals(code, 0);
     assertStringIncludes(out, join(target, "cf"));
     assertStringIncludes(out, checkout);
+  });
+});
+
+Deno.test("installs cfsh beside cf, with no checkout baked into it", async () => {
+  // The shell's documented entry point is only real if it lands on a PATH.
+  // It carries no checkout of its own — it forwards to `cf sh` and finds `cf`
+  // by name — so the copy takes the marker and nothing else.
+  await withTempDir(async (dir) => {
+    const checkout = join(dir, "labs");
+    const target = join(dir, "target");
+    await makeCheckout(checkout);
+    await Deno.mkdir(target);
+
+    const { code, out } = await runInstaller(checkout, ["--dir", target]);
+    assertEquals(code, 0);
+    assertStringIncludes(out, join(target, "cfsh"));
+
+    const installed = await Deno.readTextFile(join(target, "cfsh"));
+    assertStringIncludes(installed, "# installed by scripts/install-cf.sh");
+    assertEquals(installed.split("\n")[0], "#!/bin/sh");
+    assertEquals(installed.includes("DEFAULT_LABS_ROOT"), false);
+    assertEquals((await Deno.stat(join(target, "cfsh"))).mode! & 0o111, 0o111);
   });
 });
 
@@ -344,5 +379,21 @@ Deno.test("an unknown argument is rejected", async () => {
     const { code, err } = await runInstaller(checkout, ["--nope"]);
     assertEquals(code, 2);
     assertStringIncludes(err, "unknown argument");
+  });
+});
+
+Deno.test("the help names both of the things it installs", async () => {
+  // A person who cannot find `cfsh` in the help has no way to learn it was
+  // installed, which makes shipping it and not saying so the same as not
+  // shipping it.
+
+  await withTempDir(async (dir) => {
+    const checkout = join(dir, "labs");
+    await makeCheckout(checkout);
+
+    const { code, out } = await runInstaller(checkout, ["--help"]);
+    assertEquals(code, 0);
+    assertStringIncludes(out, "bin/cf");
+    assertStringIncludes(out, "bin/cfsh");
   });
 });

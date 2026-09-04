@@ -75,8 +75,16 @@ invisible, the prompt renders the whole ambient record — place and scope
    cell, browse a collection) open on demand and return to the prompt. The
    prompt serves composition and muscle memory; the views serve the
    browse-and-observe loop a reactive substrate deserves.
-2. **Home: a new workspace package** (working name `packages/shuttle`),
-   importing `cli` and `runner` plumbing as libraries. Not a `cf` subcommand.
+2. **Home: inside `packages/cli`**, in `lib/shuttle/`, reached as the `cf sh`
+   subcommand. A shell is the `cf` verbs held open over one connection, so it
+   is `cf`'s own subsystem rather than a package beside it: it calls the seams
+   as neighbors, `cf sh` imports what it runs, and there is no package
+   boundary for a cycle to form across. It keeps its own directory, beside
+   `lib/view/` and `lib/completion/`, the two other subsystems `cf` gives one
+   to. A person's flags are read once, in the command, in the words every
+   other command reads a space and an identity in, so nothing under it parses
+   a command line a second time. The pace layer is `cli`'s, and the seam work
+   stage A landed stands whether a caller is inside the package or beside it.
 3. **Audience: the operator at the keyboard.** Power use first; teammates
    second, served by completion, help, and forgiving defaults. Agents and
    demo audiences are not v1 targets, and no decision may preclude them.
@@ -162,8 +170,21 @@ invisible, the prompt renders the whole ambient record — place and scope
 18. **`!` means local, everywhere.** Line-initial `! <cmd>` runs a local
     program, `|!` is the same escape inside a pipeline, `!cf` the special
     case that injects place-derived flags.
-19. **The binary is `shuttle`.** The codename is the name; aliases and
-    completion absorb the length.
+19. **Shuttle is what it is; `cf sh` is what you type.** The relationship is
+    the one Fabric already has with `cf`: a product carries the name a person
+    means, and the command carries the name a person types thirty times an
+    hour. Shuttle stays the codename and the product, and no command spells
+    it. `cf sh` is the subcommand and `cfsh` the one-word spelling of it —
+    the space elided, so it is one name at two spellings rather than two
+    names, and it reads as a shell in the family `zsh` and `ksh` are in.
+
+    Both reach one process: `bin/cfsh` is a forward to `cf sh`, which runs in
+    whichever checkout `bin/cf` resolved from the working directory. The
+    forward carries no checkout logic of its own — `exec` leaves the working
+    directory alone, so both hops mean the same checkout — and it finds `cf`
+    by name, which mise and `install-cf` are what put there. `install-cf`
+    installs `cfsh` beside `cf`, without which the spelling this decision
+    settles on is one nobody has on their PATH.
 20. **Scope is the cwd's second dimension.** Per-identity overlays
     (`@user`, `@session`) are a way of seeing every place, so the cwd is
     the pair (position, scope): both stick across navigation, both render
@@ -318,10 +339,15 @@ Shuttle rides the addressing decisions of
   words shuttle must not add a third meaning to.
 
 Word hazards, so shuttle does not add to them: "shell" names the web
-frontend; "session" already carries three meanings (invocation session,
-process connection, `@session` cell scope) — shuttle says **place** and
-**connection**; "collection" means an array path inside a holder piece
-(`cf piece survey`), and shuttle uses it only that way.
+frontend, so nothing here takes it as a second identifier — no command is
+named `shell`, the subcommand being `cf sh` (decision 19), and no document
+names this thing that way. What the word does here is the ordinary one it
+does in English, for the kind of thing shuttle is, which names nothing and
+collides with nothing; "session" already carries three
+meanings (invocation session, process connection, `@session` cell scope) —
+shuttle says **place** and **connection**; "collection" means an array path
+inside a holder piece (`cf piece survey`), and shuttle uses it only that
+way.
 
 ## Open questions
 

@@ -47,6 +47,21 @@ The scripting bundle is also the agent door the non-goals hold open:
 stable machine-readable output, exit-code discipline, and deterministic
 non-TTY behavior (no views, no strip) arrive with it, not before.
 
+**A place's space is safe by its alphabet rather than by a guard.**
+`renderPosition` (`place.ts`) writes the space into what `pwd` and `where`
+show without holding it to the class a terminal acts on, and `isDID`
+admits that class — it asks for a `did:` prefix, a second colon, and a
+length. The guard is absent, and deliberately so. What stands in its place
+is where a space comes from: a place is built on the DID an opened
+connection reports, and a `did:key` is base58btc, an alphabet with no
+character in the class. A DID method with a wider alphabet is what ends
+that, and it is worth noticing when one arrives, because the guard becomes
+necessary at exactly that moment and neither way of adding it is free.
+Glyphing the space costs `pwd` being complete and pasteable; refusing it
+widens what the doors admit. Each is a ruling to take against a case
+somebody can reach, and the alphabet is why there is none to take it
+against today.
+
 ## Deferred from v1, design settled
 
 Each of these was ruled during the v1 design and then deferred past v1 to
@@ -97,6 +112,27 @@ decisions point here where they defer.
   one surface (decision 22). It arrives when a caller exists to want it, and
   the scripting bundle above is where one does: stable machine-readable
   output is part of that bundle rather than of the interactive surface.
+
+  One property it inherits: nothing printed may carry a character a terminal
+  acts on. The class is the doors' ([`grammar.md`](grammar.md)), and every
+  surface already answers for it — a name is refused, a message is shown as
+  the glyph naming it, and a serialized value is escaped. The JSON form
+  escapes in JSON's own spelling, which it can because `JSON.stringify`
+  already writes `\uXXXX` for C0 and leaves only `DEL` and C1 to finish; a
+  form that is not JSON cannot borrow that and has to say what it writes
+  instead.
+
+  A second property, and this one it supplies rather than inherits: a value
+  the interactive form loses without a word. An `undefined` or an interned
+  symbol under a key loses the key, and either of them at an array index is
+  written `null` — the first reads as a key the fabric does not hold, the
+  second as a value it does, and a cell holds every one of them
+  (`prompt.ts`). The interactive form cannot close that, because a tag
+  standing where the value was would stop being JSON somebody can paste back,
+  which is what its escaping exists to keep (`place.ts`). This form makes no
+  such promise, so it is where a spelling for them belongs, and the storage
+  codec already has one to borrow: `Undefined@1` beside the `BigInt@1` that
+  `get` writes as `$bigint` today (`packages/data-model/src/codec-json/`).
 - **Vim keybindings, as a `where` dimension.** Modal editing at the prompt,
   an option and never a default. What it costs is a second binding table
   over motions the line editor already drives, plus the mode the table

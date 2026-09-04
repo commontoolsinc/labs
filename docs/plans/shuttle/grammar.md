@@ -182,7 +182,16 @@ holding a line break are refused, while one that merely starts with
 whitespace survives and is not. The first two are refused wherever they sit
 and not only last, because `..` makes any segment the last one.
 
-Only the newline reaches a piece that has one. The scope suffix the
+A control character is refused as well, for a reason the round trip cannot
+see: every rendering goes to a terminal, and there Unicode's `Cc` characters —
+C0, `DEL`, and C1, whose `U+009B` is a sequence introducer needing no escape
+in front of it — are instructions rather than text. That such a name reads
+back whole is what makes it dangerous rather than what excuses it, since what
+a person copies off the screen is what the terminal did with it. `U+00A0`,
+`U+2028` and `U+2029` are not in that class and are admitted: a terminal
+prints them, and the printer quotes them, being whitespace to the split.
+
+Of what a rendering loses, only the newline reaches a piece that has one. The scope suffix the
 rendering always writes sits between the piece and the end of the string,
 so the trim takes the suffix rather than the piece, and the parse's split
 at the last `@` takes the suffix's own. An empty piece is the exception,
@@ -191,9 +200,9 @@ nothing else, so the split finds no id in front of it and the parse refuses
 the whole reference rather than handing anything back.
 
 The piece is nonetheless held to more, for a different reason: one that is
-empty, ends in whitespace, or holds an `@` is refused because no slug or
-handle carries such a name. The reason covers all three. The mechanism
-behind it covers two: for a piece shaped like a handle — a colon, and
+empty, ends in whitespace, holds an `@`, or holds a control character is
+refused because no slug or handle carries such a name. The reason covers all
+four. The mechanism behind it covers three: for a piece shaped like a handle — a colon, and
 twenty characters — the parse takes it, its handle test being a length rule
 rather than an alphabet one, and hands back verbatim a name the `fid1`
 encoding could not have produced, a rendering that round-trips exactly and
@@ -326,13 +335,26 @@ no name — while a marker's own payload is not escaped, those brackets
 delimiting for a reader and not for a parser. Nothing parses a listed line.
 
 A row is one line, and the lines are separated by a newline, so a name holding
-one is described rather than written and a message holding one has it written
-as a space. The newline's is the only rewrite there is, so a carriage
-return and the Unicode line and paragraph separators are printed as they
-stand, because a name is printed to be typed back and a rewritten one no
-longer names its row — a carriage return returns a terminal's cursor to the
-start of the line, and that is a thing a terminal does rather than a thing the
-name says, the same bound the rendering of a place is held to.
+one is described rather than written.
+
+A name and a message answer a control character differently, and what each is
+for is the difference. A **name** holding one is described rather than written,
+for the reason the doors refuse one: the marker is the last place such a name
+would still be written, and writing it there would put back on the screen what
+refusing it kept off. A **message** — a row's error, the bound — is escaped
+instead: every character survives and each acted-on one is shown as the Control
+Pictures glyph that names it, so the text a person has to read arrives whole
+and instructs nothing. The newline is the one exception, and the row rather
+than the class is what makes it one: a message is one row, so a newline in it
+is written as a space and every other character in the class is glyphed. A name
+is typed back and a message is read, which is why one may be replaced by a
+description and the other may not.
+
+Nothing else is rewritten. The Unicode line and paragraph separators are
+printed as they stand, a terminal acting on neither, because a name is printed
+to be typed back and a rewritten one no longer names its row; and an angle
+bracket in a message stands too, those delimiting a marker for a reader rather
+than for a parser.
 
 Large collections appear everywhere (a space's pieces, an array of
 thousands). `ls` prints one height-fit page — what the terminal shows

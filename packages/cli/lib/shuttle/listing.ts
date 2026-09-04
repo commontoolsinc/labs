@@ -15,19 +15,20 @@
  * fills.
  */
 
-import { listCellKeys } from "@commonfabric/cli/lib/cell-listing";
+import { listCellKeys } from "../cell-listing.ts";
 import {
   listPieces,
   listSpaceSlugs,
   type PieceConfig,
   type SpaceConfig,
-} from "@commonfabric/cli/lib/piece";
-
+} from "../piece.ts";
 import type { HeldConnection } from "./connection.ts";
 import { quoteToken } from "./line.ts";
 import {
+  escapeControlCharacters,
   type Facet,
   FACETS,
+  holdsControlCharacter,
   operandForChild,
   type PiecePosition,
   type Place,
@@ -134,9 +135,9 @@ export async function listPlace(
  * A row is one line, and lines are separated by a newline, so nothing written
  * on a line may put one inside it: a message and a bound each have their
  * newlines written as spaces, and a name carrying one is described rather than
- * written. That is the only rewrite there is, so every other control
- * character is written as it stands. Rewriting
- * one inside a name would leave a token `cd` no longer takes back to the row,
+ * written. What a message does with the rest of the class a terminal acts on,
+ * and why a name cannot do the same, is with {@link oneLine}. Rewriting one
+ * inside a name would leave a token `cd` no longer takes back to the row,
  * which is the guarantee the name is printed for, so what a terminal makes of
  * it is not something this can spend that on.
  */
@@ -240,7 +241,13 @@ function lineFor(row: ListingRow): string {
  * by a multi-segment operand, `#` being data in a segment that names a data
  * key.
  * What holds of every row this is written for is that neither the name nor the
- * reference names it, and a name is what a listing prints. The name is shown
+ * reference names it, and a name is what a listing prints.
+ *
+ * Two names are described rather than written, and for the same reason the
+ * doors refuse them: one holding a line break would make a second row out of
+ * one, and one holding a control character would reach a terminal as an
+ * instruction. Writing either would put back, in the marker, exactly what
+ * refusing the name kept off the screen. The name is shown
  * as it is written and not as something to type — it sits inside a marker,
  * which by the rule above carries no name.
  *
@@ -252,6 +259,8 @@ function lineFor(row: ListingRow): string {
 function noOperandFor(name: string): string {
   return name.includes("\n")
     ? "no operand: a name holding a line break"
+    : holdsControlCharacter(name)
+    ? "no operand: a name holding a control character"
     : `no operand: ${quoteToken(name)}`;
 }
 
@@ -261,13 +270,27 @@ function marker(text: string): string {
 }
 
 /**
- * Helper for {@link renderListing}, which is `text` with each newline written
- * as a space, so that what is written on a line takes one line. The payloads
- * that are a caller's own text go through it, the bound as much as an error —
- * the two agreeing is what keeps "a row is one line" a rule rather than a
- * habit of one of them. The marker for a row with no operand builds its own
- * text and answers a break by describing the name instead of showing it.
+ * Helper for {@link renderListing}, which is `text` fit to be written on a
+ * line and acted on by nothing: each newline as a space, so that what is
+ * written on a line takes one line, and each remaining character a terminal
+ * acts on as the glyph that names it.
+ *
+ * The payloads that are a caller's own text go through it, the bound as much
+ * as an error — the two agreeing is what keeps "a row is one line" a rule
+ * rather than a habit of one of them. The marker for a row with no operand
+ * builds its own text and answers a break, or a character a terminal acts on,
+ * by describing the name instead of showing it.
+ *
+ * The two rewrites are two decisions. A newline becomes a space so that a
+ * message stays one row; the rest become glyphs so that a message a person
+ * reads cannot instruct the terminal it is read on. Escaping is what a message
+ * gets and a name does not, because a message is read where a name is typed
+ * back.
+ *
+ * Nothing else is touched, an angle bracket included: those delimit a marker
+ * for a reader rather than for a parser, and a payload holding one is that
+ * decision rather than this one.
  */
 function oneLine(text: string): string {
-  return text.replaceAll("\n", " ");
+  return escapeControlCharacters(text.replaceAll("\n", " "));
 }

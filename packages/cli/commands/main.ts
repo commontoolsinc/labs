@@ -21,6 +21,7 @@ import { invocationSession } from "./invocation-session.ts";
 import { cell } from "./cell.ts";
 import { piece, pieceDataCommand } from "./piece.ts";
 import { space } from "./space.ts";
+import { sh } from "./sh.ts";
 import { createTestCommand } from "./test-command.ts";
 import { view } from "./view.ts";
 import { wish } from "./wish.ts";
@@ -205,6 +206,7 @@ export const main = new Command()
   .command("id", identity)
   .command("init", init)
   .command("invocation-session", invocationSession)
+  .command("sh", sh)
   .command("test", createTestCommand({ recordResults: true }))
   .command("wish", wish)
   // The superseded top-level spellings of the data commands. Each is the one
