@@ -3349,7 +3349,8 @@ export class Runtime {
    * when this resolution creates it (its first and only commit — no
    * world-writable default is ever written), validated by the memory
    * server's genesis admission; on a space that already exists the open
-   * proceeds only if it carries exactly that document, else refuses. It is
+   * proceeds only if it is owned exactly as the document says, else
+   * refuses. It is
    * refused together with `owner` (two descriptions of one document), for
    * a bare DID (no key to register against), and for a name already
    * resolved — by anything, including a pattern's `inSpace(name)` — unless

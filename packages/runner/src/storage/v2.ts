@@ -4,7 +4,7 @@ import {
   hasDataUriScheme,
   valueFromDataUri,
 } from "@commonfabric/data-model/codec-data-uri";
-import { aclDocId, sameAcl } from "@commonfabric/memory/acl";
+import { aclDocId } from "@commonfabric/memory/acl";
 import type { ACL, Entity } from "@commonfabric/memory/interface";
 import {
   type AuthorizationError as IAuthorizationError,
@@ -624,6 +624,28 @@ const defaultGenesisAcl = (owner: string): ACL => ({
   ...DEFAULT_GENESIS_GRANTS,
 });
 
+/** The concrete OWNER principals of a stored ACL document (a non-object
+ *  has none). */
+const ownersOf = (document: unknown): string[] =>
+  typeof document === "object" && document !== null
+    ? Object.entries(document as Record<string, unknown>)
+      .filter(([principal, capability]) =>
+        principal !== "*" && capability === "OWNER"
+      )
+      .map(([principal]) => principal)
+      .sort()
+    : [];
+
+/** Whether a stored ACL document is owned exactly as `expected` says: the
+ *  same concrete OWNER set, no more, no fewer. Grants below OWNER are the
+ *  owner's to evolve and are not compared. */
+const sameOwners = (stored: unknown, expected: ACL): boolean => {
+  const actual = ownersOf(stored);
+  const wanted = ownersOf(expected);
+  return actual.length === wanted.length &&
+    actual.every((principal, index) => principal === wanted[index]);
+};
+
 export interface Options {
   as: Signer;
 
@@ -956,7 +978,10 @@ export class StorageManager implements IStorageManager {
    * genesisAcl registered in either state could never be the space's
    * genesis, so registration refuses. A failed attempt leaves no entry — the
    * caller may correct the document and retry — and close() clears it. */
-  #genesisPhase = new Map<MemorySpace, "in-flight" | "handed-off">();
+  #genesisPhase = new Map<
+    MemorySpace,
+    { phase: "in-flight"; attempt: symbol } | { phase: "handed-off" }
+  >();
 
   /** Seed map from Options — fixed for the manager's lifetime. */
   #seedHosts: Record<string, string>;
@@ -1136,10 +1161,13 @@ export class StorageManager implements IStorageManager {
    * the open rejects, and a corrected registration may retry. The
    * document is a demand: the space's first open on this manager
    * proceeds only if the space is fresh (the document becomes its only
-   * commit) or already carries exactly that document; a space populated
-   * before genesis, or claimed by another initializer with a different
-   * ACL, is refused rather than silently entered under the other ACL's
-   * grant. It never reaches the home arm. A caller that will open the
+   * commit) or is already owned exactly as the document says — a seal
+   * asserts ownership, and grants below OWNER are the owner's to evolve
+   * afterwards, so a creator's restart survives its own grants; a space
+   * populated before genesis, a retracted ACL, or a genesis another
+   * initializer won under a different owner is refused rather than
+   * silently entered under someone else's ACL. It never reaches the
+   * home arm. A caller that will open the
    * space itself must grant its own signer at least READ, or every open
    * after genesis is refused by the server. `owner` and `genesisAcl` are
    * two descriptions of one document, so supplying both in one
@@ -1407,8 +1435,12 @@ export class StorageManager implements IStorageManager {
     };
     routeSignal.addEventListener("abort", closeActiveClients, { once: true });
     let completed = false;
-    if (this.#genesisPhase.get(space) !== "handed-off") {
-      this.#genesisPhase.set(space, "in-flight");
+    // Attempts can overlap across a route replacement; each marks its own
+    // in-flight entry and clears only its own on failure, so a superseded
+    // attempt's exit never unmarks its successor.
+    const attempt = Symbol("genesis attempt");
+    if (this.#genesisPhase.get(space)?.phase !== "handed-off") {
+      this.#genesisPhase.set(space, { phase: "in-flight", attempt });
     }
 
     try {
@@ -1449,7 +1481,7 @@ export class StorageManager implements IStorageManager {
       });
       const handOff = (opened: OpenedSpaceSession): OpenedSpaceSession => {
         this.#detachedSessionResumes.delete(space);
-        this.#genesisPhase.set(space, "handed-off");
+        this.#genesisPhase.set(space, { phase: "handed-off" });
         completed = true;
         return opened;
       };
@@ -1465,35 +1497,58 @@ export class StorageManager implements IStorageManager {
       }
 
       // A caller's own genesis document (never the home arm's) is a
-      // demand, not a preference: this open proceeds only if the space is
-      // fresh (then the document is written) or already carries exactly
-      // that document (a reopen). Anything else — a space populated
-      // before genesis, a genesis another initializer won with a
-      // different ACL, in whichever window it landed — is not the space
-      // the caller asked for, and the reopen below would otherwise
-      // succeed under the winner's grant with nothing reported. Fail
-      // closed.
+      // demand, not a preference. On a fresh space it is written verbatim.
+      // Otherwise the space must be OWNED exactly as the document says: a
+      // seal asserts ownership, and grants evolve afterwards under the
+      // owner's authority (a share space's owner admitting guests), so an
+      // exact-document rule would refuse the creator's own restart after
+      // the first grant. What the ownership rule still refuses — at either
+      // inspection, and after a lost genesis race in whichever window it
+      // landed — is every case where the reopen below would otherwise
+      // succeed under someone else's ACL with nothing reported: a space
+      // populated with no ACL, a retracted ACL, a genesis another
+      // initializer won with a different owner (the wildcard default names
+      // the other user). Fail closed, and say what stands.
       const registered = this.#spaceGenesisAcls.get(space);
       const demanded = !isHomeSpace && registered?.supplied === true
         ? registered.document
         : undefined;
-      const assertDemandedDocumentStands = (stored: unknown): void => {
-        if (demanded !== undefined && !sameAcl(stored, demanded)) {
+      const assertDemandedOwnershipStands = (
+        snapshot:
+          | { seq?: number; document?: { value?: unknown } | null }
+          | undefined,
+      ): void => {
+        if (demanded === undefined) return;
+        const stored = snapshot?.document?.value ?? null;
+        const stands = stored === null
+          ? (snapshot?.seq ?? 0) > 0
+            ? "has a retracted ACL (a tombstone)"
+            : "is populated with no ACL (the legacy-public case)"
+          : sameOwners(stored, demanded)
+          ? undefined
+          : `is owned by ${ownersOf(stored).join(", ") || "nobody"}, not ${
+            ownersOf(demanded).join(", ")
+          }`;
+        if (stands !== undefined) {
           throw new Error(
-            `genesis of ${space} was claimed with a different ACL; the ` +
-              "supplied genesis document was not applied and the space is " +
-              "not the one the caller asked for",
+            `${space} ${stands}; the supplied genesis document cannot be ` +
+              "its genesis and the space is not the one the caller asked for",
           );
         }
       };
-      const aclValueOf = (
+      const aclSnapshotOf = (
         entities: Array<
-          { id: string; scope?: string; document?: { value?: unknown } | null }
+          {
+            id: string;
+            scope?: string;
+            seq?: number;
+            document?: { value?: unknown } | null;
+          }
         >,
-      ): unknown =>
+      ) =>
         entities.find((entity) =>
           entity.id === aclId && (entity.scope ?? "space") === "space"
-        )?.document?.value ?? null;
+        );
 
       const openedServerSeq = normal.session.serverSeq;
       const aclId = aclDocId(space);
@@ -1501,13 +1556,11 @@ export class StorageManager implements IStorageManager {
         roots: [{ id: aclId, selector: { path: [], schema: false } }],
       });
       assertCurrentRoute();
-      const aclSnapshot = aclResult.entities.find((entity) =>
-        entity.id === aclId && (entity.scope ?? "space") === "space"
-      );
+      const aclSnapshot = aclSnapshotOf(aclResult.entities);
       const aclNeverCreated = aclSnapshot?.seq === 0 &&
         aclSnapshot.document === null;
       if (!aclNeverCreated || (!isHomeSpace && openedServerSeq !== 0)) {
-        assertDemandedDocumentStands(aclValueOf(aclResult.entities));
+        assertDemandedOwnershipStands(aclSnapshot);
         return handOff(normal);
       }
 
@@ -1535,9 +1588,7 @@ export class StorageManager implements IStorageManager {
           roots: [{ id: aclId, selector: { path: [], schema: false } }],
         });
         assertCurrentRoute();
-        const snapshot = current.entities.find((entity) =>
-          entity.id === aclId && (entity.scope ?? "space") === "space"
-        );
+        const snapshot = aclSnapshotOf(current.entities);
         // Recheck emptiness in the authority session. In `off` mode an
         // unrelated writer can still populate the space between the first
         // inspection and bootstrap; that turns it into the named legacy-public
@@ -1550,8 +1601,8 @@ export class StorageManager implements IStorageManager {
         ) {
           // Claimed (or populated) between the first inspection and this
           // recheck: the default path reopens as the user below; a
-          // demanded document must already be what stands.
-          assertDemandedDocumentStands(aclValueOf(current.entities));
+          // demanded document's ownership must already be what stands.
+          assertDemandedOwnershipStands(snapshot);
         } else {
           try {
             // The HOME arm is untouched — a home space is its own
@@ -1591,13 +1642,14 @@ export class StorageManager implements IStorageManager {
             }
             // Default path: reopening as the user below is the authoritative
             // outcome — it succeeds only if the winning ACL grants access.
-            // A demanded document: the winner's must be exactly it.
+            // A demanded document: the winner must own the space as it
+            // says.
             if (demanded !== undefined) {
               const after = await bootstrap.session.queryGraph({
                 roots: [{ id: aclId, selector: { path: [], schema: false } }],
               });
               assertCurrentRoute();
-              assertDemandedDocumentStands(aclValueOf(after.entities));
+              assertDemandedOwnershipStands(aclSnapshotOf(after.entities));
             }
           }
         }
@@ -1618,7 +1670,8 @@ export class StorageManager implements IStorageManager {
       return handOff(resumed);
     } finally {
       if (!completed) {
-        if (this.#genesisPhase.get(space) === "in-flight") {
+        const phase = this.#genesisPhase.get(space);
+        if (phase?.phase === "in-flight" && phase.attempt === attempt) {
           this.#genesisPhase.delete(space);
         }
         routeSignal.removeEventListener("abort", closeActiveClients);

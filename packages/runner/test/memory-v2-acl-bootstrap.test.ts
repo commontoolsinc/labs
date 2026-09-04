@@ -1019,7 +1019,7 @@ Deno.test("a sealer that loses the genesis race to a different document is told,
     // Red-first witnessed: the swallow let Alice's open SUCCEED — the
     // winner's wildcard granted her access — with her document discarded
     // and nothing reported.
-    await assertRejects(() => aliceOpen, Error, "different ACL");
+    await assertRejects(() => aliceOpen, Error, "owned by");
     // The winner's document stands; Alice's was never applied.
     assertEquals((await server.readDocument(space, aclId))?.value, {
       [bob.did()]: "OWNER",
@@ -1329,7 +1329,7 @@ Deno.test("a sealer that loses the race in the RECHECK window (before its commit
     // Red-first witnessed: the recheck found the ACL created, skipped the
     // bootstrap arm with no conflict to catch, and Alice's open SUCCEEDED
     // under Bob's wildcard.
-    await assertRejects(() => aliceOpen, Error, "different ACL");
+    await assertRejects(() => aliceOpen, Error, "owned by");
     assertEquals((await server.readDocument(space, `of:${space}`))?.value, {
       [bob.did()]: "OWNER",
       "*": "WRITE",
@@ -1365,19 +1365,20 @@ Deno.test("a sealer opening a space that already carries exactly its document pr
     const sync = await second.open(space).sync(`of:${space}` as URI);
     assert(!sync.error, sync.error?.message);
     assertEquals(secondFactory.principals, [alice.did()], "no bootstrap");
-    // But a different document on the same existing space is refused.
+    // But a document asserting a different OWNER set on the same existing
+    // space is refused, and the refusal says what stands.
     const third = TestStorageManager.overServer(
       { as: alice },
       new RecordingLoopbackSessionFactory(server),
     );
     third.registerSpaceIdentity(spaceIdentity, {
-      genesisAcl: { [space]: "OWNER" },
+      genesisAcl: { [alice.did()]: "OWNER" },
     });
     try {
       await assertRejects(
         () => third.ensureSpaceInitialized(space),
         Error,
-        "different ACL",
+        "owned by",
       );
     } finally {
       await third.close();
@@ -1414,5 +1415,154 @@ Deno.test("registerSpaceIdentity refuses a genesis ACL once the space's provider
   } finally {
     await manager.close();
     await server.close();
+  }
+});
+
+Deno.test("a sealer's reopen survives the owner granting rows: ownership is what a seal asserts, grants evolve", async () => {
+  const daemon = await Identity.fromPassphrase("acl genesis evolve daemon");
+  const guest = await Identity.fromPassphrase("acl genesis evolve guest");
+  const spaceIdentity = await Identity.fromPassphrase(
+    "acl genesis evolve space",
+  );
+  const space = spaceIdentity.did();
+  const aclId = `of:${space}` as URI;
+  const server = createServer("runner-acl-genesis-evolve");
+  const sealed = {
+    [space]: "OWNER" as const,
+    [daemon.did()]: "WRITE" as const,
+  };
+  const first = TestStorageManager.overServer(
+    { as: daemon },
+    new RecordingLoopbackSessionFactory(server),
+  );
+  first.registerSpaceIdentity(spaceIdentity, { genesisAcl: sealed });
+  try {
+    await first.ensureSpaceInitialized(space);
+    await first.close();
+    // The OWNER (the space key) grants a guest READ — Loom's share-acl arc.
+    const owner = await new RecordingLoopbackSessionFactory(server).create(
+      space,
+      spaceIdentity,
+    );
+    try {
+      await owner.session.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: aclId,
+          value: { value: { ...sealed, [guest.did()]: "READ" } },
+        }],
+      });
+    } finally {
+      await owner.client.close();
+    }
+    // Red-first witnessed: the daemon's restart, registering the SAME
+    // document by name, was refused with "claimed with a different ACL" —
+    // a false statement about a document that WAS applied at seq 1.
+    const restarted = TestStorageManager.overServer(
+      { as: daemon },
+      new RecordingLoopbackSessionFactory(server),
+    );
+    restarted.registerSpaceIdentity(spaceIdentity, { genesisAcl: sealed });
+    try {
+      await restarted.ensureSpaceInitialized(space);
+      assertEquals((await server.readDocument(space, aclId))?.value, {
+        ...sealed,
+        [guest.did()]: "READ",
+      });
+    } finally {
+      await restarted.close();
+    }
+    // A default-wildcard winner still fails the ownership check: its OWNER
+    // is another principal (pinned by the race tests); so does a space
+    // whose owner has been replaced.
+    const transferred = await new RecordingLoopbackSessionFactory(server)
+      .create(space, spaceIdentity);
+    try {
+      await transferred.session.transact({
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set",
+          id: aclId,
+          value: { value: { [guest.did()]: "OWNER", [daemon.did()]: "WRITE" } },
+        }],
+      });
+    } finally {
+      await transferred.client.close();
+    }
+    const after = TestStorageManager.overServer(
+      { as: daemon },
+      new RecordingLoopbackSessionFactory(server),
+    );
+    after.registerSpaceIdentity(spaceIdentity, { genesisAcl: sealed });
+    try {
+      await assertRejects(
+        () => after.ensureSpaceInitialized(space),
+        Error,
+        "owned by",
+      );
+    } finally {
+      await after.close();
+    }
+  } finally {
+    await server.close();
+  }
+});
+
+Deno.test("a demanded document on a retracted ACL is refused naming the tombstone", async () => {
+  const directory = await Deno.makeTempDir({
+    prefix: "runner-acl-genesis-tombstone-",
+  });
+  const store = toFileUrl(`${directory}/`);
+  const user = await Identity.fromPassphrase("acl genesis tombstone user");
+  const spaceIdentity = await Identity.fromPassphrase(
+    "acl genesis tombstone space",
+  );
+  const space = spaceIdentity.did();
+  const aclId = `of:${space}` as URI;
+  try {
+    // Seed and retract in `off` mode, then open in `off` mode too: the
+    // server's fail-closed session open is out of the way, so the client's
+    // own refusal is what the test observes.
+    const seedServer = createServer("unused", { store, mode: "off" });
+    try {
+      await seedServer.writeDocument(space, aclId, { [space]: "OWNER" });
+      const seeded = await new RecordingLoopbackSessionFactory(seedServer)
+        .create(space, spaceIdentity);
+      try {
+        await seeded.session.transact({
+          localSeq: 1,
+          reads: { confirmed: [], pending: [] },
+          operations: [{ op: "delete", id: aclId }],
+        });
+      } finally {
+        await seeded.client.close();
+      }
+    } finally {
+      await seedServer.close();
+    }
+    const server = createServer("unused", { store, mode: "off" });
+    const manager = TestStorageManager.overServer(
+      { as: user },
+      new RecordingLoopbackSessionFactory(server),
+    );
+    manager.registerSpaceIdentity(spaceIdentity, {
+      genesisAcl: { [space]: "OWNER" },
+    });
+    try {
+      await assertRejects(
+        () => manager.ensureSpaceInitialized(space),
+        Error,
+        "retracted",
+      );
+      assertEquals(await server.readDocument(space, aclId), null);
+    } finally {
+      await manager.close();
+      await server.close();
+    }
+  } finally {
+    await Deno.remove(directory, { recursive: true });
   }
 });

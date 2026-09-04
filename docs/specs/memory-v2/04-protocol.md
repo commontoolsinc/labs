@@ -930,8 +930,9 @@ mounts the durable session as the active user. The document is whichever the
 caller registered beside the space key
 (`registerSpaceIdentity(identity, { genesisAcl })` — the space is then born
 with exactly that ACL, this admission check is the only validation it
-receives, and an open of a space that already exists proceeds only if it
-carries exactly that document, else is refused), else the fallback
+receives, and an open of a space that already exists proceeds only if it is
+owned exactly as that document says — grants below OWNER are the owner's to
+evolve — else is refused), else the fallback
 `{ [activeUser]: "OWNER", "*": "WRITE" }`. The wildcard grant is the rollout
 default until ACL management has a UI, spelled once as the runner's
 `DEFAULT_GENESIS_GRANTS`; the active user remains the concrete owner who can
