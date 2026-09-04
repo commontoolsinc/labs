@@ -225,6 +225,110 @@ abstract class Fryer {
 }
 ```
 
+#### Making a private member reachable from a test
+
+A test sometimes needs what a class keeps to itself: a threshold to straddle,
+a table to seed, a step to run on its own. Casting the instance to get at it —
+`as unknown as { ... }`, `as never as { ... }`, `as any` — is not the way, and
+the `#` convention takes it off the table: a `#` name is out of a cast's reach,
+and a member left TypeScript-`private` so that a cast can find it is, if a
+field, an own enumerable property, and either way a member the class promised
+to keep to itself, with a comment apologizing for it. The cast also types the
+member however the test finds convenient, so nothing checks that what the test
+reads is what the class holds, and a renamed member leaves the test reading
+`undefined` and passing.
+
+The way is a public getter named `accessForTestingOnly`, which hands over
+exactly what a test needs and nothing else. The name is the documentation:
+everything behind it is internals free to change, and a reader who sees it in
+a test knows the test is written against them. Its doc comment says what it
+exposes, and the name says the rest.
+
+- Instance members go behind an instance getter; static members behind a
+  static one. A class may have both, and never more than one of each.
+- The getter's return type is written inline on the getter, and the body is an
+  object literal. No named type is declared for it, so the class's public
+  surface grows by one member and nothing else.
+- A field the class never reassigns — a `Map` it mutates in place — is handed
+  over as a plain property holding the reference. A field the class reassigns
+  is a getter, so that a read is live, and gains a setter only when a test
+  assigns it. A method is an arrow forwarding to the `#` method. An
+  object-literal getter cannot see the class's `this`, so an accessor with one
+  takes `const outerThis = this;` under `// deno-lint-ignore no-this-alias`;
+  an accessor of plain properties and arrows needs no alias.
+- Each entry is typed as the class types the member. A stand-in the test
+  supplies then declares itself where it is passed in — an `as` on the
+  argument, or one small helper taking a `Partial<T>` — rather than on the
+  receiver, and a value the test reads back is what the class holds.
+- It is a public getter, so it sits where the order above puts public getters,
+  and first among them.
+- Prose names the member `Class.#member`.
+
+```ts
+// Shown at module scope.
+
+/** A fryer that records the temperature each item was fried at. */
+export class Fryer {
+  #temperature = 190;
+  #log = new Map<string, number>();
+
+  /**
+   * The oil temperature, the batch log, and the drain step, which a test
+   * drives directly.
+   */
+  get accessForTestingOnly(): {
+    temperature: number;
+    log: Map<string, number>;
+    drain(): void;
+  } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      get temperature() {
+        return outerThis.#temperature;
+      },
+      set temperature(value) {
+        outerThis.#temperature = value;
+      },
+      log: this.#log,
+      drain: () => this.#drain(),
+    };
+  }
+
+  /** Fries one item at the current temperature. */
+  fry(item: string): void {
+    this.#log.set(item, this.#temperature);
+  }
+
+  #drain(): void {
+    this.#temperature = 20;
+  }
+}
+
+// In a test:
+const fryer = new Fryer();
+fryer.accessForTestingOnly.temperature = 200;
+fryer.fry("cruller");
+fryer.accessForTestingOnly.drain();
+```
+
+Three things a test reaches for that the getter does not cover, each wanting a
+different answer:
+
+- **A method the test replaces by assignment** — `obj.step = fake; ...;
+  obj.step = original`. A `#` method cannot be reassigned, and the getter only
+  forwards, so the test is asking for a seam the class does not offer. Offer
+  one — a collaborator passed to the constructor, a hook the class calls — or
+  rewrite the test against public behavior. Until then the member stays
+  TypeScript-`private`, with a comment naming the test that replaces it.
+- **A method called off the prototype against a stand-in receiver** —
+  `Class.prototype.step.call(fake, ...)`. A `#` method is not on the prototype
+  to be called, and a public method reached that way throws the moment it
+  touches a `#` member of a receiver that is not a real instance, so the test
+  wants rewriting to build one.
+- **A helper that uses no instance state.** Make it `static #` behind the
+  static getter, or a module-level function the test imports.
+
 ### Comments
 
 - Comments explain **why**, not what, and describe the system as it stands.

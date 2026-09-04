@@ -26,7 +26,9 @@ and passes: `#privateName` rather than TypeScript's `private`, no enumerable
 properties on a class, and the member order in
 `docs/development/DEVELOPMENT.md`, § Classes. A `private` field is an own
 enumerable property once the modifier is erased, so `private` is not a quieter
-spelling of `#`.
+spelling of `#`. A member kept `private` so that a test can cast its way to it
+is the same defect; the same section says how an `accessForTestingOnly` getter
+hands a test what it needs instead.
 
 ## The document is part of the change
 

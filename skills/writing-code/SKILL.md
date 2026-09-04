@@ -68,7 +68,10 @@ example:
 
 - **Class shape.** `#privateName` over TypeScript's `private`; a class exposes
   no enumerable properties; members run in the order § Classes gives. A
-  `private` field type-checks clean and is still an own enumerable property.
+  `private` field type-checks clean and is still an own enumerable property. A
+  test that needs a `#` member reaches it through an `accessForTestingOnly`
+  getter, never through a cast on the instance; § Classes says how that getter
+  is shaped and what it cannot cover.
 - **Import grouping and collation.** Every specifier naming the same package
   sits in one contiguous run. Nothing sorts imports here.
 - **Word choice.** American spelling, and one word per concept — this reaches
