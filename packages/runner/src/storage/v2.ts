@@ -624,6 +624,16 @@ const defaultGenesisAcl = (owner: string): ACL => ({
   ...DEFAULT_GENESIS_GRANTS,
 });
 
+/** Whether a stored ACL document is exactly `expected`: same principals,
+ *  same capabilities, nothing more. Key order is not part of the contract. */
+const sameAcl = (stored: unknown, expected: ACL): boolean => {
+  if (typeof stored !== "object" || stored === null) return false;
+  const actual = stored as Record<string, unknown>;
+  const expectedKeys = Object.keys(expected);
+  return Object.keys(actual).length === expectedKeys.length &&
+    expectedKeys.every((key) => actual[key] === expected[key as keyof ACL]);
+};
+
 export interface Options {
   as: Signer;
 
@@ -924,8 +934,29 @@ export class StorageManager implements IStorageManager {
    * one reader. Absent (every client that registered nothing), the
    * fallback is computed at genesis from the signer, byte-identical to the
    * pre-OW31 shape. A later registration for the same space replaces an
-   * earlier one, as re-registering an owner always did. */
-  #spaceGenesisAcls = new Map<MemorySpace, ACL>();
+   * earlier one, as re-registering an owner always did. `supplied` marks a
+   * caller's own document — the one registration whose genesis must land
+   * exactly or be reported (see the ConflictError arm of
+   * `#createInitializedSession`). */
+  #spaceGenesisAcls = new Map<
+    MemorySpace,
+    { document: ACL; supplied: boolean }
+  >();
+
+  /** Resume options for a space's manager-wide session that
+   * `#createInitializedSession` detached ahead of a bootstrap that then
+   * failed (a refused genesis, a lost route). The memory server keeps a
+   * detached session resumable by its token for a TTL, so the next attempt
+   * must present that token or be refused with "resume token is no longer
+   * valid" — a wedge that hid the real error until the manager closed.
+   * Scoped to the route generation it was minted under: a token belongs
+   * to one host, and a replay after a route replacement must not present
+   * the old host's token to the new one. Consumed by the next attempt on
+   * the same route; cleared once a session is handed to the provider. */
+  #detachedSessionResumes = new Map<
+    MemorySpace,
+    { options: MemoryV2Client.MountOptions; routeGeneration: number }
+  >();
 
   /** Seed map from Options — fixed for the manager's lifetime. */
   #seedHosts: Record<string, string>;
@@ -1123,12 +1154,18 @@ export class StorageManager implements IStorageManager {
     }
     this.#spaceIdentities.set(space, identity);
     if (owner !== undefined) {
-      this.#spaceGenesisAcls.set(space, defaultGenesisAcl(owner));
+      this.#spaceGenesisAcls.set(space, {
+        document: defaultGenesisAcl(owner),
+        supplied: false,
+      });
     }
     if (genesisAcl !== undefined) {
       // Snapshot: what genesis writes is what was registered, not what the
       // caller's object holds by the time the space is first opened.
-      this.#spaceGenesisAcls.set(space, { ...genesisAcl });
+      this.#spaceGenesisAcls.set(space, {
+        document: { ...genesisAcl },
+        supplied: true,
+      });
     }
   }
 
@@ -1344,11 +1381,18 @@ export class StorageManager implements IStorageManager {
 
     try {
       assertCurrentRoute();
+      // A previous attempt on this same route that detached the
+      // manager-wide session and then failed left it resumable only by
+      // token; present it. A resume minted under another route is stale.
+      const detached = this.#detachedSessionResumes.get(space);
+      this.#detachedSessionResumes.delete(space);
       const normal = track(
         await this.#sessionFactory.create(
           space,
           signer,
-          { sessionId: this.#sessionId, ...this.#servingActingAs() },
+          detached !== undefined && detached.routeGeneration === routeGeneration
+            ? detached.options
+            : { sessionId: this.#sessionId, ...this.#servingActingAs() },
           routeSignal,
         ),
       );
@@ -1397,6 +1441,14 @@ export class StorageManager implements IStorageManager {
       };
       activeClients.delete(normal.client);
       await normal.client.close();
+      // From here until the resume below hands a session to the provider,
+      // a failure leaves the manager-wide session detached; remember how
+      // to resume it so the next attempt is not refused for want of the
+      // token (and so the next attempt's error is the real one).
+      this.#detachedSessionResumes.set(space, {
+        options: resumeNormal,
+        routeGeneration,
+      });
       assertCurrentRoute();
       let bootstrapSessionId = crypto.randomUUID();
       while (bootstrapSessionId === this.#sessionId) {
@@ -1425,6 +1477,7 @@ export class StorageManager implements IStorageManager {
         // case and must not be claimed. Home remains the explicit exception.
         const aclStillNeverCreated = snapshot?.seq === 0 &&
           snapshot.document === null;
+        const registered = this.#spaceGenesisAcls.get(space);
         if (
           aclStillNeverCreated &&
           (isHomeSpace || current.serverSeq === 0)
@@ -1439,8 +1492,7 @@ export class StorageManager implements IStorageManager {
             // client.
             const bootstrapAcl = isHomeSpace
               ? { [signer.did()]: "OWNER" }
-              : this.#spaceGenesisAcls.get(space) ??
-                defaultGenesisAcl(signer.did());
+              : registered?.document ?? defaultGenesisAcl(signer.did());
             await bootstrap.session.transact({
               localSeq: 1,
               reads: {
@@ -1462,11 +1514,34 @@ export class StorageManager implements IStorageManager {
             });
           } catch (error) {
             // A concurrent space-authorized initializer may win between the
-            // point read and commit. Reopening as the user below is the
-            // authoritative outcome: it succeeds only if the winning ACL grants
-            // access. Other failures are real bootstrap errors.
+            // point read and commit. Other failures are real bootstrap errors.
             if (!(error instanceof Error) || error.name !== "ConflictError") {
               throw error;
+            }
+            // Default path: reopening as the user below is the authoritative
+            // outcome — it succeeds only if the winning ACL grants access.
+            // Supplied path: that reasoning inverts. The caller's purpose
+            // was a space born with exactly its document; if the winner
+            // wrote a different one (the wildcard default, say) the reopen
+            // would succeed under the winner's grant and nothing would
+            // report that the seal never landed. Fail closed: refuse unless
+            // the space carries exactly the supplied document.
+            if (!isHomeSpace && registered?.supplied === true) {
+              const after = await bootstrap.session.queryGraph({
+                roots: [{ id: aclId, selector: { path: [], schema: false } }],
+              });
+              assertCurrentRoute();
+              const winner = after.entities.find((entity) =>
+                entity.id === aclId && (entity.scope ?? "space") === "space"
+              )?.document?.value;
+              if (!sameAcl(winner, registered.document)) {
+                throw new Error(
+                  `genesis of ${space} was claimed concurrently with a ` +
+                    "different ACL; the supplied genesis document was not " +
+                    "applied and the space is not the one the caller asked " +
+                    "for",
+                );
+              }
             }
           }
         }
