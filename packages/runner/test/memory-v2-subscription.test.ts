@@ -922,6 +922,41 @@ describe("Memory v2 storage notifications", () => {
     expect(subscription.pulls).toHaveLength(1);
   });
 
+  it("times the replica's application of a pushed frame under its own key", async () => {
+    // `watchRefresh/applySessionSync` covers the frames a refresh brought
+    // back; frames the server PUSHES apply off the subscription iterator
+    // under `watchPush/applySessionSync`. Both keys are named in
+    // docs/development/debugging/profiling.md; this pins the push one.
+    const subscription = new Subscription();
+    storageManager.subscribe(subscription);
+    const uri = `of:memory-v2-push-timing-${Date.now()}` as URI;
+    const write = (n: number) =>
+      remoteSession.transact({
+        localSeq: remoteLocalSeq++,
+        reads: { confirmed: [], pending: [] },
+        operations: [{ op: "set", id: uri, value: { value: { n } } }],
+      });
+    await write(1);
+    const provider = storageManager.open(space);
+    await provider.sync(uri, { path: [], schema: true });
+
+    const timing = getLogger("storage.v2");
+    const pushApplies = () =>
+      timing.getTimeStats("watchPush", "applySessionSync")?.count ?? 0;
+    const before = pushApplies();
+    await write(2);
+    await waitFor(
+      () =>
+        subscription.notifications.some((notification) =>
+          notification.type === "integrate" &&
+          "changes" in notification &&
+          [...notification.changes].some((change) => change.address.id === uri)
+        ),
+      1_000,
+    );
+    expect(pushApplies() - before).toBeGreaterThanOrEqual(1);
+  });
+
   it("expands subscribed graph state to previously existing hidden docs after a root retarget", async () => {
     const subscription = new Subscription();
     storageManager.subscribe(subscription);

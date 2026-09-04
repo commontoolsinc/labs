@@ -4995,6 +4995,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
       if (next.done || this.#closed) {
         return;
       }
+      const applyStart = performance.now();
       try {
         this.applySessionSync(next.value, "integrate");
       } catch (error) {
@@ -5011,6 +5012,13 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
           "consumer continues:",
           error,
         ]);
+      } finally {
+        // The push-side counterpart of `watchRefresh/applySessionSync`:
+        // frames the server pushed apply here, off the subscription
+        // iterator, never inside a refresh. Between the two keys every
+        // frame the replica ingests is timed, so a slow trickle and a
+        // slow initial sync read as different rows.
+        logger.time(applyStart, "watchPush", "applySessionSync");
       }
     }
   }
