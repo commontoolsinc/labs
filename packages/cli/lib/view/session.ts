@@ -454,7 +454,7 @@ export class Session {
    * of diff metadata, and the file picker.
    */
   get accessForTestingOnly(): {
-    buffer: EditBuffer | undefined;
+    readonly buffer: EditBuffer | undefined;
     selectNode(idx: number): void;
     moveCardSelection(delta: number): void;
     jumpToTarget(target: CardTarget): void;
