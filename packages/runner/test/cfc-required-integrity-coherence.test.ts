@@ -137,10 +137,13 @@ describe("CFC requiredIntegrity coherence (B5)", () => {
       required: unknown,
     ): Promise<{ ok: boolean; message?: string }> => {
       const storageManager = StorageManager.emulate({ as: signer });
+      // The subject here is the read-side coherence matcher; the value-side
+      // write floor (which the mint-less sinks would fail) stays off.
       const runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
         cfcEnforcementMode: "enforce-explicit",
+        cfcWriteFloor: "off",
       });
       try {
         for (const [index, witness] of witnesses.entries()) {
@@ -254,10 +257,13 @@ describe("CFC requiredIntegrity coherence (B5)", () => {
       readBAfterWrite: boolean,
     ): Promise<{ ok: boolean; message?: string }> => {
       const storageManager = StorageManager.emulate({ as: signer });
+      // The subject here is the read-side coherence matcher; the value-side
+      // write floor (which the mint-less sinks would fail) stays off.
       const runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
         cfcEnforcementMode: "enforce-explicit",
+        cfcWriteFloor: "off",
       });
       try {
         for (const [index, witness] of [witnessA, witnessB].entries()) {

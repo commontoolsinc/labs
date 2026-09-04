@@ -24,15 +24,24 @@ import type { DockerRunscSandboxConfig } from "./sandbox/types.ts";
 
 export const DEFAULT_GATEWAY_BASE_URL = "https://llm.stage.commontools.dev/";
 export const DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE =
-  "enforce-explicit" as const satisfies CfcEnforcementMode;
+  "enforce-strict" as const satisfies CfcEnforcementMode;
+/**
+ * The default for a run carrying a Loom run manifest that names no mode
+ * itself: Loom runs observe-and-report rather than deny, so the CFC layer
+ * emits its diagnostics without rejecting tool calls.
+ */
+export const DEFAULT_LOOM_HARNESS_CFC_ENFORCEMENT_MODE =
+  "observe" as const satisfies CfcEnforcementMode;
 export type HarnessGatewayAuthMode = "bearer" | "none";
 
 /**
- * The fabric session's enforcement dial admits raises only: the remoteClient
- * preset already pins `enforce-explicit`, so the sole configurable move is up
- * to `enforce-strict`. This is a different dial from the harness's own
- * `cfcEnforcementMode`, which governs tool policy and the sandbox — this one
- * governs the runtime the `run_pattern` tool deploys patterns into.
+ * The fabric session's enforcement dial admits only the enforcing rungs: the
+ * remoteClient preset pins `enforce-strict`, and the configurable moves are
+ * that pin or `enforce-explicit` — never a non-enforcing mode, since this
+ * session is a trusted write path into a real space. This is a different
+ * dial from the harness's own `cfcEnforcementMode`, which governs tool
+ * policy and the sandbox — this one governs the runtime the `run_pattern`
+ * tool deploys patterns into.
  */
 export type HarnessFabricCfcEnforcementMode =
   | "enforce-explicit"
@@ -47,9 +56,9 @@ export type HarnessFabricCfcFlowLabelsMode = CfcFlowLabelsMode;
  * the run offers `run_pattern` in the parent tool surface; when absent, the
  * tool is unavailable. The optional CFC dials reach the session's Runtime;
  * unset means the remoteClient preset's first-party posture
- * (`enforce-explicit`, flow labels off). `cfcPosture` opts the runtime into
- * a named bundle (`MAX_ENFORCEMENT_CFC_OPTIONS` in the runner's presets);
- * the two dials still apply over it.
+ * (`enforce-strict`, flow labels `persist`). `cfcPosture` opts the runtime
+ * into a named bundle (`MAX_ENFORCEMENT_CFC_OPTIONS` in the runner's
+ * presets); the two dials still apply over it.
  */
 export interface HarnessFabricSessionConfig {
   apiUrl: string;
@@ -236,13 +245,13 @@ export const parseHarnessGatewayAuthMode = (
 
 /**
  * The mode a fabric session enforces at, whether or not it named one: the
- * session's preset pins `enforce-explicit`, and `--fabric-cfc-enforcement-mode`
- * raises from there.
+ * session's preset pins `enforce-strict`, and `--fabric-cfc-enforcement-mode`
+ * names a different rung from there.
  */
 export const fabricSessionCfcEnforcementMode = (
   fabricSession: HarnessFabricSessionConfig,
 ): HarnessFabricCfcEnforcementMode =>
-  fabricSession.cfcEnforcementMode ?? "enforce-explicit";
+  fabricSession.cfcEnforcementMode ?? "enforce-strict";
 
 /** What the operator stated the harness's own dial to be, if anything. */
 const statedCfcEnforcementMode = (
@@ -258,11 +267,12 @@ const statedCfcEnforcementMode = (
 /**
  * Whether the session's dial decides this run's harness dial.
  *
- * Only `enforce-strict` does. The session's preset pins `enforce-explicit`
- * whether an operator asked for it or not, and a harness loop deliberately run
- * weaker than that pin is an ordinary configuration; a loop left weaker than a
- * session an operator raised to strict is the pair nobody stated, and the one
- * an audit reads as an enforcing run that did not enforce.
+ * Only an operator naming `enforce-strict` on the session does. The session's
+ * preset pins that rung whether an operator asked for it or not, and a harness
+ * loop deliberately run weaker than the pin is an ordinary configuration; a
+ * loop left weaker than a session an operator raised to strict is the pair
+ * nobody stated, and the one an audit reads as an enforcing run that did not
+ * enforce.
  */
 const fabricSessionRaisesCfcEnforcement = (
   options: Pick<
@@ -277,7 +287,7 @@ const fabricSessionRaisesCfcEnforcement = (
   if (options.fabricSession === undefined) {
     return undefined;
   }
-  const session = fabricSessionCfcEnforcementMode(options.fabricSession);
+  const session = options.fabricSession.cfcEnforcementMode;
   if (session !== "enforce-strict") {
     return undefined;
   }
@@ -332,7 +342,9 @@ export const resolveCfcEnforcementMode = (
   return statedCfcEnforcementMode(options) ??
     options.inheritedCfcEnforcementMode ??
     parsedRunManifestMode ??
-    DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE;
+    (options.runManifest?.source === "loom"
+      ? DEFAULT_LOOM_HARNESS_CFC_ENFORCEMENT_MODE
+      : DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE);
 };
 
 export const resolveCfcEnforcementModeSource = (
@@ -362,6 +374,9 @@ export const resolveCfcEnforcementModeSource = (
   }
   if (parseCfcEnforcementMode(options.runManifest?.cfc?.enforcementMode)) {
     return "run-manifest";
+  }
+  if (options.runManifest?.source === "loom") {
+    return "loom-default";
   }
   return "default";
 };

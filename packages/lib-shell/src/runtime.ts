@@ -1,4 +1,10 @@
-import { createSession, DID, Identity, Session } from "@commonfabric/identity";
+import {
+  createSession,
+  DID,
+  Identity,
+  isDID,
+  Session,
+} from "@commonfabric/identity";
 import { CFC_CONCEPT_KIND, cfcAtom } from "@commonfabric/api/cfc";
 import type { FabricPlainObject } from "@commonfabric/data-model";
 import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
@@ -134,19 +140,19 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
 
   /**
-   * Flow-label propagation dial (S16). Shell hosts default to "observe"
-   * (Epic H1): derive the per-tx conservative join and emit diagnostics,
-   * persisting nothing — the measurement stage before "persist".
+   * Flow-label propagation dial (S16). Shell hosts default to "persist"
+   * (Epic H2): derive the per-tx conservative join and write it as a
+   * `derived` label component on every value write.
    */
   cfcFlowLabels?: RuntimeCfcFlowLabelsMode;
 
   /**
-   * Populate the default render confidentiality ceiling (Epic H3a). When
-   * true, the worker's display sinks gate labeled values against the
-   * §8.10.6 profile for this identity and author-supplied render-boundary
-   * declassification is denied. Dogfood flag, default off (= today's
-   * unbounded rendering). Expect over-blocking while exchange resolution
-   * (H3b) is not implemented.
+   * Populate the default render confidentiality ceiling (Epic H3a).
+   * Defaults to on: the worker's display sinks gate labeled values against
+   * the §8.10.6 profile for this identity, shared `Space(...)` principals
+   * resolve through the verified `HasRole` rules at the render boundary
+   * (H3b), and author-supplied render-boundary declassification is denied.
+   * `false` opts a host out, which renders labeled content ungated.
    */
   cfcRenderCeiling?: boolean;
 
@@ -300,7 +306,7 @@ export function createRuntimeClientOptions({
   apiUrl,
   spaceHostMap,
   experimental,
-  cfcEnforcementMode = "enforce-explicit",
+  cfcEnforcementMode = "enforce-strict",
   // Epic H2 (docs/history/plans/cfc-future-work-implementation.md): shell hosts run the
   // flow-label dial at "persist" — the per-tx conservative join is derived AND
   // written as a `derived` label component on every value write. This
@@ -312,16 +318,16 @@ export function createRuntimeClientOptions({
   // (§8.12.8) keeps the derived component tracking the current value rather
   // than ratcheting forever. H1 shipped "observe" as the measurement stage.
   cfcFlowLabels = "persist",
-  // Epic H3a: populate the render confidentiality ceiling. Off by default —
-  // a deployment-posture change to what the shell renders, enabled
-  // deliberately per host (shell dogfood flag). When on, display sinks
-  // admit only the §8.10.6 profile (the acting user's own identity atom
-  // plus display-dischargeable influence-class caveat kinds) and
+  // Epic H3a: populate the render confidentiality ceiling. On by default:
+  // display sinks admit only the §8.10.6 profile (the acting user's own
+  // identity atoms plus display-dischargeable influence-class caveat kinds,
+  // with shared `Space(...)` principals resolved through the verified
+  // `HasRole` exchange rules at the render boundary, H3b) and
   // author-supplied render declassification is denied (audit S15); the
-  // reconciler's fail-closed narrowing does the enforcement. Exact-match
-  // forms only until H3b adds exchange resolution, so over-blocking is
-  // expected — that is the point of the dogfood stage.
-  cfcRenderCeiling = false,
+  // reconciler's fail-closed narrowing does the enforcement. The shell's
+  // per-profile `commonfabric.cfcRenderCeiling(false)` toggle opts a browser
+  // profile back out.
+  cfcRenderCeiling = true,
   trustSnapshot,
   forwardWorkerConsole,
   patternCoverage,
@@ -359,8 +365,13 @@ export function createRuntimeClientOptions({
     ...(cfcRenderCeiling
       ? {
         renderDeclassificationPolicy: "deny" as const,
+        // The ceiling admits the identity the runtime renders AS, which a
+        // delegated host names in its own trust snapshot. Without a snapshot,
+        // and for a principal that is not a DID, that is the session identity.
         renderConfidentialityCeiling: defaultRenderConfidentialityCeiling(
-          session.as.did(),
+          isDID(resolvedTrustSnapshot?.actingPrincipal)
+            ? resolvedTrustSnapshot.actingPrincipal
+            : session.as.did(),
         ),
       }
       : {}),

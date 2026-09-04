@@ -245,6 +245,9 @@ export async function runMultiUserTestPattern(
           participant: spec.name,
           participants: meta.participants.map((p) => p.name),
           seedDefaults: index === 0,
+          // A test that names a mode names it for every participant, the way
+          // the single-user runner honors it.
+          cfcEnforcementMode: options.cfcEnforcementMode,
         }) as ParticipantInitResult;
         participants.push({
           spec,

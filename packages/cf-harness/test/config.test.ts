@@ -5,6 +5,7 @@ import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import {
   DEFAULT_GATEWAY_BASE_URL,
   DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE,
+  DEFAULT_LOOM_HARNESS_CFC_ENFORCEMENT_MODE,
   type HarnessConfig,
   parseCfcEnforcementMode,
   parseHarnessGatewayAuthMode,
@@ -96,8 +97,32 @@ Deno.test("resolveCfcEnforcementMode ignores malformed in-memory run manifest mo
         cfc: { enforcementMode: "bogus" as CfcEnforcementMode },
       },
     }),
-    DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE,
+    DEFAULT_LOOM_HARNESS_CFC_ENFORCEMENT_MODE,
   );
+});
+
+Deno.test("resolveCfcEnforcementMode defaults a Loom run without a named mode to observe", () => {
+  assertEquals(
+    resolveCfcEnforcementMode({
+      runManifest: {
+        type: "cf-harness.loom-run-manifest",
+        version: 1,
+        source: "loom",
+      },
+    }),
+    DEFAULT_LOOM_HARNESS_CFC_ENFORCEMENT_MODE,
+  );
+  assertEquals(
+    resolveCfcEnforcementModeSource({
+      runManifest: {
+        type: "cf-harness.loom-run-manifest",
+        version: 1,
+        source: "loom",
+      },
+    }),
+    "loom-default",
+  );
+  assertEquals(DEFAULT_LOOM_HARNESS_CFC_ENFORCEMENT_MODE, "observe");
 });
 
 Deno.test("resolveCfcEnforcementModeSource identifies the winning mode source", () => {
@@ -173,14 +198,38 @@ Deno.test("resolveCfcEnforcementMode follows a fabric session raised to strict",
     cfcEnforcementMode: "enforce-strict" as const,
   };
 
-  // Nobody set the harness dial, so it follows the session rather than the
-  // harness default, and says where it came from.
+  // Nobody set the harness dial, and its own default sits at the same rung,
+  // so there is nothing for the session to raise and the source names the
+  // default that got there first.
   assertEquals(
     resolveCfcEnforcementMode({ fabricSession: strictSession }),
     "enforce-strict",
   );
   assertEquals(
     resolveCfcEnforcementModeSource({ fabricSession: strictSession }),
+    "default",
+  );
+
+  // A run the manifest puts below the session is where the raise still
+  // decides: the harness dial would be `observe`, and the session is above it.
+  const loomManifest = {
+    type: "cf-harness.loom-run-manifest" as const,
+    version: 1 as const,
+    source: "loom" as const,
+    cfc: { enforcementMode: "observe" as const },
+  };
+  assertEquals(
+    resolveCfcEnforcementMode({
+      fabricSession: strictSession,
+      runManifest: loomManifest,
+    }),
+    "enforce-strict",
+  );
+  assertEquals(
+    resolveCfcEnforcementModeSource({
+      fabricSession: strictSession,
+      runManifest: loomManifest,
+    }),
     "fabric-session",
   );
 
@@ -256,7 +305,7 @@ Deno.test("resolveHarnessConfig preserves legacy gateway fields for openai-codex
     gatewayBaseUrl: DEFAULT_GATEWAY_BASE_URL,
     gatewayAuthMode: "bearer",
     skillScriptExecutionTarget: "sandbox",
-    cfcEnforcementMode: "enforce-explicit",
+    cfcEnforcementMode: "enforce-strict",
     cfcEnforcementModeSource: "default",
     docsCorpus: {
       type: "cf-harness.docs-corpus-record",

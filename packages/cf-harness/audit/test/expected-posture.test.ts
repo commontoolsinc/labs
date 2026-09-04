@@ -151,8 +151,11 @@ describe("the expected-posture spec", () => {
         join(PROFILES_DIR, "max-enforcement.json"),
       );
       const mismatches = postureMismatches(spec, FLEET_RECORD);
+      // The fleet pin holds monotonicity at `observe`, which is its
+      // strictest sound rung; the bundle raises it and configures the sink
+      // ceilings the pin leaves to a deployment.
       expect(mismatches.map((mismatch) => mismatch.field)).toContain(
-        "flowLabels",
+        "declaredMonotonicity",
       );
       expect(mismatches.map((mismatch) => mismatch.field)).toContain(
         "ceilingedSinks[fetchText]",

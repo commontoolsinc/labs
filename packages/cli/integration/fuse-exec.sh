@@ -745,7 +745,11 @@ run_mount() {
   rm -f "$MEMORY_PROXY_READY"
   MEMORY_PROXY_READY=""
 
-  MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$FUSE_API_URL" --identity="$IDENTITY" --space="$SPACE" --background --dangerously-allow-incompatible-schema)
+  # --cfc-mode=disabled: this script covers the filesystem write-through
+  # surfaces, and one of them is the legacy handler write. An enforcing
+  # mount refuses a handler write with EACCES at open, so the mode has to
+  # be named here for the write-through path to be reachable at all.
+  MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$FUSE_API_URL" --identity="$IDENTITY" --space="$SPACE" --cfc-mode=disabled --background --dangerously-allow-incompatible-schema)
   echo "$MOUNT_OUTPUT"
 
   MOUNT_PID="${MOUNT_OUTPUT#*PID }"

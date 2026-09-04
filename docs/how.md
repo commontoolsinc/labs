@@ -458,42 +458,41 @@ SES-verified on every pull request — 444 authored entry files
 (`deno task cfcheck`). A second gate replays each pattern against 455
 recorded contract baselines across 122 patterns, because the updater
 performs no structural check before swapping a pattern onto a running
-piece. Pattern tests run at `enforce-explicit`, the same mode the servers
+piece. Pattern tests run at `enforce-strict`, the same mode the servers
 run, rather than in an observe mode that would let violations pass. That
-is the runtime's default, no flag sets it, and both server hosts are
-pinned to it (`packages/runner/src/runtime.ts`, `runtime-presets.ts`).
-The two-readers test at the top of this document runs at that plain
-default. A grep will also turn up
-`DEFAULT_CFC_ENFORCEMENT_MODE = "disabled"` in `cfc/types.ts`, which is
-the transaction-level default, not this one.
+is the runtime's default, no flag sets it, and every first-party preset
+is pinned to it (`packages/runner/src/runtime.ts`,
+`runtime-presets.ts`). The two-readers test at the top of this document
+runs at that plain default.
 
 The flow-control layer is `packages/runner/src/cfc/`: 45 modules, about
 24,000 lines, with 133 test files beside them in `packages/runner/test`.
-Every dial it exposes is implemented; what differs between hosts is
-which are switched on. The browser shell — the product surface — runs
-label propagation at `persist`, so a value derived from labeled data is
-written with its derived label rather than laundering it away
-(`packages/lib-shell/src/runtime.ts`). Access control on spaces defaults
-to `enforce` on the production server (`packages/toolshed/env.ts`). The
-harness that dogfoods the runtime turns the whole
-`MAX_ENFORCEMENT_CFC_OPTIONS` bundle on by default
-(`packages/cf-harness/console/server.ts`), and its committed run ledgers
-record real refusals. A property suite runs on every pull request with
-labels persisted, because at the default rung "the properties below
-would pass by finding nothing"
-(`packages/cf-harness/test/cfc-properties/support/episode.ts`).
+Every dial it exposes is implemented, and every one of them now rests at
+its strictest sound rung by default, so a host differs from the fleet
+only by naming a rung of its own. Label propagation runs at `persist`
+everywhere, so a value derived from labeled data is written with its
+derived label rather than laundering it away. Access control on spaces
+defaults to `enforce` on the production server
+(`packages/toolshed/env.ts`). The harness that dogfoods the runtime
+turns the whole `MAX_ENFORCEMENT_CFC_OPTIONS` bundle on by default
+(`packages/cf-harness/console/server.ts`), which adds the standard
+policy records and the per-sink ceilings on top of those pins, and its
+committed run ledgers record real refusals.
 
 ## What is not here yet
 
-The remaining work is mostly wiring: deciding which host turns which
-dial on, and turning it on without wedging the patterns already running.
-In the core preset, label propagation, policy evaluation, the write
-floor and the monotonicity gate are off, and the default sink ceiling is
-empty; the shell and the harness are ahead of it, as above. The render
-ceiling is a toggle rather than a default, and that boundary is held by
-the label and contract layer rather than by DOM sanitization, which has
-an open gap. `docs/development/EXPERIMENTAL_OPTIONS.md` carries every
-dial, its status, and where it is headed.
+The enforcement dials are on: label propagation persists, and the write
+floor, trigger-read gating, policy evaluation, label-metadata protection
+and the render ceiling all default to their strict settings.
+Declared monotonicity rests at `observe`, which is its strictest sound
+rung while per-principal mints remain non-monotone.
+`docs/development/EXPERIMENTAL_OPTIONS.md` carries every dial, its
+status, and where it is headed. The default sink ceiling is still empty,
+and a sink with no declared ceiling is not gated at all: nothing measures
+what a request carries, so release to the network and to a model is
+ungoverned until a deployment declares ceilings for those sinks. The
+render boundary is held by the label and contract layer rather than by
+DOM sanitization, which has an open gap.
 
 Attestation — what would let a machine prove which runtime it is running
 before your data arrives — is specified rather than built.

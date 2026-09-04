@@ -20,6 +20,7 @@ export type HarnessCfcEnforcementModeSource =
   /** Derived from the mode the run's fabric session enforces at. */
   | "fabric-session"
   | "run-manifest"
+  | "loom-default"
   | "default";
 
 export type HarnessPromptSlotBindingSource =

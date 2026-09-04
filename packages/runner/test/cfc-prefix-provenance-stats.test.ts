@@ -50,10 +50,13 @@ const makeRuntime = (options: {
   storageManager: ReturnType<typeof StorageManager.emulate>;
   cfcPrefixProvenanceStats?: boolean;
 }): Runtime =>
+  // The subject here is the D4 precision counters; the value-side write
+  // floor (which the mint-less sinks would fail) stays off.
   new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager: options.storageManager,
     cfcEnforcementMode: "enforce-explicit",
+    cfcWriteFloor: "off",
     ...(options.cfcPrefixProvenanceStats !== undefined
       ? { cfcPrefixProvenanceStats: options.cfcPrefixProvenanceStats }
       : {}),

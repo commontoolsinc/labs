@@ -348,7 +348,9 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
       // flipped holds verbatim foreign entries; flipping to enforce commits
       // only NEW cross-space entries — no rewrite of the existing ones —
       // and consumers dispatch on the marker shape, so both forms coexist.
-      const { storageManager, runtime } = makeRuntime(undefined);
+      // The pre-flip world is staged with the dial pinned off; the flipped
+      // half raises the same runtime's dial per transaction below.
+      const { storageManager, runtime } = makeRuntime("off");
       try {
         const sourceId = await seedSource(runtime, spaceA, "mixed-source");
         const targetName = "mixed-target";
@@ -616,9 +618,9 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
   });
 
   describe("off", () => {
-    it("persists bytes identical to a runtime without the option", async () => {
+    it("persists bytes identical across two runtimes pinned off", async () => {
       const offRun = makeRuntime("off");
-      const defaultRun = makeRuntime(undefined);
+      const defaultRun = makeRuntime("off");
       try {
         for (const { runtime } of [offRun, defaultRun]) {
           const sourceId = await seedSource(runtime, spaceA, "off-source");

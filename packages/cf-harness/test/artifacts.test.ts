@@ -425,6 +425,10 @@ Deno.test({
         apiKey: "test-key",
         engine: new CfHarnessEngine({
           artifactRoot,
+          // The read below carries no direct-command authorization, which
+          // enforce-strict denies; the test observes persistence of an
+          // allowed read, so it runs one rung down.
+          cfcEnforcementMode: "enforce-explicit",
           sandboxRuntime: new FakeSandboxRuntime([
             {
               stdout: "hello from file",
@@ -545,7 +549,7 @@ Deno.test({
       );
       assertEquals(persistedPolicySnapshot.cfc, {
         enforcementMode: "enforce-explicit",
-        enforcementModeSource: "default",
+        enforcementModeSource: "explicit-config",
         absenceBehavior: "fail-closed-if-absent",
         substrateStatus: "not-attested",
       });

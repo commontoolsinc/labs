@@ -222,8 +222,11 @@ required-integrity floor (e.g. tool inputs that demand certified data).
 Deployments dial it along four independent axes — enforcement mode
 (`disabled`/`observe`/`enforce-explicit`/`enforce-strict`), flow-label
 persistence (`off`/`observe`/`persist`), the write floor, and trigger-read
-gating; the shell today runs `enforce-explicit` with flow labels at
-`persist`. The verified-source `$implRef` machinery (Chapter 7) is what
+gating; every first-party host defaults to the strict end of each axis
+(`enforce-strict`, flow labels at `persist`, the floor and the gating on).
+A Loom run that names no mode of its own sits lower on the enforcement
+axis, observing and reporting rather than denying.
+The verified-source `$implRef` machinery (Chapter 7) is what
 ties labels to the exact code that produced a value. Specs live in
 `docs/specs/cfc-*.md`; demo patterns in `packages/patterns/cfc-*`.
 

@@ -366,11 +366,18 @@ export class ShellIntegration {
   //
   // If `identity` provided, logs in with the identity
   // after navigation.
+  //
+  // `renderCeiling: false` opts the profile out of the §8.10.6 display
+  // ceiling, through the same per-profile switch a browser user has. A page
+  // whose subject is author-declared render declassification needs it: the
+  // ceiling denies that declassification, so the value under test never
+  // reaches the DOM.
   async goto(
-    { frontendUrl, view, identity }: {
+    { frontendUrl, view, identity, renderCeiling }: {
       frontendUrl: string;
       view: AppView;
       identity?: Identity;
+      renderCeiling?: boolean;
     },
   ): Promise<void> {
     this.#checkIsOk();
@@ -391,6 +398,19 @@ export class ShellIntegration {
     // to be set after the page has an origin to store it against and before the
     // login below.
     await enablePatternCoverage(page);
+    // Same read-at-runtime-creation contract as patternCoverage above: the
+    // shell reads this key when it builds the worker runtime, at login. One
+    // page serves every test in a file, so each navigation states the profile
+    // it wants rather than inheriting the previous test's.
+    if (renderCeiling === false) {
+      await page.evaluate(() => {
+        globalThis.localStorage.setItem("cfcRenderCeiling", "false");
+      });
+    } else {
+      await page.evaluate(() => {
+        globalThis.localStorage.removeItem("cfcRenderCeiling");
+      });
+    }
     // [NDT] triage aid: seed the worker-console host toggle before login so
     // the worker runtime's console (where the storage taps live) reaches the
     // page console — and, with PIPE_CONSOLE, the test output. Same

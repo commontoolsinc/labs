@@ -136,7 +136,7 @@ Deno.test("CfHarnessEngine builds a default docker-runsc sandbox when given a wo
     status: "pending",
     createdAt: "2026-04-15T19:00:00.000Z",
     updatedAt: "2026-04-15T19:00:00.000Z",
-    cfcEnforcementMode: "enforce-explicit",
+    cfcEnforcementMode: "enforce-strict",
     currentDir: "/workspace",
     docsCorpus: {
       type: "cf-harness.docs-corpus-record",
@@ -219,9 +219,9 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
     },
   });
   assertEquals(pinned.getRunState().fabricSessionCfc, {
-    enforcementMode: "enforce-explicit",
+    enforcementMode: "enforce-strict",
     enforcementModeSource: "preset-pin",
-    flowLabels: "off",
+    flowLabels: "persist",
     flowLabelsSource: "default",
     record: recordFor({
       apiUrl: "https://toolshed.example/",
@@ -242,7 +242,7 @@ Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in 
     },
   });
   assertEquals(postured.getRunState().fabricSessionCfc, {
-    enforcementMode: "enforce-explicit",
+    enforcementMode: "enforce-strict",
     enforcementModeSource: "preset-pin",
     flowLabels: "persist",
     flowLabelsSource: "posture",
@@ -278,7 +278,7 @@ Deno.test("CfHarnessEngine publishes no posture record when a session factory ov
       Promise.reject(new Error("never built in this test")),
   });
   assertEquals(engine.getRunState().fabricSessionCfc, {
-    enforcementMode: "enforce-explicit",
+    enforcementMode: "enforce-strict",
     enforcementModeSource: "preset-pin",
     flowLabels: "persist",
     flowLabelsSource: "posture",
@@ -306,7 +306,7 @@ Deno.test("CfHarnessEngine records an inherited posture record when the injected
   });
 
   assertEquals(child.getRunState().fabricSessionCfc, {
-    enforcementMode: "enforce-explicit",
+    enforcementMode: "enforce-strict",
     enforcementModeSource: "preset-pin",
     flowLabels: "persist",
     flowLabelsSource: "posture",
@@ -380,7 +380,7 @@ Deno.test("CfHarnessEngine refuses to resume under a fabric-session posture that
     runState,
   });
   assertEquals(resumed.getRunState().fabricSessionCfc, {
-    enforcementMode: "enforce-explicit",
+    enforcementMode: "enforce-strict",
     enforcementModeSource: "preset-pin",
     flowLabels: "persist",
     flowLabelsSource: "posture",
@@ -433,9 +433,10 @@ Deno.test("CfHarnessEngine refuses to resume under a fabric-session posture that
     "max-enforcement",
   );
 
-  // A legacy record (no posture ever captured) stays frozen as history:
-  // plain session dials may restate the original invocation, but the named
-  // bundle cannot have been what the run ran, so a posture resume is refused.
+  // A legacy record (no posture ever captured) stays frozen as history, and
+  // resuming one takes the operator naming both dials: a configuration that
+  // names neither resolves to the fleet pin, which is a posture the record
+  // cannot attest.
   const legacyState = {
     ...runState,
     fabricSessionCfc: undefined,
@@ -447,10 +448,46 @@ Deno.test("CfHarnessEngine refuses to resume under a fabric-session posture that
       identityKeyPath: posturedSession.identityKeyPath,
       space: posturedSession.space,
       cfcEnforcementMode: "enforce-strict",
+      cfcFlowLabels: "persist",
     },
     runState: legacyState,
   });
   assertEquals(legacyWithDials.getRunState().fabricSessionCfc, undefined);
+
+  // One dial named is not enough: the other still resolves to the pin.
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        fabricSession: {
+          apiUrl: posturedSession.apiUrl,
+          identityKeyPath: posturedSession.identityKeyPath,
+          space: posturedSession.space,
+          cfcEnforcementMode: "enforce-strict",
+        },
+        runState: legacyState,
+      }),
+    Error,
+    "the session configuration names none either",
+  );
+
+  // Naming nothing at all is the case the guard exists for.
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        fabricSession: {
+          apiUrl: posturedSession.apiUrl,
+          identityKeyPath: posturedSession.identityKeyPath,
+          space: posturedSession.space,
+        },
+        runState: legacyState,
+      }),
+    Error,
+    "the session configuration names none either",
+  );
+
+  // The named bundle cannot have been what a legacy run ran.
   assertThrows(
     () =>
       new CfHarnessEngine({

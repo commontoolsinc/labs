@@ -219,6 +219,8 @@ describe("inSpace child owner-protected write (profile elements)", () => {
       // to `unsupported`.
       const writeTx = rt2.edit();
       childCell.withTx(writeTx).key("add").send({ item: "second" });
+      // A manual test tx must prepare (the runtime's own commit paths do).
+      rt2.prepareTxForCommit(writeTx);
       const writeCommit = await writeTx.commit();
       expect(writeCommit.error).toBeUndefined();
       await childCell.pull();

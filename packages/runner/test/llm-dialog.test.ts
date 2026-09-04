@@ -47,9 +47,14 @@ describe("llmDialog", () => {
   beforeEach(() => {
     clearMockResponses();
     storageManager = StorageManager.emulate({ as: signer });
+    // The suite characterizes the tool loop at enforce-explicit: several
+    // fixtures write labeled values into undeclared stores, which the
+    // strict writer-fit rejects while explicit persists-and-flags; the
+    // denial tests reject through requiredIntegrity under both.
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      cfcEnforcementMode: "enforce-explicit",
     });
     tx = runtime.edit();
 

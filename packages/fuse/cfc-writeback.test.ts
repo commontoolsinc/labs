@@ -119,7 +119,7 @@ Deno.test("CFC mode parsing and annotation defaults match runner modes", () => {
     resolveCfcMode({ cliMode: undefined, envMode: "enforce-explicit" }),
     "enforce-explicit",
   );
-  assertEquals(resolveCfcMode({}), "disabled");
+  assertEquals(resolveCfcMode({}), "enforce-strict");
 
   assertEquals(
     shouldEnableCfcAnnotations({

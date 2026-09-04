@@ -1592,6 +1592,10 @@ Deno.test("CfHarnessPromptLoop attaches images loaded by view_image on the next 
       workspaceHostPath: workspace,
       runId: "run-view-image",
       model: "gpt-5.4",
+      // view_image carries no direct-command authorization, which
+      // enforce-strict denies; the test observes the image follow-up
+      // turn, so it runs one rung down.
+      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});

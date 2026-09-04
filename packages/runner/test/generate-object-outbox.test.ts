@@ -302,7 +302,6 @@ describe("generateObject outbox mechanism", () => {
 
     try {
       const rejectedTx = runtime.edit();
-      rejectedTx.setCfcEnforcementMode("enforce-explicit");
       rejectedTx.markCfcRelevant("generateObject retry regression");
       action(rejectedTx);
       const rejectedResult = await rejectedTx.commit();
@@ -403,7 +402,6 @@ describe("generateObject outbox mechanism", () => {
 
     try {
       const rejectedTx = runtime.edit();
-      rejectedTx.setCfcEnforcementMode("enforce-explicit");
       rejectedTx.markCfcRelevant("generateObject tool retry regression");
       action(rejectedTx);
       const rejectedResult = await rejectedTx.commit();

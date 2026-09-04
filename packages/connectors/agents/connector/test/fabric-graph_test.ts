@@ -436,6 +436,9 @@ Deno.test("stable graph field writes preserve document metadata", async () => {
       },
       { preserved: true },
     );
+    // A document-root write is CFC-relevant, so this transaction prepares
+    // before it commits, as the runtime's own commit paths do.
+    metadataTx.prepareCfc();
     const metadataCommit = await metadataTx.commit();
     if (metadataCommit.error) throw metadataCommit.error;
 

@@ -333,10 +333,14 @@ describe("CFC concept-level integrity floors (D5)", () => {
       trust?: CfcTrustConfigInput,
     ): Promise<{ ok: boolean; message?: string }> => {
       const storageManager = StorageManager.emulate({ as: signer });
+      // The subject here is the read-side gate's concept resolution; the
+      // value-side write floor (which the mint-less sink would fail)
+      // observes only.
       const runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
         cfcEnforcementMode: "enforce-explicit",
+        cfcWriteFloor: "observe",
         ...(trust ? { cfcTrustConfig: trust } : {}),
       });
       try {

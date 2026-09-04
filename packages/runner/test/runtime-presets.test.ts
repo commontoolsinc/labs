@@ -101,9 +101,16 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   apiUrl: { treat: "per-site" },
   storageManager: { treat: "per-site" },
   experimental: { treat: "per-site" },
-  // Same value as the Runtime constructor default today; pinned so a changed
+  // Same values as the Runtime constructor defaults today (the strict end
+  // state of docs/specs/cfc-enforcement-matrix.md §3); pinned so a changed
   // constructor default cannot silently relax first-party environments.
-  cfcEnforcementMode: { treat: "core-pinned", value: "enforce-explicit" },
+  cfcEnforcementMode: { treat: "core-pinned", value: "enforce-strict" },
+  cfcFlowLabels: { treat: "core-pinned", value: "persist" },
+  cfcWriteFloor: { treat: "core-pinned", value: "enforce" },
+  cfcTriggerReadGating: { treat: "core-pinned", value: true },
+  cfcPolicyEvaluation: { treat: "core-pinned", value: "enforce" },
+  cfcLabelMetadataProtection: { treat: "core-pinned", value: "enforce" },
+  cfcDeclaredMonotonicity: { treat: "core-pinned", value: "observe" },
   // Deployment-facing runtimes point patterns at the deployment itself;
   // local presets keep the builder-env default (localhost fall-through).
   patternEnvironment: {
@@ -120,13 +127,7 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   pieceCreatedCallback: { treat: "absent" },
   debug: { treat: "absent" },
   telemetry: { treat: "absent" },
-  cfcFlowLabels: { treat: "absent" },
-  cfcWriteFloor: { treat: "absent" },
-  cfcTriggerReadGating: { treat: "absent" },
   cfcDecomposedEnvelopes: { treat: "absent" },
-  cfcPolicyEvaluation: { treat: "absent" },
-  cfcLabelMetadataProtection: { treat: "absent" },
-  cfcDeclaredMonotonicity: { treat: "absent" },
   cfcPolicyRecords: { treat: "absent" },
   cfcPrefixProvenanceStats: { treat: "absent" },
   cfcTrustConfig: { treat: "absent" },
@@ -809,12 +810,13 @@ describe("runtimePresets conformance (CT-1814)", () => {
     });
 
     it("keeps the shared enforcement-mode pin out of the bundle", () => {
-      // Strict is a per-session host raise, not part of the bundle: the pin
-      // must come through unchanged so the raise below is the only way up.
+      // The enforcement mode is not part of the bundle: the shared core pin
+      // comes through unchanged, and a host session dial is the only thing
+      // that moves it.
       expect(Object.keys(MAX_ENFORCEMENT_CFC_OPTIONS))
         .not.toContain("cfcEnforcementMode");
       expect(postureOutputs.remoteClient.cfcEnforcementMode)
-        .toBe("enforce-explicit");
+        .toBe("enforce-strict");
     });
 
     it("lets a host session dial apply over the bundle", () => {
@@ -860,7 +862,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         ...posture,
       }));
       try {
-        expect(runtime.cfcEnforcementMode).toBe("enforce-explicit");
+        expect(runtime.cfcEnforcementMode).toBe("enforce-strict");
         expect(runtime.cfcFlowLabels).toBe("persist");
         expect(runtime.cfcWriteFloor).toBe("enforce");
         expect(runtime.cfcTriggerReadGating).toBe(true);
@@ -886,7 +888,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
       storageManager: emulated,
     }));
     try {
-      expect(runtime.cfcEnforcementMode).toBe("enforce-explicit");
+      expect(runtime.cfcEnforcementMode).toBe("enforce-strict");
     } finally {
       await runtime.dispose();
       await emulated.close();
