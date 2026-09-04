@@ -59,7 +59,7 @@ describe("piece-reference", () => {
       const seen = {};
       const resolved = await resolvePieceConfig(
         { ...CONFIG, piece: "top", piecePath: [2] },
-        resolving({ piece: MEMBER, path: [] }, seen),
+        resolving({ piece: MEMBER, pathAfter: [] }, seen),
       );
       expect(seen).toEqual({ token: "top", path: [2] });
       expect(resolved.piece).toBe(MEMBER);
@@ -70,7 +70,7 @@ describe("piece-reference", () => {
       await expect(
         resolvePieceConfig(
           { ...CONFIG, piece: "top", piecePath: [2, "title"] },
-          resolving({ piece: MEMBER, path: ["title"] }, {}),
+          resolving({ piece: MEMBER, pathAfter: ["title"] }, {}),
         ),
       ).rejects.toThrow(
         /embeds a path \("title"\) but this command takes a piece id only/,
@@ -122,7 +122,7 @@ describe("piece-reference", () => {
           resolvePieceReference: (_pieces, token, path) => {
             seen.token = token;
             seen.path = path;
-            return Promise.resolve({ piece: MEMBER, path: ["title"] });
+            return Promise.resolve({ piece: MEMBER, pathAfter: ["title"] });
           },
         },
       );

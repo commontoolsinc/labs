@@ -123,8 +123,7 @@ address printed by one command therefore composes into the next with no flag
 beside it, whatever space the reader has configured.
 
 A slug may name a collection rather than a piece.
-`cf piece set-slug top
-/of:fid1:…/names` points `top` at the map a board keeps
+`cf piece set-slug top /of:fid1:…/names` points `top` at the map a board keeps
 its members in, keyed by member name, and `/top/2` then names member `2`. Where
 the slug points is what decides how the path after it reads. A slug that points
 at a piece names that piece, and the path is a cell path inside it, as it is
@@ -134,12 +133,22 @@ collection: the first segment selects a member, the cell that member holds is
 the piece, and the segments after it are a cell path inside that member. So
 `cf cell get /top/2 title` reads member `2`'s title,
 `cf piece describe --cell /top/2` describes it, and
-`cf piece call --cell /top/2 <verb>` calls it. A collection's name with no
-member after it is refused, naming the piece that holds the collection; a member
-the collection does not hold is refused as `no member 999 in top`. This is the
-rule wherever a `--cell` or positional address names the target, and for the
-source of `set-slug`; a `cf piece link` endpoint resolves its slug to a piece
-and reads the path inside that piece.
+`cf piece call --cell /top/2 <verb>` calls it. Exactly one segment reaches a
+member, so a field of a member never answers to the collection's namespace:
+`/top/2/comments` is the `comments` field of member `2`, never a member named
+`comments` of whatever `2` holds.
+
+A collection's name with no member after it is refused, naming the piece that
+holds the collection; a member the collection does not hold is refused as
+`no member 999 in top`. The map itself is addressed by the `piece/path` handle
+`cf piece slugs` prints for the name, never by the name, which addresses
+members: `cf piece inspect --cell /of:fid1:…/names` shows the map, and
+`cf piece inspect --cell /top` is the refusal. Writing follows the same rule:
+`cf cell set /top/2 title <value>` writes the title, while a `cf cell set` whose
+address stops at `/top/2` is refused, because the address alone reaches the
+member's whole cell, and replacing that is what a path spells out. This is the
+rule wherever a `--cell` or positional address names the target, at both
+`cf piece link` endpoints, and for the source of `set-slug`.
 
 Beside the reference, the CLI's bare form — `pieceId[@scope]`,
 `pieceId[@scope]/path` at link endpoints, and slugs — is a convenience alias for
@@ -330,9 +339,11 @@ nothing can enumerate names it was never told.
 with a path, `/of:fid1:…/names`, names a cell inside that piece, which is how a
 collection gets its name. A slug with a path after it resolves as a target does,
 so `set-slug two /top/2` names member `2`. A bare slug names whatever that slug
-points at, piece or not, which is how a collection's name is aliased.
-`--resolve-before-linking` resolves the source cell's link before writing, so
-the new slug points at what the source's cell points at rather than at the cell.
+points at, piece or not, which is how a collection's name is aliased; a scope
+written on a bare slug is refused, because the slug's own redirect names the
+scope of the cell it points at. `--resolve-before-linking` resolves the source
+cell's link before writing, so the new slug points at what the source's cell
+points at rather than at the cell.
 
 `cf piece search` also starts from the registry. It searches readable input and
 result data, but returns registered pieces only. `cf piece map` likewise shows

@@ -132,8 +132,8 @@ export interface PieceReference {
   /** The piece's id. */
   piece: string;
 
-  /** The segments after the piece, a cell path inside it. */
-  path: (string | number)[];
+  /** The segments left to address after the piece, a cell path inside it. */
+  pathAfter: (string | number)[];
 }
 
 /**
@@ -146,7 +146,7 @@ export interface SlugTarget {
   piece: string;
 
   /** The path from the piece's root to the target. */
-  path: string[];
+  pathInside: string[];
 }
 
 /**
@@ -165,7 +165,7 @@ export async function resolvePieceReference(
   path: readonly (string | number)[],
 ): Promise<PieceReference> {
   if (!isSlugAddress(token)) {
-    return { piece: token, path: [...path] };
+    return { piece: token, pathAfter: [...path] };
   }
   const target = await resolveSlugReference(
     pieces.runtime,
@@ -173,7 +173,10 @@ export async function resolvePieceReference(
     token,
     path,
   );
-  return { piece: pieceIdOrThrow(token, target.piece), path: target.path };
+  return {
+    piece: pieceIdOrThrow(token, target.piece),
+    pathAfter: target.pathAfter,
+  };
 }
 
 /**
@@ -202,12 +205,15 @@ export async function resolveSlugTarget(
     pieces.getSpace(),
     token,
   );
-  return { piece: pieceIdOrThrow(token, target.piece), path: target.path };
+  return {
+    piece: pieceIdOrThrow(token, target.piece),
+    pathInside: target.pathInside,
+  };
 }
 
 /**
- * Helper for the resolvers above, which reads a piece's id off its root cell
- * and refuses a cell that has none.
+ * Helper for `resolvePieceReference()` and `resolveSlugTarget()`, which reads
+ * a piece's id off its root cell and refuses a cell that has none.
  */
 function pieceIdOrThrow(token: string, piece: Cell<unknown>): string {
   const id = pieceId(piece);

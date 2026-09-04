@@ -1331,19 +1331,20 @@ The slug is validated, then checked for availability, before anything is
 written, so an unusable slug and a slug already naming another piece are both
 structured errors that change nothing. The availability question fails closed: a
 slug is free only on the outcomes that say nothing is there — no document, a
-malformed one, one that is not a piece, one carrying no piece id — and any other
-failure refuses the call saying the availability could not be established,
-because reporting a storage error as a free name would write over whatever is
-there. That check is what stops a caller from taking over a name a person
-already opens: assigning a slug is a blind write, so without it a model naming
-`home` would repoint `home` at whatever it referenced. It is a check and not a
-lock — resolution and assignment are not atomic, so a slug that becomes taken in
-between is still overwritten — and it closes the case that arises rather than a
-race against a concurrent writer. A slug that already points at the very piece
-the token names answers `ok` rather than a refusal: the request is already true.
-`assign_slug` sets the address, not the title: what the piece list displays is
-the pattern's own `NAME` result, so a pattern that wants a title sets `NAME` in
-its source.
+malformed one, one that is not a piece, one carrying no piece id. A slug that
+resolves into a piece rather than to one names a collection, and is refused the
+way a taken name is: it is an address a person opens. Any other failure refuses
+the call saying the availability could not be established, because reporting a
+storage error as a free name would write over whatever is there. That check is
+what stops a caller from taking over a name a person already opens: assigning a
+slug is a blind write, so without it a model naming `home` would repoint `home`
+at whatever it referenced. It is a check and not a lock — resolution and
+assignment are not atomic, so a slug that becomes taken in between is still
+overwritten — and it closes the case that arises rather than a race against a
+concurrent writer. A slug that already points at the very piece the token names
+answers `ok` rather than a refusal: the request is already true. `assign_slug`
+sets the address, not the title: what the piece list displays is the pattern's
+own `NAME` result, so a pattern that wants a title sets `NAME` in its source.
 
 Every `run_pattern` invocation persists a piece in the configured space, named
 or not. A cancelled run stops its piece, but no piece is ever deleted, and each

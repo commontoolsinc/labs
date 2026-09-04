@@ -114,9 +114,10 @@ describe("slug resolution", () => {
     // A piece here is a document stamped with a `patternIdentity`, which is
     // what the resolvers read; nothing runs. The board holds its collection
     // at `names`, keyed by member name, each member a link to an item's
-    // document, with one key holding a plain value for a member that is no
-    // piece. `top` points at the collection, `board` at the board itself,
-    // and `plain` at a document that is no piece at all.
+    // document, with two keys holding plain values for members that are no
+    // piece — one of them a record whose own key names a piece. `top` points
+    // at the collection, `board` at the board itself, and `plain` at a
+    // document that is no piece at all.
 
     let board: Cell<unknown>;
     let item1: Cell<unknown>;
@@ -162,16 +163,24 @@ describe("slug resolution", () => {
     beforeEach(async () => {
       item1 = await pieceDocument("item-1", { title: "Glaze recipes" });
       item2 = await pieceDocument("item-2", { title: "Oven schedule" });
-      // Member `4` reaches its piece through a document that is nothing but
-      // a link to it, the way a member stored by reference does.
+      // Member `4` reaches its piece through documents that are nothing but
+      // links to it, the way a member stored by reference does.
       const viaLink = runtime.getCell(space, { space, random: "via-link" });
+      const viaLink2 = runtime.getCell(space, { space, random: "via-link-2" });
       const plain = runtime.getCell(space, { space, random: "plain" });
       await runtime.editWithRetry((tx) => {
-        viaLink.withTx(tx).set(item2);
+        viaLink2.withTx(tx).set(item2);
+        viaLink.withTx(tx).set(viaLink2);
         plain.withTx(tx).set({ value: 1 });
       });
       board = await pieceDocument("board", {
-        names: { "1": item1, "2": item2, "3": { plain: true }, "4": viaLink },
+        names: {
+          "1": item1,
+          "2": item2,
+          "3": { plain: true },
+          "4": viaLink,
+          "5": { "6": item1 },
+        },
       });
       await pointSlug("board", board);
       await pointSlug("top", board.key("names"));
@@ -185,7 +194,7 @@ describe("slug resolution", () => {
           "1",
         ]);
         expect(idOf(target.piece)).toBe(idOf(board));
-        expect(target.path).toEqual(["names", "1"]);
+        expect(target.pathAfter).toEqual(["names", "1"]);
       });
 
       it("returns the member piece and the rest of the path when the slug names a collection", async () => {
@@ -195,13 +204,13 @@ describe("slug resolution", () => {
         ]);
         expect(idOf(target.piece)).toBe(idOf(item2));
         expect(target.piece.getAsNormalizedFullLink().path).toEqual([]);
-        expect(target.path).toEqual(["title"]);
+        expect(target.pathAfter).toEqual(["title"]);
       });
 
       it("reads a numeric segment as the member name it denotes", async () => {
         const target = await resolveSlugReference(runtime, space, "top", [1]);
         expect(idOf(target.piece)).toBe(idOf(item1));
-        expect(target.path).toEqual([]);
+        expect(target.pathAfter).toEqual([]);
       });
 
       it("follows a member through a chain of links to the piece at its end", async () => {
@@ -210,7 +219,7 @@ describe("slug resolution", () => {
           "title",
         ]);
         expect(idOf(target.piece)).toBe(idOf(item2));
-        expect(target.path).toEqual(["title"]);
+        expect(target.pathAfter).toEqual(["title"]);
       });
 
       it("fails with `missing-member` naming the collection when a segment selects nothing", async () => {
@@ -233,13 +242,29 @@ describe("slug resolution", () => {
         expect((error as Error).message).toContain("top/<name>");
       });
 
-      it("fails with `not-piece` when the segments run out before a piece", async () => {
+      it("fails with `not-piece` when the member the segment selects is no piece", async () => {
         const error = await resolveSlugReference(runtime, space, "top", ["3"])
           .catch((error: unknown) => error);
         expect(error).toBeInstanceOf(SlugResolutionError);
         expect((error as SlugResolutionError).code).toBe("not-piece");
         expect((error as Error).message).toMatch(
           /"top\/3" does not name a piece/,
+        );
+      });
+
+      it("spends one segment on the member and reads no second one as a member name", async () => {
+        // Member `5` is a plain record whose own key `6` holds a piece.
+        // Reading that key as a member name would let a field inside an item
+        // answer to the collection's namespace, so the refusal names the one
+        // segment that was spent and stops there.
+        const error = await resolveSlugReference(runtime, space, "top", [
+          "5",
+          "6",
+        ]).catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(SlugResolutionError);
+        expect((error as SlugResolutionError).code).toBe("not-piece");
+        expect((error as Error).message).toBe(
+          '"top/5" does not name a piece.',
         );
       });
 
@@ -257,13 +282,13 @@ describe("slug resolution", () => {
         const target = await resolveSlugTargetInPiece(runtime, space, "top");
         expect(idOf(target.piece)).toBe(idOf(board));
         expect(target.piece.getAsNormalizedFullLink().path).toEqual([]);
-        expect(target.path).toEqual(["names"]);
+        expect(target.pathInside).toEqual(["names"]);
       });
 
       it("returns an empty path for a slug that names the piece itself", async () => {
         const target = await resolveSlugTargetInPiece(runtime, space, "board");
         expect(idOf(target.piece)).toBe(idOf(board));
-        expect(target.path).toEqual([]);
+        expect(target.pathInside).toEqual([]);
       });
 
       it("fails with `not-piece` for a slug to a plain document", async () => {

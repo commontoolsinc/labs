@@ -11,7 +11,12 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
-import { assignSlug, resolvePieceAddress } from "@commonfabric/piece";
+import {
+  assignSlug,
+  resolvePieceAddress,
+  resolveSlugTarget,
+  setSlugLink,
+} from "@commonfabric/piece";
 import { PiecesController } from "@commonfabric/piece/ops";
 import {
   entityIdFrom,
@@ -213,6 +218,38 @@ describe("assign-slug", () => {
       expect(await resolvePieceAddress(pieces, "doubling-report")).toBe(
         first.pieceId,
       );
+    });
+
+    it("refuses a slug that names a collection, leaving the address where it pointed", async () => {
+      // A slug pointing at a cell inside a piece names a collection, which is
+      // an address a person opens as much as a piece is. Reading that as an
+      // operational failure would report a positive statement about what the
+      // space holds as a "try again", and reading it as vacancy would repoint
+      // the name.
+      await linkDefaultPattern();
+      const engine = createEngine();
+      const held = await createPiece(engine, 21);
+      const taking = await createPiece(engine, 22);
+      const cell = pieces.runtime.getCellFromLink(
+        parseLLMFriendlyLink(held.resultRef, pieces.getSpace()),
+      );
+      await cell.sync();
+      await setSlugLink(pieces, "doubling-report", cell.key("doubled"));
+
+      const result = await engine.invokeBuiltinTool("assign_slug", {
+        token: taking.resultRef,
+        slug: "doubling-report",
+      });
+      const output = result.output as AssignSlugToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("already names a collection");
+      expect(output.message).not.toContain("could not establish");
+      // The name still points into the piece it pointed into, so the refusal
+      // protected the address rather than merely reporting on it.
+      expect(await resolveSlugTarget(pieces, "doubling-report")).toEqual({
+        piece: held.pieceId,
+        pathInside: ["doubled"],
+      });
     });
 
     it("answers ok for a slug already pointing at the very piece the token names", async () => {

@@ -348,22 +348,22 @@ describe("piece slugs", () => {
     describe("resolvePieceReference()", () => {
       it("returns the member the first segment selects, and the rest of the path", async () => {
         expect(await resolvePieceReference(pieces, "top", ["2", "value"]))
-          .toEqual({ piece: pieceId(item2), path: ["value"] });
+          .toEqual({ piece: pieceId(item2), pathAfter: ["value"] });
       });
 
       it("reads a numeric segment as the member name it denotes", async () => {
         expect(await resolvePieceReference(pieces, "top", [1]))
-          .toEqual({ piece: pieceId(item1), path: [] });
+          .toEqual({ piece: pieceId(item1), pathAfter: [] });
       });
 
       it("returns the piece and the whole path when the slug names a piece root", async () => {
         expect(await resolvePieceReference(pieces, "one", ["value"]))
-          .toEqual({ piece: pieceId(item1), path: ["value"] });
+          .toEqual({ piece: pieceId(item1), pathAfter: ["value"] });
       });
 
       it("returns a handle and its path untouched", async () => {
         expect(await resolvePieceReference(pieces, "of:fid1:piece-123", ["x"]))
-          .toEqual({ piece: "of:fid1:piece-123", path: ["x"] });
+          .toEqual({ piece: "of:fid1:piece-123", pathAfter: ["x"] });
       });
 
       it("fails with `missing-member` when the collection holds no such name", async () => {
@@ -407,12 +407,12 @@ describe("piece slugs", () => {
     describe("resolveSlugTarget()", () => {
       it("returns the containing piece and the path for a slug into a piece", async () => {
         expect(await resolveSlugTarget(pieces, "top"))
-          .toEqual({ piece: boardId, path: ["names"] });
+          .toEqual({ piece: boardId, pathInside: ["names"] });
       });
 
       it("returns an empty path for a slug that names a piece", async () => {
         expect(await resolveSlugTarget(pieces, "one"))
-          .toEqual({ piece: pieceId(item1), path: [] });
+          .toEqual({ piece: pieceId(item1), pathInside: [] });
       });
 
       it("fails with `not-piece` for a slug to a plain document", async () => {

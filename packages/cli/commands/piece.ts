@@ -99,6 +99,7 @@ import {
   MapFormat,
   newPiece,
   partitionVerbListing,
+  pathRequiredRefusal,
   PieceConfig,
   pieceIdOnlyPathRefusal,
   PieceResultProjectionError,
@@ -3335,12 +3336,17 @@ export async function getCellValueFromCommand(
 
 /**
  * The `cf cell set` action, with the same positional-address intake as
- * {@link getCellValueFromCommand}. The write needs a path spelled somewhere
- * — embedded in the address, positionally, or both — and an explicit empty
- * positional (`""`) is a spelling: it has always named the root, and the
- * fuse integration writes a whole input cell with it. What is refused is a
- * bare positional address with no path anywhere, so a pasted address cannot
- * silently overwrite a whole cell.
+ * {@link getCellValueFromCommand}. The write needs a path inside the piece it
+ * reaches, spelled in the address, positionally, or both. An explicit empty
+ * positional (`""`) is the exception, and the only spelling under which a
+ * write lands on a whole cell: it has always named the root, and the fuse
+ * integration writes a whole input cell with it. Everything else that reaches
+ * a root is refused, so no address silently overwrites a cell.
+ *
+ * Refused at two points, because the two halves are known at different
+ * moments. A line carrying no path at all is refused here, before stdin is
+ * drained; a line whose path a collection spends reaching a member is refused
+ * by the write, which is where what the address resolves to is known.
  */
 export async function setCellValueFromCommand(
   options: PieceLabelCLIOptions,
@@ -3355,21 +3361,26 @@ export async function setCellValueFromCommand(
     { acceptsPath: true, acceptsArgument: true },
   );
   const pathSegments = mergePiecePath(pieceConfig, target.pathString);
+  // An empty positional is the one spelling that names the root, so it is
+  // the one spelling under which a write may land on a whole cell.
+  const rootSpelled = target.pathString === "";
   if (pathSegments.length === 0 && target.pathString === undefined) {
-    throw new ValidationError(
-      `A path is required: embed it in the address (/of:.../title) or ` +
-        `pass it as an argument ("" writes the root).`,
-      { exitCode: 1 },
-    );
+    throw new ValidationError(pathRequiredRefusal(), { exitCode: 1 });
   }
   const value = await (deps.drainStdin ?? drainStdin)();
-  await (deps.setCellValue ?? setCellValue)(pieceConfig, pathSegments, value, {
-    input: options.input || pieceConfig.pieceInput,
-  });
-  (deps.render ?? render)(`Set value at path: ${pathSegments.join("/")}`);
+  const written = await (deps.setCellValue ?? setCellValue)(
+    pieceConfig,
+    pathSegments,
+    value,
+    {
+      input: options.input || pieceConfig.pieceInput,
+      refuseRootWrite: !rootSpelled,
+    },
+  );
+  (deps.render ?? render)(`Set value at path: ${written.path.join("/")}`);
   (deps.hint ?? hint)(
     cliText(
-      `TIP: Computed values may be stale. Run 'cf piece step --cell ${pieceConfig.piece} ...' to trigger recomputation.`,
+      `TIP: Computed values may be stale. Run 'cf piece step --cell ${written.piece} ...' to trigger recomputation.`,
     ),
   );
 }

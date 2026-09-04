@@ -1,6 +1,7 @@
 import { ensureDir } from "@std/fs";
 import { dirname, join } from "@std/path";
 
+import { ValidationError } from "@cliffy/command";
 import type { CellScope, JSONSchema } from "@commonfabric/api";
 import {
   FabricPrimitive,
@@ -21,7 +22,6 @@ import {
   listSlugs,
   pieceId,
   type PieceReference,
-  resolvePieceAddress as resolveStoredPieceAddress,
   resolvePieceReference as resolveStoredPieceReference,
   resolveSlugTarget,
   resolveSlugTargetCell,
@@ -737,8 +737,12 @@ export async function listSpaceSlugs(
   return Promise.all(
     slugs.map(async (slug) => {
       try {
-        const { piece, path } = await resolveSlugTarget(pieces, slug);
-        return { slug, piece, ...(path.length > 0 && { path }) };
+        const { piece, pathInside } = await resolveSlugTarget(pieces, slug);
+        return {
+          slug,
+          piece,
+          ...(pathInside.length > 0 && { path: pathInside }),
+        };
       } catch (err) {
         return {
           slug,
@@ -1340,7 +1344,7 @@ function pieceReferenceResolver(
   if (resolveAddress) {
     return async (pieces, token, path) => ({
       piece: await resolveAddress(pieces, token),
-      path: [...path],
+      pathAfter: [...path],
     });
   }
   return resolveStoredPieceReference;
@@ -1379,7 +1383,10 @@ async function resolvePieceTargetWithPieces(
     path,
   );
   const { piecePath: _embedded, ...rest } = config;
-  return { config: { ...rest, piece: resolved.piece }, path: resolved.path };
+  return {
+    config: { ...rest, piece: resolved.piece },
+    path: resolved.pathAfter,
+  };
 }
 
 /**
@@ -1399,7 +1406,9 @@ async function resolvePieceConfigWithPieces(
     deps,
   );
   if (target.path.length > 0) {
-    throw new Error(pieceIdOnlyPathRefusal(target.path));
+    throw new ValidationError(pieceIdOnlyPathRefusal(target.path), {
+      exitCode: 1,
+    });
   }
   return target.config;
 }
@@ -1417,6 +1426,16 @@ export function pieceIdOnlyPathRefusal(
   }") but this command takes a piece id only.`;
 }
 
+/**
+ * The refusal a write meets when it names no path inside the piece it
+ * reaches: a bare address must not replace a whole cell, and a caller that
+ * means the root says so with an explicit empty path.
+ */
+export function pathRequiredRefusal(): string {
+  return `A path is required: embed it in the address (/of:.../title) or ` +
+    `pass it as an argument ("" writes the root).`;
+}
+
 export async function resolvePieceConfig(
   config: PieceConfig,
   deps: PieceResolutionDeps = {},
@@ -1425,15 +1444,24 @@ export async function resolvePieceConfig(
   return await resolvePieceConfigWithPieces(config, pieces, deps);
 }
 
+/**
+ * Resolves a link endpoint's address together with the path written after it,
+ * as every address resolves: a slug naming a collection spends the first
+ * segment on the member, and what is left is a cell path inside the piece the
+ * endpoint reached.
+ *
+ * `options.allowMissingSlugFallback` keeps an id-shaped token that names no
+ * slug document, so an endpoint may be a piece the space has not seen.
+ */
 export async function resolveLinkEndpointAddress(
   pieces: PiecesController,
   token: string,
-  resolver: PieceResolutionDeps["resolvePieceAddress"] =
-    resolveStoredPieceAddress,
+  path: readonly (string | number)[],
+  deps: PieceResolutionDeps = {},
   options?: { allowMissingSlugFallback?: boolean },
-): Promise<string> {
+): Promise<PieceReference> {
   try {
-    return await resolver(pieces, token);
+    return await pieceReferenceResolver(deps)(pieces, token, path);
   } catch (error) {
     if (
       options?.allowMissingSlugFallback &&
@@ -1445,7 +1473,7 @@ export async function resolveLinkEndpointAddress(
       // non-hash string reach `entityIdFrom`.
       !isSlugAddress(token)
     ) {
-      return token;
+      return { piece: token, pathAfter: [...path] };
     }
     throw error;
   }
@@ -1558,16 +1586,18 @@ export async function setPieceSlug(
     sourceScope?: PieceConfig["pieceScope"];
     resolveBeforeLinking?: boolean;
   },
+  deps: PieceResolutionDeps = {},
 ): Promise<void> {
   const pieces = await timeCliPhase(
     "setPieceSlug.loadPieces",
-    () => loadPieces(config),
+    () => (deps.loadPieces ?? loadPieces)(config),
   );
   const source = await resolveSlugSourceCell(
     pieces,
     sourcePieceId,
     sourcePath,
     options?.sourceScope,
+    deps,
   );
   await timeCliPhase("setPieceSlug.source.sync", () => source.sync());
   await timeCliPhase(
@@ -1588,23 +1618,34 @@ export async function setPieceSlug(
  * slug with a path after it resolves the way every address does, so `/top/2`
  * is the member piece and `/top/2/title` a cell inside it. A bare slug is the
  * cell it points at, piece or not: naming one slug's target by another is an
- * alias, and an alias of a collection's name needs no piece behind it.
+ * alias, and an alias of a collection's name needs no piece behind it. That
+ * one target is the slug's own redirect, which names its own scope, so a
+ * scope written beside a bare slug is refused rather than dropped.
  */
 async function resolveSlugSourceCell(
   pieces: PiecesController,
   sourcePieceId: string,
   sourcePath: (string | number)[],
   sourceScope: PieceConfig["pieceScope"],
+  deps: PieceResolutionDeps,
 ): Promise<Cell<unknown>> {
   if (isSlugAddress(sourcePieceId) && sourcePath.length === 0) {
+    if (sourceScope !== undefined) {
+      throw new ValidationError(
+        `Slug "${sourcePieceId}" points at a cell whose own redirect names ` +
+          `its scope, so \`@${sourceScope}\` has nothing to apply to. Name ` +
+          `the cell itself to scope it.`,
+        { exitCode: 1 },
+      );
+    }
     return await timeCliPhase(
       "setPieceSlug.resolveSource",
       () => resolveSlugTargetCell(pieces, sourcePieceId),
     );
   }
-  const { piece, path } = await timeCliPhase(
+  const { piece, pathAfter: path } = await timeCliPhase(
     "setPieceSlug.resolveSource",
-    () => resolveStoredPieceReference(pieces, sourcePieceId, sourcePath),
+    () => pieceReferenceResolver(deps)(pieces, sourcePieceId, sourcePath),
   );
   if (path.length === 0) {
     return pieces.runtime.getCellFromEntityId(
@@ -3628,25 +3669,25 @@ export async function linkPieces(
     "linkPieces.loadPieces",
     () => (deps.loadPieces ?? loadPieces)(config),
   );
-  const resolvedSourcePieceId = await timeCliPhase(
+  const source = await timeCliPhase(
     "linkPieces.resolveSource",
     () =>
       resolveLinkEndpointAddress(
         pieces,
         sourcePieceId,
-        deps.resolvePieceAddress,
+        sourcePath,
+        deps,
         { allowMissingSlugFallback: true },
       ),
   );
-  const resolvedTargetPieceId = await timeCliPhase(
+  const target = await timeCliPhase(
     "linkPieces.resolveTarget",
-    () =>
-      resolveLinkEndpointAddress(
-        pieces,
-        targetPieceId,
-        deps.resolvePieceAddress,
-      ),
+    () => resolveLinkEndpointAddress(pieces, targetPieceId, targetPath, deps),
   );
+  const resolvedSourcePieceId = source.piece;
+  const resolvedSourcePath = source.pathAfter;
+  const resolvedTargetPieceId = target.piece;
+  const resolvedTargetPath = target.pathAfter;
 
   // Validate that source and target pieces/paths exist by reading them
   if (!options?.allowNonExisting) {
@@ -3668,18 +3709,18 @@ export async function linkPieces(
       getPatternIdentityRef(sourcePiece.getCell()) !== undefined;
     if (!sourceHasPattern) {
       errors.push(`Source piece ${sourcePieceId} does not have pattern`);
-    } else if (sourcePath.length > 0) {
+    } else if (resolvedSourcePath.length > 0) {
       const sourceData = await timeCliPhase(
         "linkPieces.readSourceResult",
         () => sourcePiece.result.get(),
       );
       // Check source path resolves
       let current: any = sourceData;
-      for (const segment of sourcePath) {
+      for (const segment of resolvedSourcePath) {
         if (current == null || typeof current !== "object") {
           errors.push(
             `Source path "${
-              sourcePath.join("/")
+              resolvedSourcePath.join("/")
             }" does not exist on piece ${sourcePieceId}`,
           );
           break;
@@ -3689,7 +3730,7 @@ export async function linkPieces(
       if (current === undefined) {
         errors.push(
           `Source path "${
-            sourcePath.join("/")
+            resolvedSourcePath.join("/")
           }" does not exist on piece ${sourcePieceId}`,
         );
       }
@@ -3710,18 +3751,18 @@ export async function linkPieces(
       getPatternIdentityRef(targetPiece.getCell()) !== undefined;
     if (!targetHasPattern) {
       errors.push(`Target piece ${targetPieceId} does not have pattern`);
-    } else if (targetPath.length > 0) {
+    } else if (resolvedTargetPath.length > 0) {
       // Check target path resolves on the input cell
       const targetData = await timeCliPhase(
         "linkPieces.readTargetInput",
         () => targetPiece.input.get(),
       );
       let current: any = targetData;
-      for (const segment of targetPath) {
+      for (const segment of resolvedTargetPath) {
         if (current == null || typeof current !== "object") {
           errors.push(
             `Target path "${
-              targetPath.join("/")
+              resolvedTargetPath.join("/")
             }" does not exist on piece ${targetPieceId}`,
           );
           break;
@@ -3731,7 +3772,7 @@ export async function linkPieces(
       if (current === undefined) {
         errors.push(
           `Target path "${
-            targetPath.join("/")
+            resolvedTargetPath.join("/")
           }" does not exist on piece ${targetPieceId}`,
         );
       }
@@ -3749,9 +3790,9 @@ export async function linkPieces(
     () =>
       pieces.link(
         resolvedSourcePieceId,
-        sourcePath,
+        resolvedSourcePath,
         resolvedTargetPieceId,
-        targetPath,
+        resolvedTargetPath,
         options,
       ),
   );
@@ -3811,8 +3852,9 @@ export async function linkSqliteDiskSource(
   const resolvedTarget = await resolveLinkEndpointAddress(
     pieces,
     targetPieceId,
+    targetPath,
   );
-  await pieces.link(id, [], resolvedTarget, targetPath, {
+  await pieces.link(id, [], resolvedTarget.piece, resolvedTarget.pathAfter, {
     start: options?.start,
     targetScope: options?.targetScope,
   });
@@ -4657,16 +4699,34 @@ export async function getCellValue(
 }
 
 /**
- * Writes `value` at `path` on a piece's result cell, or on its arguments cell
- * under `options.input`, and receipts the space the write landed in.
+ * Where a {@link setCellValue} write landed: the piece it reached, and the
+ * path inside that piece it was written at.
+ */
+export interface CellWriteTarget {
+  /** The id of the piece written to. */
+  piece: string;
+
+  /** The path inside that piece, empty for a write at its root. */
+  path: (string | number)[];
+}
+
+/**
+ * Writes `value` at the path `addressedPath` resolves to on a piece's result
+ * cell, or on its arguments cell under `options.input`, receipts the space
+ * the write landed in, and reports where it landed.
+ *
+ * `options.refuseRootWrite` refuses a write whose resolved path is empty.
+ * Only resolution can decide that: a slug naming a collection spends the
+ * leading segments reaching the member, so an address carrying a path can
+ * still reach a piece's root.
  */
 export async function setCellValue(
   config: PieceConfig,
   addressedPath: (string | number)[],
   value: unknown,
-  options?: { input?: boolean },
+  options?: { input?: boolean; refuseRootWrite?: boolean },
   deps: PieceResolutionDeps = {},
-): Promise<void> {
+): Promise<CellWriteTarget> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const { config: resolvedConfig, path } = await resolvePieceTargetWithPieces(
     config,
@@ -4674,6 +4734,9 @@ export async function setCellValue(
     pieces,
     deps,
   );
+  if (options?.refuseRootWrite && path.length === 0) {
+    throw new ValidationError(pathRequiredRefusal(), { exitCode: 1 });
+  }
   const piece = await pieces.get(
     resolvedConfig.piece,
     false,
@@ -4686,6 +4749,7 @@ export async function setCellValue(
     await piece.result.set(value, path);
   }
   noteWroteTo(config.space);
+  return { piece: resolvedConfig.piece, path };
 }
 
 /**

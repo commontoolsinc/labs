@@ -62,7 +62,7 @@ export interface SlugTargetInPiece {
   piece: Cell<unknown>;
 
   /** The path from that root to the target. */
-  path: string[];
+  pathInside: string[];
 }
 
 /**
@@ -73,8 +73,8 @@ export interface SlugReferenceTarget<Segment extends string | number> {
   /** The piece's root cell. */
   piece: Cell<unknown>;
 
-  /** The segments after the piece, a cell path inside it. */
-  path: Segment[];
+  /** The segments left to address after the piece, a cell path inside it. */
+  pathAfter: Segment[];
 }
 
 /**
@@ -98,7 +98,7 @@ export async function resolveSlugTargetInPiece(
     scope: link.scope,
     path: [],
   });
-  return { piece, path: [...link.path] };
+  return { piece, pathInside: [...link.path] };
 }
 
 /**
@@ -108,16 +108,17 @@ export async function resolveSlugTargetInPiece(
  * cell path inside it, returned whole. A slug whose target is any other cell
  * names a collection: the target is a map from member name to member, the
  * first segment of the path selects a member, and the cell that member holds,
- * followed through its link, is the piece. The walk goes on while the cell
- * reached is not a piece root, so a nested map spends one segment per level.
- * Whichever way the piece was reached, the segments after it are a cell path
- * inside it.
+ * followed through its links, is the piece. Exactly one segment reaches a
+ * member, so an item's own fields and a collection's member names stay
+ * different namespaces — a member name never competes for the segment after
+ * an item. Whichever way the piece was reached, the segments after it are a
+ * cell path inside it.
  *
  * Fails, as a `SlugResolutionError`, with `inside-piece` when the target is a
  * cell inside a piece and the path is empty, naming that piece; with
  * `not-piece` when the target is neither a piece nor inside one and the path
- * is empty, or when the segments run out before a piece is reached; and with
- * `missing-member` when a segment selects nothing. A slug that does not
+ * is empty, or when the member the segment selects is no piece; and with
+ * `missing-member` when the segment selects nothing. A slug that does not
  * resolve fails as {@link resolveSlugTargetCell} does.
  */
 export async function resolveSlugReference<Segment extends string | number>(
@@ -128,7 +129,7 @@ export async function resolveSlugReference<Segment extends string | number>(
 ): Promise<SlugReferenceTarget<Segment>> {
   const target = await resolveSlugTargetCell(runtime, space, token);
   if (isPieceRoot(runtime, target)) {
-    return { piece: target, path: [...path] };
+    return { piece: target, pathAfter: [...path] };
   }
   if (path.length === 0) {
     throw isPieceDocument(runtime, target)
@@ -141,33 +142,27 @@ export async function resolveSlugReference<Segment extends string | number>(
       : notPiece(token);
   }
 
-  // Each level is followed through its link before its keys are read: the
-  // map a collection holds is reached from the containing piece through a
-  // link, and a key read on the unresolved cell would look the member up in
-  // the wrong document.
-  let map = target;
-  const walked: string[] = [];
-  for (let index = 0; index < path.length; index++) {
-    map = await followAndLoad(map);
-    const member = String(path[index]);
-    const held = map.key(member);
-    if (held.getRaw() === undefined) {
-      throw new SlugResolutionError(
-        `no member ${member} in ${[token, ...walked].join("/")}`,
-        "missing-member",
-      );
-    }
-    walked.push(member);
-    const reached = await followAndLoad(held);
-    if (isPieceRoot(runtime, reached)) {
-      return { piece: reached, path: path.slice(index + 1) };
-    }
-    map = reached;
+  // The map is followed through its link before its keys are read: a
+  // collection is reached from the containing piece through a link, and a key
+  // read on the unresolved cell would look the member up in the wrong
+  // document. The member's own link chain is followed the same way.
+  const map = await followAndLoad(target);
+  const member = String(path[0]);
+  const held = map.key(member);
+  if (held.getRaw() === undefined) {
+    throw new SlugResolutionError(
+      `no member ${member} in ${token}`,
+      "missing-member",
+    );
   }
-  throw new SlugResolutionError(
-    `"${[token, ...walked].join("/")}" does not name a piece.`,
-    "not-piece",
-  );
+  const reached = await followAndLoad(held);
+  if (!isPieceRoot(runtime, reached)) {
+    throw new SlugResolutionError(
+      `"${token}/${member}" does not name a piece.`,
+      "not-piece",
+    );
+  }
+  return { piece: reached, pathAfter: path.slice(1) };
 }
 
 /**
@@ -195,7 +190,10 @@ async function followAndLoad(cell: Cell<unknown>): Promise<Cell<unknown>> {
   }
 }
 
-/** Helper for the resolvers above, which builds the `not-piece` failure. */
+/**
+ * Helper for `resolveSlugReference()` and `resolveSlugTargetInPiece()`, which
+ * builds the `not-piece` failure.
+ */
 function notPiece(token: string): SlugResolutionError {
   return new SlugResolutionError(
     `Slug "${token}" redirects to a document that is not a piece.`,

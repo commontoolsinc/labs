@@ -60,7 +60,7 @@ export const assignSlugToolDescriptor: HarnessToolDescriptor = {
   toolId: "assign_slug",
   title: "Assign Slug",
   description:
-    "Register the piece behind a handle token in the space's piece list and give it a named address a person can open. Use it after run_pattern when a piece deserves a name; a piece never named stays out of the list, which is what pure computation wants. A slug that already names another piece is refused rather than repointed.",
+    "Register the piece behind a handle token in the space's piece list and give it a named address a person can open. Use it after run_pattern when a piece deserves a name; a piece never named stays out of the list, which is what pure computation wants. A slug already naming another piece, or a collection, is refused rather than repointed.",
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
@@ -98,25 +98,42 @@ const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 /**
- * The `SlugResolutionError` codes that positively say the slug names no
- * piece: its document is absent, holds no usable redirect, or redirects to
- * something that is not a piece. Each is a statement about what the space
- * holds, arrived at by reading it, so each means the slug is free — a
- * name only ever competes with a piece.
+ * What each `SlugResolutionError` code says about the name.
  *
- * Every other outcome is a failure to establish anything: a storage error, a
- * sync that never landed, a lost connection. `invalid` sits on that side too
- * — the slug was validated before this is asked, so a resolver calling it
- * unusable means the two disagree about the rule rather than that the space
- * is empty.
+ * `free` is a positive statement about what the space holds, arrived at by
+ * reading it: the slug's document is absent, holds no usable redirect, or
+ * redirects to something that is not a piece, and a name only ever competes
+ * with a piece. `in-use` is equally positive the other way — the name
+ * resolves to a collection, which is a thing a person opens, so assigning
+ * over it would take the address away from whoever holds it.
+ *
+ * `unknown` is a failure to establish anything: a storage error, a sync that
+ * never landed, a lost connection. `invalid` sits there too — the slug was
+ * validated before this is asked, so a resolver calling it unusable means the
+ * two disagree about the rule rather than that the space is empty.
+ *
+ * The map is total over the code union, so a code added to the resolver does
+ * not compile until it is classified here.
  */
-const VACANT_SLUG_CODES: ReadonlySet<
-  NonNullable<SlugResolutionError["code"]>
-> = new Set(["missing", "malformed", "not-piece", "missing-piece-id"]);
+const SLUG_CODE_STATES: Readonly<
+  Record<
+    NonNullable<SlugResolutionError["code"]>,
+    "free" | "in-use" | "unknown"
+  >
+> = {
+  invalid: "unknown",
+  missing: "free",
+  malformed: "free",
+  "not-piece": "free",
+  "missing-piece-id": "free",
+  "inside-piece": "in-use",
+  "missing-member": "in-use",
+};
 
 /**
  * Whether `slug` already names a piece in the session's space — and which —
- * or whether that could not be established at all.
+ * whether it names something else a person opens, or whether that could not
+ * be established at all.
  *
  * Assignment is a blind write: the slug document is pointed at the piece
  * whatever it held before, and last writer wins. So without asking first, a
@@ -126,8 +143,8 @@ const VACANT_SLUG_CODES: ReadonlySet<
  * about what the slug holds, and treating it as vacancy would reopen exactly
  * the overwrite this asks to prevent.
  *
- * The two are told apart by the typed `code` `resolvePieceAddress` carries
- * on its `SlugResolutionError`, never by the message text.
+ * The outcomes are told apart by the typed `code` `resolvePieceAddress`
+ * carries on its `SlugResolutionError`, never by the message text.
  */
 const slugAvailability = async (
   pieces: PiecesController,
@@ -135,19 +152,19 @@ const slugAvailability = async (
 ): Promise<
   | { state: "free" }
   | { state: "taken"; pieceId: string }
+  | { state: "in-use"; reason: string }
   | { state: "unknown"; reason: string }
 > => {
   try {
     const holder = await resolvePieceAddress(pieces, slug);
     return { state: "taken", pieceId: holder };
   } catch (error) {
-    if (
-      error instanceof SlugResolutionError && error.code !== undefined &&
-      VACANT_SLUG_CODES.has(error.code)
-    ) {
-      return { state: "free" };
-    }
-    return { state: "unknown", reason: errorMessage(error) };
+    const state = error instanceof SlugResolutionError &&
+        error.code !== undefined
+      ? SLUG_CODE_STATES[error.code]
+      : "unknown";
+    if (state === "free") return { state };
+    return { state, reason: errorMessage(error) };
   }
 };
 
@@ -311,6 +328,11 @@ export const assignSlugTool: HarnessToolDefinition<
       }
       return errorOutput(
         `assign_slug slug "${slug}" already names another piece in this space, and assigning would repoint that address. Choose another slug.`,
+      );
+    }
+    if (availability.state === "in-use") {
+      return errorOutput(
+        `assign_slug slug "${slug}" already names a collection in this space, and assigning would repoint that address. Choose another slug. The resolver reported: ${availability.reason}`,
       );
     }
     if (availability.state === "unknown") {
