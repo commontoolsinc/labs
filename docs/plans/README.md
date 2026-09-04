@@ -16,6 +16,11 @@ a record: archive it to `docs/history/plans/` following the procedure in
   commit SHA answers for the bytes, the text loads by handle into a child the
   chooser never reads, and a split-mint provenance mark records where it came
   from without declassifying anything.
+- [Collection naming: the first customer](collection-naming-topics.md)
+  builds [Naming in collections](../specs/collection-naming.md) on a parallel
+  exemplar board — a naming library, a member namespace the CLI and the shell
+  resolve as `top/42`, and `#42` in the editor — proven against the Topics
+  shape by a test-only board, and grafted onto Topics once, at the end.
 - [`cf view` language and syntax coverage](cf-view-language-coverage.md)
   orders the remaining language, data, build, and configuration formats needed
   for honest coverage of the active organization repositories.
