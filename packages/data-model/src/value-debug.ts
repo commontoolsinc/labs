@@ -252,8 +252,9 @@ class DebugConverter {
    * characters up to the length limit, or its first lines up to the line
    * limit, whichever is shorter. A character cut can land inside a surrogate
    * pair, so an excerpt so cut loses a final high surrogate; a line cut lands
-   * on a line break. That form nests two levels, so a result holding one can
-   * run one level past the maximum nesting depth.
+   * just past a line break, which the excerpt keeps. That form nests two
+   * levels, so a result holding one can run one level past the maximum
+   * nesting depth.
    */
   #convertString(value: string): FabricValue {
     const { maxStringLength, maxStringLines } = this.#limits;
@@ -386,20 +387,17 @@ class DebugConverter {
 
   /**
    * Returns the index at which `value` ends were it cut to its first
-   * `maxLines` lines: the index of the line break which ends that many lines,
-   * or the length of `value` when it holds no more lines than that. A line
-   * break at the very end of `value` ends its last line rather than starting
-   * an empty one.
+   * `maxLines` lines: the index just past the line break which ends that many
+   * lines, or the length of `value` when it holds no more lines than that. A
+   * line break at the very end of `value` ends its last line rather than
+   * starting an empty one, which is a consequence of the cut landing past it.
    */
   static #lineCutOf(value: string, maxLines: number): number {
     let lines = 1;
 
     for (const lineBreak of value.matchAll(LINE_BREAK_REGEX)) {
-      const isFinal = (lineBreak.index + lineBreak[0].length) === value.length;
-      if (isFinal) {
-        break;
-      } else if (lines === maxLines) {
-        return lineBreak.index;
+      if (lines === maxLines) {
+        return lineBreak.index + lineBreak[0].length;
       }
       lines++;
     }

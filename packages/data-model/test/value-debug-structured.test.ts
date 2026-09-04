@@ -585,7 +585,7 @@ describe("toStructuredDebugValue()", () => {
   describe("with `maxStringLines`", () => {
     it("returns `/partialString` with the length and the first lines for a string past the limit", () => {
       expect(toStructuredDebugValue("a\nb\nc\nd", { maxStringLines: 2 }))
-        .toEqual({ "/partialString": { length: 7, excerpt: "a\nb" } });
+        .toEqual({ "/partialString": { length: 7, excerpt: "a\nb\n" } });
     });
 
     it("returns a string whose line count is the limit whole", () => {
@@ -595,14 +595,14 @@ describe("toStructuredDebugValue()", () => {
 
     it("counts a newline, a carriage return, and the two together as one line break each", () => {
       expect(toStructuredDebugValue("a\r\nb\rc\nd", { maxStringLines: 3 }))
-        .toEqual({ "/partialString": { length: 8, excerpt: "a\r\nb\rc" } });
+        .toEqual({ "/partialString": { length: 8, excerpt: "a\r\nb\rc\n" } });
     });
 
     it("counts a final line break as ending the last line rather than starting another", () => {
       expect(toStructuredDebugValue("a\nb\n", { maxStringLines: 2 }))
         .toBe("a\nb\n");
       expect(toStructuredDebugValue("a\nb\n\n", { maxStringLines: 2 }))
-        .toEqual({ "/partialString": { length: 5, excerpt: "a\nb" } });
+        .toEqual({ "/partialString": { length: 5, excerpt: "a\nb\n" } });
     });
 
     it("returns whichever excerpt of the two limits is shorter", () => {
@@ -613,12 +613,12 @@ describe("toStructuredDebugValue()", () => {
       expect(
         toStructuredDebugValue(value, { ...options, maxStringLength: 100 }),
       )
-        .toEqual({ "/partialString": { length: 11, excerpt: "abcdefgh" } });
+        .toEqual({ "/partialString": { length: 11, excerpt: "abcdefgh\n" } });
     });
 
-    it("returns a line-cut excerpt whole even when it ends in a high surrogate", () => {
+    it("returns a line-cut excerpt ending in a high surrogate and its line break", () => {
       expect(toStructuredDebugValue("a\ud800\nb", { maxStringLines: 1 }))
-        .toEqual({ "/partialString": { length: 4, excerpt: "a\ud800" } });
+        .toEqual({ "/partialString": { length: 4, excerpt: "a\ud800\n" } });
     });
 
     it("returns a string of any length whole when only the line limit is given", () => {
@@ -630,7 +630,7 @@ describe("toStructuredDebugValue()", () => {
       const value = "a\nb\nc\nd\ne\nf";
       expect(toStructuredDebugValue(value))
         .toEqual({
-          "/partialString": { length: 11, excerpt: "a\nb\nc\nd\ne" },
+          "/partialString": { length: 11, excerpt: "a\nb\nc\nd\ne\n" },
         });
     });
 
@@ -642,7 +642,7 @@ describe("toStructuredDebugValue()", () => {
           { maxStringLines: limit },
         ) as { "/partialString": { length: number; excerpt: string } };
         expect(result["/partialString"].length).toBe(3001);
-        expect(result["/partialString"].excerpt).toBe("x\n".repeat(999) + "x");
+        expect(result["/partialString"].excerpt).toBe("x\n".repeat(1000));
       }
     });
 

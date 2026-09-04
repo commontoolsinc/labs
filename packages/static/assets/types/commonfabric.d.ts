@@ -525,10 +525,10 @@ export interface DebugValueOptions {
    * line break is a newline, a carriage return, or the two together; one at
    * the end of the string ends its last line rather than starting another. A
    * string with more lines is converted to the same form a string past
-   * `maxStringLength` is, carrying an excerpt of the string up to the limit
-   * and the string's actual length; when both limits apply, the excerpt is
-   * the shorter of the two. When absent, the limit is five. A large value is
-   * capped.
+   * `maxStringLength` is, carrying an excerpt of the string up to the limit,
+   * line breaks included, and the string's actual length; when both limits
+   * apply, the excerpt is the shorter of the two. When absent, the limit is
+   * five. A large value is capped.
    */
   readonly maxStringLines?: number;
 

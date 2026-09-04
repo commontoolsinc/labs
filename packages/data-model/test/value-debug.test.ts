@@ -181,9 +181,9 @@ describe("value-debug", () => {
     describe("with `maxStringLines`", () => {
       it("renders the string's first lines, and the string's length after them", () => {
         expect(toCompactDebugString("a\nb\nc", { maxStringLines: 2 }))
-          .toBe('"a\\nb" + ... length: 5');
+          .toBe('"a\\nb\\n" + ... length: 5');
         expect(toCompactDebugString({ s: "a\nb\nc" }, { maxStringLines: 2 }))
-          .toBe('{s:"a\\nb" + ... length: 5}');
+          .toBe('{s:"a\\nb\\n" + ... length: 5}');
       });
 
       it("renders a string whose line count is the limit whole", () => {
@@ -193,7 +193,7 @@ describe("value-debug", () => {
 
       it("renders no more than 5 lines when the limit is not given", () => {
         expect(toCompactDebugString("a\nb\nc\nd\ne\nf"))
-          .toBe('"a\\nb\\nc\\nd\\ne" + ... length: 11');
+          .toBe('"a\\nb\\nc\\nd\\ne\\n" + ... length: 11');
       });
 
       it("throws given a `maxStringLines` that is not a positive integer", () => {
@@ -260,7 +260,7 @@ describe("value-debug", () => {
 
     it("renders a string's first lines and length in the string's place", () => {
       expect(toIndentedDebugString({ s: "a\nb\nc" }, { maxStringLines: 2 }))
-        .toBe('{\n  s: "a\\nb" + ... length: 5\n}');
+        .toBe('{\n  s: "a\\nb\\n" + ... length: 5\n}');
     });
 
     it("renders the replacement in place of the original value", () => {
