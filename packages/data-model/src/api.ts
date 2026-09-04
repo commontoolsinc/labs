@@ -449,10 +449,8 @@ export interface DebugValueOptions {
    * Maximum depth of result nesting: a positive integer, or `Infinity` for as
    * deep as the conversion allows. An item which would require further
    * nesting is instead converted into a form suggestive of the elided
-   * information. When absent, the depth is the default of the function
-   * called: as deep as the conversion allows for a structured value, and ten
-   * levels for a debug string. A large value is capped; there is no guarantee
-   * about the _actual_ possible maximum depth.
+   * information. When absent, the depth is ten levels. A large value is capped;
+   * there is no guarantee about the _actual_ possible maximum depth.
    */
   readonly maxDepth?: number;
 

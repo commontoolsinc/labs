@@ -8,9 +8,17 @@
 instance:
 /<anonymous>(...)
 /<anonymous>(...)
+{
+  "/<anonymous>": "/..."
+}
 
 with props:
 /<anonymous>(x:1)
 /<anonymous>(
   x: 1
 )
+{
+  "/<anonymous>": {
+    x: 1
+  }
+}

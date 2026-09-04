@@ -17,9 +17,18 @@ identifier keys:
   plain: 1,
   _dollar$2: 2
 }
+{
+  plain: 1,
+  _dollar$2: 2
+}
 
 keys needing quotes:
 {"my-key":3,"9x":4,"":5}
+{
+  "my-key": 3,
+  "9x": 4,
+  "": 5
+}
 {
   "my-key": 3,
   "9x": 4,
@@ -35,9 +44,19 @@ keys starting with a slash:
   "/uniqueSymbol": 9,
   "/Error@1": 10
 }
+{
+  "//tagged": 6,
+  "///doubled": 7,
+  "//circle": 8,
+  "//uniqueSymbol": 9,
+  "//Error@1": 10
+}
 
 unsafe key:
 {constructor:11}
 {
   constructor: 11
+}
+{
+  "/constructor": 11
 }

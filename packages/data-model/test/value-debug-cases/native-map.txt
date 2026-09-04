@@ -7,11 +7,20 @@
 empty:
 /Map(...)
 /Map(...)
+{
+  "/Map": "/..."
+}
 
 string keys:
 /Map(...)
 /Map(...)
+{
+  "/Map": "/..."
+}
 
 object key:
 /Map(...)
 /Map(...)
+{
+  "/Map": "/..."
+}

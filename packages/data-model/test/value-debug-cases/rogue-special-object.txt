@@ -12,3 +12,6 @@
 no codec:
 /RogueSpecial(...)
 /RogueSpecial(...)
+{
+  "/RogueSpecial": "/..."
+}

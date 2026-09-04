@@ -55,6 +55,15 @@ plain:
   stack: "Error: boom\n" +
     "    at frob (file:///example/frob.ts:12:34)"
 )
+{
+  "/Error@1": {
+    type: "Error",
+    name: null,
+    message: "boom",
+    stack: "Error: boom\n" +
+      "    at frob (file:///example/frob.ts:12:34)"
+  }
+}
 
 bare:
 /Error(type:"Error",name:null,message:"boom")
@@ -63,6 +72,13 @@ bare:
   name: null,
   message: "boom"
 )
+{
+  "/Error@1": {
+    type: "Error",
+    name: null,
+    message: "boom"
+  }
+}
 
 type other than `Error`:
 /Error(type:"TypeError",name:null,message:"not a thing",stack:"TypeError: not a thing\n    at frob (file:///example/frob.ts:12:34)")
@@ -73,6 +89,15 @@ type other than `Error`:
   stack: "TypeError: not a thing\n" +
     "    at frob (file:///example/frob.ts:12:34)"
 )
+{
+  "/Error@1": {
+    type: "TypeError",
+    name: null,
+    message: "not a thing",
+    stack: "TypeError: not a thing\n" +
+      "    at frob (file:///example/frob.ts:12:34)"
+  }
+}
 
 name differs from type:
 /Error(type:"TypeError",name:"FrobError",message:"frob failed")
@@ -81,6 +106,13 @@ name differs from type:
   name: "FrobError",
   message: "frob failed"
 )
+{
+  "/Error@1": {
+    type: "TypeError",
+    name: "FrobError",
+    message: "frob failed"
+  }
+}
 
 with native cause:
 /Error(type:"Error",name:null,message:"outer",stack:"Error: outer\n    at frob (file:///example/frob.ts:12:34)",cause:/Error(type:"Error",name:null,message:"inner",stack:"Error: inner\n    at frob (file:///example/frob.ts:12:34)"))
@@ -98,6 +130,24 @@ with native cause:
       "    at frob (file:///example/frob.ts:12:34)"
   )
 )
+{
+  "/Error@1": {
+    type: "Error",
+    name: null,
+    message: "outer",
+    stack: "Error: outer\n" +
+      "    at frob (file:///example/frob.ts:12:34)",
+    cause: {
+      "/Error@1": {
+        type: "Error",
+        name: null,
+        message: "inner",
+        stack: "Error: inner\n" +
+          "    at frob (file:///example/frob.ts:12:34)"
+      }
+    }
+  }
+}
 
 with fabric cause:
 /Error(type:"Error",name:null,message:"outer",cause:{detail:1,where:["x",2]})
@@ -113,6 +163,20 @@ with fabric cause:
     ]
   }
 )
+{
+  "/Error@1": {
+    type: "Error",
+    name: null,
+    message: "outer",
+    cause: {
+      detail: 1,
+      where: [
+        "x",
+        2
+      ]
+    }
+  }
+}
 
 with extras:
 /Error(type:"Error",name:null,message:"extra",stack:"Error: extra\n    at frob (file:///example/frob.ts:12:34)",code:42,when:/EpochNsec(1788438896789000000n))
@@ -125,6 +189,17 @@ with extras:
   code: 42,
   when: /EpochNsec(1788438896789000000n)
 )
+{
+  "/Error@1": {
+    type: "Error",
+    name: null,
+    message: "extra",
+    stack: "Error: extra\n" +
+      "    at frob (file:///example/frob.ts:12:34)",
+    code: 42,
+    when: /EpochNsec(1788438896789000000n)
+  }
+}
 
 cause chain:
 /Error(type:"Error",name:null,message:"top",stack:"Error: top\n    at frob (file:///example/frob.ts:12:34)",cause:/Error(type:"Error",name:null,message:"middle",stack:"Error: middle\n    at frob (file:///example/frob.ts:12:34)",cause:/Error(type:"Error",name:null,message:"root",stack:"Error: root\n    at frob (file:///example/frob.ts:12:34)")))
@@ -149,3 +224,30 @@ cause chain:
     )
   )
 )
+{
+  "/Error@1": {
+    type: "Error",
+    name: null,
+    message: "top",
+    stack: "Error: top\n" +
+      "    at frob (file:///example/frob.ts:12:34)",
+    cause: {
+      "/Error@1": {
+        type: "Error",
+        name: null,
+        message: "middle",
+        stack: "Error: middle\n" +
+          "    at frob (file:///example/frob.ts:12:34)",
+        cause: {
+          "/Error@1": {
+            type: "Error",
+            name: null,
+            message: "root",
+            stack: "Error: root\n" +
+              "    at frob (file:///example/frob.ts:12:34)"
+          }
+        }
+      }
+    }
+  }
+}

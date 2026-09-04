@@ -28,9 +28,20 @@ with holes in the middle:
   void * 2,
   6
 ]
+[
+  1,
+  void,
+  3,
+  void * 2,
+  6
+]
 
 hole at the start:
 [void,1]
+[
+  void,
+  1
+]
 [
   void,
   1
@@ -42,9 +53,17 @@ two holes at the start:
   void * 2,
   1
 ]
+[
+  void * 2,
+  1
+]
 
 hole at the end:
 [1,void]
+[
+  1,
+  void
+]
 [
   1,
   void
@@ -56,9 +75,16 @@ two holes at the end:
   1,
   void * 2
 ]
+[
+  1,
+  void * 2
+]
 
 all holes, length 1:
 [void]
+[
+  void
+]
 [
   void
 ]
@@ -68,9 +94,15 @@ all holes, length 2:
 [
   void * 2
 ]
+[
+  void * 2
+]
 
 all holes, length 50:
 [void*50]
+[
+  void * 50
+]
 [
   void * 50
 ]
@@ -81,6 +113,14 @@ all holes across the limit:
   void * 100,
   ... length: 500
 ]
+[
+  void * 100,
+  {
+    "/...": {
+      length: 500
+    }
+  }
+]
 
 holes across the limit:
 [1,void*99,...length:250]
@@ -88,4 +128,13 @@ holes across the limit:
   1,
   void * 99,
   ... length: 250
+]
+[
+  1,
+  void * 99,
+  {
+    "/...": {
+      length: 250
+    }
+  }
 ]

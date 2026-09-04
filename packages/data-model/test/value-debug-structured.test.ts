@@ -386,7 +386,7 @@ describe("toStructuredDebugValue()", () => {
         at = at.o as Record<string, unknown>;
         levels++;
       }
-      expect(levels).toBe(99);
+      expect(levels).toBe(9);
       expect(at).toEqual({ "/...": "object" });
     });
 

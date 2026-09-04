@@ -5,3 +5,6 @@
 two elements:
 /Set(...)
 /Set(...)
+{
+  "/Set": "/..."
+}

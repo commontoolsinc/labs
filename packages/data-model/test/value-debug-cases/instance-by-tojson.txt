@@ -18,6 +18,11 @@ object:
 /HasJson(
   j: 1
 )
+{
+  "/HasJson": {
+    j: 1
+  }
+}
 
 array:
 /JsonArray([1,2])
@@ -25,3 +30,9 @@ array:
   1,
   2
 ])
+{
+  "/JsonArray": [
+    1,
+    2
+  ]
+}

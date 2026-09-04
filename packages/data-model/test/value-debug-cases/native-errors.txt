@@ -30,23 +30,41 @@
 plain:
 /Error("Error: boom")
 /Error("Error: boom")
+{
+  "/Error": "Error: boom"
+}
 
 type:
 /TypeError("TypeError: not a thing")
 /TypeError("TypeError: not a thing")
+{
+  "/TypeError": "TypeError: not a thing"
+}
 
 range:
 /RangeError("RangeError: out of bounds")
 /RangeError("RangeError: out of bounds")
+{
+  "/RangeError": "RangeError: out of bounds"
+}
 
 custom:
 /FrobError("FrobError: frob failed")
 /FrobError("FrobError: frob failed")
+{
+  "/FrobError": "FrobError: frob failed"
+}
 
 with cause:
 /Error("Error: outer")
 /Error("Error: outer")
+{
+  "/Error": "Error: outer"
+}
 
 with extra property:
 /Error("Error: extra")
 /Error("Error: extra")
+{
+  "/Error": "Error: extra"
+}

@@ -17,35 +17,62 @@
 named:
 function foo(...){...}
 function foo(...) {...}
+{
+  "/function": "foo(...)"
+}
 
 arrow:
 function arrow(...){...}
 function arrow(...) {...}
+{
+  "/function": "arrow(...)"
+}
 
 method:
 function method(...){...}
 function method(...) {...}
+{
+  "/function": "method(...)"
+}
 
 anonymous:
 (...)=>{...}
 (...) => {...}
+{
+  "/function": "<anonymous>(...)"
+}
 
 empty name:
 (...)=>{...}
 (...) => {...}
+{
+  "/function": "<anonymous>(...)"
+}
 
 class:
 function Foo(...){...}
 function Foo(...) {...}
+{
+  "/function": "Foo(...)"
+}
 
 generator:
 function gen(...){...}
 function gen(...) {...}
+{
+  "/function": "gen(...)"
+}
 
 async:
 function af(...){...}
 function af(...) {...}
+{
+  "/function": "af(...)"
+}
 
 with properties:
 function bar(...){...}
 function bar(...) {...}
+{
+  "/function": "bar(...)"
+}

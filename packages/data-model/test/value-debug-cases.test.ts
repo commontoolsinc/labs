@@ -1,14 +1,19 @@
 /**
- * The two debug string renderers, run over the cases recorded as files in
+ * The debug renderers, run over the cases recorded as files in
  * `value-debug-cases/`. A file opens with a JavaScript expression which
  * produces a plain object, each of whose properties is one case: the key
  * labels it, and the value is what gets rendered, on its own. After a blank
  * line, the file records one section per property, the sections separated by
- * blank lines: the label followed by a colon on a line of its own, then the
- * value's `toCompactDebugString()` rendering, whole, then its
- * `toIndentedDebugString()` rendering, which can run to several lines. A
- * recorded rendering is a fact about the renderer, to be read as such when it
- * changes. What `maxLength` does to a compact rendering is
+ * blank lines: the label followed by a colon on a line of its own, then three
+ * renderings of the value, each starting on a line of its own. The first is
+ * its `toCompactDebugString()` rendering, whole. The second is its
+ * `toIndentedDebugString()` rendering, which can run to several lines. The
+ * third is its `toStructuredDebugValue()` result, the structure the two
+ * strings were rendered from, rendered by `toIndentedDebugString()` with every
+ * limit at `Infinity` so that it shows whole; where a string rendering
+ * interprets a form of the structured value, this rendering shows the form
+ * itself. A recorded rendering is a fact about the renderer, to be read as
+ * such when it changes. What `maxLength` does to a compact rendering is
  * `value-debug.test.ts`'s to check, so no case here is cut by one.
  *
  * The expression is evaluated with every `FabricInstance` and
@@ -35,14 +40,31 @@ import { REALM_CODEC } from "@/codec-interface/interface.ts";
 import * as fabricInstances from "@/fabric-instances/index.ts";
 import * as fabricPrimitives from "@/fabric-primitives/index.ts";
 import {
+  type DebugValueOptions,
   FabricInstance,
   FabricPrimitive,
   FabricSpecialObject,
 } from "@/interface.ts";
-import { toCompactDebugString, toIndentedDebugString } from "@/value-debug.ts";
+import {
+  toCompactDebugString,
+  toIndentedDebugString,
+  toStructuredDebugValue,
+} from "@/value-debug.ts";
 
 /** Directory holding the case files. */
 const CASES_DIR = new URL("./value-debug-cases/", import.meta.url);
+
+/**
+ * Options for rendering a structured value whole: every limit at `Infinity`,
+ * which the renderer caps at its absolute maximum for each.
+ */
+const WHOLE_RENDERING_OPTIONS: DebugValueOptions = {
+  maxDepth: Infinity,
+  maxArrayLength: Infinity,
+  maxProperties: Infinity,
+  maxStringLength: Infinity,
+  maxStringLines: Infinity,
+};
 
 /** Whether to rewrite the recorded renderings instead of checking them. */
 const UPDATE_GOLDENS = (() => {
@@ -121,13 +143,17 @@ function parseCaseFile(text: string): {
 
 /**
  * Renders one case as its recorded section: the label and a colon, the
- * compact rendering, and the indented rendering, each starting on a line of
- * its own.
+ * compact rendering, the indented rendering, and the structured value
+ * rendered whole, each starting on a line of its own.
  */
 function renderSection(label: string, value: unknown): string {
   const compact = toCompactDebugString(value);
   const indented = toIndentedDebugString(value);
-  return `${label}:\n${compact}\n${indented}`;
+  const structured = toIndentedDebugString(
+    toStructuredDebugValue(value),
+    WHOLE_RENDERING_OPTIONS,
+  );
+  return `${label}:\n${compact}\n${indented}\n${structured}`;
 }
 
 /** Names of the case files, sorted for a stable test order. */

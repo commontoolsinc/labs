@@ -15,3 +15,8 @@
 name throws:
 /function(/unconvertible("name trap"))
 /function(/unconvertible("name trap"))
+{
+  "/function": {
+    "/unconvertible": "name trap"
+  }
+}

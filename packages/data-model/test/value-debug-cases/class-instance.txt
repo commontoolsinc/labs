@@ -32,17 +32,39 @@ data:
     ]
   }
 )
+{
+  "/Data": {
+    x: 1,
+    y: "two",
+    nested: {
+      z: [
+        3
+      ]
+    }
+  }
+}
 
 empty:
 /Empty(...)
 /Empty(...)
+{
+  "/Empty": "/..."
+}
 
 name not an identifier:
 /"Not a proper identifier"(x:1)
 /"Not a proper identifier"(
   x: 1
 )
+{
+  "/Not a proper identifier": {
+    x: 1
+  }
+}
 
 name with a newline:
 /"a\nb"(...)
 /"a\nb"(...)
+{
+  "/a\nb": "/..."
+}

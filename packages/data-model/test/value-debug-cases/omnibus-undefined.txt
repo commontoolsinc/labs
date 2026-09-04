@@ -6,7 +6,9 @@
 plain:
 undefined
 undefined
+undefined
 
 via void:
+undefined
 undefined
 undefined

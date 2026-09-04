@@ -16,3 +16,8 @@ with a toJSON property:
 {
   toJSON: function toJSON(...) {...}
 }
+{
+  toJSON: {
+    "/function": "toJSON(...)"
+  }
+}

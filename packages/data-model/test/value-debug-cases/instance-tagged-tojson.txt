@@ -32,15 +32,35 @@
 cyclic:
 /Cyclic(<circle>)
 /Cyclic(<circle>)
+{
+  "/Cyclic": {
+    "/circle": 0
+  }
+}
 
 set:
 /ToSet(/Set(...))
 /ToSet(/Set(...))
+{
+  "/ToSet": {
+    "/Set": "/..."
+  }
+}
 
 fn:
 /ToFunction((...)=>{...})
 /ToFunction((...) => {...})
+{
+  "/ToFunction": {
+    "/function": "<anonymous>(...)"
+  }
+}
 
 symbol:
 /ToSymbol(Symbol("d"))
 /ToSymbol(Symbol("d"))
+{
+  "/ToSymbol": {
+    "/uniqueSymbol": "d"
+  }
+}

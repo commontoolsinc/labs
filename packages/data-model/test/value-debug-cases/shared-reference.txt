@@ -25,3 +25,21 @@ one object at four places:
     }
   ]
 }
+{
+  a: {
+    v: 1
+  },
+  b: {
+    v: 1
+  },
+  c: [
+    {
+      v: 1
+    },
+    {
+      d: {
+        v: 1
+      }
+    }
+  ]
+}

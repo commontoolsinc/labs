@@ -39,12 +39,15 @@
 empty:
 ""
 ""
+""
 
 plain:
 "hello"
 "hello"
+"hello"
 
 with quotes:
+"say \"hi\""
 "say \"hi\""
 "say \"hi\""
 
@@ -52,32 +55,41 @@ with newline:
 "a\nb"
 "a\n" +
   "b"
+"a\n" +
+  "b"
 
 with backslash:
+"a\\b"
 "a\\b"
 "a\\b"
 
 non-ASCII:
 "héllo ☃"
 "héllo ☃"
+"héllo ☃"
 
 control character:
+"\u0001"
 "\u0001"
 "\u0001"
 
 reads like a token:
 "undefined"
 "undefined"
+"undefined"
 
 reads like a bigint:
+"42n"
 "42n"
 "42n"
 
 reads like a symbol:
 "@k"
 "@k"
+"@k"
 
 lone surrogate:
+"\ud800"
 "\ud800"
 "\ud800"
 
@@ -85,8 +97,11 @@ with quotes and a newline:
 "a string with \"quotes\" and a\nnewline"
 "a string with \"quotes\" and a\n" +
   "newline"
+"a string with \"quotes\" and a\n" +
+  "newline"
 
 exactly 200 characters:
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 
@@ -94,6 +109,12 @@ exactly 200 characters:
 "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij"+...length:300
 "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij" +
   ... length: 300
+{
+  "/partialString": {
+    length: 300,
+    excerpt: "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij"
+  }
+}
 
 seven lines:
 "one\ntwo\nthree\nfour\nfive\n"+...length:33
@@ -103,6 +124,16 @@ seven lines:
   "four\n" +
   "five\n" +
   ... length: 33
+{
+  "/partialString": {
+    length: 33,
+    excerpt: "one\n" +
+      "two\n" +
+      "three\n" +
+      "four\n" +
+      "five\n"
+  }
+}
 
 three lines of 90, cut inside the third:
 "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\ncccccccccccccccccc"+...length:273
@@ -110,6 +141,14 @@ three lines of 90, cut inside the third:
   "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n" +
   "cccccccccccccccccc" +
   ... length: 273
+{
+  "/partialString": {
+    length: 273,
+    excerpt: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n" +
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n" +
+      "cccccccccccccccccc"
+  }
+}
 
 in an array:
 ["one line","xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"+...length:250,"one\ntwo\nthree","one\ntwo\nthree\nfour\nfive\n"+...length:33]
@@ -127,6 +166,28 @@ in an array:
     "five\n" +
     ... length: 33
 ]
+[
+  "one line",
+  {
+    "/partialString": {
+      length: 250,
+      excerpt: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  },
+  "one\n" +
+    "two\n" +
+    "three",
+  {
+    "/partialString": {
+      length: 33,
+      excerpt: "one\n" +
+        "two\n" +
+        "three\n" +
+        "four\n" +
+        "five\n"
+    }
+  }
+]
 
 in an object:
 {lines:"one\ntwo\nthree",long:"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"+...length:250}
@@ -136,4 +197,15 @@ in an object:
     "three",
   long: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" +
     ... length: 250
+}
+{
+  lines: "one\n" +
+    "two\n" +
+    "three",
+  long: {
+    "/partialString": {
+      length: 250,
+      excerpt: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+  }
 }

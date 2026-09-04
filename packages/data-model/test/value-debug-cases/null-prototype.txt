@@ -10,3 +10,9 @@ null prototype:
     c: 2
   }
 }
+{
+  a: 1,
+  b: {
+    c: 2
+  }
+}

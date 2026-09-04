@@ -12,3 +12,6 @@ with a non-enumerable property:
 {
   shown: 1
 }
+{
+  shown: 1
+}

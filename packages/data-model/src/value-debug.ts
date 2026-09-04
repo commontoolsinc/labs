@@ -31,8 +31,8 @@ import type { RealmCodecValue } from "@/codec-realm/interface.ts";
  */
 const ABSOLUTE_MAX_DEPTH = 100;
 
-/** Nesting depth a debug string renders to, when its options do not say. */
-const DEFAULT_STRING_MAX_DEPTH = 10;
+/** Nesting depth a conversion stops at, when its options do not say. */
+const DEFAULT_MAX_DEPTH = 10;
 
 /**
  * Number of array elements a conversion stops at whatever its options say, so
@@ -1140,10 +1140,9 @@ function checkedLimit(
 }
 
 /**
- * Helper for the entry points, which validates `options` and returns the
- * limits they call for: each limit stated, or when not, `defaultMaxDepth` for
- * the depth and the default for each of the others, all capped at their
- * absolute maximums. The string length defaults to `Infinity` rather than
+ * Helper for the entry points, which validates `options` and returns the limits
+ * they call for: each limit stated, or when not, its default, all capped at
+ * their absolute maximums. The string length defaults to `Infinity` rather than
  * to its usual default when the options state a line count.
  *
  * @throws {Error} if `options` is not a plain object, or if one of its limits
@@ -1151,7 +1150,6 @@ function checkedLimit(
  */
 function checkedLimits(
   options: DebugValueOptions | undefined,
-  defaultMaxDepth: number,
 ): ConversionLimits {
   checkOptions(options);
 
@@ -1165,7 +1163,7 @@ function checkedLimits(
     maxDepth: checkedLimit(
       "maxDepth",
       options?.maxDepth,
-      defaultMaxDepth,
+      DEFAULT_MAX_DEPTH,
       ABSOLUTE_MAX_DEPTH,
     ),
     maxArrayLength: checkedLimit(
@@ -1198,7 +1196,7 @@ function checkedLimits(
 /**
  * Renders the debug-string form of the given value with optional indentation,
  * by converting it with `toStructuredDebugValue()` per `options` and rendering
- * the result. A depth the options leave unsaid is `DEFAULT_STRING_MAX_DEPTH`.
+ * the result.
  *
  * @throws {Error} if given invalid `options`.
  */
@@ -1209,7 +1207,7 @@ function renderDebugString(
 ): string {
   // The limits are resolved here, ahead of the `try`, so that an invalid one
   // is refused rather than rendered as unrenderable.
-  const limits = checkedLimits(options, DEFAULT_STRING_MAX_DEPTH);
+  const limits = checkedLimits(options);
   const converterOptions: DebugValueOptions = { ...options, ...limits };
 
   try {
@@ -1349,17 +1347,16 @@ export function toDebugKindString(value: unknown): string {
  *
  * The limits of the result -- its nesting, the number of elements of an array
  * it represents, the number of properties of an object it represents, and the
- * length and number of lines of a string it carries whole -- and a replacer
- * to consult are the `maxDepth`, `maxArrayLength`, `maxProperties`,
- * `maxStringLength`, `maxStringLines`, and `replacer` of `options`. When
- * there is no nesting limit given, the result nests as deep as reasonably
- * possible; when there is no array length given, an array is represented to
- * one hundred elements; when there is no property count given, an object is
- * represented to one hundred properties; when there is no string line count
- * given, a string is
- * carried whole to five lines; and when there is no string length given, a
- * string is carried whole to two hundred characters, or as long as the
- * conversion allows when a line count is given.
+ * length and number of lines of a string it carries whole -- and a replacer to
+ * consult are the `maxDepth`, `maxArrayLength`, `maxProperties`,
+ * `maxStringLength`, `maxStringLines`, and `replacer` of `options`. When there
+ * is no nesting limit given, the result nests to ten levels; when there is no
+ * array length given, an array is represented to one hundred elements; when
+ * there is no property count given, an object is represented to one hundred
+ * properties; when there is no string line count given, a string is carried
+ * whole to five lines; and when there is no string length given, a string is
+ * carried whole to two hundred characters, or as long as the conversion allows
+ * when a line count is given.
  *
  * If the conversion could not be completed (stack overflow, object
  * `toJSON()` conversion error, etc.), this function returns the literal value
@@ -1373,7 +1370,7 @@ export function toStructuredDebugValue(
   /** Conversion options, if desired. */
   options?: DebugValueOptions,
 ): FabricValue {
-  const limits = checkedLimits(options, ABSOLUTE_MAX_DEPTH);
+  const limits = checkedLimits(options);
 
   // We subtract one from `maxDepth` because the "suggestive forms" for elided
   // data use a layer of depth. The array-length and string-length forms use
