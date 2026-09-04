@@ -165,6 +165,11 @@ export class XDeviceLinkView extends LitElement {
   // `setTimeout` is typed as Node's `Timeout` under this config, not `number`.
   #guardTimer: ReturnType<typeof setTimeout> | undefined;
 
+  /** The answer step of this dialog, which a test drives directly. */
+  get accessForTestingOnly(): { finish(accepted: boolean): void } {
+    return { finish: (accepted) => this.#finish(accepted) };
+  }
+
   override firstUpdated() {
     // Schedule the guard release FIRST — before anything below that could throw
     // — so a failure activating the dialog can never leave the accept button
@@ -174,7 +179,7 @@ export class XDeviceLinkView extends LitElement {
     }, TAP_THROUGH_GUARD_MS);
 
     const dialog = this.renderRoot.querySelector("dialog");
-    activateModalDialog(dialog, () => this.finish(false));
+    activateModalDialog(dialog, () => this.#finish(false));
 
     // Focus the heading, NOT a button. WebKit scrolls a modal to its focused
     // element; with the accept button disabled during the guard, focus would
@@ -191,11 +196,8 @@ export class XDeviceLinkView extends LitElement {
     super.disconnectedCallback();
   }
 
-  /**
-   * TypeScript-private rather than a `#` name: `test/device-link.test.ts`
-   * drives this member directly.
-   */
-  private finish(accepted: boolean) {
+  /** Answers the dialog once, dispatching the result the host listens for. */
+  #finish(accepted: boolean) {
     // Exactly one answer, ever: a double-tap must not dispatch twice.
     if (this.#answered) return;
     // Accept is inert during the tap-through guard; Cancel is always allowed.
@@ -219,7 +221,7 @@ export class XDeviceLinkView extends LitElement {
             Reveal the code again on the Pair screen and rescan it.
           </p>
           <div class="actions">
-            <button @click="${() => this.finish(false)}">Continue</button>
+            <button @click="${() => this.#finish(false)}">Continue</button>
           </div>
         </dialog>
       `;
@@ -239,7 +241,7 @@ export class XDeviceLinkView extends LitElement {
           <div class="did">${this.incomingDid}</div>
           <div class="actions">
             <button
-              @click="${() => this.finish(true)}"
+              @click="${() => this.#finish(true)}"
               ?disabled="${this.guarded}"
             >
               Continue
@@ -271,12 +273,12 @@ export class XDeviceLinkView extends LitElement {
         </p>
         <div class="actions">
           <button
-            @click="${() => this.finish(true)}"
+            @click="${() => this.#finish(true)}"
             ?disabled="${this.guarded}"
           >
             ${replacing ? "Replace identity" : "Continue"}
           </button>
-          <button @click="${() => this.finish(false)}">Cancel</button>
+          <button @click="${() => this.#finish(false)}">Cancel</button>
         </div>
       </dialog>
     `;

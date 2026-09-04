@@ -162,9 +162,7 @@ export class XRootView extends BaseView implements ShellApp {
   // Invalidates callbacks from replaced workers. A coded compiler-load error
   // can arrive through either a request reply or an asynchronous runtime error;
   // only the currently-owned worker may trigger one replacement.
-  // TypeScript-private rather than a `#` name, because `test/root-view.test.ts`
-  // drives this member directly.
-  private _runtimeGeneration = 0;
+  #runtimeGeneration = 0;
   #preserveRuntimeErrorsForNextViewChange = false;
 
   readonly preserveRuntimeErrorsForNextViewChange = (): void => {
@@ -173,10 +171,10 @@ export class XRootView extends BaseView implements ShellApp {
 
   readonly _handleRuntimeError = (
     event: ErrorNotification,
-    generation = this._runtimeGeneration,
+    generation = this.#runtimeGeneration,
   ): void => {
     console.error("[RuntimeClient Error]", event);
-    if (generation !== this._runtimeGeneration) {
+    if (generation !== this.#runtimeGeneration) {
       return;
     }
 
@@ -200,8 +198,8 @@ export class XRootView extends BaseView implements ShellApp {
     // before terminating it; the replacement gets a fresh module map and can
     // retry the compiler chunk when the user retries the operation.
     this._runtimeLoadErrors = [];
-    this._runtimeGeneration++;
-    this._rt.run([this.app]);
+    this.#runtimeGeneration++;
+    this.#rt.run([this.app]);
   };
 
   @property()
@@ -224,9 +222,7 @@ export class XRootView extends BaseView implements ShellApp {
   // change; one runtime serves every space. This is manually run in `updated()`
   // because we want to compare to previous values, leaving this function
   // responsible for cleaning up previous runtimes, and creating a new one.
-  // TypeScript-private rather than a `#` name, because `test/root-view.test.ts`
-  // drives this member directly.
-  private _rt = new Task<[AppState | undefined], RuntimeInternals | undefined>(
+  #rt = new Task<[AppState | undefined], RuntimeInternals | undefined>(
     this,
     {
       // Do not define `args` -- this is run in "manual mode",
@@ -235,9 +231,9 @@ export class XRootView extends BaseView implements ShellApp {
       // whereas in a task we don't have access to necessary info
       // like previous app state.
       task: async ([app]: [AppState | undefined], { signal }) => {
-        const generation = ++this._runtimeGeneration;
+        const generation = ++this.#runtimeGeneration;
         this._runtimeLoadErrors = [];
-        const previous = this._rt.value;
+        const previous = this.#rt.value;
         if (previous) {
           this.runtime?.off(
             "eventneedsattention",
@@ -333,6 +329,31 @@ export class XRootView extends BaseView implements ShellApp {
     },
   );
 
+  /**
+   * The runtime task, its generation counter, and the unload handler, which
+   * a test drives directly.
+   */
+  get accessForTestingOnly(): {
+    readonly onBeforeUnload: (event: BeforeUnloadEvent) => void;
+    rt: Task<[AppState | undefined], RuntimeInternals | undefined>;
+    readonly runtimeGeneration: number;
+  } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      onBeforeUnload: this.#onBeforeUnload,
+      get rt() {
+        return outerThis.#rt;
+      },
+      set rt(value) {
+        outerThis.#rt = value;
+      },
+      get runtimeGeneration() {
+        return outerThis.#runtimeGeneration;
+      },
+    };
+  }
+
   override connectedCallback(): void {
     super.connectedCallback();
     // A Lit element can be detached and reattached without rebuilding its
@@ -345,7 +366,7 @@ export class XRootView extends BaseView implements ShellApp {
       "theme-preference-changed",
       this.#onThemeChanged,
     );
-    globalThis.addEventListener("beforeunload", this._onBeforeUnload);
+    globalThis.addEventListener("beforeunload", this.#onBeforeUnload);
   }
 
   override disconnectedCallback(): void {
@@ -355,7 +376,7 @@ export class XRootView extends BaseView implements ShellApp {
       "theme-preference-changed",
       this.#onThemeChanged,
     );
-    globalThis.removeEventListener("beforeunload", this._onBeforeUnload);
+    globalThis.removeEventListener("beforeunload", this.#onBeforeUnload);
     super.disconnectedCallback();
   }
 
@@ -366,9 +387,7 @@ export class XRootView extends BaseView implements ShellApp {
   // unconfirmed, ask the browser to confirm leaving instead of silently losing
   // them. Commits confirm quickly (typically well under a second), so the
   // prompt only appears in the narrow window a reload would actually lose data.
-  // TypeScript-private rather than a `#` name, because `test/root-view.test.ts`
-  // drives this member directly.
-  private _onBeforeUnload = (event: BeforeUnloadEvent): void => {
+  #onBeforeUnload = (event: BeforeUnloadEvent): void => {
     if (this.runtime?.hasPendingWrites()) {
       event.preventDefault();
     }
@@ -406,7 +425,7 @@ export class XRootView extends BaseView implements ShellApp {
       shouldRecreateRuntime(previous, current);
 
     if (flipState || stateChanged) {
-      this._rt.run([current]);
+      this.#rt.run([current]);
     }
   }
 
@@ -493,7 +512,7 @@ export class XRootView extends BaseView implements ShellApp {
     // the telemetry sink lives across navigations.
     this.#telemetry?.setSpace(space);
     if (space !== undefined) {
-      void this.#refreshEventAttention(space, this._runtimeGeneration);
+      void this.#refreshEventAttention(space, this.#runtimeGeneration);
     }
   }
 
@@ -527,7 +546,7 @@ export class XRootView extends BaseView implements ShellApp {
     try {
       const notices = await runtime.listEventAttention(space);
       if (
-        generation !== this._runtimeGeneration || runtime !== this.runtime ||
+        generation !== this.#runtimeGeneration || runtime !== this.runtime ||
         space !== this.space ||
         this.#eventAttentionRefreshOwners.get(space) !== owner
       ) return;
@@ -556,7 +575,7 @@ export class XRootView extends BaseView implements ShellApp {
       ];
     } catch (error) {
       if (
-        generation === this._runtimeGeneration && runtime === this.runtime &&
+        generation === this.#runtimeGeneration && runtime === this.runtime &&
         space === this.space &&
         this.#eventAttentionRefreshOwners.get(space) === owner
       ) {
@@ -679,15 +698,15 @@ export class XRootView extends BaseView implements ShellApp {
 
   override render() {
     const loadError: LoadError | undefined = this._spaceResolutionError ??
-      (this._rt.status === TaskStatus.ERROR
-        ? { kind: "space", error: this._rt.error }
+      (this.#rt.status === TaskStatus.ERROR
+        ? { kind: "space", error: this.#rt.error }
         : undefined);
     return html`
       <cf-theme .theme="${{ colorScheme: this._themePreference }}">
         <x-app-view
           .app="${this.app}"
           .keyStore="${this.keyStore}"
-          .rt="${this._rt.value}"
+          .rt="${this.#rt.value}"
           .space="${this.space}"
           .spaceLoadError="${loadError}"
           .runtimeLoadErrors="${this._runtimeLoadErrors}"

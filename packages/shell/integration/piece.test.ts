@@ -132,11 +132,13 @@ describe("shell piece tests", () => {
           const rootView = document.querySelector("x-root-view");
           const typedRootView = rootView as
             | {
-              _rt?: {
-                status?: unknown;
-                value?: unknown;
-                error?: {
-                  message?: string;
+              accessForTestingOnly?: {
+                rt?: {
+                  status?: unknown;
+                  value?: unknown;
+                  error?: {
+                    message?: string;
+                  };
                 };
               };
               app?: {
@@ -175,9 +177,11 @@ describe("shell piece tests", () => {
             href: globalThis.location.href,
             hasRuntime: !!globalThis.commonfabric?.rt,
             hasRootView: !!rootView,
-            rootRuntimeStatus: typedRootView?._rt?.status,
-            hasRootRuntimeValue: !!typedRootView?._rt?.value,
-            rootRuntimeError: typedRootView?._rt?.error?.message,
+            rootRuntimeStatus: typedRootView?.accessForTestingOnly?.rt?.status,
+            hasRootRuntimeValue: !!typedRootView?.accessForTestingOnly?.rt
+              ?.value,
+            rootRuntimeError: typedRootView?.accessForTestingOnly?.rt?.error
+              ?.message,
             rootHasIdentity: !!typedRootView?.app?.identity,
             hasAppView: !!appView,
             patternsStatus: appView?._patterns?.status,
@@ -458,9 +462,13 @@ describe("shell piece tests", () => {
     // trip, and the transport close) on a real completion instead of a timer.
     await shell.page().evaluate(async () => {
       const rootView = document.querySelector("x-root-view") as
-        | { _rt?: { value?: { dispose(): Promise<void> } } }
+        | {
+          accessForTestingOnly?: {
+            rt?: { value?: { dispose(): Promise<void> } };
+          };
+        }
         | null;
-      const internals = rootView?._rt?.value;
+      const internals = rootView?.accessForTestingOnly?.rt?.value;
       if (!internals) {
         throw new Error(
           "Runtime internals not available to observe disposal",
