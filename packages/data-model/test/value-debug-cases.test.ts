@@ -5,10 +5,11 @@
  * labels it, and the value is what gets rendered, on its own. After a blank
  * line, the file records one section per property, the sections separated by
  * blank lines: the label followed by a colon on a line of its own, then the
- * value's `toCompactDebugString()` rendering at a maximum length of 100, then
- * its `toIndentedDebugString()` rendering, which can run to several lines. A
+ * value's `toCompactDebugString()` rendering, whole, then its
+ * `toIndentedDebugString()` rendering, which can run to several lines. A
  * recorded rendering is a fact about the renderer, to be read as such when it
- * changes.
+ * changes. What `maxLength` does to a compact rendering is
+ * `value-debug.test.ts`'s to check, so no case here is cut by one.
  *
  * The expression is evaluated with every `FabricInstance` and
  * `FabricPrimitive` class in scope under its own name, along with the three
@@ -40,9 +41,6 @@ import { toCompactDebugString, toIndentedDebugString } from "@/value-debug.ts";
 
 /** Directory holding the case files. */
 const CASES_DIR = new URL("./value-debug-cases/", import.meta.url);
-
-/** Maximum length passed to `toCompactDebugString()`. */
-const COMPACT_MAX_LENGTH = 100;
 
 /** Whether to rewrite the recorded renderings instead of checking them. */
 const UPDATE_GOLDENS = (() => {
@@ -123,9 +121,7 @@ function parseCaseFile(text: string): {
  * its own.
  */
 function renderSection(label: string, value: unknown): string {
-  const compact = toCompactDebugString(value, {
-    maxLength: COMPACT_MAX_LENGTH,
-  });
+  const compact = toCompactDebugString(value);
   const indented = toIndentedDebugString(value);
   return `${label}:\n${compact}\n${indented}`;
 }

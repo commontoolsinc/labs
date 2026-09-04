@@ -47,7 +47,7 @@
 })()
 
 plain:
-/Error(type:"Error",name:null,message:"boom",stack:"Error: boom\n    at frob (file:///example/fro...
+/Error(type:"Error",name:null,message:"boom",stack:"Error: boom\n    at frob (file:///example/frob.ts:12:34)")
 /Error(
   type: "Error",
   name: null,
@@ -65,7 +65,7 @@ bare:
 )
 
 type other than `Error`:
-/Error(type:"TypeError",name:null,message:"not a thing",stack:"TypeError: not a thing\n    at fro...
+/Error(type:"TypeError",name:null,message:"not a thing",stack:"TypeError: not a thing\n    at frob (file:///example/frob.ts:12:34)")
 /Error(
   type: "TypeError",
   name: null,
@@ -83,7 +83,7 @@ name differs from type:
 )
 
 with native cause:
-/Error(type:"Error",name:null,message:"outer",stack:"Error: outer\n    at frob (file:///example/f...
+/Error(type:"Error",name:null,message:"outer",stack:"Error: outer\n    at frob (file:///example/frob.ts:12:34)",cause:/Error(type:"Error",name:null,message:"inner",stack:"Error: inner\n    at frob (file:///example/frob.ts:12:34)"))
 /Error(
   type: "Error",
   name: null,
@@ -115,7 +115,7 @@ with fabric cause:
 )
 
 with extras:
-/Error(type:"Error",name:null,message:"extra",stack:"Error: extra\n    at frob (file:///example/f...
+/Error(type:"Error",name:null,message:"extra",stack:"Error: extra\n    at frob (file:///example/frob.ts:12:34)",code:42,when:/EpochNsec(1788438896789000000n))
 /Error(
   type: "Error",
   name: null,
@@ -127,7 +127,7 @@ with extras:
 )
 
 cause chain:
-/Error(type:"Error",name:null,message:"top",stack:"Error: top\n    at frob (file:///example/frob....
+/Error(type:"Error",name:null,message:"top",stack:"Error: top\n    at frob (file:///example/frob.ts:12:34)",cause:/Error(type:"Error",name:null,message:"middle",stack:"Error: middle\n    at frob (file:///example/frob.ts:12:34)",cause:/Error(type:"Error",name:null,message:"root",stack:"Error: root\n    at frob (file:///example/frob.ts:12:34)")))
 /Error(
   type: "Error",
   name: null,
