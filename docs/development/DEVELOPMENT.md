@@ -449,9 +449,11 @@ needs, and using them is not optional in code that can reach a stored value:
   in for the container question.
 - A walk that can meet an instance and has a better answer than a throw tests
   for one first. `attestation.ts`'s `resolve()` reports the
-  `TypeMismatchError` its own signature already carries. A walk that can meet a
-  *link* tests `isPrimitiveCellLink()` first, since a link is a reference
-  rather than a container, and under `modernCellRep` it is a `FabricInstance`.
+  `TypeMismatchError` its own signature already carries. A walk whose own
+  answer for a link differs from the container question's tests
+  `isPrimitiveCellLink()` first. That predicate speaks only about the sigil
+  form, which is written as a record, so a `FabricLink` reaches the refusal
+  like any other instance.
   And `reactive-dependencies.ts` keeps descending one by property name through
   its own `isKeyable()`: a throw there costs the rest of the notification being
   delivered, and `false` would make an instance indistinguishable from a leaf,

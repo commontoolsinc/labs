@@ -1330,9 +1330,8 @@ const stripWriterIdentityStamp = (value: unknown): unknown => {
   if (Array.isArray(value)) {
     return value.map(stripWriterIdentityStamp);
   }
-  // A link is carried whole. It is a reference rather than a record of the
-  // writer's, so there is no stamp inside one to strip -- and under
-  // `modernCellRep` it is a `FabricLink`, which the walk question refuses.
+  // A sigil link is carried whole. It is a reference rather than a record of
+  // the writer's, so there is no stamp inside one to strip.
   if (isPrimitiveCellLink(value)) {
     return value;
   }
@@ -3091,10 +3090,10 @@ const valuesAtPatternPath = (
     );
   }
 
-  // A pattern path does not descend through a link: the reference is the
-  // value at that slot, and what it points at is resolved elsewhere. Asked
-  // before the walk question, because `modernCellRep` makes a link a
-  // `FabricLink`, which that question refuses.
+  // A pattern path does not descend through a sigil link: the reference is
+  // the value at that slot, and what it points at is resolved elsewhere.
+  // Asked before the walk question, which reads a sigil link as the record it
+  // is written as and would descend into it.
   if (isPrimitiveCellLink(value) || !isWalkableObjectOrArray(value)) {
     return [];
   }
@@ -3259,9 +3258,11 @@ const policySchemaMatchesValue = (
   }
   // A special object has no property for a `properties` condition to read, so
   // it falls past this arm rather than matching every child vacuously.
-  // A link matches by what it is, not by what a `properties` condition would
-  // read off it; and under `modernCellRep` asking the walk question of one
-  // refuses.
+  // A sigil link matches by what it is, not by what a `properties` condition
+  // would read off the record it is written as. Descending one reaches values
+  // the walk question refuses, which is what a modern argument link arriving
+  // here does; `isPrimitiveCellLink()` speaks only about the sigil form, so a
+  // `FabricLink` reaching this arm is refused rather than matched.
   if (
     !isPrimitiveCellLink(value) && isWalkableObjectOrArray(value) &&
     isObjectOrArray(schema.properties)
