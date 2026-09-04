@@ -450,6 +450,8 @@ class DebugConverter {
 class DebugStringifier {
   readonly #options: DebugValueOptions;
   readonly #singleIndent: string | undefined;
+  readonly #spacer: string;
+  readonly #colon: string;
 
   /**
    * Constructs an instance which renders using `indent` spaces per nesting
@@ -461,6 +463,8 @@ class DebugStringifier {
     this.#singleIndent = (indent === undefined)
       ? undefined
       : " ".repeat(indent);
+    this.#spacer = this.#isCompact ? "" : " ";
+    this.#colon = `:${this.#spacer}`;
   }
 
   //
@@ -673,12 +677,13 @@ class DebugStringifier {
     unescape = true,
   ): string[] {
     const inner = this.#innerIndent(indent);
-    const separator = this.#isCompact ? ":" : ": ";
 
     return Object.entries(value).map(([key, subvalue]) => {
       const original = (unescape && (key[0] === "/")) ? key.slice(1) : key;
       const rendered = render(subvalue, inner);
-      return `${DebugStringifier.#renderKey(original)}${separator}${rendered}`;
+      return `${
+        DebugStringifier.#renderKey(original)
+      }${this.#colon}${rendered}`;
     });
   }
 
