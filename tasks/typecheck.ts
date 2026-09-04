@@ -82,11 +82,11 @@ const DIRS = [
   "packages/ts-transformers/src",
   "packages/ui",
   "packages/utils",
+  "tasks",
 ];
 
 // Glob patterns, expanded the way the shell used to expand them.
 const GLOBS = [
-  "tasks/*.ts",
   "scripts/*.ts",
   "packages/cli/*.ts",
   "packages/static/*.ts",

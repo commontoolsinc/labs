@@ -251,7 +251,11 @@ difficulties getting coverage checks to pass, consider the information in
 there), and that list now names every workspace package. Most are covered in
 full; a few are partial by design. The `*.input.ts` transformer fixtures under
 `schema-generator` and `ts-transformers` name ambient wrappers the transformer
-supplies, so they do not compile on their own and are left out.
+supplies, so they do not compile on their own and are left out. The declaration
+bundles under `packages/static/assets/types` are left out for the same reason:
+they are the ambient types handed to the in-memory pattern compiler, so they
+redeclare what `packages/html` declares and use ambient-context forms that do
+not compile beside the tree they describe.
 
 Patterns are the exception `deno task check` does not own. It lists some pattern
 directories and checks them through the automatic-JSX environment the rest of

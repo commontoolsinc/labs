@@ -16,6 +16,16 @@ import {
 
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 
+/**
+ * Trees the task checks in full. What a package's own test run checks is
+ * whatever its test files happen to import, and the `tasks` run passes
+ * `--no-check`, so coverage here is what the repository actually relies
+ * on. A tree checked only in part belongs elsewhere:
+ * `packages/static/assets/types` holds declaration bundles that do not
+ * compile on their own, and patterns answer to `deno task cfcheck`.
+ */
+const FULLY_CHECKED_TREES = ["packages/ui", "tasks"];
+
 describe("typecheck", () => {
   describe("scopeOfPath()", () => {
     it("returns the workspace member owning a path", () => {
@@ -47,8 +57,9 @@ describe("typecheck", () => {
       expect(byScope.get("runner")).toContain("packages/runner");
       expect(byScope.get("test-support")).toContain("packages/test-support");
       // Glob entries expand to repository-relative files.
-      expect(byScope.get("tasks")).toContain("tasks/typecheck.ts");
+      expect(byScope.get("scripts")).toContain("scripts/bundle.ts");
       expect(byScope.get("ui")).toContain("packages/ui");
+      expect(byScope.get("tasks")).toContain("tasks");
       // Every path in every group belongs to the group's scope.
       for (const [scope, paths] of byScope) {
         for (const path of paths) {
@@ -57,27 +68,29 @@ describe("typecheck", () => {
       }
     });
 
-    it("covers every TypeScript file the ui package holds", async () => {
-      // A group naming part of a package type-checks that part and
-      // reports a clean run over the rest, so what this asserts is
-      // coverage rather than the shape of the entry that gives it. It
-      // reads the tree rather than a fixture, so a directory added to
-      // the package later is held to the same claim.
+    it("covers every TypeScript file in the trees it checks in full", async () => {
+      // An entry naming part of a tree type-checks that part and reports
+      // a clean run over the rest, so what this asserts is coverage
+      // rather than the shape of the entry that gives it. These trees
+      // are read from disk rather than from a fixture, so a directory
+      // added to one later is held to the same claim.
 
-      const byScope = await collectPathsByScope(REPO_ROOT);
-      const checked = byScope.get("ui") ?? [];
+      const checked = [...(await collectPathsByScope(REPO_ROOT)).values()]
+        .flat();
       const uncovered: string[] = [];
-      for await (
-        const entry of walk(join(REPO_ROOT, "packages", "ui"), {
-          includeDirs: false,
-          exts: [".ts", ".tsx"],
-        })
-      ) {
-        const file = relative(REPO_ROOT, entry.path);
-        const covered = checked.some((checkPath) =>
-          file === checkPath || file.startsWith(`${checkPath}/`)
-        );
-        if (!covered) uncovered.push(file);
+      for (const tree of FULLY_CHECKED_TREES) {
+        for await (
+          const entry of walk(join(REPO_ROOT, tree), {
+            includeDirs: false,
+            exts: [".ts", ".tsx"],
+          })
+        ) {
+          const file = relative(REPO_ROOT, entry.path);
+          const covered = checked.some((checkPath) =>
+            file === checkPath || file.startsWith(`${checkPath}/`)
+          );
+          if (!covered) uncovered.push(file);
+        }
       }
       expect(uncovered).toEqual([]);
     });
