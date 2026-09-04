@@ -185,6 +185,16 @@ describe("browser", () => {
             expect(profileDirectories(directory)).toEqual([]);
           });
         });
+
+        it("refuses a page opened while it is still running", async () => {
+          const browser = await Browser.launch();
+          const closing = browser.close();
+
+          await expect(browser.newPage()).rejects.toThrow(
+            "Browser is already closed.",
+          );
+          await closing;
+        });
       });
     });
 

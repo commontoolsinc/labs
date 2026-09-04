@@ -70,14 +70,23 @@ export class Browser {
   // The removal follows the close rather than running beside it. Chrome
   // recreates the directory `--user-data-dir` names, every missing parent
   // included, whenever it writes into it, so a removal that overlapped one of
-  // the processes the browser started would put the directory back. A close
-  // that throws leaves both the browser and the directory where they are, so
-  // the caller can close again.
+  // the processes the browser started would put the directory back.
+  //
+  // The browser is given up before the wait rather than after it, so that a
+  // page opened while this is running is refused rather than opened on a
+  // browser that is going away. A close that fails hands it back, so a caller
+  // whose browser stopped but whose directory stayed can close again.
   async close(): Promise<void> {
     this.#checkIsOk();
-    await this.#process!.close();
+    const process = this.#process!;
     this.#process = null;
-    await removeDirectory(this.#profileDir);
+    try {
+      await process.close();
+      await removeDirectory(this.#profileDir);
+    } catch (error) {
+      this.#process = process;
+      throw error;
+    }
   }
 
   #checkIsOk() {
