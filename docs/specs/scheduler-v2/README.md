@@ -228,7 +228,7 @@ interface SchedulerNode {
   // Dynamic:
   reads: ReadSet;                // registered read set (drives the reader index)
   status: "never-ran" | "clean" | "invalid";
-  invalidCauses: Map<Key, Address>; // CFC trigger reads (§10), one per address; cleared on run
+  invalidCauses: Map<string, Address>; // CFC trigger reads (§10), keyed by address; cleared on run
   liveRefs: number;              // demand refcount (§5)
   provisionalDemand: boolean;    // (§5.3)
   gate: GateState;               // debounce/throttle/backoff (§8)
