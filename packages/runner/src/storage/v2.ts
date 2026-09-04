@@ -5292,11 +5292,18 @@ export class SpaceReplica
         },
       }));
 
+      // Both sub-spans record in `finally` blocks, as `total` below does: a
+      // refresh that fails inside the request or inside application still
+      // paid for it, and a success-only span would leave that share in
+      // `total` alone, so the halves would not add up across outcomes.
       const watchAddStart = performance.now();
-      const { view, precedingSyncs, sync } = await session.watchAddSync(
-        watches,
-      );
-      logger.time(watchAddStart, "watchRefresh", "watchAddSync");
+      let mutation: MemoryV2Client.WatchMutationResult;
+      try {
+        mutation = await session.watchAddSync(watches);
+      } finally {
+        logger.time(watchAddStart, "watchRefresh", "watchAddSync");
+      }
+      const { view, precedingSyncs, sync } = mutation;
 
       if (this.#closed) {
         view.close();
@@ -5318,9 +5325,10 @@ export class SpaceReplica
         // overwrites `#watchView`.
         view.close();
         throw error;
+      } finally {
+        // deno-coverage-ignore-stop
+        logger.time(applyStart, "watchRefresh", "applySessionSync");
       }
-      // deno-coverage-ignore-stop
-      logger.time(applyStart, "watchRefresh", "applySessionSync");
       this.#consumeWatchView(view);
       return { ok: {} };
     } catch (error) {
