@@ -76,11 +76,7 @@ export class FsTree {
   /** Renderers for inodes added by `addGeneratedFile`. */
   #generated: Map<bigint, () => Uint8Array | string> = new Map();
 
-  /**
-   * TypeScript-private rather than a `#` name: `tree.test.ts` drives this
-   * member directly.
-   */
-  private cfcEntryIndexes = new Map<bigint, Map<string, number>>();
+  #cfcEntryIndexes = new Map<bigint, Map<string, number>>();
 
   #unsortedCfcEntryDirectories = new Set<bigint>();
   #nextIno = 2n;
@@ -96,6 +92,18 @@ export class FsTree {
     });
     this.paths.set("/", ROOT_INO);
     this.#inoPaths.set(ROOT_INO, "/");
+  }
+
+  /**
+   * The lookup indexes this tree keeps, one per annotated directory, which a
+   * test drives directly.
+   */
+  get accessForTestingOnly(): {
+    cfcEntryIndexes: Map<bigint, Map<string, number>>;
+  } {
+    return {
+      cfcEntryIndexes: this.#cfcEntryIndexes,
+    };
   }
 
   get rootIno(): bigint {
@@ -334,10 +342,10 @@ export class FsTree {
     this.#unsortedCfcEntryDirectories.delete(ino);
     const entries = annotation?.entries?.entries;
     if (!entries) {
-      this.cfcEntryIndexes.delete(ino);
+      this.#cfcEntryIndexes.delete(ino);
       return;
     }
-    this.cfcEntryIndexes.set(
+    this.#cfcEntryIndexes.set(
       ino,
       new Map(entries.map((entry, index) => [entry.name, index])),
     );
@@ -347,10 +355,10 @@ export class FsTree {
     ino: bigint,
     entries: readonly CfcDirectoryEntryAnnotation[],
   ): Map<string, number> {
-    let index = this.cfcEntryIndexes.get(ino);
+    let index = this.#cfcEntryIndexes.get(ino);
     if (!index) {
       index = new Map(entries.map((entry, offset) => [entry.name, offset]));
-      this.cfcEntryIndexes.set(ino, index);
+      this.#cfcEntryIndexes.set(ino, index);
     }
     return index;
   }
@@ -498,7 +506,7 @@ export class FsTree {
     this.inodes.delete(ino);
     this.parents.delete(ino);
     this.#generated.delete(ino);
-    this.cfcEntryIndexes.delete(ino);
+    this.#cfcEntryIndexes.delete(ino);
     this.#unsortedCfcEntryDirectories.delete(ino);
     this.#untrackPath(ino);
   }
@@ -635,7 +643,7 @@ export class FsTree {
     oldNode.cfc = newNode.cfc;
     newNode.cfc = undefined;
     this.#rebuildCfcEntryIndex(oldIno, oldNode.cfc);
-    this.cfcEntryIndexes.delete(newIno);
+    this.#cfcEntryIndexes.delete(newIno);
     this.#unsortedCfcEntryDirectories.delete(newIno);
 
     if (this.#adoptContent(oldNode, newNode)) {
@@ -763,7 +771,7 @@ export class FsTree {
     this.inodes.delete(ino);
     this.parents.delete(ino);
     this.#generated.delete(ino);
-    this.cfcEntryIndexes.delete(ino);
+    this.#cfcEntryIndexes.delete(ino);
     this.#unsortedCfcEntryDirectories.delete(ino);
     this.#untrackPath(ino);
   }
