@@ -8,14 +8,13 @@
  * renderings of the value, each starting on a line of its own. The first is
  * its `toCompactDebugString()` rendering, whole. The second is its
  * `toIndentedDebugString()` rendering, which can run to several lines. The
- * third is its `toStructuredDebugValue()` result, converted under the limits
- * the string renderers convert under, and rendered by
- * `toIndentedDebugString()` with every limit at `Infinity`, so that it is the
- * structure the two strings were rendered from, shown whole; where a string
- * rendering interprets a form of the structured value, this rendering shows
- * the form itself. A recorded rendering is a fact about the renderer, to be
- * read as such when it changes. What `maxLength` does to a compact rendering
- * is `value-debug.test.ts`'s to check, so no case here is cut by one.
+ * third is its `toStructuredDebugValue()` result, the structure the two
+ * strings were rendered from, rendered by `toIndentedDebugString()` with every
+ * limit at `Infinity` so that it shows whole; where a string rendering
+ * interprets a form of the structured value, this rendering shows the form
+ * itself. A recorded rendering is a fact about the renderer, to be read as
+ * such when it changes. What `maxLength` does to a compact rendering is
+ * `value-debug.test.ts`'s to check, so no case here is cut by one.
  *
  * The expression is evaluated with every `FabricInstance` and
  * `FabricPrimitive` class in scope under its own name, along with the three
@@ -54,14 +53,6 @@ import {
 
 /** Directory holding the case files. */
 const CASES_DIR = new URL("./value-debug-cases/", import.meta.url);
-
-/**
- * Options under which a case is converted for its structured rendering: the
- * limits a string renderer converts under when given none. Only the depth
- * needs saying, since a structured value's own default is deeper than a debug
- * string's ten levels, and the other limits default the same for both.
- */
-const STRING_CONVERSION_OPTIONS: DebugValueOptions = { maxDepth: 10 };
 
 /**
  * Options for rendering a structured value whole: every limit at `Infinity`,
@@ -152,15 +143,14 @@ function parseCaseFile(text: string): {
 
 /**
  * Renders one case as its recorded section: the label and a colon, the
- * compact rendering, the indented rendering, and the structured value the
- * string renderers convert to, rendered whole, each starting on a line of its
- * own.
+ * compact rendering, the indented rendering, and the structured value
+ * rendered whole, each starting on a line of its own.
  */
 function renderSection(label: string, value: unknown): string {
   const compact = toCompactDebugString(value);
   const indented = toIndentedDebugString(value);
   const structured = toIndentedDebugString(
-    toStructuredDebugValue(value, STRING_CONVERSION_OPTIONS),
+    toStructuredDebugValue(value),
     WHOLE_RENDERING_OPTIONS,
   );
   return `${label}:\n${compact}\n${indented}\n${structured}`;
