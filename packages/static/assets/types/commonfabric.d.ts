@@ -3302,6 +3302,12 @@ export interface ISqliteQueryable {
        *  `table(…, { allowReadClearance: true })`; never for aggregates. The
        *  count of withheld rows is reported as `withheld`. */
       readClearance?: boolean;
+
+      /** Scope of the result cell. A `session`-scoped result is one each
+       *  session reads alone, which a runtime-wide read ceiling
+       *  (`cfcReadMaxConfidentiality`) requires; absent, the result takes the
+       *  scope of the db and of the pattern's output. */
+      scope?: CellScope;
     },
   ): Reactive<
     {
@@ -3377,16 +3383,24 @@ export type SqliteQueryParams = {
    *  of withheld rows is reported back as `withheld`. */
   readClearance?: boolean;
 };
-export type SqliteQueryFunction = <Row = Record<string, unknown>>(
-  params: FactoryInput<SqliteQueryParams>,
-) => Reactive<
-  {
-    pending: boolean;
-    result?: SqliteQueryRow<Row>[];
-    error?: any;
-    withheld?: number;
-  }
->;
+export type SqliteQueryFunction = {
+  <Row = Record<string, unknown>>(
+    params: FactoryInput<SqliteQueryParams>,
+  ): Reactive<
+    {
+      pending: boolean;
+      result?: SqliteQueryRow<Row>[];
+      error?: any;
+      withheld?: number;
+    }
+  >;
+
+  /** Bind the query's result cell to a scope: a `session`-scoped result is
+   *  one each session reads alone, which a runtime-wide read ceiling
+   *  (`cfcReadMaxConfidentiality`) requires. The `scope` option of
+   *  `db.query` is the same binding. */
+  asScope(scope: CellScope): SqliteQueryFunction;
+};
 
 // Writes are the imperative SqliteDb.exec method (see ISqliteExecutable), which
 // folds a `sqlite` op into the caller's commit (atomic with cell writes). There
