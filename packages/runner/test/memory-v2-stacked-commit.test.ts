@@ -21,6 +21,7 @@ import {
   type PatchOp,
   type SessionSync,
   type SqliteOperation,
+  toDocumentPath,
 } from "@commonfabric/memory/v2";
 import type {
   ClientCommit,
@@ -47,9 +48,13 @@ import {
 } from "../../memory/v2/path.ts";
 import type {
   IStorageProvider,
+  IStorageTransaction,
   StorageNotification,
 } from "../src/storage/interface.ts";
-import { setConflictAdmissionMode } from "../src/storage/v2.ts";
+import {
+  setConflictAdmissionMode,
+  type SpaceReplica,
+} from "../src/storage/v2.ts";
 import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
 import {
   NotificationRecorder,
@@ -641,13 +646,7 @@ const createHarness = (
         error: { name?: string; message?: string };
       }
     >;
-    buildReads(
-      source: unknown,
-      localSeq: number,
-    ): {
-      confirmed: ConfirmedRead[];
-      pending: PendingRead[];
-    };
+    accessForTestingOnly: SpaceReplica["accessForTestingOnly"];
     get(address: {
       id: URI;
       type: MIME;
@@ -736,11 +735,13 @@ const sourceFromReads = (
     ...(read.nonRecursive === true ? { nonRecursive: true } : {}),
     meta: read.seq === undefined ? {} : { seq: read.seq },
   }));
+  // A stand-in for the transaction whose reads the replica builds from,
+  // declared as one here so the callers pass it as the class types it.
   return {
     getReadActivities() {
       return activities;
     },
-  };
+  } as unknown as IStorageTransaction;
 };
 
 const visibleValue = (provider: TestProvider, id: URI) => {
@@ -910,7 +911,7 @@ const notificationLog = (notifications: StorageNotification[]) =>
 const topPendingSurface = (
   harness: Harness,
 ) => {
-  const reads = harness.replica.buildReads(
+  const reads = harness.replica.accessForTestingOnly.buildReads(
     sourceFromReads(Object.values(DOCS).map((id) => ({ id }))),
     10_000,
   );
@@ -1874,7 +1875,7 @@ Deno.test("memory v2 stacked commits: pending-read compaction keeps localSeq bou
     const c2 = beginSet(harness, DOCS.A, valueFor("c2"));
     harness.model.setOutcome(c2.localSeq, { kind: "accept" });
 
-    const reads = harness.replica.buildReads(
+    const reads = harness.replica.accessForTestingOnly.buildReads(
       sourceFromReads([
         { id: DOCS.A },
         { id: DOCS.A, path: ["nested"] },
@@ -1996,7 +1997,7 @@ Deno.test("memory v2 stacked commits: divergent basis overrides survive pending-
     // higher basis claim the pinned read's interval (0, confirmedBasis],
     // hiding a foreign write there from the server's staleness scan.
     const confirmedBasis = harness.model.applied.get(c1.localSeq)!.applied.seq;
-    const reads = harness.replica.buildReads(
+    const reads = harness.replica.accessForTestingOnly.buildReads(
       sourceFromReads([
         { id: DOCS.A },
         { id: DOCS.A, seq: 0 },
@@ -3730,11 +3731,6 @@ Deno.test("memory v2 stacked commits: replica reset locally rejects in-flight de
   }
 });
 
-type AdmissionReplica = {
-  recordStaleFloor(commit: unknown, localSeq: number): void;
-  noteCaughtUpLocalSeq(localSeq: number | undefined): void;
-};
-
 //
 // Read repair, and commits minted against it
 //
@@ -3749,10 +3745,13 @@ Deno.test("memory v2 stacked commits: preempt-mode admission rejects a floored c
   const previousLevel = storageLogger.level;
   storageLogger.level = "debug";
   try {
-    const replica = harness.replica as unknown as AdmissionReplica;
+    const replica = harness.replica.accessForTestingOnly;
     replica.recordStaleFloor({
       localSeq: 50,
-      reads: { confirmed: [{ id: DOCS.A, path: [], seq: 0 }], pending: [] },
+      reads: {
+        confirmed: [{ id: DOCS.A, path: toDocumentPath([]), seq: 0 }],
+        pending: [],
+      },
       operations: [],
     }, 50);
     const t = beginSet(
@@ -3985,7 +3984,7 @@ Deno.test("memory v2 stacked commits: a commit minted during the read repair is 
       return result;
     });
     assertEquals(
-      harness.replica.buildReads(
+      harness.replica.accessForTestingOnly.buildReads(
         sourceFromReads([{ id: DOCS.A }]),
         follower.localSeq + 1,
       ).pending.map((read) => read.localSeq),

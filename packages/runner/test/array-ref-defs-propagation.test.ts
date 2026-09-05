@@ -16,7 +16,8 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { StorageManager as V2StorageManager } from "../src/storage/v2.ts";
+import type { IStorageProvider } from "../src/storage/interface.ts";
+import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import type { NormalizedLink } from "../src/link-types.ts";
 
@@ -89,7 +90,7 @@ describe("$defs propagation in array item schema extraction", () => {
     // The sync call itself won't find data (fake ID), but it will
     // call pull() which calls joinSchema() on the schema — and that's
     // where the crash happens.
-    (storageManager as any).collectLinkedCellSyncs(
+    storageManager.accessForTestingOnly.collectLinkedCellSyncs(
       value,
       base,
       arraySchema,
@@ -106,7 +107,7 @@ describe("$defs propagation in array item schema extraction", () => {
     }
   });
 
-  it("v2 collectLinkedCellSyncs carries parent $defs into array item schemas", () => {
+  it("v2 collectLinkedCellSyncs carries parent $defs into array item schemas", async () => {
     const cellLink = {
       "/": {
         "link@1": {
@@ -122,30 +123,30 @@ describe("$defs propagation in array item schema extraction", () => {
       path: [],
     };
     const capturedSchemas: unknown[] = [];
-    const collectLinkedCellSyncs =
-      (V2StorageManager.prototype as any).collectLinkedCellSyncs;
-    const trackPendingProviderSync =
-      (V2StorageManager.prototype as any).trackPendingProviderSync;
-    const fakeStorage = {
-      collectLinkedCellSyncs,
-      trackPendingProviderSync,
-      registerPendingLoad: () => () => {},
-      open: () => ({
-        sync: (_id: string, selector: { schema: unknown }) => {
-          capturedSchemas.push(selector.schema);
-          return Promise.resolve({ ok: {} });
-        },
-      }),
-    };
-
-    collectLinkedCellSyncs.call(
-      fakeStorage,
-      [cellLink],
-      base,
-      arraySchema,
-      [],
-      new Set(),
-    );
+    // A manager whose providers only record the schema each sync is asked
+    // for, which is the collector's one output this test reads.
+    class SchemaCapturingStorageManager extends EmulatedStorageManager {
+      override open(): IStorageProvider {
+        return {
+          sync: (_id: string, selector: { schema: unknown }) => {
+            capturedSchemas.push(selector.schema);
+            return Promise.resolve({ ok: {} });
+          },
+        } as unknown as IStorageProvider;
+      }
+    }
+    const capturing = SchemaCapturingStorageManager.emulate({ as: signer });
+    try {
+      capturing.accessForTestingOnly.collectLinkedCellSyncs(
+        [cellLink],
+        base,
+        arraySchema,
+        [],
+        new Set(),
+      );
+    } finally {
+      await capturing.close();
+    }
 
     expect(capturedSchemas).toEqual([
       {

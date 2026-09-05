@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import type { SpaceReplica } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
@@ -74,12 +75,9 @@ describe("asCell link: value read-through stays a commit-conflict dependency", (
     };
     expect(holder.isAdmin.get()).toBe(true);
 
-    const replica = storage.open(space).replica as unknown as {
-      buildReads(source: unknown, localSeq: number): {
-        confirmed: Array<{ id: string; path: string[] }>;
-      };
-    };
-    const confirmed = replica.buildReads(tx.tx, 1).confirmed;
+    const replica = storage.open(space).replica as SpaceReplica;
+    const confirmed = replica.accessForTestingOnly.buildReads(tx.tx, 1)
+      .confirmed;
     const cellBId = cellB.getAsNormalizedFullLink().id;
     assert(
       confirmed.some((r) => r.id === cellBId && r.path.includes("isAdmin")),

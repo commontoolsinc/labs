@@ -2666,7 +2666,7 @@ export interface ISpaceReplica extends ISpace {
    * on (RULED 2026-08-21; verification-coverage.md OW47, second
    * producer): the verifier verifies the durable policy state the
    * server will enforce against — a speculation layer never reaches
-   * the wire — and the value read here matches the basis `buildReads`
+   * the wire — and the value read here matches the basis `SpaceReplica.#buildReads`
    * names for such reads (speculative layers excluded). Optional:
    * implementations without a speculation overlay may omit it, and
    * readers fall back to {@link getDocument}, whose view is then

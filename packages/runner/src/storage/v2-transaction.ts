@@ -1576,7 +1576,7 @@ export class V2StorageTransaction implements IStorageTransaction {
     // will enforce against — a client speculation layer never reaches
     // the wire, so deriving from it verified state the server can never
     // see, and the basis it contributed made the §6 export refusal
-    // terminal on the user's own typed input. `buildReads`
+    // terminal on the user's own typed input. `SpaceReplica.#buildReads`
     // (storage/v2.ts) names the same durable layer set for these reads,
     // so verify-durable and name-durable travel together. Scoped tight:
     // only the blind-write tx shape (the structural target survives the
@@ -1605,7 +1605,7 @@ export class V2StorageTransaction implements IStorageTransaction {
       // same docs server-side). Serving "durably absent" here turned
       // the user's fill into the silent stored-schemaHash-missing
       // prepare failure. Their layers stay excluded from the blind tx's
-      // verifier basis in `buildReads` — consistent by construction:
+      // verifier basis in `SpaceReplica.#buildReads` — consistent by construction:
       // the value equals the durable content whichever layer serves it.
       !address.id.startsWith("cid:") &&
       getBlindStructuralTarget(this) !== undefined &&
@@ -3368,7 +3368,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   // Abandons every mergeable intent a document recorded, for a commit that
   // emits the document whole. An intent narrows the reads incidental to its op
-  // out of the commit's read set (`commitReadActivities` in ./v2.ts), which is
+  // out of the commit's read set (`SpaceReplica.#commitReadActivities` in ./v2.ts), which is
   // sound only while the op is what carries that region: a mergeable op
   // resolves against durable state, so the value it read does not constrain
   // it. A whole-document set carries the region instead, and it is the value

@@ -1,7 +1,9 @@
+import { toDocumentPath } from "@commonfabric/memory/v2";
 import { assert, assertEquals } from "@std/assert";
 import { dataUriFromValue } from "@commonfabric/data-model/codec-data-uri";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import type { SpaceReplica } from "../src/storage/v2.ts";
 import { Runtime } from "../src/runtime.ts";
 import { excludeReadFromConflict } from "../src/storage/reactivity-log.ts";
 import { txToReactivityLog } from "../src/scheduler.ts";
@@ -50,17 +52,12 @@ Deno.test("memory v2 compacts descendant confirmed reads under a recursive ances
     path: ["section0", "field0"],
   });
 
-  const replica = storage.open(space).replica as unknown as {
-    buildReads(source: unknown, localSeq: number): {
-      confirmed: Array<{ path: string[]; seq: number }>;
-      pending: Array<{ path: string[]; localSeq: number }>;
-    };
-  };
-  const reads = replica.buildReads(tx.tx, 1);
+  const replica = storage.open(space).replica as SpaceReplica;
+  const reads = replica.accessForTestingOnly.buildReads(tx.tx, 1);
 
   assertEquals(reads.pending, []);
   assertEquals(reads.confirmed.length, 1);
-  assertEquals(reads.confirmed[0].path, ["value"]);
+  assertEquals<readonly string[]>(reads.confirmed[0].path, ["value"]);
 
   await runtime.dispose();
   await storage.close();
@@ -93,16 +90,11 @@ Deno.test("memory v2 keeps descendant reads when the ancestor is non-recursive",
     path: ["section0", "field0"],
   });
 
-  const replica = storage.open(space).replica as unknown as {
-    buildReads(source: unknown, localSeq: number): {
-      confirmed: Array<{ path: string[]; seq: number }>;
-      pending: Array<{ path: string[]; localSeq: number }>;
-    };
-  };
-  const reads = replica.buildReads(tx.tx, 1);
+  const replica = storage.open(space).replica as SpaceReplica;
+  const reads = replica.accessForTestingOnly.buildReads(tx.tx, 1);
 
   assertEquals(reads.pending, []);
-  assertEquals(
+  assertEquals<readonly (readonly string[])[]>(
     reads.confirmed.map((read) => read.path).toSorted((left, right) =>
       JSON.stringify(left).localeCompare(JSON.stringify(right))
     ),
@@ -142,23 +134,18 @@ Deno.test("memory v2 excludes inline data URI reads from tracked commit dependen
     path: [],
   });
 
-  const replica = storage.open(space).replica as unknown as {
-    buildReads(source: unknown, localSeq: number): {
-      confirmed: Array<{ id: string; path: string[]; seq: number }>;
-      pending: Array<{ id: string; path: string[]; localSeq: number }>;
-    };
-  };
+  const replica = storage.open(space).replica as SpaceReplica;
   const directReads = [...(tx.tx.getReadActivities?.() ?? [])];
-  const reads = replica.buildReads(tx.tx, 1);
+  const reads = replica.accessForTestingOnly.buildReads(tx.tx, 1);
 
   assertEquals(
     directReads.map((read) => ({ id: read.id, path: read.path })),
-    [{ id: DOCUMENT_ADDRESS.id, path: ["value", "live"] }],
+    [{ id: DOCUMENT_ADDRESS.id, path: toDocumentPath(["value", "live"]) }],
   );
   assertEquals(reads.pending, []);
   assertEquals(
     reads.confirmed.map((read) => ({ id: read.id, path: read.path })),
-    [{ id: DOCUMENT_ADDRESS.id, path: ["value", "live"] }],
+    [{ id: DOCUMENT_ADDRESS.id, path: toDocumentPath(["value", "live"]) }],
   );
 
   await runtime.dispose();
@@ -196,13 +183,8 @@ Deno.test("memory v2 excludeReadFromConflict drops ONLY marked nonRecursive (ref
     { nonRecursive: true },
   );
 
-  const replica = storage.open(space).replica as unknown as {
-    buildReads(source: unknown, localSeq: number): {
-      confirmed: Array<{ path: string[]; seq: number }>;
-      pending: Array<{ path: string[]; localSeq: number }>;
-    };
-  };
-  const reads = replica.buildReads(tx.tx, 1);
+  const replica = storage.open(space).replica as SpaceReplica;
+  const reads = replica.accessForTestingOnly.buildReads(tx.tx, 1);
   const paths = reads.confirmed.map((read) => read.path.join("."));
 
   assert(
@@ -248,17 +230,11 @@ Deno.test("memory v2 excludeReadFromConflict reads STAY in the reactivity log (a
     { meta: excludeReadFromConflict, nonRecursive: true },
   );
 
-  const replica = storage.open(space).replica as unknown as {
-    buildReads(source: unknown, localSeq: number): {
-      confirmed: Array<{ path: string[]; seq: number }>;
-      pending: Array<{ path: string[]; localSeq: number }>;
-    };
-  };
+  const replica = storage.open(space).replica as SpaceReplica;
 
   // Conflict set DROPS the link read (no spurious collision with disjoint writers).
-  const conflictPaths = replica.buildReads(tx.tx, 1).confirmed.map((read) =>
-    read.path.join(".")
-  );
+  const conflictPaths = replica.accessForTestingOnly.buildReads(tx.tx, 1)
+    .confirmed.map((read) => read.path.join("."));
   assert(
     !conflictPaths.some((p) => p.endsWith("refShape")),
     `reference read must be excluded from the conflict set; got ${conflictPaths}`,

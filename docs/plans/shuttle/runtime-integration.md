@@ -74,7 +74,7 @@ One near-miss worth pinning: `Provider.#syncRequests` and `#replaySync`
 on route replacement — the reconnect replay is `SpaceSession`'s, above.
 
 Two gaps around it. **Initial** construction is not retried —
-`SpaceReplica.sessionHandle()` clears its memo on failure and re-attempts
+`SpaceReplica.#memoizedSessionHandle()` clears its memo on failure and re-attempts
 only when a caller next asks for a session, which is the case cf-harness's
 cache exists for. And a **permanent** failure stops the loop rather than
 retrying: `isPermanentConnectionFailure` (a protocol-flag mismatch) sets

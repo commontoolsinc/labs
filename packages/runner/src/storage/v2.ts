@@ -1004,6 +1004,32 @@ export class StorageManager implements IStorageManager {
   #telemetry?: TelemetrySink;
 
   /**
+   * The pending-load registration step and the linked-cell sync collector,
+   * which a test drives directly.
+   */
+  get accessForTestingOnly(): {
+    registerPendingLoad(address: {
+      space: MemorySpace;
+      scope: CellScope;
+      id: URI;
+      scopeKey?: ScopeKey;
+    }): (failure?: unknown) => void;
+    collectLinkedCellSyncs(
+      value: unknown,
+      base: NormalizedLink,
+      schema: JSONSchema | undefined,
+      promises: Promise<unknown>[],
+      seen: Set<unknown>,
+    ): void;
+  } {
+    return {
+      registerPendingLoad: (address) => this.#registerPendingLoad(address),
+      collectLinkedCellSyncs: (value, base, schema, promises, seen) =>
+        this.#collectLinkedCellSyncs(value, base, schema, promises, seen),
+    };
+  }
+
+  /**
    * Attach the runtime's telemetry bus so replicas can emit the
    * `storage.push/pull.*` markers. Late-bound and optional: the manager is
    * constructed before (and independently of) the Runtime, and providers read
@@ -1979,10 +2005,13 @@ export class StorageManager implements IStorageManager {
   #loggedSyncFailures = new Set<string>();
 
   /**
-   * TypeScript-private rather than a `#` name:
-   * `test/array-ref-defs-propagation.test.ts` drives this member directly.
+   * Registers one pending load of `address` and returns its release step,
+   * which takes the load's failure if it had one. The release that brings
+   * the key's count back to zero settles the key's waiters and, when no
+   * failure was recorded, reports the recovery epoch to
+   * `loadRecoveryObserver`.
    */
-  private registerPendingLoad(
+  #registerPendingLoad(
     address: {
       space: MemorySpace;
       scope: CellScope;
@@ -2150,7 +2179,7 @@ export class StorageManager implements IStorageManager {
     // instance. Own-identity loads (every client, the OFF arm) name
     // nothing and take exactly the pre-stage-A path.
     const instance = this.#foreignInstanceKey(scope, options?.scopeKeyIdentity);
-    const releaseLoad = this.registerPendingLoad({
+    const releaseLoad = this.#registerPendingLoad({
       space,
       scope: normalizeCellScope(scope),
       id,
@@ -2210,7 +2239,7 @@ export class StorageManager implements IStorageManager {
     const scope = normalizeCellScope(address.scope);
     const instance = this.#foreignInstanceKey(scope, identity);
     const provider = this.open(address.space);
-    const releaseLoad = this.registerPendingLoad({
+    const releaseLoad = this.#registerPendingLoad({
       space: address.space,
       scope,
       id: address.id,
@@ -2239,8 +2268,9 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
-   * TypeScript-private rather than a `#` name:
-   * `test/array-ref-defs-propagation.test.ts` drives this member directly.
+   * TypeScript-private rather than a `#` name, because
+   * `test/storage-pending-load.test.ts` replaces this member by assignment,
+   * which a `#` method does not allow.
    */
   private async syncCfcSchemaDocument(
     space: MemorySpace,
@@ -2259,14 +2289,15 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
-   * TypeScript-private rather than a `#` name:
-   * `test/array-ref-defs-propagation.test.ts` drives this member directly.
+   * Runs `start` as a pending load of `address`: the load is registered
+   * before `start` is called and released when its result settles, with a
+   * resolved error counted as the load's failure and logged.
    */
-  private trackPendingProviderSync(
+  #trackPendingProviderSync(
     address: { space: MemorySpace; scope: CellScope; id: URI },
     start: () => Promise<Result<Unit, Error>>,
   ): Promise<Result<Unit, Error>> {
-    const releaseLoad = this.registerPendingLoad(address);
+    const releaseLoad = this.#registerPendingLoad(address);
     let work: Promise<Result<Unit, Error>>;
     try {
       work = start();
@@ -2353,7 +2384,7 @@ export class StorageManager implements IStorageManager {
       path: [],
     };
     const promises: Promise<unknown>[] = [];
-    this.collectLinkedCellSyncs(
+    this.#collectLinkedCellSyncs(
       value,
       base,
       schema,
@@ -2366,10 +2397,11 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
-   * TypeScript-private rather than a `#` name:
-   * `test/array-ref-defs-propagation.test.ts` drives this member directly.
+   * Walks `value` for cell links and pushes a pending provider sync of each
+   * linked document onto `promises`, under the schema that the link's place
+   * in `schema` selects. `seen` holds the objects already walked.
    */
-  private collectLinkedCellSyncs(
+  #collectLinkedCellSyncs(
     value: unknown,
     base: NormalizedLink,
     schema: JSONSchema | undefined,
@@ -2392,7 +2424,7 @@ export class StorageManager implements IStorageManager {
           link.scope as CellScope | undefined,
         );
         promises.push(
-          this.trackPendingProviderSync(
+          this.#trackPendingProviderSync(
             { space, scope, id: link.id },
             () =>
               this.open(space).sync(link.id!, {
@@ -2411,7 +2443,7 @@ export class StorageManager implements IStorageManager {
         const itemSchema = schema
           ? ContextualFlowControl.getSchemaAtPath(schema, [String(i)])
           : undefined;
-        this.collectLinkedCellSyncs(
+        this.#collectLinkedCellSyncs(
           item,
           base,
           itemSchema,
@@ -2438,7 +2470,7 @@ export class StorageManager implements IStorageManager {
         const childSchema = schema
           ? ContextualFlowControl.getSchemaAtPath(schema, [key])
           : undefined;
-        this.collectLinkedCellSyncs(
+        this.#collectLinkedCellSyncs(
           child,
           base,
           childSchema,
@@ -3008,7 +3040,8 @@ const docKey = (id: URI, instance: string): string => `${instance}\0${id}`;
  * caller knows it, the explicit instance key. */
 type LocalDocAddress = { id: URI; scope?: CellScope; scopeKey?: ScopeKey };
 
-class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
+export class SpaceReplica
+  implements ISpaceReplica, IOperationStorageCapability {
   // A member below declared `private` rather than `#` is one the storage
   // suites reach and drive directly; a `#` name would put it out of their
   // reach.
@@ -3096,7 +3129,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
   >();
   readonly #operationWatchRemovals = new Map<string, Promise<void>>();
   #watchView: MemoryV2Client.WatchView | null = null;
-  // The specific view instance that `consumeUpdates` is iterating. This can
+  // The specific view instance that `#consumeUpdates` is iterating. This can
   // diverge from `#watchView` (the client may hand back a fresh view instance
   // on a later refresh while the original consumer keeps running), so teardown
   // must close *this* view to settle the consumer's pending `next()`. Closing
@@ -3295,6 +3328,63 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     // load kicks the drain iff rows exist; an empty load is inert (no
     // session is established until something discharges).
     this.#ensureEventAppendQueue();
+  }
+
+  /**
+   * The caught-up and stale-floor bookkeeping, the read builder, the
+   * session-sync consumer, the watch-set refresh, the session-sync apply
+   * step, and the conflict read repair, which a test drives directly.
+   */
+  get accessForTestingOnly(): {
+    noteCaughtUpLocalSeq(localSeq: number | undefined): void;
+    waitForCaughtUpLocalSeq(localSeq: number): Promise<void>;
+    recordStaleFloor(commit: ClientCommit, localSeq: number): void;
+    preemptThreshold(commit: ClientCommit): number | undefined;
+    buildReads(
+      source: IStorageTransaction | undefined,
+      localSeq: number,
+      identity?: ScopeKeyIdentity,
+    ): ClientCommit["reads"];
+    consumeUpdates(iterator: AsyncIterator<SessionSync>): Promise<void>;
+    refreshWatchSet(
+      entries: Iterable<[WatchAddress, SchemaPathSelector]>,
+      type?: "pull" | "integrate",
+      watchBranch?: string,
+    ): Promise<Result<Unit, PullError>>;
+    applySessionSync(sync: SessionSync, type: "pull" | "integrate"): void;
+    waitForConflictReadRepair(
+      rejection: StorageTransactionRejected,
+    ): Promise<void>;
+  } {
+    return {
+      noteCaughtUpLocalSeq: (localSeq) => this.#noteCaughtUpLocalSeq(localSeq),
+      waitForCaughtUpLocalSeq: (localSeq) =>
+        this.#waitForCaughtUpLocalSeq(localSeq),
+      recordStaleFloor: (commit, localSeq) =>
+        this.#recordStaleFloor(commit, localSeq),
+      preemptThreshold: (commit) => this.#preemptThreshold(commit),
+      buildReads: (source, localSeq, identity) =>
+        this.#buildReads(source, localSeq, identity),
+      consumeUpdates: (iterator) => this.#consumeUpdates(iterator),
+      // The next three forward to TypeScript-private members so that a test
+      // which replaces one by assignment is honored here too.
+      // TODO(danfuzz): Make `refreshWatchSet()` a `#` method, which needs
+      // `test/memory-v2-watch-remove-coverage.test.ts` to make a refresh fail
+      // some other way than by replacing the method: a transport whose watch
+      // call rejects.
+      refreshWatchSet: (entries, type, watchBranch) =>
+        this.refreshWatchSet(entries, type, watchBranch),
+      // TODO(danfuzz): Make `applySessionSync()` a `#` method, which needs the
+      // three tests that wrap it to observe or fail a frame's apply some other
+      // way: a hook the replica offers around applying a frame.
+      applySessionSync: (sync, type) => this.applySessionSync(sync, type),
+      // TODO(danfuzz): Make `waitForConflictReadRepair()` a `#` method, which
+      // needs `test/memory-v2-subscription.test.ts` to learn that a repair
+      // started some other way than by wrapping the method: a hook the replica
+      // offers, or the telemetry it emits.
+      waitForConflictReadRepair: (rejection) =>
+        this.waitForConflictReadRepair(rejection),
+    };
   }
 
   did(): MemorySpace {
@@ -3548,7 +3638,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
    *
    * An admitted commit touched this space's ACL document, so the
    * AUTHORIZATION VERDICT that terminated this replica's session may have
-   * changed. Record it; `sessionHandle()` consumes it on the next load.
+   * changed. Record it; `#memoizedSessionHandle()` consumes it on the next load.
    *
    * Why a latch instead of tearing the session down right here: the memory
    * server emits the admitted-commit notice BEFORE it runs
@@ -3561,7 +3651,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
    * dependent on it.
    *
    * Consumption is event-driven, not timed: the next load attempt calls
-   * `sessionHandle()`, and the serving loop already re-attempts a deferred
+   * `#memoizedSessionHandle()`, and the serving loop already re-attempts a deferred
    * event's load every drain (see the scheduler's `failHeadEventLoadPark`
    * and the SpaceServer's deferral backstop), so the heal arrives on the
    * cadence the deferral machinery already runs at.
@@ -3573,13 +3663,13 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
 
   /**
    * THE SESSION REMOUNT itself. Drop a memoized session that an ACL verdict
-   * terminated, so the next `sessionHandle()` opens a fresh one.
+   * terminated, so the next `#memoizedSessionHandle()` opens a fresh one.
    *
    * A revoked (or permanently denied) space session is TERMINAL for that
    * session object: `terminateSession` (memory/v2/client.ts) closes it,
    * clears its watch specs, and stores the verdict in `closeError`, which
    * `#assertOpen()` then rethrows for every later call. Nothing on the read
-   * or commit path ever dropped the memoized mount — `sessionHandle()`
+   * or commit path ever dropped the memoized mount — `#memoizedSessionHandle()`
    * clears it only in `close()`/`closeNow()` — so every subsequent pull
    * reused the same dead session and the space read `unauthorized` forever.
    * `storage/rejection.ts`'s `SessionError` note named this gap when it was
@@ -3606,7 +3696,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
    *     `{user: OWNER}` de-authorized it by design. The re-open binds the
    *     user, who is OWNER, and is admitted.
    *   - a GENUINE de-authorization (the user removed, ownership moved): the
-   *     re-open is DENIED at `session.open`. `sessionHandle()`'s catch drops
+   *     re-open is DENIED at `session.open`. `#memoizedSessionHandle()`'s catch drops
    *     the failed handle, the load keeps failing, and the served event
    *     keeps deferring — the ratified wedge, which OW54's give-up arm
    *     covers. Fail-closed, and loud.
@@ -3943,7 +4033,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
    * over confirmed state plus only its DURABLE pending layers,
    * skipping the client speculation overlay (#speculativeLocalSeqs).
    * The value side of the blind-write verifier-read basis — the same
-   * layers `buildReads` names for such reads. */
+   * layers `#buildReads` names for such reads. */
   getNonSpeculativeDocument(
     uri: URI,
     scope?: CellScope,
@@ -4163,7 +4253,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     this.#closeSignal.resolve();
     this.#eventAppendQueue?.close();
     this.#resetConflictAdmissionState();
-    this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
+    this.#rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     // Settle any queued (not-yet-sent) watch refresh first so its pull promise
     // cannot outlive close(); `#closed` also makes refreshWatchSet fail closed
     // for any refresh already in flight.
@@ -4242,7 +4332,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     this.#ackedSeqsByLocalSeq.clear();
   }
 
-  private noteCaughtUpLocalSeq(localSeq: number | undefined): void {
+  #noteCaughtUpLocalSeq(localSeq: number | undefined): void {
     if (localSeq === undefined) {
       return;
     }
@@ -4303,7 +4393,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     }
   }
 
-  private waitForCaughtUpLocalSeq(localSeq: number): Promise<void> {
+  #waitForCaughtUpLocalSeq(localSeq: number): Promise<void> {
     if (this.#closed) {
       return Promise.reject(new Error("memory replica closed"));
     }
@@ -4315,7 +4405,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     return pending.promise;
   }
 
-  private rejectCaughtUpLocalSeqWaiters(error: Error): void {
+  #rejectCaughtUpLocalSeqWaiters(error: Error): void {
     const waiters = this.#caughtUpLocalSeqWaiters;
     this.#caughtUpLocalSeqWaiters = [];
     for (const waiter of waiters) {
@@ -4348,7 +4438,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     void Promise.allSettled([...this.#operationWatchRemovals.values()]);
     this.#operationWatchRemovals.clear();
     void Promise.allSettled([...this.#suppressedVerdicts]);
-    this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
+    this.#rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     this.#syncTasks.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
       () => this.#scopeKeyIdentity(),
@@ -4378,7 +4468,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
       return { ok: {} };
     }
     // The owed session remount, consumed BEFORE the watch-selector tracker
-    // is consulted below — not only at `sessionHandle()`. A selector the
+    // is consulted below — not only at `#memoizedSessionHandle()`. A selector the
     // tracker already covers is answered from it and never reaches a
     // session at all, so consuming only at the mount point leaves precisely
     // the docs the replica had successfully read being served out of a
@@ -4691,7 +4781,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     }
     const commit: ClientCommit = {
       localSeq,
-      reads: this.buildReads(source, localSeq, identity),
+      reads: this.#buildReads(source, localSeq, identity),
       // Cell ops first, folded SQLite ops last — the same commit shape
       // commitOperations builds, so the wave batch is made of ordinary
       // client commits.
@@ -4959,7 +5049,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     this.#watchedIds.clear();
     this.#delivered.clear();
     this.#resetConflictAdmissionState();
-    this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica reset"));
+    this.#rejectCaughtUpLocalSeqWaiters(new Error("memory replica reset"));
     this.#cancelQueuedWatchRefresh();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
       () => this.#scopeKeyIdentity(),
@@ -4970,6 +5060,11 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     });
   }
 
+  /**
+   * TypeScript-private rather than a `#` name, because
+   * `test/memory-v2-watch-remove-coverage.test.ts` replaces this member by
+   * assignment, which a `#` method does not allow.
+   */
   private async refreshWatchSet(
     entries: Iterable<[WatchAddress, SchemaPathSelector]>,
     type: "pull" | "integrate" = "pull",
@@ -5127,7 +5222,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     const previous = this.#subscribedWatchView;
     this.#subscribedWatchView = view;
     previous?.close();
-    const updates = this.consumeUpdates(view.subscribeSync())
+    const updates = this.#consumeUpdates(view.subscribeSync())
       .finally(() => {
         this.#updatePromises.delete(updates);
         if (this.#subscribedWatchView === view) {
@@ -5239,7 +5334,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     }
   }
 
-  private async consumeUpdates(
+  async #consumeUpdates(
     iterator: AsyncIterator<SessionSync>,
   ): Promise<void> {
     while (true) {
@@ -5290,7 +5385,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
       ["commitOperations", "buildCommit"],
       (): ClientCommit => ({
         localSeq,
-        reads: this.buildReads(source, localSeq),
+        reads: this.#buildReads(source, localSeq),
         // Cell ops first, folded SQLite ops last (applied in array order by the
         // engine; sqlite ops are not entity revisions and carry no id/scope).
         operations: [
@@ -5616,7 +5711,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
       // Strategy 1: a commit whose read set lands on a still-catching-up id.
       const admissionMode = conflictAdmissionMode();
       if (admissionMode !== "off") {
-        const threshold = this.preemptThreshold(commit);
+        const threshold = this.#preemptThreshold(commit);
         if (threshold !== undefined) {
           // Coarse mode: assume conflict and pre-empt without sending.
           const rejection = this.#makePreemptRejection(commit, threshold);
@@ -5830,7 +5925,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         if (schedulerDependencyRejection === undefined) {
           this.#attachProviderReadyToRetry(rejection, localSeq);
           if (admissionMode !== "off" && rejection.name === "ConflictError") {
-            this.recordStaleFloor(commit, localSeq);
+            this.#recordStaleFloor(commit, localSeq);
           }
         }
         // Counted (even while silent) so multi-writer churn can be read back via
@@ -5896,7 +5991,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     } catch (error) {
       return Promise.reject(error);
     }
-    const handle = this.sessionHandle();
+    const handle = this.#memoizedSessionHandle();
     if (this.#sessionClient !== undefined) {
       return handle;
     }
@@ -6049,7 +6144,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
    * read that buildReads later drops can spend a retry on an observation the
    * server would never validate.
    */
-  private commitReadActivities(
+  #commitReadActivities(
     source: IStorageTransaction,
     reads: Iterable<IReadActivity>,
   ): IReadActivity[] {
@@ -6160,7 +6255,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
       ownWrites.add(docKey(write.id, this.instanceKey(write.scope, identity)));
     }
     const unexamined = new Map<string, WatchAddress>();
-    for (const read of this.commitReadActivities(source, reads)) {
+    for (const read of this.#commitReadActivities(source, reads)) {
       const scope = normalizeCellScope(read.scope);
       // A malformed/incomplete served identity cannot name the instance on
       // the wire. Leave its claim for commit admission rather than pulling a
@@ -6264,13 +6359,13 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     })();
   }
 
-  private buildReads(
+  #buildReads(
     source: IStorageTransaction | undefined,
     localSeq: number,
     // The reading run's identity (a served per-instance seal): each read's
     // pending layers and confirmed seq come from THAT instance's record.
     identity?: ScopeKeyIdentity,
-  ) {
+  ): ClientCommit["reads"] {
     const confirmed: ConfirmedCommitRead[] = [];
     const pending: PendingCommitRead[] = [];
     if (!source) {
@@ -6386,7 +6481,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
       }
     };
 
-    for (const read of this.commitReadActivities(source, reads)) {
+    for (const read of this.#commitReadActivities(source, reads)) {
       const scope = normalizeCellScope(read.scope);
       pushCommitRead(
         read.id as URI,
@@ -6463,7 +6558,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
    * cannot verify never applies, and an unverifiable schema document
    * never registers, so no unverified schema is ever used. Contained for
    * the PROCESS: this ran on the background consume path
-   * (`consumeUpdates`), where the previous frame-wide throw was an
+   * (`#consumeUpdates`), where the previous frame-wide throw was an
    * unhandled rejection that killed the consuming worker wholesale on
    * one bad document — a robustness hole against any producer bug (the
    * OW61 board: 13 file-level failures from one delivery race). The
@@ -6663,6 +6758,13 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
       internSchemaAsTaggedHashString(value as JSONSchema) === hash;
   }
 
+  /**
+   * TypeScript-private rather than a `#` name, because
+   * `test/executor-space-root-ensure.test.ts`,
+   * `test/schema-doc-sync.test.ts`, and
+   * `test/memory-v2-watch-remove-coverage.test.ts` replace this member by
+   * assignment, which a `#` method does not allow.
+   */
   private applySessionSync(
     sync: SessionSync,
     type: "pull" | "integrate",
@@ -6680,7 +6782,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
       sync.upserts.length === 0 &&
       sync.removes.length === 0
     ) {
-      this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
+      this.#noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
       return;
     }
 
@@ -6870,7 +6972,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     // and the notification must reflect the post-promotion view — not a
     // transient double-apply of a still-standing overlay that the parked
     // application then silently removes.
-    this.noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
+    this.#noteCaughtUpLocalSeq(sync.caughtUpLocalSeq);
 
     if (before !== undefined) {
       const changes = before.compare(this);
@@ -6985,7 +7087,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
   // Mark every id this conflicted commit touched (reads + writes) stale until
   // the runner observes caughtUpLocalSeq >= the commit's localSeq — the seq the
   // server stages as the post-conflict catch-up point for these ids.
-  private recordStaleFloor(commit: ClientCommit, localSeq: number): void {
+  #recordStaleFloor(commit: ClientCommit, localSeq: number): void {
     const mark = (id: string, scope?: CellScope) => {
       const key = this.#docKeyOf({ id: id as URI, scope });
       const current = this.#staleFloor.get(key);
@@ -7009,7 +7111,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
   // current caught-up seq), return the highest such floor — the seq we must
   // reach before a retry can succeed. Only reads gate admission: a stale read
   // precondition is what the server rejects.
-  private preemptThreshold(commit: ClientCommit): number | undefined {
+  #preemptThreshold(commit: ClientCommit): number | undefined {
     if (this.#staleFloor.size === 0) {
       return undefined;
     }
@@ -7050,7 +7152,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
       // The catch-up that clears `threshold` is already in flight from the
       // earlier conflict; gate the retry directly on it (no provider round trip
       // to wrap, so we do NOT call attachProviderReadyToRetry here).
-      readyToRetry: () => this.waitForCaughtUpLocalSeq(threshold),
+      readyToRetry: () => this.#waitForCaughtUpLocalSeq(threshold),
     };
   }
 
@@ -7237,10 +7339,15 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     }
     rejection.readyToRetry = async () => {
       await readyToRetry();
-      await this.waitForCaughtUpLocalSeq(localSeq);
+      await this.#waitForCaughtUpLocalSeq(localSeq);
     };
   }
 
+  /**
+   * TypeScript-private rather than a `#` name, because
+   * `test/memory-v2-subscription.test.ts` replaces this member by
+   * assignment, which a `#` method does not allow.
+   */
   private async waitForConflictReadRepair(
     rejection: StorageTransactionRejected,
   ): Promise<void> {
@@ -7791,7 +7898,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     return false;
   }
 
-  private sessionHandle(): Promise<{
+  #memoizedSessionHandle(): Promise<{
     client: MemoryV2Client.Client;
     session: MemoryV2Client.SpaceSession;
   }> {
@@ -8020,7 +8127,7 @@ const toRejectedError = (
   //  - `SessionError`: the commit was routed to a session the server no longer
   //    knows. Classified TERMINAL by the retry allow-list — not because the
   //    commit was evaluated (it was not), but because nothing on the retry path
-  //    remounts the session: `sessionHandle()` memoizes the mount and clears it
+  //    remounts the session: `#memoizedSessionHandle()` memoizes the mount and clears it
   //    on close, and (since 2026-08-26) when the space's ACL CHANGES — which a
   //    commit retry is not. The name still has to survive normalization here,
   //    or the caller sees a generic TransactionError instead of the real cause.
