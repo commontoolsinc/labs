@@ -205,20 +205,29 @@ describe("store", () => {
       expect(found.objectName).toBe(name);
     });
 
-    it("treats a listing that will not say when it created an object as absent", async () => {
-      // Standing in a creation time would decide the resolution on a
-      // guess, so the listing fails and the lane runs unselected.
-      const found = await fetchManifest({
-        at,
-        env: NO_ENV,
-        fetch: storeOf(
-          { [name]: serializeManifest(sampleManifest()) },
-          { [name]: undefined },
-        ),
+    for (
+      const [what, timeCreated] of [
+        ["says nothing about a creation time", undefined],
+        ["gives an empty creation time", ""],
+        ["gives an unparseable creation time", "the other day"],
+      ] as const
+    ) {
+      it(`treats a listing that ${what} as absent`, async () => {
+        // Any of these would order the resolution by a key that means
+        // nothing, so the listing fails and the lane goes on without a
+        // manifest rather than obeying one it picked by accident.
+        const found = await fetchManifest({
+          at,
+          env: NO_ENV,
+          fetch: storeOf(
+            { [name]: serializeManifest(sampleManifest()) },
+            { [name]: timeCreated },
+          ),
+        });
+        expect(found.manifest).toBeUndefined();
+        expect(found.absent).toContain("no usable creation time");
       });
-      expect(found.manifest).toBeUndefined();
-      expect(found.absent).toContain("gave no creation time");
-    });
+    }
 
     it("treats an unreachable store as absent", async () => {
       const found = await fetchManifest({

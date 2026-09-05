@@ -92,12 +92,22 @@ export async function listObjectTimes(options: {
   fetch?: typeof fetch;
 }): Promise<TimedObject[]> {
   return (await listItems(options, "name,timeCreated")).map((item) => {
-    if (item.timeCreated === undefined) {
+    const createdAt = item.timeCreated;
+    // The listing is a parsed network response rather than a value this
+    // process built, so the field can be absent, empty, or something that
+    // is not a time at all. Each of those orders a resolution by a key
+    // that means nothing, and an empty string sorts below every real
+    // moment, so they are one rejection rather than three.
+    if (
+      typeof createdAt !== "string" ||
+      Number.isNaN(Date.parse(createdAt))
+    ) {
       throw new Error(
-        `listing ${options.prefix} gave no creation time for ${item.name}`,
+        `listing ${options.prefix} gave no usable creation time for ` +
+          `${item.name}`,
       );
     }
-    return { name: item.name, createdAt: item.timeCreated };
+    return { name: item.name, createdAt };
   });
 }
 

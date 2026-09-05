@@ -3258,7 +3258,7 @@ selection have data. That window is one `main` run and one manual
 dispatch, not days.
 
 Pull requests in that window are already handled. A lane that finds no
-manifest takes the same path as a lane that cannot reach the store: it
+manifest takes the same path as a lane that cannot reach the store:
 nothing has records, so every unit the tree holds is an identity with none
 and the whole corpus is mandatory. The lanes divide it between them and
 print that they are running everything. Feedback costs the time selection
