@@ -183,10 +183,10 @@ export function computeRowLabelRead(
   for (const [name, t] of Object.entries(tables ?? {})) {
     if (!tableDeclaresRowLabel(t)) continue;
     const spec = (t as { rowLabel: RowLabelSpec }).rowLabel;
-    const columnNames = Object.keys(
-      (t as { properties?: Record<string, unknown> }).properties ?? {},
-    );
-    const reason = validateRowLabelSpec(spec, columnNames);
+    const properties =
+      (t as { properties?: Record<string, unknown> }).properties ?? {};
+    const columnNames = Object.keys(properties);
+    const reason = validateRowLabelSpec(spec, columnNames, properties);
     if (reason) {
       return {
         error: `sqlite: table "${name}" declares an invalid rowLabel rule — ` +

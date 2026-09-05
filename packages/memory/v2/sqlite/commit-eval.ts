@@ -85,11 +85,32 @@ const fail = (message: string): never => {
 
 const quoteIdent = (id: string) => `"${id.replace(/"/g, '""')}"`;
 
-// The engine connection runs with int64:false (integers surface as JS
-// numbers), but tolerate bigint in case that ever flips. Key by String for
-// dedup; bind values pass through as-is.
-const isRowidValue = (v: unknown): v is number | bigint =>
-  typeof v === "number" || typeof v === "bigint";
+// Rowids and rule inputs both cross into JS as TEXT, rendered by SQLite —
+// see `rowidText` and `renderedInput` below for why. A rowid is therefore a
+// string of digits here; anything else means the render did not happen.
+const isRowidValue = (v: unknown): v is string =>
+  typeof v === "string" && /^-?\d+$/.test(v);
+
+// The engine connection reads an INTEGER column through `sqlite3_column_int`,
+// the 32-bit accessor (`@db/sqlite` uses `sqlite3_column_int64` only under
+// `int64`, which the engine does not set — flipping it would change every
+// value the engine hands anyone). So a stored 4294967303 arrives as 7, and a
+// label derived from that is a label for a different row's key. SQLite renders
+// the value instead, which is exact whatever the accessor would have done:
+//   - the rowid, so the read-back addresses the row that was written rather
+//     than whichever row shares its low 32 bits;
+//   - a rule input holding an INTEGER, so the evaluator sees the digits it
+//     would see on the read side, which reads whole integers already.
+// Only the INTEGER storage class is rendered: a REAL rendered to text would
+// reach the evaluator as a string and be gated on, where the read side refuses
+// it, and the two sides deriving different labels is the thing this evaluator
+// exists to prevent.
+const rowidText = (rowid: string) => `CAST(${rowid} AS TEXT)`;
+const renderedInput = (column: string) => {
+  const id = quoteIdent(column);
+  return `CASE WHEN typeof(${id}) = 'integer' THEN CAST(${id} AS TEXT) ` +
+    `ELSE ${id} END AS ${id}`;
+};
 
 /**
  * Execute a commit-folded `sqlite` write. Plain `runWrite` unless the db
@@ -151,12 +172,12 @@ export function applySqliteCommitWrite(
   }
 
   const spec = (declared as { rowLabel: RowLabelSpec }).rowLabel;
-  const columnNames = Object.keys(
-    (declared as { properties?: Record<string, unknown> }).properties ?? {},
-  );
+  const properties =
+    (declared as { properties?: Record<string, unknown> }).properties ?? {};
+  const columnNames = Object.keys(properties);
   // `db.tables` is wire-supplied: re-validate before evaluating anything —
   // "couldn't validate" is never "no label".
-  const invalid = validateRowLabelSpec(spec, columnNames);
+  const invalid = validateRowLabelSpec(spec, columnNames, properties);
   if (invalid) {
     return fail(
       `table "${declaredKey}" declares an invalid rowLabel rule — ${invalid}`,
@@ -205,7 +226,7 @@ export function applySqliteCommitWrite(
   // take effect (e.g. the statement ends inside an unterminated block comment
   // that swallowed it), so fail closed rather than under-evaluate.
   const execSql = op.sql.replace(/[\s;]+$/, "") +
-    `\nRETURNING ${rowidName} AS __cf_rowid`;
+    `\nRETURNING ${rowidText(rowidName)} AS __cf_rowid`;
   let returned: Record<string, unknown>[];
   let changes: number;
   const stmt = db.prepare(execSql);
@@ -232,7 +253,7 @@ export function applySqliteCommitWrite(
     );
   }
 
-  const rowids: (number | bigint)[] = [];
+  const rowids: string[] = [];
   const seen = new Set<string>();
   for (const row of returned) {
     const id = row.__cf_rowid;
@@ -242,9 +263,8 @@ export function applySqliteCommitWrite(
           `"${declaredKey}"`,
       );
     }
-    const key = String(id);
-    if (seen.has(key)) continue; // same row touched twice by one statement
-    seen.add(key);
+    if (seen.has(id)) continue; // same row touched twice by one statement
+    seen.add(id);
     rowids.push(id);
   }
 
@@ -267,12 +287,15 @@ export function applySqliteCommitWrite(
   // evolved after the file was created — additive DDL creates tables only)
   // makes this SELECT throw: fail closed, matching the read side, which
   // refuses queries over the same gap.
-  const selectCols = inputFields.map(quoteIdent).join(", ");
+  const selectCols = inputFields.map(renderedInput).join(", ");
   for (let at = 0; at < rowids.length; at += READ_BACK_CHUNK) {
     const chunk = rowids.slice(at, at + READ_BACK_CHUNK);
-    const readSql = `SELECT ${rowidName} AS __cf_rowid, ${selectCols} FROM ${
-      quoteIdent(declaredKey)
-    } WHERE ${rowidName} IN (${chunk.map(() => "?").join(", ")})`;
+    // The digits bind as text and cast back to the integer inside SQL, so the
+    // comparison is still rowid-to-rowid and still takes the rowid index.
+    const readSql = `SELECT ${rowidText(rowidName)} AS __cf_rowid, ` +
+      `${selectCols} FROM ${quoteIdent(declaredKey)} WHERE ${rowidName} IN (${
+        chunk.map(() => "CAST(? AS INTEGER)").join(", ")
+      })`;
     const readStmt = db.prepare(readSql);
     let rows: Record<string, unknown>[];
     try {

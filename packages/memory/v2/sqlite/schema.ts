@@ -142,7 +142,11 @@ export function table<C extends Record<string, ColumnSpec>>(
   }
   const schema: TableSchema = { type: "object", properties, required };
   if (rule !== undefined) {
-    schema.rowLabel = buildRowLabelSpec(Object.keys(columns), rule);
+    schema.rowLabel = buildRowLabelSpec(
+      Object.keys(columns),
+      rule,
+      properties,
+    );
   }
   if (opts?.allowReadClearance) {
     if (rule === undefined) {
