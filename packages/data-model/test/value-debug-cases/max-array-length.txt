@@ -1,0 +1,174 @@
+{
+  // An array with more elements than the limit renders the elements below
+  // it, and then its actual length in place of the rest.
+  "/options": { maxArrayLength: 3 },
+  "past the limit": [1, 2, 3, 4, 5],
+  "at the limit": [1, 2, 3],
+  "below the limit": [1],
+  "with a converting element": [1, new Map(), 3, 4, 5],
+  "in an object": { a: [1, 2, 3, 4] },
+  // A run of holes which crosses the limit renders only the holes below it.
+  "holes crossing the limit": [1, , , , , 6],
+  "holes below the limit": [, , 3, 4],
+  "holes among the elements": [1, , 3, , , , 7],
+  "sparse, with `length` alone past the limit": (() => {
+    const value = [1];
+    value.length = 500;
+    return value;
+  })(),
+}
+
+past the limit:
+[1,2,3,...length:5]
+[
+  1,
+  2,
+  3,
+  ... length: 5
+]
+[
+  1,
+  2,
+  3,
+  {
+    "/...": {
+      length: 5
+    }
+  }
+]
+
+at the limit:
+[1,2,3]
+[
+  1,
+  2,
+  3
+]
+[
+  1,
+  2,
+  3
+]
+
+below the limit:
+[1]
+[
+  1
+]
+[
+  1
+]
+
+with a converting element:
+[1,/Map(...),3,...length:5]
+[
+  1,
+  /Map(...),
+  3,
+  ... length: 5
+]
+[
+  1,
+  {
+    "/Map": "/..."
+  },
+  3,
+  {
+    "/...": {
+      length: 5
+    }
+  }
+]
+
+in an object:
+{a:[1,2,3,...length:4]}
+{
+  a: [
+    1,
+    2,
+    3,
+    ... length: 4
+  ]
+}
+{
+  a: [
+    1,
+    2,
+    3,
+    {
+      "/...": {
+        length: 4
+      }
+    }
+  ]
+}
+
+holes crossing the limit:
+[1,void*2,...length:6]
+[
+  1,
+  void * 2,
+  ... length: 6
+]
+[
+  1,
+  void * 2,
+  {
+    "/...": {
+      length: 6
+    }
+  }
+]
+
+holes below the limit:
+[void*2,3,...length:4]
+[
+  void * 2,
+  3,
+  ... length: 4
+]
+[
+  void * 2,
+  3,
+  {
+    "/...": {
+      length: 4
+    }
+  }
+]
+
+holes among the elements:
+[1,void,3,...length:7]
+[
+  1,
+  void,
+  3,
+  ... length: 7
+]
+[
+  1,
+  void,
+  3,
+  {
+    "/...": {
+      length: 7
+    }
+  }
+]
+
+sparse, with `length` alone past the limit:
+[1,void*2,...length:500]
+[
+  1,
+  void * 2,
+  ... length: 500
+]
+[
+  1,
+  void * 2,
+  {
+    "/...": {
+      length: 500
+    }
+  }
+]

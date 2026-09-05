@@ -1,19 +1,23 @@
 /**
  * The debug renderers, run over the cases recorded as files in
  * `value-debug-cases/`. A file opens with a JavaScript expression which
- * produces a plain object, each of whose properties is one case: the key
- * labels it, and the value is what gets rendered, on its own. After a blank
- * line, the file records one section per property, the sections separated by
- * blank lines: the label followed by a colon on a line of its own, then three
- * renderings of the value, each starting on a line of its own. The first is
- * its `toCompactDebugString()` rendering, whole. The second is its
+ * produces a plain object, each of whose properties is one case: the key labels
+ * it, and the value is what gets rendered, on its own. The one property that is
+ * not a case is `/options`, which holds the options every case in the file is
+ * rendered with; a file that binds none renders its cases with the defaults.
+ * After a blank line, the file records one section per case, the sections
+ * separated by blank lines: the label followed by a colon on a line of its own,
+ * then three renderings of the value, each starting on a line of its own. The
+ * first is its `toCompactDebugString()` rendering, whole. The second is its
  * `toIndentedDebugString()` rendering, which can run to several lines. The
- * third is its `toStructuredDebugValue()` result, the structure the two
- * strings were rendered from, rendered by `toIndentedDebugString()` with every
- * limit at `Infinity` so that it shows whole; where a string rendering
- * interprets a form of the structured value, this rendering shows the form
- * itself. A recorded rendering is a fact about the renderer, to be read as
- * such when it changes. What `maxLength` does to a compact rendering is
+ * third is its `toStructuredDebugValue()` result, the structure the two strings
+ * were rendered from, rendered by `toIndentedDebugString()` with every limit at
+ * `Infinity` so that it shows whole; where a string rendering interprets a form
+ * of the structured value, this rendering shows the form itself. The file's
+ * options reach all three calls, and the two that only the compact rendering
+ * reads, `maxLength` and `backtickQuote`, therefore reach the compact rendering
+ * alone. A recorded rendering is a fact about the renderer, to be read as such
+ * when it changes. What `maxLength` does to a compact rendering is
  * `value-debug.test.ts`'s to check, so no case here is cut by one.
  *
  * The expression is evaluated with every `FabricInstance` and
@@ -40,6 +44,7 @@ import { REALM_CODEC } from "@/codec-interface/interface.ts";
 import * as fabricInstances from "@/fabric-instances/index.ts";
 import * as fabricPrimitives from "@/fabric-primitives/index.ts";
 import {
+  type CompactDebugStringOptions,
   type DebugValueOptions,
   FabricInstance,
   FabricPrimitive,
@@ -53,6 +58,9 @@ import {
 
 /** Directory holding the case files. */
 const CASES_DIR = new URL("./value-debug-cases/", import.meta.url);
+
+/** Key under which a case file's expression binds its rendering options. */
+const OPTIONS_KEY = "/options";
 
 /**
  * Options for rendering a structured value whole: every limit at `Infinity`,
@@ -93,11 +101,17 @@ const SCOPE: Record<string, unknown> = Object.fromEntries([
 ]);
 
 /**
- * Evaluates a case's expression, producing the cases it describes.
+ * Evaluates a case file's expression, producing the cases it describes and
+ * the options they are to be rendered with, the latter `undefined` when the
+ * expression binds none.
  *
- * @throws {Error} if the expression produces other than a plain object.
+ * @throws {Error} if the expression produces other than a plain object, or if
+ * it binds `/options` to other than a plain object.
  */
-function evaluateExpression(expression: string): Record<string, unknown> {
+function evaluateExpression(expression: string): {
+  cases: Record<string, unknown>;
+  options: CompactDebugStringOptions | undefined;
+} {
   const names = Object.keys(SCOPE);
   const values = names.map((name) => SCOPE[name]);
   const fn = new Function(
@@ -116,7 +130,19 @@ function evaluateExpression(expression: string): Record<string, unknown> {
     );
   }
 
-  return result;
+  const { [OPTIONS_KEY]: options, ...cases } = result;
+
+  if ((options !== undefined) && !isPlainObject(options, false)) {
+    const rendered = toCompactDebugString(options, {
+      maxLength: 60,
+      backtickQuote: true,
+    });
+    throw new Error(
+      `\`${OPTIONS_KEY}\` must be a plain object; got ${rendered}`,
+    );
+  }
+
+  return { cases, options: options as CompactDebugStringOptions | undefined };
 }
 
 /**
@@ -144,13 +170,18 @@ function parseCaseFile(text: string): {
 /**
  * Renders one case as its recorded section: the label and a colon, the
  * compact rendering, the indented rendering, and the structured value
- * rendered whole, each starting on a line of its own.
+ * rendered whole, each starting on a line of its own. `options` are the
+ * file's, passed to each of the three calls that render `value`.
  */
-function renderSection(label: string, value: unknown): string {
-  const compact = toCompactDebugString(value);
-  const indented = toIndentedDebugString(value);
+function renderSection(
+  label: string,
+  value: unknown,
+  options: CompactDebugStringOptions | undefined,
+): string {
+  const compact = toCompactDebugString(value, options);
+  const indented = toIndentedDebugString(value, options);
   const structured = toIndentedDebugString(
-    toStructuredDebugValue(value),
+    toStructuredDebugValue(value, options),
     WHOLE_RENDERING_OPTIONS,
   );
   return `${label}:\n${compact}\n${indented}\n${structured}`;
@@ -167,9 +198,9 @@ describe("value-debug-cases", () => {
     it(`renders \`${name}\` as recorded`, async () => {
       const url = new URL(`${name}.txt`, CASES_DIR);
       const recorded = parseCaseFile(await Deno.readTextFile(url));
-      const cases = evaluateExpression(recorded.expression);
+      const { cases, options } = evaluateExpression(recorded.expression);
       const actual = Object.entries(cases).map(([label, value]) =>
-        renderSection(label, value)
+        renderSection(label, value, options)
       );
 
       if (UPDATE_GOLDENS) {

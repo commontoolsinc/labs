@@ -6,8 +6,10 @@
  * already wrong, so the two properties that matter most are pinned throughout:
  * the result is always a valid `FabricValue`, and a subvalue that cannot be
  * converted costs only itself rather than the whole result. The cases here are
- * arranged by what the input is, and then by the two knobs -- `maxDepth` and
- * `replacer` -- that change what comes back.
+ * arranged by what the input is, and then by the limit options, whose
+ * defaults and caps are pinned here while the conversions under other limits
+ * are recorded as case files under `value-debug-cases/`, each file's
+ * `/options` binding naming the limits its cases convert under.
  *
  * The marker vocabulary (`/circle`, `/...`, `/function`, `/uniqueSymbol`,
  * `/unconvertible`, and the leading-slash key escape) is deliberately not
@@ -347,49 +349,6 @@ describe("toStructuredDebugValue()", () => {
   });
 
   describe("with `maxDepth`", () => {
-    it("returns `/...` and the elided value's kind at the limit", () => {
-      expect(toStructuredDebugValue({ a: { b: 1 } }, { maxDepth: 2 }))
-        .toEqual({ a: { "/...": "object" } });
-      expect(toStructuredDebugValue({ a: [1, 2] }, { maxDepth: 2 }))
-        .toEqual({ a: { "/...": "array" } });
-    });
-
-    it("returns the elision at the top level given a `maxDepth` of `1`", () => {
-      expect(toStructuredDebugValue({ a: 1 }, { maxDepth: 1 }))
-        .toEqual({ "/...": "object" });
-    });
-
-    it("returns content within the limit unelided", () => {
-      // The converting leaf makes this say that conversion reached the
-      // bottom, not merely that nothing was elided on the way.
-
-      expect(
-        toStructuredDebugValue({ a: { b: Symbol("leaf") } }, { maxDepth: 3 }),
-      ).toEqual({ a: { b: { "/uniqueSymbol": "leaf" } } });
-    });
-
-    it("returns a `FabricPrimitive` at the limit rather than eliding it", () => {
-      // A primitive is atomic, so including it adds no nesting to the result.
-
-      const value = new FabricEpochNsec(123n);
-      const result = toStructuredDebugValue({ t: value }, { maxDepth: 2 });
-      expect((result as { t: unknown }).t).toBe(value);
-    });
-
-    it("returns a bounded result for a structure deeper than the default", () => {
-      let value: unknown = 1;
-      for (let i = 0; i < 300; i++) value = { o: value };
-
-      let at = toStructuredDebugValue(value) as Record<string, unknown>;
-      let levels = 0;
-      while (at && (typeof at === "object") && ("o" in at)) {
-        at = at.o as Record<string, unknown>;
-        levels++;
-      }
-      expect(levels).toBe(9);
-      expect(at).toEqual({ "/...": "object" });
-    });
-
     it("returns a result as deep as the conversion allows given `Infinity`", () => {
       let value: unknown = 1;
       for (let i = 0; i < 300; i++) value = { o: value };
@@ -423,57 +382,6 @@ describe("toStructuredDebugValue()", () => {
   });
 
   describe("with `maxArrayLength`", () => {
-    it("returns the elements below the limit, and `/...` carrying the length at it", () => {
-      const result = toStructuredDebugValue(
-        [1, new Map(), 3, 4, 5],
-        { maxArrayLength: 2 },
-      ) as unknown[];
-      expect(result).toEqual([
-        1,
-        { "/Map": "/..." },
-        { "/...": { length: 5 } },
-      ]);
-      expect(result.length).toBe(3);
-    });
-
-    it("returns an array whose length is the limit whole", () => {
-      expect(toStructuredDebugValue([1, 2, new Map()], { maxArrayLength: 3 }))
-        .toEqual([1, 2, { "/Map": "/..." }]);
-    });
-
-    it("returns the holes below the limit as holes, and none of the run past it", () => {
-      // The run of holes crosses the limit, so only the part of it below the
-      // limit is in the result.
-
-      const result = toStructuredDebugValue(
-        [1, , , , , new Map()],
-        { maxArrayLength: 3 },
-      ) as unknown[];
-      expect(result.length).toBe(4);
-      expect(Object.keys(result)).toEqual(["0", "3"]);
-      expect(result[3]).toEqual({ "/...": { length: 6 } });
-    });
-
-    it("returns the length form for a sparse array whose `length` alone is past the limit", () => {
-      const value: unknown[] = [new Map()];
-      value.length = 500;
-      const result = toStructuredDebugValue(
-        value,
-        { maxArrayLength: 3 },
-      ) as unknown[];
-      expect(result.length).toBe(4);
-      expect(Object.keys(result)).toEqual(["0", "3"]);
-      expect(result[3]).toEqual({ "/...": { length: 500 } });
-    });
-
-    it("returns no more than 100 elements when the limit is not given", () => {
-      const value = Array.from({ length: 150 }, (_, i) => i);
-      const result = toStructuredDebugValue(value) as unknown[];
-      expect(result.length).toBe(101);
-      expect(result[99]).toBe(99);
-      expect(result[100]).toEqual({ "/...": { length: 150 } });
-    });
-
     it("returns no more than 10000 elements given a larger limit", () => {
       const value = Array.from({ length: 20000 }, (_, i) => i);
       for (const limit of [50000, Infinity]) {
@@ -487,17 +395,6 @@ describe("toStructuredDebugValue()", () => {
       }
     });
 
-    it("returns the length form whole where it lands at the depth limit", () => {
-      // The form nests two levels, which is one more than the depth limit
-      // leaves room for, and it is carried whole regardless.
-
-      const result = toStructuredDebugValue(
-        { a: [1, 2, 3] },
-        { maxArrayLength: 1, maxDepth: 3 },
-      );
-      expect(result).toEqual({ a: [1, { "/...": { length: 3 } }] });
-    });
-
     it("throws given a `maxArrayLength` that is not a positive integer", () => {
       for (const bad of [0, -1, 1.5, -Infinity, NaN, "3", null, {}]) {
         const options = { maxArrayLength: bad as unknown as number };
@@ -509,62 +406,6 @@ describe("toStructuredDebugValue()", () => {
   });
 
   describe("with `maxProperties`", () => {
-    it("returns the first properties in key order, and `/...` with the count last", () => {
-      const value = { a: 1, b: 2, c: 3, d: 4 };
-      const result = toStructuredDebugValue(value, { maxProperties: 2 });
-      expect(result).toEqual({ a: 1, b: 2, "/...": { count: 4 } });
-      expect(Object.keys(result as object)).toEqual(["a", "b", "/..."]);
-    });
-
-    it("returns an object with as many properties as the limit whole", () => {
-      expect(toStructuredDebugValue({ a: 1, b: 2 }, { maxProperties: 2 }))
-        .toEqual({ a: 1, b: 2 });
-    });
-
-    it("returns the form in place of the properties of a nested object", () => {
-      expect(
-        toStructuredDebugValue(
-          { o: { a: 1, b: 2, c: 3 }, l: [{ a: 1, b: 2, c: 3 }] },
-          { maxProperties: 4 },
-        ),
-      ).toEqual({
-        o: { a: 1, b: 2, c: 3 },
-        l: [{ a: 1, b: 2, c: 3 }],
-      });
-      expect(
-        toStructuredDebugValue({ o: { a: 1, b: 2, c: 3 } }, {
-          maxProperties: 2,
-        }),
-      ).toEqual({ o: { a: 1, b: 2, "/...": { count: 3 } } });
-    });
-
-    it("returns the form in place of a class instance's properties past the limit", () => {
-      class Data {
-        a = 1;
-        b = 2;
-        c = 3;
-      }
-      expect(toStructuredDebugValue(new Data(), { maxProperties: 2 }))
-        .toEqual({ "/Data": { a: 1, b: 2, "/...": { count: 3 } } });
-    });
-
-    it("returns a user's `/...` key escaped, beside the form", () => {
-      expect(
-        toStructuredDebugValue({ "/...": 1, b: 2 }, { maxProperties: 1 }),
-      ).toEqual({ "//...": 1, "/...": { count: 2 } });
-    });
-
-    it("returns no more than 100 properties when the limit is not given", () => {
-      const value = Object.fromEntries(
-        Array.from({ length: 150 }, (_, i) => [`k${i}`, i]),
-      );
-      const result = toStructuredDebugValue(value) as Record<string, unknown>;
-      const keys = Object.keys(result);
-      expect(keys.length).toBe(101);
-      expect(keys[99]).toBe("k99");
-      expect(result["/..."]).toEqual({ count: 150 });
-    });
-
     it("returns no more than 10000 properties given a larger limit", () => {
       const value = Object.fromEntries(
         Array.from({ length: 10500 }, (_, i) => [`k${i}`, i]),
@@ -590,57 +431,6 @@ describe("toStructuredDebugValue()", () => {
   });
 
   describe("with `maxStringLength`", () => {
-    it("returns `/partialString` with the length and an excerpt for a string past the limit", () => {
-      expect(toStructuredDebugValue("abcdefgh", { maxStringLength: 5 }))
-        .toEqual({ "/partialString": { length: 8, excerpt: "abcde" } });
-    });
-
-    it("returns a string whose length is the limit whole", () => {
-      expect(toStructuredDebugValue("abcde", { maxStringLength: 5 }))
-        .toBe("abcde");
-    });
-
-    it("returns the form in place of a string inside a container", () => {
-      const partial = { "/partialString": { length: 8, excerpt: "abcde" } };
-      expect(
-        toStructuredDebugValue(
-          { s: "abcdefgh", a: ["abcdefgh"] },
-          { maxStringLength: 5 },
-        ),
-      ).toEqual({ s: partial, a: [partial] });
-    });
-
-    it("returns the form in place of a class instance's `toString()` form", () => {
-      class Foo {
-        toString() {
-          return "abcdefgh";
-        }
-      }
-      expect(toStructuredDebugValue(new Foo(), { maxStringLength: 5 }))
-        .toEqual({
-          "/Foo": { "/partialString": { length: 8, excerpt: "abcde" } },
-        });
-    });
-
-    it("returns an excerpt which does not end in half of a surrogate pair", () => {
-      // The emoji is two UTF-16 units, at indices 2 and 3; a limit of 3 cuts
-      // it in half, and the excerpt stops short of it instead.
-
-      const value = "ab\u{1F600}cd";
-      expect(toStructuredDebugValue(value, { maxStringLength: 3 }))
-        .toEqual({ "/partialString": { length: 6, excerpt: "ab" } });
-      expect(toStructuredDebugValue(value, { maxStringLength: 4 }))
-        .toEqual({ "/partialString": { length: 6, excerpt: "ab\u{1F600}" } });
-    });
-
-    it("returns no more than 200 characters when the limit is not given", () => {
-      const result = toStructuredDebugValue("x".repeat(250)) as {
-        "/partialString": { length: number; excerpt: string };
-      };
-      expect(result["/partialString"].length).toBe(250);
-      expect(result["/partialString"].excerpt).toBe("x".repeat(200));
-    });
-
     it("returns no more than 100000 characters given a larger limit", () => {
       const value = "x".repeat(150000);
       for (const limit of [200000, Infinity]) {
@@ -664,57 +454,6 @@ describe("toStructuredDebugValue()", () => {
   });
 
   describe("with `maxStringLines`", () => {
-    it("returns `/partialString` with the length and the first lines for a string past the limit", () => {
-      expect(toStructuredDebugValue("a\nb\nc\nd", { maxStringLines: 2 }))
-        .toEqual({ "/partialString": { length: 7, excerpt: "a\nb\n" } });
-    });
-
-    it("returns a string whose line count is the limit whole", () => {
-      expect(toStructuredDebugValue("a\nb", { maxStringLines: 2 }))
-        .toBe("a\nb");
-    });
-
-    it("counts a newline, a carriage return, and the two together as one line break each", () => {
-      expect(toStructuredDebugValue("a\r\nb\rc\nd", { maxStringLines: 3 }))
-        .toEqual({ "/partialString": { length: 8, excerpt: "a\r\nb\rc\n" } });
-    });
-
-    it("counts a final line break as ending the last line rather than starting another", () => {
-      expect(toStructuredDebugValue("a\nb\n", { maxStringLines: 2 }))
-        .toBe("a\nb\n");
-      expect(toStructuredDebugValue("a\nb\n\n", { maxStringLines: 2 }))
-        .toEqual({ "/partialString": { length: 5, excerpt: "a\nb\n" } });
-    });
-
-    it("returns whichever excerpt of the two limits is shorter", () => {
-      const value = "abcdefgh\nij";
-      const options = { maxStringLines: 1, maxStringLength: 5 };
-      expect(toStructuredDebugValue(value, options))
-        .toEqual({ "/partialString": { length: 11, excerpt: "abcde" } });
-      expect(
-        toStructuredDebugValue(value, { ...options, maxStringLength: 100 }),
-      )
-        .toEqual({ "/partialString": { length: 11, excerpt: "abcdefgh\n" } });
-    });
-
-    it("returns a line-cut excerpt ending in a high surrogate and its line break", () => {
-      expect(toStructuredDebugValue("a\ud800\nb", { maxStringLines: 1 }))
-        .toEqual({ "/partialString": { length: 4, excerpt: "a\ud800\n" } });
-    });
-
-    it("returns a string of any length whole when only the line limit is given", () => {
-      const value = "x".repeat(250);
-      expect(toStructuredDebugValue(value, { maxStringLines: 1 })).toBe(value);
-    });
-
-    it("returns no more than 5 lines when the limit is not given", () => {
-      const value = "a\nb\nc\nd\ne\nf";
-      expect(toStructuredDebugValue(value))
-        .toEqual({
-          "/partialString": { length: 11, excerpt: "a\nb\nc\nd\ne\n" },
-        });
-    });
-
     it("returns no more than 1000 lines given a larger limit", () => {
       const value = "x\n".repeat(1500) + "x";
       for (const limit of [2000, Infinity]) {
@@ -744,45 +483,6 @@ describe("toStructuredDebugValue()", () => {
           toStructuredDebugValue({}, bad as unknown as DebugValueOptions)
         ).toThrow("`options` must be a plain object or `undefined`; got `");
       }
-    });
-  });
-
-  describe("with a `replacer`", () => {
-    it("returns the replacement in place of the original value", () => {
-      const result = toStructuredDebugValue({ a: 1, b: 2 }, {
-        replacer: (value) => (value === 1 ? "one" : value),
-      });
-      expect(result).toEqual({ a: "one", b: 2 });
-    });
-
-    it("returns a replacement offered for the top-level value", () => {
-      const result = toStructuredDebugValue({ a: 1 }, {
-        replacer: (value) => (typeof value === "object" ? "replaced" : value),
-      });
-      expect(result).toBe("replaced");
-    });
-
-    it("returns the converted replacement, not the replacement verbatim", () => {
-      // The replacement re-enters conversion, so a value the replacer hands
-      // back still gets escaped, tagged, and depth-limited like any other.
-
-      const result = toStructuredDebugValue({ a: 1 }, {
-        replacer: (value) => (value === 1 ? new Map() : value),
-      });
-      expect(result).toEqual({ a: { "/Map": "/..." } });
-    });
-
-    it("returns the original value when the `replacer` throws", () => {
-      // A failed replacement reads as a refusal to replace rather than as a
-      // conversion error, so the rest of the result is unaffected.
-
-      const result = toStructuredDebugValue({ a: 1, m: new Map() }, {
-        replacer: (value) => {
-          if (value === 1) throw new Error("no thanks");
-          return value;
-        },
-      });
-      expect(result).toEqual({ a: 1, m: { "/Map": "/..." } });
     });
   });
 

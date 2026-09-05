@@ -1,0 +1,39 @@
+{
+  // When both string limits are given, the excerpt is the shorter of the
+  // two.
+  "/options": { maxStringLines: 2, maxStringLength: 8 },
+  "cut by the length": "abcdefghij\nkl\nmn",
+  "cut by the lines": "ab\ncd\nef",
+  "within both": "ab\ncd",
+}
+
+cut by the length:
+"abcdefgh"+...length:16
+"abcdefgh" +
+  ... length: 16
+{
+  "/partialString": {
+    length: 16,
+    excerpt: "abcdefgh"
+  }
+}
+
+cut by the lines:
+"ab\ncd\n"+...length:8
+"ab\n" +
+  "cd\n" +
+  ... length: 8
+{
+  "/partialString": {
+    length: 8,
+    excerpt: "ab\n" +
+      "cd\n"
+  }
+}
+
+within both:
+"ab\ncd"
+"ab\n" +
+  "cd"
+"ab\n" +
+  "cd"

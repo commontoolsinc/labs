@@ -12,18 +12,17 @@
  * names what a value is without rendering it at all. The custom inspector is
  * how all of this reaches a `console.log()`. The renderings themselves are
  * recorded as case files under `value-debug-cases/`, which
- * `value-debug-cases.test.ts` checks; what is tested here is what a case
- * file cannot express.
+ * `value-debug-cases.test.ts` checks, a file's `/options` binding covering the
+ * renderings under other than the default options; what is tested here is
+ * what a case file cannot express.
  */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { REALM_CODEC } from "@/codec-interface/interface.ts";
 import {
   type CompactDebugStringOptions,
   type DebugValueOptions,
-  FabricPrimitive,
 } from "@/interface.ts";
 import {
   toCompactDebugString,
@@ -41,8 +40,8 @@ describe("value-debug", () => {
   describe("toCompactDebugString", () => {
     // The renderings themselves are recorded as case files in
     // `value-debug-cases/`. What is here is what a case file cannot express:
-    // a value at the top level, and the `maxLength` behavior at more than one
-    // length.
+    // a value at the top level against the same value nested, the `maxLength`
+    // behavior at more than one length, and the options that are refused.
 
     it("renders a top-level value the same as it renders that value in an array", () => {
       function foo() {}
@@ -65,10 +64,6 @@ describe("value-debug", () => {
         const nested = toCompactDebugString([value]);
         expect(toCompactDebugString(value)).toBe(nested.slice(1, -1));
       }
-    });
-
-    it("renders a string holding a line break on one line, the break escaped", () => {
-      expect(toCompactDebugString({ s: "a\nb" })).toBe('{s:"a\\nb"}');
     });
 
     describe("with `maxLength`", () => {
@@ -100,16 +95,6 @@ describe("value-debug", () => {
     });
 
     describe("with `backtickQuote`", () => {
-      it("renders the result as a code span", () => {
-        expect(toCompactDebugString({ a: 1 }, { backtickQuote: true }))
-          .toBe("`{a:1}`");
-      });
-
-      it("renders a result holding backticks with a longer delimiter", () => {
-        expect(toCompactDebugString("a`b", { backtickQuote: true }))
-          .toBe('``"a`b"``');
-      });
-
       it("renders the truncated result as the code span, when both are asked for", () => {
         const options = { maxLength: 8, backtickQuote: true };
         expect(toCompactDebugString({ abc: "defghij" }, options))
@@ -123,177 +108,19 @@ describe("value-debug", () => {
       });
     });
 
-    describe("with `maxDepth`", () => {
-      it("renders to the given depth rather than to the default", () => {
-        const value = { a: { b: { c: 1 } } };
-        expect(toCompactDebugString(value, { maxDepth: 2 })).toBe("{a:...}");
-        expect(toCompactDebugString(value, { maxDepth: 3 })).toBe(
-          "{a:{b:...}}",
+    it("throws given a limit that is not a positive integer", () => {
+      const names = [
+        "maxDepth",
+        "maxArrayLength",
+        "maxProperties",
+        "maxStringLength",
+        "maxStringLines",
+      ];
+      for (const name of names) {
+        expect(() => toCompactDebugString({}, { [name]: 0 })).toThrow(
+          `\`${name}\` must be a positive integer, \`Infinity\`, or`,
         );
-      });
-
-      it("renders past the default depth given `Infinity`", () => {
-        let value: unknown = "leaf";
-        for (let i = 0; i < 20; i++) value = { o: value };
-        expect(toCompactDebugString(value, { maxDepth: Infinity }))
-          .toContain('"leaf"');
-        expect(toIndentedDebugString(value, { maxDepth: Infinity }))
-          .toContain('"leaf"');
-      });
-
-      it("throws given a `maxDepth` that is not a positive integer", () => {
-        expect(() => toCompactDebugString({}, { maxDepth: 0 }))
-          .toThrow("`maxDepth` must be a positive integer, `Infinity`, or");
-      });
-    });
-
-    describe("with `maxArrayLength`", () => {
-      it("renders the elements below the limit, and the array's length in place of the rest", () => {
-        expect(toCompactDebugString([1, 2, 3, 4, 5], { maxArrayLength: 3 }))
-          .toBe("[1,2,3,...length:5]");
-        expect(toCompactDebugString({ a: [1, 2, 3] }, { maxArrayLength: 2 }))
-          .toBe("{a:[1,2,...length:3]}");
-      });
-
-      it("renders an array whose length is the limit whole", () => {
-        expect(toCompactDebugString([1, 2, 3], { maxArrayLength: 3 }))
-          .toBe("[1,2,3]");
-      });
-
-      it("renders only the holes below the limit of a run of holes which crosses it", () => {
-        expect(toCompactDebugString([1, , , , , 6], { maxArrayLength: 3 }))
-          .toBe("[1,void*2,...length:6]");
-        expect(toCompactDebugString([1, , , , , 6], { maxArrayLength: 2 }))
-          .toBe("[1,void,...length:6]");
-        expect(toCompactDebugString([1, , 3, , , , 7], { maxArrayLength: 4 }))
-          .toBe("[1,void,3,void,...length:7]");
-      });
-
-      it("renders no more than 100 elements when the limit is not given", () => {
-        const value = Array.from({ length: 101 }, (_, i) => i);
-        expect(toCompactDebugString(value)).toMatch(
-          /,99,\.\.\.length:101\]$/,
-        );
-      });
-
-      it("throws given a `maxArrayLength` that is not a positive integer", () => {
-        expect(() => toCompactDebugString([], { maxArrayLength: 0 })).toThrow(
-          "`maxArrayLength` must be a positive integer, `Infinity`, or",
-        );
-      });
-    });
-
-    describe("with `maxProperties`", () => {
-      it("renders the first properties, and the object's property count in place of the rest", () => {
-        const value = { a: 1, b: 2, c: 3 };
-        expect(toCompactDebugString(value, { maxProperties: 2 }))
-          .toBe("{a:1,b:2,...count:3}");
-        expect(toCompactDebugString({ o: value }, { maxProperties: 2 }))
-          .toBe("{o:{a:1,b:2,...count:3}}");
-      });
-
-      it("renders an object with as many properties as the limit whole", () => {
-        expect(toCompactDebugString({ a: 1, b: 2 }, { maxProperties: 2 }))
-          .toBe("{a:1,b:2}");
-      });
-
-      it("renders a `FabricPrimitive`'s realm state to the limit as well", () => {
-        class Wide extends FabricPrimitive {
-          static get [REALM_CODEC]() {
-            return {
-              tagForValue: () => "Wide@1",
-              encode: () => ({ p: 1, q: 2, r: 3 }),
-            };
-          }
-        }
-        expect(toCompactDebugString(new Wide(), { maxProperties: 2 }))
-          .toBe("/Wide(p:1,q:2,...count:3)");
-        expect(toIndentedDebugString(new Wide(), { maxProperties: 2 }))
-          .toBe("/Wide(\n  p: 1,\n  q: 2,\n  ... count: 3\n)");
-      });
-
-      it("renders a `FabricInstance`'s contents to the limit as well", () => {
-        const link = new FabricLink({ id: "of:fid1:abc", a: 1, b: 2 });
-        expect(toCompactDebugString(link, { maxProperties: 2 }))
-          .toBe('/Link(id:"of:fid1:abc",a:1,...count:3)');
-        expect(toIndentedDebugString(link, { maxProperties: 2 }))
-          .toBe('/Link(\n  id: "of:fid1:abc",\n  a: 1,\n  ... count: 3\n)');
-      });
-
-      it("renders no more than 100 properties when the limit is not given", () => {
-        const value = Object.fromEntries(
-          Array.from({ length: 101 }, (_, i) => [`k${i}`, i]),
-        );
-        expect(toCompactDebugString(value)).toMatch(
-          /,k99:99,\.\.\.count:101\}$/,
-        );
-      });
-
-      it("throws given a `maxProperties` that is not a positive integer", () => {
-        expect(() => toCompactDebugString({}, { maxProperties: 0 })).toThrow(
-          "`maxProperties` must be a positive integer, `Infinity`, or",
-        );
-      });
-    });
-
-    describe("with `maxStringLength`", () => {
-      it("renders an excerpt of the string, and the string's length after it", () => {
-        expect(toCompactDebugString("abcdefgh", { maxStringLength: 5 }))
-          .toBe('"abcde"+...length:8');
-        expect(toCompactDebugString({ s: "abcdefgh" }, { maxStringLength: 5 }))
-          .toBe('{s:"abcde"+...length:8}');
-      });
-
-      it("renders a string whose length is the limit whole", () => {
-        expect(toCompactDebugString("abcde", { maxStringLength: 5 }))
-          .toBe('"abcde"');
-      });
-
-      it("renders no more than 200 characters when the limit is not given", () => {
-        expect(toCompactDebugString("x".repeat(250)))
-          .toMatch(/^"x{200}"\+\.\.\.length:250$/);
-      });
-
-      it("throws given a `maxStringLength` that is not a positive integer", () => {
-        expect(() => toCompactDebugString("", { maxStringLength: 0 })).toThrow(
-          "`maxStringLength` must be a positive integer, `Infinity`, or",
-        );
-      });
-    });
-
-    describe("with `maxStringLines`", () => {
-      it("renders the string's first lines, and the string's length after them", () => {
-        expect(toCompactDebugString("a\nb\nc", { maxStringLines: 2 }))
-          .toBe('"a\\nb\\n"+...length:5');
-        expect(toCompactDebugString({ s: "a\nb\nc" }, { maxStringLines: 2 }))
-          .toBe('{s:"a\\nb\\n"+...length:5}');
-      });
-
-      it("renders a string whose line count is the limit whole", () => {
-        expect(toCompactDebugString("a\nb", { maxStringLines: 2 }))
-          .toBe('"a\\nb"');
-      });
-
-      it("renders no more than 5 lines when the limit is not given", () => {
-        expect(toCompactDebugString("a\nb\nc\nd\ne\nf"))
-          .toBe('"a\\nb\\nc\\nd\\ne\\n"+...length:11');
-      });
-
-      it("throws given a `maxStringLines` that is not a positive integer", () => {
-        expect(() => toCompactDebugString("", { maxStringLines: 0 })).toThrow(
-          "`maxStringLines` must be a positive integer, `Infinity`, or",
-        );
-      });
-    });
-
-    describe("with a `replacer`", () => {
-      it("renders the replacement in place of the original value", () => {
-        const options: CompactDebugStringOptions = {
-          replacer: (value) => (value === 1 ? "one" : value),
-        };
-        expect(toCompactDebugString({ a: 1, b: 2 }, options))
-          .toBe('{a:"one",b:2}');
-      });
+      }
     });
 
     it("throws given `options` that are not a plain object", () => {
@@ -323,32 +150,6 @@ describe("value-debug", () => {
       }
     });
 
-    it("renders to the given depth rather than to the default", () => {
-      const value = { a: { b: 1 } };
-      expect(toIndentedDebugString(value, { maxDepth: 2 }))
-        .toBe("{\n  a: ...\n}");
-    });
-
-    it("renders the array's length on its own line in place of the elements past the limit", () => {
-      expect(toIndentedDebugString([1, , , 4, 5], { maxArrayLength: 3 }))
-        .toBe("[\n  1,\n  void * 2,\n  ... length: 5\n]");
-    });
-
-    it("renders the object's property count on its own line in place of the properties past the limit", () => {
-      expect(toIndentedDebugString({ a: 1, b: 2, c: 3 }, { maxProperties: 2 }))
-        .toBe("{\n  a: 1,\n  b: 2,\n  ... count: 3\n}");
-    });
-
-    it("renders a string's excerpt and length in the string's place", () => {
-      expect(toIndentedDebugString({ s: "abcdefgh" }, { maxStringLength: 5 }))
-        .toBe('{\n  s: "abcde" +\n    ... length: 8\n}');
-    });
-
-    it("renders a string's first lines and length in the string's place", () => {
-      expect(toIndentedDebugString({ s: "a\nb\nc" }, { maxStringLines: 2 }))
-        .toBe('{\n  s: "a\\n" +\n    "b\\n" +\n    ... length: 5\n}');
-    });
-
     describe("with a string holding a line break", () => {
       it("renders each line quoted on a line of its own, joined by ` +`", () => {
         expect(toIndentedDebugString("a\nb\nc"))
@@ -374,18 +175,6 @@ describe("value-debug", () => {
         expect(toIndentedDebugString("a\n")).toBe('"a\\n"');
       });
 
-      it("renders a partial string's length on a line of its own", () => {
-        expect(toIndentedDebugString("a\nb\nc", { maxStringLines: 2 }))
-          .toBe('"a\\n" +\n  "b\\n" +\n  ... length: 5');
-        expect(toIndentedDebugString("abc\ndef", { maxStringLength: 5 }))
-          .toBe('"abc\\n" +\n  "d" +\n  ... length: 7');
-      });
-
-      it("renders a partial string's one-line excerpt with the length on the line after", () => {
-        expect(toIndentedDebugString("abc\ndef", { maxStringLines: 1 }))
-          .toBe('"abc\\n" +\n  ... length: 7');
-      });
-
       it("renders a class instance's `toString()` form the same way", () => {
         class Foo {
           toString() {
@@ -395,13 +184,6 @@ describe("value-debug", () => {
         expect(toIndentedDebugString({ foo: new Foo() }))
           .toBe('{\n  foo: /Foo("a\\n" +\n    "b")\n}');
       });
-    });
-
-    it("renders the replacement in place of the original value", () => {
-      const options: DebugValueOptions = {
-        replacer: (value) => (value === 1 ? "one" : value),
-      };
-      expect(toIndentedDebugString({ a: 1 }, options)).toBe('{\n  a: "one"\n}');
     });
 
     it("throws given `options` that are not a plain object", () => {

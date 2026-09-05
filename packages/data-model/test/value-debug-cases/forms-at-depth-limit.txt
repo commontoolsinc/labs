@@ -1,0 +1,133 @@
+{
+  // An elision form which lands at the depth limit is carried whole, though
+  // it nests further than the limit leaves room for. A container or an
+  // instance there is elided.
+  "/options": {
+    maxDepth: 3,
+    maxArrayLength: 1,
+    maxProperties: 1,
+    maxStringLength: 3,
+  },
+  "array length": { a: [1, 2, 3] },
+  "property count": { o: { a: 1, b: 2 } },
+  "partial string": { o: { s: "abcdef" } },
+  "unique symbol": { o: { s: Symbol("desc") } },
+  function: { o: { f: function foo() {} } },
+  "class instance": { o: { m: new Map() } },
+  "elided object": { o: { p: { q: 1 } } },
+}
+
+array length:
+{a:[1,...length:3]}
+{
+  a: [
+    1,
+    ... length: 3
+  ]
+}
+{
+  a: [
+    1,
+    {
+      "/...": {
+        length: 3
+      }
+    }
+  ]
+}
+
+property count:
+{o:{a:1,...count:2}}
+{
+  o: {
+    a: 1,
+    ... count: 2
+  }
+}
+{
+  o: {
+    a: 1,
+    "/...": {
+      count: 2
+    }
+  }
+}
+
+partial string:
+{o:{s:"abc"+...length:6}}
+{
+  o: {
+    s: "abc" +
+      ... length: 6
+  }
+}
+{
+  o: {
+    s: {
+      "/partialString": {
+        length: 6,
+        excerpt: "abc"
+      }
+    }
+  }
+}
+
+unique symbol:
+{o:{s:Symbol("desc")}}
+{
+  o: {
+    s: Symbol("desc")
+  }
+}
+{
+  o: {
+    s: {
+      "/uniqueSymbol": "desc"
+    }
+  }
+}
+
+function:
+{o:{f:function foo(...){...}}}
+{
+  o: {
+    f: function foo(...) {...}
+  }
+}
+{
+  o: {
+    f: {
+      "/function": "foo(...)"
+    }
+  }
+}
+
+class instance:
+{o:{m:...}}
+{
+  o: {
+    m: ...
+  }
+}
+{
+  o: {
+    m: {
+      "/...": "Map"
+    }
+  }
+}
+
+elided object:
+{o:{p:...}}
+{
+  o: {
+    p: ...
+  }
+}
+{
+  o: {
+    p: {
+      "/...": "object"
+    }
+  }
+}

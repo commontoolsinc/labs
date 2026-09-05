@@ -1,0 +1,58 @@
+{
+  // The replacer is called on every value, top-level and nested alike, and
+  // its replacement re-enters the conversion in the original's place. A
+  // replacer which throws is taken to have declined.
+  "/options": {
+    replacer: (value) => {
+      if (value === 1) return "one";
+      if (value === 2) return new Map();
+      if (value === 3) throw new Error("no thanks");
+      if (value?.whole === true) return "replaced";
+      return value;
+    },
+  },
+  "in place": { a: 1, b: 5 },
+  "converted, not verbatim": { a: 2 },
+  "declined by a throw": { a: 3, m: new Map() },
+  "top level": { whole: true, a: 1 },
+}
+
+in place:
+{a:"one",b:5}
+{
+  a: "one",
+  b: 5
+}
+{
+  a: "one",
+  b: 5
+}
+
+converted, not verbatim:
+{a:/Map(...)}
+{
+  a: /Map(...)
+}
+{
+  a: {
+    "/Map": "/..."
+  }
+}
+
+declined by a throw:
+{a:3,m:/Map(...)}
+{
+  a: 3,
+  m: /Map(...)
+}
+{
+  a: 3,
+  m: {
+    "/Map": "/..."
+  }
+}
+
+top level:
+"replaced"
+"replaced"
+"replaced"

@@ -1,0 +1,71 @@
+{
+  // At a depth limit of one, a container renders as its elision alone, while
+  // a scalar and a primitive are carried whole.
+  "/options": { maxDepth: 1 },
+  object: { a: 1 },
+  "empty object": {},
+  array: [1, 2],
+  "empty array": [],
+  scalar: 42,
+  string: "str",
+  primitive: new FabricEpochNsec(123n),
+  instance: new FabricLink({ id: "of:fid1:abc", path: ["x"] }),
+  "class instance": /ab+c/gi,
+}
+
+object:
+...
+...
+{
+  "/...": "object"
+}
+
+empty object:
+...
+...
+{
+  "/...": "object"
+}
+
+array:
+...
+...
+{
+  "/...": "array"
+}
+
+empty array:
+...
+...
+{
+  "/...": "array"
+}
+
+scalar:
+42
+42
+42
+
+string:
+"str"
+"str"
+"str"
+
+primitive:
+/EpochNsec(123n)
+/EpochNsec(123n)
+/EpochNsec(123n)
+
+instance:
+...
+...
+{
+  "/...": "FabricInstance (FabricLink)"
+}
+
+class instance:
+...
+...
+{
+  "/...": "RegExp"
+}
