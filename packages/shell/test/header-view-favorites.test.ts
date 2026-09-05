@@ -17,6 +17,7 @@ interface HeaderViewLike {
   rt: unknown;
   space: unknown;
   pieceId: unknown;
+  pieceAddress: unknown;
   menuOpen: boolean;
   accessForTestingOnly: HeaderViewClass["accessForTestingOnly"];
   willUpdate(changed: Map<string, unknown>): void;
@@ -74,36 +75,52 @@ function installBrowserGlobals(): () => void {
   };
 }
 
+/** A stored favorite as the header reads one: an entry over a cell handle. */
+function favoriteOf(ref: { id: string; space: string; scope: string }) {
+  return { cell: { ref: () => ref } };
+}
+
 /**
  * A stand-in for the runtime's favorites surface. Counts subscriptions so a
- * test can assert when (and how often) the header asks for favorites, and can
- * reject writes to simulate a disposed runtime.
+ * test can assert when (and how often) the header asks for favorites, delivers
+ * `entries` as the stored favorites, and can reject writes to simulate a
+ * disposed runtime.
  */
-function makeRuntime(opts: { aborted?: boolean; failWrite?: boolean } = {}) {
+function makeRuntime(
+  opts: {
+    aborted?: boolean;
+    failWrite?: boolean;
+    entries?: readonly unknown[];
+  } = {},
+) {
   let subscribeCount = 0;
   let unsubscribeCount = 0;
+  let writeCount = 0;
+  const write = () => {
+    writeCount++;
+    return opts.failWrite
+      ? Promise.reject(new Error("write cancelled"))
+      : Promise.resolve();
+  };
   const favorites = {
     subscribeFavorites(cb: (favorites: readonly unknown[]) => void) {
       subscribeCount++;
-      cb([]);
+      cb(opts.entries ?? []);
       return () => {
         unsubscribeCount++;
       };
     },
-    addFavorite: () =>
-      opts.failWrite
-        ? Promise.reject(new Error("write cancelled"))
-        : Promise.resolve(),
-    removeFavorite: () =>
-      opts.failWrite
-        ? Promise.reject(new Error("write cancelled"))
-        : Promise.resolve(),
+    addFavorite: write,
+    removeFavorite: write,
   };
   return {
     favorites: () => favorites,
     signal: { aborted: opts.aborted ?? false },
     get subscribeCount() {
       return subscribeCount;
+    },
+    get writeCount() {
+      return writeCount;
     },
     get unsubscribeCount() {
       return unsubscribeCount;
@@ -194,20 +211,102 @@ Deno.test("toggling a favorite requests the subscription and swallows a disposal
     const ok = new XHeaderView() as unknown as HeaderViewLike;
     const okRt = makeRuntime();
     ok.rt = okRt;
-    ok.space = "did:key:test";
-    ok.pieceId = "piece-1";
+    ok.pieceAddress = {
+      space: "did:key:test",
+      pieceId: "piece-1",
+      scope: "space",
+    };
     await ok.accessForTestingOnly.handleToggleFavorite(fakeEvent());
     assertEquals(okRt.subscribeCount, 1);
+    assertEquals(okRt.writeCount, 1);
     assertFalse(ok.accessForTestingOnly.isFavoriteLoading);
 
     // A write cancelled by a disposed runtime is swallowed, not surfaced.
     const racing = new XHeaderView() as unknown as HeaderViewLike;
     const racingRt = makeRuntime({ failWrite: true, aborted: true });
     racing.rt = racingRt;
-    racing.space = "did:key:test";
-    racing.pieceId = "piece-2";
+    racing.pieceAddress = {
+      space: "did:key:test",
+      pieceId: "piece-2",
+      scope: "space",
+    };
     await racing.accessForTestingOnly.handleToggleFavorite(fakeEvent());
     assertFalse(racing.accessForTestingOnly.isFavoriteLoading);
+
+    // A piece whose scope the view does not yet know has no address to be
+    // favorited at, and the toggle writes nothing rather than favoriting
+    // whichever document the space scope holds.
+    const unresolved = new XHeaderView() as unknown as HeaderViewLike;
+    const unresolvedRt = makeRuntime();
+    unresolved.rt = unresolvedRt;
+    unresolved.space = "did:key:test";
+    unresolved.pieceId = "piece-3";
+    await unresolved.accessForTestingOnly.handleToggleFavorite(fakeEvent());
+    assertEquals(unresolvedRt.writeCount, 0);
+  } finally {
+    restore();
+  }
+});
+
+Deno.test("a favorite matches only in the scope the piece's address names", async () => {
+  const restore = installBrowserGlobals();
+  try {
+    const { XHeaderView } = await import("../src/views/HeaderView.ts");
+    const view = new XHeaderView() as unknown as HeaderViewLike;
+    view.rt = makeRuntime({
+      entries: [
+        favoriteOf({ id: "of:p", space: "did:key:test", scope: "user" }),
+      ],
+    });
+    view.accessForTestingOnly.ensureFavoritesSubscription();
+
+    view.pieceAddress = {
+      space: "did:key:test",
+      pieceId: "p",
+      scope: "user",
+    };
+    assert(view.accessForTestingOnly.isFavorite());
+
+    // The same id in the space scope is another document, whose favorite this
+    // one's is not.
+    view.pieceAddress = {
+      space: "did:key:test",
+      pieceId: "p",
+      scope: "space",
+    };
+    assertFalse(view.accessForTestingOnly.isFavorite());
+  } finally {
+    restore();
+  }
+});
+
+Deno.test("a favorite matches only in the space the piece's address names", async () => {
+  const restore = installBrowserGlobals();
+  try {
+    const { XHeaderView } = await import("../src/views/HeaderView.ts");
+    const view = new XHeaderView() as unknown as HeaderViewLike;
+    view.rt = makeRuntime({
+      entries: [
+        favoriteOf({ id: "of:p", space: "did:key:test", scope: "space" }),
+      ],
+    });
+    view.accessForTestingOnly.ensureFavoritesSubscription();
+
+    view.pieceAddress = {
+      space: "did:key:test",
+      pieceId: "p",
+      scope: "space",
+    };
+    assert(view.accessForTestingOnly.isFavorite());
+
+    // Favorites are one list across every space, so an id favorited in one
+    // says nothing about the same id in another.
+    view.pieceAddress = {
+      space: "did:key:other",
+      pieceId: "p",
+      scope: "space",
+    };
+    assertFalse(view.accessForTestingOnly.isFavorite());
   } finally {
     restore();
   }

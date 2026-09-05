@@ -1,12 +1,23 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { JSONSchema } from "@commonfabric/api";
+import type { CellScope, JSONSchema } from "@commonfabric/api";
 import type { DID } from "@commonfabric/identity";
 import { favoriteKey } from "@commonfabric/home-schemas";
-import { FavoritesManager } from "@/favorites-manager.ts";
+import {
+  type FavoritePieceAddress,
+  FavoritesManager,
+} from "@/favorites-manager.ts";
 import type { RuntimeClient } from "@/runtime-client.ts";
 
 const space = "did:key:test-space" as DID;
+
+/** The address of `pieceId` in the test space, resolved in `scope`. */
+function pieceAt(
+  pieceId: string,
+  scope: CellScope = "space",
+): FavoritePieceAddress {
+  return { space, pieceId, scope };
+}
 
 interface StubOptions {
   schema?: JSONSchema; // schema carried on the resolved piece ref
@@ -24,7 +35,7 @@ function makeStub(opts: StubOptions = {}) {
   const sent: Array<Record<string, unknown>> = [];
   let subscribeCb: ((v: unknown) => void) | undefined;
   let unsubscribed = false;
-  let getPieceCalls = 0;
+  const getPieceArgs: unknown[][] = [];
 
   const handler = { send: (p: Record<string, unknown>) => sent.push(p) };
   const favoritesCell: Record<string, unknown> = {
@@ -51,8 +62,8 @@ function makeStub(opts: StubOptions = {}) {
         : opts.ensureThrows
         ? Promise.reject(new Error("ensure failed"))
         : Promise.resolve(homeHandle),
-    getPiece: () => {
-      getPieceCalls++;
+    getPiece: (...args: unknown[]) => {
+      getPieceArgs.push(args);
       return opts.getPieceThrows
         ? Promise.reject(new Error("getPiece failed"))
         : Promise.resolve({
@@ -67,7 +78,8 @@ function makeStub(opts: StubOptions = {}) {
     invokeSubscribe: (v: unknown) => subscribeCb?.(v),
     hasSubscriber: () => subscribeCb !== undefined,
     wasUnsubscribed: () => unsubscribed,
-    getPieceCalls: () => getPieceCalls,
+    getPieceCalls: () => getPieceArgs.length,
+    lastGetPiece: () => getPieceArgs.at(-1),
   };
 }
 
@@ -83,13 +95,13 @@ describe("FavoritesManager", () => {
           tags: ["search", "go"],
         },
       });
-      await new FavoritesManager(stub.rt).addFavorite(space, "piece-1");
+      await new FavoritesManager(stub.rt).addFavorite(pieceAt("piece-1"));
       expect(stub.sent[0].tags).toEqual(["search", "go"]);
       expect(stub.sent[0].piece).toMatchObject({ id: "of:piece-1", space });
       // The favorite is addressed by the piece's identity so the handler can dedup
       // a re-favorite and remove by identity.
       expect(stub.sent[0].id).toBe(
-        favoriteKey({ space, id: "of:piece-1", path: [] }),
+        favoriteKey({ space, scope: "space", id: "of:piece-1", path: [] }),
       );
     });
 
@@ -98,8 +110,7 @@ describe("FavoritesManager", () => {
         schema: { type: "object", tags: ["schema-tag"] },
       });
       await new FavoritesManager(stub.rt).addFavorite(
-        space,
-        "p",
+        pieceAt("p"),
         "#Custom-Tag",
       );
       expect(stub.sent[0].tags).toEqual(["custom-tag"]);
@@ -108,14 +119,52 @@ describe("FavoritesManager", () => {
 
     it("stores no tags when the piece has no readable schema", async () => {
       const stub = makeStub({ schema: undefined });
-      await new FavoritesManager(stub.rt).addFavorite(space, "p");
+      await new FavoritesManager(stub.rt).addFavorite(pieceAt("p"));
       expect(stub.sent[0].tags).toEqual([]);
     });
 
     it("stores no tags when the schema read fails", async () => {
       const stub = makeStub({ getPieceThrows: true });
-      await new FavoritesManager(stub.rt).addFavorite(space, "p");
+      await new FavoritesManager(stub.rt).addFavorite(pieceAt("p"));
       expect(stub.sent[0].tags).toEqual([]);
+    });
+
+    it("reads the schema in the scope the piece's address names", async () => {
+      const stub = makeStub({ schema: { type: "object", tags: ["deep"] } });
+      await new FavoritesManager(stub.rt).addFavorite(pieceAt("p", "user"));
+      // The id and the scope together say which document to read: the same id
+      // in the space scope is a different one, whose tags are not this
+      // piece's.
+      expect(stub.lastGetPiece()).toEqual(["p", space, undefined, "user"]);
+    });
+  });
+
+  describe("the scope a favorite is taken in", () => {
+    it("sends the piece reference in the scope its address names", async () => {
+      const stub = makeStub();
+      await new FavoritesManager(stub.rt).addFavorite(pieceAt("p", "user"));
+      expect(stub.sent[0].piece).toMatchObject({
+        id: "of:p",
+        space,
+        scope: "user",
+      });
+    });
+
+    it("keys one id resolved in two scopes as two favorites", async () => {
+      const stub = makeStub();
+      const favorites = new FavoritesManager(stub.rt);
+      await favorites.addFavorite(pieceAt("p", "space"));
+      await favorites.addFavorite(pieceAt("p", "user"));
+      expect(stub.sent[0].id).not.toBe(stub.sent[1].id);
+    });
+
+    it("removes a scoped favorite by the key adding it used", async () => {
+      const stub = makeStub();
+      const favorites = new FavoritesManager(stub.rt);
+      await favorites.addFavorite(pieceAt("p", "session"));
+      await favorites.removeFavorite(pieceAt("p", "session"));
+      expect(stub.sent[1].id).toBe(stub.sent[0].id);
+      expect(stub.sent[1].piece).toMatchObject({ scope: "session" });
     });
   });
 
@@ -123,13 +172,13 @@ describe("FavoritesManager", () => {
     describe("removeFavorite()", () => {
       it("sends the piece reference and its key", async () => {
         const stub = makeStub();
-        await new FavoritesManager(stub.rt).removeFavorite(space, "piece-x");
+        await new FavoritesManager(stub.rt).removeFavorite(pieceAt("piece-x"));
         expect(stub.sent[0]).toMatchObject({
           piece: { id: "of:piece-x", space },
         });
         // The same key add uses, so the removal reaches the same favorite entity.
         expect(stub.sent[0].id).toBe(
-          favoriteKey({ space, id: "of:piece-x", path: [] }),
+          favoriteKey({ space, scope: "space", id: "of:piece-x", path: [] }),
         );
       });
     });

@@ -5,6 +5,7 @@
  * defaultPattern through cell operations, without requiring specialized IPC messages.
  */
 
+import type { CellScope } from "@commonfabric/api";
 import {
   FavoriteEntry,
   favoriteKey,
@@ -19,6 +20,26 @@ import type { CellRef } from "./protocol/types.ts";
 import { RuntimeClient } from "./runtime-client.ts";
 import { tagsFromSchema } from "./schema-tags.ts";
 import { describeFailure } from "@/shared/utils.ts";
+
+/**
+ * Which piece a favorite names: the space it lives in, its routing id there,
+ * and the scope that id resolves in.
+ *
+ * The three are one value so that an id and the scope completing it cannot be
+ * declared apart. A piece reached through a link into a narrower scope is
+ * addressed by its id and that scope together; the id alone names the
+ * space-scoped document, which is a different one.
+ */
+export type FavoritePieceAddress = {
+  /** The space the piece lives in. */
+  space: DID;
+
+  /** The piece's routing id, carrying no entity-URI scheme. */
+  pieceId: string;
+
+  /** The scope that id resolves in within the space. */
+  scope: CellScope;
+};
 
 type HandlerName = "addFavorite" | "removeFavorite";
 
@@ -39,20 +60,18 @@ export class FavoritesManager {
    * the piece's authored schema. An explicit `tag` overrides the derived
    * tags.
    *
-   * @param space - The space the piece lives in (part of its address)
-   * @param pieceId - The entity ID of the piece to add
+   * @param piece - The piece to add, addressed by space, id and scope
    * @param tag - Optional explicit discovery tag (overrides schema tags)
    * @param spaceName - Optional human-readable name of the space
    */
   async addFavorite(
-    space: DID,
-    pieceId: string,
+    piece: FavoritePieceAddress,
     tag?: string,
     spaceName?: string,
   ): Promise<void> {
     const handler = await this.#getHandler("addFavorite");
-    const pieceCellRef = this.#createPieceRef(space, pieceId);
-    const tags = await this.#deriveTags(space, pieceId, tag);
+    const pieceCellRef = this.#createPieceRef(piece);
+    const tags = await this.#deriveTags(piece, tag);
     // The favorite is addressed by the piece's identity, so a re-favorite dedups
     // and an unfavorite removes by identity. Pattern code cannot introspect the
     // piece cell's link, so the key is computed here from the piece address.
@@ -67,8 +86,7 @@ export class FavoritesManager {
    * favorite that later code can heal.
    */
   async #deriveTags(
-    space: DID,
-    pieceId: string,
+    piece: FavoritePieceAddress,
     explicitTag?: string,
   ): Promise<string[]> {
     if (explicitTag) return [explicitTag.toLowerCase().replace(/^#/, "")];
@@ -77,9 +95,16 @@ export class FavoritesManager {
       // with its result schema (`getAsLink({ includeSchema: true })`). It does
       // not start the piece (runIt defaults to false), so a piece that is not
       // already running may resolve without a schema and yield no tags — a
-      // tagless favorite that later code can heal.
-      const piece = await this.#rt.getPiece(pieceId, space);
-      const schema = piece?.cell().ref().schema;
+      // tagless favorite that later code can heal. The scope goes with the id:
+      // the schema read in the wrong scope is another document's, and would
+      // tag this favorite with that document's tags.
+      const handle = await this.#rt.getPiece(
+        piece.pieceId,
+        piece.space,
+        undefined,
+        piece.scope,
+      );
+      const schema = handle?.cell().ref().schema;
       return schema ? tagsFromSchema(schema) : [];
     } catch {
       // A missing or unreadable piece schema yields no tags, not a failure.
@@ -89,12 +114,11 @@ export class FavoritesManager {
 
   /**
    * Remove a piece from favorites.
-   * @param space - The space the piece lives in
-   * @param pieceId - The entity ID of the piece to remove
+   * @param piece - The piece to remove, addressed by space, id and scope
    */
-  async removeFavorite(space: DID, pieceId: string): Promise<void> {
+  async removeFavorite(piece: FavoritePieceAddress): Promise<void> {
     const handler = await this.#getHandler("removeFavorite");
-    const pieceCellRef = this.#createPieceRef(space, pieceId);
+    const pieceCellRef = this.#createPieceRef(piece);
     // Address the favorite entity by the same key add used, so the removal
     // reaches it regardless of the whole list's contents.
     const id = favoriteKey(pieceCellRef);
@@ -213,13 +237,14 @@ export class FavoritesManager {
   }
 
   /**
-   * Create a CellRef for a piece — an address of (space, id).
+   * Create a `CellRef` for a piece: its routing id under the `of:` scheme, in
+   * the space and scope its address names.
    */
-  #createPieceRef(space: DID, pieceId: string): CellRef {
+  #createPieceRef(piece: FavoritePieceAddress): CellRef {
     return {
-      id: `of:${pieceId}`,
-      space,
-      scope: "space",
+      id: `of:${piece.pieceId}`,
+      space: piece.space,
+      scope: piece.scope,
       path: [],
     };
   }
