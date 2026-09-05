@@ -68,6 +68,12 @@ const OPTIONS_KEY = "/options";
 const DIVIDER = "--";
 
 /**
+ * The divider as it sits in a file, a blank line above it and another below,
+ * the one below possibly being the end of the file.
+ */
+const DIVIDER_PATTERN = /\n\n--\n(?:\n|$)/;
+
+/**
  * Options for rendering a structured value whole: every limit at `Infinity`,
  * which the renderer caps at its absolute maximum for each.
  */
@@ -152,13 +158,15 @@ function evaluateExpression(expression: string): {
 
 /**
  * Splits a case file into its expression and its recorded sections, one per
- * case. The expression runs to the first divider line, and the sections are
- * what follow it, separated by blank lines; blank lines around the divider
- * belong to neither. The split of the sections rests on no rendering holding
- * a blank line, which holds for every rendering but that of an instance whose
- * class name itself holds one, and no case has such a class. A file with no
- * divider, or with nothing after it, is accepted as one with nothing but an
- * expression when the recordings are about to be rewritten.
+ * case. The expression runs to the first divider line that has a blank line
+ * on each side of it, and the sections are what follow it, separated by blank
+ * lines; the blank lines around the divider belong to neither. A `--` line
+ * without both blank lines is not a divider, so an expression may hold one.
+ * The split of the sections rests on no rendering holding a blank line, which
+ * holds for every rendering but that of an instance whose class name itself
+ * holds one, and no case has such a class. A file with no divider, or with
+ * nothing after it, is accepted as one with nothing but an expression when
+ * the recordings are about to be rewritten.
  *
  * @throws {Error} if the file records no sections, and the recordings are not
  * about to be rewritten.
@@ -167,13 +175,14 @@ function parseCaseFile(text: string): {
   expression: string;
   sections: string[];
 } {
-  const lines = text.split("\n");
-  const dividerAt = lines.indexOf(DIVIDER);
-  const expression = lines.slice(0, (dividerAt === -1) ? undefined : dividerAt)
-    .join("\n").trimEnd();
-  const recorded = (dividerAt === -1)
+  const trimmed = text.trimEnd();
+  const divider = DIVIDER_PATTERN.exec(trimmed);
+  const expression = (divider === null)
+    ? trimmed
+    : trimmed.slice(0, divider.index).trimEnd();
+  const recorded = (divider === null)
     ? ""
-    : lines.slice(dividerAt + 1).join("\n").trim();
+    : trimmed.slice(divider.index + divider[0].length).trim();
   const sections = (recorded === "") ? [] : recorded.split("\n\n");
 
   if ((sections.length === 0) && !UPDATE_GOLDENS) {
