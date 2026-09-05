@@ -313,7 +313,7 @@ describe("editWithRetry sequential conflict discovery", () => {
   // makes progress, and (b) survive a pull or catch-up failure without giving
   // up the round (the retry's commit is the definitive outcome). Convergence
   // takes one round per pre-existing derived doc, which is why
-  // writeBackCompileCache passes a budget sized to its write set instead of
+  // `#writeBackCompileCache` passes a budget sized to its write set instead of
   // DEFAULT_MAX_RETRIES.
 
   it("pulls each named doc and converges one doc per round", async () => {
@@ -425,7 +425,7 @@ describe("editWithRetry sequential conflict discovery", () => {
     try {
       // With the general default (5 retries = 6 attempts), a write set with
       // more never-read derived docs than that cannot converge — the CT-1824
-      // cold-boot loop. This is the behavior writeBackCompileCache's larger
+      // cold-boot loop. This is the behavior `#writeBackCompileCache`'s larger
       // budget exists to clear.
       const result = await runtime.editWithRetry(() => {});
       expect(result.error).toBeDefined();

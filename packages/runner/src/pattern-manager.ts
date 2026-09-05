@@ -63,20 +63,6 @@ import type { MemorySpace, Runtime, ServerRunInfo } from "./runtime.ts";
  * FOREIGN to the serving manager's home space. */
 export type WritebackDelegation = NonNullable<ServerRunInfo["delegated"]>;
 
-/**
- * Writes a compiled closure back to a space's compile cache: the shape of
- * `PatternManager`'s own write-back, and of the writer a test supplies in
- * its place.
- */
-export type CompileCacheWriter = (
-  space: MemorySpace,
-  modules: CacheableModule[],
-  entryIdentity: string,
-  opts: { runtimeVersion: string },
-  moduleDelegations?: ModuleDelegationMap,
-  delegated?: WritebackDelegation,
-) => Promise<void>;
-
 import {
   isFabricImportSpecifier,
   parseFabricRef,
@@ -92,6 +78,20 @@ import type {
   IExtendedStorageTransaction,
 } from "./storage/interface.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
+
+/**
+ * Writes a compiled closure back to a space's compile cache: the shape of
+ * `PatternManager`'s own write-back, and of the writer a test supplies in
+ * its place.
+ */
+export type CompileCacheWriter = (
+  space: MemorySpace,
+  modules: CacheableModule[],
+  entryIdentity: string,
+  opts: { runtimeVersion: string },
+  moduleDelegations?: ModuleDelegationMap,
+  delegated?: WritebackDelegation,
+) => Promise<void>;
 
 const logger = getLogger("pattern-manager");
 
@@ -432,10 +432,6 @@ export class PatternManager {
   // misses recover through the async storage-backed load. Instance field so
   // tests can shrink it.
   #maxEvaluatedModuleCacheSize = MAX_EVALUATED_MODULE_CACHE_SIZE;
-
-  // The writer a test supplies in place of the compile-cache write-back;
-  // undefined means the manager's own.
-  #compileCacheWriter: CompileCacheWriter | undefined = undefined;
   // ESM content-addressed compile-cache instrumentation.
   #esmCacheStats = { hits: 0, misses: 0, byIdentityHits: 0 };
   // In-memory identity -> module-namespace cache (CT-1623). Populated for EVERY
@@ -677,6 +673,9 @@ export class PatternManager {
     string,
     { closureSignature: string; persistence: Promise<void> }
   >();
+  // The writer a test supplies in place of the compile-cache write-back;
+  // undefined means the manager's own.
+  #compileCacheWriter: CompileCacheWriter | undefined = undefined;
   // A best-effort identity recovery that failed to persist skips the in-memory
   // artifact shortcuts on the next load so storage recovery runs again.
   #failedCompileCacheRecoveries = new Set<string>();
@@ -684,11 +683,13 @@ export class PatternManager {
   constructor(readonly runtime: Runtime) {}
 
   /**
-   * The in-flight and cached compilation tables, the module-cache bound, and
-   * the three closure steps that a test drives directly.
+   * The in-flight and cached compilation tables, the module-cache bound, the
+   * compile-cache writer a test may supply, and the three closure steps that
+   * a test drives directly.
    */
   get accessForTestingOnly(): {
     readonly addressableByIdentity: Map<string, Map<string, unknown>>;
+    compileCacheWriter: CompileCacheWriter | undefined;
     readonly compileCacheWrites: Set<Promise<unknown>>;
     readonly inProgressByIdentityLoads: Map<
       string,
@@ -696,7 +697,6 @@ export class PatternManager {
     >;
     readonly inProgressCompilations: Map<string, Promise<Pattern>>;
     maxEvaluatedModuleCacheSize: number;
-    compileCacheWriter: CompileCacheWriter | undefined;
     readonly modulesByIdentity: Map<string, { exports: Exports }>;
     readonly pendingCacheWriteBacks: Set<Promise<unknown>>;
     readonly persistedCompileCacheClosures: Map<string, string>;
@@ -724,6 +724,12 @@ export class PatternManager {
     const outerThis = this;
     return {
       addressableByIdentity: this.#addressableByIdentity,
+      get compileCacheWriter() {
+        return outerThis.#compileCacheWriter;
+      },
+      set compileCacheWriter(value) {
+        outerThis.#compileCacheWriter = value;
+      },
       compileCacheWrites: this.#compileCacheWrites,
       inProgressByIdentityLoads: this.#inProgressByIdentityLoads,
       inProgressCompilations: this.#inProgressCompilations,
@@ -732,12 +738,6 @@ export class PatternManager {
       },
       set maxEvaluatedModuleCacheSize(value) {
         outerThis.#maxEvaluatedModuleCacheSize = value;
-      },
-      get compileCacheWriter() {
-        return outerThis.#compileCacheWriter;
-      },
-      set compileCacheWriter(value) {
-        outerThis.#compileCacheWriter = value;
       },
       modulesByIdentity: this.#modulesByIdentity,
       pendingCacheWriteBacks: this.#pendingCacheWriteBacks,
@@ -2656,23 +2656,16 @@ export class PatternManager {
       }
 
       // A writer a test supplied stands in for the write-back.
-      await (this.#compileCacheWriter === undefined
-        ? this.#writeBackCompileCache(
-          space,
-          modules,
-          entryIdentity,
-          opts,
-          moduleDelegations,
-          delegated,
-        )
-        : this.#compileCacheWriter(
-          space,
-          modules,
-          entryIdentity,
-          opts,
-          moduleDelegations,
-          delegated,
-        ));
+      const write: CompileCacheWriter = this.#compileCacheWriter ??
+        ((...args) => this.#writeBackCompileCache(...args));
+      await write(
+        space,
+        modules,
+        entryIdentity,
+        opts,
+        moduleDelegations,
+        delegated,
+      );
       this.#persistedCompileCacheClosures.set(
         persistenceSlotKey,
         closureSignature,
@@ -2943,7 +2936,7 @@ export class PatternManager {
   // them blind and conflicts one engine round per edge (the CT-1824 loop).
   // With the edge docs materialized up front the write-back diffs against
   // true state and commits on the first attempt; the retry budget in
-  // writeBackCompileCache remains as a backstop. Same-microtask syncs batch
+  // `#writeBackCompileCache` remains as a backstop. Same-microtask syncs batch
   // into a single server round trip.
   async #syncSourceCacheWriteTargets(
     space: MemorySpace,

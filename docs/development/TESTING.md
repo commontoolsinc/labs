@@ -335,7 +335,7 @@ which the documents a compile-cache write-back writes do not. See
 check.
 
 Forcing that row on refuses the write-back of the debug-view deployment's own
-compile. `writeBackCompileCache` rethrows the refusal, so the deployment
+compile. `PatternManager.#writeBackCompileCache` rethrows the refusal, so the deployment
 promise rejects. A case waiting for a commit further along the deployment then
 waits forever, and the reason string names documents the case never mentions.
 
