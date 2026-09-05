@@ -150,6 +150,15 @@ const BOOTSTRAP_DAYS = 60;
 /** Objects read and folded before the next batch is fetched. */
 const CHUNK = 200;
 
+/**
+ * Rollup shards read and folded before the next batch is fetched. A shard
+ * is eight mebibytes stored and some tens of megabytes of text, holding a
+ * few hundred thousand records, and a day is written as up to two dozen
+ * of them. The compactor sizes a shard so that a reader holds one at a
+ * time, and this is what holds a reader to that.
+ */
+export const SHARD_CHUNK = 4;
+
 /** What the command line asked for. */
 export interface Options {
   days: number;
@@ -470,27 +479,38 @@ export async function publish(
 
   let settled = 0;
   for (const [date, shards] of rollups) {
-    try {
-      // A pair is folded whole or not at all: a shard that failed to read
-      // would leave it partly folded, and writing its receipt would then
-      // hide the rest of it from every later run.
-      const reports = await mapConcurrent(
-        shards,
-        options.concurrency,
-        (objectName) => store.read(objectName),
-      );
+    // A few shards at a time, for the reason the raw path reads in
+    // chunks: a day's worth of parsed records held at once is gigabytes.
+    //
+    // The receipt is written after the whole day, so a run that stops
+    // partway leaves the pair still owing what it owed. What the fold
+    // already took cannot be given back, though, and a rollup carries no
+    // record of which arrivals it covers, so nothing could tell a later
+    // run which part of the day it still owes. A shard that fails to read
+    // ends the run, and the previous manifest stays newest.
+    for (let at = 0; at < shards.length; at += SHARD_CHUNK) {
+      let reports: StoredReport[];
+      try {
+        reports = await mapConcurrent(
+          shards.slice(at, at + SHARD_CHUNK),
+          options.concurrency,
+          (objectName) => store.read(objectName),
+        );
+      } catch (error) {
+        console.warn(
+          `test selection: reading the rollup of ${date} failed: ${error}`,
+        );
+        console.warn(
+          "test selection: refusing to publish from part of the window. " +
+            "The previous manifest is still the newest one.",
+        );
+        return 1;
+      }
       for (const report of reports) noteReport(report);
       fold.add(reports);
-      fold.markSettled(CI_SOURCE, date);
-      settled++;
-    } catch (error) {
-      console.warn(
-        `test selection: reading the rollup of ${date} failed: ${error}`,
-      );
-      // No receipt was written, so the pair still owes what it owed, and
-      // the raw path is what is left to read it by.
-      ciDays.push(date);
     }
+    fold.markSettled(CI_SOURCE, date);
+    settled++;
   }
   if (rollups.size > 0) {
     console.log(

@@ -8,6 +8,7 @@ import {
   parseArgs,
   partitionOf,
   publish,
+  SHARD_CHUNK,
   type StoreAccess,
   writeToken,
 } from "./test-selection-publish.ts";
@@ -661,9 +662,10 @@ describe("publish() over a day that has been compacted", () => {
     expect(read).toContain(local);
   });
 
-  it("leaves a day open when a shard of its rollup will not read", async () => {
-    // Folded half, the day would be marked compacted and the rest of it
-    // would be hidden from every later run.
+  it("ends the run when a shard of its rollup will not read", async () => {
+    // The shards that did read are in the fold already, and a rollup
+    // carries no record of which arrivals it covers, so nothing could
+    // tell a later run which part of the day it still owes.
     const objects = {
       ...seed(),
       [ROLLUP]: object("c3", "fail", "2026-08-20T03:00:00.000Z"),
@@ -671,22 +673,51 @@ describe("publish() over a day that has been compacted", () => {
     const { store, created } = fakeStore(objects, {
       [DAY]: [ROLLUP, `labs/test-records/aggregated/v1/${DAY}/shard-1.ndjson`],
     });
-    const read: string[] = [];
     const broken: StoreAccess = {
       ...store,
-      read: (name) => {
-        read.push(name);
-        return name.endsWith("shard-1.ndjson")
+      read: (name) =>
+        name.endsWith("shard-1.ndjson")
           ? Promise.reject(new Error("that shard is gone"))
-          : store.read(name);
-      },
+          : store.read(name),
     };
     expect(await publish(["--bootstrap", "--days", "1"], broken, NOW, suites))
+      .toBe(1);
+    expect(created.size).toBe(0);
+  });
+
+  it("holds a few of a day's shards at a time rather than the day", async () => {
+    // A day is written as up to two dozen shards, and one decompresses to
+    // some tens of megabytes of text.
+    const shards = Array.from(
+      { length: SHARD_CHUNK * 2 + 1 },
+      (_, index) =>
+        `labs/test-records/aggregated/v1/${DAY}/shard-${index}.ndjson`,
+    );
+    const objects: Record<string, string> = { ...seed() };
+    for (const shard of shards) {
+      objects[shard] = object("c3", "fail", "2026-08-20T03:00:00.000Z");
+    }
+    const { store } = fakeStore(objects, { [DAY]: shards });
+    const read: string[] = [];
+    let live = 0;
+    let peak = 0;
+    const watched: StoreAccess = {
+      ...store,
+      read: async (name) => {
+        read.push(name);
+        live++;
+        peak = Math.max(peak, live);
+        try {
+          return await store.read(name);
+        } finally {
+          live--;
+        }
+      },
+    };
+    expect(await publish(["--bootstrap", "--days", "1"], watched, NOW, suites))
       .toBe(0);
-    // The run carried on and folded the day's raw objects instead.
-    expect(read).toContain(CI(DAY, "1"));
-    expect(read).toContain(CI(DAY, "2"));
-    expect(created.size).toBeGreaterThan(0);
+    expect(read).toEqual(shards);
+    expect(peak).toBeLessThanOrEqual(SHARD_CHUNK);
   });
 });
 
