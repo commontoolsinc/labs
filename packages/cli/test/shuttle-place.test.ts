@@ -658,9 +658,22 @@ describe("place", () => {
 
       describe("cd()", () => {
         it("refuses an empty operand", () => {
-          expect(atSpaceRoot().cd("  ")).toEqual({
+          expect(atSpaceRoot().cd("")).toEqual({
             kind: "refused",
             reason: "`cd` takes a place to move to.",
+          });
+        });
+
+        it("refuses an operand that is only whitespace for naming no child", () => {
+          // An empty operand and a quoted space are two mistakes rather than
+          // one: the first gave nothing, and the second gave a name that is
+          // only a space. A name reaches the rule the position's own children
+          // answer to, which at a space root is the closed set of facets.
+
+          expect(atSpaceRoot().cd(" ")).toEqual({
+            kind: "refused",
+            reason: "A space root lists facets, and ` ` names none. The " +
+              "facets are `slugs/` and `pieces/`.",
           });
         });
 
@@ -1258,23 +1271,6 @@ describe("place", () => {
             });
           });
 
-          it("trims the outer edges of an operand before splitting it", () => {
-            // A reference keeps what the walk drops here, and the walk is
-            // the only door that drops it — so a key named `" a"` is
-            // reachable by reference and not by walking to it. Landing on
-            // the trimmed key rather than refusing is what makes this
-            // worth pinning: nothing says the edge was lost.
-
-            const place = atReferencedPiece();
-            place.cd(" a ");
-            expect(place.place.position).toEqual({
-              kind: "piece",
-              space: SPACE,
-              piece: HANDLE,
-              path: ["a"],
-            });
-          });
-
           it("reads `~1` in a segment as two characters of a data key", () => {
             // A relative operand is not a reference, so the reference
             // grammar's `~1` escaping does not reach it: `~1` is literal
@@ -1363,6 +1359,58 @@ describe("place", () => {
               });
             });
 
+            it("reads `-` as a data key where whitespace precedes it", () => {
+              // The readings above are matched against the operand as it
+              // was written, so a leading space is a character of the first
+              // segment rather than something the reading looks past.
+              // Whitespace reaches an edge only through a quote, which makes
+              // it the character the writer meant.
+
+              const place = atReferencedPiece();
+              place.cd(" -");
+              expect(place.place.position).toEqual({
+                kind: "piece",
+                space: SPACE,
+                piece: HANDLE,
+                path: [" -"],
+              });
+            });
+
+            it("reads `@user` as a data key where whitespace precedes it", () => {
+              const place = atReferencedPiece();
+              place.cd(" @user");
+              expect(place.place.position).toEqual({
+                kind: "piece",
+                space: SPACE,
+                piece: HANDLE,
+                path: [" @user"],
+              });
+            });
+
+            it("reads `#favorites` as a data key where whitespace precedes it", () => {
+              const place = atReferencedPiece();
+              place.cd(" #favorites");
+              expect(place.place.position).toEqual({
+                kind: "piece",
+                space: SPACE,
+                piece: HANDLE,
+                path: [" #favorites"],
+              });
+            });
+
+            it("refuses `/` where whitespace precedes it, rather than reading it as the space root", () => {
+              // Relayed: the canonical layer's sentence, not shuttle's. The
+              // space-root reading is the operand exactly, so `" /"` falls
+              // through to the reference grammar, which is the door that
+              // reports it.
+
+              expect(atReferencedPiece().cd(" /")).toEqual({
+                kind: "refused",
+                reason: "Target must include a piece handle, e.g. " +
+                  '"/of:fid1:abc123/path".',
+              });
+            });
+
             it("reads `..` as a data key through a reference", () => {
               // `..` is read segment by segment by the walk and by nothing
               // else, so the reference door carries one as data. That is
@@ -1412,9 +1460,10 @@ describe("place", () => {
           });
 
           it("refuses an operand with a segment ending in whitespace", () => {
-            // The operand is trimmed before it is split, so only a segment
-            // with something after it can carry trailing whitespace this
-            // far.
+            // A segment with something after it in the operand, where the
+            // trailing whitespace is plainly the segment's own. One sitting
+            // at the operand's own edge answers to the same rule, under
+            // `whitespace at an operand's edges` below.
 
             expect(atReferencedPiece().cd("a /b")).toEqual({
               kind: "refused",
@@ -1450,6 +1499,138 @@ describe("place", () => {
                 "carries that name: a slug is lowercase letters, numbers, " +
                 "and single hyphens between words, and a handle is " +
                 "`of:fid1:` and unpadded base64url.",
+            });
+          });
+
+          describe("whitespace at an operand's edges", () => {
+            // The split separates tokens on whitespace (`line.ts`), so
+            // whitespace reaches an operand's edge only through a quote
+            // somebody wrote. Nothing strips it, which is what puts the outer
+            // parts of an operand under the same rule as every part between
+            // them: the operand's edges are those parts' edges, and at that
+            // one position stripping the operand would strip a name.
+
+            it("refuses a key ending in whitespace", () => {
+              expect(atReferencedPiece().cd("board ")).toEqual({
+                kind: "refused",
+                reason: "`board ` has a segment ending in whitespace, so a " +
+                  "rendering of the place would name a different cell.",
+              });
+            });
+
+            it("refuses a key ending in a tab", () => {
+              expect(atReferencedPiece().cd("board\t")).toEqual({
+                kind: "refused",
+                reason: "`board\t` has a segment ending in whitespace, so a " +
+                  "rendering of the place would name a different cell.",
+              });
+            });
+
+            it("refuses a key padded on both sides", () => {
+              expect(atReferencedPiece().cd(" board ")).toEqual({
+                kind: "refused",
+                reason: "` board ` has a segment ending in whitespace, so a " +
+                  "rendering of the place would name a different cell.",
+              });
+            });
+
+            it("reaches a key whose name starts with whitespace", () => {
+              // Leading whitespace survives a rendering and the parse that
+              // reads one back, so it costs a key no name and the walk spells
+              // such a key. The trailing edge is the one a rendering loses.
+
+              const place = atReferencedPiece();
+              place.cd(" board");
+              expect(place.place.position).toEqual({
+                kind: "piece",
+                space: SPACE,
+                piece: HANDLE,
+                path: [" board"],
+              });
+            });
+
+            it("refuses a multi-segment operand whose last segment ends in whitespace", () => {
+              // The one position where the operand's edge and a part's edge
+              // are the same characters, which is the whole of what makes
+              // this case different from `a /b` above.
+
+              expect(atReferencedPiece().cd("a/b ")).toEqual({
+                kind: "refused",
+                reason: "`a/b ` has a segment ending in whitespace, so a " +
+                  "rendering of the place would name a different cell.",
+              });
+            });
+
+            it("refuses an operand that is only whitespace inside a piece", () => {
+              expect(atReferencedPiece().cd(" ")).toEqual({
+                kind: "refused",
+                reason: "` ` has a segment ending in whitespace, so a " +
+                  "rendering of the place would name a different cell.",
+              });
+            });
+
+            it("refuses a piece ending in whitespace", () => {
+              expect(inSlugs().cd("board ")).toEqual({
+                kind: "refused",
+                reason:
+                  "`board ` has a piece ending in whitespace, so no piece " +
+                  "carries that name: a slug is lowercase letters, numbers, " +
+                  "and single hyphens between words, and a handle is " +
+                  "`of:fid1:` and unpadded base64url.",
+              });
+            });
+
+            it("refuses a piece ending in a tab", () => {
+              expect(inSlugs().cd("board\t")).toEqual({
+                kind: "refused",
+                reason:
+                  "`board\t` has a piece ending in whitespace, so no piece " +
+                  "carries that name: a slug is lowercase letters, numbers, " +
+                  "and single hyphens between words, and a handle is " +
+                  "`of:fid1:` and unpadded base64url.",
+              });
+            });
+
+            it("refuses a piece padded on both sides", () => {
+              expect(inSlugs().cd(" board ")).toEqual({
+                kind: "refused",
+                reason:
+                  "` board ` has a piece ending in whitespace, so no piece " +
+                  "carries that name: a slug is lowercase letters, numbers, " +
+                  "and single hyphens between words, and a handle is " +
+                  "`of:fid1:` and unpadded base64url.",
+              });
+            });
+
+            it("refuses a piece whose name starts with whitespace for naming no slug", () => {
+              // Relayed: the canonical layer's sentence, not shuttle's. A
+              // leading space costs a piece no rendering, so what refuses it
+              // is the vocabulary rather than the rendering rule — a
+              // different reason from the one the same edge gets on a key.
+
+              expect(inSlugs().cd(" board")).toEqual({
+                kind: "refused",
+                reason: '" board" is not a slug: a slug is lowercase ' +
+                  "letters, numbers, and single hyphens between words.",
+              });
+            });
+
+            it("refuses an operand that is only whitespace inside a facet", () => {
+              expect(inSlugs().cd(" ")).toEqual({
+                kind: "refused",
+                reason: "` ` has a piece ending in whitespace, so no piece " +
+                  "carries that name: a slug is lowercase letters, numbers, " +
+                  "and single hyphens between words, and a handle is " +
+                  "`of:fid1:` and unpadded base64url.",
+              });
+            });
+
+            it("refuses a facet name ending in whitespace", () => {
+              expect(atSpaceRoot().cd("slugs ")).toEqual({
+                kind: "refused",
+                reason: "A space root lists facets, and `slugs ` names none. " +
+                  "The facets are `slugs/` and `pieces/`.",
+              });
             });
           });
         });
@@ -1620,6 +1801,17 @@ describe("place", () => {
           });
         });
 
+        it("hands `#argument` followed by whitespace on as a target", () => {
+          // The suffix reading is the operand exactly, so a trailing space
+          // leaves the head reading to decide, and the head reading is the
+          // wish target.
+
+          expect(atPiece().aim("#argument ")).toEqual({
+            input: false,
+            move: { kind: "wish", target: "#argument " },
+          });
+        });
+
         it("hands a `#name` target on whole, the head reading being another one", () => {
           expect(atPiece().aim("#favorites")).toEqual({
             input: false,
@@ -1636,6 +1828,63 @@ describe("place", () => {
             move: pointsAt(atPiece(), "a#b"),
           });
           expect(pointsAt(atPiece(), "a#b").kind).toBe("moved");
+        });
+
+        it("refuses a key ending in whitespace inside a piece", () => {
+          expect(atPiece().aim("topics ")).toEqual({
+            input: false,
+            move: {
+              kind: "refused",
+              reason: "`topics ` has a segment ending in whitespace, so a " +
+                "rendering of the place would name a different cell.",
+            },
+          });
+        });
+
+        it("returns the key a leading space names inside a piece", () => {
+          expect(atPiece().aim(" topics")).toEqual({
+            input: false,
+            move: {
+              kind: "moved",
+              place: {
+                position: {
+                  kind: "piece",
+                  space: SPACE,
+                  piece: "board",
+                  path: [" topics"],
+                },
+                scope: "space",
+              },
+            },
+          });
+        });
+
+        it("refuses a piece ending in whitespace inside a facet", () => {
+          expect(inSlugs().aim("board ")).toEqual({
+            input: false,
+            move: {
+              kind: "refused",
+              reason: "`board ` has a piece ending in whitespace, so no " +
+                "piece carries that name: a slug is lowercase letters, " +
+                "numbers, and single hyphens between words, and a handle is " +
+                "`of:fid1:` and unpadded base64url.",
+            },
+          });
+        });
+
+        it("returns two reasons for an empty operand and one that is only whitespace", () => {
+          // The read door keeps the two apart the way the move door does: one
+          // named nothing, and one named a key that is only a space.
+
+          expect(atPiece().aim("").move).toEqual({
+            kind: "refused",
+            reason: "`cd` takes a place to move to.",
+          });
+          expect(atPiece().aim(" ").move).toEqual({
+            kind: "refused",
+            reason: "` ` has a segment ending in whitespace, so a rendering " +
+              "of the place would name a different cell.",
+          });
         });
 
         it("carries the reason a reference gave a fragment that is no suffix", () => {
