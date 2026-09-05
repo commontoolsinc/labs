@@ -187,6 +187,23 @@ type NavigationDetail = {
 };
 
 describe("RuntimeInternals", () => {
+  /** Fails the test if anything reaches for a dedicated worker. */
+  async function withNoWorkerConstructible<T>(
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const OriginalWorker = (globalThis as { Worker: unknown }).Worker;
+    (globalThis as { Worker: unknown }).Worker = class {
+      constructor() {
+        throw new Error("a supplied transport must spawn no worker");
+      }
+    };
+    try {
+      return await run();
+    } finally {
+      (globalThis as { Worker: unknown }).Worker = OriginalWorker;
+    }
+  }
+
   describe("getSpaceRootPattern", () => {
     it("caches a successful root-pattern lookup", async () => {
       const client = new MockRuntimeClient();
@@ -791,6 +808,91 @@ describe("RuntimeInternals", () => {
     expect(off.renderConfidentialityCeiling).toBeUndefined();
   });
 
+  it("builds the render ceiling for a host-supplied acting principal", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const session = await createSession({
+      identity,
+      spaceName: "lib-shell-cfc-render-ceiling-delegated",
+    });
+    const delegate = "did:key:z6MkDelegatedHost";
+
+    const options = createRuntimeClientOptions({
+      session,
+      apiUrl: new URL("http://shell.test/"),
+      // Stated, not inherited from a host default: the subject here is
+      // which principal the ceiling admits.
+      cfcRenderCeiling: true,
+      trustSnapshot: { id: `principal:${delegate}`, actingPrincipal: delegate },
+    });
+
+    // A display sink's audience is whoever the runtime renders as, which a
+    // delegated host names in its own trust snapshot rather than in the
+    // session identity.
+    expect(options.renderConfidentialityCeiling).toEqual(
+      defaultRenderConfidentialityCeiling(delegate),
+    );
+    expect(options.renderConfidentialityCeiling?.atoms).not.toContainEqual({
+      type: "https://commonfabric.org/cfc/atom/User",
+      subject: session.as.did(),
+    });
+  });
+
+  it("falls back to the session identity when nobody is named", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const session = await createSession({
+      identity,
+      spaceName: "lib-shell-cfc-render-ceiling-fallback",
+    });
+    const sessionCeiling = defaultRenderConfidentialityCeiling(
+      session.as.did(),
+    );
+
+    // `null` asks for no trust snapshot at all, which is a different case
+    // from a snapshot that carries no acting principal. Neither names an
+    // audience, so the session identity is acting in both.
+    const withoutSnapshot = createRuntimeClientOptions({
+      session,
+      apiUrl: new URL("http://shell.test/"),
+      cfcRenderCeiling: true,
+      trustSnapshot: null,
+    });
+    expect(withoutSnapshot.trustSnapshot).toBeUndefined();
+    expect(withoutSnapshot.renderConfidentialityCeiling).toEqual(
+      sessionCeiling,
+    );
+
+    const withoutPrincipal = createRuntimeClientOptions({
+      session,
+      apiUrl: new URL("http://shell.test/"),
+      cfcRenderCeiling: true,
+      trustSnapshot: { id: "principal:loom-host" },
+    });
+    expect(withoutPrincipal.renderConfidentialityCeiling).toEqual(
+      sessionCeiling,
+    );
+  });
+
+  it("refuses an acting principal that is not a DID", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+    const session = await createSession({
+      identity,
+      spaceName: "lib-shell-cfc-render-ceiling-non-did",
+    });
+
+    // A principal that is not a DID names no audience, and the check runs
+    // whether or not this host asks for a ceiling.
+    expect(() =>
+      createRuntimeClientOptions({
+        session,
+        apiUrl: new URL("http://shell.test/"),
+        trustSnapshot: {
+          id: "principal:loom-host",
+          actingPrincipal: "loom-host",
+        },
+      })
+    ).toThrow("acting principal must be a DID");
+  });
+
   it("allows hosts to override CFC policy and trust snapshot", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
     const session = await createSession({
@@ -934,6 +1036,26 @@ describe("RuntimeInternals", () => {
         defaultRenderConfidentialityCeiling(identity.did()),
       );
     });
+  });
+
+  it("refuses bad options before spawning a worker it would own", async () => {
+    const identity = await Identity.generate({ implementation: "noble" });
+
+    // With no transport supplied, `create` spawns the worker itself and owns
+    // it. Options are built first, so a snapshot this host cannot render for
+    // is refused while there is still nothing to dispose.
+    await expect(
+      withNoWorkerConstructible(() =>
+        RuntimeInternals.create({
+          identity,
+          apiUrl: new URL("http://shell.test/"),
+          trustSnapshot: {
+            id: "principal:loom-host",
+            actingPrincipal: "loom-host",
+          },
+        })
+      ),
+    ).rejects.toThrow("acting principal must be a DID");
   });
 
   describe("worker URL versioning", () => {
@@ -1228,23 +1350,6 @@ describe("RuntimeInternals", () => {
       dispose(): Promise<void> {
         this.disposals += 1;
         return Promise.resolve();
-      }
-    }
-
-    /** Fails the test if anything reaches for a dedicated worker. */
-    async function withNoWorkerConstructible<T>(
-      run: () => Promise<T>,
-    ): Promise<T> {
-      const OriginalWorker = (globalThis as { Worker: unknown }).Worker;
-      (globalThis as { Worker: unknown }).Worker = class {
-        constructor() {
-          throw new Error("a supplied transport must spawn no worker");
-        }
-      };
-      try {
-        return await run();
-      } finally {
-        (globalThis as { Worker: unknown }).Worker = OriginalWorker;
       }
     }
 
