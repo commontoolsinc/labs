@@ -445,10 +445,22 @@ export function plan(input: PlanInput): Plan {
   for (const [key, reason] of requiredOf) {
     // An identity the manifest does not carry cannot be placed, because
     // nothing here knows which suite would run it. Whoever enumerated the
-    // working tree carries a stand-in entry for it, so the identities
-    // that reach this without one are the ones no tree holds.
+    // working tree carries a stand-in entry for every unit it holds, so
+    // reaching this without one means the caller named something
+    // mandatory and handed over a corpus that does not contain it.
+    //
+    // Skipping it instead would drop a test that must run and say
+    // nothing, and a run reporting a pass over a test that never ran is
+    // the one failure of this design that would leave no trace. Every
+    // identity being placed once it is required is then what makes the
+    // full run complete, so that needs no separate check afterwards.
     const entry = byKey.get(key);
-    if (entry === undefined) continue;
+    if (entry === undefined) {
+      throw new Error(
+        `${key} must run, and the corpus this was given does not carry ` +
+          `it, so nothing here knows what would run it`,
+      );
+    }
     required.push({
       key,
       reason,
@@ -555,27 +567,6 @@ export function plan(input: PlanInput): Plan {
     bound,
     withRepeats,
   );
-
-  // The full run is the safety net under everything else, so a test it
-  // fails to place is a test nothing anywhere runs, and the run reports
-  // a pass over it. That the mandatory pass places every identity it is
-  // given follows from every lane being a candidate for work that fits
-  // in none of them, but an argument is the wrong thing to rest that on:
-  // a green run over tests that never ran is the one failure of this
-  // design that would leave no trace, so it is checked here rather than
-  // reasoned about.
-  if (everything) {
-    const placed = lanes.reduce(
-      (total, lane) => total + lane.selections.length,
-      0,
-    );
-    if (placed !== requiredOf.size) {
-      throw new Error(
-        `a full plan placed ${placed} of ${requiredOf.size} identities, ` +
-          `so ${requiredOf.size - placed} would run nowhere`,
-      );
-    }
-  }
 
   return {
     lanes: lanes.map((lane) => ({

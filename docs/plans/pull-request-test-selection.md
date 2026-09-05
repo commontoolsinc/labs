@@ -2265,7 +2265,8 @@ What the runner does, in order:
    lines through the attribution map to the items that execute them. The
    full run skips this: it has no diff.
 4. Call `plan()`, take this lane's plan. The full run calls it with the
-   `everything` policy and this is the only place the two differ.
+   `everything` policy, and with the empty diff step 3 left it. Those two
+   values are the whole of the difference between the two runs.
 5. Print the plan to the job summary: which batches, which items, what
    each is expected to cost, why each was chosen, which items were
    withheld and why, and which manifest the plan came from.
@@ -3093,14 +3094,18 @@ test's score and `FILL_DENSITY_SHARE` is a share of a lane's budget. A
 share of an item's runs reads the same way again. Naming the unit is what
 keeps them from being compared to each other.
 
-The **Set by** column separates the two kinds. A **chosen** value is a
+The **Set by** column separates three kinds. A **chosen** value is a
 decision somebody made, and editing it is how the decision changes. A
 **measured** value is worked out from the data and written back by the
 publisher, so the number in the file is only the seed used before there is
 anything to measure, and editing it changes nothing after the first
-publisher run. The distinction matters because the two look identical in a
-source file, and somebody who tunes a measured value is arguing with a
-tape measure.
+publisher run. A **derived** value is computed from other dials and has no
+expression of its own to edit: each lane budget is its run's bound less
+the prologue and the safety margin, so a budget that does not fit inside
+its own bound cannot be written down. The distinction matters because all
+three look identical in a source file, and somebody who tunes a measured
+value is arguing with a tape measure while somebody who tries to tune a
+derived one is editing a line that is not there.
 
 | Dial | Default | Units | Set by | Why you would move it, and which way |
 | --- | --- | --- | --- | --- |

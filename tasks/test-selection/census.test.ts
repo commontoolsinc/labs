@@ -231,6 +231,22 @@ describe("the identity a unit nothing has recorded stands on", () => {
       .toEqual(["package-integration", "package-integration-opposite"]);
   });
 
+  it("refuses a stand-in whose name a real test already has", () => {
+    // Vanishingly unlikely and cheap to refuse. What it costs to ignore
+    // is a unit that goes into no lane while everything downstream
+    // counts as though it had, which is a test that quietly stops
+    // running.
+    const collides = manifestOf([{
+      test: {
+        k: "unit",
+        s: "bakery",
+        n: `unrecorded ${"packages/oven/bakes.test.ts"}`,
+      },
+      unit: "packages/oven/somewhere-else.test.ts",
+    }]);
+    expect(() => census([off], collides, new Set())).toThrow("run nowhere");
+  });
+
   it("gives the whole topology as many stand-ins as it has units", async () => {
     // The property above, over the repository's real suites rather than
     // over a pair built to show it.

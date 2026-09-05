@@ -633,13 +633,34 @@ describe("plan", () => {
   });
 });
 
-describe("an identity the manifest does not carry", () => {
-  it("is left out, because nothing here knows what would run it", () => {
-    const key = '["unit","memory","brand new"]';
-    const result = run(sampleManifest({ entries: entries(3) }), {
-      mandatory: new Map([[key, "changed" as const]]),
+describe("an identity a manifest carries twice", () => {
+  it("runs it once, rather than placing it in two lanes", () => {
+    // A duplicated entry is one identity however many rows describe it,
+    // and running it twice would charge a lane for work it did not do.
+    const twice = sampleEntry({ k: "unit", s: "memory", n: "case 0" }, {
+      unit: "packages/memory/test/case-0.test.ts",
     });
-    expect(keysOf(result)).not.toContain(key);
+    const manifest = sampleManifest({
+      entries: [...entries(3), twice],
+    });
+    const key = testIdentityKey(twice.test);
+    const placed = keysOf(run(manifest)).filter((k) => k === key);
+    expect(placed.length).toBe(1);
+  });
+});
+
+describe("an identity the manifest does not carry", () => {
+  it("refuses to plan, rather than dropping a test that must run", () => {
+    // Whoever read the tree carries a stand-in for every unit it holds,
+    // so this is the caller naming something mandatory and handing over
+    // a corpus without it. Leaving it out would report a pass over a
+    // test that never ran, which is the failure with no trace.
+    const key = '["unit","memory","brand new"]';
+    expect(() =>
+      run(sampleManifest({ entries: entries(3) }), {
+        mandatory: new Map([[key, "changed" as const]]),
+      })
+    ).toThrow("must run");
   });
 });
 
@@ -784,19 +805,73 @@ describe("how many lanes the full run needs", () => {
     expect(count(manifest, { budgetSeconds: 100 })).toBe(6);
   });
 
+  it("adds lanes while each one still buys something", () => {
+    // The fewest lanes the raw work could fit in is not enough lanes,
+    // because a lane loses part of its budget to the overhead of the
+    // suite it opens. The search has to climb past that starting point,
+    // and this is the case that makes it: three lanes hold 1,440
+    // seconds of tests only if their overheads are free, and they are
+    // not.
+    const manifest = sampleManifest({
+      entries: entries(24, () => ({ cost: 60 })),
+      calibration: {
+        setupCost: {},
+        suites: { "workspace-unit": { overhead: 150, correction: 1 } },
+        unitOverhead: {},
+        prologue: 0,
+      },
+    });
+    const work = manifest.entries.reduce((total, e) => total + e.cost, 0);
+    const floor = Math.ceil(work / FULL_LANE_BUDGET_SECONDS);
+    const lanes = count(manifest);
+    expect(lanes).toBeGreaterThan(floor);
+    const packed = plan({
+      manifest,
+      mandatory: new Map(),
+      capabilities,
+      policy: "everything",
+      lanes,
+    });
+    expect(packed.overBudgetSeconds).toBe(0);
+  });
+
   it("stops rather than chasing work no number of lanes can fit", () => {
-    // One identity larger than a whole lane and nothing else. Its lane
-    // runs long however many lanes there are, so adding lanes buys
-    // nothing and the search stops.
+    // The search has to reach its stopping rule to be tested by this, so
+    // the corpus has to be one where lanes are still worth adding for a
+    // while and then stop being. A single oversized identity would cap
+    // the search at one lane before the loop ran at all, and the case
+    // would pass with the rule deleted.
     const manifest = sampleManifest({
       entries: [
+        ...entries(20, () => ({ cost: 100 })),
         sampleEntry({ k: "unit", s: "memory", n: "vast" }, {
           unit: "packages/memory/test/vast.test.ts",
-          cost: 5_000,
+          cost: FULL_LANE_BUDGET_SECONDS * 3,
         }),
       ],
     });
-    expect(count(manifest)).toBe(1);
+    const lanes = count(manifest);
+    // Adding lanes past this buys nothing, because what is left over
+    // budget is one identity no lane can hold.
+    const at = (n: number) =>
+      plan({
+        manifest,
+        mandatory: new Map(),
+        capabilities,
+        policy: "everything",
+        lanes: n,
+      });
+    const overrun = (result: ReturnType<typeof plan>) =>
+      result.lanes.reduce(
+        (total, lane) =>
+          total + Math.max(0, lane.projectedSeconds - result.budgetSeconds),
+        0,
+      );
+    expect(overrun(at(lanes))).toBeGreaterThan(0);
+    expect(overrun(at(lanes + 1))).toBeGreaterThan(overrun(at(lanes)) - 1);
+    // And it did reach the rule rather than stopping at the cap.
+    expect(lanes).toBeGreaterThan(1);
+    expect(lanes).toBeLessThan(manifest.entries.length);
   });
 
   it("keeps adding lanes for work one oversized test would hide", () => {

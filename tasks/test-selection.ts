@@ -350,13 +350,21 @@ export function verdictFor(
   manifest: Manifest,
   suites: readonly Suite[],
   test: TestIdentity,
-): PlanVerdict {
-  const { result } = planFor(manifest, suites);
+): PlanVerdict & { corpus: Manifest } {
+  const { seen, result } = planFor(manifest, suites);
   const key = testIdentityKey(test);
   const taken = result.lanes.flatMap((lane) => lane.selections).find((
     selection,
   ) => testIdentityKey(selection.entry.test) === key);
-  const verdict: PlanVerdict = { selected: taken !== undefined };
+  // The corpus travels with the verdict so that whatever explains this
+  // identity explains it against the same set the verdict came from. A
+  // reader given the published manifest instead would be told there is
+  // no record of a unit this tree has just added, while the verdict
+  // beside it says a lane runs the stand-in for it.
+  const verdict: PlanVerdict & { corpus: Manifest } = {
+    selected: taken !== undefined,
+    corpus: seen,
+  };
   if (taken !== undefined) verdict.repeats = taken.repeats;
   const refused = result.unschedulable.find((entry) =>
     testIdentityKey(entry.test) === key
@@ -518,13 +526,8 @@ export async function dispatch(
         manifest.generatedAt.slice(0, 10),
       );
       const suites = await sources.topology();
-      for (
-        const line of explainLines(
-          manifest,
-          resolved,
-          verdictFor(manifest, suites, resolved),
-        )
-      ) {
+      const verdict = verdictFor(manifest, suites, resolved);
+      for (const line of explainLines(verdict.corpus, resolved, verdict)) {
         console.log(line);
       }
       return 0;

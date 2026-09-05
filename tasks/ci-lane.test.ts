@@ -437,27 +437,112 @@ describe("how many lanes the full run asks for", () => {
     expect(await fullLanes(options, deps)).toBe(4);
   });
 
+  /**
+   * A corpus with the shapes that make packing hard: several suites, the
+   * measured skew the plan document records with a tenth of the tests
+   * holding most of the time, capabilities whose setup a lane pays once,
+   * fitted overheads, and one identity larger than a whole lane.
+   */
+  function awkward() {
+    const suites = [
+      suite({ id: "workspace-unit", needs: ["deno"], units: [] }),
+      suite({
+        id: "pattern-integration",
+        needs: ["deno", "browser"],
+        units: [],
+      }),
+      suite({ id: "cli-core", needs: ["deno", "toolshed"], units: [] }),
+    ].map((s, i) => ({
+      ...s,
+      units: Array.from({ length: 40 }, (_, u) => `s${i}/unit-${u}.test.ts`),
+    }));
+    const entries = suites.flatMap((s, i) =>
+      s.units.map((unit, u) => ({
+        test: { k: "unit", s: "bakery", n: `s${i} case ${u}` },
+        suite: s.id,
+        unit,
+        // A tenth of them hold most of the time, and one is larger than
+        // any lane can hold.
+        cost: u === 0 && i === 0
+          ? FULL_LANE_BUDGET_SECONDS * 2
+          : u % 10 === 0
+          ? 40
+          : 0.4,
+      }))
+    );
+    const manifest = manifestOf(entries);
+    manifest.calibration = {
+      setupCost: { deno: 15, browser: 60, toolshed: 45 },
+      suites: Object.fromEntries(
+        suites.map((s) => [s.id, { overhead: 12, correction: 1.3 }]),
+      ),
+      unitOverhead: {},
+      prologue: 40,
+    };
+    return {
+      suites,
+      topology: () => Promise.resolve(suites),
+      manifest: () =>
+        Promise.resolve({ manifest, objectName: "manifest-fixture.json.gz" }),
+    };
+  }
+
   it("gives every unit a lane at the count it asked for", async () => {
     // The integer is the whole of what the job ahead of the full run
-    // emits, so it has to be a count the lanes can honor: every unit
-    // placed, and no lane past the budget the count was chosen for.
-    const deps = corpus(100, 1);
+    // emits, so it has to be a count the lanes can honor. Every identity
+    // placed exactly once is the property that matters: what the full
+    // run does not run, nothing runs.
+    const deps = awkward();
     const lanes = await fullLanes(options, deps);
-    const suites = await deps.topology();
-    const seen = census(suites, (await deps.manifest()).manifest, new Set());
+    const seen = census(
+      deps.suites,
+      (await deps.manifest()).manifest,
+      new Set(),
+    );
     const laid = plan({
       manifest: seen.manifest,
       mandatory: seen.mandatory,
-      capabilities: capabilitiesBySuite(suites),
+      capabilities: capabilitiesBySuite(deps.suites),
       policy: "everything",
       lanes,
     });
-    expect(laid.overBudgetSeconds).toBe(0);
     const placed = laid.lanes.flatMap((lane) =>
-      lane.selections.map((s) => s.entry.unit)
+      lane.selections.map((s) => testIdentityKey(s.entry.test))
     );
-    expect(placed.length).toBe(100);
-    expect(new Set(placed).size).toBe(100);
+    expect(placed.length).toBe(seen.manifest.entries.length);
+    expect(new Set(placed).size).toBe(seen.manifest.entries.length);
+    // The lanes the count was chosen for hold what it promised, save the
+    // one carrying an identity larger than any lane, which carries it
+    // alone because nothing else would fit beside it.
+    const over = laid.lanes.filter((lane) =>
+      lane.projectedSeconds > laid.budgetSeconds
+    );
+    expect(over.length).toBe(1);
+    expect(over[0]!.selections.length).toBe(1);
+  });
+
+  it("gives every unit a lane when nothing has been measured", async () => {
+    // The same property down the fallback path, where the count comes
+    // from the shape of the topology rather than from a cost model.
+    const deps = awkward();
+    const lanes = await fullLanes(options, {
+      topology: deps.topology,
+      manifest: () => Promise.resolve({ absent: "the store is gone" }),
+    });
+    const seen = census(deps.suites, undefined, new Set());
+    const laid = plan({
+      manifest: seen.manifest,
+      mandatory: seen.mandatory,
+      capabilities: capabilitiesBySuite(deps.suites),
+      policy: "everything",
+      lanes,
+    });
+    const placed = laid.lanes.flatMap((lane) =>
+      lane.selections.map((s) => testIdentityKey(s.entry.test))
+    );
+    expect(placed.length).toBe(120);
+    expect(new Set(placed).size).toBe(120);
+    expect(laid.overBudgetSeconds).toBe(0);
   });
 
   it("takes the topology's shape when a manifest knows none of it", async () => {

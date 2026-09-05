@@ -156,6 +156,9 @@ export function census(
   }
   const entries: ManifestEntry[] = [];
   const mandatory = new Map<string, SelectionReason>();
+  const taken = new Set<string>(
+    (manifest?.entries ?? []).map((entry) => testIdentityKey(entry.test)),
+  );
   let unmeasured = 0;
   for (const suite of suites) {
     const unavailable = unavailableUnits(suite);
@@ -178,11 +181,27 @@ export function census(
       const recorded = inUnit.get(`${suite.id}\t${unit}`);
       if (recorded === undefined) {
         const entry = standIn(suite, unit, costs.get(suite.id) ?? []);
+        const key = testIdentityKey(entry.test);
+        // A stand-in is named for the unit it stands in for, and a real
+        // test could in principle be given that name. Two things would
+        // then share one key: the identity maps would keep one of them,
+        // and a unit would go into no lane while everything downstream
+        // counted as though it had. Nothing here can prevent a name, so
+        // the collision is refused where it is made rather than left to
+        // be found as a test that stopped running.
+        if (taken.has(key)) {
+          throw new Error(
+            `the stand-in for ${suite.id} ${unit} is named ${key}, and ` +
+              `something else in this corpus already is, so one of the ` +
+              `two would run nowhere`,
+          );
+        }
+        taken.add(key);
         entries.push(entry);
         unmeasured += 1;
         // Nothing in the manifest runs this unit, so it is unknown
         // whatever else made it mandatory.
-        mandatory.set(testIdentityKey(entry.test), reason ?? "unknown");
+        mandatory.set(key, reason ?? "unknown");
         continue;
       }
       entries.push(...recorded);
