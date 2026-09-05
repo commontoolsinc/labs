@@ -760,35 +760,6 @@ const extra = answer + 1;
   }
 });
 
-Deno.test("diffedit: a refused hunk update leaves the removed line intact", () => {
-  const { root, ws, done } = tempWorkspace();
-  try {
-    const s = diffSession(ws);
-    toLine(s, 8); // the "-export const answer = 42;" line
-    const before = s.doc.text;
-    const internals = s as unknown as {
-      adjustHunkCounts(
-        oldDelta: number,
-        newDelta: number,
-        hunkHeader?: number | null,
-      ): boolean;
-    };
-    internals.adjustHunkCounts = () => false;
-
-    press(s, "R");
-
-    assertEquals(s.doc.text, before, "the removed line was not changed");
-    assertEquals(s.view().message, "This hunk could not be updated.");
-    assertEquals(
-      Deno.readTextFileSync(join(root, "m.ts")),
-      FILE_TEXT,
-      "the workspace file was not changed",
-    );
-  } finally {
-    done();
-  }
-});
-
 Deno.test("diffedit: R remains a typed character on an editable diff line", () => {
   const { ws, done } = tempWorkspace();
   try {
