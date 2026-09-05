@@ -151,6 +151,7 @@
       ]
     },
     "plugins": [
+      "./tasks/lint-access-for-testing-only.ts",
       "./tasks/lint-bench-console.ts",
       "./tasks/lint-inline-imports.ts",
       "./tasks/lint-self-import.ts"
