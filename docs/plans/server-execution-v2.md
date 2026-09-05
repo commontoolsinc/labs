@@ -38,6 +38,9 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
+**Delta 2026-09-03 (the RE-FLIP, #6844): the default is ON again; the ON
+soak resumes at its merge.**
+
 **Delta 2026-09-03 (the ROLLBACK): the first-party default returned to OFF
 via the rollback PR (#6840) — the first data-only flip:
 `SERVER_EXECUTION_DEFAULT_ENABLED` → `false` plus current-status prose, with
