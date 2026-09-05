@@ -2,7 +2,9 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   linkPathSegmentToCellPathSegment,
+  parseLinkPrimitive,
   parseScopedIdSegment,
+  type PrimitiveCellLink,
 } from "../src/link-types.ts";
 
 describe("link-types", () => {
@@ -62,6 +64,15 @@ describe("link-types", () => {
     it("throws when no id precedes the suffix", () => {
       expect(() => parseScopedIdSegment("@user")).toThrow(
         /Invalid scope suffix/,
+      );
+    });
+  });
+
+  describe("parseLinkPrimitive()", () => {
+    it("throws naming the value, given a value that is not a link", () => {
+      const value = { x: 1 } as unknown as PrimitiveCellLink;
+      expect(() => parseLinkPrimitive(value)).toThrow(
+        "Link is not a primitive: `{x:1}`",
       );
     });
   });

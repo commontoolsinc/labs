@@ -1,9 +1,10 @@
-import { isObjectNotArray } from "@commonfabric/utils/types";
+import { toCompactDebugString } from "@commonfabric/data-model";
 import {
   isLinkRef,
   linkRefFrom,
   linkRefPayload,
 } from "@commonfabric/data-model/cell-rep";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
   type CellScope,
   type JSONSchema,
@@ -277,7 +278,11 @@ export function parseLinkPrimitive(
       ...(link.overwrite === "redirect" && { overwrite: "redirect" }),
     };
   }
-  throw new Error(`Link is not a primitive: ${value}`);
+  throw new Error(
+    `Link is not a primitive: ${
+      toCompactDebugString(value, { backtickQuote: true })
+    }`,
+  );
 }
 
 /**

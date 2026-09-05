@@ -39,11 +39,17 @@ const DEBUGGER_VALUE_OPTIONS: DebugValueOptions = {
 };
 
 /**
- * Longest text an expanded marker's detail shows. The indented rendering has
- * no length option of its own, and a marker with many keys at every level
- * within the depth limit still runs long, so the display bounds itself.
+ * Rendering options for the runs of a non-idempotent report. The panel is an
+ * inspector, so every run and every cell a run read or wrote is shown, deep
+ * enough to reach the values; a long string, or a value nested past the
+ * depth, is still cut.
  */
-const MAX_MARKER_DETAIL_LENGTH = 10000;
+const RUN_DETAIL_OPTIONS: DebugValueOptions = {
+  ...DEBUGGER_VALUE_OPTIONS,
+  maxDepth: 6,
+  maxArrayLength: Infinity,
+  maxProperties: Infinity,
+};
 
 /**
  * Hierarchical topic definitions for filtering telemetry events.
@@ -96,12 +102,13 @@ export type SubtopicKey<T extends TopicKey> =
  */
 export class XDebuggerView extends LitElement {
   // The members below stay TypeScript-private rather than becoming `#` names,
-  // which is the convention elsewhere. `test/disposal-handling.test.ts` calls
-  // this view's handlers off `XDebuggerView.prototype` against a stand-in
-  // receiver: a plain object supplying `getLoggerRegistry`,
-  // `debuggerController`, and the rest as ordinary properties. A `#` name is
-  // scoped to real instances, so each of those calls would throw. Converting
-  // the class means rewriting that suite to build real views.
+  // which is the convention elsewhere. `test/disposal-handling.test.ts` and
+  // `test/XDebuggerView.test.ts` call this view's methods off
+  // `XDebuggerView.prototype` against a stand-in receiver: a plain object
+  // supplying `getLoggerRegistry`, `debuggerController`, and the rest as
+  // ordinary properties. A `#` name is scoped to real instances, so each of
+  // those calls would throw. Converting the class means rewriting both suites
+  // to build real views.
 
   static override styles = css`
     :host {
@@ -1133,17 +1140,6 @@ export class XDebuggerView extends LitElement {
     }
 
     return false;
-  }
-
-  /**
-   * Renders the detail an expanded marker shows: the indented rendering, cut
-   * to `MAX_MARKER_DETAIL_LENGTH` with a trailing `...` when it runs longer.
-   */
-  private markerDetail(marker: RuntimeTelemetryMarkerResult): string {
-    const text = toIndentedDebugString(marker, DEBUGGER_VALUE_OPTIONS);
-    return (text.length > MAX_MARKER_DETAIL_LENGTH)
-      ? `${text.slice(0, MAX_MARKER_DETAIL_LENGTH - 3)}...`
-      : text;
   }
 
   private matchesSearch(marker: RuntimeTelemetryMarkerResult): boolean {
@@ -2562,7 +2558,10 @@ export class XDebuggerView extends LitElement {
                             </summary>
                             <pre
                               style="margin: 0.25rem 0 0; font-size: 0.625rem; color: #cbd5e1; overflow: auto; max-height: 8rem;"
-                            >${JSON.stringify(report.runs, null, 2)}</pre>
+                            >${toIndentedDebugString(
+                              report.runs,
+                              RUN_DETAIL_OPTIONS,
+                            )}</pre>
                           </details>
                         </div>
                       `,
@@ -2703,7 +2702,10 @@ export class XDebuggerView extends LitElement {
                         Copy Full
                       </button>
                     </div>
-                    <pre>${this.markerDetail(marker)}</pre>
+                    <pre>${toIndentedDebugString(
+                      marker,
+                      DEBUGGER_VALUE_OPTIONS,
+                    )}</pre>
                   </div>
                 `
                 : ""}

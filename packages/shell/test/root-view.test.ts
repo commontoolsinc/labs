@@ -11,6 +11,7 @@ import {
   NotificationType,
   RuntimeErrorCode,
 } from "@commonfabric/runtime-client";
+import { templateMarkup } from "./lit-template-markup.ts";
 
 // XRootView is a Lit element; load and exercise it under a minimal browser
 // shim, mirroring login-view.test.ts. Constructing it runs its field
@@ -84,21 +85,21 @@ function templateStrings(value: unknown): string {
   return (result?.strings ?? []).join("");
 }
 
-function templateMarkup(value: unknown): string {
-  if (Array.isArray(value)) return value.map(templateMarkup).join("");
-  if (value === null || value === undefined) return "";
-  if (typeof value !== "object") return String(value);
-  const template = value as {
-    strings?: readonly string[];
-    values?: readonly unknown[];
-  };
-  if (template.strings === undefined) return "";
-  return template.strings.map((part, index) =>
-    part + templateMarkup(template.values?.[index])
-  ).join("");
-}
-
 describe("XRootView", () => {
+  it("throws naming the value, given a command event carrying a non-command", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const event = new CustomEvent("command", { detail: { type: "bogus" } });
+      expect(() => view.onCommand(event)).toThrow(
+        'Received a non-command: `{type:"bogus"}`',
+      );
+    } finally {
+      restore();
+    }
+  });
+
   it("constructs with default app state and renders the app view", async () => {
     const restore = installBrowserGlobals();
     try {
