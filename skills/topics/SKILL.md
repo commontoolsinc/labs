@@ -376,9 +376,9 @@ same way before the live run: `docs/development/space-clone-rehearsal.md`.
    says before scheduling the window.
 
 2. **Then each Topic's source.** Moving the board first is what clears the Topic
-   leg's `mentionable[].shortName` refusal. What remains is older than the
-   graft: a Topic wired to a board's `mentionable` cannot be re-sourced with its
-   OWN bytes either.
+   leg's `mentionable[].shortName` refusal. What remains is older than the graft
+   and is #6968: a Topic wired to a board's `mentionable` cannot be re-sourced
+   with its OWN bytes either.
 
    ```
    piece source is incompatible with retained input: input link at mentionable
