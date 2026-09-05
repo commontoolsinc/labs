@@ -1,6 +1,7 @@
 import { checkoutDocsCorpusRoots } from "../src/docs-corpus/corpus.ts";
 import { resolveHarnessSkillsRoot } from "../src/skills/root.ts";
 import { assert, assertEquals, assertExists, assertThrows } from "@std/assert";
+import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import {
   type CfcEnforcementMode,
   cfcEnforcementStrictness,
@@ -8,6 +9,7 @@ import {
 } from "@commonfabric/runner/cfc";
 import { presetCfcOptions } from "@commonfabric/runner";
 import {
+  readCeilingsEqual,
   DEFAULT_GATEWAY_BASE_URL,
   DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE,
   fabricSessionCfcEnforcementMode,
@@ -725,4 +727,58 @@ Deno.test("resolveHarnessConfig snapshots the run manifest's read ceiling rather
   assertEquals(config.fabricSession?.manifestReadMaxConfidentiality, [
     "did:key:zOwner",
   ]);
+});
+
+
+Deno.test("readCeilingsEqual is a multiset match with order-insensitive alternatives, never a string compare", () => {
+  const A = "did:key:zA";
+  const B = "did:key:zB";
+  const O = "did:key:zO";
+  assertEquals(readCeilingsEqual([{ anyOf: [A, B] }, O], [O, { anyOf: [B, A] }]), true);
+  assertEquals(readCeilingsEqual([{ anyOf: [A, B] }], [{ anyOf: [A] }]), false);
+  assertEquals(readCeilingsEqual([O], [O, O]), false);
+  assertEquals(readCeilingsEqual(undefined, undefined), true);
+  assertEquals(readCeilingsEqual(undefined, [O]), false);
+  assertEquals(readCeilingsEqual([O], undefined), false);
+});
+
+Deno.test("resolveHarnessConfig refuses a resolved session beside a manifest that dropped its ceiling, and passes through the same ceiling respelled", () => {
+  const session = {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+  };
+  const manifestWith = (ceiling: CfcConfClause[] | undefined) => ({
+    type: "cf-harness.loom-run-manifest" as const,
+    version: 1 as const,
+    source: "loom" as const,
+    ...(ceiling !== undefined ? { cfc: { maxConfidentiality: ceiling } } : {}),
+  });
+  const underAB = resolveHarnessConfig({
+    fabricSession: session,
+    runManifest: manifestWith([{ anyOf: ["did:key:zA", "did:key:zB"] }]),
+    skillScriptExecutionTarget: "sandbox",
+  }).fabricSession;
+  // Folded under a ceiling, handed on beside a manifest that now declares
+  // none: the config would attest a ceiling this manifest never carried.
+  assertThrows(
+    () =>
+      resolveHarnessConfig({
+        fabricSession: underAB,
+        runManifest: manifestWith(undefined),
+        skillScriptExecutionTarget: "sandbox",
+      }),
+    Error,
+    "resolved fabric session did not fold the run manifest's read ceiling",
+  );
+  // The same ceiling with its alternatives in another order is the same
+  // ceiling: passed through, not refused over spelling.
+  assertEquals(
+    resolveHarnessConfig({
+      fabricSession: underAB,
+      runManifest: manifestWith([{ anyOf: ["did:key:zB", "did:key:zA"] }]),
+      skillScriptExecutionTarget: "sandbox",
+    }).fabricSession,
+    underAB,
+  );
 });

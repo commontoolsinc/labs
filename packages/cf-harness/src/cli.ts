@@ -20,6 +20,7 @@ import {
   isHarnessModelProviderId,
   parseCfcEnforcementMode,
   parseHarnessGatewayAuthMode,
+  readCeilingsEqual,
 } from "./config.ts";
 import {
   createHarnessImageAttachment,
@@ -3350,8 +3351,10 @@ export const runCfHarnessCli = async (
       // run reads under the one they passed.
       if (
         runManifest !== undefined && recordedRunManifest !== undefined &&
-        (JSON.stringify(runManifest.cfc?.maxConfidentiality) !==
-            JSON.stringify(recordedRunManifest.cfc?.maxConfidentiality) ||
+        (!readCeilingsEqual(
+          runManifest.cfc?.maxConfidentiality,
+          recordedRunManifest.cfc?.maxConfidentiality,
+        ) ||
           runManifest.cfc?.onExceed !== recordedRunManifest.cfc?.onExceed)
       ) {
         throw new HarnessControlError(

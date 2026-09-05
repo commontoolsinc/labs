@@ -5,6 +5,7 @@ import {
   type CfcFlowLabelsMode,
   type CfcReadOnExceed,
   isCfcEnforcementMode,
+  clausesEqual,
   meetCfcObservationCeilings,
 } from "@commonfabric/runner/cfc";
 import type { CfcPosture } from "@commonfabric/runner";
@@ -110,6 +111,32 @@ export interface ResolvedHarnessFabricSessionConfig
  * Requests carry the fabric session's identity, so this configuration goes
  * with a fabric session and is refused without one.
  */
+/**
+ * Two read ceilings say the same thing: the same clauses, each compared
+ * with the runner's structural equality, which is insensitive to the order
+ * of an `anyOf`'s alternatives. Clause order is not significant either — a
+ * ceiling is a conjunction — so the comparison is a multiset match, never a
+ * `JSON.stringify` of the two, which would call `[A ∨ B]` and `[B ∨ A]`
+ * different ceilings and refuse a resume or a session over spelling. Absent
+ * equals absent only.
+ */
+export const readCeilingsEqual = (
+  left: readonly CfcConfClause[] | undefined,
+  right: readonly CfcConfClause[] | undefined,
+): boolean => {
+  if (left === undefined || right === undefined) return left === right;
+  if (left.length !== right.length) return false;
+  const used = new Array<boolean>(right.length).fill(false);
+  for (const clause of left) {
+    const at = right.findIndex((candidate, i) =>
+      !used[i] && clausesEqual(clause, candidate)
+    );
+    if (at === -1) return false;
+    used[at] = true;
+  }
+  return true;
+};
+
 export interface HarnessPatternIndexConfig {
   baseUrl: string;
 
@@ -184,7 +211,7 @@ interface HarnessCommonConfig {
   artifactRoot?: string;
   cfcEnforcementMode: CfcEnforcementMode;
   cfcEnforcementModeSource: HarnessCfcEnforcementModeSource;
-  fabricSession?: ResolvedHarnessFabricSessionConfig;
+  fabricSession?: HarnessFabricSessionConfig;
   patternIndex?: HarnessPatternIndexConfig;
   skillsSh?: HarnessSkillsShConfig;
   sandbox?: DockerRunscSandboxConfig;
@@ -200,9 +227,15 @@ export interface HarnessConfig extends HarnessCommonConfig {
   credentialOwnerKey?: string;
 }
 
-/** Fully resolved configuration used by the engine. */
+/** Fully resolved configuration used by the engine. The fabric session is
+ *  the resolved shape here and the raw one on `HarnessConfig`: the resolver's
+ *  fold-once brand is its own, never a field a caller supplies. */
+type ResolvedHarnessCommonConfig =
+  & Omit<HarnessCommonConfig, "fabricSession">
+  & { fabricSession?: ResolvedHarnessFabricSessionConfig };
+
 export type ResolvedHarnessConfig =
-  & HarnessCommonConfig
+  & ResolvedHarnessCommonConfig
   & (
     | {
       modelProvider: "openai-compatible-gateway";
@@ -476,10 +509,16 @@ export const resolveFabricSessionConfig = (
     // under: a resolved config beside a manifest ceiling it never folded
     // would either run unbounded under a manifest that asked for a bound or
     // attest a ceiling that manifest never declared.
+    // Compared whenever EITHER side declares one: a config folded under a
+    // manifest ceiling arriving beside a manifest that now declares none
+    // would attest a ceiling that manifest never carried.
     if (
-      manifestCeiling !== undefined &&
-      (JSON.stringify(options.fabricSession.manifestReadMaxConfidentiality) !==
-          JSON.stringify(manifestCeiling) ||
+      (manifestCeiling !== undefined ||
+        options.fabricSession.manifestReadMaxConfidentiality !== undefined) &&
+      (!readCeilingsEqual(
+        options.fabricSession.manifestReadMaxConfidentiality,
+        manifestCeiling,
+      ) ||
         options.fabricSession.manifestReadOnExceed !==
           options.runManifest?.cfc?.onExceed)
     ) {
@@ -595,7 +634,7 @@ export const resolveHarnessConfig = (
   const skillsRootRecord = options.skillsRootRecord ??
     resolveHarnessSkillsRoot(options.skillsRoot);
   const fabricSession = resolveFabricSessionConfig(options);
-  const common: HarnessCommonConfig = {
+  const common: ResolvedHarnessCommonConfig = {
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
     ...(options.model !== undefined ? { model: options.model } : {}),
     ...(modelAuthSource !== undefined ? { modelAuthSource } : {}),
