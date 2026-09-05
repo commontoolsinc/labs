@@ -617,15 +617,16 @@ const INT64_MAX = 2n ** 63n - 1n;
  *
  * A REAL does NOT coerce, and the reason is not squeamishness about floats:
  * SQLite renders one with "%!.15g" over its OWN decoded digits, and that
- * rendering is not a function of the double this evaluator holds. SQLite
- * shows -0.009598882198146955 as "-0.00959888219814696" where the value
- * correctly rounded to 15 digits is "-0.00959888219814695" — its decoder
- * stops at the round-trip digits and rounds up from there. A gate is an
- * anchored comparison against the text SQLite would show, so a text we can
- * only nearly reproduce is a gate that silently fails to fire on some rows,
- * dropping a confidentiality clause. Refusing is the fail-closed half of
- * that choice, and it is what a REAL did before this coercion existed.
- * (`v2-sqlite-row-label-number-text.test.ts` pins the counterexample.)
+ * rendering is not a function of the double this evaluator holds. The two
+ * prebuilt libraries this driver loads disagree about the last digit of
+ * -0.009598882198146955 — the macOS one shows "-0.00959888219814696", the
+ * Linux one the correctly rounded "-0.00959888219814695" — so no formatter
+ * written here is right on both. A gate is an anchored comparison against the
+ * text SQLite would show, so a text we can only nearly reproduce is a gate
+ * that silently fails to fire on some rows, dropping a confidentiality
+ * clause. Refusing is the fail-closed half of that choice, and it is what a
+ * REAL did before this coercion existed.
+ * (`v2-sqlite-row-label-number-text.test.ts` pins the disagreement.)
  *
  * The one place an INTEGER's text is not literally `CAST(col AS TEXT)`: a JS
  * number carries no INTEGER/REAL tag, so a whole value stored in a REAL

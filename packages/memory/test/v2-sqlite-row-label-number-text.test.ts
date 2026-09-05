@@ -238,19 +238,26 @@ describe("row-label numeric regex input", () => {
     });
 
     it("is not a function of the double, for a REAL", () => {
-      // The evidence behind refusing a REAL. SQLite renders one from its own
-      // decoded digits, which stop at the round-trip point and round up from
-      // there; the correctly rounded 15-digit value differs in the last
-      // place. Reproducing SQLite here would mean reimplementing its
-      // decoder's approximation, quirks included — and a gate compares the
-      // text SQLite would show, so "close" is a gate that misses rows.
+      // The evidence behind refusing a REAL, and it is stronger than one
+      // build can show: SQLite renders a REAL from its own decoded digits,
+      // and the two prebuilt libraries this driver loads disagree about the
+      // last one. For -0.009598882198146955 the macOS library says
+      // "-0.00959888219814696" while the Linux library says
+      // "-0.00959888219814695", which is the correctly rounded value. So the
+      // rendering is not a function of the double the evaluator holds, and no
+      // formatter is right on both platforms. A gate compares the text SQLite
+      // would show, so "close" is a gate that misses rows — this asserts the
+      // disagreement rather than either build's answer.
       const value = -0.009598882198146955;
+      const correctlyRounded = "-0.00959888219814695";
+      const macOsLibrary = "-0.00959888219814696";
+      expect(value.toPrecision(15)).toBe(correctlyRounded);
+
       const db = new Database(":memory:");
       try {
         const shown = db.prepare("SELECT CAST(?1 AS TEXT) AS text")
           .get<{ text: string }>(value)?.text;
-        expect(shown).toBe("-0.00959888219814696");
-        expect(value.toPrecision(15)).toBe("-0.00959888219814695");
+        expect([correctlyRounded, macOsLibrary]).toContain(shown);
         expect(regexInputText(value)).toBeUndefined();
       } finally {
         db.close();

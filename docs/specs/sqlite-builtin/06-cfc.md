@@ -255,14 +255,15 @@ so a whole value stored in a REAL column also shows its integer spelling
 the column's declared type. Everything else refuses at evaluation, and each
 refusal names the value's **class** only, never the value (invariant 14):
 
-- a **REAL** with a fraction, and an infinity. SQLite renders a REAL from its
-  own decoded digits, which stop at the round-trip point and round up from
-  there — it shows `-0.009598882198146955` as `-0.00959888219814696` where
-  the correctly rounded 15-digit value ends `…695`. The rendering is
-  therefore not a function of the double the evaluator holds, and a gate is
-  an anchored comparison against the text SQLite *would* show: a text we
-  could only nearly reproduce is a gate that silently fails to fire on some
-  rows, dropping a confidentiality clause.
+- a **REAL** with a fraction, and an infinity. SQLite renders a REAL with
+  `%!.15g` over its own decoded digits, and the rendering is not a function
+  of the double the evaluator holds: the prebuilt SQLite libraries the driver
+  loads on macOS and on Linux disagree about the last digit of
+  `-0.009598882198146955` (`…696` against the correctly rounded `…695`), so
+  no formatter is right on both. A gate is an anchored comparison against the
+  text SQLite *would* show, and a text we could only nearly reproduce is a
+  gate that silently fails to fire on some rows, dropping a confidentiality
+  clause.
 - a whole number past 2^53, where a double no longer names one int64 (a large
   INTEGER read into one has already lost its low digits), and a bigint
   outside int64.
