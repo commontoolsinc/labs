@@ -10,6 +10,10 @@ import {
 import { normalize as normalizeSandboxPath } from "@std/path/posix";
 import type { JSONSchema } from "@commonfabric/api";
 import {
+  type CfcConfClause,
+  normalizeCfcReadCeiling,
+} from "@commonfabric/runner/cfc";
+import {
   DEFAULT_GATEWAY_BASE_URL,
   type HarnessFabricSessionConfig,
   type HarnessGatewayAuthMode,
@@ -204,6 +208,7 @@ const CLI_STRING_FLAGS = [
   "fabric-cfc-enforcement-mode",
   "fabric-cfc-flow-labels",
   "fabric-cfc-posture",
+  "max-confidentiality",
   "space-db",
   "pattern-index-url",
   "host-mount",
@@ -548,6 +553,10 @@ Options:
                                 into the named CFC posture bundle (every staged
                                 enforcement dial on); the two dials above still
                                 apply over the bundle
+  --max-confidentiality <json>  Read ceiling for the fabric session's runtime: a
+                                JSON array of confidentiality clauses every
+                                db.query the run issues is bounded by, met with
+                                any the run manifest declares (never widened)
   --space-db <path>             The space database the run's per-cell label
                                 snapshot reads. Give it when this run's working
                                 directory shares no ancestor with the server's,
@@ -1702,6 +1711,26 @@ export const parseCfHarnessCliArgs = async (
       `--fabric-cfc-posture must be max-enforcement: ${fabricCfcPosture}`,
     );
   }
+  const rawMaxConfidentiality = typeof args["max-confidentiality"] === "string"
+    ? args["max-confidentiality"].trim()
+    : undefined;
+  let maxConfidentiality: CfcConfClause[] | undefined;
+  if (rawMaxConfidentiality !== undefined) {
+    let parsedCeiling: unknown;
+    try {
+      parsedCeiling = JSON.parse(rawMaxConfidentiality);
+    } catch (error) {
+      throw new Error(
+        `--max-confidentiality must be JSON: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    maxConfidentiality = normalizeCfcReadCeiling(
+      parsedCeiling,
+      "--max-confidentiality",
+    );
+  }
   let fabricSession: HarnessFabricSessionConfig | undefined;
   if (
     fabricApiUrl !== undefined || fabricIdentity !== undefined ||
@@ -1737,6 +1766,9 @@ export const parseCfHarnessCliArgs = async (
       ...(fabricCfcPosture !== undefined
         ? { cfcPosture: fabricCfcPosture }
         : {}),
+      ...(maxConfidentiality !== undefined
+        ? { cfcReadMaxConfidentiality: maxConfidentiality }
+        : {}),
     };
   } else if (
     fabricCfcEnforcementMode !== undefined ||
@@ -1744,6 +1776,12 @@ export const parseCfHarnessCliArgs = async (
   ) {
     throw new Error(
       "--fabric-cfc-enforcement-mode, --fabric-cfc-flow-labels, and --fabric-cfc-posture configure the fabric session's runtime and need --fabric-api-url, --fabric-identity, and --fabric-space",
+    );
+  } else if (maxConfidentiality !== undefined) {
+    // A ceiling with no session bounds nothing, and one accepted here would
+    // read as working all run.
+    throw new Error(
+      "--max-confidentiality bounds the fabric session's reads and needs --fabric-api-url, --fabric-identity, and --fabric-space",
     );
   }
   const rawSpaceDb = typeof args["space-db"] === "string"

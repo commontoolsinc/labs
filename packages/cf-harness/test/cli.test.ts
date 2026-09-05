@@ -7259,3 +7259,89 @@ Deno.test("parseCfHarnessCliArgs rejects --allow-tool record_feedback without a 
     "missing --pattern-index-url",
   );
 });
+
+Deno.test("parseCfHarnessCliArgs carries --max-confidentiality into the fabric session as its read ceiling", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--max-confidentiality",
+      JSON.stringify([
+        "did:key:zOwner",
+        { type: "Facet", owner: "did:key:zOwner", id: "work" },
+      ]),
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/tmp/project/keys/agent.pkcs8",
+    space: "my-space",
+    cfcReadMaxConfidentiality: [
+      "did:key:zOwner",
+      { type: "Facet", owner: "did:key:zOwner", id: "work" },
+    ],
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs refuses a --max-confidentiality that is not a ceiling", async () => {
+  const fabric = [
+    "--prompt",
+    "hi",
+    "--fabric-api-url",
+    "https://toolshed.example/",
+    "--fabric-identity",
+    "keys/agent.pkcs8",
+    "--fabric-space",
+    "my-space",
+  ];
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [...fabric, "--max-confidentiality", "did:key:zOwner"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--max-confidentiality must be JSON",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [...fabric, "--max-confidentiality", "[]"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--max-confidentiality is empty",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [...fabric, "--max-confidentiality", '{"anyOf":["did:key:zOwner"]}'],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--max-confidentiality must be a JSON array",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs refuses --max-confidentiality without a fabric session", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--max-confidentiality", '["did:key:zOwner"]'],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--max-confidentiality bounds the fabric session's reads and needs --fabric-api-url, --fabric-identity, and --fabric-space",
+  );
+});
