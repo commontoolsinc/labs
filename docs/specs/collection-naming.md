@@ -546,11 +546,14 @@ inside it. Resolving the two together is what the split is for — the path is
 the part that says which member, so a resolver handed the address on its own
 has nothing to walk with.
 
-**4. Walk segments in the URL layer.** Built for the shell's page URLs, in
-review. `urlToAppView` (`packages/navigation/src/view.ts`) reads the segment
-after a slug as the member name and carries it in the view, which serializes
-back to `<space>/<collection>/<member>`. Resolution is a separate worker round
-trip, `slug:resolve`
+**4. Walk segments in the URL layer.** Built for the shell's page URLs.
+`urlToAppView` (`packages/navigation/src/view.ts`) reads the segment after a
+slug as the member name and carries it in the view, which serializes back to
+`<space>/<collection>/<member>`. It reads a leading `@` on the first segment as
+the mark on the space, so the fully qualified reference and the page URL are
+one address written two ways: the mark is what a reference carries and is no
+part of the space, so the shell opens `/@<space>/top/42` and settles on
+`/<space>/top/42`. Resolution is a separate worker round trip, `slug:resolve`
 (`packages/runtime-client/src/backends/runtime-processor.ts`), which hands the
 reference to the runner's walk and answers with the piece and whatever the walk
 did not spend. A name with no member after it is a different question of the
@@ -565,6 +568,17 @@ names turning a space name into a DID as the kind of work that belongs outside
 it. Walking into a collection is that kind of work — it syncs and reads a cell
 — so the walk sits beside the parse rather than inside it, and every reader of
 these URLs keeps reading the segments apart from resolving them.
+
+That split is also what bounds who resolves a fully qualified reference. The
+shell reads it and `cf` reads it, both holding a session that can turn a space
+name into a DID and walk a collection. The pattern-facing reader, the
+`cellFromUrl` builtin (`packages/runner/src/builtins/cell-from-url.ts`), does
+not, and what refuses it is the parse rather than the builtin: it reads
+through `parseFabricUrl`, whose rooted-path branch wants an entity id where a
+collection's name sits. The builtin is not that pure contract itself — it
+holds a runtime and a transaction, resolves a space name through one, and
+reaches a cell — so what it lacks is the collection walk, and giving a pattern
+one is a decision about that builtin rather than a gap in this step.
 
 **5. Add the prose layer.** Sigil parsing, canonicalize-on-write,
 context-computed rendering with round-trip verification, the two render modes,

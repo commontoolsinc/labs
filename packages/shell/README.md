@@ -22,11 +22,18 @@ The shell supports these browser URL forms:
   fields never answer to the collection's namespace. A member the collection
   does not hold is reported by name, alongside the collection's. The header
   offers the member's portable reference, `/@<space>/<collection>/<member>`,
-  which carries its own space and so depends on no binding of the reader's. `cf`
-  resolves it; this shell's own URLs and a pattern's `cellFromUrl` do not read
-  that grammar. Where the slug names a piece rather than a collection there are
-  no members to name, so the segment is dropped and the address settles on the
-  piece the page is showing.
+  which carries its own space and so depends on no binding of the reader's.
+  Where the slug names a piece rather than a collection there are no members to
+  name, so the segment is dropped and the address settles on the piece the page
+  is showing.
+- `/@<space-name-or-did>/...`: any of the other forms, `.embed` included,
+  written with the mark that says which segment is the space. This is the
+  spelling the portable reference above is written in, so what one page copies
+  is what another opens; `cf` reads it too, and a pattern's `cellFromUrl` does
+  not — it reads through `parseFabricUrl`, which wants an entity id where a
+  collection's name sits. The mark is no part of the space, so a page opened
+  this way settles on the URL the shell would have written for that address, and
+  a segment that is nothing but the mark names no space and opens the home view.
 - `/.embed/<space-name-or-did>/<piece-id-or-slug>`: opens the same piece in
   embed mode.
 

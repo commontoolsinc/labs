@@ -73,8 +73,25 @@ function asEntityId(segment: string): string | undefined {
   return undefined;
 }
 
-/** A `@did:key:…` segment, as the LLM-friendly link form writes a space. */
-function asSpaceSegment(segment: string): string | undefined {
+/**
+ * The space a marked path segment carries, or `undefined` where the segment
+ * carries no mark and so is not the space at all.
+ *
+ * A leading `@` is what marks a segment as the space, in every reference this
+ * repository writes: it keeps a space from competing for the slot the piece
+ * would otherwise hold. What the mark carries is only held to a form by the
+ * reader — a DID resolves from the string alone, a name needs a session — so
+ * the rest of the segment comes back unexamined.
+ *
+ * The segment is percent-decoded first, so a mark or a name that arrived
+ * escaped reads as what it stands for and `%40space` carries what `@space`
+ * carries; a segment holding a malformed escape is one this cannot read, and
+ * carries no space. A segment that is nothing but the mark returns the empty
+ * string rather than `undefined`, which is the distinction a caller needs: it
+ * says it is the space while naming none, where an unmarked segment never
+ * said it was one.
+ */
+export function asSpaceSegment(segment: string): string | undefined {
   const decoded = decode(segment);
   return decoded?.startsWith("@") ? decoded.slice(1) : undefined;
 }

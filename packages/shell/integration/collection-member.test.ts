@@ -7,6 +7,7 @@
  * and a rendered page that is the member rather than the board.
  */
 
+import { expect } from "@std/expect";
 import { join, resolve } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 
@@ -141,6 +142,40 @@ describe("shell collection members", () => {
         shell.page(),
         () => document.title === "Oven schedule",
       );
+    });
+
+    it("opens the reference the header hands out", async () => {
+      await using tempIdentity = await writeTempIdentity({
+        implementation: "noble",
+      });
+      const { identity, path: identityPath } = tempIdentity;
+      const slug = `portable-${crypto.randomUUID()}`;
+      await fileBoardWithMembers(identityPath, slug, [
+        "Glaze recipes",
+        "Oven schedule",
+      ]);
+
+      // `/@<space>/<collection>/<member>` is what "Copy reference" copies, and
+      // a page served at that URL is the only place its whole trip is
+      // visible: through the server that routes it, the browser that sends
+      // it, and the shell that reads it back.
+      await shell.goto({
+        frontendUrl: FRONTEND_URL,
+        view: { spaceName: SPACE_NAME, pieceSlug: slug, pieceMember: "2" },
+        urlPath: `/@${SPACE_NAME}/${slug}/2`,
+        identity,
+      });
+
+      await waitForCondition(shell.page(), (probe) => {
+        const badges = probe.collect("[data-member-name]");
+        return badges.length === 1 && probe.deepText(badges[0]).trim() === "2";
+      });
+      // The mark says which segment is the space and is no part of it, so the
+      // page the shell settles on is the one it would have written itself.
+      const pathname = await shell.page().evaluate(() =>
+        globalThis.location.pathname
+      );
+      expect(pathname).toBe(`/${SPACE_NAME}/${slug}/2`);
     });
   });
 

@@ -933,9 +933,10 @@ export class XHeaderView extends BaseView {
   /**
    * Copy this piece's portable reference to the clipboard. It carries its own
    * space, so it depends on no binding of the copier's and resolves for
-   * whoever receives it — in `cf`, and in anything else that opens a session
-   * before it reads. Neither this shell's own URLs nor a pattern's
-   * `cellFromUrl` reads this grammar today.
+   * whoever receives it — in this shell's own URLs and in `cf`, each of which
+   * reads this grammar and walks the collection it names. A pattern's
+   * `cellFromUrl` does not: it reads through `parseFabricUrl`, which wants an
+   * entity id where the collection's name sits.
    */
   async #handleCopyReference(e: Event) {
     e.preventDefault();
