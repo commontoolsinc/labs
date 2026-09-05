@@ -1605,8 +1605,9 @@ export class V2StorageTransaction implements IStorageTransaction {
       // same docs server-side). Serving "durably absent" here turned
       // the user's fill into the silent stored-schemaHash-missing
       // prepare failure. Their layers stay excluded from the blind tx's
-      // verifier basis in `SpaceReplica.#buildReads` — consistent by construction:
-      // the value equals the durable content whichever layer serves it.
+      // verifier basis in `SpaceReplica.#buildReads` — consistent by
+      // construction: the value equals the durable content whichever layer
+      // serves it.
       !address.id.startsWith("cid:") &&
       getBlindStructuralTarget(this) !== undefined &&
       // A replica without a speculation overlay serves no separate
@@ -3368,8 +3369,9 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   // Abandons every mergeable intent a document recorded, for a commit that
   // emits the document whole. An intent narrows the reads incidental to its op
-  // out of the commit's read set (`SpaceReplica.#commitReadActivities` in ./v2.ts), which is
-  // sound only while the op is what carries that region: a mergeable op
+  // out of the commit's read set (`SpaceReplica.#commitReadActivities` in
+  // ./v2.ts), which is sound only while the op is what carries that region:
+  // a mergeable op
   // resolves against durable state, so the value it read does not constrain
   // it. A whole-document set carries the region instead, and it is the value
   // the run computed from what it read — so those reads are real dependencies

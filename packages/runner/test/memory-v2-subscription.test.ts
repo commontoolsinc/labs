@@ -565,8 +565,8 @@ describe("Memory v2 storage notifications", () => {
       ) => Promise<{ ok?: unknown; error?: unknown }>;
     };
     const repairStarted = defer<void>();
-    // Replaced by assignment below, which only a TypeScript-private member
-    // allows, so it is reached the old way.
+    // Replaced by assignment below, which its `private` rather than `#` name
+    // allows; the cast reaches only it.
     const stubbed = replica as unknown as {
       waitForConflictReadRepair(
         rejection: StorageTransactionRejected,

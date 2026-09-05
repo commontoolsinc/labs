@@ -1244,8 +1244,8 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       // mixed window: a pre-predicate frame, or one from before this
       // client learned the class).
       sync(upsert(5));
-      const wakes: Array<Array<{ id: string; scope?: string }>> = [];
-      replica.speculationArrivalObserver = (docs) => wakes.push([...docs]);
+      const wakes: Array<readonly { id: string; scope?: string }[]> = [];
+      replica.speculationArrivalObserver = (docs) => wakes.push(docs);
       // A same-seq echo still without a class: nothing changed, no wake.
       sync(upsert(5));
       expect(wakes.length).toBe(0);

@@ -1004,32 +1004,6 @@ export class StorageManager implements IStorageManager {
   #telemetry?: TelemetrySink;
 
   /**
-   * The pending-load registration step and the linked-cell sync collector,
-   * which a test drives directly.
-   */
-  get accessForTestingOnly(): {
-    registerPendingLoad(address: {
-      space: MemorySpace;
-      scope: CellScope;
-      id: URI;
-      scopeKey?: ScopeKey;
-    }): (failure?: unknown) => void;
-    collectLinkedCellSyncs(
-      value: unknown,
-      base: NormalizedLink,
-      schema: JSONSchema | undefined,
-      promises: Promise<unknown>[],
-      seen: Set<unknown>,
-    ): void;
-  } {
-    return {
-      registerPendingLoad: (address) => this.#registerPendingLoad(address),
-      collectLinkedCellSyncs: (value, base, schema, promises, seen) =>
-        this.#collectLinkedCellSyncs(value, base, schema, promises, seen),
-    };
-  }
-
-  /**
    * Attach the runtime's telemetry bus so replicas can emit the
    * `storage.push/pull.*` markers. Late-bound and optional: the manager is
    * constructed before (and independently of) the Runtime, and providers read
@@ -1089,6 +1063,32 @@ export class StorageManager implements IStorageManager {
     // caller mutating their map object must not desynchronize them.
     this.#seedHosts = Object.freeze({ ...(options.spaceHostMap ?? {}) });
     this.#memoryHost = String(options.memoryHost);
+  }
+
+  /**
+   * The pending-load registration step and the linked-cell sync collector,
+   * which a test drives directly.
+   */
+  get accessForTestingOnly(): {
+    registerPendingLoad(address: {
+      space: MemorySpace;
+      scope: CellScope;
+      id: URI;
+      scopeKey?: ScopeKey;
+    }): (failure?: unknown) => void;
+    collectLinkedCellSyncs(
+      value: unknown,
+      base: NormalizedLink,
+      schema: JSONSchema | undefined,
+      promises: Promise<unknown>[],
+      seen: Set<unknown>,
+    ): void;
+  } {
+    return {
+      registerPendingLoad: (address) => this.#registerPendingLoad(address),
+      collectLinkedCellSyncs: (value, base, schema, promises, seen) =>
+        this.#collectLinkedCellSyncs(value, base, schema, promises, seen),
+    };
   }
 
   /**
@@ -3040,12 +3040,14 @@ const docKey = (id: URI, instance: string): string => `${instance}\0${id}`;
  * caller knows it, the explicit instance key. */
 type LocalDocAddress = { id: URI; scope?: CellScope; scopeKey?: ScopeKey };
 
+/**
+ * One space's local replica: the documents the server has confirmed, the
+ * local writes pending on them, and the session that keeps the two in step.
+ * Exported so that a test holding one as `ISpaceReplica` can narrow to the
+ * class.
+ */
 export class SpaceReplica
   implements ISpaceReplica, IOperationStorageCapability {
-  // A member below declared `private` rather than `#` is one the storage
-  // suites reach and drive directly; a `#` name would put it out of their
-  // reach.
-
   readonly #space: MemorySpace;
   readonly #subscription: IStorageSubscription;
   readonly #scopeKeyIdentity: () => ScopeKeyIdentity;
@@ -3638,7 +3640,8 @@ export class SpaceReplica
    *
    * An admitted commit touched this space's ACL document, so the
    * AUTHORIZATION VERDICT that terminated this replica's session may have
-   * changed. Record it; `#memoizedSessionHandle()` consumes it on the next load.
+   * changed. Record it; `#memoizedSessionHandle()` consumes it on the next
+   * load.
    *
    * Why a latch instead of tearing the session down right here: the memory
    * server emits the admitted-commit notice BEFORE it runs
@@ -3651,8 +3654,8 @@ export class SpaceReplica
    * dependent on it.
    *
    * Consumption is event-driven, not timed: the next load attempt calls
-   * `#memoizedSessionHandle()`, and the serving loop already re-attempts a deferred
-   * event's load every drain (see the scheduler's `failHeadEventLoadPark`
+   * `#memoizedSessionHandle()`, and the serving loop already re-attempts a
+   * deferred event's load every drain (see the scheduler's `failHeadEventLoadPark`
    * and the SpaceServer's deferral backstop), so the heal arrives on the
    * cadence the deferral machinery already runs at.
    */
@@ -3669,8 +3672,9 @@ export class SpaceReplica
    * session object: `terminateSession` (memory/v2/client.ts) closes it,
    * clears its watch specs, and stores the verdict in `closeError`, which
    * `#assertOpen()` then rethrows for every later call. Nothing on the read
-   * or commit path ever dropped the memoized mount — `#memoizedSessionHandle()`
-   * clears it only in `close()`/`closeNow()` — so every subsequent pull
+   * or commit path ever dropped the memoized mount —
+   * `#memoizedSessionHandle()` clears it only in `close()`/`closeNow()` — so
+   * every subsequent pull
    * reused the same dead session and the space read `unauthorized` forever.
    * `storage/rejection.ts`'s `SessionError` note named this gap when it was
    * written: "the convergence argument is sound, only the remount is
@@ -3696,8 +3700,9 @@ export class SpaceReplica
    *     `{user: OWNER}` de-authorized it by design. The re-open binds the
    *     user, who is OWNER, and is admitted.
    *   - a GENUINE de-authorization (the user removed, ownership moved): the
-   *     re-open is DENIED at `session.open`. `#memoizedSessionHandle()`'s catch drops
-   *     the failed handle, the load keeps failing, and the served event
+   *     re-open is DENIED at `session.open`. `#memoizedSessionHandle()`'s
+   *     catch drops the failed handle, the load keeps failing, and the
+   *     served event
    *     keeps deferring — the ratified wedge, which OW54's give-up arm
    *     covers. Fail-closed, and loud.
    */
@@ -4468,8 +4473,9 @@ export class SpaceReplica
       return { ok: {} };
     }
     // The owed session remount, consumed BEFORE the watch-selector tracker
-    // is consulted below — not only at `#memoizedSessionHandle()`. A selector the
-    // tracker already covers is answered from it and never reaches a
+    // is consulted below — not only at `#memoizedSessionHandle()`. A
+    // selector the tracker already covers is answered from it and never
+    // reaches a
     // session at all, so consuming only at the mount point leaves precisely
     // the docs the replica had successfully read being served out of a
     // subscription the revocation killed. Found by independent review
@@ -8127,8 +8133,9 @@ const toRejectedError = (
   //  - `SessionError`: the commit was routed to a session the server no longer
   //    knows. Classified TERMINAL by the retry allow-list — not because the
   //    commit was evaluated (it was not), but because nothing on the retry path
-  //    remounts the session: `#memoizedSessionHandle()` memoizes the mount and clears it
-  //    on close, and (since 2026-08-26) when the space's ACL CHANGES — which a
+  //    remounts the session: `#memoizedSessionHandle()` memoizes the mount
+  //    and clears it on close, and (since 2026-08-26) when the space's ACL
+  //    CHANGES — which a
   //    commit retry is not. The name still has to survive normalization here,
   //    or the caller sees a generic TransactionError instead of the real cause.
   //  - `InvalidMessageError`: a frame off the wire would not decode, and the

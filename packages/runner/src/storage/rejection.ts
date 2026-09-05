@@ -217,8 +217,9 @@ export function isStorageTransactionInconsistent(
  * error: it is the same "never evaluated" shape as a `ConnectionError`, but the
  * re-established session its convergence argument needs never arrives. Nothing
  * between two `editWithRetry` attempts clears or remounts one:
- *  - `SpaceReplica.#memoizedSessionHandle()` (storage/v2.ts) memoizes the mount and drops
- *    it only in `close()`/`closeNow()` — and, since 2026-08-26, when an admitted
+ *  - `SpaceReplica.#memoizedSessionHandle()` (storage/v2.ts) memoizes the
+ *    mount and drops it only in `close()`/`closeNow()` — and, since
+ *    2026-08-26, when an admitted
  *    commit touches the space's ACL doc (`consumeOwedSessionRemount`, the READ
  *    path's fix for the profile-starvation fifth face). Nothing an `editWithRetry`
  *    ATTEMPT does clears it, so every attempt still reuses the very handle the
