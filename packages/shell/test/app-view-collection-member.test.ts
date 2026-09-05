@@ -83,6 +83,26 @@ function installBrowserGlobals(): () => void {
   };
 }
 
+/**
+ * Record what `console.error` is given, until `restore` puts it back.
+ *
+ * A test that prints an error it is not about trains a reader to skip this
+ * file's output, which is where the next real diagnostic goes missing. Reading
+ * the log is also the only way a stub too small for what a collaborator calls
+ * shows up at all, where that collaborator logs the failure and carries on.
+ */
+function captureErrors(): { lines: string[]; restore: () => void } {
+  const lines: string[] = [];
+  const real = console.error;
+  console.error = (...args: unknown[]) => lines.push(args.join(" "));
+  return {
+    lines,
+    restore: () => {
+      console.error = real;
+    },
+  };
+}
+
 /** Return the rendered text of nested Lit template results. */
 function templateText(value: unknown): string {
   if (value == null) return "";
@@ -163,6 +183,12 @@ interface StubRuntime {
   /** Hold every answer from here on, to be released by hand. */
   hold(): void;
 
+  /** Release the oldest held answer, and let what it finishes settle. */
+  releaseOldest(): Promise<void>;
+
+  /** Release the newest held answer, and let what it finishes settle. */
+  releaseNewest(): Promise<void>;
+
   /** Release the held answers, newest first. */
   releaseNewestFirst(): Promise<void>;
 }
@@ -195,6 +221,8 @@ function stubRuntime(
     holdLoads: () => {},
     releaseLoads: async () => {},
     hold: () => {},
+    releaseOldest: async () => {},
+    releaseNewest: async () => {},
     releaseNewestFirst: async () => {},
   };
   let loadFailure: Error | undefined;
@@ -214,6 +242,14 @@ function stubRuntime(
   let held: Array<() => void> | undefined;
   stub.hold = () => {
     held = [];
+  };
+  stub.releaseOldest = async () => {
+    held?.shift()?.();
+    for (let hop = 0; hop < 6; hop++) await Promise.resolve();
+  };
+  stub.releaseNewest = async () => {
+    held?.pop()?.();
+    for (let hop = 0; hop < 6; hop++) await Promise.resolve();
   };
   stub.releaseNewestFirst = async () => {
     const pending = held ?? [];
@@ -252,6 +288,19 @@ function stubRuntime(
         queue.push(() => resolve(loaded));
       });
     },
+    // What handing a runtime to the view's debugger controller reads, here
+    // and on what `runtime()` returns. A replacement runtime goes through
+    // that hand-off on its way to the watch, and the controller reports a
+    // member it cannot call by logging rather than by throwing — so the case
+    // driving that hand-off reads the log, and a member missing from here
+    // fails it.
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    telemetry: () => [],
+    runtime: () => ({
+      setTelemetryEnabled: () => Promise.resolve(),
+      setBreakpoints: () => Promise.resolve(),
+    }),
     getSlugCell: () =>
       Promise.resolve({
         subscribe: () => () => {
@@ -341,6 +390,39 @@ function appViewOver(
   element.space = SPACE;
   element.rt = stub.rt;
   return element;
+}
+
+/**
+ * Drive `view` into the state the cases below turn on: the watch it was
+ * running has been replaced, that watch's resolution is still out, and the
+ * watch that replaced it is the one now resolving.
+ *
+ * The address moves off member `42`, which callers open on, and onto member
+ * `43`. That is a different reference and so a different watch. Answers are
+ * held from before the move, so the outgoing watch's resolution is still out
+ * when the incoming one starts. The incoming watch's first answer is
+ * released, because opening its poll and its subscription is what that first
+ * answer finishing does.
+ */
+async function replaceWatchMidResolution(
+  view: AppViewLike,
+  stub: StubRuntime,
+): Promise<void> {
+  view.updated(new Map([["app", undefined]]));
+  await stub.settle();
+
+  stub.hold();
+  await stub.poll();
+
+  view.app = {
+    identity: {},
+    config: {},
+    view: viewOf({ pieceSlug: "top", pieceMember: "43" }),
+  };
+  view.updated(new Map([["app", undefined]]));
+  await stub.settle();
+
+  await stub.releaseNewest();
 }
 
 describe("AppView collection members", () => {
@@ -668,6 +750,68 @@ describe("AppView collection members", () => {
     }
   });
 
+  it("keeps to one resolution in flight when a replaced watch's answer lands", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:first", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      await replaceWatchMidResolution(view, stub);
+
+      // The watch the view is running has a resolution out of its own.
+      await stub.poll();
+      const inFlight = stub.resolved.length;
+
+      // The replaced watch's answer lands, and ends the run it started. The
+      // run still out is the running watch's, and is not the replaced
+      // watch's to end — so a poll behind it finds one running, and
+      // coalesces.
+      await stub.releaseOldest();
+      await stub.poll();
+
+      expect(stub.resolved.length).toBe(inFlight);
+    } finally {
+      restore();
+    }
+  });
+
+  it("re-resolves for its own coalesced request when a replaced watch's answer lands", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:first", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      await replaceWatchMidResolution(view, stub);
+
+      // The watch the view is running has a resolution out and a poll
+      // coalesced behind it.
+      await stub.poll();
+      await stub.poll();
+
+      // The replaced watch's answer lands. The request coalesced behind the
+      // running watch's resolution was asked of that watch, and is still that
+      // watch's to answer.
+      await stub.releaseOldest();
+      const asked = stub.resolved.length;
+
+      await stub.releaseNewestFirst();
+
+      expect(stub.resolved.length).toBe(asked + 1);
+    } finally {
+      restore();
+    }
+  });
+
   it("applies an answer that took longer than the poll interval", async () => {
     const restore = installBrowserGlobals();
     try {
@@ -804,6 +948,96 @@ describe("AppView collection members", () => {
     }
   });
 
+  it("retries a load that failed after the watch behind it was replaced", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const first = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        first,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      // A piece is on screen, so an answer is recorded.
+      view.updated(new Map([["app", undefined], ["rt", undefined]]));
+      await first.settle();
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      // A replacement runtime takes over. It reaches the same answer, and the
+      // load of it fails — so what the recorded answer names is not what is
+      // on screen, and the answer alone cannot say so.
+      const replacement = stubRuntime({
+        pieceId: "fid1:member-42",
+        pathAfter: [],
+      });
+      replacement.failLoads(new Error("the socket went away"));
+      view.rt = replacement.rt;
+      view.updated(new Map([["rt", undefined]]));
+      await replacement.settle();
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete.catch(() => {});
+      const afterFailedLoad = view.accessForTestingOnly.slugRevision;
+
+      // Nothing about the reference changed, so no later answer differs from
+      // the one recorded. Recovery has to come from the run having reported
+      // that it reached nothing to show.
+      replacement.failLoads(undefined);
+      await replacement.poll();
+
+      expect(view.accessForTestingOnly.slugRevision).toBeGreaterThan(
+        afterFailedLoad,
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("retries a load that failed with the reference and its watch unchanged", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view.updated(new Map([["app", undefined], ["rt", undefined]]));
+      await stub.settle();
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      // A new app state naming the same reference: every input the watch is
+      // built from is what it was, so the running watch stands and no
+      // teardown runs at all. The selection runs again anyway, and its load
+      // fails.
+      view.app = {
+        identity: {},
+        config: {},
+        view: viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      };
+      view.updated(new Map([["app", undefined]]));
+      await stub.settle();
+      stub.failLoads(new Error("the socket went away"));
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete.catch(() => {});
+      const afterFailedLoad = view.accessForTestingOnly.slugRevision;
+
+      stub.failLoads(undefined);
+      await stub.poll();
+
+      expect(view.accessForTestingOnly.slugRevision).toBeGreaterThan(
+        afterFailedLoad,
+      );
+      expect(stub.started.map((call) => call[1])).toContain("fid1:member-42");
+    } finally {
+      restore();
+    }
+  });
+
   it("watches each reference through a slug separately", async () => {
     const restore = installBrowserGlobals();
     try {
@@ -835,15 +1069,6 @@ describe("AppView collection members", () => {
     }
   });
 
-  it("leaves the process-wide timers as it found them", () => {
-    // Last, and it reads what every test before it did. These are shared with
-    // the whole test process: left replaced, `setInterval` stops scheduling
-    // and `clearInterval` stops cancelling for everything that runs after,
-    // and no assertion anywhere goes red — things simply stop happening.
-    expect(globalThis.setInterval).toBe(NATIVE_TIMERS.setInterval);
-    expect(globalThis.clearInterval).toBe(NATIVE_TIMERS.clearInterval);
-  });
-
   it("stops watching a runtime that has been disposed", async () => {
     const restore = installBrowserGlobals();
     try {
@@ -866,5 +1091,61 @@ describe("AppView collection members", () => {
     } finally {
       restore();
     }
+  });
+
+  it("reloads nothing when a replacement watch reaches the answer on screen", async () => {
+    const restore = installBrowserGlobals();
+    const errors = captureErrors();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const first = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        first,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      // The runtime arrives with the rest of the view's state, as it does on
+      // a first update. Naming it is what installs it, and a runtime is
+      // released only where one was installed before it — so a replacement
+      // that never had a predecessor exercises less of the hand-off than a
+      // replacement has to.
+      view.updated(new Map([["app", undefined], ["rt", undefined]]));
+      await first.settle();
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+      const before = view.accessForTestingOnly.slugRevision;
+
+      // A replacement runtime can read the same reference to a different
+      // answer, so it gets a watch of its own and the running one stops. The
+      // piece the stopped watch resolved is on screen throughout, and the
+      // view goes on naming it — so the replacement's first answer is the one
+      // the view already has, and asks for no reload.
+      const replacement = stubRuntime({
+        pieceId: "fid1:member-42",
+        pathAfter: [],
+      });
+      view.rt = replacement.rt;
+      view.updated(new Map([["rt", undefined]]));
+      await replacement.settle();
+
+      expect(view.accessForTestingOnly.slugRevision).toBe(before);
+      // Nothing here drives an error path, so every member the hand-off
+      // reaches for answered — the release of the first runtime among them,
+      // which only a replacement reaches.
+      expect(errors.lines).toEqual([]);
+    } finally {
+      errors.restore();
+      restore();
+    }
+  });
+
+  it("leaves the process-wide timers as it found them", () => {
+    // Last, and it reads what every test before it did. These are shared with
+    // the whole test process: left replaced, `setInterval` stops scheduling
+    // and `clearInterval` stops cancelling for everything that runs after,
+    // and no assertion anywhere goes red — things simply stop happening.
+    expect(globalThis.setInterval).toBe(NATIVE_TIMERS.setInterval);
+    expect(globalThis.clearInterval).toBe(NATIVE_TIMERS.clearInterval);
   });
 });

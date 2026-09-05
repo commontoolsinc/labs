@@ -109,20 +109,71 @@ function project<T extends object>(
 }
 
 /**
- * One live watch on a slug reference: the reference itself, and the runtime
- * and space it is read in. These are every input the watch is built from, so
- * comparing them is what decides whether a running watch already covers what
- * the view now addresses.
+ * One live watch on a slug reference: the reference itself, the runtime and
+ * space it is read in, and everything whose lifetime is this watch's — the
+ * subscription it opens, the poll it schedules, and the pair of flags that
+ * keep its re-resolutions to one at a time.
+ *
+ * The reference, the runtime and the space are every input the watch is built
+ * from, so comparing them is what decides whether a running watch already
+ * covers what the view now addresses.
  *
  * A callback arriving after a view change checks itself by identity against
  * the watch the view is running, so replacing the watch invalidates every
- * callback still holding the old one.
+ * callback still holding the old one. What such a callback writes it writes
+ * on the watch it holds, which is what keeps one watch's state out of every
+ * other watch's reach.
  */
-interface SlugWatch {
-  rt: RuntimeInternals;
-  space: DID;
-  slug: string;
-  member: string | undefined;
+class SlugWatch {
+  /** The runtime the reference is read through. */
+  readonly rt: RuntimeInternals;
+
+  /** The space the reference is read in. */
+  readonly space: DID;
+
+  /** The name at the head of the reference. */
+  readonly slug: string;
+
+  /** The member the reference selects, where it names one. */
+  readonly member: string | undefined;
+
+  /** Cancels the subscription on the slug document, once it is open. */
+  cancel: Cancel | undefined = undefined;
+
+  /** The re-resolution poll, once it is scheduled. */
+  pollInterval: ReturnType<typeof setInterval> | undefined = undefined;
+
+  /** Whether a re-resolution is running; a watch runs one at a time. */
+  refreshRunning = false;
+
+  /** Whether something asked to re-resolve while one was running. */
+  refreshRequested = false;
+
+  /**
+   * Constructs a watch on what `slug` and `member` name in `space`, read
+   * through `rt`.
+   */
+  constructor(
+    rt: RuntimeInternals,
+    space: DID,
+    slug: string,
+    member: string | undefined,
+  ) {
+    this.rt = rt;
+    this.space = space;
+    this.slug = slug;
+    this.member = member;
+  }
+
+  /** Stops this watch, cancelling its subscription and clearing its poll. */
+  stop(): void {
+    this.cancel?.();
+    this.cancel = undefined;
+    if (this.pollInterval !== undefined) {
+      globalThis.clearInterval(this.pollInterval);
+      this.pollInterval = undefined;
+    }
+  }
 }
 
 export class XAppView extends BaseView {
@@ -185,14 +236,13 @@ export class XAppView extends BaseView {
   @state()
   private accessor _slugRevision = 0;
 
-  #slugCancel: Cancel | undefined = undefined;
-  #slugPollInterval: ReturnType<typeof setInterval> | undefined = undefined;
+  /** The watch on the reference the view addresses, while it has one. */
   #slugWatch: SlugWatch | undefined = undefined;
 
   /**
    * The answer the view is SHOWING: the resolution whose piece is on screen,
-   * or whose refusal is the error on screen. Undefined until one of those
-   * has happened.
+   * or whose refusal is the error on screen. Undefined where neither holds —
+   * before the first of them, and after a load that could not finish.
    *
    * One fact, not several about one thing. What was resolved, whether it was
    * applied, which piece it reached, and which answer is newest are all read
@@ -204,16 +254,24 @@ export class XAppView extends BaseView {
    *
    * Written only by {@link XAppView.#markShown}, and only from the answer the
    * writer itself resolved — never from whatever is current when it finishes,
-   * which is how a slow load came to claim a newer answer's identity.
+   * which is how a slow load came to claim a newer answer's identity. Its
+   * lifetime is the view's display rather than any watch's, so a watch
+   * stopping leaves it standing and the selection is what moves it on.
+   *
+   * That lifetime qualifies the first sentence. Only the selection moves this
+   * on, and the selection reports only for an address that names a reference
+   * — so on an address naming none, and between an address changing and the
+   * run for the new one reporting, this names what the view came to show LAST
+   * rather than anything on screen. Both readers are bounded by that same
+   * condition, so neither sees the first state:
+   * {@link XAppView.#resolveAgainst} compares against this only through a
+   * watch, which is built only for an address that names a reference, and
+   * {@link XAppView.#shownPieceId} is read only under one. In the second
+   * state a runtime error naming the previous piece is attributed to this
+   * view, which the run reporting ends however it went.
    */
   #shownResolution: SlugReferenceTarget | SlugReferenceRefusal | undefined =
     undefined;
-
-  /** Whether a re-resolution is running; the watch runs one at a time. */
-  #slugRefreshRunning = false;
-
-  /** Whether something asked to re-resolve while one was running. */
-  #slugRefreshRequested = false;
 
   #selectedPatternTargetId: string | undefined = undefined;
 
@@ -344,12 +402,20 @@ export class XAppView extends BaseView {
           if (member !== undefined && pathAfter.length > 0) {
             this.#replaceViewWithoutMember(app.view);
           }
-          const pattern = await rt.getPattern(space, pieceId, { scope });
+          let pattern: PieceHandle<NameSchema>;
+          try {
+            pattern = await rt.getPattern(space, pieceId, { scope });
+          } catch (error) {
+            // Around the load alone. The run's outer catch also takes the
+            // refusal's own throw, and recording nothing there would undo
+            // the mark a refusal just made — leaving every poll to re-resolve
+            // an answer the view is already showing.
+            this.#markShown(undefined, signal);
+            throw error;
+          }
           // `landed` and not whatever is current: this run finished THIS
           // answer, and saying so with another's identity is how a slow load
-          // came to claim a newer answer was on screen. A throw above writes
-          // nothing, so the watch's next re-resolution sees the view still
-          // showing something else and asks for this one again.
+          // came to claim a newer answer was on screen.
           this.#markShown(landed, signal);
           if (!signal.aborted) this.#maybeDeliverOpenPath(pattern);
           return pattern;
@@ -439,10 +505,10 @@ export class XAppView extends BaseView {
     ) {
       return;
     }
-    this.#clearSlugSubscription();
+    this.#stopSlugWatch();
     if (!rt || !space || !slug) return;
 
-    const watch: SlugWatch = { rt, space, slug, member };
+    const watch = new SlugWatch(rt, space, slug, member);
     this.#slugWatch = watch;
     rt.getSlugCell(space, slug).then(async (cell) => {
       if (!this.#isCurrentSlugWatch(watch)) return;
@@ -467,12 +533,12 @@ export class XAppView extends BaseView {
       // on, since a member whose target is not yet a piece is refused, so
       // re-resolving is what notices it becoming one. Whoever makes that
       // observable to a watch can retire this.
-      this.#slugPollInterval = globalThis.setInterval(() => {
+      watch.pollInterval = globalThis.setInterval(() => {
         void this.#refreshSlugTarget(watch);
       }, 1000);
 
       let sawInitialCallback = false;
-      this.#slugCancel = cell.subscribe(() => {
+      watch.cancel = cell.subscribe(() => {
         if (!sawInitialCallback) {
           sawInitialCallback = true;
           return;
@@ -484,35 +550,43 @@ export class XAppView extends BaseView {
       if (rt.signal.aborted) {
         // Drop the watch so a replacement runtime for the same reference
         // subscribes instead of matching the stale one.
-        this.#clearSlugSubscription();
+        this.#stopSlugWatch();
         return;
       }
       console.error("[AppView] Failed to watch slug cell:", error);
     });
   }
 
-  #clearSlugSubscription() {
+  /**
+   * Stop the watch the view is running, and leave it with none.
+   *
+   * A watch owns what is watch-scoped; the view owns what is displayed. The
+   * piece the stopped watch resolved is on screen until something replaces
+   * it, so {@link XAppView.#shownResolution} goes on naming it, and the
+   * selection is what moves that on.
+   */
+  #stopSlugWatch() {
+    const watch = this.#slugWatch;
     this.#slugWatch = undefined;
-    this.#slugCancel?.();
-    if (this.#slugPollInterval !== undefined) {
-      globalThis.clearInterval(this.#slugPollInterval);
-    }
-    this.#slugCancel = undefined;
-    this.#slugPollInterval = undefined;
-    this.#shownResolution = undefined;
-    this.#slugRefreshRunning = false;
-    this.#slugRefreshRequested = false;
+    watch?.stop();
   }
 
   /**
-   * Record that the view has come to show `answer`.
+   * Record that the view has come to show `answer`, or `undefined` where the
+   * run reached nothing for it to show.
    *
    * The only writer of {@link XAppView.#shownResolution}, and it takes the
    * signal of the run that resolved `answer` so a run the view has moved on
    * from cannot report what it finished as what is on screen.
+   *
+   * Every outcome of a run is reported through here — the piece it loaded,
+   * the refusal it was given, and the load it could not finish. That is what
+   * lets one comparison stand for all of them: an outcome that wrote nothing
+   * would leave the answer before it standing as though it were still what
+   * the view had settled on.
    */
   #markShown(
-    answer: SlugReferenceTarget | SlugReferenceRefusal,
+    answer: SlugReferenceTarget | SlugReferenceRefusal | undefined,
     signal: AbortSignal,
   ): void {
     if (signal.aborted) return;
@@ -525,7 +599,7 @@ export class XAppView extends BaseView {
     return shown && !shown.refusal ? shown.pieceId : undefined;
   }
 
-  /** Whether `watch` is still the subscription this view is running. */
+  /** Whether `watch` is still the watch this view is running. */
   #isCurrentSlugWatch(watch: SlugWatch): boolean {
     return this.#slugWatch === watch;
   }
@@ -541,21 +615,25 @@ export class XAppView extends BaseView {
    * removes the question instead of guarding it: there is never a second
    * answer to compare against, and a wake that arrives mid-flight still gets
    * its resolution, immediately after.
+   *
+   * The pair of flags that serializes this lives on `watch`, so a run
+   * finishing after the view has moved on releases the turn it took and reads
+   * the request coalesced behind it, both of them its own.
    */
   async #refreshSlugTarget(watch: SlugWatch): Promise<void> {
     if (!this.#isCurrentSlugWatch(watch)) return;
-    if (this.#slugRefreshRunning) {
-      this.#slugRefreshRequested = true;
+    if (watch.refreshRunning) {
+      watch.refreshRequested = true;
       return;
     }
-    this.#slugRefreshRunning = true;
+    watch.refreshRunning = true;
     try {
       await this.#resolveAgainst(watch);
     } finally {
-      this.#slugRefreshRunning = false;
+      watch.refreshRunning = false;
     }
-    if (!this.#slugRefreshRequested) return;
-    this.#slugRefreshRequested = false;
+    if (!watch.refreshRequested) return;
+    watch.refreshRequested = false;
     await this.#refreshSlugTarget(watch);
   }
 
@@ -573,7 +651,7 @@ export class XAppView extends BaseView {
         // The runtime this subscription polls was disposed (logout,
         // teardown, worker replacement) — stop polling it; a new runtime
         // re-subscribes via #syncSlugSubscription.
-        if (this.#isCurrentSlugWatch(watch)) this.#clearSlugSubscription();
+        if (this.#isCurrentSlugWatch(watch)) this.#stopSlugWatch();
         return;
       }
       // Not a refusal — those arrive as an answer — but a fault in asking: a
@@ -584,10 +662,14 @@ export class XAppView extends BaseView {
       return;
     }
     if (!this.#isCurrentSlugWatch(watch)) return;
-    // The one question. A yes covers every reason the view could be behind —
-    // the reference moved, a member arrived, a refusal changed, a load failed
-    // and left something else on screen — because each of them is the same
-    // fact: what is showing is not this.
+    // The one question, asked of what the selection recorded. A difference
+    // covers every reason the view could be behind — the reference moved, a
+    // member arrived, a refusal changed, a load failed and left the view on
+    // an error — because each of them is the same fact: what the view
+    // settled on is not this. That holds because every outcome of a run is
+    // recorded, a load that could not finish among them; an outcome that
+    // recorded nothing would leave the answer before it reading as settled,
+    // and the retry it needs would never be asked for.
     const shown = this.#shownResolution;
     if (shown && slugResolutionKey(shown) === slugResolutionKey(landed)) return;
     this.#handleSlugCellUpdate(watch);
@@ -713,7 +795,7 @@ export class XAppView extends BaseView {
       "recreate-space-root-pattern",
       this.#handleRecreateSpaceRootPattern,
     );
-    this.#clearSlugSubscription();
+    this.#stopSlugWatch();
   }
 
   override updated(changedProperties: Map<string, unknown>) {
