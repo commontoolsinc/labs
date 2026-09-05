@@ -490,16 +490,8 @@ export class Session {
       revealMatch: () => this.#revealMatch(),
       handleOverlayKey: (key) => this.#handleOverlayKey(key),
       prepareContextEdit: () => this.#prepareContextEdit(),
-      // Forwards to the TypeScript-private member so that a test which
-      // replaces it by assignment is honored here too.
-      // TODO(danfuzz): Make `adjustHunkCounts()` a `#` method. That needs
-      // `test/view-diffedit.test.ts` to stop replacing it by assignment, and
-      // the refusal it stands in for is reachable from the public surface: a
-      // malformed `@@` header makes the real method return `false`, and the
-      // `doctoredDiffSession()` helper in `test/view-session-cov2.test.ts`
-      // already builds a session with such a header.
       adjustHunkCounts: (oldDelta, newDelta, hunkHeader) =>
-        this.adjustHunkCounts(oldDelta, newDelta, hunkHeader),
+        this.#adjustHunkCounts(oldDelta, newDelta, hunkHeader),
       editStart: () => this.#editStart(),
       ensureCursorVisible: () => this.#ensureCursorVisible(),
       computeEditedFiles: () => this.#computeEditedFiles(),
@@ -2648,7 +2640,7 @@ export class Session {
             } else {
               this.#splitDiffLine(prefix);
             }
-            this.adjustHunkCounts(0, 1, hunkHeader);
+            this.#adjustHunkCounts(0, 1, hunkHeader);
             this.#afterEdit();
           }
         } else {
@@ -2782,9 +2774,13 @@ export class Session {
     const newSideBom = carriesNewUtf8Bom && parsed
       ? this.#newSideBomCarrier(parsed.model, parsed.hunk)
       : null;
-    if (!this.adjustHunkCounts(0, 1, hunkHeader)) {
-      this.#message = "This hunk could not be updated.";
-      return true;
+    if (!this.#adjustHunkCounts(0, 1, hunkHeader)) {
+      // A resurrectable line sits inside a parsed hunk, and the adjuster's
+      // header pattern accepts every header the parser's does, so a header
+      // that stops parsing here is a broken invariant, not a refusal.
+      throw new Error(
+        "the hunk header of a resurrectable line did not parse",
+      );
     }
     const decodedContent = [...line].slice(oldHasUtf8Bom ? 2 : 1).join("");
     const newContent = `${carriesNewUtf8Bom ? "\uFEFF" : ""}${decodedContent}`;
@@ -2899,13 +2895,10 @@ export class Session {
 
   /** Grow or shrink a parsed hunk header after its body changes. A zero-count
    * unified-diff range names the line before its insertion point, so crossing
-   * zero also moves the range start.
-   *
-   * TypeScript-private rather than a `#` name, because
-   * `test/view-diffedit.test.ts` replaces this member by assignment, which a
-   * `#` method does not allow.
-   */
-  private adjustHunkCounts(
+   * zero also moves the range start. Returns whether a header was rewritten:
+   * false with no diff policy or buffer, with nothing to change, with no
+   * header row, or with a header row the pattern does not match. */
+  #adjustHunkCounts(
     oldDelta: number,
     newDelta: number,
     hunkHeader = this.#hunkHeaderAt(this.#buffer?.row ?? -1),
@@ -3113,7 +3106,7 @@ export class Session {
     if (context) {
       b.lines[b.row] = `-${b.lines[b.row].slice(1)}`;
       b.place(b.row, 1);
-      this.adjustHunkCounts(0, -1, hunkHeader);
+      this.#adjustHunkCounts(0, -1, hunkHeader);
       return;
     }
     const previousEnding = b.lineEndingProvenance()[b.row - 1];
@@ -3123,7 +3116,7 @@ export class Session {
     const lineEndings = [...b.lineEndingProvenance()];
     lineEndings[b.row] = previousEnding;
     b.setLineEndingProvenance(lineEndings);
-    this.adjustHunkCounts(
+    this.#adjustHunkCounts(
       marker === " " || marker === "-" ? -1 : 0,
       marker === " " || marker === "+" ? -1 : 0,
       hunkHeader,
