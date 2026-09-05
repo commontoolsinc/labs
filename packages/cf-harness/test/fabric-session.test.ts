@@ -21,6 +21,21 @@ describe("fabric-session", () => {
       expect("cfcEnforcementMode" in options).toBe(false);
       expect("cfcFlowLabels" in options).toBe(false);
       expect("cfcPosture" in options).toBe(false);
+      expect("cfcReadMaxConfidentiality" in options).toBe(false);
+      expect("cfcReadOnExceed" in options).toBe(false);
+    });
+
+    it("carries the read ceiling the config sets, with its onExceed", () => {
+      const options = harnessFabricSessionControllerOptions({
+        ...base,
+        cfcReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+        cfcReadOnExceed: "skip",
+      });
+      expect(options.cfcReadMaxConfidentiality).toEqual([
+        "did:key:zOwner",
+        "did:key:zFacet",
+      ]);
+      expect(options.cfcReadOnExceed).toBe("skip");
     });
 
     it("carries every dial the config sets, posture included", () => {

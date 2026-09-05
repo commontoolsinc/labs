@@ -776,6 +776,15 @@ export class CfHarnessEngine {
         ...(this.config.fabricSession.cfcPosture !== undefined
           ? { posture: this.config.fabricSession.cfcPosture }
           : {}),
+        ...(this.config.fabricSession.cfcReadMaxConfidentiality !== undefined
+          ? {
+            readMaxConfidentiality:
+              this.config.fabricSession.cfcReadMaxConfidentiality,
+          }
+          : {}),
+        ...(this.config.fabricSession.cfcReadOnExceed !== undefined
+          ? { readOnExceed: this.config.fabricSession.cfcReadOnExceed }
+          : {}),
         ...(sessionRecord !== undefined ? { record: sessionRecord } : {}),
       }
       : undefined;
@@ -806,6 +815,12 @@ export class CfHarnessEngine {
         recorded.enforcementMode !== fabricSessionCfc.enforcementMode ||
         recorded.flowLabels !== fabricSessionCfc.flowLabels ||
         recorded.posture !== fabricSessionCfc.posture ||
+        // The read ceiling too: a resume that would read wider (or under
+        // another ceiling) than the artifacts attest is the same
+        // contradiction as a moved dial.
+        JSON.stringify(recorded.readMaxConfidentiality) !==
+          JSON.stringify(fabricSessionCfc.readMaxConfidentiality) ||
+        recorded.readOnExceed !== fabricSessionCfc.readOnExceed ||
         // The whole record too, where the run recorded one. The two dials
         // above can agree while a dial neither of them names has moved under
         // the run — a changed runtime default, a changed posture bundle — and

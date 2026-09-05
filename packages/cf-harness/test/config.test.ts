@@ -4,6 +4,7 @@ import { assert, assertEquals, assertExists, assertThrows } from "@std/assert";
 import {
   type CfcEnforcementMode,
   cfcEnforcementStrictness,
+  cfcObservationFitsCeiling,
 } from "@commonfabric/runner/cfc";
 import { presetCfcOptions } from "@commonfabric/runner";
 import {
@@ -458,4 +459,100 @@ Deno.test("resolveHarnessConfig carries a skills.sh discovery registry", () => {
     skillScriptExecutionTarget: "sandbox",
   });
   assertEquals(config.skillsSh, { baseUrl: "https://registry.example/" });
+});
+
+Deno.test("resolveHarnessConfig bounds the fabric session by the run manifest's read ceiling", () => {
+  const config = resolveHarnessConfig({
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+    },
+    runManifest: {
+      type: "cf-harness.loom-run-manifest",
+      version: 1,
+      source: "loom",
+      cfc: {
+        maxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+        onExceed: "skip",
+      },
+    },
+    skillScriptExecutionTarget: "sandbox",
+  });
+  assertEquals(config.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+    cfcReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+    cfcReadOnExceed: "skip",
+  });
+});
+
+Deno.test("resolveHarnessConfig meets the run manifest's read ceiling with the session's own", () => {
+  const config = resolveHarnessConfig({
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+      cfcReadMaxConfidentiality: ["did:key:zA", "did:key:zB"],
+      cfcReadOnExceed: "fail",
+    },
+    runManifest: {
+      type: "cf-harness.loom-run-manifest",
+      version: 1,
+      source: "loom",
+      cfc: {
+        maxConfidentiality: ["did:key:zB", "did:key:zC"],
+        onExceed: "skip",
+      },
+    },
+    skillScriptExecutionTarget: "sandbox",
+  });
+  const ceiling = config.fabricSession?.cfcReadMaxConfidentiality;
+  // Only what both admit fits the result: neither side's ceiling replaced
+  // the other's.
+  assertEquals(cfcObservationFitsCeiling(["did:key:zB"], ceiling), true);
+  assertEquals(cfcObservationFitsCeiling(["did:key:zA"], ceiling), false);
+  assertEquals(cfcObservationFitsCeiling(["did:key:zC"], ceiling), false);
+  // The session's own onExceed stands over the manifest's.
+  assertEquals(config.fabricSession?.cfcReadOnExceed, "fail");
+});
+
+Deno.test("resolveHarnessConfig leaves a session with no ceiling unbounded when the manifest declares none", () => {
+  const config = resolveHarnessConfig({
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+    },
+    runManifest: {
+      type: "cf-harness.loom-run-manifest",
+      version: 1,
+      source: "loom",
+      cfc: { enforcementMode: "observe" },
+    },
+    skillScriptExecutionTarget: "sandbox",
+  });
+  assertEquals(config.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+  });
+});
+
+Deno.test("resolveHarnessConfig refuses a run manifest read ceiling with no fabric session to apply it", () => {
+  assertThrows(
+    () =>
+      resolveHarnessConfig({
+        runManifest: {
+          type: "cf-harness.loom-run-manifest",
+          version: 1,
+          source: "loom",
+          cfc: { maxConfidentiality: ["did:key:zOwner"] },
+        },
+        skillScriptExecutionTarget: "sandbox",
+      }),
+    Error,
+    "run manifest cfc.maxConfidentiality names a read ceiling for the fabric session's runtime, and the run has no fabric session",
+  );
 });

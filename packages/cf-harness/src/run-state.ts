@@ -1,6 +1,8 @@
 import type {
+  CfcConfClause,
   CfcEnforcementMode,
   CfcPostureReport,
+  CfcReadOnExceed,
 } from "@commonfabric/runner/cfc";
 import type { HarnessCfcInvocationContext } from "./contracts/cfc-invocation-context.ts";
 import {
@@ -99,6 +101,16 @@ export interface HarnessFabricSessionCfcPosture {
    * `MAX_ENFORCEMENT_CFC_OPTIONS` in the runner's presets.
    */
   posture?: "max-enforcement";
+
+  /**
+   * The read ceiling the session's runtime bounds every `sqliteQuery` by:
+   * the run manifest's, met with any the operator configured. Absent when
+   * the session reads unbounded.
+   */
+  readMaxConfidentiality?: readonly CfcConfClause[];
+
+  /** The ceiling's `onExceed` default, when one was configured. */
+  readOnExceed?: CfcReadOnExceed;
 
   /**
    * The session runtime's whole posture, as the shared record every surface

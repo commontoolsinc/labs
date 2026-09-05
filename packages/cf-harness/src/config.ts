@@ -1,8 +1,11 @@
 import {
+  type CfcConfClause,
   type CfcEnforcementMode,
   cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
+  type CfcReadOnExceed,
   isCfcEnforcementMode,
+  meetCfcObservationCeilings,
 } from "@commonfabric/runner/cfc";
 import type { CfcPosture } from "@commonfabric/runner";
 import type { HarnessCfcEnforcementModeSource } from "./contracts/cfc-policy-snapshot.ts";
@@ -58,6 +61,15 @@ export interface HarnessFabricSessionConfig {
   cfcEnforcementMode?: HarnessFabricCfcEnforcementMode;
   cfcFlowLabels?: HarnessFabricCfcFlowLabelsMode;
   cfcPosture?: CfcPosture;
+
+  /**
+   * The read ceiling the session's runtime bounds every `sqliteQuery` by
+   * (`RuntimeOptions.cfcReadMaxConfidentiality`). Absent is no ceiling.
+   */
+  cfcReadMaxConfidentiality?: readonly CfcConfClause[];
+
+  /** Its `onExceed` default (`RuntimeOptions.cfcReadOnExceed`). */
+  cfcReadOnExceed?: CfcReadOnExceed;
 }
 
 /**
@@ -391,6 +403,42 @@ export const resolveGatewayAuthMode = (
     "bearer";
 };
 
+/**
+ * The fabric session the run executes under, bounded by the run manifest's
+ * read ceiling. A ceiling the session config carries and one the manifest
+ * carries are met, so a query fits the result only if it fits both: neither
+ * the operator's session nor Loom's dispatch can widen what the other
+ * declared. The session's own `onExceed` stands over the manifest's.
+ *
+ * @throws Error when the manifest declares a ceiling and the run has no
+ * fabric session to apply it to — a ceiling accepted with nothing bounding
+ * reads would read as working while doing nothing.
+ */
+export const resolveFabricSessionConfig = (
+  options: Pick<ResolveHarnessConfigOptions, "fabricSession" | "runManifest">,
+): HarnessFabricSessionConfig | undefined => {
+  const manifestCeiling = options.runManifest?.cfc?.maxConfidentiality;
+  if (manifestCeiling === undefined) {
+    return options.fabricSession;
+  }
+  if (options.fabricSession === undefined) {
+    throw new Error(
+      "run manifest cfc.maxConfidentiality names a read ceiling for the " +
+        "fabric session's runtime, and the run has no fabric session",
+    );
+  }
+  const onExceed = options.fabricSession.cfcReadOnExceed ??
+    options.runManifest?.cfc?.onExceed;
+  return {
+    ...options.fabricSession,
+    cfcReadMaxConfidentiality: meetCfcObservationCeilings(
+      options.fabricSession.cfcReadMaxConfidentiality,
+      manifestCeiling,
+    ) as readonly CfcConfClause[],
+    ...(onExceed !== undefined ? { cfcReadOnExceed: onExceed } : {}),
+  };
+};
+
 export const resolveHarnessConfig = (
   options: ResolveHarnessConfigOptions = {},
 ): ResolvedHarnessConfig => {
@@ -455,6 +503,7 @@ export const resolveHarnessConfig = (
   // relabelling an inherited default as something the operator configured.
   const skillsRootRecord = options.skillsRootRecord ??
     resolveHarnessSkillsRoot(options.skillsRoot);
+  const fabricSession = resolveFabricSessionConfig(options);
   const common: HarnessCommonConfig = {
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
     ...(options.model !== undefined ? { model: options.model } : {}),
@@ -487,9 +536,7 @@ export const resolveHarnessConfig = (
       : {}),
     cfcEnforcementMode: resolveCfcEnforcementMode(options),
     cfcEnforcementModeSource: resolveCfcEnforcementModeSource(options),
-    ...(options.fabricSession !== undefined
-      ? { fabricSession: options.fabricSession }
-      : {}),
+    ...(fabricSession !== undefined ? { fabricSession } : {}),
     ...(options.patternIndex !== undefined
       ? { patternIndex: options.patternIndex }
       : {}),

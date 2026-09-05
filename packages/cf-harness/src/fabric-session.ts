@@ -60,6 +60,10 @@ export const harnessFabricSessionControllerOptions = (
   cfcEnforcementMode?: HarnessFabricSessionConfig["cfcEnforcementMode"];
   cfcFlowLabels?: HarnessFabricSessionConfig["cfcFlowLabels"];
   cfcPosture?: HarnessFabricSessionConfig["cfcPosture"];
+  cfcReadMaxConfidentiality?: HarnessFabricSessionConfig[
+    "cfcReadMaxConfidentiality"
+  ];
+  cfcReadOnExceed?: HarnessFabricSessionConfig["cfcReadOnExceed"];
 } => ({
   apiUrl: new URL(config.apiUrl),
   space: config.space,
@@ -70,6 +74,12 @@ export const harnessFabricSessionControllerOptions = (
     ? { cfcFlowLabels: config.cfcFlowLabels }
     : {}),
   ...(config.cfcPosture !== undefined ? { cfcPosture: config.cfcPosture } : {}),
+  ...(config.cfcReadMaxConfidentiality !== undefined
+    ? { cfcReadMaxConfidentiality: config.cfcReadMaxConfidentiality }
+    : {}),
+  ...(config.cfcReadOnExceed !== undefined
+    ? { cfcReadOnExceed: config.cfcReadOnExceed }
+    : {}),
 });
 
 /**

@@ -1854,6 +1854,17 @@ export const runPatternTool: HarnessToolDefinition<
           session.identity,
           pieces.runtime.apiUrl,
           context.cfcEnforcementMode,
+          {
+            ...(pieces.runtime.cfcReadMaxConfidentiality !== undefined
+              ? {
+                cfcReadMaxConfidentiality:
+                  pieces.runtime.cfcReadMaxConfidentiality,
+              }
+              : {}),
+            ...(pieces.runtime.cfcReadOnExceed !== undefined
+              ? { cfcReadOnExceed: pieces.runtime.cfcReadOnExceed }
+              : {}),
+          },
         );
         // No identity, no isolated runtime, and therefore no probe. Falling
         // back to the live space would re-enter the leak this exists to close
