@@ -98,11 +98,27 @@ async () => {
     await Deno.readFile(config.identityKeyPath),
   );
   const recorder = createFabricInstantiationRecorder();
+  const options = harnessFabricSessionControllerOptions(config);
   const pieces = await PiecesController.initialize({
-    ...harnessFabricSessionControllerOptions(config),
+    ...options,
     identity,
     onPatternInstantiated: recorder.observe,
   });
+  // The runtime this session hands out must be bounded as the config asked,
+  // or the run reads unbounded while its artifacts attest a ceiling. Checked
+  // here rather than trusted, since the controller's options and the
+  // runtime's are two declarations that can drift apart.
+  if (
+    JSON.stringify(pieces.runtime.cfcReadMaxConfidentiality) !==
+      JSON.stringify(options.cfcReadMaxConfidentiality) ||
+    pieces.runtime.cfcReadOnExceed !== options.cfcReadOnExceed
+  ) {
+    await pieces.runtime.dispose().catch(() => {});
+    throw new Error(
+      "fabric session runtime is not bounded by the configured read " +
+        "ceiling; refusing to run under it",
+    );
+  }
   return { pieces, identity, instantiations: recorder.instantiations };
 };
 

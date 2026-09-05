@@ -7321,7 +7321,7 @@ Deno.test("parseCfHarnessCliArgs refuses a --max-confidentiality that is not a c
         { cwd: "/tmp/project", env: {} },
       ),
     Error,
-    "--max-confidentiality is empty",
+    "--max-confidentiality: an empty ceiling admits",
   );
   await assertRejects(
     () =>
@@ -7330,7 +7330,7 @@ Deno.test("parseCfHarnessCliArgs refuses a --max-confidentiality that is not a c
         { cwd: "/tmp/project", env: {} },
       ),
     Error,
-    "--max-confidentiality must be a JSON array",
+    "--max-confidentiality: expected an array of clauses",
   );
 });
 

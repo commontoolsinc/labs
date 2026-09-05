@@ -348,29 +348,30 @@ Deno.test("parseLoomRunManifestJson refuses a malformed read ceiling rather than
   const cases: { cfc: unknown; message: string }[] = [
     {
       cfc: { maxConfidentiality: [] },
-      message: "run manifest cfc.maxConfidentiality is empty",
+      message: "run manifest cfc.maxConfidentiality: an empty ceiling admits",
     },
     {
       cfc: { maxConfidentiality: "did:key:zOwner" },
-      message: "run manifest cfc.maxConfidentiality must be a JSON array",
+      message:
+        "run manifest cfc.maxConfidentiality: expected an array of clauses",
     },
     {
       cfc: { maxConfidentiality: ["did:key:zOwner", 7] },
-      message:
-        "run manifest cfc.maxConfidentiality[1] is not a confidentiality clause",
+      message: "run manifest cfc.maxConfidentiality[1]: expected an atom",
     },
     {
       cfc: { maxConfidentiality: [{ anyOf: [] }] },
       message:
-        "run manifest cfc.maxConfidentiality[0] is an OR-clause with no alternatives",
+        "run manifest cfc.maxConfidentiality[0]: an `anyOf` with no alternatives",
     },
     {
       cfc: { maxConfidentiality: ["did:key:zOwner"], onExceed: "drop" },
-      message: "run manifest cfc.onExceed must be fail or skip",
+      message: 'run manifest cfc.onExceed: expected "fail" or "skip"',
     },
     {
       cfc: { onExceed: "skip" },
-      message: "run manifest cfc.onExceed needs a cfc.maxConfidentiality",
+      message:
+        "run manifest cfc.onExceed: qualifies `run manifest cfc.maxConfidentiality`",
     },
   ];
   for (const testCase of cases) {

@@ -9,10 +9,7 @@ import {
 } from "@std/path";
 import { normalize as normalizeSandboxPath } from "@std/path/posix";
 import type { JSONSchema } from "@commonfabric/api";
-import {
-  type CfcConfClause,
-  normalizeCfcReadCeiling,
-} from "@commonfabric/runner/cfc";
+import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import {
   DEFAULT_GATEWAY_BASE_URL,
   type HarnessFabricSessionConfig,
@@ -53,6 +50,7 @@ import {
   type HarnessRunManifest,
   type LoomLocalHostBinding,
   parseLoomRunManifestJson,
+  readCeilingFromInput,
 } from "./contracts/run-manifest.ts";
 import type { HarnessFetch } from "./contracts/http-fetch.ts";
 import {
@@ -1714,7 +1712,7 @@ export const parseCfHarnessCliArgs = async (
   const rawMaxConfidentiality = typeof args["max-confidentiality"] === "string"
     ? args["max-confidentiality"].trim()
     : undefined;
-  let maxConfidentiality: CfcConfClause[] | undefined;
+  let maxConfidentiality: readonly CfcConfClause[] | undefined;
   if (rawMaxConfidentiality !== undefined) {
     let parsedCeiling: unknown;
     try {
@@ -1726,10 +1724,11 @@ export const parseCfHarnessCliArgs = async (
         }`,
       );
     }
-    maxConfidentiality = normalizeCfcReadCeiling(
+    maxConfidentiality = readCeilingFromInput(
       parsedCeiling,
-      "--max-confidentiality",
-    );
+      undefined,
+      { ceiling: "--max-confidentiality", onExceed: "--max-confidentiality" },
+    ).maxConfidentiality;
   }
   let fabricSession: HarnessFabricSessionConfig | undefined;
   if (

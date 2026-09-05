@@ -1,10 +1,10 @@
 import {
+  buildCfcReadCeiling,
   type CfcConfClause,
   type CfcEnforcementMode,
+  type CfcReadCeiling,
   type CfcReadOnExceed,
   isCfcEnforcementMode,
-  normalizeCfcReadCeiling,
-  normalizeCfcReadOnExceed,
 } from "@commonfabric/runner/cfc";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
@@ -32,7 +32,7 @@ export interface LoomRunManifestCfc {
    * the owner's whole view; an empty list is refused at normalization
    * rather than read either way.
    */
-  maxConfidentiality?: CfcConfClause[];
+  maxConfidentiality?: readonly CfcConfClause[];
 
   /**
    * What a bounded read does with a row the ceiling does not admit when the
@@ -41,6 +41,28 @@ export interface LoomRunManifestCfc {
    */
   onExceed?: CfcReadOnExceed;
 }
+
+/**
+ * Validates a read ceiling written by a caller — a manifest field, a command
+ * line flag — through the runner's own `buildCfcReadCeiling`, so what the
+ * harness accepts is exactly what the runtime accepts, and returns the
+ * frozen form. A refusal names the caller's fields, since the reader fixing
+ * it is looking at those rather than at the runtime option behind them.
+ *
+ * @throws Error when the ceiling or its `onExceed` is malformed, or when
+ * `onExceed` is given without a ceiling.
+ */
+export const readCeilingFromInput = (
+  maxConfidentiality: unknown,
+  onExceed: unknown,
+  labels: { ceiling: string; onExceed: string },
+): CfcReadCeiling =>
+  buildCfcReadCeiling({
+    cfcReadMaxConfidentiality: maxConfidentiality as
+      | readonly CfcConfClause[]
+      | undefined,
+    cfcReadOnExceed: onExceed as CfcReadOnExceed | undefined,
+  }, labels);
 
 export const HARNESS_CREDENTIAL_OWNER_REF_TYPE =
   "cf-harness.credential-owner-ref" as const;
@@ -185,19 +207,14 @@ const normalizeLoomRunManifestCfc = (
   }
   // Validated rather than projected: a ceiling this projection dropped would
   // read as no ceiling, the widest posture there is.
-  const maxConfidentiality = normalizeCfcReadCeiling(
+  const { maxConfidentiality, onExceed } = readCeilingFromInput(
     input.maxConfidentiality,
-    "run manifest cfc.maxConfidentiality",
-  );
-  const onExceed = normalizeCfcReadOnExceed(
     input.onExceed,
-    "run manifest cfc.onExceed",
+    {
+      ceiling: "run manifest cfc.maxConfidentiality",
+      onExceed: "run manifest cfc.onExceed",
+    },
   );
-  if (onExceed !== undefined && maxConfidentiality === undefined) {
-    throw new Error(
-      "run manifest cfc.onExceed needs a cfc.maxConfidentiality to apply to",
-    );
-  }
   return {
     ...(input.enforcementMode !== undefined
       ? { enforcementMode: input.enforcementMode }
