@@ -1,6 +1,10 @@
 import {
+  type CfcConfClause,
   type CfcEnforcementMode,
+  type CfcReadOnExceed,
   isCfcEnforcementMode,
+  normalizeCfcReadCeiling,
+  normalizeCfcReadOnExceed,
 } from "@commonfabric/runner/cfc";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import {
@@ -19,6 +23,23 @@ export interface LoomRunManifestWorkspace {
 export interface LoomRunManifestCfc {
   enforcementMode?: CfcEnforcementMode;
   labelSource?: "loom-run-manifest";
+
+  /**
+   * The read ceiling this run's fabric session applies to every
+   * `sqliteQuery` the run issues: a flat list of confidentiality clauses,
+   * the shape the builtin's own `maxConfidentiality` option takes. A query
+   * declaring its own ceiling is bounded by both. Absent is no ceiling —
+   * the owner's whole view; an empty list is refused at normalization
+   * rather than read either way.
+   */
+  maxConfidentiality?: CfcConfClause[];
+
+  /**
+   * What a bounded read does with a row the ceiling does not admit when the
+   * query says nothing itself: `fail` refuses the query, `skip` withholds
+   * the row. Needs `maxConfidentiality` beside it.
+   */
+  onExceed?: CfcReadOnExceed;
 }
 
 export const HARNESS_CREDENTIAL_OWNER_REF_TYPE =
@@ -162,6 +183,21 @@ const normalizeLoomRunManifestCfc = (
       `unsupported run manifest cfc.labelSource: ${String(input.labelSource)}`,
     );
   }
+  // Validated rather than projected: a ceiling this projection dropped would
+  // read as no ceiling, the widest posture there is.
+  const maxConfidentiality = normalizeCfcReadCeiling(
+    input.maxConfidentiality,
+    "run manifest cfc.maxConfidentiality",
+  );
+  const onExceed = normalizeCfcReadOnExceed(
+    input.onExceed,
+    "run manifest cfc.onExceed",
+  );
+  if (onExceed !== undefined && maxConfidentiality === undefined) {
+    throw new Error(
+      "run manifest cfc.onExceed needs a cfc.maxConfidentiality to apply to",
+    );
+  }
   return {
     ...(input.enforcementMode !== undefined
       ? { enforcementMode: input.enforcementMode }
@@ -169,6 +205,8 @@ const normalizeLoomRunManifestCfc = (
     ...(input.labelSource !== undefined
       ? { labelSource: input.labelSource }
       : {}),
+    ...(maxConfidentiality !== undefined ? { maxConfidentiality } : {}),
+    ...(onExceed !== undefined ? { onExceed } : {}),
   };
 };
 
