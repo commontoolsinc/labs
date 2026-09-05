@@ -172,6 +172,70 @@ describe("schema-view", () => {
           ],
         } as const,
       ],
+      [
+        "an empty array against a closed tuple",
+        { xs: [] },
+        {
+          type: "object",
+          properties: { xs: { type: "array", items: false } },
+        } as const,
+      ],
+      [
+        // `items: false` closes the tuple, so an array holding anything is not
+        // one this schema describes and the property drops out of both reads.
+        "an array against a tuple closed at no slots",
+        { xs: ["a"] },
+        {
+          type: "object",
+          properties: { xs: { type: "array", items: false } },
+        } as const,
+      ],
+      [
+        "a closed tuple filled to its slots",
+        { xs: ["a"] },
+        {
+          type: "object",
+          properties: {
+            xs: {
+              type: "array",
+              prefixItems: [{ type: "string" }],
+              items: false,
+            },
+          },
+        } as const,
+      ],
+      [
+        "a closed tuple carrying an element past its slots",
+        { xs: ["a", "b"] },
+        {
+          type: "object",
+          properties: {
+            xs: {
+              type: "array",
+              prefixItems: [{ type: "string" }],
+              items: false,
+            },
+          },
+        } as const,
+      ],
+      [
+        // The union's other branch cannot take an array, so the closed one is
+        // all that narrowing has to choose from — and it does not describe
+        // this array either.
+        "a union whose only array branch closes its tuple",
+        { xs: ["a"] },
+        {
+          type: "object",
+          properties: {
+            xs: {
+              anyOf: [
+                { type: "array", items: false },
+                { type: "object" },
+              ],
+            },
+          },
+        } as const,
+      ],
     ];
 
     for (const [name, value, schema] of cases) {
@@ -271,6 +335,24 @@ describe("schema-view", () => {
           required: ["a"],
           properties: { a: { type: "number" }, b: { type: "number" } },
         } as const,
+      );
+
+      const lazy = read(true);
+      const eager = read(false);
+      try {
+        expect(lazy.get()).toBeUndefined();
+        expect(eager.get()).toBeUndefined();
+      } finally {
+        await lazy.tx.commit();
+        await eager.tx.commit();
+      }
+    });
+
+    it("returns undefined when the root array outruns its tuple closure", async () => {
+      const read = await seeded(
+        "root-closed-tuple",
+        ["a"],
+        { type: "array", items: false } as const,
       );
 
       const lazy = read(true);

@@ -2069,15 +2069,38 @@ describe("canBranchMatch", () => {
     ).toBe(true);
   });
 
-  it("accepts empty array against items: false (only empty arrays match)", () => {
-    // CT-1562 / B1: `items: false` on an array schema means "no items allowed"
-    // (only the empty array `[]` matches). canBranchMatch checks
-    // `type === "array"` but ignores `items: false`, so a populated array still
-    // passes this fast-reject check. This case pins the empty-array half, which
-    // matches either way; nothing here covers the populated half, so the gap
-    // shows up in no failing test.
-
+  it("accepts an empty array against items: false", () => {
     expect(canBranchMatch({ type: "array", items: false }, [])).toBe(true);
+  });
+
+  it("rejects a populated array against items: false", () => {
+    expect(canBranchMatch({ type: "array", items: false }, ["a"])).toBe(false);
+  });
+
+  it("accepts a closed tuple filled to its slots", () => {
+    expect(
+      canBranchMatch(
+        { type: "array", prefixItems: [{ type: "string" }], items: false },
+        ["a"],
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a closed tuple carrying an element past its slots", () => {
+    expect(
+      canBranchMatch(
+        { type: "array", prefixItems: [{ type: "string" }], items: false },
+        ["a", "b"],
+      ),
+    ).toBe(false);
+  });
+
+  it("accepts a populated array where items is a schema", () => {
+    // The counterweight to the two rejections above: only `items: false`
+    // bounds the length, so an open `items` admits any number of elements.
+    expect(
+      canBranchMatch({ type: "array", items: { type: "string" } }, ["a", "b"]),
+    ).toBe(true);
   });
 });
 
@@ -2335,6 +2358,89 @@ describe("anyOf optimization integration", () => {
 
     expect(error).toBeUndefined();
     expect(ok).toBe(value);
+    expect(traverser.anyOfFastRejects).toBe(1);
+  });
+
+  it("passes a branch whose $ref does not resolve", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-anyof-unresolved-ref" as URI;
+    const docEntity = docUri as Entity;
+    const value = "hello";
+
+    store.set(`${docUri}/${type}`, {
+      the: type,
+      of: docEntity,
+      is: { value },
+      since: 1,
+    });
+
+    const selector = internPathSelector({
+      path: ["value"],
+      schema: {
+        anyOf: [{ $ref: "#/$defs/Absent" }, { type: "number" }],
+      },
+    });
+    expect(isInternedSchema(selector.schema!)).toBe(true);
+
+    const traverser = getTraverser(store, selector);
+    const { ok, error } = traverser.traverse({
+      address: {
+        space: "did:null:null",
+        id: docUri,
+        type,
+        path: ["value"],
+      },
+      value,
+    });
+
+    // The prefilter defers on a branch it cannot resolve rather than turning
+    // it down, so only the number branch is fast-rejected. Refusing the value
+    // is then traversal's to do, which is where the failure comes from.
+    expect(traverser.anyOfFastRejects).toBe(1);
+    expect(ok).toBeUndefined();
+    expect(error?.code).toBe("NO_MATCHING_ANY_OF");
+  });
+
+  it("fast-rejects a branch whose tuple closure the array outruns", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-anyof-closed-tuple" as URI;
+    const docEntity = docUri as Entity;
+    const value = ["a", "b"];
+
+    store.set(`${docUri}/${type}`, {
+      the: type,
+      of: docEntity,
+      is: { value },
+      since: 1,
+    });
+
+    const selector = internPathSelector({
+      path: ["value"],
+      schema: {
+        anyOf: [
+          { type: "array", prefixItems: [{ type: "string" }], items: false },
+          { type: "array", items: { type: "string" } },
+        ],
+      },
+    });
+    expect(isInternedSchema(selector.schema!)).toBe(true);
+
+    const traverser = getTraverser(store, selector);
+    const { ok, error } = traverser.traverse({
+      address: {
+        space: "did:null:null",
+        id: docUri,
+        type,
+        path: ["value"],
+      },
+      value,
+    });
+
+    // The closed branch is turned away on length alone; the open one answers.
+    expect(error).toBeUndefined();
+    expect(ok).toEqual(value);
     expect(traverser.anyOfFastRejects).toBe(1);
   });
 
