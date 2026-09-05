@@ -17,9 +17,9 @@ This block is LIVE: the change that moves a stage updates it here.
 | S1b — index rows are the members | on main (#6886) |
 | S2 — `top/42` resolves at the CLI | on main (#6890) |
 | S2b — assignment refuses by default | on main (#6898) |
-| S3 — the shell opens `/<space>/top/42` | built, in review (#6896) |
+| S3 — the shell opens `/<space>/top/42` | on main (#6896) |
 | S4 — `#42` in text | on main (#6887) |
-| S6 — graft onto Topics | not started; Mike's call after S4 |
+| S6 — graft onto Topics | items 1, 2, 3, 5 built; item 4 is Mike's call |
 | S5 — deferred, not scheduled | — |
 
 ## Decisions, ruled 2026-09-03
@@ -266,9 +266,28 @@ Mike's call, after S4.
    `mentionableIndex` are a fork of the Topics pair differing only by that
    property, so this step is where the fork ends: one of the two goes, and the
    survivor is the one both boards derive their universe through.
+
+   Recorded: the survivor is one derivation, `mentionableIndex` and
+   `mentionableRowsOf` in `packages/patterns/collection-naming/mentionable.ts`,
+   which both boards import; `MentionableRow` is the row type both publish, and
+   `TopicMentionableRow` and `ItemMentionableRow` are gone. Neither board could
+   import the other's copy: a pattern module carries its imports into its own
+   compiled program, so the exemplar would ship the Topics board or Topics
+   would ship the exemplar. It is not in `naming.ts` either, because that
+   module never reads through a member and this derivation reads three display
+   strings off each one.
 4. The production backfill is rehearsed on a clone per
    `../development/space-clone-rehearsal.md`; the deployed vintage includes
-   #6827 before the backfill runs.
+   #6827 before the backfill runs. Not started, and one decision items 1-3
+   could not make for it stands: a topic filed before the namespace reads its
+   name only once `namesTable` is link-bound onto it, and nothing in a pattern
+   can reach a member's argument to do that.
+
+   The graft's own contract IS applicable over the deployed one — every row
+   demand declares `shortName` optional rather than defaulted, which is what
+   keeps it so — so the update needs no schema flag. It does need `--root` at
+   or above `packages/patterns`, because the board imports the naming library
+   from a sibling directory and the default program root is the entry's own.
 5. `skills/topics/SKILL.md` describes `top/42` addressing.
 
 ### S5 — Deferred, not scheduled

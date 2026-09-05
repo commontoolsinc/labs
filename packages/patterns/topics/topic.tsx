@@ -19,6 +19,8 @@ import {
   Writable,
 } from "commonfabric";
 
+import { type NamesTableRow, ownName } from "../collection-naming/naming.ts";
+
 // ===== Shared types =====
 
 /**
@@ -379,11 +381,12 @@ export interface TopicInput {
 
   /** The board's mention universe — what the body editor autocompletes
    * over. Wired at creation to the board's mention index (one derived
-   * document of two-string rows; `TopicMentionableRow` in `main.tsx`), and
-   * rewired onto a piece from before the index as a one-time link-bind.
-   * A plain list of the pieces themselves also satisfies the demand — a
-   * board not yet rewired, or a composer without a board. Absent, the
-   * editor simply offers no completions. */
+   * document of copies; `MentionableRow` in
+   * `../collection-naming/mentionable.ts`), and rewired onto a piece from
+   * before the index as a one-time link-bind. A plain list of the pieces
+   * themselves also satisfies the demand — a board not yet rewired, or a
+   * composer without a board. Absent, the editor simply offers no
+   * completions. */
   mentionable?: Writable<TopicMentionable[] | Default<[]>>;
 
   /** Where this topic's `[Label][key]` mentions point, keyed by the token that
@@ -415,6 +418,16 @@ export interface TopicInput {
    * has no business writing into it. Declaring the narrower cell says so where
    * a reader can see it, rather than leaving it to convention. */
   boardCrossrefs?: ReadonlyCell<TopicCrossrefRow[] | Default<[]>>;
+
+  /** The board's names table, one row per named topic. The topic reads its own
+   * row out of it and nothing else; absent, the topic shows no number.
+   *
+   * Readable, not writable, for the reason `boardCrossrefs` states: the table
+   * is the board's derivation, and a topic has no business writing into it.
+   * Wired at creation by the board's create, and rewired onto a topic filed
+   * before the namespace as a one-time link-bind — the same operator step
+   * `mentionable` states for itself. */
+  boardNames?: ReadonlyCell<NamesTableRow[] | Default<[]>>;
 }
 
 /**
@@ -488,9 +501,18 @@ export interface TopicCrossrefRow {
 
 /**
  * What the body editor's `@`-mention autocomplete needs of a mention
- * universe entry: the display name it lists and matches on, and the title
- * — the persisted scalar other readers of the universe select, though the
- * editor's own schema does not.
+ * universe entry: the display name it lists and matches on, the title — the
+ * persisted scalar other readers of the universe select, though the editor's
+ * own schema does not — and the board's name for the topic as `shortName`,
+ * which is what a `#42` query matches.
+ *
+ * `shortName` is OPTIONAL rather than defaulted, and the spelling is what
+ * keeps this demand applicable over a topic deployed before the namespace. A
+ * defaulted property moves the demand's defaults below an array constraint the
+ * compatibility proof cannot show stable under default insertion, and dropping
+ * the default without making the property optional makes it a newly required
+ * field. `TopicPiece` publishes it the same way, so a plain list of topics
+ * satisfies this demand as the input documents it may.
  *
  * `[NAME]` is not decoration here. `cf-code-editor` declares its entries as
  * `Mentionable`, whose schema carries `required: [NAME]`
@@ -498,7 +520,7 @@ export interface TopicCrossrefRow {
  * it silently offers no completions — the JSX prop binding is loose enough
  * that TypeScript does not object.
  *
- * Two strings are also deliberately the WHOLE demand. A board's index row
+ * These three are also deliberately the WHOLE demand. A board's universe row
  * carries its topic as a `piece` reference besides them, and leaving that
  * out of this projection is what keeps every walk under a topic's argument
  * out of the sibling topics: a property the declared demand does not select
@@ -509,6 +531,7 @@ export interface TopicCrossrefRow {
 export interface TopicMentionable {
   [NAME]: string | Default<""> | undefined;
   title: string | Default<"">;
+  shortName?: string;
 }
 
 /**
@@ -557,6 +580,27 @@ export interface TopicPiece extends TopicSummary {
    * retained topic may not have produced this path yet; its persisted title
    * remains authoritative until it does. */
   [NAME]: string | Default<""> | undefined;
+
+  /** The name the board calls this topic by, read out of the board's names
+   * table by identity. The display name stays the title — this rides beside
+   * it, under the name a mention pill reads it by (`Mentionable.shortName` in
+   * `packages/ui/src/v2/core/mentionable.ts`), so a mention of this topic
+   * elsewhere gains the number as soon as the board names it.
+   *
+   * Absent for a topic no board has named, or one wired to no board: the
+   * lookup produces nothing and the property is simply not there. Every
+   * consumer treats that as no name — the badge renders nothing, a universe
+   * row matches no `#42` query, and a mention pill shows no number
+   * (`_trackRefShortName` in
+   * `packages/ui/src/v2/components/cf-code-editor/cf-code-editor.ts` reads an
+   * absent name exactly as it reads a blank one).
+   *
+   * Optional rather than defaulted, and the difference is the whole reason
+   * this projection still applies over a deployed board: this is what a
+   * board's stored list is validated against, and a defaulted property there
+   * moves the demand's defaults below an array constraint the compatibility
+   * proof cannot show stable under default insertion. */
+  shortName?: string;
 
   /** The living document, verbatim Markdown. `setBody` replaces it whole. */
   body: string | Default<"">;
@@ -669,8 +713,32 @@ export interface TopicOutput extends TopicPiece {
    */
   commentDraft: PerSession<Writable<string>>;
   bodyDraft: PerSession<Writable<string>>;
+
+  /**
+   * Whether the body editor is open.
+   *
+   * A bare session-scoped value rather than a cell-wrapped one, and that
+   * spelling costs a capability worth knowing about before reaching for it: a
+   * verb cannot take a whole Topic as captured state while any required
+   * property is published this way. The piece does not materialize through the
+   * verb's state schema, so the argument arrives undefined and the runtime
+   * declines to run the verb at all — "stream action argument is undefined
+   * (potential schema mismatch)", logged rather than thrown, with the write
+   * silently absent.
+   *
+   * Nothing needs that today. A board names a member by writing the piece into
+   * its namespace, and every path that does so builds the piece inside the
+   * verb (`addTopic`, the browser composer) or writes a list POSITION rather
+   * than a held piece (`backfillNames`). Cell-wrapping these two would buy the
+   * capability at the cost of a `scope changed` break on every deployed Topic,
+   * so it waits for a verb that needs it.
+   */
   editingBody: PerSession<boolean>;
   titleDraft: PerSession<Writable<string>>;
+
+  /** Whether the rename editor is open. Bare for the reason `editingBody`
+   * states, and the constraint is per property: cell-wrapping one and not the
+   * other buys nothing. */
   editingTitle: PerSession<boolean>;
   linkUrlDraft: PerSession<Writable<string>>;
   linkLabelDraft: PerSession<Writable<string>>;
@@ -1272,6 +1340,7 @@ export default pattern<TopicInput, TopicOutput>(
       references,
       mentioned,
       boardCrossrefs,
+      boardNames,
       [SELF]: self,
     },
   ) => {
@@ -1302,6 +1371,9 @@ export default pattern<TopicInput, TopicOutput>(
     const profileAvatar = profileWish.result?.avatar ?? "";
     const hasProfile = profileName.trim().length > 0;
     const createdByView = createdByOf({ createdBy });
+    // The board has already derived the table; this is a lookup by identity,
+    // and it is written as one.
+    const shortName = ownName({ table: boardNames, self });
 
     // --- Streams (external API; also usable headlessly via CLI) ---
 
@@ -1663,12 +1735,25 @@ export default pattern<TopicInput, TopicOutput>(
               )
               : (
                 <cf-hstack gap="2" justify="between" align="center">
-                  <cf-text
-                    block
-                    style="font-size: 1.25rem; font-weight: 600;"
+                  <cf-hstack
+                    gap="2"
+                    align="center"
+                    style="flex: 1; min-width: 0;"
                   >
-                    {topicName}
-                  </cf-text>
+                    {shortName
+                      ? (
+                        <cf-badge size="sm" color="primary" data-member-name="">
+                          {shortName}
+                        </cf-badge>
+                      )
+                      : null}
+                    <cf-text
+                      block
+                      style="font-size: 1.25rem; font-weight: 600;"
+                    >
+                      {topicName}
+                    </cf-text>
+                  </cf-hstack>
                   <cf-button
                     variant="ghost"
                     disabled={!hasProfile}
@@ -2020,6 +2105,7 @@ export default pattern<TopicInput, TopicOutput>(
       links,
       createdAt,
       createdBy: createdByView,
+      shortName,
       bodyUpdatedBy,
       bodyUpdatedAt,
       commentCount,

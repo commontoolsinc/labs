@@ -88,13 +88,40 @@ step "deploy the topics board into a fresh space ($SPACE)"
 # snapshot is taken from the database file itself.
 ls "$ENGINE_DIR" 2> /dev/null | grep '\.sqlite$' | sort > "$WORK/dbs-before" ||
   true
-BOARD="$(
-  $CF piece new "$REPO_ROOT/packages/patterns/topics/main.tsx" \
-    --space "$SPACE" --api-url "$API_URL" 2> /dev/null |
-    grep -o 'fid1:[A-Za-z0-9_-]*' | head -1
-)"
+# `--root` is the repository root because the board imports the member-naming
+# library from a sibling directory (`../collection-naming/`). Without it the
+# program root is the entry's own directory, every such import is refused as
+# escaping it, and no fid is printed. Any deploy of this board needs the same
+# flag, which is why the failure is captured and shown rather than discarded:
+# a deploy that refuses and a deploy that prints nothing look identical once
+# stderr is dropped, and only one of them is this script's fault.
+#
+# The two streams stay apart, and the match is a WHOLE LINE. Under `-q` today
+# stdout carries the new piece's id and nothing else, while every diagnostic,
+# hint and log line goes to stderr. Merging them and taking the first `fid1:`
+# token anywhere would accept a token out of a message — a source reference in
+# a warning, an id inside a suggested command — and the drill would then run
+# against a board that does not exist, failing several steps later with a
+# message about something else.
+#
+# What the anchor buys is narrower than "stdout holds only the id", and the
+# difference matters to whoever next asks whether this still holds. `grep -x`
+# accepts a LINE that is a fid and nothing more, so a fid embedded in a longer
+# line cannot match however the streams are arranged. It does NOT require
+# stdout to hold that line alone: a future `cf` printing something beside the
+# id would keep working, and silently. What breaks this is stdout ceasing to
+# carry a bare fid line at all, and that failure is loud — nothing matches,
+# `BOARD` is empty, and the step stops here naming what it did not find.
+$CF piece new -q "$REPO_ROOT/packages/patterns/topics/main.tsx" \
+  --root "$REPO_ROOT" --space "$SPACE" --api-url "$API_URL" \
+  > "$WORK/deploy.out" 2> "$WORK/deploy.err"
+BOARD="$(grep -xE 'fid1:[A-Za-z0-9_-]+' "$WORK/deploy.out" | head -1)"
 [ -n "$BOARD" ] && ok "board deployed: $BOARD" || {
-  bad "board deploy printed no fid"
+  bad "board deploy produced no bare fid line on stdout"
+  echo "--- deploy stdout ---" >&2
+  cat "$WORK/deploy.out" >&2
+  echo "--- deploy stderr ---" >&2
+  cat "$WORK/deploy.err" >&2
   exit 1
 }
 
@@ -117,6 +144,13 @@ fi
   bad "no topic address"
   exit 1
 }
+# The name the create allocated, beside the topic it created. A caller reads
+# this rather than waiting for the topic's own `shortName` derivation, and a
+# pattern test cannot see it — a verb's result reaches its caller through the
+# handling's receipt. This is the first topic on a fresh board, so `1`.
+CREATED_NAME="$(jq -r '.result.name // empty' "$WORK/create.json")"
+[ "$CREATED_NAME" = "1" ] && ok "create returned the allocated name: 1" ||
+  bad "create returned name '$CREATED_NAME', expected 1"
 $CF piece call -q --piece "$TOPIC_ALIAS" --space "$SPACE" \
   --api-url "$API_URL" addComment \
   '{"body":"first drill comment","agentName":"drill"}' > /dev/null 2>&1
@@ -208,6 +242,44 @@ deno run --allow-run --allow-read --allow-env \
   --piece "$TOPIC" --api-url "$API_URL" 2> /dev/null |
   grep -q "nothing to restore" &&
   ok "second restore is a no-op" || bad "second restore was not a no-op"
+
+step "the namespace verbs' own results"
+# `backfillNames` returns the names it wrote. Asserted here rather than in a
+# pattern test for the reason the create's `name` is: a verb's result reaches
+# its caller through the handling's receipt, and `send()` hands a pattern test
+# nothing.
+#
+# The board's one topic was named by its create, so a backfill over it as it
+# stands writes nothing — and an implementation that never wrote anything would
+# pass that just as well. So the namespace is emptied first, which is the state
+# a board filed before it numbered anything is actually in: members in the
+# list, no names for them. Now the run has something to write, and `assigned`
+# has to carry it. Last step in the drill, since it leaves the namespace
+# rebuilt rather than as the restore left it.
+printf '{}' | $CF cell set -q --piece "$BOARD" --space "$SPACE" \
+  --api-url "$API_URL" names > /dev/null 2>&1
+CLEARED="$(
+  $CF cell get -q --piece "$BOARD" --space "$SPACE" --api-url "$API_URL" \
+    names 2> /dev/null | jq -c 'keys'
+)"
+[ "$CLEARED" = "[]" ] && ok "namespace emptied for the backfill" ||
+  bad "namespace did not empty: $CLEARED"
+BACKFILL="$(
+  $CF piece call -q --piece "$BOARD" --space "$SPACE" --api-url "$API_URL" \
+    backfillNames \
+    '{"agentName":"drill"}' 2> /dev/null
+)"
+ASSIGNED="$(printf '%s\n' "$BACKFILL" | jq -c '.result.assigned // empty')"
+[ "$ASSIGNED" = '["1"]' ] &&
+  ok "backfill reported the name it wrote: [\"1\"]" ||
+  bad "backfill reported '$ASSIGNED', expected [\"1\"]"
+# And it wrote what it reported, rather than reporting a name it never stored.
+REFILLED="$(
+  $CF cell get -q --piece "$BOARD" --space "$SPACE" --api-url "$API_URL" \
+    names 2> /dev/null | jq -c 'keys'
+)"
+[ "$REFILLED" = '["1"]' ] && ok "the namespace carries the name it reported" ||
+  bad "namespace holds $REFILLED after the backfill"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

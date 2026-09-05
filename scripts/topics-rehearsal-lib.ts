@@ -251,6 +251,10 @@ export interface TopicsExport {
  * one points at. A document write cannot carry a `$link`, so these are routed
  * aside and re-linked after the apply.
  *
+ * Three today: `mentionable` (the board's universe), `boardCrossrefs` (its
+ * reference pivot), and `boardNames` (its names table, which a topic reads its
+ * own member name out of).
+ *
  * Adding a wiring input to the topic pattern means adding it here. Leaving it
  * out is not silent: `buildRestoreDocument` throws on any link-valued field it
  * does not recognize, because writing one as data would corrupt it and
@@ -261,6 +265,7 @@ export interface TopicsExport {
 export const STRUCTURAL_LINK_SOURCES: Record<string, string> = {
   mentionable: "topics",
   boardCrossrefs: "crossrefs",
+  boardNames: "namesTable",
 };
 
 export const STRUCTURAL_LINK_FIELDS = Object.keys(STRUCTURAL_LINK_SOURCES);

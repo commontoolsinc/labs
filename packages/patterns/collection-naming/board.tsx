@@ -12,10 +12,8 @@
 import {
   action,
   Default,
-  lift,
   NAME,
   pattern,
-  type ReadonlyCell,
   Stream,
   UI,
   type VNode,
@@ -23,6 +21,7 @@ import {
 } from "commonfabric";
 
 import Item from "./item.tsx";
+import { mentionableIndex, type MentionableRow } from "./mentionable.ts";
 import {
   assignName,
   backfillNames,
@@ -183,9 +182,9 @@ export interface BoardOutput {
    * autocompletes over — what `addItem` wires into each item it creates. One
    * derived document of copies, each holding its item as an unread reference
    * and carrying the board's name for it, so `#42` finds a member without
-   * expanding one; see `ItemMentionableRow`.
+   * expanding one; see `MentionableRow` in `mentionable.ts`.
    */
-  mentionable: ItemMentionableRow[] | Default<[]>;
+  mentionable: MentionableRow[] | Default<[]>;
 
   /** How many items the board holds. */
   itemCount: number;
@@ -206,103 +205,6 @@ export interface BoardOutput {
 const reject = (verb: string, reason: string): never => {
   throw new Error(`${verb} rejected: ${reason}`);
 };
-
-/**
- * One row of the board's mention universe: the display name the editor's
- * autocomplete lists and matches on, the title, the board's name for the
- * member as `shortName`, and the member itself as a reference.
- *
- * The strings are COPIES, and that is what separates this from `index`. An
- * index row IS its item, because a survey reads those items anyway; the
- * universe is read by EVERY item's editor, so wiring it to the items would
- * multiply the board by itself, and one document of copies is what bounds that
- * product.
- *
- * `shortName` is copied off the member's own — the derivation `index`
- * publishes — rather than looked up in the names table a second way, so one
- * fact is derived once and a member's number reads the same wherever the board
- * shows it. A member whose `boardNames` never arrived therefore reads blank
- * here exactly as it does in its index row.
- *
- * `piece` is the item, written as a reference and never read through here:
- * the editor resolves it when a completion is picked, so what a mention
- * stores is the item and never this row (`Mentionable.piece` in
- * `packages/ui/src/v2/core/mentionable.ts` is the consuming contract). It is
- * deliberately not part of `ItemMentionable`, the demand an item declares for
- * itself: a property that demand does not select is invisible to the walks
- * that warm and watch an item's argument, and that invisibility is what keeps
- * one item from reaching every sibling through its mention universe.
- */
-export interface ItemMentionableRow {
-  [NAME]: string;
-  title: string | Default<"">;
-  shortName: string | Default<"">;
-  piece: unknown;
-}
-
-/**
- * Each member's universe row, read once per member. A member whose own
- * `shortName` has produced no value carries the empty name, which is a row no
- * `#42` query matches.
- *
- * Declared structurally for the reason `indexRowsOf` is: a member with
- * nothing behind it yet — one appended a moment ago, still mid-sync — reads
- * as `undefined` here and gets no row rather than a junk one; the row appears
- * on the next run.
- */
-export function mentionableRowsOf(
-  members: readonly (
-    | {
-      get():
-        | { [NAME]?: string; title?: string; shortName?: string }
-        | undefined;
-    }
-    | undefined
-  )[],
-): ItemMentionableRow[] {
-  const rows: ItemMentionableRow[] = [];
-  for (const member of members) {
-    const value = member?.get();
-    if (!member || !value) continue;
-    rows.push({
-      // The display-name chain a reader would otherwise walk the item for: a
-      // cold item has not produced its derived `[NAME]` yet, and its
-      // persisted title is authoritative until it does.
-      [NAME]: value[NAME] || value.title || "",
-      title: value.title ?? "",
-      shortName: value.shortName ?? "",
-      piece: member,
-    });
-  }
-  return rows;
-}
-
-/**
- * The board's mention universe, derived once for the whole board: every
- * item's editor autocompletes over this one document of copies rather than
- * over the items themselves, so a universe read is one document however many
- * items the board holds.
- *
- * The parameter is an array of CELLS for the index's two reasons: the cell is
- * the identity each row's `piece` records, and a cell always writes as a
- * link, so an unchanged board recomputes to the same rows and writes nothing.
- */
-const mentionableIndex = lift(
-  (
-    { members }: {
-      members:
-        | ReadonlyCell<{
-          [NAME]?: string | Default<"">;
-          title: string | Default<"">;
-          shortName: string | Default<""> | undefined;
-        }>[]
-        | Default<[]>;
-    },
-  ): ItemMentionableRow[] =>
-    // A plain array, read once per member: an element read through the
-    // reactive array costs a link resolution per access.
-    mentionableRowsOf(Array.from(members)),
-);
 
 export default pattern<BoardInput, BoardOutput>(({ items, names }) => {
   // `.length` alone is what keeps this cheap: the shrunk schema declares

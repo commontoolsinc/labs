@@ -89,7 +89,7 @@ export interface ItemInput {
   /**
    * The board's mention universe — what the body editor completes over.
    * Wired at creation to the board's mention index, one derived document of
-   * rows (`ItemMentionableRow` in `board.tsx`). Absent, the editor simply
+   * rows (`MentionableRow` in `mentionable.ts`). Absent, the editor simply
    * offers no completions.
    */
   mentionable?: Writable<ItemMentionable[] | Default<[]>>;

@@ -55,8 +55,9 @@ or derived INDEX ROWS standing for them: entries shaped `{ [NAME], piece }`,
 where the strings are the row's own copies and `piece` holds the actual
 piece as a reference. A board-sized producer reaches for rows so that every
 reader of the universe loads one document instead of every listed piece;
-the Topics board's `mentionable` is the worked example
-(`TopicMentionableRow` in `packages/patterns/topics/main.tsx`).
+the Topics board's `mentionable` is the worked example, derived through the
+library both it and the collection-naming exemplar share (`MentionableRow` in
+`packages/patterns/collection-naming/mentionable.ts`).
 
 `piece` is therefore a RESERVED key on this contract: an entry carrying one
 IS a row, and the editors store what `piece` names — never the entry — as

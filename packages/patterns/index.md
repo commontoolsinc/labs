@@ -227,47 +227,62 @@ assignees. The board publishes a bounded discovery index — the topics
 themselves, declared through a narrow row schema of summary scalars, so a row's
 address IS its topic's and a survey and the follow-up read name one document.
 `addTopic` returns the piece it created, so a caller addresses a new topic
-straight from the create. Topics reference each other by CELL: the board derives
-the whole graph once by scanning what each topic points at with `equals`, and
-each topic reads its own inbound edges out of that pivot. Demonstrates:
-reading-list-style piece-in-list composition, `PerUser` display-name on a shared
-piece, mergeable comment appends, session-scoped drafts, bounding a whole-list
-derivation with a narrow declared `lift` parameter, passing topics through a
-sort so an activity-ordered list keeps the identity its elements already have,
-`multiUserTest` coverage.
+straight from the create. The board owns a member namespace through
+`collection-naming/naming.ts`: `addTopic` allocates the next decimal name in the
+same transaction as the append, each topic reads its own name out of the board's
+names table and publishes it as `shortName`, and `backfillNames` names what the
+board held before it numbered anything. Topics reference each other by CELL: the
+board derives the whole graph once by scanning what each topic points at with
+`equals`, and each topic reads its own inbound edges out of that pivot.
+Demonstrates: reading-list-style piece-in-list composition, profile-native
+browser authorship on a shared piece, mergeable comment appends, session-scoped
+drafts, bounding a whole-list derivation with a narrow declared `lift`
+parameter, passing topics through a sort so an activity-ordered list keeps the
+identity its elements already have, `multiUserTest` coverage.
 
 **Keywords:** topics, issues, tracker, discussion, thread, comments, multi-user,
-PerUser, mergeable, index, discovery, bounded read, row identity, references,
-backlinks, cell identity, equals, mentions
+profile, mergeable, index, discovery, bounded read, row identity, references,
+backlinks, cell identity, equals, mentions, member names, shortName, namespace,
+backfill
 
 ### Input Schema
 
 ```ts
 interface TopicsInput {
-  topics?: Writable<TopicPiece[] | Default<[]>>;
-  myName?: PerUser<Writable<string | Default<"">>>;
+  topics?: Writable<TopicDemand[] | Default<[]>>;
+  // The member namespace: each decimal name to the topic it names, held as an
+  // unread reference
+  names?: Writable<Default<NamesMap, {}>>;
 }
-// TopicInput additionally takes mentionable?: Writable<TopicPiece[]> — the
-// board's own list, wired at creation, as the @-mention universe for the
-// topic's body editor.
+// TopicInput additionally takes the three wirings addTopic gives a child:
+// mentionable (the @-mention universe for the body editor), boardCrossrefs
+// (the reference pivot), and boardNames (the names table it reads its own
+// number out of).
 ```
 
 ### Output Schema
 
 ```ts
 interface TopicsOutput {
-  topics: TopicPiece[];
-  mentionable: TopicPiece[];
+  topics: TopicDemand[];
+  // { [NAME], title, shortName, piece } per topic — one document of copies
+  mentionable: MentionableRow[];
   topicCount: number;
   // The topics, read through { title, createdAt, createdBy, commentCount,
-  //   lastActivityAt } — a row addresses the topic it describes
+  //   lastActivityAt, shortName } — a row addresses the topic it describes
   index: TopicIndexRow[];
   // { topic, mentionedBy } per topic — the reference graph, derived once here
   crossrefs: TopicCrossrefRow[];
-  myName: string;
-  // Returns { topic } — the piece it created
+  // The namespace, the table every topic reads its name out of, and the
+  // policy the names are held to
+  names: Default<NamesMap, {}>;
+  namesTable: NamesTableRow[];
+  naming: NamingDeclaration;
+  // Returns { topic, name } — the piece it created and the name it allocated
   addTopic: Stream<AddTopicEvent, AddTopicResult>;
-  setMyName: Stream<{ name: string }>;
+  // Names every unnamed member in filing order; idempotent
+  backfillNames: Stream<BackfillNamesEvent, BackfillNamesResult>;
+  submitTopic: Stream<void>;
 }
 ```
 
@@ -275,10 +290,13 @@ interface TopicsOutput {
 
 A single #topic piece: the durable object the tracker's list holds. Body edits
 go through an explicit Edit→Save toggle (one whole-value `set` per save keeps
-the concurrent-edit window small); comments and links are mergeable appends. Use
-from `topics/main.tsx` via `navigateTo()`, or standalone.
+the concurrent-edit window small); comments and links are mergeable appends.
+Reads the board's name for itself out of `boardNames` by identity, publishes it
+as `shortName`, and renders it as a badge beside the title; a topic wired to no
+board shows none. Use from `topics/main.tsx` via `navigateTo()`, or standalone.
 
-**Keywords:** topic, detail, thread, comment, links, body, navigateTo
+**Keywords:** topic, detail, thread, comment, links, body, navigateTo,
+shortName, member name, badge
 
 ---
 

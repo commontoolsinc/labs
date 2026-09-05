@@ -8,9 +8,15 @@ other topics — URLs in v0).
 
 The board publishes an **index**: one row per topic carrying the topic's
 canonical address, a reference to the topic itself, and the scalars a survey
-reads (`title`, `createdAt`, `createdBy`, `commentCount`, `lastActivityAt`). The
-same rows render the board's cards, so a headless survey and the rendered board
-read one derivation rather than two.
+reads (`title`, `createdAt`, `createdBy`, `commentCount`, `lastActivityAt`,
+`shortName`). The same rows render the board's cards, so a headless survey and
+the rendered board read one derivation rather than two.
+
+The board also **names its members**. It owns a namespace of decimal names,
+dense from `1` and never reused, through the library in
+[`collection-naming/`](../collection-naming/README.md); a topic is cited as
+`top/42`, and the number renders as a badge beside its title rather than in
+place of it.
 
 Topics reference each other. A reference is a **cell**, not a string: picking a
 completion in the body editor stores the destination piece itself, and a link
@@ -59,6 +65,32 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   current authored-content verb writes structured attribution; the public result
   and mutation contracts contain no mutable "current author" state or
   display-name mirrors.
+- **The board names its members, and every reader reaches a name the same way.**
+  `addTopic` allocates the next name in the same transaction as the append, so
+  no reader observes a topic without its name and two concurrent creates
+  serialize on the map's keys rather than taking the same one; the browser
+  composer allocates through the same call. The namespace is one map cell,
+  `names: { "42": <topic> }`, written one key at a time and holding each topic
+  as an unread reference, so surveying its keys expands no topic. A topic reads
+  its own row out of the board's `namesTable` by identity and publishes the
+  result as `shortName` — one derivation — and the survey row, the mention
+  universe row, and a mention's pill all read that one property. `backfillNames`
+  names what the board held before it numbered anything, in filing order,
+  skipping what is already named; it writes the namespace and nothing else, so
+  on a board whose topics were filed past `addTopic` it has to be paired with a
+  one-time link-bind of `namesTable` onto each of them, the same operator step
+  `mentionable` states for itself. Until that bind the topic is named — `names`
+  and `namesTable` carry it — and its row still carries no name. `naming` is
+  what the board declares about those names, so a consumer reads the promise
+  rather than assuming one.
+
+  Every demand for that property is declared OPTIONAL rather than defaulted, and
+  the spelling is what lets the whole graft be applied over a board deployed
+  before it: a defaulted property moves a row demand's defaults below an array
+  constraint the compatibility proof cannot show stable under default insertion,
+  while an optional one tolerates a topic that publishes none. Universe ROWS are
+  the exception and carry the empty string, because they are copies the board
+  writes rather than a demand on anything stored.
 - **`mentionable` is a derived index, and its copies are the design.** Every
   topic on the board reads the mention universe — each child's editor
   autocompletes over it — so whatever `mentionable` is wired to is multiplied by
@@ -66,9 +98,12 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   crosses into every other topic, and document-granular delivery ships each
   sibling whole to serve two strings. The index bounds that product:
   `mentionableIndex` derives one small document of rows, each carrying a topic's
-  display name and title as COPIES plus the topic itself as a reference. One
-  derivation pays the board-wide walk, once per change, in place of every reader
-  paying it on every load.
+  display name, title and `shortName` as COPIES plus the topic itself as a
+  reference. One derivation pays the board-wide walk, once per change, in place
+  of every reader paying it on every load. The lift and its row type are shared
+  with the collection-naming exemplar (`../collection-naming/mentionable.ts`):
+  both boards derive their universe through the one derivation, so a member's
+  number reads the same on either.
 
   The reference is what a picked completion stores, and it is deliberately
   outside the demand a topic declares over the universe: a property that demand
@@ -89,12 +124,13 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   space. So every derivation here is a module-scope `lift`, because a `lift`'s
   declared parameter type is a ceiling an opaque helper cannot widen.
 
-  Three derivations run over the whole board, and each declares only what it
+  Four derivations run over the whole board, and each declares only what it
   reads. `crossrefTable` takes one list of references per topic and builds the
   mention pivot from it; `cardsByActivity` takes a single timestamp per topic
-  and orders the cards by it; `mentionableIndex` takes the two display strings
-  per topic and builds the mention universe. None expands a topic's prose,
-  thread, verbs, or rendered UI.
+  and orders the cards by it; `mentionableIndex` takes the three display strings
+  per topic and builds the mention universe; `namesTable` takes the namespace
+  map and builds one row per named member without reading through any of them.
+  None expands a topic's prose, thread, verbs, or rendered UI.
 
   A lift's parameter and its result look like one type, which seems to force a
   choice: narrow the parameter to bound the read, and what comes out narrows
@@ -106,7 +142,7 @@ lineage: Linear CT-1878, which this pattern exists to absorb).
   that way: it reads one timestamp and gives back the topics themselves.
 
   What each reader of a topic gets is then its own declared schema's business.
-  The published `index` declares the five scalars a survey reads, so a survey
+  The published `index` declares the six scalars a survey reads, so a survey
   cannot expand a topic past them, while the card list's argument schema is
   shrunk to the handful of fields its body renders. Neither widens the topic,
   which is what leaves both free to be that narrow — and it is why every field a
@@ -183,10 +219,18 @@ the contract surface; `--all` additionally shows UI wrappers and deprecated
 verbs. Against a deployed board piece:
 
 ```bash
-cf piece call --piece <board> \
-  --schema '{"properties":{"topic":{"$link":true}}}' addTopic \
-  '{"title":"...","body":"the initial living document","agentName":"Sol"}'
-# -> { "result": { "topic": { "$link": "/of:fid1:..." } } }
+# The read options follow the `--` marker, which closes the verb's own
+# section; before the verb the CLI exits 2. The projection names BOTH results,
+# because one naming only `topic` drops `name` from the envelope.
+cf piece call --piece <board> addTopic \
+  '{"title":"...","body":"the initial living document","agentName":"Sol"}' \
+  -- --schema '{"properties":{"topic":{"$link":true},"name":{"type":"string"}}}'
+# -> { "result": { "name": "1", "topic": { "$link": "/of:fid1:..." } } }
+cf cell get --piece <board> names
+# -> { "1": {} }
+# Idempotent, so a board whose members are all named reports nothing written.
+cf piece call --piece <board> backfillNames '{"agentName":"Sol"}'
+# -> { "result": { "assigned": [] } }
 cf cell get --piece <board> topics --input \
   --select title,createdAt,lastActivityAt,commentCount
 cf piece call --piece <topic> addComment \
@@ -241,9 +285,9 @@ before reference resolution and rejects a bare address.
 
 **A full-board survey is one bounded read of `index`.** Each row IS the topic it
 describes, declared through a schema of scalar summaries (`title`, `createdAt`,
-`createdBy`, `commentCount`, `lastActivityAt`). The declared schema is the
-bound, so the read cannot expand a topic's body, thread, or verbs no matter how
-it is projected.
+`createdBy`, `commentCount`, `lastActivityAt`, `shortName`). The declared schema
+is the bound, so the read cannot expand a topic's body, thread, or verbs no
+matter how it is projected.
 
 ```bash
 cf cell get --piece <board> index --step
@@ -299,13 +343,17 @@ then searching the board for it. The result is declared through the index's row
 schema rather than the full topic: the declared schema bounds the default
 readback, and every name a verb's result publishes is permanent, so the create
 hands back the survey row plus the write-time facts only the pattern could
-resolve (`createdAt`, `createdBy`). `addComment` and `addLink` return the
-appended record, `setBody` the persisted body plus the attribution it wrote,
-`setTitle` the persisted title plus its attribution; each carries fields the
-pattern resolved that a caller cannot compute for itself. Counts are
-deliberately not returned: these appends are mergeable ops, so a length observed
-inside one handling is not a fact about the resulting list — read `commentCount`
-when you want the count.
+resolve (`createdAt`, `createdBy`). `name` rides beside it — the name the create
+allocated, as written to the namespace — because the topic's own `shortName` is
+a lookup that may not have produced a value when the call returns, and a caller
+must not have to wait for a derivation to learn what it just allocated.
+`backfillNames` returns the names it wrote, in filing order, and `[]` on a
+second run. `addComment` and `addLink` return the appended record, `setBody` the
+persisted body plus the attribution it wrote, `setTitle` the persisted title
+plus its attribution; each carries fields the pattern resolved that a caller
+cannot compute for itself. Counts are deliberately not returned: these appends
+are mergeable ops, so a length observed inside one handling is not a fact about
+the resulting list — read `commentCount` when you want the count.
 
 A returned value reaches the caller through the handling's receipt. A result
 carrying a piece (`addTopic`) travels the result-pattern projection path; the
@@ -323,7 +371,8 @@ _update_: `bodyUpdatedBy`/`bodyUpdatedAt` stay unset.
 
 Invalid mutations **throw** instead of silently returning (verb contract rule
 4): an empty title, an empty comment body, a blank or non-http(s) link URL, and
-a blank `agentName` on an authored-content verb all surface as a failed call — a
-nonzero CLI exit — never as apparent success. The UI composer wrappers keep
+a blank `agentName` on an authored-content verb — `backfillNames` included,
+which writes the namespace on someone's behalf — all surface as a failed call —
+a nonzero CLI exit — never as apparent success. The UI composer wrappers keep
 their silent guards: an empty draft is a non-event in a composer, not a headless
 mutation.

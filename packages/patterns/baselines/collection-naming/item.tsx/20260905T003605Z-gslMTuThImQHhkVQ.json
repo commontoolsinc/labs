@@ -1,0 +1,224 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "ItemMentionRef": {
+        "properties": {
+          "destination": {
+            "type": "unknown"
+          },
+          "modifiedTitle": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "destination",
+          "modifiedTitle"
+        ],
+        "type": "object"
+      },
+      "ItemMentionRefMap": {
+        "additionalProperties": {
+          "$ref": "#/$defs/ItemMentionRef"
+        },
+        "properties": {},
+        "type": "object"
+      },
+      "ItemMentionable": {
+        "properties": {
+          "$NAME": {
+            "default": "",
+            "type": [
+              "string",
+              "undefined"
+            ]
+          },
+          "shortName": {
+            "default": "",
+            "type": "string"
+          },
+          "title": {
+            "default": "",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "shortName",
+          "$NAME"
+        ],
+        "type": "object"
+      },
+      "NamesTableRow": {
+        "properties": {
+          "member": {
+            "description": "The member. `unknown` because it is written as a reference and only ever\ncompared; anything wider would read the member back whole.",
+            "type": "unknown"
+          },
+          "name": {
+            "description": "The member's name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "member",
+          "name"
+        ],
+        "type": "object"
+      }
+    },
+    "description": "What an item holds, and what its board hands it.",
+    "properties": {
+      "boardNames": {
+        "asCell": [
+          "readonly"
+        ],
+        "default": [],
+        "description": "The board's names table, one row per named member. The item reads its\nown row out of it and nothing else; absent, the item shows no name.\n\nReadable, not writable: the table is the board's derivation, and an item\nhas no business writing into it.",
+        "items": {
+          "$ref": "#/$defs/NamesTableRow"
+        },
+        "type": "array"
+      },
+      "body": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "",
+        "description": "The item's body, verbatim Markdown.",
+        "type": "string"
+      },
+      "createdAt": {
+        "default": 0,
+        "description": "When the item was filed (epoch milliseconds), stamped at create.",
+        "type": "number"
+      },
+      "mentionable": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "description": "The board's mention universe — what the body editor completes over.\nWired at creation to the board's mention index, one derived document of\nrows (`MentionableRow` in `mentionable.ts`). Absent, the editor simply\noffers no completions.",
+        "items": {
+          "$ref": "#/$defs/ItemMentionable"
+        },
+        "type": "array"
+      },
+      "references": {
+        "$ref": "#/$defs/ItemMentionRefMap",
+        "asCell": [
+          "cell"
+        ],
+        "default": {},
+        "description": "Where this item's `[Label][key]` mentions point, keyed by the token that\nappears in the body. The editor owns the contents; this pattern owns the\ncell, which is what makes a mention durable and — because each entry\nholds the destination as a REFERENCE — what makes the reference a\nquestion about cell identity rather than about text.\n\nThe default has to match the one `ItemOutput` publishes. A map published\nunder a different default than its input carries cannot be materialized."
+      },
+      "title": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "",
+        "description": "The item's title, trimmed by the board's create before it is stored.",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "collection-naming/item.tsx",
+  "resultSchema": {
+    "$defs": {
+      "ItemMentionRef": {
+        "properties": {
+          "destination": {
+            "type": "unknown"
+          },
+          "modifiedTitle": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "destination",
+          "modifiedTitle"
+        ],
+        "type": "object"
+      },
+      "ItemMentionRefMap": {
+        "additionalProperties": {
+          "$ref": "#/$defs/ItemMentionRef"
+        },
+        "properties": {},
+        "type": "object"
+      }
+    },
+    "description": "An item of the exemplar board. The display name stays the title; the\nboard's name for the item rides beside it as `shortName`, and renders as a\nbadge in the header when there is one.",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "body": {
+        "default": "",
+        "description": "The item's body, verbatim Markdown.",
+        "type": "string"
+      },
+      "cancelEditBody": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "description": "Close the editor, leaving both drafts behind.",
+        "tier": "wrapper"
+      },
+      "createdAt": {
+        "description": "When the item was filed (epoch milliseconds).",
+        "type": "number"
+      },
+      "references": {
+        "$ref": "#/$defs/ItemMentionRefMap",
+        "default": {},
+        "description": "Where this item's mentions point, keyed by the token in the body. Written\nwhole by the save, out of the draft the editor minted into, in the same\ntransaction as the prose those tokens sit in."
+      },
+      "saveBody": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "description": "Write the drafted body and its mention map together, and close.",
+        "tier": "wrapper"
+      },
+      "shortName": {
+        "description": "The name the board calls this item by, read out of the board's names\ntable; `undefined` for an item no board has named, or one wired to no\nboard.\n\nPublished under the name a mention pill reads it by\n(`Mentionable.shortName` in `packages/ui/src/v2/core/mentionable.ts`), so\na mention of this item elsewhere gains the number as soon as the board\nnames it.",
+        "type": [
+          "string",
+          "undefined"
+        ]
+      },
+      "startEditBody": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ],
+        "description": "Open the body editor on the stored body and its mention map.\n\nThese three are the whole editing surface, and opening is a verb rather\nthan a flag on purpose: the drafts are seeded here and nowhere else, so a\nsurface that could raise an `editingBody` flag directly would open an\neditor showing nothing and then save that over the stored body. No such\nflag is reachable — an unpublished session cell cannot be written from\noutside, and publishing one as a plain `PerSession<boolean>` is not an\noption either, because a published value carrying one cannot serve as an\naction's captured state, which is what naming a member makes of it.",
+        "tier": "wrapper"
+      },
+      "title": {
+        "default": "",
+        "description": "The item's title, as stored.",
+        "type": "string"
+      }
+    },
+    "required": [
+      "title",
+      "body",
+      "createdAt",
+      "shortName",
+      "references",
+      "startEditBody",
+      "saveBody",
+      "cancelEditBody",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

@@ -226,13 +226,28 @@ describe("topics-rehearsal-lib", () => {
     });
 
     it("routes known link fields aside instead of into the document", () => {
+      // Every wiring input the topic pattern declares, so a new one that never
+      // reached STRUCTURAL_LINK_SOURCES fails here rather than at a restore.
+
       const { doc, structural, legacy } = buildRestoreDocument(
-        { title: "t", mentionable: link, myName: link },
+        {
+          title: "t",
+          mentionable: link,
+          boardCrossrefs: link,
+          boardNames: link,
+          myName: link,
+        },
         resolved,
       );
-      expect(structural).toEqual(["mentionable"]);
+      expect(structural).toEqual([
+        "mentionable",
+        "boardCrossrefs",
+        "boardNames",
+      ]);
       expect(legacy).toEqual(["myName"]);
       expect(doc.mentionable).toBeUndefined();
+      expect(doc.boardCrossrefs).toBeUndefined();
+      expect(doc.boardNames).toBeUndefined();
       expect(doc.myName).toBeUndefined();
     });
 

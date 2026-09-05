@@ -21,13 +21,19 @@ import {
   Writable,
 } from "commonfabric";
 import { pattern } from "commonfabric";
-import Topics, {
+import {
+  type MentionableRow,
   mentionableRowsOf,
+} from "../collection-naming/mentionable.ts";
+import {
+  type NamesMap,
+  type NamesTableRow,
+} from "../collection-naming/naming.ts";
+import Topics, {
   mentionedBy,
   mentionListsOf,
   submitProfileTopic,
   type TopicCrossrefRow,
-  type TopicMentionableRow,
   type TopicPiece,
 } from "./main.tsx";
 import Topic, {
@@ -226,6 +232,12 @@ export default pattern(() => {
   const profileBoardCrossrefs = new Writable<TopicCrossrefRow[] | Default<[]>>(
     [],
   );
+  // The namespace and the table the composer is handed, standalone for the
+  // same reason: the composer allocates into the one and wires the other onto
+  // the topic it files, so a browser create is named exactly as a headless one
+  // is.
+  const profileBoardNames = new Writable<NamesTableRow[] | Default<[]>>([]);
+  const profileNames = new Writable<NamesMap>({});
   const profileTitleDraft = new Writable("Profile topic");
   const profileComments = new Writable<TopicComment[] | Default<[]>>([]);
   const profileCommentDraft = new Writable("via the profile composer");
@@ -266,6 +278,8 @@ export default pattern(() => {
     topics: profileTopics,
     mentionable: profileTopics,
     boardCrossrefs: profileBoardCrossrefs,
+    boardNames: profileBoardNames,
+    names: profileNames,
     newTitle: profileTitleDraft,
     profileName: " Ada ",
     profileAvatar: " 🦊 ",
@@ -505,6 +519,17 @@ export default pattern(() => {
       profileTitleDraft.get() === "";
   });
 
+  // The browser composer allocates out of the same namespace the headless
+  // create does, in the same transaction as its append: drop the allocation
+  // and the map stays empty while the topic still lands.
+  const assert_profile_topic_named = assert(() =>
+    Object.keys(profileNames.get()).join(",") === "1" &&
+    equals(
+      profileNames.get()["1"] as object,
+      profileTopics.key(0),
+    )
+  );
+
   const assert_profile_comment_submitted = assert(() => {
     const list = profileComments.get() ?? [];
     return list.length === 1 &&
@@ -719,9 +744,13 @@ export default pattern(() => {
   // The derivation's own rules, on sources a board cannot produce mid-run:
   // a mid-sync entry contributes no row, the display name falls back to the
   // persisted title until a topic derives its `[NAME]` (and past a blank
-  // one), and a row records its SOURCE as `piece` — identity, not a copy.
+  // one), the collection's name for a member is copied off the member's own
+  // and reads blank where it has none, and a row records its SOURCE as
+  // `piece` — identity, not a copy.
   const assert_mention_index_rows_pure = assert(() => {
-    const named = { get: () => ({ [NAME]: "Named", title: "Titled" }) };
+    const named = {
+      get: () => ({ [NAME]: "Named", title: "Titled", shortName: "42" }),
+    };
     const cold = {
       get: () => ({ [NAME]: undefined, title: "Cold title" }),
     };
@@ -733,19 +762,21 @@ export default pattern(() => {
     return rows.length === 3 &&
       rows[0]?.[NAME] === "Named" &&
       rows[0]?.title === "Titled" &&
+      rows[0]?.shortName === "42" &&
       rows[0]?.piece === named &&
       rows[1]?.[NAME] === "Cold title" &&
+      rows[1]?.shortName === "" &&
       rows[2]?.[NAME] === "Blank name" &&
       rows[2]?.piece === blankName;
   });
 
   // A topic accepts the index's rows as its mention universe — the exact
   // list the backfill rewires onto every existing topic. The consumer
-  // materializing proves the two-string demand validates a row list; the
+  // materializing proves the three-string demand validates a row list; the
   // read-back proves the row landed with its copies intact and its piece
   // still a reference, not a flattened copy of the cell.
   const rowPieceTarget = new Writable({ title: "Row piece target" });
-  const rowUniverse = new Writable<TopicMentionableRow[] | Default<[]>>([]);
+  const rowUniverse = new Writable<MentionableRow[] | Default<[]>>([]);
   const rowUniverseConsumer = Topic({
     title: "Row universe consumer",
     mentionable: rowUniverse,
@@ -754,12 +785,14 @@ export default pattern(() => {
     rowUniverse.push({
       [NAME]: "Seeded row",
       title: "Seeded row",
+      shortName: "7",
       piece: rowPieceTarget,
     });
   });
   const assert_row_universe_accepted = assert(() =>
     rowUniverse.get().length === 1 &&
     rowUniverse.get()[0]?.[NAME] === "Seeded row" &&
+    rowUniverse.get()[0]?.shortName === "7" &&
     equals(rowUniverse.get()[0]?.piece as object, rowPieceTarget) &&
     rowUniverseConsumer[NAME] === "Row universe consumer"
   );
@@ -1105,6 +1138,7 @@ export default pattern(() => {
       { assertion: assert_explicit_undefined_author_projection },
       { action: action_submit_profile_topic },
       { assertion: assert_profile_topic_submitted },
+      { assertion: assert_profile_topic_named },
       { action: action_submit_profile_comment },
       { assertion: assert_profile_comment_submitted },
       { action: action_save_profile_body },
