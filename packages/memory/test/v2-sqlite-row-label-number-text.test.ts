@@ -64,6 +64,26 @@ function refusal(value: unknown): string | undefined {
   return "error" in res ? res.error : undefined;
 }
 
+/** A rule whose only clause extracts principals from column `v`. */
+function extractorSpec(re: RegExp): RowLabelSpec {
+  const schema = table(
+    { id: "integer primary key", v: "integer" },
+    (f) => ({ confidentiality: all(principal("acct", match(f.v, re))) }),
+  );
+  return schema.rowLabel as RowLabelSpec;
+}
+
+/** What `match()` extracts from `value`, or the refusal it produced. */
+function extract(
+  re: RegExp,
+  value: unknown,
+): { atoms: unknown[] } | { error: string } {
+  const res = evaluateRowLabel(extractorSpec(re), { id: 1, v: value }, {
+    dbOwner: OWNER,
+  });
+  return "error" in res ? res : { atoms: res.confidentiality };
+}
+
 describe("row-label numeric regex input", () => {
   describe("a gate on an INTEGER column", () => {
     it("fires on the digits SQLite shows for the value", () => {
@@ -167,6 +187,27 @@ describe("row-label numeric regex input", () => {
   });
 
   describe("match(), the extractor", () => {
+    // The gate and the extractor read a column through one function, so what
+    // one refuses the other refuses. These assert that on the extractor
+    // directly: an extractor that rendered values its own way would mint
+    // principals from a REAL's digits, from a BLOB's bytes, and from an
+    // integer too large to be the one stored — silently, since a minted
+    // principal looks like any other.
+    it("refuses every value class the gate refuses", () => {
+      for (const value of [7.5, Infinity, NaN, 2 ** 53, true, 2n ** 63n]) {
+        expect(extract(/\d+/, value)).toEqual({
+          error: expect.stringContaining("regex input"),
+        });
+      }
+      expect(extract(/\d+/, new Uint8Array([1, 2]))).toEqual({
+        error: expect.stringContaining("BLOB"),
+      });
+    });
+
+    it("extracts from a zero, which is a value and not an absence", () => {
+      expect(extract(/\d+/, 0)).toEqual({ atoms: ["did:acct:0"] });
+    });
+
     it("extracts from a number the same text a gate compares", () => {
       const schema = table(
         { id: "integer primary key", source_id: "integer" },
