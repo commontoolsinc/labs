@@ -318,13 +318,15 @@ interface PiecePropRootInfo {
   propName: "input" | "result";
 }
 
-interface UnhydratedEntityRootInfo {
+/** What the bridge knows about an entity root it has not yet hydrated. */
+export interface UnhydratedEntityRootInfo {
   state: SpaceState;
   spaceName: string;
   entityId: string;
 }
 
-interface EntityProjectionLookupOwner {
+/** The root an entity-projection lookup pin belongs to, and its pin count. */
+export interface EntityProjectionLookupOwner {
   rootIno: bigint;
   count: bigint;
 }
@@ -361,11 +363,12 @@ interface PropRebuildJob {
 }
 
 export class CellBridge {
-  // A member below declared `private` rather than `#` is one
-  // `cell-bridge.test.ts` reaches and drives directly; a `#` name would put
-  // it out of that test's reach. Three also keep a leading `_` that this
-  // convention otherwise drops, `_attemptReconnect`, `_disconnected`, and
-  // `_reconnectTimer` being the names the test uses.
+  // Four methods below stay TypeScript-`private` rather than `#`, which is
+  // the convention elsewhere in this class: `cell-bridge.test.ts` replaces
+  // each by assignment, which a `#` method does not allow. They are
+  // `refreshPiecePatternMetadata()`, `rebuildPieceProp()`,
+  // `updateIndexJson()`, and `buildSourceTree()`, and each carries a note
+  // naming the test that replaces it.
 
   tree: FsTree;
   spaces: Map<string, SpaceState> = new Map();
@@ -382,12 +385,12 @@ export class CellBridge {
   #connecting = new Map<string, Promise<SpaceState>>();
 
   /** In-flight piece-list synchronization keyed by space name. */
-  private pieceSyncs = new Map<string, Promise<void>>();
+  #pieceSyncs = new Map<string, Promise<void>>();
 
   /** Flag: re-run sync after current pass completes. */
-  private syncAgain: Set<string> = new Set();
+  #syncAgain: Set<string> = new Set();
 
-  private pendingPieceHydrations = new Map<string, Promise<void>>();
+  #pendingPieceHydrations = new Map<string, Promise<void>>();
 
   /** Coalesced subtree rebuilds keyed by piece inode + prop name. */
   #pendingPropRebuilds = new Map<
@@ -408,30 +411,30 @@ export class CellBridge {
   #execCli: string;
   #pieceRoots = new Map<bigint, PieceRootInfo>();
 
-  private unhydratedEntityRoots = new Map<
+  #unhydratedEntityRoots = new Map<
     bigint,
     UnhydratedEntityRootInfo
   >();
 
-  private pendingEntityHydrations = new Map<bigint, Promise<boolean>>();
+  #pendingEntityHydrations = new Map<bigint, Promise<boolean>>();
   #pendingEntityDirectorySnapshots = new Map<
     SpaceState,
     Promise<readonly DirectorySnapshotEntry[]>
   >();
 
-  private entityProjectionLru = new Map<bigint, UnhydratedEntityRootInfo>();
+  #entityProjectionLru = new Map<bigint, UnhydratedEntityRootInfo>();
 
-  private entityProjectionEvictionCandidates = new Map<
+  #entityProjectionEvictionCandidates = new Map<
     bigint,
     UnhydratedEntityRootInfo
   >();
 
-  private entityProjectionUseOrder = new Map<bigint, number>();
+  #entityProjectionUseOrder = new Map<bigint, number>();
   #nextEntityProjectionUseOrder = 0;
 
-  private entityProjectionLookupRefs = new Map<bigint, bigint>();
+  #entityProjectionLookupRefs = new Map<bigint, bigint>();
 
-  private entityProjectionLookupOwners = new Map<
+  #entityProjectionLookupOwners = new Map<
     bigint,
     EntityProjectionLookupOwner
   >();
@@ -443,9 +446,9 @@ export class CellBridge {
   >();
   #entityProjectionOpenOwnerInodes = new Map<bigint, Set<bigint>>();
 
-  private pendingEntityRemovals = new Map<bigint, UnhydratedEntityRootInfo>();
+  #pendingEntityRemovals = new Map<bigint, UnhydratedEntityRootInfo>();
 
-  private entitySubscriptions = new Map<bigint, Cancel[]>();
+  #entitySubscriptions = new Map<bigint, Cancel[]>();
   #piecePropRoots = new Map<bigint, PiecePropRootInfo>();
   #hydratedPieceProps = new Map<bigint, Set<"input" | "result">>();
 
@@ -479,21 +482,169 @@ export class CellBridge {
    * so agents get immediate feedback rather than silent data loss.
    * Reconnection is attempted automatically with exponential backoff.
    */
-  private _disconnected = false;
+  #disconnected = false;
 
   #disconnectCount = 0;
   #lastDisconnectReason: string | null = null;
 
-  private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /**
+   * The synchronization and hydration tables, the entity-projection tables,
+   * the disconnection state, and the tree-building steps this bridge keeps to
+   * itself, which a test drives directly.
+   */
+  get accessForTestingOnly(): {
+    readonly pieceSyncs: Map<string, Promise<void>>;
+    readonly syncAgain: Set<string>;
+    readonly pendingPieceHydrations: Map<string, Promise<void>>;
+    readonly unhydratedEntityRoots: Map<bigint, UnhydratedEntityRootInfo>;
+    readonly pendingEntityHydrations: Map<bigint, Promise<boolean>>;
+    entityProjectionLru: Map<bigint, UnhydratedEntityRootInfo>;
+    entityProjectionEvictionCandidates: Map<bigint, UnhydratedEntityRootInfo>;
+    readonly entityProjectionUseOrder: Map<bigint, number>;
+    readonly entityProjectionLookupRefs: Map<bigint, bigint>;
+    entityProjectionLookupOwners: Map<bigint, EntityProjectionLookupOwner>;
+    readonly pendingEntityRemovals: Map<bigint, UnhydratedEntityRootInfo>;
+    readonly entitySubscriptions: Map<bigint, Cancel[]>;
+    disconnected: boolean;
+    reconnectTimer: ReturnType<typeof setTimeout> | null;
+    attemptReconnect(): Promise<void>;
+    enqueuePiecePropRebuild(args: PropRebuildJob): Promise<void>;
+    hydratePieceProp(
+      pieceIno: bigint,
+      propName: "input" | "result",
+      retries?: number,
+    ): Promise<boolean>;
+    buildSpaceTree(spaceName: string, pieces: PiecesController): SpaceState;
+    addPieceToSpace(
+      state: SpaceState,
+      piece: PieceController,
+      spaceName: string,
+    ): Promise<string>;
+    syncPieceListOnce(state: SpaceState, spaceName: string): Promise<void>;
+    updatePiecesJson(state: SpaceState): void;
+    subscribePiece(
+      piece: PieceController,
+      pieceIno: bigint,
+      pieceName: string,
+      spaceName: string,
+      state: SpaceState,
+    ): Promise<Cancel[]>;
+    makeLinkResolver(spaceName: string): ResolveLink;
+    loadPieceTree(
+      piece: PieceController,
+      parentIno: bigint,
+      name: string,
+      spaceName: string,
+      existingIno?: bigint,
+      rootKind?: "pieces" | "entities",
+    ): Promise<bigint>;
+    refreshPiecePatternMetadata(
+      state: SpaceState,
+      piece: PieceController,
+      pieceIno: bigint,
+    ): Promise<void>;
+    rebuildPieceProp(args: PropRebuildJob): Promise<void>;
+    updateIndexJson(state: SpaceState): void;
+    buildSourceTree(
+      pieceIno: bigint,
+      piece: PieceController,
+      state: SpaceState,
+      pieceName: string,
+    ): Promise<void>;
+  } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      pieceSyncs: this.#pieceSyncs,
+      syncAgain: this.#syncAgain,
+      pendingPieceHydrations: this.#pendingPieceHydrations,
+      unhydratedEntityRoots: this.#unhydratedEntityRoots,
+      pendingEntityHydrations: this.#pendingEntityHydrations,
+      get entityProjectionLru() {
+        return outerThis.#entityProjectionLru;
+      },
+      set entityProjectionLru(value) {
+        outerThis.#entityProjectionLru = value;
+      },
+      get entityProjectionEvictionCandidates() {
+        return outerThis.#entityProjectionEvictionCandidates;
+      },
+      set entityProjectionEvictionCandidates(value) {
+        outerThis.#entityProjectionEvictionCandidates = value;
+      },
+      entityProjectionUseOrder: this.#entityProjectionUseOrder,
+      entityProjectionLookupRefs: this.#entityProjectionLookupRefs,
+      get entityProjectionLookupOwners() {
+        return outerThis.#entityProjectionLookupOwners;
+      },
+      set entityProjectionLookupOwners(value) {
+        outerThis.#entityProjectionLookupOwners = value;
+      },
+      pendingEntityRemovals: this.#pendingEntityRemovals,
+      entitySubscriptions: this.#entitySubscriptions,
+      get disconnected() {
+        return outerThis.#disconnected;
+      },
+      set disconnected(value) {
+        outerThis.#disconnected = value;
+      },
+      get reconnectTimer() {
+        return outerThis.#reconnectTimer;
+      },
+      set reconnectTimer(value) {
+        outerThis.#reconnectTimer = value;
+      },
+      attemptReconnect: () => this.#attemptReconnect(),
+      enqueuePiecePropRebuild: (args) => this.#enqueuePiecePropRebuild(args),
+      hydratePieceProp: (pieceIno, propName, retries) =>
+        this.#hydratePieceProp(pieceIno, propName, retries),
+      buildSpaceTree: (spaceName, pieces) =>
+        this.#buildSpaceTree(spaceName, pieces),
+      addPieceToSpace: (state, piece, spaceName) =>
+        this.#addPieceToSpace(state, piece, spaceName),
+      syncPieceListOnce: (state, spaceName) =>
+        this.#syncPieceListOnce(state, spaceName),
+      updatePiecesJson: (state) => this.#updatePiecesJson(state),
+      subscribePiece: (piece, pieceIno, pieceName, spaceName, state) =>
+        this.#subscribePiece(piece, pieceIno, pieceName, spaceName, state),
+      makeLinkResolver: (spaceName) => this.#makeLinkResolver(spaceName),
+      loadPieceTree: (
+        piece,
+        parentIno,
+        name,
+        spaceName,
+        existingIno,
+        rootKind,
+      ) =>
+        this.#loadPieceTree(
+          piece,
+          parentIno,
+          name,
+          spaceName,
+          existingIno,
+          rootKind,
+        ),
+      // The next four forward to TypeScript-private members so that a test
+      // which replaces one by assignment is honored here too.
+      refreshPiecePatternMetadata: (state, piece, pieceIno) =>
+        this.refreshPiecePatternMetadata(state, piece, pieceIno),
+      rebuildPieceProp: (args) => this.rebuildPieceProp(args),
+      updateIndexJson: (state) => this.updateIndexJson(state),
+      buildSourceTree: (pieceIno, piece, state, pieceName) =>
+        this.buildSourceTree(pieceIno, piece, state, pieceName),
+    };
+  }
 
   get disconnected(): boolean {
-    return this._disconnected;
+    return this.#disconnected;
   }
 
   /** Mark the bridge as disconnected and schedule reconnection. */
   markDisconnected(reason: string): void {
-    if (this._disconnected) return;
-    this._disconnected = true;
+    if (this.#disconnected) return;
+    this.#disconnected = true;
     this.#disconnectCount++;
     this.#lastDisconnectReason = reason;
     console.error(
@@ -509,17 +660,17 @@ export class CellBridge {
   }
 
   #scheduleReconnect(): void {
-    if (this._reconnectTimer !== null) clearTimeout(this._reconnectTimer);
+    if (this.#reconnectTimer !== null) clearTimeout(this.#reconnectTimer);
     const timerId = setTimeout(() => {
-      this._reconnectTimer = null;
-      this._attemptReconnect();
+      this.#reconnectTimer = null;
+      this.#attemptReconnect();
     }, this.#reconnectDelayMs());
     // Don't prevent Deno process from exiting while waiting to reconnect
     Deno.unrefTimer(timerId);
-    this._reconnectTimer = timerId;
+    this.#reconnectTimer = timerId;
   }
 
-  private async _attemptReconnect(): Promise<void> {
+  async #attemptReconnect(): Promise<void> {
     const spaces = [...this.spaces];
     let allSpacesRestored = spaces.length > 0;
     for (const [spaceName, state] of spaces) {
@@ -559,7 +710,7 @@ export class CellBridge {
       }
     }
     if (allSpacesRestored) {
-      this._disconnected = false;
+      this.#disconnected = false;
       this.#disconnectCount = 0;
       console.error(
         `[FUSE] Backend connection restored — write access resumed.`,
@@ -753,7 +904,7 @@ export class CellBridge {
         startedAt: this.#startedAt,
         spaces,
         connection: {
-          disconnected: this._disconnected,
+          disconnected: this.#disconnected,
           disconnectCount: this.#disconnectCount,
           lastDisconnectReason: this.#lastDisconnectReason,
         },
@@ -806,7 +957,13 @@ export class CellBridge {
     this.#updatePieceManifest(state, piece.id, { summary, patternRef });
   }
 
-  /** Refresh synthetic pattern metadata after an in-place pattern swap. */
+  /**
+   * Refreshes synthetic pattern metadata after an in-place pattern swap.
+   *
+   * TypeScript-private rather than a `#` name, because
+   * `cell-bridge.test.ts` replaces this member by assignment, which a `#`
+   * method does not allow.
+   */
   private async refreshPiecePatternMetadata(
     state: SpaceState,
     piece: PieceController,
@@ -834,7 +991,7 @@ export class CellBridge {
     }
 
     if (manifestChanged) {
-      this.updatePiecesJson(state);
+      this.#updatePiecesJson(state);
     }
     if (this.onInvalidate) {
       this.onInvalidate(pieceIno, ["meta.json"]);
@@ -923,10 +1080,10 @@ export class CellBridge {
     try {
       pieces = await this.#createSpacePieces(spaceName);
       await this.#verifyPiecesConnection(pieces);
-      state = this.buildSpaceTree(spaceName, pieces);
+      state = this.#buildSpaceTree(spaceName, pieces);
 
       this.updateIndexJson(state);
-      this.updatePiecesJson(state);
+      this.#updatePiecesJson(state);
       this.spaces.set(spaceName, state);
       this.knownSpaces.set(spaceName, state.did);
       this.#updateSpacesJson();
@@ -967,19 +1124,19 @@ export class CellBridge {
     }
     for (const [, ino] of this.tree.getChildren(state.entitiesIno)) {
       this.#cancelEntitySubscriptions(ino);
-      this.unhydratedEntityRoots.delete(ino);
-      this.pendingEntityHydrations.delete(ino);
-      this.entityProjectionLru.delete(ino);
-      this.entityProjectionEvictionCandidates.delete(ino);
-      this.entityProjectionUseOrder.delete(ino);
+      this.#unhydratedEntityRoots.delete(ino);
+      this.#pendingEntityHydrations.delete(ino);
+      this.#entityProjectionLru.delete(ino);
+      this.#entityProjectionEvictionCandidates.delete(ino);
+      this.#entityProjectionUseOrder.delete(ino);
       this.#clearEntityProjectionReferences(ino);
-      this.pendingEntityRemovals.delete(ino);
+      this.#pendingEntityRemovals.delete(ino);
       this.#unregisterPieceRoot(ino);
     }
-    this.pendingPieceHydrations.delete(spaceName);
+    this.#pendingPieceHydrations.delete(spaceName);
     this.#pendingEntityDirectorySnapshots.delete(state);
-    this.pieceSyncs.delete(spaceName);
-    this.syncAgain.delete(spaceName);
+    this.#pieceSyncs.delete(spaceName);
+    this.#syncAgain.delete(spaceName);
     this.tree.removeChild(
       this.tree.rootIno,
       encodeSpaceDirectoryName(spaceName),
@@ -1073,8 +1230,8 @@ export class CellBridge {
   }
 
   #isEntityProjectionRoot(ino: bigint): boolean {
-    return this.unhydratedEntityRoots.has(ino) ||
-      this.pendingEntityRemovals.has(ino) ||
+    return this.#unhydratedEntityRoots.has(ino) ||
+      this.#pendingEntityRemovals.has(ino) ||
       this.#pieceRoots.get(ino)?.rootKind === "entities";
   }
 
@@ -1089,7 +1246,7 @@ export class CellBridge {
 
   retainEntityProjectionLookup(ino: bigint, count = 1n): void {
     if (count <= 0n) return;
-    const owner = this.entityProjectionLookupOwners.get(ino);
+    const owner = this.#entityProjectionLookupOwners.get(ino);
     const rootIno = owner?.rootIno ?? this.#entityProjectionRootForInode(ino);
     if (rootIno === undefined) return;
     if (owner === undefined) {
@@ -1099,30 +1256,30 @@ export class CellBridge {
         ino,
       );
     }
-    this.entityProjectionLookupOwners.set(ino, {
+    this.#entityProjectionLookupOwners.set(ino, {
       rootIno,
       count: (owner?.count ?? 0n) + count,
     });
-    this.entityProjectionLookupRefs.set(
+    this.#entityProjectionLookupRefs.set(
       rootIno,
-      (this.entityProjectionLookupRefs.get(rootIno) ?? 0n) + count,
+      (this.#entityProjectionLookupRefs.get(rootIno) ?? 0n) + count,
     );
-    this.entityProjectionEvictionCandidates.delete(rootIno);
+    this.#entityProjectionEvictionCandidates.delete(rootIno);
   }
 
   releaseEntityProjectionLookup(ino: bigint, count = 1n): void {
     if (count <= 0n) return;
-    const owner = this.entityProjectionLookupOwners.get(ino);
+    const owner = this.#entityProjectionLookupOwners.get(ino);
     if (owner === undefined) return;
     const released = count > owner.count ? owner.count : count;
     const ownerRemaining = owner.count - released;
     if (ownerRemaining > 0n) {
-      this.entityProjectionLookupOwners.set(ino, {
+      this.#entityProjectionLookupOwners.set(ino, {
         rootIno: owner.rootIno,
         count: ownerRemaining,
       });
     } else {
-      this.entityProjectionLookupOwners.delete(ino);
+      this.#entityProjectionLookupOwners.delete(ino);
       this.#unindexEntityProjectionOwner(
         this.#entityProjectionLookupOwnerInodes,
         owner.rootIno,
@@ -1130,11 +1287,11 @@ export class CellBridge {
       );
     }
     const remaining =
-      (this.entityProjectionLookupRefs.get(owner.rootIno) ?? 0n) - released;
+      (this.#entityProjectionLookupRefs.get(owner.rootIno) ?? 0n) - released;
     if (remaining > 0n) {
-      this.entityProjectionLookupRefs.set(owner.rootIno, remaining);
+      this.#entityProjectionLookupRefs.set(owner.rootIno, remaining);
     } else {
-      this.entityProjectionLookupRefs.delete(owner.rootIno);
+      this.#entityProjectionLookupRefs.delete(owner.rootIno);
     }
     this.#finishPendingEntityRemoval(owner.rootIno);
     this.#refreshEntityProjectionEvictionCandidate(owner.rootIno);
@@ -1160,7 +1317,7 @@ export class CellBridge {
       rootIno,
       (this.#entityProjectionOpenRefs.get(rootIno) ?? 0) + 1,
     );
-    this.entityProjectionEvictionCandidates.delete(rootIno);
+    this.#entityProjectionEvictionCandidates.delete(rootIno);
   }
 
   releaseEntityProjectionOpen(ino: bigint): void {
@@ -1216,13 +1373,13 @@ export class CellBridge {
   }
 
   #clearEntityProjectionReferences(rootIno: bigint): void {
-    this.entityProjectionLookupRefs.delete(rootIno);
+    this.#entityProjectionLookupRefs.delete(rootIno);
     this.#entityProjectionOpenRefs.delete(rootIno);
     for (
       const ino of this.#entityProjectionLookupOwnerInodes.get(rootIno) ??
         []
     ) {
-      this.entityProjectionLookupOwners.delete(ino);
+      this.#entityProjectionLookupOwners.delete(ino);
     }
     this.#entityProjectionLookupOwnerInodes.delete(rootIno);
     for (
@@ -1243,7 +1400,7 @@ export class CellBridge {
     if (this.#stateForPiecesDir(parentIno)) return true;
     if (name.startsWith(".") && name !== ".handlers") return false;
     if (this.isEntitiesDir(parentIno)) return true;
-    if (this.unhydratedEntityRoots.has(parentIno)) return true;
+    if (this.#unhydratedEntityRoots.has(parentIno)) return true;
     if (this.#pieceRoots.has(parentIno)) return true;
     if (this.#piecePropRoots.has(parentIno)) return true;
     return false;
@@ -1251,7 +1408,7 @@ export class CellBridge {
 
   shouldPrepareDirectory(ino: bigint): boolean {
     return this.#stateForPiecesDir(ino) !== undefined ||
-      this.isEntitiesDir(ino) || this.unhydratedEntityRoots.has(ino) ||
+      this.isEntitiesDir(ino) || this.#unhydratedEntityRoots.has(ino) ||
       this.#pieceRoots.has(ino) || this.#piecePropRoots.has(ino);
   }
 
@@ -1273,21 +1430,21 @@ export class CellBridge {
       return await this.resolveEntity(parentIno, name);
     }
 
-    if (this.unhydratedEntityRoots.has(parentIno)) {
+    if (this.#unhydratedEntityRoots.has(parentIno)) {
       if (!await this.#hydrateEntityRoot(parentIno)) return false;
     }
 
     const pieceInfo = this.#getPieceInfo(parentIno);
     if (pieceInfo) {
       if (name === "input" || name === "input.json") {
-        await this.hydratePieceProp(parentIno, "input");
+        await this.#hydratePieceProp(parentIno, "input");
         return true;
       }
       if (
         name === "result" || name === "result.json" ||
         name === "index.md" || name === "index.json" || name === ".handlers"
       ) {
-        await this.hydratePieceProp(parentIno, "result");
+        await this.#hydratePieceProp(parentIno, "result");
         return true;
       }
       return this.tree.lookup(parentIno, name) !== undefined;
@@ -1295,7 +1452,7 @@ export class CellBridge {
 
     const propInfo = this.#piecePropRoots.get(parentIno);
     if (propInfo) {
-      await this.hydratePieceProp(propInfo.pieceIno, propInfo.propName);
+      await this.#hydratePieceProp(propInfo.pieceIno, propInfo.propName);
       return true;
     }
 
@@ -1339,14 +1496,14 @@ export class CellBridge {
 
     const pieceInfo = this.#getPieceInfo(ino);
     if (pieceInfo) {
-      await this.hydratePieceProp(ino, "input");
-      await this.hydratePieceProp(ino, "result");
+      await this.#hydratePieceProp(ino, "input");
+      await this.#hydratePieceProp(ino, "result");
       return true;
     }
 
     const propInfo = this.#piecePropRoots.get(ino);
     if (propInfo) {
-      await this.hydratePieceProp(propInfo.pieceIno, propInfo.propName);
+      await this.#hydratePieceProp(propInfo.pieceIno, propInfo.propName);
       return true;
     }
 
@@ -1653,7 +1810,7 @@ export class CellBridge {
       timer: setTimeout(() => {
         this.#pendingPropRebuilds.delete(key);
         this.#activePropRebuilds.add(key);
-        void this.enqueuePiecePropRebuild({
+        void this.#enqueuePiecePropRebuild({
           cell: entry.cell,
           newValue: entry.latestValue,
           pieceId: entry.pieceId,
@@ -1820,6 +1977,14 @@ export class CellBridge {
     this.#hydrationEpochs.set(key, (this.#hydrationEpochs.get(key) ?? 0) + 1);
   }
 
+  /**
+   * Rebuilds the mounted subtree of one piece prop from a new cell value, in
+   * place.
+   *
+   * TypeScript-private rather than a `#` name, because
+   * `cell-bridge.test.ts` replaces this member by assignment, which a `#`
+   * method does not allow.
+   */
   private async rebuildPieceProp(args: {
     cell: Cell<unknown>;
     newValue: unknown;
@@ -1959,7 +2124,7 @@ export class CellBridge {
               summary: this.#extractSummary(treeValue),
             });
             if (summaryChanged) {
-              this.updatePiecesJson(state);
+              this.#updatePiecesJson(state);
               if (this.onInvalidate) {
                 this.onInvalidate(state.piecesIno, ["pieces.json"]);
               }
@@ -2072,7 +2237,7 @@ export class CellBridge {
           summary: this.#extractSummary(treeValue),
         });
         if (summaryChanged) {
-          this.updatePiecesJson(state);
+          this.#updatePiecesJson(state);
           if (this.onInvalidate) {
             this.onInvalidate(state.piecesIno, ["pieces.json"]);
           }
@@ -2086,7 +2251,7 @@ export class CellBridge {
     this.#debugLog(`[${spaceName}] Updated ${pieceName}/${propName}`);
   }
 
-  private async enqueuePiecePropRebuild(args: PropRebuildJob): Promise<void> {
+  async #enqueuePiecePropRebuild(args: PropRebuildJob): Promise<void> {
     const key = this.#propRebuildKey(args.pieceIno, args.propName);
     const previous = this.#pendingPropRebuildQueues.get(key) ??
       Promise.resolve();
@@ -2105,7 +2270,7 @@ export class CellBridge {
 
   static readonly #MAX_HYDRATION_RETRIES = 3;
 
-  private hydratePieceProp(
+  #hydratePieceProp(
     pieceIno: bigint,
     propName: "input" | "result",
     retries = 0,
@@ -2131,14 +2296,14 @@ export class CellBridge {
         try {
           const cell = await info.piece[propName].getCell();
           const newValue = await info.piece[propName].get();
-          await this.enqueuePiecePropRebuild({
+          await this.#enqueuePiecePropRebuild({
             cell,
             newValue,
             pieceId: info.piece.id,
             pieceIno,
             pieceName: info.rootName,
             propName,
-            resolveLink: this.makeLinkResolver(info.spaceName),
+            resolveLink: this.#makeLinkResolver(info.spaceName),
             spaceName: info.spaceName,
           });
           const currentEpoch = this.#hydrationEpochs.get(key) ?? 0;
@@ -2149,7 +2314,7 @@ export class CellBridge {
             if (retries >= CellBridge.#MAX_HYDRATION_RETRIES) {
               return false;
             }
-            return await this.hydratePieceProp(
+            return await this.#hydratePieceProp(
               pieceIno,
               propName,
               retries + 1,
@@ -2274,14 +2439,14 @@ export class CellBridge {
     }
     const cell = await writePath.piece[writePath.cell].getCell();
     const newValue = await writePath.piece[writePath.cell].get();
-    await this.enqueuePiecePropRebuild({
+    await this.#enqueuePiecePropRebuild({
       cell,
       newValue,
       pieceId: writePath.piece.id,
       pieceIno,
       pieceName: writePath.pieceName,
       propName: writePath.cell,
-      resolveLink: this.makeLinkResolver(writePath.spaceName),
+      resolveLink: this.#makeLinkResolver(writePath.spaceName),
       spaceName: writePath.spaceName,
     });
   }
@@ -2594,7 +2759,7 @@ export class CellBridge {
     );
   }
 
-  private buildSpaceTree(
+  #buildSpaceTree(
     spaceName: string,
     pieces: PiecesController,
   ): SpaceState {
@@ -2694,7 +2859,7 @@ export class CellBridge {
     state: SpaceState,
     spaceName: string,
   ): Promise<void> {
-    const existing = this.pendingPieceHydrations.get(spaceName);
+    const existing = this.#pendingPieceHydrations.get(spaceName);
     if (existing) return existing;
     if (state.piecesHydrated) return Promise.resolve();
 
@@ -2708,11 +2873,11 @@ export class CellBridge {
         state.piecesMaterializing = false;
       }
     })().finally(() => {
-      if (this.pendingPieceHydrations.get(spaceName) === pending) {
-        this.pendingPieceHydrations.delete(spaceName);
+      if (this.#pendingPieceHydrations.get(spaceName) === pending) {
+        this.#pendingPieceHydrations.delete(spaceName);
       }
     });
-    this.pendingPieceHydrations.set(spaceName, pending);
+    this.#pendingPieceHydrations.set(spaceName, pending);
     return pending;
   }
 
@@ -2744,7 +2909,7 @@ export class CellBridge {
     const existingIno = this.tree.lookup(state.entitiesIno, entityName);
     if (existingIno !== undefined) {
       if (!this.#pieceRoots.has(existingIno)) {
-        this.unhydratedEntityRoots.set(existingIno, info);
+        this.#unhydratedEntityRoots.set(existingIno, info);
       }
       state.entityIds.add(entityId);
       this.#touchEntityProjection(existingIno, info);
@@ -2761,7 +2926,7 @@ export class CellBridge {
     });
     annotator?.annotateJsonDirectory(entityIno, [], {});
     annotator?.annotateEntry(state.entitiesIno, entityName, entityIno);
-    this.unhydratedEntityRoots.set(entityIno, info);
+    this.#unhydratedEntityRoots.set(entityIno, info);
     state.entityIds.add(entityId);
     this.#touchEntityProjection(entityIno, info);
     return entityIno;
@@ -2771,9 +2936,9 @@ export class CellBridge {
     ino: bigint,
     info: UnhydratedEntityRootInfo,
   ): void {
-    this.entityProjectionLru.delete(ino);
-    this.entityProjectionLru.set(ino, info);
-    this.entityProjectionUseOrder.set(
+    this.#entityProjectionLru.delete(ino);
+    this.#entityProjectionLru.set(ino, info);
+    this.#entityProjectionUseOrder.set(
       ino,
       ++this.#nextEntityProjectionUseOrder,
     );
@@ -2782,25 +2947,25 @@ export class CellBridge {
   }
 
   #refreshEntityProjectionEvictionCandidate(ino: bigint): void {
-    this.entityProjectionEvictionCandidates.delete(ino);
-    const info = this.entityProjectionLru.get(ino);
+    this.#entityProjectionEvictionCandidates.delete(ino);
+    const info = this.#entityProjectionLru.get(ino);
     if (
-      info === undefined || this.pendingEntityHydrations.has(ino) ||
+      info === undefined || this.#pendingEntityHydrations.has(ino) ||
       this.#entityProjectionHasReferences(ino)
     ) {
       return;
     }
-    this.entityProjectionEvictionCandidates.set(ino, info);
+    this.#entityProjectionEvictionCandidates.set(ino, info);
   }
 
   #trimEntityProjectionCache(protectedIno?: bigint): void {
-    while (this.entityProjectionLru.size > this.#maxEntityProjections) {
+    while (this.#entityProjectionLru.size > this.#maxEntityProjections) {
       let oldestIno: bigint | undefined;
       let oldestInfo: UnhydratedEntityRootInfo | undefined;
       let oldestUseOrder = Number.POSITIVE_INFINITY;
-      for (const [ino, info] of this.entityProjectionEvictionCandidates) {
+      for (const [ino, info] of this.#entityProjectionEvictionCandidates) {
         if (ino === protectedIno) continue;
-        const useOrder = this.entityProjectionUseOrder.get(ino);
+        const useOrder = this.#entityProjectionUseOrder.get(ino);
         if (useOrder !== undefined && useOrder < oldestUseOrder) {
           oldestIno = ino;
           oldestInfo = info;
@@ -2813,31 +2978,31 @@ export class CellBridge {
   }
 
   #entityProjectionHasReferences(ino: bigint): boolean {
-    return (this.entityProjectionLookupRefs.get(ino) ?? 0n) > 0n ||
+    return (this.#entityProjectionLookupRefs.get(ino) ?? 0n) > 0n ||
       (this.#entityProjectionOpenRefs.get(ino) ?? 0) > 0;
   }
 
   #cancelEntitySubscriptions(ino: bigint): void {
-    const subscriptions = this.entitySubscriptions.get(ino);
+    const subscriptions = this.#entitySubscriptions.get(ino);
     if (!subscriptions) return;
-    this.entitySubscriptions.delete(ino);
+    this.#entitySubscriptions.delete(ino);
     for (const cancel of subscriptions) cancel();
   }
 
   #finishPendingEntityRemoval(ino: bigint): void {
-    const info = this.pendingEntityRemovals.get(ino);
+    const info = this.#pendingEntityRemovals.get(ino);
     if (
-      !info || this.pendingEntityHydrations.has(ino) ||
+      !info || this.#pendingEntityHydrations.has(ino) ||
       this.#entityProjectionHasReferences(ino)
     ) {
       return;
     }
 
-    this.pendingEntityRemovals.delete(ino);
-    this.entityProjectionLru.delete(ino);
-    this.entityProjectionEvictionCandidates.delete(ino);
-    this.entityProjectionUseOrder.delete(ino);
-    this.unhydratedEntityRoots.delete(ino);
+    this.#pendingEntityRemovals.delete(ino);
+    this.#entityProjectionLru.delete(ino);
+    this.#entityProjectionEvictionCandidates.delete(ino);
+    this.#entityProjectionUseOrder.delete(ino);
+    this.#unhydratedEntityRoots.delete(ino);
     this.#cancelEntitySubscriptions(ino);
     this.#unregisterPieceRoot(ino);
     this.#fsProjectionEntries.delete(ino);
@@ -2865,18 +3030,18 @@ export class CellBridge {
       return undefined;
     }
 
-    const info = this.entityProjectionLru.get(entityIno) ??
-      this.unhydratedEntityRoots.get(entityIno) ?? {
+    const info = this.#entityProjectionLru.get(entityIno) ??
+      this.#unhydratedEntityRoots.get(entityIno) ?? {
       state,
       spaceName: this.#pieceRoots.get(entityIno)?.spaceName ?? "",
       entityId,
     };
-    this.entityProjectionLru.delete(entityIno);
-    this.entityProjectionEvictionCandidates.delete(entityIno);
-    this.entityProjectionUseOrder.delete(entityIno);
-    this.unhydratedEntityRoots.delete(entityIno);
+    this.#entityProjectionLru.delete(entityIno);
+    this.#entityProjectionEvictionCandidates.delete(entityIno);
+    this.#entityProjectionUseOrder.delete(entityIno);
+    this.#unhydratedEntityRoots.delete(entityIno);
     this.#cancelEntitySubscriptions(entityIno);
-    this.pendingEntityRemovals.set(entityIno, info);
+    this.#pendingEntityRemovals.set(entityIno, info);
     this.tree.detachChild(state.entitiesIno, entityName);
     state.entityIds.delete(entityId);
     if (invalidate) {
@@ -2996,22 +3161,22 @@ export class CellBridge {
 
   #hydrateEntityRoot(entityIno: bigint): Promise<boolean> {
     if (this.#pieceRoots.has(entityIno)) {
-      const info = this.entityProjectionLru.get(entityIno);
+      const info = this.#entityProjectionLru.get(entityIno);
       if (info) this.#touchEntityProjection(entityIno, info);
       return Promise.resolve(true);
     }
-    const existing = this.pendingEntityHydrations.get(entityIno);
+    const existing = this.#pendingEntityHydrations.get(entityIno);
     if (existing) return existing;
-    const info = this.unhydratedEntityRoots.get(entityIno);
+    const info = this.#unhydratedEntityRoots.get(entityIno);
     if (!info) return Promise.resolve(false);
     this.#touchEntityProjection(entityIno, info);
 
     const pending = (async () => {
       const piece = info.state.entityControllers.get(info.entityId) ??
         await info.state.pieces.get(info.entityId, false);
-      if (this.unhydratedEntityRoots.get(entityIno) !== info) return false;
+      if (this.#unhydratedEntityRoots.get(entityIno) !== info) return false;
       info.state.entityControllers.set(info.entityId, piece);
-      await this.loadPieceTree(
+      await this.#loadPieceTree(
         piece,
         info.state.entitiesIno,
         encodeFuseComponent(info.entityId),
@@ -3019,31 +3184,31 @@ export class CellBridge {
         entityIno,
         "entities",
       );
-      if (this.unhydratedEntityRoots.get(entityIno) !== info) return false;
-      const subscriptions = await this.subscribePiece(
+      if (this.#unhydratedEntityRoots.get(entityIno) !== info) return false;
+      const subscriptions = await this.#subscribePiece(
         piece,
         entityIno,
         encodeFuseComponent(info.entityId),
         info.spaceName,
         info.state,
       );
-      if (this.unhydratedEntityRoots.get(entityIno) !== info) {
+      if (this.#unhydratedEntityRoots.get(entityIno) !== info) {
         for (const cancel of subscriptions) cancel();
         return false;
       }
-      this.entitySubscriptions.set(entityIno, subscriptions);
-      this.unhydratedEntityRoots.delete(entityIno);
+      this.#entitySubscriptions.set(entityIno, subscriptions);
+      this.#unhydratedEntityRoots.delete(entityIno);
       return true;
     })().finally(() => {
-      if (this.pendingEntityHydrations.get(entityIno) === pending) {
-        this.pendingEntityHydrations.delete(entityIno);
+      if (this.#pendingEntityHydrations.get(entityIno) === pending) {
+        this.#pendingEntityHydrations.delete(entityIno);
       }
       this.#finishPendingEntityRemoval(entityIno);
       this.#refreshEntityProjectionEvictionCandidate(entityIno);
       this.#trimEntityProjectionCache();
     });
-    this.pendingEntityHydrations.set(entityIno, pending);
-    this.entityProjectionEvictionCandidates.delete(entityIno);
+    this.#pendingEntityHydrations.set(entityIno, pending);
+    this.#entityProjectionEvictionCandidates.delete(entityIno);
     return pending;
   }
 
@@ -3079,9 +3244,11 @@ export class CellBridge {
     if (exists === false) {
       if (
         existingIno !== undefined &&
-        this.pendingEntityHydrations.has(existingIno)
+        this.#pendingEntityHydrations.has(existingIno)
       ) {
-        await this.pendingEntityHydrations.get(existingIno)?.catch(() => false);
+        await this.#pendingEntityHydrations.get(existingIno)?.catch(() =>
+          false
+        );
       }
       this.#removeEntityProjection(entities.state, decodedEntityId);
       return undefined;
@@ -3137,7 +3304,7 @@ export class CellBridge {
     try {
       await (piece.getCell() as Cell<unknown>).asSchema(nameSchema).sync();
     } catch {
-      // Name stays unavailable; addPieceToSpace falls back to the piece id.
+      // Name stays unavailable; `#addPieceToSpace()` falls back to the piece id.
     }
   }
 
@@ -3145,7 +3312,7 @@ export class CellBridge {
    * Add a single piece to a space's tree.
    * Returns the assigned display name.
    */
-  private async addPieceToSpace(
+  async #addPieceToSpace(
     state: SpaceState,
     piece: PieceController,
     spaceName: string,
@@ -3174,7 +3341,7 @@ export class CellBridge {
     state.pieceMap.set(name, piece.id);
     state.pieceControllers.set(name, piece);
 
-    const pieceIno = await this.loadPieceTree(
+    const pieceIno = await this.#loadPieceTree(
       piece,
       state.piecesIno,
       name,
@@ -3186,7 +3353,7 @@ export class CellBridge {
     await this.buildSourceTree(pieceIno, piece, state, name);
     await this.#refreshPieceManifest(state, piece);
 
-    const subs = await this.subscribePiece(
+    const subs = await this.#subscribePiece(
       piece,
       pieceIno,
       name,
@@ -3248,18 +3415,18 @@ export class CellBridge {
     state: SpaceState,
     spaceName: string,
   ): Promise<void> {
-    const existing = this.pieceSyncs.get(spaceName);
+    const existing = this.#pieceSyncs.get(spaceName);
     if (existing) {
-      this.syncAgain.add(spaceName);
+      this.#syncAgain.add(spaceName);
       return existing;
     }
 
     const pending = this.#runPieceListSync(state, spaceName).finally(() => {
-      if (this.pieceSyncs.get(spaceName) === pending) {
-        this.pieceSyncs.delete(spaceName);
+      if (this.#pieceSyncs.get(spaceName) === pending) {
+        this.#pieceSyncs.delete(spaceName);
       }
     });
-    this.pieceSyncs.set(spaceName, pending);
+    this.#pieceSyncs.set(spaceName, pending);
     return pending;
   }
 
@@ -3268,13 +3435,13 @@ export class CellBridge {
     spaceName: string,
   ): Promise<void> {
     do {
-      this.syncAgain.delete(spaceName);
-      await this.syncPieceListOnce(state, spaceName);
-    } while (this.syncAgain.has(spaceName));
+      this.#syncAgain.delete(spaceName);
+      await this.#syncPieceListOnce(state, spaceName);
+    } while (this.#syncAgain.has(spaceName));
   }
 
   /** Single pass of piece list sync (called by guarded syncPieceList). */
-  private async syncPieceListOnce(
+  async #syncPieceListOnce(
     state: SpaceState,
     spaceName: string,
   ): Promise<void> {
@@ -3307,13 +3474,13 @@ export class CellBridge {
     }
 
     for (const piece of toAdd) {
-      const name = await this.addPieceToSpace(state, piece, spaceName);
+      const name = await this.#addPieceToSpace(state, piece, spaceName);
       this.#debugLog(`[${spaceName}] Added piece: ${name}`);
     }
 
     // Update index and invalidate
     this.updateIndexJson(state);
-    this.updatePiecesJson(state);
+    this.#updatePiecesJson(state);
     if (this.onInvalidate) {
       // Invalidate child entries under pieces/
       const invalidNames = [
@@ -3338,7 +3505,7 @@ export class CellBridge {
   }
 
   /** Update the pieces/pieces.json manifest for a space. */
-  private updatePiecesJson(state: SpaceState): void {
+  #updatePiecesJson(state: SpaceState): void {
     const entries = this.#buildPiecesManifestEntries(state);
     const existingIno = this.tree.lookup(state.piecesIno, "pieces.json");
     if (existingIno !== undefined) {
@@ -3365,7 +3532,13 @@ export class CellBridge {
     );
   }
 
-  /** Update the pieces/.index.json file for a space. */
+  /**
+   * Updates the `pieces/.index.json` file for a space.
+   *
+   * TypeScript-private rather than a `#` name, because
+   * `cell-bridge.test.ts` replaces this member by assignment, which a `#`
+   * method does not allow.
+   */
   private updateIndexJson(state: SpaceState): void {
     const existingIno = this.tree.lookup(state.piecesIno, ".index.json");
     if (existingIno !== undefined) {
@@ -3975,7 +4148,7 @@ export class CellBridge {
    * Subscribe to cell changes for hydration-cache invalidation and
    * projected name changes for a piece.
    */
-  private async subscribePiece(
+  async #subscribePiece(
     piece: PieceController,
     pieceIno: bigint,
     pieceName: string,
@@ -3988,7 +4161,7 @@ export class CellBridge {
     // invalidated when external mutations arrive (background recomputes,
     // remote writes, etc.). The invalidation is debounced: the reactive
     // graph may fire multiple intermediate updates before settling.
-    const resolveLink = this.makeLinkResolver(spaceName);
+    const resolveLink = this.#makeLinkResolver(spaceName);
     for (const propName of ["input", "result"] as const) {
       try {
         const cell = await piece[propName].getCell();
@@ -4021,7 +4194,7 @@ export class CellBridge {
               // tree is not torn down first; advancing the hydration epoch is
               // enough to make an in-flight hydration re-read the new value.
               this.#bumpHydrationEpoch(pieceIno, propName);
-              await this.enqueuePiecePropRebuild({
+              await this.#enqueuePiecePropRebuild({
                 cell,
                 newValue: rebuildValue,
                 pieceId: piece.id,
@@ -4103,7 +4276,7 @@ export class CellBridge {
         setTimeout(() => {
           try {
             // Use the state captured at subscription time, NOT
-            // this.spaces.get(): during the initial buildSpaceTree the space
+            // this.spaces.get(): during the initial `#buildSpaceTree()` the space
             // isn't registered in this.spaces yet, so a lookup would silently
             // drop every name event that fires while the tree is being built
             // (and a static piece may never fire again). Only bail if the
@@ -4219,7 +4392,7 @@ export class CellBridge {
 
             // Rebuild .index.json and pieces.json.
             this.updateIndexJson(state);
-            this.updatePiecesJson(state);
+            this.#updatePiecesJson(state);
 
             // Invalidate kernel cache.
             if (this.onInvalidate) {
@@ -4268,7 +4441,7 @@ export class CellBridge {
    *   Cross-space:      "../".repeat(depth+3) + "<spaceName>/entities/<hash>[/<path>]"
    *   Self-ref (no id): relative path within the same piece
    */
-  private makeLinkResolver(
+  #makeLinkResolver(
     spaceName: string,
   ): (value: unknown, depth: number) => string | null {
     return (value: unknown, depth: number): string | null => {
@@ -4331,7 +4504,7 @@ export class CellBridge {
     };
   }
 
-  private async loadPieceTree(
+  async #loadPieceTree(
     piece: PieceController,
     parentIno: bigint,
     name: string,
@@ -4418,6 +4591,10 @@ export class CellBridge {
    * authored source files (recovered from the content-addressed
    * `pattern:<identity>` source-doc closure). Skips system pieces that have no
    * recoverable source.
+   *
+   * TypeScript-private rather than a `#` name, because
+   * `cell-bridge.test.ts` replaces this member by assignment, which a `#`
+   * method does not allow.
    */
   private async buildSourceTree(
     pieceIno: bigint,
