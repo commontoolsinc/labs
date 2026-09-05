@@ -64,15 +64,44 @@ and "what am I being compared against?".
 
 ### `plan --dry-run [--lane N]`
 
-What would run, and what it would cost: how many identities the store
-knows, how many are withheld, and per lane the number of tests, the
+What would run, and what it would cost: how many identities this tree
+holds, how many are withheld, and per lane the number of tests, the
 projected seconds against the budget, the capabilities it would open, and
 a count by why each test was chosen. Given a lane number it answers "what
 would lane three do?", and given none it prints all of them.
 
+The count is of this tree rather than of the manifest, because those are
+different numbers and the plan beneath it is over the first. A manifest is
+hours old, so it names units the tree has since dropped and misses units
+the tree has since gained; the reconciliation of the two is what gets
+packed, and it is what is counted here.
+
 `--verify` compares the identity set the topology produces against what a
-recorded run actually executed. It needs the topology, which is not in the
-tree yet, and says so rather than pretending.
+recorded run actually executed, in both directions: identities a run
+produced that no suite claims, and units the topology enumerates that the
+run never recorded.
+
+### How many lanes the run on the default branch uses
+
+A change's tests are packed into a fixed number of lanes, `LANES`. The run
+on the default branch cannot be, because how much work there is decides
+how many lanes it needs and the job matrix has to exist before anything
+starts. So one job asks:
+
+```
+deno run -A tasks/ci-lane.ts --full --lane-count
+```
+
+and it answers with an integer and nothing else. The lanes then read the
+same tree against the same manifest and work out their own shares, the
+way a change's lanes do, so nothing about which tests run travels through
+a job output.
+
+Run it yourself to see how many jobs the default branch would take. Where
+nothing in the tree has a measured cost it answers with the number of
+suites that have anything to run and says on the error stream that it did
+so, since a projection from costs nobody has measured would be arithmetic
+over an invented figure.
 
 ## The publisher
 
