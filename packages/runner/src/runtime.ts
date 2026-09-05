@@ -3396,9 +3396,10 @@ export class Runtime {
     }
     const inFlight = this.#spaceNameResolutions.get(name);
     if (inFlight !== undefined) {
-      // Join the resolution already under way, then take the cached path:
-      // an identical document is a retry, a different one is refused.
-      await inFlight.catch(() => {});
+      // Join the resolution already under way — its rejection is this
+      // caller's too — then take the cached path: an identical document is
+      // a retry, a different one is refused.
+      await inFlight;
       return await this.resolveSpaceName(name, options);
     }
     const cached = this.resolveSpaceNameSync(name);

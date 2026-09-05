@@ -1775,3 +1775,57 @@ Deno.test("runtime.resolveSpaceName: two concurrent resolutions of one uncached 
     await server.close();
   }
 });
+
+Deno.test("runtime.resolveSpaceName: a joiner shares a failed resolution's rejection rather than retrying on its own", async () => {
+  const user = await Identity.fromPassphrase("acl genesis joiner user");
+  const server = createServer("runner-acl-genesis-joiner");
+  const factory = new RecordingLoopbackSessionFactory(server);
+  (factory as { supportsAclBootstrap: boolean }).supportsAclBootstrap = false;
+  const manager = TestStorageManager.overServer({ as: user }, factory);
+  let registrations = 0;
+  // Every registration is refused (the factory cannot bootstrap); count them.
+  const counting = new Proxy(manager, {
+    get(target, property, receiver) {
+      if (property === "registerSpaceIdentity") {
+        return (...args: unknown[]) => {
+          registrations++;
+          return (target.registerSpaceIdentity as (...a: unknown[]) => void)(
+            ...args,
+          );
+        };
+      }
+      const value = Reflect.get(target, property, receiver);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: counting,
+  });
+  try {
+    // Red-first witnessed: the joiner swallowed the first rejection and ran
+    // a second registration attempt of its own (registrations === 2).
+    const outcomes = await Promise.allSettled([
+      runtime.resolveSpaceName("genesis-acl-joiner", {
+        genesisAcl: { [user.did()]: "OWNER" },
+      }),
+      runtime.resolveSpaceName("genesis-acl-joiner", {
+        genesisAcl: { [user.did()]: "OWNER" },
+      }),
+    ]);
+    assertEquals(outcomes.map((o) => o.status), ["rejected", "rejected"]);
+    for (const outcome of outcomes) {
+      assert(
+        String((outcome as PromiseRejectedResult).reason).includes(
+          "cannot bootstrap",
+        ),
+      );
+    }
+    assertEquals(registrations, 1, "one attempt, shared by both callers");
+    assertEquals(runtime.resolveSpaceNameSync("genesis-acl-joiner"), undefined);
+  } finally {
+    await runtime.dispose();
+    await manager.close();
+    await server.close();
+  }
+});
