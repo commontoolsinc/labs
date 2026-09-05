@@ -22,7 +22,11 @@ import {
   principal,
 } from "@commonfabric/memory/sqlite/row-label";
 import { table } from "@commonfabric/memory/sqlite/schema";
-import type { SqliteDbRef, SqliteParamsWire } from "@commonfabric/memory/v2";
+import {
+  serverExecutionEnablerCount,
+  type SqliteDbRef,
+  type SqliteParamsWire,
+} from "@commonfabric/memory/v2";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
@@ -46,7 +50,8 @@ type QueryState = {
 };
 
 const ADDR = /[^\s<>,;"]+@[^\s<>,;"]+/g;
-const BOB = "mailto:bob@example.test";
+// The atom the `principal("mailto", …)` rule mints for the addressed row.
+const BOB = "did:mailto:bob@example.test";
 
 // `emails`: every row's label carries the db owner, and a row addressed to
 // someone also carries that address. Under a ceiling naming the owner alone
@@ -227,6 +232,30 @@ describe("sqliteQuery under a runtime read ceiling", () => {
       ).toThrow(/does not bound a client under server execution/);
     });
 
+    it("releases the server-execution enabler it claimed when it refuses that ceiling", () => {
+      // The refusal is thrown inside the construction scope whose rollback
+      // releases the process-global enabler; a leaked one would pin the
+      // ambient flag for the process lifetime.
+      const before = serverExecutionEnablerCount();
+      expect(() =>
+        construct({
+          experimental: { serverExecution: true },
+          cfcReadMaxConfidentiality: ["did:key:owner"],
+        })
+      ).toThrow();
+      expect(serverExecutionEnablerCount()).toBe(before);
+    });
+
+    it("throws on a ceiling with a hole in it", () => {
+      expect(() => construct({ cfcReadMaxConfidentiality: new Array(1) }))
+        .toThrow(/cfcReadMaxConfidentiality\[0\]/);
+      const holed: CfcConfClause[] = [];
+      holed[1] = "did:key:owner";
+      expect(() => construct({ cfcReadMaxConfidentiality: holed })).toThrow(
+        /cfcReadMaxConfidentiality\[0\]/,
+      );
+    });
+
     it("holds a frozen copy of the ceiling it was given", async () => {
       const given: CfcConfClause[] = ["did:key:owner", { anyOf: ["a", "b"] }];
       const runtime = construct({ cfcReadMaxConfidentiality: given });
@@ -348,11 +377,51 @@ describe("sqliteQuery under a runtime read ceiling", () => {
       expect(bodies(state)).toEqual(["mine"]);
     });
 
+    it("resolves a placeholder inside an `anyOf` of the runtime's ceiling", async () => {
+      // Under an OR-clause ceiling a row fits when its label is at least as
+      // wide, so over `shared` only the addressed row — labeled owner OR
+      // bob — fits `{anyOf: [owner, bob]}`. An unresolved placeholder
+      // would leave the clause unsatisfiable and admit nothing.
+      const rt = await start({
+        cfcReadMaxConfidentiality: [{ anyOf: [{ __ctDbOwner: true }, BOB] }],
+        cfcReadOnExceed: "skip",
+      });
+      const { state } = await runQuery(rt, space, aggregateDb, {
+        sql: "SELECT id, to_addr, body FROM shared ORDER BY id",
+      });
+      expect(state.error).toBeUndefined();
+      expect(bodies(state)).toEqual(["shared"]);
+    });
+
+    it("refuses a query's `onExceed: null` rather than reading it as absent", async () => {
+      const rt = await start({
+        cfcReadMaxConfidentiality: [signer.did()],
+        cfcReadOnExceed: "skip",
+      });
+      const { state } = await runQuery(rt, space, db, {
+        sql: ROWS_SQL,
+        onExceed: null,
+      });
+      expect(String(state.error)).toMatch(/invalid onExceed/);
+    });
+
     it("refuses the query under `fail`, the default mode, when a row exceeds", async () => {
       const rt = await start({ cfcReadMaxConfidentiality: [signer.did()] });
       const { state } = await runQuery(rt, space, db, { sql: ROWS_SQL });
       expect(String(state.error)).toMatch(/ceiling/);
       expect(state.result).toBeUndefined();
+    });
+
+    it("returns both rows under a query's ceiling naming the address, with no runtime ceiling", async () => {
+      // The control for the two meets below: the query ceiling they widen
+      // with admits the addressed row on its own.
+      const rt = await start({});
+      const { state } = await runQuery(rt, space, db, {
+        sql: ROWS_SQL,
+        maxConfidentiality: [signer.did(), BOB],
+      });
+      expect(state.error).toBeUndefined();
+      expect(bodies(state)).toEqual(["mine", "shared"]);
     });
 
     it("meets a query's wider ceiling with the runtime's, so the query cannot widen past it", async () => {

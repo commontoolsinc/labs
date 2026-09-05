@@ -1218,9 +1218,13 @@ export function sqliteQuery(
               owner: db.owner,
               staticConfidentiality: staticConfidentialityOf(labelSchema),
               ceiling,
-              // The query's own mode stands; the runtime's supplies the
-              // default beneath it, and the builtin's `fail` beneath that.
-              onExceed: inputs.onExceed ?? runtime.cfcReadOnExceed,
+              // The query's own mode stands, an invalid one included, so
+              // the validation below still refuses it; the runtime's
+              // supplies the default for a query that declared none, and
+              // the builtin's `fail` beneath that.
+              onExceed: inputs.onExceed === undefined
+                ? runtime.cfcReadOnExceed
+                : inputs.onExceed,
               // Phase 3.b read-time clearance: the reader is the acting
               // principal of the REQUESTING run (same identity the ceiling
               // placeholders resolve against, and the USER half of the

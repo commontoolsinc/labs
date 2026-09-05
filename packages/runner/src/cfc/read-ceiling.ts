@@ -128,33 +128,37 @@ export function buildCfcReadCeiling(
         "no ceiling",
     );
   }
-  ceiling.forEach((clause, index) => {
+  // Indexed rather than iterated with `forEach`/`map`, which skip the holes
+  // of a sparse array: a hole is an entry that is not a clause, and refused
+  // as one.
+  const clauses: CfcConfClause[] = [];
+  for (let index = 0; index < ceiling.length; index++) {
+    const clause = ceiling[index];
     const where = `${ceilingName}[${index}]`;
     if (isOrClause(clause)) {
       if (clause.anyOf.length === 0) {
         throw new Error(`${where}: an \`anyOf\` with no alternatives`);
       }
-      clause.anyOf.forEach((alternative, i) => {
-        if (!isCeilingAtom(alternative)) {
+      for (let i = 0; i < clause.anyOf.length; i++) {
+        if (!isCeilingAtom(clause.anyOf[i])) {
           throw new Error(
             `${where}.anyOf[${i}]: expected an atom, got ${
-              JSON.stringify(alternative)
+              JSON.stringify(clause.anyOf[i])
             }`,
           );
         }
-      });
-      return;
-    }
-    if (!isCeilingAtom(clause)) {
+      }
+    } else if (!isCeilingAtom(clause)) {
       throw new Error(
         `${where}: expected an atom or an \`anyOf\` of atoms, got ${
           JSON.stringify(clause)
         }`,
       );
     }
-  });
+    clauses.push(freezeClause(clause));
+  }
   return Object.freeze({
-    maxConfidentiality: Object.freeze(ceiling.map(freezeClause)),
+    maxConfidentiality: Object.freeze(clauses),
     onExceed,
   });
 }

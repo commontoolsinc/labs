@@ -20,7 +20,7 @@ import { tableDeclaresRowLabel } from "@commonfabric/memory/v2";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { CfcConfClause } from "../../cfc/clause.ts";
-import { clauseAlternatives } from "../../cfc/clause.ts";
+import { clauseAlternatives, isOrClause } from "../../cfc/clause.ts";
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
 
 interface ResultColumn {
@@ -412,15 +412,17 @@ export function computeRowLabelRead(
 /**
  * Resolve placeholder principals in a declared ceiling: the acting user
  * (`{__ctCurrentPrincipal:true}`, prepare-time identity) and the db owner
- * (`{__ctDbOwner:true}`, from the db ref). Unresolvable placeholders fail
- * closed — a ceiling that can't be pinned must not silently widen.
+ * (`{__ctDbOwner:true}`, from the db ref), whether an entry is the
+ * placeholder or an `anyOf` whose alternative is. Unresolvable placeholders
+ * fail closed — a ceiling that can't be pinned must not silently widen.
  */
 export function resolveCeilingPlaceholders(
   ceiling: readonly CfcConfClause[],
   ctx: { actingPrincipal?: string; owner?: string },
 ): { atoms: CfcConfClause[] } | { error: string } {
-  const atoms: CfcConfClause[] = [];
-  for (const atom of ceiling) {
+  const resolveAtom = (
+    atom: CfcAtom,
+  ): { atom: CfcAtom } | { error: string } => {
     if (
       isObjectNotArray(atom) &&
       (atom as CfcAtomObject).__ctCurrentPrincipal === true
@@ -431,8 +433,7 @@ export function resolveCeilingPlaceholders(
             "principal is available — refusing (fail closed)",
         };
       }
-      atoms.push(ctx.actingPrincipal);
-      continue;
+      return { atom: ctx.actingPrincipal };
     }
     if (
       isObjectNotArray(atom) && (atom as CfcAtomObject).__ctDbOwner === true
@@ -443,10 +444,28 @@ export function resolveCeilingPlaceholders(
             "carries no owner — refusing (fail closed)",
         };
       }
-      atoms.push(ctx.owner);
+      return { atom: ctx.owner };
+    }
+    return { atom };
+  };
+  const atoms: CfcConfClause[] = [];
+  for (const clause of ceiling) {
+    if (isOrClause(clause)) {
+      // An alternative is an atom, never a nested clause, so one level is
+      // the whole depth; a nested `anyOf` stays as it is, opaque and
+      // unsatisfiable, which is how the clause machinery reads it.
+      const alternatives: CfcAtom[] = [];
+      for (const alternative of clause.anyOf) {
+        const resolved = resolveAtom(alternative);
+        if ("error" in resolved) return resolved;
+        alternatives.push(resolved.atom);
+      }
+      atoms.push({ anyOf: alternatives });
       continue;
     }
-    atoms.push(atom);
+    const resolved = resolveAtom(clause);
+    if ("error" in resolved) return resolved;
+    atoms.push(resolved.atom);
   }
   return { atoms };
 }
