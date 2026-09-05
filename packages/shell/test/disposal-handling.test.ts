@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+
 import type { DebuggerController } from "../src/lib/debugger-controller.ts";
 import { XDebuggerView } from "../src/views/DebuggerView.ts";
 
