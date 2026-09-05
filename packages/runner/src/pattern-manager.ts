@@ -63,6 +63,20 @@ import type { MemorySpace, Runtime, ServerRunInfo } from "./runtime.ts";
  * FOREIGN to the serving manager's home space. */
 export type WritebackDelegation = NonNullable<ServerRunInfo["delegated"]>;
 
+/**
+ * Writes a compiled closure back to a space's compile cache: the shape of
+ * `PatternManager`'s own write-back, and of the writer a test supplies in
+ * its place.
+ */
+export type CompileCacheWriter = (
+  space: MemorySpace,
+  modules: CacheableModule[],
+  entryIdentity: string,
+  opts: { runtimeVersion: string },
+  moduleDelegations?: ModuleDelegationMap,
+  delegated?: WritebackDelegation,
+) => Promise<void>;
+
 import {
   isFabricImportSpecifier,
   parseFabricRef,
@@ -418,6 +432,10 @@ export class PatternManager {
   // misses recover through the async storage-backed load. Instance field so
   // tests can shrink it.
   #maxEvaluatedModuleCacheSize = MAX_EVALUATED_MODULE_CACHE_SIZE;
+
+  // The writer a test supplies in place of the compile-cache write-back;
+  // undefined means the manager's own.
+  #compileCacheWriter: CompileCacheWriter | undefined = undefined;
   // ESM content-addressed compile-cache instrumentation.
   #esmCacheStats = { hits: 0, misses: 0, byIdentityHits: 0 };
   // In-memory identity -> module-namespace cache (CT-1623). Populated for EVERY
@@ -678,6 +696,7 @@ export class PatternManager {
     >;
     readonly inProgressCompilations: Map<string, Promise<Pattern>>;
     maxEvaluatedModuleCacheSize: number;
+    compileCacheWriter: CompileCacheWriter | undefined;
     readonly modulesByIdentity: Map<string, { exports: Exports }>;
     readonly pendingCacheWriteBacks: Set<Promise<unknown>>;
     readonly persistedCompileCacheClosures: Map<string, string>;
@@ -713,6 +732,12 @@ export class PatternManager {
       },
       set maxEvaluatedModuleCacheSize(value) {
         outerThis.#maxEvaluatedModuleCacheSize = value;
+      },
+      get compileCacheWriter() {
+        return outerThis.#compileCacheWriter;
+      },
+      set compileCacheWriter(value) {
+        outerThis.#compileCacheWriter = value;
       },
       modulesByIdentity: this.#modulesByIdentity,
       pendingCacheWriteBacks: this.#pendingCacheWriteBacks,
@@ -2630,14 +2655,24 @@ export class PatternManager {
         this.#persistedCompileCacheClosures.delete(persistenceSlotKey);
       }
 
-      await this.writeBackCompileCache(
-        space,
-        modules,
-        entryIdentity,
-        opts,
-        moduleDelegations,
-        delegated,
-      );
+      // A writer a test supplied stands in for the write-back.
+      await (this.#compileCacheWriter === undefined
+        ? this.#writeBackCompileCache(
+          space,
+          modules,
+          entryIdentity,
+          opts,
+          moduleDelegations,
+          delegated,
+        )
+        : this.#compileCacheWriter(
+          space,
+          modules,
+          entryIdentity,
+          opts,
+          moduleDelegations,
+          delegated,
+        ));
       this.#persistedCompileCacheClosures.set(
         persistenceSlotKey,
         closureSignature,
@@ -2800,11 +2835,8 @@ export class PatternManager {
    * pattern's own space writes) retries rather than silently dropping the
    * entry. A final failure throws because persisted refs-only pattern JSON
    * requires a durable closure behind every `$patternRef`.
-   *
-   * TypeScript-private rather than a `#` name, because `test/cell-cache.test.ts`
-   * replaces this member by assignment, which a `#` method does not allow.
    */
-  private async writeBackCompileCache(
+  async #writeBackCompileCache(
     space: MemorySpace,
     modules: CacheableModule[],
     entryIdentity: string,
