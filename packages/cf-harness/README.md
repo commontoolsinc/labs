@@ -1267,6 +1267,25 @@ recorded as `fabricSessionCfc` in `run-state.json` and the run report (with the
 selected bundle, when there is one, as its `posture` field), and the operator
 summary prints it beside the harness's own `cfcMode`.
 
+The session's runtime can also run under a read ceiling: a flat list of
+confidentiality clauses (the same shape a pattern's `db.query` takes as
+`maxConfidentiality`) that every `db.query` the run issues is bounded by,
+whatever the pattern wrote. A query declaring no ceiling reads under the run's;
+one declaring its own reads under the meet of the two, so a pattern cannot widen
+its run's ceiling from inside. The ceiling comes from
+`--max-confidentiality
+<json>` on the command line, from
+`cfc.maxConfidentiality` in the run manifest (with `cfc.onExceed`, `fail` or
+`skip`, as the default for a query that says nothing), or from both, met. An
+empty list is refused rather than read as no ceiling, a malformed one refuses
+the manifest rather than being dropped, and either source without a fabric
+session is refused, since a ceiling with nothing bounding reads would read as
+working all run. Absent both, the session reads unbounded — the owner's whole
+view. The effective ceiling is recorded in `fabricSessionCfc` as
+`readMaxConfidentiality`, so a resume under another (or none) is refused like
+any other moved dial; the manifest's declaration is projected into the policy
+snapshot and every invocation context for the audit.
+
 The tool takes `sourceText` (inline pattern source, at most 256 KiB — an
 over-cap source is a structured tool error), an optional `inputs` object, and an
 optional `resultSchema`. An `inputs` string value that is a whole-string
