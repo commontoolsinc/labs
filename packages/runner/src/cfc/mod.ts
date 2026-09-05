@@ -302,6 +302,13 @@ export type {
   SinkUngatedRationale,
   UngatedSinkName,
 } from "./sink-inventory.ts";
+export {
+  buildCfcReadCeiling,
+  type CfcReadCeiling,
+  type CfcReadCeilingLabels,
+  type CfcReadCeilingOptions,
+  type CfcReadOnExceed,
+} from "./read-ceiling.ts";
 export { markRendererTrustedEvent } from "./ui-contract.ts";
 export {
   cfcObjectSchemaIsClosed,
@@ -329,6 +336,7 @@ export {
   type CfcOpaqueLink,
   cfcOpaqueLinkForPath,
   joinCfcObservedConfidentiality,
+  meetCfcObservationCeilings,
   uniqueCfcAtoms,
 } from "./observation.ts";
 export {

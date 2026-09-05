@@ -81,6 +81,11 @@
  * |                            | deployment (value-level provenance Stage 0)      |
  * | cfcTrustConfig             | core-default (none declared) — same              |
  * | cfcSinkMaxConfidentiality  | core-default (none declared) — same              |
+ * | cfcReadMaxConfidentiality  | core-default (none — the owner view); delta on   |
+ * |                            | remoteClient / browserWorker (a per-run or       |
+ * |                            | per-device read ceiling is the host's to set)    |
+ * | cfcReadOnExceed            | core-default (`fail`); delta on the same two,    |
+ * |                            | beside the ceiling it qualifies                  |
  * | patternEnvironment         | pinned from apiUrl in productionServer /         |
  * |                            | remoteClient / browserWorker (patterns fetch     |
  * |                            | against the real deployment, not the builder's   |
@@ -129,8 +134,10 @@
 import { toCompactDebugString } from "@commonfabric/data-model";
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
 import {
+  type CfcConfClause,
   type CfcEnforcementMode,
   type CfcFlowLabelsMode,
+  type CfcReadOnExceed,
   type CfcWriteFloorMode,
   sinkCeilingsOf,
   type SinkGovernanceRegistry,
@@ -192,6 +199,8 @@ export const RUNTIME_OPTION_KEYS = [
   "cfcPrefixProvenanceStats",
   "cfcTrustConfig",
   "cfcSinkMaxConfidentiality",
+  "cfcReadMaxConfidentiality",
+  "cfcReadOnExceed",
   "trustSnapshotProvider",
   "hideInternalStackFrames",
   "commitBackpressure",
@@ -765,7 +774,8 @@ function coreOptions(params: CoreParams): RuntimeOptions {
     // cfcDecomposedEnvelopes /
     // cfcPolicyEvaluation / cfcLabelMetadataProtection /
     // cfcDeclaredMonotonicity / cfcPolicyRecords /
-    // cfcTrustConfig / cfcSinkMaxConfidentiality ride the constructor
+    // cfcTrustConfig / cfcSinkMaxConfidentiality /
+    // cfcReadMaxConfidentiality / cfcReadOnExceed ride the constructor
     // defaults (off / none) — deliberately absent here until a first-party
     // rollout begins. A caller that opts into `cfcPosture` gets the named
     // bundle's values instead, for this one runtime.
@@ -831,6 +841,16 @@ export interface RemoteClientPresetParams extends CoreParams {
    * `enforce`.
    */
   cfcWriteFloor?: CfcWriteFloorMode;
+
+  /**
+   * The runtime-wide read ceiling for this one session's `db.query` reads
+   * (`RuntimeOptions.cfcReadMaxConfidentiality`): a harness running one
+   * pattern under one clearance sets it here.
+   */
+  cfcReadMaxConfidentiality?: readonly CfcConfClause[];
+
+  /** The read ceiling's fallback `onExceed`, beside the ceiling it qualifies. */
+  cfcReadOnExceed?: CfcReadOnExceed;
 }
 
 export interface PatternTestPresetParams extends CoreParams {
@@ -861,6 +881,17 @@ export interface BrowserWorkerPresetParams extends CoreParams {
   /** The other such dial, from the same source. */
   cfcFlowLabels?: CfcFlowLabelsMode;
 
+  /**
+   * The runtime-wide read ceiling for this worker's `db.query` reads
+   * (`RuntimeOptions.cfcReadMaxConfidentiality`), from `InitializationData`:
+   * a worker is one device's runtime, so a ceiling set here is per device
+   * by construction and never touches the space.
+   */
+  cfcReadMaxConfidentiality?: readonly CfcConfClause[];
+
+  /** The read ceiling's fallback `onExceed`, from the same source. */
+  cfcReadOnExceed?: CfcReadOnExceed;
+
   trustSnapshotProvider?: () => TrustSnapshot | undefined;
   telemetry?: RuntimeTelemetry;
   consoleHandler?: ConsoleHandler;
@@ -883,6 +914,27 @@ export interface UnitTestPresetParams extends Omit<CoreParams, "experimental"> {
 
   /** Scheduler tests shrink the backoff/retry window. */
   commitBackpressure?: Partial<CommitBackpressurePolicy>;
+}
+
+/**
+ * Helper for the host-controlled presets, which passes a read ceiling and its
+ * `onExceed` through as the options the constructor validates: each only
+ * when set, so an unset one stays the constructor default.
+ */
+function readCeilingOptions(
+  params: Pick<
+    RemoteClientPresetParams,
+    "cfcReadMaxConfidentiality" | "cfcReadOnExceed"
+  >,
+): Partial<RuntimeOptions> {
+  return {
+    ...(params.cfcReadMaxConfidentiality !== undefined
+      ? { cfcReadMaxConfidentiality: params.cfcReadMaxConfidentiality }
+      : {}),
+    ...(params.cfcReadOnExceed !== undefined
+      ? { cfcReadOnExceed: params.cfcReadOnExceed }
+      : {}),
+  };
 }
 
 export const runtimePresets = {
@@ -931,6 +983,7 @@ export const runtimePresets = {
       ...(params.cfcWriteFloor !== undefined
         ? { cfcWriteFloor: params.cfcWriteFloor }
         : {}),
+      ...readCeilingOptions(params),
       ...(params.errorHandlers !== undefined
         ? { errorHandlers: params.errorHandlers }
         : {}),
@@ -1008,6 +1061,7 @@ export const runtimePresets = {
       ...(params.cfcFlowLabels !== undefined
         ? { cfcFlowLabels: params.cfcFlowLabels }
         : {}),
+      ...readCeilingOptions(params),
       ...(params.trustSnapshotProvider !== undefined
         ? { trustSnapshotProvider: params.trustSnapshotProvider }
         : {}),

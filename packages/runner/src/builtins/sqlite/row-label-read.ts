@@ -20,7 +20,7 @@ import { tableDeclaresRowLabel } from "@commonfabric/memory/v2";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import type { CfcConfClause } from "../../cfc/clause.ts";
-import { clauseAlternatives } from "../../cfc/clause.ts";
+import { clauseAlternatives, isOrClause } from "../../cfc/clause.ts";
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
 
 interface ResultColumn {
@@ -57,6 +57,13 @@ export interface RowLabelReadArgs {
 
   /** What to do when a row's label exceeds the ceiling (default "fail"). */
   onExceed?: unknown;
+  /** True when `onExceed` is the runtime's default rather than the query's
+   *  own declaration. A runtime-wide `skip` is a mode the query author never
+   *  chose, so on an aggregate/expression projection — where skip is refused
+   *  because a withheld row already contributed server-side — the runtime's
+   *  default falls back to `fail` instead of refusing a query that declared
+   *  nothing. A query's OWN `skip` on such a projection is still refused. */
+  onExceedIsRuntimeDefault?: boolean;
 
   /** CFC Phase 3.b read-time clearance: when set, keep only rows the acting
    *  reader may read (a declared existence release, §8.17/inv-14). Requires the
@@ -170,7 +177,7 @@ export function computeRowLabelRead(
       } — expected "fail" or "skip"`,
     };
   }
-  const onExceed = (args.onExceed ?? "fail") as "fail" | "skip";
+  let onExceed = (args.onExceed ?? "fail") as "fail" | "skip";
 
   // Discover + re-validate rule-bearing tables (db.tables is wire-supplied;
   // "couldn't validate" is never "no label"). `allowReadClearance` is the
@@ -320,6 +327,14 @@ export function computeRowLabelRead(
   // reader-clearance (none exists), a declared contract (06-cfc.md ceiling).
   let keep: boolean[] | undefined;
   if (ceiling !== undefined) {
+    if (
+      onExceed === "skip" && nullOrigin && args.onExceedIsRuntimeDefault
+    ) {
+      // The runtime's default, not the query's word: fall back to the
+      // builtin's own `fail` rather than refuse a projection the query
+      // author never opted into skipping.
+      onExceed = "fail";
+    }
     if (onExceed === "skip" && nullOrigin) {
       return {
         error: 'sqlite: onExceed:"skip" never applies to an aggregate/' +
@@ -412,15 +427,17 @@ export function computeRowLabelRead(
 /**
  * Resolve placeholder principals in a declared ceiling: the acting user
  * (`{__ctCurrentPrincipal:true}`, prepare-time identity) and the db owner
- * (`{__ctDbOwner:true}`, from the db ref). Unresolvable placeholders fail
- * closed — a ceiling that can't be pinned must not silently widen.
+ * (`{__ctDbOwner:true}`, from the db ref), whether an entry is the
+ * placeholder or an `anyOf` whose alternative is. Unresolvable placeholders
+ * fail closed — a ceiling that can't be pinned must not silently widen.
  */
 export function resolveCeilingPlaceholders(
   ceiling: readonly CfcConfClause[],
   ctx: { actingPrincipal?: string; owner?: string },
 ): { atoms: CfcConfClause[] } | { error: string } {
-  const atoms: CfcConfClause[] = [];
-  for (const atom of ceiling) {
+  const resolveAtom = (
+    atom: CfcAtom,
+  ): { atom: CfcAtom } | { error: string } => {
     if (
       isObjectNotArray(atom) &&
       (atom as CfcAtomObject).__ctCurrentPrincipal === true
@@ -431,8 +448,7 @@ export function resolveCeilingPlaceholders(
             "principal is available — refusing (fail closed)",
         };
       }
-      atoms.push(ctx.actingPrincipal);
-      continue;
+      return { atom: ctx.actingPrincipal };
     }
     if (
       isObjectNotArray(atom) && (atom as CfcAtomObject).__ctDbOwner === true
@@ -443,10 +459,28 @@ export function resolveCeilingPlaceholders(
             "carries no owner — refusing (fail closed)",
         };
       }
-      atoms.push(ctx.owner);
+      return { atom: ctx.owner };
+    }
+    return { atom };
+  };
+  const atoms: CfcConfClause[] = [];
+  for (const clause of ceiling) {
+    if (isOrClause(clause)) {
+      // An alternative is an atom, never a nested clause, so one level is
+      // the whole depth; a nested `anyOf` stays as it is, opaque and
+      // unsatisfiable, which is how the clause machinery reads it.
+      const alternatives: CfcAtom[] = [];
+      for (const alternative of clause.anyOf) {
+        const resolved = resolveAtom(alternative);
+        if ("error" in resolved) return resolved;
+        alternatives.push(resolved.atom);
+      }
+      atoms.push({ anyOf: alternatives });
       continue;
     }
-    atoms.push(atom);
+    const resolved = resolveAtom(clause);
+    if ("error" in resolved) return resolved;
+    atoms.push(resolved.atom);
   }
   return { atoms };
 }

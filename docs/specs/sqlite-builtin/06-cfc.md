@@ -444,6 +444,38 @@ contract, required to be policy-permitted and auditable — and it never applies
 to aggregates (a withheld row already contributed server-side; a count cannot
 be un-counted), where the mode is rejected outright.
 
+**Runtime read ceiling.** A ceiling can also come from the runtime rather
+than the query: `RuntimeOptions.cfcReadMaxConfidentiality` (with
+`cfcReadOnExceed` beside it) is a ceiling every `db.query` the runtime issues
+reads under, aggregates included. A query declaring no ceiling reads under
+the runtime's; a query declaring one — the `maxConfidentiality` option or the
+Row schema's `MaxConfidentiality` — reads under the **meet** of the two
+(`meetCfcObservationCeilings`: a row fits the meet iff it fits each), so a
+query tightens the runtime's ceiling and never widens it. Placeholder atoms
+resolve per query, against the same acting principal and db owner as the
+query's own. The query's `onExceed` stands; the runtime's supplies the default
+beneath it, and `fail` beneath that. `skip` is refused on an aggregate
+projection exactly as the query option is. Absent, the runtime applies no
+ceiling (the owner view); an empty list, which admits nothing, is refused at
+construction.
+
+The option exists because the only carrier a pattern can read is a cell in
+the space, which every runtime on the space shares: a ceiling that has to
+differ per runtime — a device's lens, a run's clearance — cannot ride a
+pattern's inputs. For the same reason it applies only to a query whose result
+is **session-scoped** by the pattern's own declaration (`PerSession<>` on the
+result, `.asScope("session")` on the query, the `scope: "session"` query
+option, or a session-scoped db): a space- or user-shared result is one cell
+every runtime on the space resolves, its link — scope included — is shared
+too, and a runtime cannot narrow it for itself. A query under a runtime
+ceiling whose result is broader is refused before anything shared is written,
+through the runtime's error handlers rather than the result cell, which
+another runtime may be serving. Under served execution the serving runtime
+performs the query, so its option governs every run it serves; a client
+runtime's option governs the queries it executes itself. The runtime's
+ceiling joins the request hash, so a settled result is a hit only for a
+runtime reading under the same ceiling.
+
 **Read-time clearance (Phase 3.b).** Filtering by *who is asking*, rather than
 by a declared contract: `db.query(sql, { readClearance: true })` keeps only the
 rows the **acting reader** may read and drops the rest. The acting reader is
@@ -611,7 +643,10 @@ re-derives.
    reader is a static unconditional reader of every row; otherwise ⟶ refuse.
    `skip` never applies to aggregates.
 5. **Read, ceiling exceeded:** `onExceed` decides — fail the query (default)
-   or skip the row (declared opt-in, row-returning queries only).
+   or skip the row (declared opt-in, row-returning queries only). The
+   runtime's ceiling, where one is declared, meets the query's first; a query
+   under a runtime ceiling whose result is not session-scoped ⟶ refuse the
+   query before it is staged.
 6. **Write, unattributable:** fail closed (Phase 2's set) — except the
    3.c-covered shapes with unlabeled inputs against a server that advertises
    commit evaluation (rule-input UPDATE, INSERT…SELECT, upsert, columnless

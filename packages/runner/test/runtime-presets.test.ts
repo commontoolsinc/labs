@@ -132,6 +132,8 @@ const MINIMAL_TREATMENT: Record<RuntimeOptionKey, MinimalTreatment> = {
   cfcPrefixProvenanceStats: { treat: "absent" },
   cfcTrustConfig: { treat: "absent" },
   cfcSinkMaxConfidentiality: { treat: "absent" },
+  cfcReadMaxConfidentiality: { treat: "absent" },
+  cfcReadOnExceed: { treat: "absent" },
   trustSnapshotProvider: { treat: "absent" },
   hideInternalStackFrames: { treat: "absent" },
   commitBackpressure: { treat: "absent" },
@@ -240,6 +242,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
     } as unknown as NonNullable<RuntimeOptions["telemetry"]>;
     const commitBackpressure = { retryWindowMs: 100 };
     const spaceHostMap = { "did:key:zSpace": "https://host.example" };
+    const readCeiling = ["did:key:zOwner", { anyOf: ["a", "b"] }];
     const onPatternInstantiated = () => {};
 
     it("productionServer", () => {
@@ -271,6 +274,8 @@ describe("runtimePresets conformance (CT-1814)", () => {
         cfcEnforcementMode: "enforce-strict",
         cfcFlowLabels: "persist",
         cfcWriteFloor: "enforce",
+        cfcReadMaxConfidentiality: readCeiling,
+        cfcReadOnExceed: "skip",
       })).toEqual({
         ...minimalOutputs.remoteClient,
         errorHandlers,
@@ -282,6 +287,8 @@ describe("runtimePresets conformance (CT-1814)", () => {
         cfcEnforcementMode: "enforce-strict",
         cfcFlowLabels: "persist",
         cfcWriteFloor: "enforce",
+        cfcReadMaxConfidentiality: readCeiling,
+        cfcReadOnExceed: "skip",
       });
     });
 
@@ -313,6 +320,8 @@ describe("runtimePresets conformance (CT-1814)", () => {
         spaceHostMap,
         cfcEnforcementMode: "observe",
         cfcFlowLabels: "observe",
+        cfcReadMaxConfidentiality: readCeiling,
+        cfcReadOnExceed: "skip",
         trustSnapshotProvider,
         telemetry,
         consoleHandler,
@@ -325,6 +334,8 @@ describe("runtimePresets conformance (CT-1814)", () => {
         spaceHostMap,
         cfcEnforcementMode: "observe",
         cfcFlowLabels: "observe",
+        cfcReadMaxConfidentiality: readCeiling,
+        cfcReadOnExceed: "skip",
         trustSnapshotProvider,
         telemetry,
         consoleHandler,

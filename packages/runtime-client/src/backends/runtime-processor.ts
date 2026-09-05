@@ -470,6 +470,12 @@ export function browserWorkerParamsFromInitializationData(
     ...(data.cfcFlowLabels !== undefined
       ? { cfcFlowLabels: data.cfcFlowLabels }
       : {}),
+    ...(data.cfcReadMaxConfidentiality !== undefined
+      ? { cfcReadMaxConfidentiality: data.cfcReadMaxConfidentiality }
+      : {}),
+    ...(data.cfcReadOnExceed !== undefined
+      ? { cfcReadOnExceed: data.cfcReadOnExceed }
+      : {}),
     ...(data.trustSnapshot
       ? { trustSnapshotProvider: () => data.trustSnapshot }
       : {}),
@@ -676,6 +682,8 @@ export function securityContextFrom(
     experimental: data.experimental,
     cfcEnforcementMode: data.cfcEnforcementMode,
     cfcFlowLabels: data.cfcFlowLabels,
+    cfcReadMaxConfidentiality: data.cfcReadMaxConfidentiality,
+    cfcReadOnExceed: data.cfcReadOnExceed,
     renderDeclassificationPolicy: data.renderDeclassificationPolicy,
     renderConfidentialityCeiling: data.renderConfidentialityCeiling,
     trustSnapshot: data.trustSnapshot,

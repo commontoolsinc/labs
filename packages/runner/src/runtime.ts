@@ -94,7 +94,9 @@ import {
 import { addressKey } from "./link-types.ts";
 import {
   buildCfcPolicySnapshot,
+  buildCfcReadCeiling,
   buildCfcTrustConfig,
+  type CfcConfClause,
   type CfcDeclaredMonotonicityMode,
   type CfcDecomposedEnvelopes,
   type CfcEnforcementMode,
@@ -104,6 +106,7 @@ import {
   type CfcPolicyEvaluationMode,
   type CfcPolicyRecordInput,
   type CfcPrefixProvenanceSummary,
+  type CfcReadOnExceed,
   type CfcTriggerReadGating,
   type CfcTrustConfig,
   type CfcTrustConfigInput,
@@ -651,6 +654,61 @@ export interface RuntimeOptions {
   cfcSinkMaxConfidentiality?: SinkMaxConfidentiality;
 
   /**
+   * Runtime-wide read ceiling: the confidentiality every `db.query` this
+   * runtime issues reads under. A query declaring no ceiling of its own reads
+   * under this one; a query declaring one (the `maxConfidentiality` option or
+   * the Row schema's `MaxConfidentiality`) reads under the meet of the two,
+   * so a query tightens this ceiling and never widens it. Placeholder atoms
+   * (`{ __ctDbOwner: true }`, `{ __ctCurrentPrincipal: true }`) resolve per
+   * query, as they do in a query's own ceiling. Defaults to none: the owner
+   * view, every row returned.
+   *
+   * Per runtime rather than per pattern because the only carrier a pattern
+   * can read is a cell in the space, shared by every runtime on it; a lens
+   * that differs per device or per run has to ride the runtime. For the same
+   * reason the ceiling applies only to a query whose result is
+   * session-scoped by the pattern's own declaration (`PerSession<>`,
+   * `.asScope("session")`, or a session-scoped db): a space- or user-shared
+   * result is one cell every runtime on the space resolves, and a runtime
+   * cannot narrow it for itself. A query with a broader result is refused
+   * through the runtime's error handlers, and nothing shared is written.
+   *
+   * The refusal bounds what THIS runtime queries; it does not reach a
+   * shared cell another runtime already filled. A pattern whose output is
+   * space-scoped and that an unbounded runtime ran first leaves its result
+   * in a cell this runtime resolves like any other shared value, refusal or
+   * not — so a bounded runtime must run its patterns with session-scoped
+   * outputs, and what protects a shared cell is the cell's own label under
+   * the commit-boundary gates, not this option. Carrying the ceiling into
+   * the cell read path (a labeled cell that does not fit reads as withheld)
+   * is the follow-up that closes that seam.
+   *
+   * Governs the runtime that performs the query — a client runtime executing
+   * its own patterns, or a serving runtime for every run it serves — and the
+   * sqlite read surface only: every `db.query`, aggregates included. Cell
+   * reads are governed by the commit-boundary gates, and a host's direct
+   * sqlite bridge refuses labeled tables outright. Validated and deep-frozen
+   * at construction; an empty list, which admits nothing, is refused (omit
+   * the option for no ceiling), and so is a ceiling on a client under
+   * server execution, whose queries the space server's runtime serves
+   * outside this ceiling's reach.
+   */
+  cfcReadMaxConfidentiality?: readonly CfcConfClause[];
+
+  /**
+   * What a read under the runtime's ceiling does with a row the ceiling does
+   * not admit when the query declares no `onExceed` of its own: `fail`
+   * refuses the whole query, `skip` drops the row (a declared existence
+   * release). On an aggregate/expression projection, where a query's own
+   * `skip` is refused because a withheld row already contributed, this
+   * default falls back to `fail` rather than refusing a query that declared
+   * nothing. A query's own `onExceed` stands over this. Defaults to `fail`.
+   * Qualifies
+   * `cfcReadMaxConfidentiality` and is refused without it.
+   */
+  cfcReadOnExceed?: CfcReadOnExceed;
+
+  /**
    * Deployment policy records for the exchange-rule evaluator (Epic B2a,
    * spec §4.3). Validated, digested, and deep-frozen into a `PolicySnapshot`
    * at construction — malformed records throw at boot (fail-closed config,
@@ -908,6 +966,12 @@ export class Runtime {
   readonly cfcDeclaredMonotonicity: CfcDeclaredMonotonicityMode;
   readonly cfcPrefixProvenanceStats: boolean;
   readonly cfcSinkMaxConfidentiality: SinkMaxConfidentiality;
+
+  /** See `RuntimeOptions.cfcReadMaxConfidentiality`; frozen, or `undefined`. */
+  readonly cfcReadMaxConfidentiality: readonly CfcConfClause[] | undefined;
+
+  /** See `RuntimeOptions.cfcReadOnExceed`; `undefined` leaves `fail` in force. */
+  readonly cfcReadOnExceed: CfcReadOnExceed | undefined;
 
   /** Frozen deployment policy snapshot; undefined = no policies configured. */
   readonly cfcPolicySnapshot: PolicySnapshot | undefined;
@@ -1525,6 +1589,27 @@ export class Runtime {
           ).map(([sink, atoms]) => [sink, Object.freeze([...atoms])]),
         ),
       );
+      // Same posture as the sink ceilings: validated and frozen here, so a
+      // malformed or empty read ceiling refuses to boot rather than admitting
+      // nothing at every query.
+      const readCeiling = buildCfcReadCeiling(options);
+      // A client under server execution stages its queries for the space
+      // server's runtime to serve, and the ceiling reaches only the runtime
+      // it is configured on. Accepting it there would read as a bounded
+      // session whose reads nothing bounds, so it is refused until a run
+      // carries its ceiling to the runtime that serves it.
+      if (
+        readCeiling.maxConfidentiality !== undefined &&
+        this.experimental.serverExecution === true && !this.servingPosture
+      ) {
+        throw new Error(
+          "cfcReadMaxConfidentiality does not bound a client under server " +
+            "execution: its queries are served by the space server's " +
+            "runtime, which this ceiling does not reach",
+        );
+      }
+      this.cfcReadMaxConfidentiality = readCeiling.maxConfidentiality;
+      this.cfcReadOnExceed = readCeiling.onExceed;
       // Validates + digests + deep-freezes; throws on malformed records so a
       // config error surfaces at boot, not as a silently inert rule (same
       // eager-validation posture as the spaceHostMap URLs above).

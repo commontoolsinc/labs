@@ -8,6 +8,8 @@
  */
 
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { clausesEqual } from "@commonfabric/runner/cfc/clause";
+import type { CfcConfClause } from "@commonfabric/runner/cfc";
 
 import type { RuntimeSecurityContext } from "@/protocol/mod.ts";
 
@@ -57,6 +59,8 @@ const SECURITY_CONTEXT_FIELDS: Record<
   apiUrl: true,
   cfcEnforcementMode: true,
   cfcFlowLabels: true,
+  cfcReadMaxConfidentiality: true,
+  cfcReadOnExceed: true,
   experimental: true,
   identity: true,
   renderConfidentialityCeiling: true,
@@ -75,6 +79,34 @@ const SECURITY_CONTEXT_FIELDS: Record<
  * carried as an absent property in one and as an explicit `undefined` in the
  * other is the same posture and compares equal here.
  */
+
+/**
+ * A read ceiling compares by clause with the runner's own structural clause
+ * equality (`clausesEqual`, insensitive to the order of an `anyOf`'s
+ * alternatives, opaque on a malformed shape) and as a multiset of clauses,
+ * since a ceiling is a conjunction: two documents that spell one ceiling in
+ * another order hold the same posture, and a byte comparison would fail the
+ * attach over spelling. Imported through the `cfc/clause` subpath rather than
+ * the CFC barrel: this file is loaded on the browser's main thread, and the
+ * barrel reaches modules that refuse to run there.
+ */
+function readCeilingsEqual(
+  left: readonly CfcConfClause[] | undefined,
+  right: readonly CfcConfClause[] | undefined,
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  if (left.length !== right.length) return false;
+  const used = new Array<boolean>(right.length).fill(false);
+  for (const clause of left) {
+    const at = right.findIndex((candidate, i) =>
+      !used[i] && clausesEqual(clause, candidate)
+    );
+    if (at === -1) return false;
+    used[at] = true;
+  }
+  return true;
+}
+
 export function securityContextDifferences(
   asserted: RuntimeSecurityContext,
   running: RuntimeSecurityContext,
@@ -82,5 +114,9 @@ export function securityContextDifferences(
   const fields = Object.keys(SECURITY_CONTEXT_FIELDS).sort() as (
     keyof RuntimeSecurityContext
   )[];
-  return fields.filter((field) => !deepEqual(asserted[field], running[field]));
+  return fields.filter((field) =>
+    field === "cfcReadMaxConfidentiality"
+      ? !readCeilingsEqual(asserted[field], running[field])
+      : !deepEqual(asserted[field], running[field])
+  );
 }

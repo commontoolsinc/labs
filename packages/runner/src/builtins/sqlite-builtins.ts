@@ -42,6 +42,7 @@ import {
 import { waveRunContextOf, waveSettlementOf } from "../executor/wave.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
+import { meetCfcObservationCeilings } from "../cfc/observation.ts";
 import {
   cloneIfNecessary,
   fabricFromNativeValue,
@@ -873,6 +874,35 @@ export function sqliteQuery(
 
     if (!inputs?.db || typeof inputs.sql !== "string") return;
 
+    // A result read under the runtime's ceiling is this runtime's view of the
+    // rows, and a runtime is one session, so the result has to be one this
+    // session reads alone: a space- or user-scoped result is one cell every
+    // runtime on the space (or every session of the user) resolves, and the
+    // pattern's output link that names it is shared too, with its scope. A
+    // runtime cannot narrow that link for itself — the first writer's scope
+    // stands — so two runtimes of different ceilings sharing one result
+    // would either fight over it, each reading the other's request hash as
+    // new inputs, or read each other's rows between rounds. The scope has to
+    // come from the pattern, where every runtime reads the same declaration;
+    // a query that declares none is refused here, before it is staged: no
+    // claim and no rows, and the refusal reaches the runtime's error
+    // handlers rather than the result cell, which another runtime may be
+    // serving. After the inputs guard, so a scope the db handle carries is
+    // read from the handle rather than refused before the handle loads.
+    if (
+      runtime.cfcReadMaxConfidentiality !== undefined && scope !== "session"
+    ) {
+      throw new Error(
+        "sqlite: this runtime declares a read ceiling " +
+          "(`cfcReadMaxConfidentiality`), which applies only to a " +
+          `session-scoped query result; this result is ${scope}-scoped. ` +
+          "Declare the result per session — `PerSession<>` on the query's " +
+          'result type, the `scope: "session"` query option, ' +
+          '`.asScope("session")` on the query, or a session-scoped db — so ' +
+          "each session reads rows of its own",
+      );
+    }
+
     const db = readDbRef(inputs.db);
     const linkCols = asCellColumnsFromRowSchema(inputs.rowSchema);
     let params: WireParams;
@@ -935,6 +965,16 @@ export function sqliteQuery(
           ? { user: actingReader ?? null, session: clearanceSession }
           : (actingReader ?? null))
         : null,
+      // The runtime's own ceiling joins the request identity too: a settled
+      // result is only a hit for a runtime reading under the same ceiling.
+      // Absent for a runtime without one, so such a runtime's queries do not
+      // re-hash.
+      ...(runtime.cfcReadMaxConfidentiality !== undefined
+        ? {
+          runtimeReadCeiling: runtime.cfcReadMaxConfidentiality,
+          runtimeReadOnExceed: runtime.cfcReadOnExceed ?? null,
+        }
+        : {}),
     });
     // Dedup against COMMITTED state (and, stage G, against this node's
     // own in-flight RPC): the claim marker commits with the REQUESTING
@@ -1137,17 +1177,39 @@ export function sqliteQuery(
               );
               return;
             }
-            let ceiling = inputs.maxConfidentiality ?? rowSchemaCeiling;
+            const placeholderContext = {
+              actingPrincipal: flushActingPrincipal,
+              owner: db.owner,
+            };
+            let ceiling: readonly CfcConfClause[] | undefined =
+              inputs.maxConfidentiality ?? rowSchemaCeiling;
             if (ceiling !== undefined) {
-              const resolved = resolveCeilingPlaceholders(ceiling, {
-                actingPrincipal: flushActingPrincipal,
-                owner: db.owner,
-              });
+              const resolved = resolveCeilingPlaceholders(
+                ceiling,
+                placeholderContext,
+              );
               if ("error" in resolved) {
                 await failQuery(resolved.error);
                 return;
               }
               ceiling = resolved.atoms;
+            }
+            // The runtime's ceiling meets the query's: a row survives only if
+            // it fits both, so the query can tighten the runtime's ceiling and
+            // never widen it. The meet rather than an atom intersection, which
+            // is sound but over-withholds an OR-labeled row both admit.
+            // Resolved against the same principal and owner as the query's,
+            // and refusing on the same terms when a placeholder cannot be.
+            if (runtime.cfcReadMaxConfidentiality !== undefined) {
+              const resolved = resolveCeilingPlaceholders(
+                runtime.cfcReadMaxConfidentiality,
+                placeholderContext,
+              );
+              if ("error" in resolved) {
+                await failQuery(resolved.error);
+                return;
+              }
+              ceiling = meetCfcObservationCeilings(ceiling, resolved.atoms);
             }
             const rowLabels = computeRowLabelRead({
               tables: db.tables,
@@ -1156,7 +1218,15 @@ export function sqliteQuery(
               owner: db.owner,
               staticConfidentiality: staticConfidentialityOf(labelSchema),
               ceiling,
-              onExceed: inputs.onExceed,
+              // The query's own mode stands, an invalid one included, so
+              // the validation below still refuses it; the runtime's
+              // supplies the default for a query that declared none, and
+              // the builtin's `fail` beneath that.
+              onExceed: inputs.onExceed === undefined
+                ? runtime.cfcReadOnExceed
+                : inputs.onExceed,
+              onExceedIsRuntimeDefault: inputs.onExceed === undefined &&
+                runtime.cfcReadOnExceed !== undefined,
               // Phase 3.b read-time clearance: the reader is the acting
               // principal of the REQUESTING run (same identity the ceiling
               // placeholders resolve against, and the USER half of the

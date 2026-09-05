@@ -603,6 +603,23 @@ describe("resolveCeilingPlaceholders", () => {
     assertEquals(res.atoms, ["did:key:zMe", OWNER, "pii"]);
   });
 
+  it("resolves a placeholder inside an `anyOf` alternative", () => {
+    const res = resolveCeilingPlaceholders(
+      [{ anyOf: [{ __ctCurrentPrincipal: true }, { __ctDbOwner: true }] }],
+      { actingPrincipal: "did:key:zMe", owner: OWNER },
+    );
+    if ("error" in res) throw new Error(res.error);
+    assertEquals(res.atoms, [{ anyOf: ["did:key:zMe", OWNER] }]);
+  });
+
+  it("an unresolvable placeholder inside an `anyOf` fails closed", () => {
+    const res = resolveCeilingPlaceholders(
+      [{ anyOf: [{ __ctCurrentPrincipal: true }, OWNER] }],
+      { owner: OWNER },
+    );
+    assert("error" in res);
+  });
+
   it("an unresolvable placeholder fails closed", () => {
     const noActing = resolveCeilingPlaceholders(
       [{ __ctCurrentPrincipal: true }],

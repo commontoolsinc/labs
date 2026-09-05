@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import type { DID } from "@commonfabric/identity";
 
 import type { RuntimeSecurityContext } from "@/protocol/mod.ts";
+import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import {
   normalizeOrigin,
   normalizeSpaceHostMap,
@@ -23,6 +24,8 @@ describe("securityContextDifferences()", () => {
     spaceHostMap: { [signerDid]: "http://memory.test/" },
     cfcEnforcementMode: "enforce-strict",
     cfcFlowLabels: "persist",
+    cfcReadMaxConfidentiality: [signerDid, { anyOf: ["a", "b"] }],
+    cfcReadOnExceed: "skip",
     renderDeclassificationPolicy: "deny",
     renderConfidentialityCeiling: { atoms: [], caveatKinds: ["influence"] },
     trustSnapshot: { id: `principal:${signerDid}` },
@@ -37,6 +40,42 @@ describe("securityContextDifferences()", () => {
     // crossed an encoding, so these are the same posture.
     const asserted = { ...running, experimental: undefined };
     expect(securityContextDifferences(asserted, running)).toEqual([]);
+  });
+
+  it("reads the same read ceiling with its alternatives reordered as the same posture", () => {
+    // Two documents spelling one ceiling: the clause order and the order
+    // of an `anyOf`'s alternatives are not posture, so an attach that
+    // respells them is not refused.
+    const asserted = {
+      ...running,
+      cfcReadMaxConfidentiality: [{ anyOf: ["b", "a"] }, signerDid],
+    };
+    expect(securityContextDifferences(asserted, running)).toEqual([]);
+  });
+
+  it("keeps a malformed OR-shaped object opaque, as the runner does", () => {
+    // `{ anyOf: [A], extra: 1 }` is not an OR clause to the runner; it is an
+    // opaque atom, so it is not the same posture as `[A]`.
+    const asserted = {
+      ...running,
+      cfcReadMaxConfidentiality: [
+        signerDid,
+        { anyOf: ["a", "b"], extra: 1 } as unknown as CfcConfClause,
+      ],
+    };
+    expect(securityContextDifferences(asserted, running)).toEqual([
+      "cfcReadMaxConfidentiality",
+    ]);
+  });
+
+  it("names the read ceiling when an alternative differs", () => {
+    const asserted = {
+      ...running,
+      cfcReadMaxConfidentiality: [signerDid, { anyOf: ["a", "c"] }],
+    };
+    expect(securityContextDifferences(asserted, running)).toEqual([
+      "cfcReadMaxConfidentiality",
+    ]);
   });
 
   it("names the backend when it differs", () => {
@@ -88,6 +127,15 @@ describe("securityContextDifferences()", () => {
         running,
       ),
     ).toEqual(["renderConfidentialityCeiling"]);
+  });
+
+  it("names a read ceiling that differs by one clause", () => {
+    expect(
+      securityContextDifferences(
+        { ...running, cfcReadMaxConfidentiality: [signerDid] },
+        running,
+      ),
+    ).toEqual(["cfcReadMaxConfidentiality"]);
   });
 
   it("names an absent field the running context declares", () => {
