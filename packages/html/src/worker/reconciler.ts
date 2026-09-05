@@ -919,7 +919,7 @@ export class WorkerReconciler {
    * own view, or — when it has none — the resolved (followed) target's view,
    * whose label may carry the `Space(...)` atoms. May throw (each caller
    * decides its own fail-closed handling). The SINGLE source of label
-   * resolution shared by the gate (`canRenderCellUnderPolicy`), the
+   * resolution shared by the gate (`#canRenderCellUnderPolicy`), the
    * represents-principal read, and the Stage-2 membership watcher
    * (`watchCellMembership`), so they can never drift out of lockstep.
    */
