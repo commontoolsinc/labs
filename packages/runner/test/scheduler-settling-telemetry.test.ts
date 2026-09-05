@@ -21,9 +21,10 @@ import type {
 
 const signer = await Identity.fromPassphrase("settling telemetry test");
 
-// The tracker and the execute-end hook are private: backdating the tracker is
-// the only seam that reaches the telemetry branch without real wall-clock
-// busy time.
+// The tracker and the execute-end hook come through `accessForTestingOnly`;
+// backdating the tracker is what reaches the telemetry branch without real
+// wall-clock busy time.
+
 // A settle result carrying only the fields the backoff telemetry path reads;
 // the rest of the shape is inert here.
 function settleResultWithBackoff(
