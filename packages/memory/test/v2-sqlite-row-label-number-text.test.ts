@@ -361,6 +361,16 @@ describe("row-label numeric regex input", () => {
       ).toThrow(/BLOB/);
     });
 
+    it("reads a column whose declared type says BLOB but is INTEGER to SQLite", () => {
+      // Affinity, not substring: `INT BLOB` has INTEGER affinity (INT matches
+      // first), so the rule reads whole integers as it does from `integer`.
+      expect(() =>
+        table({ id: "integer primary key", source_id: "int blob" }, (f) => ({
+          confidentiality: principal("mailbox", match(f.source_id, /^\d+$/)),
+        }))
+      ).not.toThrow();
+    });
+
     it("re-runs that refusal on a wire-supplied spec", () => {
       // `db.tables` arrives over the wire, so a spec that never went through
       // `table()` reaches the same refusal before anything is evaluated.

@@ -504,7 +504,11 @@ function unreadableRuleInput(
   sqlType: unknown,
 ): string | undefined {
   if (typeof sqlType !== "string") return undefined; // no declared type
-  if (/blob/i.test(sqlType)) {
+  // By affinity, not by substring: `INT BLOB` is an INTEGER column to
+  // SQLite (INT matches first), and only a type SQLite itself reads as BLOB
+  // is refused. An empty declared type also has BLOB affinity but stores
+  // each value as bound, so text stays text; it is left readable.
+  if (sqlAffinity(sqlType) === "blob" && sqlType.trim() !== "") {
     return `rule input "${field}" is declared ${sqlType} — a rule reads a ` +
       "column as text, and a BLOB has none";
   }

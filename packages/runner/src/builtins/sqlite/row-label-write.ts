@@ -43,15 +43,20 @@ import {
 import type { CfcConfClause } from "../../cfc/clause.ts";
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
 
-// Whether a numeric-affinity column would convert this bound string on the way
-// in. SQLite converts text that is a well-formed integer or real literal and
-// leaves everything else as TEXT, so this asks the same question one step more
-// broadly: anything JS reads as a finite number counts, which over-refuses a
-// spelling SQLite would have kept (`0x10`) rather than admitting one it
-// converts.
-function storesAsANumber(value: string): boolean {
+// Whether a numeric-affinity column would store this bound string as a
+// number whose text differs from the string bound. SQLite converts text that
+// is a well-formed integer or real literal and leaves everything else as
+// TEXT; a spelling that already IS the canonical text of a safe integer
+// (`"7"`, `"-12"`) converts to a number whose text is the same string, so the
+// gate and the read side agree and nothing is refused. Anything else JS reads
+// as a finite number is refused — a real change of representation (`"007"`,
+// `"7.0"`, `" 7"`, `"-0"`) as well as a spelling SQLite would have kept
+// (`"0x10"`), over-refusing rather than admitting one it converts.
+function storesAsADifferentNumber(value: string): boolean {
   const trimmed = value.trim();
-  return trimmed !== "" && Number.isFinite(Number(trimmed));
+  if (trimmed === "" || !Number.isFinite(Number(trimmed))) return false;
+  const n = Number(value);
+  return !(Number.isSafeInteger(n) && String(n) === value);
 }
 
 /**
@@ -60,24 +65,40 @@ function storesAsANumber(value: string): boolean {
  * evaluation reads what was stored, so a value the column converts on the way
  * in gives the two sides different text — and the check that rides on the
  * gate's label, no-laundering, is the one the server cannot redo: it is the
- * only place the inputs' own labels are known. A string bound to a numeric
- * column is the case that converts; a number bound to a TEXT column renders
- * the same text the evaluator would show it, and no other pairing converts.
+ * only place the inputs' own labels are known. Two bindings convert: a string
+ * a numeric column stores as a number of another text, and a JS number too
+ * large to name one INTEGER exactly, which the driver binds as a double and
+ * SQLite may store wrapped — the commit-time read-back then renders the
+ * wrapped digits and accepts what the evaluator refuses here. A number bound
+ * to a TEXT column renders the same text the evaluator would show it, and no
+ * other pairing converts. (A `Cell` bound to a rule input never reaches the
+ * store: the encoder admits a cell into a `_cf_link` column only, and the
+ * evaluator refuses the object before that.)
  */
 function boundValueMismatch(
   column: string,
   value: unknown,
   sqlType: unknown,
 ): string | undefined {
-  if (typeof value !== "string" || !storesAsANumber(value)) return undefined;
+  if (
+    typeof value === "number" && Number.isInteger(value) &&
+    !Number.isSafeInteger(value)
+  ) {
+    return `a whole number too large to name one SQLite INTEGER exactly is ` +
+      `bound to rule input "${column}" — the store may wrap it, and the ` +
+      "label would be derived from another row's digits; bind a bigint";
+  }
+  if (typeof value !== "string" || !storesAsADifferentNumber(value)) {
+    return undefined;
+  }
   const affinity = sqlAffinity(typeof sqlType === "string" ? sqlType : "");
   if (affinity !== "integer" && affinity !== "real" && affinity !== "numeric") {
     return undefined;
   }
   return `a number written as text is bound to rule input "${column}", ` +
     `which has ${affinity.toUpperCase()} affinity and stores it as a ` +
-    "number — the rule would be evaluated over text the row will not hold; " +
-    "bind the number";
+    "number of another text — the rule would be evaluated over text the " +
+    "row will not hold; bind the number";
 }
 
 /** One written row's computed label — recorded as the write's CFC policy
