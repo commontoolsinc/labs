@@ -4772,6 +4772,9 @@ export class Runner {
   }
 
   /**
+   * Starts the pattern behind `resultCell` inside `tx`, returning the
+   * registration's cancel, or nothing when there was nothing to start.
+   *
    * TypeScript-private rather than a `#` name, because
    * `test/deferred-start-catchup-start.test.ts` replaces this member by
    * assignment, which a `#` method does not allow.
