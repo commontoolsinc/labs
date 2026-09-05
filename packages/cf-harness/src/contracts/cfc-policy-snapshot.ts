@@ -16,6 +16,7 @@ import type { BuiltinToolId } from "./tool-descriptor.ts";
 export type HarnessCfcEnforcementModeSource =
   | "override"
   | "explicit-config"
+  /** Carried in from a run this one continues: a resumed run's own mode. */
   | "inherited"
   /** Derived from the mode the run's fabric session enforces at. */
   | "fabric-session"

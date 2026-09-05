@@ -198,6 +198,13 @@ export interface ResolveHarnessConfigOptions {
   handleValueOrigins?: readonly string[];
   artifactRoot?: string;
   cfcEnforcementMode?: CfcEnforcementMode;
+
+  /**
+   * The mode a run this configuration continues was already at. A resume
+   * passes the mode its run state recorded, which is the mode it goes on
+   * executing at. It outranks a run manifest and the harness default, and
+   * is outranked by anything an operator stated.
+   */
   inheritedCfcEnforcementMode?: CfcEnforcementMode;
   cfcEnforcementModeOverride?: string | CfcEnforcementMode;
   fabricSession?: HarnessFabricSessionConfig;
