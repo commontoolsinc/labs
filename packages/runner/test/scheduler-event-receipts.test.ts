@@ -191,10 +191,7 @@ function resolvedStreamLink(streamCell: Cell<unknown>, runtime: Runtime) {
 }
 
 async function processNextQueuedEvent(runtime: Runtime): Promise<void> {
-  const scheduler = runtime.scheduler as unknown as {
-    eventQueue: Array<Parameters<typeof dispatchQueuedEvent>[1]>;
-    eventExecutionState: Parameters<typeof dispatchQueuedEvent>[0];
-  };
+  const scheduler = runtime.scheduler.accessForTestingOnly;
   const queuedEvent = scheduler.eventQueue[0];
   if (queuedEvent !== undefined) {
     await dispatchQueuedEvent(scheduler.eventExecutionState, queuedEvent);

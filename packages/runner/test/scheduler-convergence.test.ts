@@ -454,11 +454,7 @@ describe("bounded convergence", () => {
   });
 
   it("should preserve dirty effects after pass budget exhaustion", async () => {
-    const schedulerInternal = runtime.scheduler as unknown as {
-      execute: () => Promise<void>;
-      pendingQueueTaskTimer: number | null;
-      scheduled: boolean;
-    };
+    const schedulerInternal = runtime.scheduler.accessForTestingOnly;
     const staleSchedulerInternal = getStaleSchedulerInternals(
       runtime.scheduler,
     );

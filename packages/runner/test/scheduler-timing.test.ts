@@ -447,7 +447,7 @@ describe("debounce and throttling", () => {
       writes: [],
     }, {});
 
-    const scheduler = runtime.scheduler as any;
+    const scheduler = runtime.scheduler.accessForTestingOnly;
     scheduler.actionStats.set(scheduler.getActionId(computation), {
       runCount: 3,
       totalTime: 180,
@@ -477,7 +477,7 @@ describe("debounce and throttling", () => {
       writes: [toMemorySpaceAddress(output.getAsNormalizedFullLink())],
     }, { isEffect: true });
 
-    const scheduler = runtime.scheduler as any;
+    const scheduler = runtime.scheduler.accessForTestingOnly;
     scheduler.actionStats.set(scheduler.getActionId(effect), {
       runCount: 3,
       totalTime: 180,
@@ -499,7 +499,7 @@ describe("debounce and throttling", () => {
       writes: [],
     }, { isEffect: true });
 
-    const scheduler = runtime.scheduler as any;
+    const scheduler = runtime.scheduler.accessForTestingOnly;
     scheduler.actionStats.set(scheduler.getActionId(effect), {
       runCount: 3,
       totalTime: 180,

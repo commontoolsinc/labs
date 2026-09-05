@@ -53,7 +53,7 @@ Deno.test("lift error through CTS pipeline has correct source line", async () =>
   const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
-  const errorHandlers = (runtime.scheduler as any).errorHandlers;
+  const errorHandlers = runtime.scheduler.accessForTestingOnly.errorHandlers;
   errorHandlers.add((err: Error) => {
     capturedError = err;
   });
@@ -131,7 +131,7 @@ Deno.test("handler error through CTS pipeline has correct source line", async ()
   const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
-  const errorHandlers = (runtime.scheduler as any).errorHandlers;
+  const errorHandlers = runtime.scheduler.accessForTestingOnly.errorHandlers;
   errorHandlers.add((err: Error) => {
     capturedError = err;
   });
@@ -211,7 +211,7 @@ Deno.test("lift error stack has multiple frames with correct source line", async
   const patternFn = main!["default"];
 
   let capturedError: Error | null = null;
-  const errorHandlers = (runtime.scheduler as any).errorHandlers;
+  const errorHandlers = runtime.scheduler.accessForTestingOnly.errorHandlers;
   errorHandlers.add((err: Error) => {
     capturedError = err;
   });

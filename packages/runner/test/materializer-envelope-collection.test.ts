@@ -299,12 +299,7 @@ describe("materializer envelope branch selection", () => {
   });
 
   const materializerIndex = () =>
-    (runtime.scheduler as unknown as {
-      materializers: {
-        materializers: Set<unknown>;
-        materializersByEntity: Map<string, Set<unknown>>;
-      };
-    }).materializers;
+    runtime.scheduler.accessForTestingOnly.materializers;
 
   const runPattern = async (withWriteMetadata: boolean) => {
     const resultCell = runtime.getCell(

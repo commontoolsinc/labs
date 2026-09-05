@@ -403,9 +403,7 @@ describe("unsubscribe clears pending trigger reads", () => {
       );
       await runtime.idle();
 
-      const nodes = (runtime.scheduler as unknown as {
-        nodes: NodeRegistry;
-      }).nodes;
+      const nodes = runtime.scheduler.accessForTestingOnly.nodes;
       const record = nodes.get(action);
       expect(record).toBeDefined();
       addInvalidCause(record!, {

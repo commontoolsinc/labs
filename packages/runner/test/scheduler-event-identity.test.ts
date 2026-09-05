@@ -199,12 +199,11 @@ describe("scheduler event identity", () => {
     try {
       // Inject only the asynchronous piece-start seam; queueing, head parking,
       // dispatch, commits, and continuation all run through the real Scheduler.
-      const schedulerInternals = env.runtime.scheduler as unknown as {
-        eventQueueState: {
-          loadPieceForEvent?: () => Promise<EnsurePieceVerdict>;
-        };
-      };
-      schedulerInternals.eventQueueState.loadPieceForEvent = () => pieceLoad;
+      // The seam is a `readonly` optional on the state, so the write narrows
+      // the state object rather than the scheduler.
+      (env.runtime.scheduler.accessForTestingOnly.eventQueueState as {
+        loadPieceForEvent?: () => Promise<EnsurePieceVerdict>;
+      }).loadPieceForEvent = () => pieceLoad;
 
       env.runtime.scheduler.queueEvent(loadingLink, "first");
       env.runtime.scheduler.addEventHandler((_tx, value) => {

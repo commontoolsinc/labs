@@ -141,9 +141,7 @@ describe("idle consults head-event park with a wake timer armed", () => {
     // Guard the coverage intent: the head-event park branch is only reached with
     // a wake timer pending, so fail loudly if the debounce did not arm one
     // rather than pass while silently skipping the branch under test.
-    const gates = (runtime.scheduler as unknown as {
-      gates: { hasWakeTimer(): boolean };
-    }).gates;
+    const gates = runtime.scheduler.accessForTestingOnly.gates;
     expect(gates.hasWakeTimer()).toBe(true);
 
     // Queue the event (now in the queue) and, in the same synchronous turn, ask
