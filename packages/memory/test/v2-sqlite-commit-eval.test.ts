@@ -83,7 +83,21 @@ const rtab = table(
   () => ({ confidentiality: all(dbOwner()) }),
 );
 
-const TABLES = { emails, staging, ownerOnly, rtab };
+// A mailbox-keyed table: the rule reads an INTEGER column, and the driver
+// reads an INTEGER column through a 32-bit accessor unless the read renders it
+// as text. `/^7$/` under `min: 1` refuses every other id, so a truncated read
+// is the difference between a refusal and a silent pass.
+const mailboxes = table(
+  { id: "integer primary key", source_id: "integer" },
+  (f) => ({
+    confidentiality: all(
+      principal("mailbox", match(f.source_id, /^7$/, { min: 1 })),
+      dbOwner(),
+    ),
+  }),
+);
+
+const TABLES = { emails, staging, ownerOnly, rtab, mailboxes };
 const DB_ID = "of:commit-eval-db";
 const OWNER = "did:key:owner";
 
@@ -596,6 +610,63 @@ Deno.test("commit eval fails closed on the shapes it cannot attribute", () => {
         ),
       RowLabelCommitError,
       "invalid rowLabel rule",
+    );
+  } finally {
+    db.close();
+  }
+});
+
+Deno.test("commit eval judges an INTEGER column by its stored digits", () => {
+  // 4294967303 is 7 in the low 32 bits, which is exactly the id the rule
+  // admits. Read as 7 the violating row commits; read as itself it refuses.
+  const db = bareDb();
+  try {
+    assertEquals(
+      applySqliteCommitWrite(
+        db,
+        bareOp("INSERT INTO mailboxes (id, source_id) VALUES (?, ?)", [1, 7]),
+      ).changes,
+      1,
+    );
+    assertThrows(
+      () =>
+        applySqliteCommitWrite(
+          db,
+          bareOp("INSERT INTO mailboxes (id, source_id) VALUES (?, ?)", [
+            2,
+            4294967303,
+          ]),
+        ),
+      RowLabelCommitError,
+      "matched nothing",
+    );
+  } finally {
+    db.close();
+  }
+});
+
+Deno.test("commit eval reads back the row it wrote, whatever its rowid", () => {
+  // The affected row is identified by rowid, and a rowid past 2^31 truncates
+  // into the range of one already stored: rowid 4294967303 collides with 7.
+  // Reading back the wrong row judges a violating write by a valid row's
+  // values, so the write lands unevaluated.
+  const db = bareDb();
+  try {
+    applySqliteCommitWrite(
+      db,
+      bareOp("INSERT INTO mailboxes (id, source_id) VALUES (?, ?)", [7, 7]),
+    );
+    assertThrows(
+      () =>
+        applySqliteCommitWrite(
+          db,
+          bareOp("INSERT INTO mailboxes (id, source_id) VALUES (?, ?)", [
+            4294967303,
+            999,
+          ]),
+        ),
+      RowLabelCommitError,
+      "matched nothing",
     );
   } finally {
     db.close();
