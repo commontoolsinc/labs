@@ -6566,7 +6566,7 @@ supply; OW29/OW32/OW34 closed):
     contract's own shape): (i) the pattern POINTER for
     separate-start/resume/stop-restart flows and (ii) the
     setup-completion MARKER for `storedSetupMarker`'s reuse decision —
-    both via `Runner.sessionPatternPointers`, written exactly where the
+    both via `Runner.#sessionPatternPointers`, written exactly where the
     stamps are skipped; and (iii) the intra-session CHANGE SIGNAL for
     RUNNING sub-pieces: a lift re-deriving its returned pattern used to
     reach the running piece's swap machinery THROUGH the stamp (setup

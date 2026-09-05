@@ -42,7 +42,6 @@ import {
 import {
   type ICommitNotification,
   type IExtendedStorageTransaction,
-  type IStorageSubscription,
   type MediaType,
   type URI,
 } from "../src/storage/interface.ts";
@@ -1347,10 +1346,7 @@ describe("storage subscription", () => {
   });
 
   it("clears cached patterns when storage notifies of changes — every scope INSTANCE of the changed doc (r3739139481)", () => {
-    const internals = runtime.runner as unknown as {
-      resultPatternCache: Map<string, Map<string, string>>;
-      createStorageSubscription(): IStorageSubscription;
-    };
+    const internals = runtime.runner.accessForTestingOnly;
 
     const uri = "pattern-cache-test" as URI;
     // The memo is keyed doc-then-instance: notifications name the DOC
@@ -3970,9 +3966,13 @@ describe("runner utils", () => {
       // Simulate a persisted piece being resumed. In that path start() syncs
       // dependencies before registering handlers, which is where this race
       // used to allow duplicate starts for the same result cell.
-      (runtime.runner as any).locallyPreparedResults.clear();
+      runtime.runner.accessForTestingOnly.locallyPreparedResults.clear();
 
-      const runner = runtime.runner as any;
+      // Replaced by assignment below, which only a TypeScript-private member
+      // allows, so it is reached the old way.
+      const runner = runtime.runner as unknown as {
+        syncCellsForRunningPattern: (...args: any[]) => Promise<boolean>;
+      };
       let dependencySyncRuns = 0;
       const originalSync = runner.syncCellsForRunningPattern.bind(runner);
       runner.syncCellsForRunningPattern = async (...args: any[]) => {
@@ -4031,7 +4031,9 @@ describe("runner utils", () => {
       const started = runtime.start(resultCell);
       // Should be running now (check via runner.cancels having the key)
       expect(
-        runtime.runner["cancels"].has(runtime.runner["getDocKey"](resultCell)),
+        runtime.runner.cancels.has(
+          runtime.runner.accessForTestingOnly.getDocKey(resultCell),
+        ),
       ).toBe(true);
 
       expect(await started).toBe(true);
@@ -4080,7 +4082,9 @@ describe("runner utils", () => {
 
       // Verify root cell is running
       expect(
-        runtime.runner["cancels"].has(runtime.runner["getDocKey"](resultCell)),
+        runtime.runner.cancels.has(
+          runtime.runner.accessForTestingOnly.getDocKey(resultCell),
+        ),
       ).toBe(true);
     });
 

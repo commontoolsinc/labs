@@ -26,27 +26,14 @@ import { FabricError } from "@commonfabric/data-model/fabric-instances";
 
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("test runner argument walks");
 const space = signer.did();
 
-/**
- * The two walks are `private` rather than `#private` on `Runner`, so a test can
- * address them through `runtime.runner`. Reaching them through a running action
- * would drag in module setup that has nothing to do with what is pinned here.
- */
-type WalkAccess = {
-  collectArgumentSchedulerReadLinks(
-    argumentSchema: unknown,
-    value: unknown,
-    resultCell: unknown,
-  ): unknown[];
-  collectWritableCellArgumentLinks(
-    argumentSchema: unknown,
-    value: unknown,
-    resultCell: unknown,
-  ): unknown[];
-};
+// The two walks are reached through `accessForTestingOnly`: driving them
+// through a running action would drag in module setup that has nothing to do
+// with what is pinned here.
 
 describe("runner-argument-walks", () => {
   let runtime: Runtime;
@@ -73,7 +60,7 @@ describe("runner-argument-walks", () => {
    * reaching a `FabricBytes` there tries to index INTO it -- the shape that
    * would expose a walk mistaking a special object for a container.
    */
-  const argumentSchema = {
+  const argumentSchema: JSONSchema = {
     type: "object",
     properties: {
       payload: {
@@ -124,7 +111,7 @@ describe("runner-argument-walks", () => {
       // schema position when it sits in a plain record, so what changes the
       // outcome is the wrapper.
       const { resultCell, value } = fixture();
-      const walks = runtime.runner as unknown as WalkAccess;
+      const walks = runtime.runner.accessForTestingOnly;
       const nested = { payload: { inner: value.ref } };
 
       expect(
@@ -153,7 +140,7 @@ describe("runner-argument-walks", () => {
       // nothing, and carry on to `ref` -- rather than throwing, or stopping.
       const { resultCell, value } = fixture();
 
-      const links = (runtime.runner as unknown as WalkAccess)
+      const links = runtime.runner.accessForTestingOnly
         .collectArgumentSchedulerReadLinks(argumentSchema, value, resultCell);
 
       expect(links.length).toBe(1);
@@ -167,8 +154,8 @@ describe("runner-argument-walks", () => {
       // would be missed while the walk reported success. This pins that the
       // guard runs first.
       const { resultCell, value } = fixture();
-      const walks = runtime.runner as unknown as WalkAccess;
-      const asCellSchema = {
+      const walks = runtime.runner.accessForTestingOnly;
+      const asCellSchema: JSONSchema = {
         type: "object",
         properties: { payload: { type: "object", asCell: ["cell"] } },
       };
@@ -195,7 +182,7 @@ describe("runner-argument-walks", () => {
 
     it("throws for a `FabricError` rather than missing a link inside it", () => {
       const { resultCell, value } = fixture();
-      const walks = runtime.runner as unknown as WalkAccess;
+      const walks = runtime.runner.accessForTestingOnly;
 
       expect(
         walks.collectWritableCellArgumentLinks(
@@ -220,7 +207,7 @@ describe("runner-argument-walks", () => {
     it("collects a sibling write-redirect link past a `FabricBytes`", () => {
       const { resultCell, value } = fixture();
 
-      const links = (runtime.runner as unknown as WalkAccess)
+      const links = runtime.runner.accessForTestingOnly
         .collectWritableCellArgumentLinks(argumentSchema, value, resultCell);
 
       expect(links.length).toBe(1);

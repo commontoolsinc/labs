@@ -51,7 +51,7 @@ import {
   streamEntriesDocId,
   type StreamEventsDocValue,
 } from "@commonfabric/memory/v2";
-import { UI } from "../src/builder/types.ts";
+import { type Frame, UI } from "../src/builder/types.ts";
 import { resolveEntryIdentity } from "../src/index.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { waitUntil } from "./support/wait-until.ts";
@@ -394,12 +394,8 @@ describe("Phase 5 cross-space serving", () => {
       // a provisioning crossing without acting would be refused
       // carriage-less anyway and the orphaned genesis would name a
       // principal the grant probe never sees.
-      const resolvePending = (serving.runner as unknown as {
-        resolvePendingSpaceNamesAndRetry(
-          frame: unknown,
-          tx?: IExtendedStorageTransaction,
-        ): Promise<never>;
-      }).resolvePendingSpaceNamesAndRetry.bind(serving.runner);
+      const resolvePending =
+        serving.runner.accessForTestingOnly.resolvePendingSpaceNamesAndRetry;
       const scaffolding = serving.edit();
       stampWaveRunContext(scaffolding, {
         actionId: "f1/scaffolding-only",
@@ -411,7 +407,7 @@ describe("Phase 5 cross-space serving", () => {
       });
       await expect(
         resolvePending(
-          { pendingSpaceNames: new Set(["ow31-f1-scaffolding"]) },
+          { pendingSpaceNames: new Set(["ow31-f1-scaffolding"]) } as Frame,
           scaffolding,
         ),
       ).rejects.toThrow("acting identity as genesis owner");
@@ -430,7 +426,7 @@ describe("Phase 5 cross-space serving", () => {
       });
       await expect(
         resolvePending(
-          { pendingSpaceNames: new Set(["ow31-f1-acting"]) },
+          { pendingSpaceNames: new Set(["ow31-f1-acting"]) } as Frame,
           actingTx,
         ),
       ).rejects.toThrow("Resolving in-space target spaces");

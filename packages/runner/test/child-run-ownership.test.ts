@@ -359,9 +359,7 @@ describe("child run ownership", () => {
     );
     runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
 
-    const pending = (runtime.runner as unknown as {
-      pendingDeferredStarts: Map<string, Set<unknown>>;
-    }).pendingDeferredStarts;
+    const pending = runtime.runner.accessForTestingOnly.pendingDeferredStarts;
     expect(pending.size).toBe(1);
 
     expect((await tx.commit()).error).toBeUndefined();
@@ -391,9 +389,7 @@ describe("child run ownership", () => {
     );
     runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
 
-    const pending = (runtime.runner as unknown as {
-      pendingDeferredStarts: Map<string, Set<unknown>>;
-    }).pendingDeferredStarts;
+    const pending = runtime.runner.accessForTestingOnly.pendingDeferredStarts;
     expect(pending.size).toBe(1);
 
     expect(tx.abort("setup rejected").error).toBeUndefined();
@@ -414,17 +410,7 @@ describe("child run ownership", () => {
     // entry point, reached here directly: driving it through a handler would
     // mean failing whichever storage transaction the dispatch happened to
     // land on.
-    const harness = runtime.runner as unknown as {
-      runPatternAfterSuccessfulCommit(
-        tx: unknown,
-        resultCell: unknown,
-        pattern: unknown,
-        inputs: unknown,
-        pullOnceAfterStart?: boolean,
-        markCreateOnlyResult?: boolean,
-      ): () => void;
-      pendingDeferredStarts: Map<string, Set<unknown>>;
-    };
+    const harness = runtime.runner.accessForTestingOnly;
     const tx = runtime.edit();
     const receipt = runtime.getCell<Record<string, unknown>>(
       space,

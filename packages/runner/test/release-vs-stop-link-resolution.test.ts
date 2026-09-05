@@ -83,9 +83,7 @@ Deno.test("releasing a target before link resolution preserves the held start", 
       });
     }) as typeof link.sync;
 
-    const lifecycleState = runtime.runner as unknown as {
-      activeStartAttempts: Set<{ preResolutionStopKeys: Set<string> }>;
-    };
+    const lifecycleState = runtime.runner.accessForTestingOnly;
     const start = runtime.start(link);
     await syncStarted.promise;
     // The release stops the child registration it owns, and leaves the start

@@ -113,12 +113,7 @@ describe("syncArgumentLinkTargets", () => {
     // reads and syncs never count toward an assertion about it.
     syncedIds.length = 0;
     walkedIds.length = 0;
-    await (runtime.runner as unknown as {
-      syncArgumentLinkTargets(
-        roots: readonly { cell: Cell<unknown>; schema?: JSONSchema }[],
-        label: string,
-      ): Promise<void>;
-    }).syncArgumentLinkTargets(
+    await runtime.runner.accessForTestingOnly.syncArgumentLinkTargets(
       [{ cell: root, schema }],
       "resumeArgumentLinkTargetSync",
     );

@@ -12,7 +12,7 @@ import { VERIFIED_BINDING_METADATA_FIELD } from "@commonfabric/utils/sandbox-con
  * registration channel: a builder artifact minted DURING a running action has
  * no content-addressed identity, and the runner fails closed at creation time
  * instead of admitting it (identity E5 — see
- * `Runner.invokeJavaScriptImplementation` / `builder/action-context.ts`).
+ * `Runner.#invokeJavaScriptImplementation` / `builder/action-context.ts`).
  *
  * The WeakMap itself is the anti-spoof proof for CFC: an attacker-supplied
  * function — even with byte-identical source text — was never registered
