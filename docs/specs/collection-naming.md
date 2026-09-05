@@ -628,11 +628,31 @@ grammar, and it carries the normalization and confusable policy with it.
 a *kind* by searching the reader's own discovery collections — favorites,
 mentionables, profile elements — and may return several candidates and a picker
 (`docs/common/conventions/wish.md`). A citation names one *instance* and
-resolves deterministically through the scope chain. Both would spell themselves
-with `#`. Either they are one system, in which case a tag search is the
+resolves deterministically through the scope chain. Both spell themselves with
+`#`.
+
+They do not meet today, and the difference is where each `#` is read. A wish's
+is a character inside a query string a pattern author writes in source, or
+inside a `#tag` in a JSDoc comment declaring what a schema offers; nothing
+scans prose for it. A citation's is a trigger matched as a person types into a
+document. No reader parses both, so neither spelling is currently ambiguous to
+any code.
+
+What is open is therefore a reservation rather than a conflict: `#` is spent
+twice, and whichever widens first collides. **Step 5 is that widening**, which
+is why it is blocked here and not merely awaiting an answer: sigil parsing
+reads `#` out of prose generally, rather than recording a reference the way the
+editor's trigger does, so a tag and a citation become candidates for the same
+token in the same reader. Answer it before that step, not during. At that point
+either they are one system, in which case a tag search is the
 outermost rung of the same scope chain and the well-known targets that resolve
 by recency need reconciling with the rule that nothing hidden decides what a
 name means; or they are two systems and one of them needs a different sigil.
+
+The cost that exists now is a reader's rather than a parser's: the same mark
+means "search a kind, perhaps pick from several" in one place and "this exact
+member, resolved deterministically" in another, and only context separates
+them.
 
 **Which spelling a renderer prefers** when several are available and all round
 trip — a collection's compact form, its path form, and any space-level name the
