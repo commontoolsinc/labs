@@ -511,16 +511,19 @@ export const resolveFabricSessionConfig = (
   );
   return {
     ...options.fabricSession,
-    cfcReadMaxConfidentiality: meetCfcObservationCeilings(
+    // Snapshots, not references: the session is built lazily on the first
+    // tool call, and a manifest array mutated in between must not widen
+    // what that session is built under.
+    cfcReadMaxConfidentiality: structuredClone(meetCfcObservationCeilings(
       options.fabricSession.cfcReadMaxConfidentiality,
       manifestCeiling,
-    ) as readonly CfcConfClause[],
+    )) as readonly CfcConfClause[],
     ...(onExceed !== undefined ? { cfcReadOnExceed: onExceed } : {}),
     readCeilingSource:
       options.fabricSession.cfcReadMaxConfidentiality !== undefined
         ? "both"
         : "run-manifest",
-    manifestReadMaxConfidentiality: manifestCeiling,
+    manifestReadMaxConfidentiality: structuredClone(manifestCeiling),
     ...(options.runManifest?.cfc?.onExceed !== undefined
       ? { manifestReadOnExceed: options.runManifest.cfc.onExceed }
       : {}),

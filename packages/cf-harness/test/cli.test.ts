@@ -1,4 +1,5 @@
-import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import { assertEquals, assertRejects,
+  assertMatch, assertStringIncludes } from "@std/assert";
 import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 
@@ -7416,4 +7417,37 @@ Deno.test("a resume whose manifest declares another read ceiling is refused as a
   assertEquals(failure.type, "cf-harness.host-failure");
   assertEquals(failure.error.code, "provider-mismatch");
   assertStringIncludes(failure.error.message, "resume read ceiling mismatch");
+});
+
+Deno.test("parseCfHarnessCliArgs refuses a present --max-confidentiality with no value rather than running unbounded", async () => {
+  const fabric = [
+    "--prompt",
+    "hi",
+    "--fabric-api-url",
+    "https://toolshed.example/",
+    "--fabric-identity",
+    "keys/agent.pkcs8",
+    "--fabric-space",
+    "my-space",
+  ];
+  // Bare at the end of the line, bare before another flag, and with an
+  // empty value: each is a ceiling the operator meant to state and did not,
+  // never a run with no ceiling.
+  for (
+    const args of [
+      [...fabric, "--max-confidentiality"],
+      [...fabric, "--max-confidentiality", "--print-transcript"],
+      [...fabric, "--max-confidentiality="],
+      [...fabric, "--max-confidentiality", "   "],
+    ]
+  ) {
+    // Two refusals cover the shapes: the parser reads a bare flag as an
+    // empty string, which the JSON step refuses; a non-string value is
+    // refused before it. Either way the run never starts unbounded.
+    const err = await assertRejects(
+      () => parseCfHarnessCliArgs(args, { cwd: "/tmp/project", env: {} }),
+      Error,
+    );
+    assertMatch(err.message, /--max-confidentiality (requires a JSON array|must be JSON)/);
+  }
 });

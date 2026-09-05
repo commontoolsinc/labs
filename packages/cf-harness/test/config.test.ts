@@ -698,3 +698,31 @@ Deno.test("resolveHarnessConfig refuses a resolved session beside a manifest cei
     underA,
   );
 });
+
+Deno.test("resolveHarnessConfig snapshots the run manifest's read ceiling rather than holding it by reference", () => {
+  const ceiling: string[] = ["did:key:zOwner"];
+  const runManifest = {
+    type: "cf-harness.loom-run-manifest" as const,
+    version: 1 as const,
+    source: "loom" as const,
+    cfc: { maxConfidentiality: ceiling },
+  };
+  const config = resolveHarnessConfig({
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+    },
+    runManifest,
+    skillScriptExecutionTarget: "sandbox",
+  });
+  // The session is built lazily, on the first tool call; a manifest object
+  // mutated in between must not widen what that session is built under.
+  ceiling.push("did:key:zEveryone");
+  assertEquals(config.fabricSession?.cfcReadMaxConfidentiality, [
+    "did:key:zOwner",
+  ]);
+  assertEquals(config.fabricSession?.manifestReadMaxConfidentiality, [
+    "did:key:zOwner",
+  ]);
+});
