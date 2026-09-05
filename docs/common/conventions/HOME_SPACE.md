@@ -56,22 +56,28 @@ Favorites are stored on the home default pattern at
 Favorites are reached through the runtime's favorites manager
 (`FavoritesManager`, exported by `@commonfabric/runtime-client`), which reads
 and writes the home space's default pattern directly. A piece is addressed by
-the space it lives in plus its entity id:
+the space it lives in, its entity id there, and the scope that id resolves in,
+carried as the one `FavoritePieceAddress` value since one id in two scopes is
+two documents:
 
 ```typescript
 // Shown for illustration only.
 const favorites = rt.favorites();
+const piece = { space, pieceId, scope: "space" };
 
-await favorites.addFavorite(space, pieceId);
-await favorites.removeFavorite(space, pieceId);
+await favorites.addFavorite(piece);
+await favorites.removeFavorite(piece);
 
 const entries = await favorites.getFavorites();
 const unsubscribe = favorites.subscribeFavorites((list) => render(list));
 ```
 
-An entry is keyed by the piece's identity, so favoriting the same piece twice
-replaces its entry rather than adding a second one, and removing it reaches
-that entry whatever else the list holds.
+An entry is keyed by that whole address, so favoriting the same piece twice
+replaces its entry rather than adding a second one, removing it reaches that
+entry whatever else the list holds, and one id favorited in two scopes holds
+two entries rather than one. A space-scoped address names no scope in its key,
+that being the scope an address defaults to; only a narrower scope is written,
+and that elision is what keys every favorite in durable storage.
 
 ## Profile
 
