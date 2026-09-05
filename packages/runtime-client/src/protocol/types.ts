@@ -781,6 +781,26 @@ export type InitializationData = {
   cfcFlowLabels?: "off" | "observe" | "persist";
 
   /**
+   * The runtime-wide read ceiling every `db.query` the worker's runtime
+   * issues reads under (`RuntimeOptions.cfcReadMaxConfidentiality`). A
+   * worker is one device's runtime, so a ceiling set here is per device by
+   * construction: it never touches the space, and a query's own ceiling can
+   * only tighten it. It applies to session-scoped query results; a query
+   * with a broader result is refused. Absent means no ceiling — the owner
+   * view. An empty list admits nothing and the runtime refuses to start on
+   * it.
+   */
+  cfcReadMaxConfidentiality?: readonly CfcConfClause[];
+
+  /**
+   * What a read under that ceiling does with a row the ceiling does not
+   * admit when the query declares no `onExceed` of its own: `fail` refuses
+   * the query, `skip` drops the row. Absent leaves the runner's default,
+   * which is `fail`.
+   */
+  cfcReadOnExceed?: "fail" | "skip";
+
+  /**
    * Whether author-supplied render-boundary declassification is honored.
    * `allow` is the default. `deny` ignores an author's
    * `declassifyConfidentiality`, so that a pattern cannot release a secret
@@ -908,6 +928,8 @@ export type RuntimeSecurityContext =
     | "experimental"
     | "cfcEnforcementMode"
     | "cfcFlowLabels"
+    | "cfcReadMaxConfidentiality"
+    | "cfcReadOnExceed"
     | "renderDeclassificationPolicy"
     | "renderConfidentialityCeiling"
     | "trustSnapshot"

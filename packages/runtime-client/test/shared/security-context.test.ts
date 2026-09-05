@@ -23,6 +23,8 @@ describe("securityContextDifferences()", () => {
     spaceHostMap: { [signerDid]: "http://memory.test/" },
     cfcEnforcementMode: "enforce-strict",
     cfcFlowLabels: "persist",
+    cfcReadMaxConfidentiality: [signerDid, { anyOf: ["a", "b"] }],
+    cfcReadOnExceed: "skip",
     renderDeclassificationPolicy: "deny",
     renderConfidentialityCeiling: { atoms: [], caveatKinds: ["influence"] },
     trustSnapshot: { id: `principal:${signerDid}` },
@@ -88,6 +90,15 @@ describe("securityContextDifferences()", () => {
         running,
       ),
     ).toEqual(["renderConfidentialityCeiling"]);
+  });
+
+  it("names a read ceiling that differs by one clause", () => {
+    expect(
+      securityContextDifferences(
+        { ...running, cfcReadMaxConfidentiality: [signerDid] },
+        running,
+      ),
+    ).toEqual(["cfcReadMaxConfidentiality"]);
   });
 
   it("names an absent field the running context declares", () => {

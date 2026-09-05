@@ -57,6 +57,8 @@ const SECURITY_CONTEXT_FIELDS: Record<
   apiUrl: true,
   cfcEnforcementMode: true,
   cfcFlowLabels: true,
+  cfcReadMaxConfidentiality: true,
+  cfcReadOnExceed: true,
   experimental: true,
   identity: true,
   renderConfidentialityCeiling: true,

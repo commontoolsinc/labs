@@ -954,6 +954,8 @@ describe("attachOptionsFrom()", () => {
       spaceHostMap: { [identity.did()]: "http://memory.test/" },
       cfcEnforcementMode: "observe",
       cfcFlowLabels: "persist",
+      cfcReadMaxConfidentiality: [identity.did()],
+      cfcReadOnExceed: "skip",
     });
 
     expect(attach.apiUrl.toString()).toBe("http://backend.test/");
@@ -962,5 +964,7 @@ describe("attachOptionsFrom()", () => {
     });
     expect(attach.cfcEnforcementMode).toBe("observe");
     expect(attach.cfcFlowLabels).toBe("persist");
+    expect(attach.cfcReadMaxConfidentiality).toEqual([identity.did()]);
+    expect(attach.cfcReadOnExceed).toBe("skip");
   });
 });

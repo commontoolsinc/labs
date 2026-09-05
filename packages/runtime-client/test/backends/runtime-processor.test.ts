@@ -4877,6 +4877,8 @@ describe("runtime-processor", () => {
             spaceDid: "did:key:space",
             cfcEnforcementMode: "enforce-explicit",
             cfcFlowLabels: "observe",
+            cfcReadMaxConfidentiality: ["did:key:worker"],
+            cfcReadOnExceed: "skip",
             trustSnapshot: {
               id: "principal:did:key:worker",
               actingPrincipal: "did:key:worker",
@@ -4889,6 +4891,8 @@ describe("runtime-processor", () => {
 
       expect(options.cfcEnforcementMode).toBe("enforce-explicit");
       expect(options.cfcFlowLabels).toBe("observe");
+      expect(options.cfcReadMaxConfidentiality).toEqual(["did:key:worker"]);
+      expect(options.cfcReadOnExceed).toBe("skip");
       expect(options.trustSnapshotProvider?.()).toEqual({
         id: "principal:did:key:worker",
         actingPrincipal: "did:key:worker",
@@ -4917,6 +4921,8 @@ describe("runtime-processor", () => {
       );
       expect(options.cfcEnforcementMode).toBe("enforce-explicit");
       expect(options.cfcFlowLabels).toBeUndefined();
+      expect(options.cfcReadMaxConfidentiality).toBeUndefined();
+      expect(options.cfcReadOnExceed).toBeUndefined();
     });
 
     it("threads the host-decided space-host map through to the runtime options", () => {
