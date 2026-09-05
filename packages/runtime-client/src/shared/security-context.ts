@@ -8,7 +8,6 @@
  */
 
 import { deepEqual } from "@commonfabric/utils/deep-equal";
-import { clausesEqual } from "@commonfabric/runner/cfc";
 import type { CfcConfClause } from "@commonfabric/runner/cfc";
 
 import type { RuntimeSecurityContext } from "@/protocol/mod.ts";
@@ -81,27 +80,46 @@ const SECURITY_CONTEXT_FIELDS: Record<
  */
 
 /**
- * A read ceiling compares by clause, with the runner's structural clause
- * equality — insensitive to the order of an `anyOf`'s alternatives — and as a
- * multiset of clauses, since a ceiling is a conjunction. Two documents that
- * spell the same ceiling with its alternatives in another order hold the same
- * posture; a byte comparison would fail the attach over spelling.
+ * A read ceiling compares by clause, insensitive to the order of an
+ * `anyOf`'s alternatives and to the order of the clauses themselves (a
+ * ceiling is a conjunction), so two documents that spell one ceiling in
+ * another order hold the same posture and a byte comparison would fail the
+ * attach over spelling. Structural, not the runner's `clausesEqual`: this
+ * file is loaded on the browser's main thread, and the runner's CFC barrel
+ * reaches modules that refuse to run there.
  */
+const canonicalAtom = (atom: unknown): string =>
+  JSON.stringify(
+    atom,
+    (_key, value) =>
+      value !== null && typeof value === "object" && !Array.isArray(value)
+        ? Object.fromEntries(
+          Object.entries(value as Record<string, unknown>).sort(([a], [b]) =>
+            a < b ? -1 : a > b ? 1 : 0
+          ),
+        )
+        : value,
+  );
+
+const canonicalClause = (clause: unknown): string => {
+  const alternatives = clause !== null && typeof clause === "object" &&
+      Array.isArray((clause as { anyOf?: unknown }).anyOf)
+    ? (clause as { anyOf: unknown[] }).anyOf
+    : undefined;
+  if (alternatives === undefined) return canonicalAtom(clause);
+  const unique = [...new Set(alternatives.map(canonicalAtom))].sort();
+  return unique.length === 1 ? unique[0] : `anyOf:${JSON.stringify(unique)}`;
+};
+
 function readCeilingsEqual(
   left: readonly CfcConfClause[] | undefined,
   right: readonly CfcConfClause[] | undefined,
 ): boolean {
   if (left === undefined || right === undefined) return left === right;
   if (left.length !== right.length) return false;
-  const used = new Array<boolean>(right.length).fill(false);
-  for (const clause of left) {
-    const at = right.findIndex((candidate, i) =>
-      !used[i] && clausesEqual(clause, candidate)
-    );
-    if (at === -1) return false;
-    used[at] = true;
-  }
-  return true;
+  const l = left.map(canonicalClause).sort();
+  const r = right.map(canonicalClause).sort();
+  return l.every((clause, i) => clause === r[i]);
 }
 
 export function securityContextDifferences(
