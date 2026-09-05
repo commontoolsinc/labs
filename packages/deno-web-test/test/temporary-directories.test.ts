@@ -3,13 +3,17 @@
  *
  * The run is given a `TMPDIR` of this test's own, and does not have it to
  * itself: Chrome writes its own scratch files into the directory `TMPDIR`
- * names and leaves some of them behind, files and directories alike, and its
- * crash handler, zygote, and GPU processes are re-parented when the browser
- * process goes, so more can land there after the run has ended and a run that
- * has ended cannot be waited for. What the run makes for itself carries the
- * prefix `Manifest.create()` gives it, and the assertion reads that.
- * `manifest.test.ts` is what pins the prefix onto the directory, so that a run
- * making no such directory would fail there rather than pass silently here.
+ * names and leaves some of them behind, files and directories alike. What the
+ * run makes for itself carries the prefix `Manifest.create()` gives it, and
+ * that prefix is what the assertion reads rather than the directory being
+ * empty. `manifest.test.ts` is what pins the prefix onto the directory, so
+ * that a run making no such directory would fail there rather than pass
+ * silently here.
+ *
+ * `BrowserProcess.close()` returns once every process holding the browser's
+ * output pipes has gone, and the run closes the browser before it returns.
+ * Nothing the run started is writing into the directory while it is read
+ * below.
  */
 
 import { describe, it } from "@std/testing/bdd";
