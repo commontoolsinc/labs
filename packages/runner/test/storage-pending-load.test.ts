@@ -50,12 +50,7 @@ describe("storage pending-load generations", () => {
     const storage = runtime.storageManager as StorageManager;
     const schemaStarted = Promise.withResolvers<void>();
     const releaseSchema = Promise.withResolvers<void>();
-    // Replaced by assignment below, which its `private` rather than `#` name
-    // allows; the cast reaches only it.
-    const stubbed = storage as unknown as {
-      syncCfcSchemaDocument(): Promise<Error | undefined>;
-    };
-    stubbed.syncCfcSchemaDocument = async () => {
+    storage.accessForTestingOnly.cfcSchemaDocumentSyncer = async () => {
       schemaStarted.resolve();
       await releaseSchema.promise;
       return undefined;
