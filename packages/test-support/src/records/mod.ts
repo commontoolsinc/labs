@@ -104,6 +104,7 @@ export type { CreateObjectOptions, CreateObjectResult } from "./store.ts";
 export {
   listObjects,
   listObjectSizes,
+  listObjectTimes,
   objectUrl,
   parseReportGroups,
   readObject,
@@ -112,6 +113,7 @@ export type {
   ListedObject,
   StoredReport,
   StoredReportGroup,
+  TimedObject,
 } from "./store-reader.ts";
 export { recordsSpooledBy } from "./testing.ts";
 export {

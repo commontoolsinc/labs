@@ -1936,9 +1936,11 @@ failure path where the request is refused. It is also the same value on a
 workstation as in a job, so `plan --dry-run` answers the question a lane
 would answer instead of resolving against the clock. And it is the better
 anchor on its own terms: the manifest worth reading is the one that was
-current when the tree under test came into being. The committer date
-rather than the author's, because a rebased or cherry-picked commit keeps
-the date it was first written.
+current when the tree under test came into being.
+
+The committer date rather than the author date. A rebased or
+cherry-picked commit keeps the author date it was first written at, which
+can be arbitrarily old, while the committer date moves with the tree.
 
 ## What the census can project
 
@@ -2017,14 +2019,19 @@ labs/test-selection/v1/state/<yyyy-mm-dd>-<ULID>.json.gz
 Write-once naming is not a stylistic choice: the store's writer
 credentials hold `objectCreator` and nothing else, cannot overwrite, and
 that is the property that makes the whole store trustworthy. So there is
-no `current.json`. The leading timestamp keeps object names
-chronologically useful, but it does not decide publication order. When a
-lane resolves a manifest, it lists object metadata once and takes the
-newest object generated at or before the commit under test, using the
-object name to break a tie. A manifest published while the run is going
-is generated after that date, so it cannot change the answer, and every
-lane and every later attempt reads the same commit and reaches the same
-object. What the answer does depend on is retention: the manifests a
+no `current.json`. The timestamp leading an object's name is the moment
+its publisher started, and it keeps a listing chronologically readable
+without deciding what a resolution compares. When a lane resolves a
+manifest, it lists once and takes the newest object the store had created
+at or before the commit under test, using the full object name to break a
+tie between two created in the same instant. The creation time rather than
+the name, because the publisher names its manifest at the start of a run
+that creates the object at the end, and a lane listing inside that gap
+would otherwise disagree with one listing after it. Every lane and every
+later attempt reads the same commit, and a manifest the store creates
+while the run is going is created after that date and cannot change the
+answer. [The specification](../specs/test-selection.md#determinism) says
+what a commit dated ahead of the store's clock costs. What the answer does depend on is retention: the manifests a
 commit can resolve have to outlive the window in which that run may be
 re-run, which is a retention setting on the bucket rather than anything
 this reads.
@@ -2921,7 +2928,7 @@ is pinned to the commit's date. And if none of that settles it,
 
 | What goes wrong | What happens |
 | --- | --- |
-| The store is unreachable from a lane | The lane runs the mandatory set plus a deterministic slice of the corpus sized to its budget, prints that it is running unselected, and passes or fails on that. Pull requests keep flowing. |
+| The store is unreachable from a lane | The lane reads its share from the tree instead. Nothing has records, so the whole corpus is mandatory and the lanes divide it between them, printing that they are running everything. Pull requests keep flowing, and slower. |
 | The publisher has not run for a day | Lanes use the last manifest. Selection quality decays slowly; nothing fails. |
 | The manifest is malformed or a newer schema | Rejected whole, treated as absent, same path as unreachable. |
 | A selected item no longer exists in the tree | Dropped with a line in the summary. A renamed test is simultaneously an unknown item, so it runs anyway. |
@@ -3252,10 +3259,10 @@ dispatch, not days.
 
 Pull requests in that window are already handled. A lane that finds no
 manifest takes the same path as a lane that cannot reach the store: it
-runs the mandatory set plus a deterministic slice of the corpus sized to
-its budget, and prints that it is running unselected. Feedback is weaker
-than selection for one afternoon and no worse than a coin toss about which
-tests run, which is what the old shard layout was anyway.
+nothing has records, so every unit the tree holds is an identity with none
+and the whole corpus is mandatory. The lanes divide it between them and
+print that they are running everything. Feedback costs the time selection
+would have saved for one afternoon, and it misses nothing.
 
 The calibration numbers converge over the days after that, from the lanes'
 own timing records, which is what they were always going to do.

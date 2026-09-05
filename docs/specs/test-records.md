@@ -189,28 +189,31 @@ test-selection publisher rather than by anything recording:
 ```
 <repo>/test-selection/v1/manifest-<ISO 8601 timestamp>-<ULID>.json.gz
 <repo>/test-selection/v1/state/<yyyy-mm-dd>-<ULID>.json.gz
-<repo>/test-selection/v1/pins/<workflow-run-id>.json.gz
 ```
 
-The leading timestamp keeps manifest names chronologically useful, but it
-does not decide publication order. A workflow without a manifest pin lists
-object metadata once on its first attempt, chooses the object with the
-newest server-assigned `timeCreated`, using the object name to break a tie,
-and stores its exact object name, generation, and validated contents in a
-create-only run pin. The generation is a canonical digits-only decimal
-string, not a JSON number. An empty or failed listing stores an explicit
-unselected result. An absent pin on a later attempt also produces
-unselected rather than another listing. Pin retention exceeds the full
-workflow rerun period. Readers and later workflow attempts use the embedded
-result rather than resolving "newest" or depending on source-manifest
-retention. There is no object name meaning "the current one": writers hold
+The timestamp leading a manifest's name is the moment its publisher
+generated it, which keeps a listing chronologically readable but is not
+what a reader compares. A publisher names its manifest when it starts and
+creates the object when it finishes, so a reader takes the newest object
+the store had created at or before the moment it is resolving for, using
+the full object name to break a tie between two created in the same
+instant. There is no object name meaning "the current one": writers hold
 create and nothing else, so nothing can be overwritten, and that is the
 property the whole store rests on.
+[The selection spec](test-selection.md#determinism) says which moment a
+consumer resolves for and why.
+
+The selection area is the one part of this store that expires. A bucket
+lifecycle rule deletes its objects at a fixed age, and that age has to
+exceed the window in which a continuous-integration run may still be
+re-run, because a re-run resolves the same moment as the attempt it
+repeats and has to find the same manifest. Records carry no retention and
+must not acquire one.
 
 A local object's date partition comes from its run's start. The CI relay
 currently takes the date from the workflow run's `run_started_at`. That
 field is the current attempt's start and GitHub advances it when another
-attempt starts. Re-shipping an earlier artifact after a rerun can therefore
+attempt starts. Re-shipping an earlier artifact after a re-run can therefore
 move it to the new attempt's date and create a second object instead of
 colliding with its first shipment.
 

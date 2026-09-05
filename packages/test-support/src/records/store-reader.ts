@@ -23,13 +23,24 @@ export interface ListedObject {
   size: number;
 }
 
+/** One object in a listing: its name and when the store created it. */
+export interface TimedObject {
+  name: string;
+
+  /**
+   * The store's own creation time, which is the moment the object became
+   * visible to a reader.
+   */
+  createdAt: string;
+}
+
 /** Every item under a prefix, in name order, paginating as needed. */
 async function listItems(
   options: { bucket: string; prefix: string; fetch?: typeof fetch },
   fields: string,
-): Promise<{ name: string; size?: string }[]> {
+): Promise<{ name: string; size?: string; timeCreated?: string }[]> {
   const doFetch = options.fetch ?? fetch;
-  const items: { name: string; size?: string }[] = [];
+  const items: { name: string; size?: string; timeCreated?: string }[] = [];
   let pageToken: string | undefined;
   do {
     const url = new URL(
@@ -46,20 +57,48 @@ async function listItems(
       );
     }
     const page = await res.json() as {
-      items?: { name?: string; size?: string }[];
+      items?: { name?: string; size?: string; timeCreated?: string }[];
       nextPageToken?: string;
     };
     for (const item of page.items ?? []) {
       if (typeof item.name !== "string") continue;
-      items.push(
-        item.size === undefined
-          ? { name: item.name }
-          : { name: item.name, size: item.size },
-      );
+      items.push({
+        name: item.name,
+        ...(item.size === undefined ? {} : { size: item.size }),
+        ...(item.timeCreated === undefined
+          ? {}
+          : { timeCreated: item.timeCreated }),
+      });
     }
     pageToken = page.nextPageToken;
   } while (pageToken !== undefined);
   return items.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+}
+
+/**
+ * Lists every object under a prefix with the time the store created it.
+ *
+ * A writer names an object before it has finished building it, so the
+ * timestamp a name carries is a moment at which the object was not yet
+ * there to be read. The creation time is when it became visible, which is
+ * the only one of the two that orders a listing the same way however long
+ * after the write it is taken. A listing that names an object without
+ * timing it has not answered the question asked, and standing in a value
+ * would decide a resolution on a guess, so it throws instead.
+ */
+export async function listObjectTimes(options: {
+  bucket: string;
+  prefix: string;
+  fetch?: typeof fetch;
+}): Promise<TimedObject[]> {
+  return (await listItems(options, "name,timeCreated")).map((item) => {
+    if (item.timeCreated === undefined) {
+      throw new Error(
+        `listing ${options.prefix} gave no creation time for ${item.name}`,
+      );
+    }
+    return { name: item.name, createdAt: item.timeCreated };
+  });
 }
 
 /** Lists every object name under a prefix. */

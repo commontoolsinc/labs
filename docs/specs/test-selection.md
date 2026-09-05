@@ -257,36 +257,67 @@ same for both. A consumer that packs the two runs through different code
 will drift, and what it drifts into is running different sets of tests in
 the two places that are meant to agree.
 
-Before the lanes start, a selector calls a trusted reusable workflow by its
-default-branch ref. The reusable workflow checks out no repository code and
-has a Workload Identity credential with create-only access restricted to
-the pin prefix. The identity condition also requires the Labs repository's
-immutable GitHub `repository_id`, so another repository cannot invoke the
-workflow to obtain the credential. The reusable workflow derives the
-repository and workflow run id from GitHub's trusted context, not caller
-inputs. It recovers the public create-only object for that run id. On the
-first attempt only, no pin makes it list the public manifest objects once,
-choose the object with the newest server-assigned storage creation time,
-and create a compressed envelope containing the selected object's name,
-generation, and complete validated manifest. A failed or empty listing
-creates an explicit unselected envelope. No pin on a later attempt also
-creates unselected instead of selecting again.
+Every lane has to resolve the same manifest, and so does every later
+attempt of the same run. A lane resolves the newest manifest generated at
+or before the moment the commit under test was made, reading the committer
+date out of its own checkout.
 
-Pin retention exceeds the full workflow rerun period. Embedding the
-manifest makes source-manifest deletion irrelevant. The selector completes
-successfully only after a valid selected or unselected pin exists. If it
-cannot read an existing pin or create a new one, it fails and dependent
-lanes do not start. Pull-request jobs have no credential that can write or
-replace pin objects.
+What that moment has to be is stable rather than exact. Nothing the
+scheduling service reports about when a run happened is stable, because it
+reports a start per attempt rather than per run, and an attempt resolving
+at its own start would pack the lanes differently from the attempt it
+repeats. The commit is stable by construction, and it needs nothing from
+that service: no credential, no request, and no failure path where a
+request is refused. It is also the same value on a workstation as in a
+job, so a dry run answers the question a lane would answer.
 
-A pin is untrusted input when read. Its workflow run id must match the
-reader. A selected pin must carry a source name under the trusted manifest
-prefix, an object generation encoded as a canonical digits-only decimal
-string, and a manifest that passes the normal whole-object validation. The
-generation is never coerced to a JavaScript number. Any mismatch rejects
-the pin.
+The committer date rather than the author date. A rebased or cherry-picked
+commit keeps the author date it was first written at, which can be
+arbitrarily old, while the committer date moves with the tree.
 
-The workflow run id is stable across attempts. A later attempt with its pin
-available therefore runs the same set rather than resolving newest again.
-A missing later pin deliberately creates an unselected result. Neither path
-depends on an ordering between GitHub's clock and Cloud Storage's clock.
+Resolution lists the manifests once and takes the newest the store had
+created at or before the moment, breaking a tie between two created in the
+same instant with the full object name. What it compares is the creation
+time the store assigns, not the timestamp leading the object's name. The
+two are different moments: a publisher names its manifest from the moment
+it started and creates the object when it finishes, so the name carries a
+moment at which the object was not yet there to be read. A listing that
+will not say when it created an object fails rather than standing a value
+in, and the lane goes on with no manifest.
+
+That difference is what keeps the eligible set closed. Every manifest is
+created at a real moment, and the lanes list after the commit was made, so
+by the time any lane lists, no manifest that the store had not already
+created can ever become eligible. Ordering on the name instead would leave
+a manifest whose publisher is still running eligible before it exists: a
+lane listing during that gap and a lane listing after it would resolve
+different manifests and pack the corpus differently.
+
+Two clocks still meet in the comparison, one on the machine that writes
+the commit and one in the store. A commit dated behind the store's clock
+resolves an older manifest than the tree deserves, which costs selection
+quality and nothing else. A commit dated ahead of it reopens the window
+above, because manifests created between the real moment and that date are
+eligible while the lanes are listing. What bounds that is where the
+committer date comes from: a lane resolving against a
+provider-generated merge commit is comparing the continuous-integration
+provider's clock against the store's. A branch commit authored on a
+workstation whose clock runs far enough ahead is what escapes the bound.
+
+One condition outside this repository has to hold. The manifests a commit
+can resolve have to outlive the window in which the scheduling service
+still permits that run to be re-run, which is a lifecycle rule on the
+bucket rather than anything a reader controls. Where the re-run window is
+the longer of the two, the retention is what to raise.
+
+A lane that resolves no manifest still agrees with its siblings, because
+what it packs is decided by the tree rather than by what it failed to
+read. Nothing has records in that state, so every unit the tree holds is
+an identity with none and the whole corpus is mandatory. The lanes divide
+that between them and say what they are doing.
+
+A consumer with no commit to read falls back to the newest manifest there
+is and reports that it has done so. That is the answer for a tool invoked
+outside a checkout, where there is no tree under test and no other lane to
+agree with. A lane holds a checkout by construction, so the moment it
+resolves for comes from the commit rather than from this fallback.

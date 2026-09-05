@@ -4,17 +4,19 @@
  * The store's writer credentials hold `objectCreator` and nothing else,
  * so an object cannot be overwritten once created. That is what makes the
  * whole store trustworthy, and it is why there is no `current.json`: a
- * reader lists the prefix, which sorts by timestamp because the timestamp
- * leads the name, and takes the newest that is not after the time it is
- * asking about.
+ * reader lists the prefix and takes the newest object the store had
+ * created at or before the time it is asking about. The timestamp leading
+ * a name keeps a listing chronologically readable; what a resolution
+ * compares is the creation time the store assigns.
  */
 
 import {
   type Environment,
   gzipText,
-  listObjects,
+  listObjectTimes,
   objectUrl,
   readEnv,
+  type TimedObject,
 } from "@commonfabric/test-support/records";
 import { storeBucket, storePrefix } from "../test-records-config.ts";
 import {
@@ -88,30 +90,35 @@ export function generatedAtOf(objectName: string): string | undefined {
 }
 
 /**
- * The newest manifest object created at or before a moment, from a
- * listing. Resolving by the workflow run's start time rather than by
- * "now" is what makes a re-run of one failed lane run the same set as the
- * lane it replaces.
+ * The newest manifest the store had created at or before a moment, from a
+ * listing.
+ *
+ * The ordering is on the store's own creation time rather than on the
+ * timestamp in the name. A publisher names its manifest from the moment it
+ * started and creates the object when it finishes, so a name carries a
+ * moment at which the object was not yet there to be read. Ordering on the
+ * name would hand a lane that lists during that gap a different manifest
+ * from one that lists after it, and the two would pack the corpus
+ * differently.
  */
 export function newestAtOrBefore(
-  objectNames: readonly string[],
+  objects: readonly TimedObject[],
   at: string,
 ): string | undefined {
   let best: string | undefined;
   let bestAt = "";
-  for (const name of objectNames) {
-    const generatedAt = generatedAtOf(name);
-    if (generatedAt === undefined || generatedAt > at) continue;
-    // Two publishers can start in the same millisecond, and then the
-    // timestamp does not order them. The name does, and every reader
+  for (const { name, createdAt } of objects) {
+    if (generatedAtOf(name) === undefined || createdAt > at) continue;
+    // Two manifests can be created in the same millisecond, and then the
+    // creation time does not order them. The name does, and every reader
     // sorts it the same way, so the lanes and the wall obey one manifest
     // rather than two that happen to share an instant.
     if (
-      best === undefined || generatedAt > bestAt ||
-      (generatedAt === bestAt && name > best)
+      best === undefined || createdAt > bestAt ||
+      (createdAt === bestAt && name > best)
     ) {
       best = name;
-      bestAt = generatedAt;
+      bestAt = createdAt;
     }
   }
   return best;
@@ -144,9 +151,9 @@ export async function fetchManifest(options: {
   const env = options.env ?? Deno.env.get;
   const bucket = options.bucket ?? storeBucket(env);
   const prefix = options.prefix ?? manifestPrefix(env);
-  let names: string[];
+  let objects: TimedObject[];
   try {
-    names = await listObjects({
+    objects = await listObjectTimes({
       bucket,
       // The trailing slash keeps the listing inside this version: a bare
       // "v1" prefix also matches "v10", whose manifests would sort above
@@ -157,7 +164,7 @@ export async function fetchManifest(options: {
   } catch (error) {
     return { absent: `listing ${prefix} failed: ${error}` };
   }
-  const objectName = newestAtOrBefore(names, options.at);
+  const objectName = newestAtOrBefore(objects, options.at);
   if (objectName === undefined) {
     return { absent: `no manifest under ${prefix} at or before ${options.at}` };
   }
