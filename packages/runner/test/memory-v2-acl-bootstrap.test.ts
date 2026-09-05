@@ -553,9 +553,11 @@ Deno.test("storage without the space signer cannot initialize a foreign space", 
 // Genesis-supplied ACL: a caller that holds the space key may name the
 // exact document a fresh space is born with, so the space is never in a
 // world-writable state it did not ask for. Absent, the rollout default
-// (owner + wildcard WRITE — the tests above) is the fallback. The option
-// is inert outside true genesis: a populated ACL-less space, a retracted
-// ACL, and the home arm all behave as if it were never supplied.
+// (owner + wildcard WRITE — the tests above) is the fallback. Outside true
+// genesis the option fails closed rather than going inert: a populated
+// ACL-less space and a lost race refuse the open, a retracted ACL is
+// refused by the server before the client can act, and the home arm never
+// consults the document.
 //
 
 Deno.test("a supplied genesis ACL is the space's first and only commit — no wildcard row ever existed", async () => {
@@ -902,21 +904,25 @@ Deno.test("a serving runtime refuses a supplied genesis ACL explicitly (OW31 pro
     // genesis "would name the SERVICE as owner"), and a document plus an
     // owner hit registerSpaceIdentity's not-both refusal — a closed door
     // by accident rather than by decision.
-    for (
-      const options of [
-        { genesisAcl: { [alice.did()]: "OWNER" as const } },
-        {
+    await assertRejects(
+      () =>
+        runtime.resolveSpaceName("genesis-acl-serving", {
+          genesisAcl: { [alice.did()]: "OWNER" },
+        }),
+      Error,
+      "serving runtime does not accept genesisAcl",
+    );
+    // With an owner beside it, the not-both refusal comes first — the same
+    // precedence as registerSpaceIdentity, on every runtime.
+    await assertRejects(
+      () =>
+        runtime.resolveSpaceName("genesis-acl-serving", {
           owner: alice.did(),
-          genesisAcl: { [alice.did()]: "OWNER" as const },
-        },
-      ]
-    ) {
-      await assertRejects(
-        () => runtime.resolveSpaceName("genesis-acl-serving", options),
-        Error,
-        "serving runtime does not accept genesisAcl",
-      );
-    }
+          genesisAcl: { [alice.did()]: "OWNER" },
+        }),
+      Error,
+      "not both",
+    );
     assertEquals(
       runtime.resolveSpaceNameSync("genesis-acl-serving"),
       undefined,
@@ -1652,6 +1658,119 @@ Deno.test("a wildcard OWNER counts as an owner: a space owned by everyone is not
       "owned by",
     );
   } finally {
+    await manager.close();
+    await server.close();
+  }
+});
+
+Deno.test("runtime.resolveSpaceName refuses owner beside genesisAcl even on a cached name, and refuses a genesisAcl its storage manager cannot register", async () => {
+  const user = await Identity.fromPassphrase("acl genesis cubic user");
+  const server = createServer("runner-acl-genesis-cubic");
+  const manager = TestStorageManager.overServer(
+    { as: user },
+    new RecordingLoopbackSessionFactory(server),
+  );
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: manager,
+  });
+  const sealed = { [user.did()]: "OWNER" as const };
+  try {
+    await runtime.resolveSpaceName("genesis-acl-owner-and-doc", {
+      genesisAcl: sealed,
+    });
+    // Red-first witnessed: the cached path returned the DID and silently
+    // dropped the conflicting owner.
+    await assertRejects(
+      () =>
+        runtime.resolveSpaceName("genesis-acl-owner-and-doc", {
+          owner: user.did(),
+          genesisAcl: sealed,
+        }),
+      Error,
+      "not both",
+    );
+    // A storage manager with no registerSpaceIdentity seam has nowhere to
+    // put the document; the optional call used to drop it silently.
+    const seamless = new Proxy(manager, {
+      get(target, property, receiver) {
+        if (property === "registerSpaceIdentity") return undefined;
+        const value = Reflect.get(target, property, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const bare = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: seamless,
+    });
+    try {
+      await assertRejects(
+        () =>
+          bare.resolveSpaceName("genesis-acl-no-seam", { genesisAcl: sealed }),
+        Error,
+        "cannot register",
+      );
+      assertEquals(bare.resolveSpaceNameSync("genesis-acl-no-seam"), undefined);
+    } finally {
+      await bare.dispose();
+    }
+  } finally {
+    await runtime.dispose();
+    await manager.close();
+    await server.close();
+  }
+});
+
+Deno.test("runtime.resolveSpaceName: two concurrent resolutions of one uncached name with different documents cannot both register", async () => {
+  const user = await Identity.fromPassphrase("acl genesis concurrent user");
+  const other = await Identity.fromPassphrase("acl genesis concurrent other");
+  const server = createServer("runner-acl-genesis-concurrent");
+  const factory = new RecordingLoopbackSessionFactory(server);
+  const manager = TestStorageManager.overServer({ as: user }, factory);
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager: manager,
+  });
+  const first = { [user.did()]: "OWNER" as const };
+  const second = {
+    [user.did()]: "OWNER" as const,
+    [other.did()]: "WRITE" as const,
+  };
+  try {
+    // Red-first witnessed: both passed the cache check before either
+    // registration, the second overwrote the first, and the space was born
+    // with the SECOND document while the first caller believed it sealed.
+    const [a, b] = await Promise.allSettled([
+      runtime.resolveSpaceName("genesis-acl-concurrent", { genesisAcl: first }),
+      runtime.resolveSpaceName("genesis-acl-concurrent", {
+        genesisAcl: second,
+      }),
+    ]);
+    assertEquals(a.status, "fulfilled", "the first resolution wins");
+    assertEquals(b.status, "rejected", "the conflicting second is refused");
+    assert(
+      b.status === "rejected" &&
+        String(b.reason).includes("different genesisAcl"),
+      String((b as PromiseRejectedResult).reason),
+    );
+    const space = (a as PromiseFulfilledResult<MemorySpace>).value;
+    // An identical concurrent request is a retry and shares the outcome.
+    const [c, d] = await Promise.all([
+      runtime.resolveSpaceName("genesis-acl-concurrent-same", {
+        genesisAcl: first,
+      }),
+      runtime.resolveSpaceName("genesis-acl-concurrent-same", {
+        genesisAcl: first,
+      }),
+    ]);
+    assertEquals(c, d);
+    await manager.ensureSpaceInitialized(space);
+    assertEquals(
+      (await server.readDocument(space, `of:${space}`))?.value,
+      first,
+    );
+  } finally {
+    await runtime.dispose();
     await manager.close();
     await server.close();
   }

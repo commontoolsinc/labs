@@ -2,6 +2,7 @@ import { assert, assertEquals, assertExists, assertRejects } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
 import { Server, SessionRegistry } from "../v2/server.ts";
+import { sameAcl } from "../acl.ts";
 import {
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
@@ -2183,4 +2184,22 @@ Deno.test("OW31 acl enforce: an OWNER-class service envelope stores NO binding â
   } finally {
     await server.close();
   }
+});
+
+Deno.test("sameAcl: exact principals and capabilities, key order free, never an array or scalar", () => {
+  const expected = { [ALICE]: "OWNER" as const, [BOB]: "WRITE" as const };
+  assertEquals(sameAcl({ [BOB]: "WRITE", [ALICE]: "OWNER" }, expected), true);
+  assertEquals(sameAcl({ [ALICE]: "OWNER" }, expected), false, "missing row");
+  assertEquals(
+    sameAcl({ ...expected, [CAROL]: "READ" }, expected),
+    false,
+    "extra row",
+  );
+  assertEquals(sameAcl({ [ALICE]: "OWNER", [BOB]: "READ" }, expected), false);
+  assertEquals(sameAcl(null, expected), false);
+  assertEquals(sameAcl("OWNER", expected), false);
+  // Red-first witnessed: an array is an object with zero keys, so [] matched
+  // an empty expected document.
+  assertEquals(sameAcl([], {}), false);
+  assertEquals(sameAcl(undefined, {}), false);
 });
