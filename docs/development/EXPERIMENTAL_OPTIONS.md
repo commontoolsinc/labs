@@ -923,10 +923,11 @@ the per-epic implementation notes).
   the lower rungs kept for diagnostics, like the other CFC ladders.
 
 > The related `RuntimeOptions` fields `cfcSinkMaxConfidentiality`,
-> `cfcPolicyRecords`, and `cfcTrustConfig` are CFC _configuration inputs_ (the
-> policy records, per-sink ceilings, and trust statements the dials evaluate
-> against), not on/off rollout dials, so they are not tracked as flags here.
-> They are validated and frozen at `Runtime` construction.
+> `cfcReadMaxConfidentiality` (with `cfcReadOnExceed`), `cfcPolicyRecords`, and
+> `cfcTrustConfig` are CFC _configuration inputs_ (the policy records, per-sink
+> ceilings, the runtime-wide `db.query` read ceiling, and trust statements the
+> dials evaluate against), not on/off rollout dials, so they are not tracked as
+> flags here. They are validated and frozen at `Runtime` construction.
 
 ---
 
