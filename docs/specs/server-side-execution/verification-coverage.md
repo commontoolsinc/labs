@@ -7493,7 +7493,7 @@ supply; OW29/OW32/OW34 closed):
     an admitted commit touches `of:<space>`
     (`#rootEnsureAwaitingOwner`). The session analog: `SpaceReplica`
     latches an ACL-doc admission (`noteAclChanged`) and consumes it at
-    `sessionHandle()` (`consumeOwedSessionRemount`) — the one place
+    `#memoizedSessionHandle()` (`#consumeOwedSessionRemount`) — the one place
     every read and commit reaches a session — dropping a mount that
     `SessionRevokedError` or `AuthorizationError` terminated so the
     next load re-opens. `ExecutorHost.#onCommitAdmitted` fans an
