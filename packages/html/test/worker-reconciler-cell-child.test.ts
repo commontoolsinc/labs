@@ -130,7 +130,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
 
     // A mock names no link, so it resolves to itself and has no schema to
     // fall back on for a label; a step that needs either overrides it.
-    resolveAsCell() {
+    resolveAsCell(): MockCell | Cell<unknown> {
       return this;
     }
 
