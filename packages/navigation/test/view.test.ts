@@ -102,6 +102,26 @@ describe("view", () => {
     });
   });
 
+  it("decodes the space segment and no other", () => {
+    // Reading the mark means reading through an escape of it, so `%40space`
+    // reaches the space `@space` reaches — and the decoding stops there.
+    // Every other segment is carried in the spelling the URL wrote, because
+    // holding one to a grammar is the resolver's question and not this one's.
+    // One URL states both halves: the space loses its escape, the member
+    // keeps its own.
+    expect(urlToAppView(new URL("http://common.test/%40space/top/4%32")))
+      .toEqual({
+        spaceName: "space",
+        pieceSlug: "top",
+        pieceMember: "4%32",
+      });
+    // An unmarked space is carried whole, so the two differ only by the mark.
+    expect(urlToAppView(new URL("http://common.test/%40space%20x/demo")))
+      .toEqual({ spaceName: "space x", pieceSlug: "demo" });
+    expect(urlToAppView(new URL("http://common.test/space%20x/demo")))
+      .toEqual({ spaceName: "space%20x", pieceSlug: "demo" });
+  });
+
   it("reads one segment after a slug as the member", () => {
     // A member's own fields are a cell path inside the piece it resolves to,
     // so nothing past the first segment is part of the address.

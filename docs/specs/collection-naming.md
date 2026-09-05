@@ -569,6 +569,14 @@ it. Walking into a collection is that kind of work — it syncs and reads a cell
 — so the walk sits beside the parse rather than inside it, and every reader of
 these URLs keeps reading the segments apart from resolving them.
 
+That split is also what bounds who resolves a fully qualified reference. The
+shell reads it and `cf` reads it, both holding a session that can turn a space
+name into a DID and walk a collection. The pattern-facing reader, the
+`cellFromUrl` builtin, does not: it is the pure and synchronous contract
+above, its rooted-path branch wants an entity id where a collection's name
+sits, and giving a pattern this grammar is a decision about that builtin
+rather than a gap in this step.
+
 **5. Add the prose layer.** Sigil parsing, canonicalize-on-write,
 context-computed rendering with round-trip verification, the two render modes,
 and the clipboard flavors.
