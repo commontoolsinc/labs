@@ -414,7 +414,7 @@ export class PatternManager {
   // modules — the same order of retention the engine's strong implementation
   // index (E1) already committed to for their implementation functions.
   readonly #addressableByIdentity = new Map<string, Map<string, unknown>>();
-  // Bound for the module-NAMESPACE cache below (`modulesByIdentity`) only; its
+  // Bound for the module-NAMESPACE cache below (`#modulesByIdentity`) only; its
   // misses recover through the async storage-backed load. Instance field so
   // tests can shrink it.
   #maxEvaluatedModuleCacheSize = MAX_EVALUATED_MODULE_CACHE_SIZE;
@@ -434,7 +434,7 @@ export class PatternManager {
   readonly #compileCacheWrites = new Set<Promise<unknown>>();
   // Closure write-backs that replication must observe before reading its
   // origin space. Tracked separately because the replication promise also
-  // lives in `compileCacheWrites` and cannot await itself.
+  // lives in `#compileCacheWrites` and cannot await itself.
   readonly #pendingCacheWriteBacks = new Set<Promise<unknown>>();
   // In-flight replications keyed by TARGET space, ordered by a monotonic
   // ticket. A replication's origin may itself be mid-supply by an earlier
@@ -444,7 +444,7 @@ export class PatternManager {
   // ever re-issuing it, and the target space's demanded roots park
   // `pattern-unloadable` forever (verification-coverage.md OW45, the
   // lunch forever-park — the incident evidence lives there). The sibling
-  // lives in `compileCacheWrites`, the one set the origin read must NOT
+  // lives in `#compileCacheWrites`, the one set the origin read must NOT
   // await wholesale (it would await itself), so replications also
   // register HERE and the read awaits only the STRICTLY OLDER entries
   // targeting its origin — registration order keeps the await graph
@@ -784,14 +784,14 @@ export class PatternManager {
    * tearing the page down loses no writes", and a program commit
    * issued from a post-arrival load chain is exactly a write a reload
    * would otherwise kill (the home-profile program-write loss). Three
-   * registries cover the chains end to end: `inProgressCompilations`
+   * registries cover the chains end to end: `#inProgressCompilations`
    * registers SYNCHRONOUSLY at `compileOrGetPattern` — which
    * `compile-and-run` launches as a FLOATING promise, so nothing else
    * holds the scheduler while TypeScript compiles — and its promise
    * resolves only after `compilePattern` has awaited persistence; the
    * single-flight load slot registers in the load's first awaits
    * (before any storage read); and the persistence slot registers at
-   * `persistCompileCacheTracked` entry. A chain running when the
+   * `#persistCompileCacheTracked` entry. A chain running when the
    * barrier's fixpoint drains is visible through whichever registry
    * currently holds it.
    */
@@ -971,7 +971,7 @@ export class PatternManager {
    * when the pattern carries an artifact entry ref (the by-identity reload path
    * — the only one a `{ identity, symbol }` piece pointer can take).
    *
-   * Closure replication is fire-and-forget (tracked in `compileCacheWrites`,
+   * Closure replication is fire-and-forget (tracked in `#compileCacheWrites`,
    * awaited by `flushCompileCacheWrites`): the child is loadable in-session
    * regardless, this only affects fresh runtimes. A failure is logged and
    * retried on the next child creation and on the next persist event —
@@ -999,7 +999,7 @@ export class PatternManager {
    * registration in `#replicationsIntoSpace` BEFORE the async body starts
    * (so a replication issued later in the same synchronous stretch
    * observes this entry when it awaits its origin's suppliers) and in
-   * `compileCacheWrites` (so `flushCompileCacheWrites` and the durability
+   * `#compileCacheWrites` (so `flushCompileCacheWrites` and the durability
    * barrier observe it). Shared by `replicatePatternToSpace` and the 3b
    * heal's re-issues, so a re-issued replication is a FULL fresh
    * replication — same ticket discipline, same acyclicity (the ticket
@@ -1262,7 +1262,7 @@ export class PatternManager {
       // neither hang nor reject this replication; entries registered
       // after the snapshot are the next consult's business), covering
       // BOTH cold compiles AND by-identity loads (a supplier can be a
-      // load's recovery compile) but NEVER `compileCacheWrites`: this
+      // load's recovery compile) but NEVER `#compileCacheWrites`: this
       // replication promise lives there and would await itself. Acyclic:
       // compiles and loads never await replications (their only
       // replication call is fire-and-forget), and a compile promise
@@ -1272,7 +1272,7 @@ export class PatternManager {
       // EMPTY SNAPSHOT → NO RETRY, byte-identical one-shot throw below.
       // Deliberate, twice over: (a) with nothing in the registries there
       // is no supplier whose completion the await could observe — every
-      // `pendingCacheWriteBacks` member belongs to a compile or load
+      // `#pendingCacheWriteBacks` member belongs to a compile or load
       // (registry-covered here) or to a sibling replication, which the
       // strictly-older-ticket await above already covers at registration
       // time, so an empty-registry retry adds no coverage the design
@@ -1304,7 +1304,7 @@ export class PatternManager {
         await Promise.allSettled([...inFlightCompilations, ...inFlightLoads]);
         // A settled by-identity load's recovery persist is fire-and-forget:
         // the load resolves after REGISTERING it in
-        // `pendingCacheWriteBacks`, not after completing it. Observe a
+        // `#pendingCacheWriteBacks`, not after completing it. Observe a
         // FRESH snapshot of that set (replications are never in it — no
         // self-await) so the persist has recorded before the re-read
         // consults the map.
@@ -2014,7 +2014,7 @@ export class PatternManager {
     if (this.#coldLoadNegativeMemo.suppresses(key, runtimeVersion)) {
       return undefined;
     }
-    // Single-flight the expensive tail (see `inProgressByIdentityLoads`).
+    // Single-flight the expensive tail (see `#inProgressByIdentityLoads`).
     const pending = this.#inProgressByIdentityLoads.get(key);
     if (pending === undefined) {
       const load = this.#loadPatternByIdentityFromStorage(
@@ -2391,7 +2391,7 @@ export class PatternManager {
     if (byId) {
       assertNoReservedHoistExports(byId);
       for (const [identity, exports] of byId) {
-        // `modulesByIdentity` keeps the whole namespace for MODULE reuse on a
+        // `#modulesByIdentity` keeps the whole namespace for MODULE reuse on a
         // by-identity reload (a separate concern from artifact addressing).
         // Refresh insertion order (Map is FIFO-ordered) so eviction is ~LRU.
         this.#modulesByIdentity.delete(identity);
@@ -2432,14 +2432,14 @@ export class PatternManager {
       }
     }
 
-    // No eviction for `addressableByIdentity` — the artifact index is
+    // No eviction for `#addressableByIdentity` — the artifact index is
     // session-lifetime (see its declaration): sync by-identity resolution
     // must keep working for every module evaluated this session.
   }
 
   /**
    * Index one content-addressed builder artifact `{ identity, symbol } -> value`,
-   * the single path that populates both the reverse `addressableByIdentity` and
+   * the single path that populates both the reverse `#addressableByIdentity` and
    * forward `valueToEntryRef` maps — whether the value came from a module's
    * `__cfReg` registration (hoists + non-exported top-level) or its exports.
    *
@@ -2554,7 +2554,7 @@ export class PatternManager {
 
   /**
    * Write the module set into `space` and AWAIT it, tracking the in-flight
-   * promise in `compileCacheWrites` + `pendingCacheWriteBacks` (so graceful
+   * promise in `#compileCacheWrites` + `#pendingCacheWriteBacks` (so graceful
    * shutdown and closure replication can observe it). A failure PROPAGATES and
    * fails the compile: refs-only pattern JSON makes a durable closure in `space`
    * part of the compilation contract.
@@ -2600,7 +2600,7 @@ export class PatternManager {
     }
 
     // Install the successor as the slot's tail before waiting for its
-    // predecessor. Replication snapshots `pendingCacheWriteBacks`, so every
+    // predecessor. Replication snapshots `#pendingCacheWriteBacks`, so every
     // write already requested when that snapshot is taken must be represented.
     const persistence = (async () => {
       await predecessor?.persistence.catch(() => {});
@@ -3039,7 +3039,7 @@ export class PatternManager {
       // { identity, symbol } in a fresh runtime (the meta-cell fallback is
       // gone). When this hit serves a different space than the one we first
       // compiled into, replicate the closure there — cheap (no TS recompile),
-      // with persistence writes deduplicated and tracked in compileCacheWrites.
+      // with persistence writes deduplicated and tracked in `#compileCacheWrites`.
       if (space && cached.space && space !== cached.space) {
         this.replicatePatternToSpace(cached.pattern, space, cached.space);
       }

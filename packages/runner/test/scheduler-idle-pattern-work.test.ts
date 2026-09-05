@@ -29,6 +29,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
+import type { Pattern } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("scheduler idle pattern work");
 const space = signer.did();
@@ -100,10 +101,10 @@ describe("idleWithPendingCommits covers pattern work (OW45 S-B)", () => {
     // the accessor must reflect): an entry present ⇒ pattern work
     // pending ⇒ the commit-aware barrier holds until it settles.
     const manager = runtime.patternManager.accessForTestingOnly;
-    const gate = Promise.withResolvers<void>();
+    const gate = Promise.withResolvers<Pattern | undefined>();
     manager.inProgressByIdentityLoads.set(
       `${space}\0ow45-synthetic-load`,
-      gate.promise as Promise<never>,
+      gate.promise,
     );
     expect(runtime.patternManager.hasPendingPatternWork()).toBe(true);
     let loadBarrierResolved = false;
@@ -115,7 +116,7 @@ describe("idleWithPendingCommits covers pattern work (OW45 S-B)", () => {
     }
     expect(loadBarrierResolved).toBe(false);
     manager.inProgressByIdentityLoads.delete(`${space}\0ow45-synthetic-load`);
-    gate.resolve();
+    gate.resolve(undefined);
     await loadBarrier;
     expect(runtime.patternManager.hasPendingPatternWork()).toBe(false);
 
