@@ -592,13 +592,83 @@ function normalizeForProtocol(protocol: string, v: string): string {
   }
 }
 
+//
+// Regex input — the text a row value shows a rule's regex.
+//
+
+// An INTEGER is an int64; a JS number carries 53 bits of integer precision.
+// Past that a number no longer names one integer — a large INTEGER read into
+// a double has already lost its low digits, and the driver's own bind wraps
+// on the way back (1e21 binds as 3875820019684212736) — so no text we
+// produced would honestly be the row's.
+const INT64_MIN = -(2n ** 63n);
+const INT64_MAX = 2n ** 63n - 1n;
+
 /**
- * The text a row value presents to a rule's regex, or `undefined` for a value
- * class this evaluator refuses. Today only TEXT has a text form here; a
- * number refuses, which is what the coercion below replaces.
+ * The text a row value shows a rule's regex, or `undefined` for a value class
+ * the evaluator refuses (the caller fails closed on it).
+ *
+ * A rule gates on stored data, and a column keyed by an INTEGER — a mailbox
+ * id, an account id — is the ordinary thing to gate on, so a whole integer
+ * shows the regex its decimal digits: the same text SQLite shows for that
+ * INTEGER, and the text an operator reads off the row. One value has one
+ * text, so the write gate, the server commit, and read re-derivation still
+ * derive one label from one row.
+ *
+ * A REAL does NOT coerce, and the reason is not squeamishness about floats:
+ * SQLite renders one with "%!.15g" over its OWN decoded digits, and that
+ * rendering is not a function of the double this evaluator holds. SQLite
+ * shows -0.009598882198146955 as "-0.00959888219814696" where the value
+ * correctly rounded to 15 digits is "-0.00959888219814695" — its decoder
+ * stops at the round-trip digits and rounds up from there. A gate is an
+ * anchored comparison against the text SQLite would show, so a text we can
+ * only nearly reproduce is a gate that silently fails to fire on some rows,
+ * dropping a confidentiality clause. Refusing is the fail-closed half of
+ * that choice, and it is what a REAL did before this coercion existed.
+ * (`v2-sqlite-row-label-number-text.test.ts` pins the counterexample.)
+ *
+ * The one place an INTEGER's text is not literally `CAST(col AS TEXT)`: a JS
+ * number carries no INTEGER/REAL tag, so a whole value stored in a REAL
+ * column shows its integer spelling ("7") where SQLite would show "7.0".
+ * Gate on a column that holds whole numbers, and write the digits.
  */
 export function regexInputText(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
+  if (typeof value === "string") return value;
+  // `Number.isSafeInteger` also rejects NaN and the infinities, which are not
+  // SQLite INTEGERs either (SQLite stores a NaN as NULL).
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) ? String(value) : undefined;
+  }
+  // A driver in int64 mode hands large INTEGERs over as bigints, whose digits
+  // ARE exact; one outside int64 never came out of a row.
+  if (typeof value === "bigint") {
+    return value >= INT64_MIN && value <= INT64_MAX ? String(value) : undefined;
+  }
+  return undefined;
+}
+
+/** Why a value has no regex text — its CLASS only. The refusal reaches a
+ *  model-facing consumer, so it carries nothing of the row itself. */
+function regexInputRefusal(field: string, value: unknown): string {
+  const kind = typeof value === "number"
+    ? (Number.isNaN(value)
+      ? "NaN, which SQLite stores as NULL"
+      : !Number.isFinite(value)
+      ? "an infinity, which is a REAL"
+      : Number.isInteger(value)
+      ? "a whole number too large to name one SQLite INTEGER exactly"
+      : "a REAL, whose SQLite text this evaluator cannot reproduce")
+    : typeof value === "bigint"
+    ? "a bigint outside SQLite's int64 range"
+    : ArrayBuffer.isView(value) || value instanceof ArrayBuffer
+    ? "a BLOB"
+    : typeof value === "boolean"
+    ? "a boolean, which is not a SQLite value (bind 1 or 0)"
+    : typeof value === "object"
+    ? "an object"
+    : `a ${typeof value}`;
+  return `field "${field}" is ${kind} — regex input must be TEXT or a whole ` +
+    "INTEGER";
 }
 
 /** Extract the match list for a field per the strict-if-present contract. */
@@ -614,11 +684,7 @@ function evalMatch(
   const values: string[] = [];
   if (value !== null && value !== undefined && value !== "") {
     const text = regexInputText(value);
-    if (text === undefined) {
-      return fail(
-        `field "${field}" is ${typeof value}, not a string — regex input`,
-      );
-    }
+    if (text === undefined) return fail(regexInputRefusal(field, value));
     // Force the global flag like match() does at authoring: matchAll throws
     // on non-global regexes, and a hostile/legacy wire spec must degrade to
     // the documented split semantics, not an uncaught exception.
@@ -663,11 +729,7 @@ function evalTest(
   const value = row[field];
   if (value === null || value === undefined || value === "") return false;
   const text = regexInputText(value);
-  if (text === undefined) {
-    return fail(
-      `field "${field}" is ${typeof value}, not a string — regex input`,
-    );
-  }
+  if (text === undefined) return fail(regexInputRefusal(field, value));
   return new RegExp(source as string, (flags as string) ?? "").test(text);
 }
 

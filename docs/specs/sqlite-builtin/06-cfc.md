@@ -245,6 +245,43 @@ returns a plain-JSON AST node):
 `f.<col>` is the only way to name data and may appear **only** as the field
 argument of `match` / `whenMatches`.
 
+**What a regex may read.** TEXT, and a **whole INTEGER** by its decimal
+digits — the ordinary key column a rule wants to gate on (msgvault's
+per-mailbox `source_id`), written as `whenMatches(f.source_id, /^7$/, …)`.
+The digits are the text SQLite shows for that INTEGER, so the gate compares
+what an operator reads off the row. A JS number carries no INTEGER/REAL tag,
+so a whole value stored in a REAL column also shows its integer spelling
+(`7`, where `CAST(col AS TEXT)` would say `7.0`): gate on the digits, not on
+the column's declared type. Everything else refuses at evaluation, and each
+refusal names the value's **class** only, never the value (invariant 14):
+
+- a **REAL** with a fraction, and an infinity. SQLite renders a REAL from its
+  own decoded digits, which stop at the round-trip point and round up from
+  there — it shows `-0.009598882198146955` as `-0.00959888219814696` where
+  the correctly rounded 15-digit value ends `…695`. The rendering is
+  therefore not a function of the double the evaluator holds, and a gate is
+  an anchored comparison against the text SQLite *would* show: a text we
+  could only nearly reproduce is a gate that silently fails to fire on some
+  rows, dropping a confidentiality clause.
+- a whole number past 2^53, where a double no longer names one int64 (a large
+  INTEGER read into one has already lost its low digits), and a bigint
+  outside int64.
+- NaN (SQLite stores one as NULL, so it never came out of a row), a boolean
+  (not a SQLite value), and a BLOB.
+
+NULL and the empty string are not refusals: a gate stays quiet and an
+extractor yields nothing, as they always have (`min` still applies).
+
+A rule reads the value **as it reaches the evaluator**, which is the bound
+value at the write gate and the stored value everywhere else. SQLite's type
+affinity can convert one into the other — a `"7.0"` bound into an INTEGER
+column stores as `7` — and the two texts then differ, so the runner's
+prospective label and the re-derived one disagree for that row. The
+re-derived label is the one that protects the row (the server's commit
+evaluation and the read side both compute it from the post-image); what the
+disagreement costs is the accuracy of the write gate's no-laundering check.
+Bind a rule-input column the value it stores.
+
 **No acting-principal term in rules.** `currentUser()` is deliberately not a
 helper: a rule must compute the **same** label at the write gate, the server
 commit, and read re-derivation — re-derived at read time an acting-principal
@@ -289,8 +326,9 @@ One pure evaluator —
 `packages/memory` beside `table()` — is shared by the write gate, read
 re-derivation, and (future) server-side commit evaluation, so the sides can
 never drift: the audit property holds by construction. It is fail-closed end
-to end: an absent rule-input field, a non-string value where a regex needs
-text, a `dbOwner()` with no owner in context, a strict-if-present zero match,
+to end: an absent rule-input field, a value class a regex cannot read (a
+REAL, a BLOB — see above), a `dbOwner()` with no owner in context, a
+strict-if-present zero match,
 a `min` violation, a multi-match integrity subject, an unknown op — each
 returns `{error}`, never a partial label; callers turn `{error}` into a
 refused query / rejected write.
@@ -535,9 +573,9 @@ re-derives.
    wire-supplied specs before evaluation.
 2. **Read, unresolvable input:** a rule input missing from the projection by
    origin, or ambiguous (two columns, same origin) ⟶ refuse the query.
-3. **Read, bad data:** evaluator `{error}` (non-string regex input,
-   strict-if-present zero match, `min` miss, multi-match integrity subject) ⟶
-   refuse the query.
+3. **Read, bad data:** evaluator `{error}` (a regex input SQLite has no
+   reproducible text for, strict-if-present zero match, `min` miss,
+   multi-match integrity subject) ⟶ refuse the query.
 4. **Read, unattributable output:** a null-origin column on a rule-bearing query
    lifts by the common-alternative property (rule 2 / CFC spec §8.17.4) when a
    reader is a static unconditional reader of every row; otherwise ⟶ refuse.

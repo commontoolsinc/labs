@@ -1,0 +1,301 @@
+/**
+ * CFC Phase 3: what a NON-TEXT row value presents to a row-rule regex.
+ *
+ * A rule's `match()`/`whenMatches()` regexes read a column's text, and a
+ * column keyed by an INTEGER — a per-mailbox `source_id`, a per-account id —
+ * is the ordinary case a rule wants to gate on. These tests pin the text the
+ * evaluator hands the regex against SQLite's own conversion, and pin the
+ * value classes that stay refused — the REAL among them, for a reason only a
+ * real database can establish.
+ *
+ * Unlike its neighbor `v2-sqlite-row-label.test.ts`, this file opens a real
+ * database: the claim under test is "the text SQLite would show", and only
+ * SQLite can settle it.
+ *
+ * Spec: docs/specs/sqlite-builtin/06-cfc.md ("Per-row labels").
+ */
+
+import { Database } from "@db/sqlite";
+import { expect } from "@std/expect";
+import { describe, it } from "@std/testing/bdd";
+import {
+  all,
+  constant,
+  dbOwner,
+  evaluateRowLabel,
+  match,
+  principal,
+  regexInputText,
+  type RowLabelSpec,
+  whenMatches,
+} from "../v2/sqlite/row-label.ts";
+import { table } from "../v2/sqlite/schema.ts";
+
+const OWNER = "did:key:zOwner";
+const GATED = "did:mailto:seven@example.com";
+
+/** A rule whose only data-dependent clause is a gate on column `v`. */
+function gateSpec(re: RegExp, sqlType = "integer"): RowLabelSpec {
+  const schema = table(
+    { id: "integer primary key", v: sqlType },
+    (f) => ({
+      confidentiality: all(whenMatches(f.v, re, constant(GATED)), dbOwner()),
+    }),
+  );
+  return schema.rowLabel as RowLabelSpec;
+}
+
+/** Whether the gate fired for `value`, or the refusal it produced. */
+function gate(
+  re: RegExp,
+  value: unknown,
+  sqlType?: string,
+): { fired: boolean } | { error: string } {
+  const res = evaluateRowLabel(gateSpec(re, sqlType), { id: 1, v: value }, {
+    dbOwner: OWNER,
+  });
+  if ("error" in res) return res;
+  return { fired: res.confidentiality.includes(GATED) };
+}
+
+/** The refusal a value produces, or `undefined` when it produced a label. */
+function refusal(value: unknown): string | undefined {
+  const res = gate(/^7$/, value);
+  return "error" in res ? res.error : undefined;
+}
+
+describe("row-label numeric regex input", () => {
+  describe("a gate on an INTEGER column", () => {
+    it("fires on the digits SQLite shows for the value", () => {
+      // The msgvault case: every mailbox keyed by an INTEGER `source_id`, and
+      // the per-mailbox facet rule written as the natural `/^7$/`.
+      expect(gate(/^7$/, 7)).toEqual({ fired: true });
+    });
+
+    it("stays quiet for a different integer", () => {
+      expect(gate(/^7$/, 8)).toEqual({ fired: false });
+      expect(gate(/^7$/, 71)).toEqual({ fired: false });
+      expect(gate(/^7$/, -7)).toEqual({ fired: false });
+    });
+
+    it("shows a negative integer with its sign", () => {
+      expect(gate(/^-7$/, -7)).toEqual({ fired: true });
+    });
+
+    it('shows zero as "0", negative zero included', () => {
+      expect(gate(/^0$/, 0)).toEqual({ fired: true });
+      expect(gate(/^0$/, -0)).toEqual({ fired: true });
+    });
+
+    it("shows a bigint by its digits, for a driver in int64 mode", () => {
+      expect(gate(/^9007199254740993$/, 9007199254740993n)).toEqual({
+        fired: true,
+      });
+    });
+  });
+
+  describe("a gate on a REAL column", () => {
+    it("refuses a fractional value rather than approximating its text", () => {
+      // Not squeamishness about floats: SQLite's own REAL text is not a
+      // function of the double (see "the text SQLite shows" below), and a
+      // gate that nearly reproduces it is a gate that silently misses rows.
+      const res = gate(/^7\.5$/, 7.5, "real");
+      expect(res).toEqual({ error: expect.stringContaining("REAL") });
+    });
+
+    it("refuses an infinity", () => {
+      expect(refusal(Infinity)).toMatch(/infinity/);
+      expect(refusal(-Infinity)).toMatch(/infinity/);
+    });
+
+    it("takes a whole value stored in a REAL column", () => {
+      // What the driver hands over for a REAL 7.0 is the JS number 7, and a
+      // whole number is exactly what does coerce.
+      expect(gate(/^7$/, 7, "real")).toEqual({ fired: true });
+    });
+  });
+
+  describe("the value classes that stay refused", () => {
+    it("refuses NaN, which SQLite has no value for", () => {
+      expect(refusal(NaN)).toMatch(/NaN/);
+    });
+
+    it("refuses a whole number too large to name one INTEGER", () => {
+      // Past 2^53 a JS number no longer names one int64, and an INTEGER
+      // column read into a double has already lost the stored digits: any
+      // text we produced could name a different row.
+      expect(refusal(1e21)).toMatch(/too large/);
+      expect(refusal(2 ** 53)).toMatch(/too large/);
+      expect(refusal(-(2 ** 53))).toMatch(/too large/);
+    });
+
+    it("refuses a bigint outside the int64 range SQLite stores", () => {
+      expect(refusal(2n ** 63n)).toMatch(/regex input/);
+    });
+
+    it("refuses a boolean, which is not a SQLite value", () => {
+      expect(refusal(true)).toMatch(/boolean/);
+      expect(refusal(false)).toMatch(/boolean/);
+    });
+
+    it("refuses a BLOB", () => {
+      expect(refusal(new Uint8Array([1, 2]))).toMatch(/regex input/);
+    });
+
+    it("names no value in the refusal, only its class", () => {
+      // A refusal reaches a model-facing consumer, so it must not carry the
+      // row's own data (CFC spec invariant 14: no existence channel).
+      const reason = refusal(1234567890123456789012);
+      expect(reason).toBeDefined();
+      expect(reason).not.toMatch(/1234567890123456789/);
+    });
+  });
+
+  describe("the NULL rule, which this change leaves alone", () => {
+    it("keeps a NULL gate quiet rather than refusing", () => {
+      expect(gate(/^7$/, null)).toEqual({ fired: false });
+      expect(gate(/^7$/, undefined)).toEqual({ fired: false });
+      expect(gate(/^7$/, "")).toEqual({ fired: false });
+    });
+
+    it("distinguishes a zero from a NULL", () => {
+      // `0` is a value SQLite shows as "0"; NULL shows nothing. An evaluator
+      // that treated falsy-as-absent would collapse the two.
+      expect(gate(/^0$/, 0)).toEqual({ fired: true });
+      expect(gate(/^0$/, null)).toEqual({ fired: false });
+    });
+  });
+
+  describe("match(), the extractor", () => {
+    it("extracts from a number the same text a gate compares", () => {
+      const schema = table(
+        { id: "integer primary key", source_id: "integer" },
+        (f) => ({
+          confidentiality: all(
+            principal("mailbox", match(f.source_id, /\d+/, { min: 1 })),
+          ),
+        }),
+      );
+      const res = evaluateRowLabel(
+        schema.rowLabel as RowLabelSpec,
+        { id: 1, source_id: 7 },
+        { dbOwner: OWNER },
+      );
+      expect(res).toEqual({
+        confidentiality: ["did:mailbox:7"],
+        integrity: [],
+      });
+    });
+
+    it("still fails closed when a populated number matches nothing", () => {
+      // Strict-if-present is unchanged: a value that yields no match under-
+      // labels the row, so it refuses rather than dropping the principal.
+      const schema = table(
+        { id: "integer primary key", source_id: "integer" },
+        (f) => ({
+          confidentiality: all(
+            principal("mailbox", match(f.source_id, /[a-z]+/)),
+          ),
+        }),
+      );
+      const res = evaluateRowLabel(
+        schema.rowLabel as RowLabelSpec,
+        { id: 1, source_id: 7 },
+        { dbOwner: OWNER },
+      );
+      expect(res).toEqual({
+        error: expect.stringContaining("matched nothing"),
+      });
+    });
+  });
+
+  describe("the text SQLite shows", () => {
+    it("is what regexInputText() returns for every INTEGER", () => {
+      const corpus = [
+        0,
+        7,
+        -7,
+        42,
+        1000000,
+        -9007199254740991,
+        9007199254740991,
+        9007199254740993n,
+        -9007199254740993n,
+        9223372036854775807n,
+        -9223372036854775808n,
+      ];
+      const db = new Database(":memory:");
+      try {
+        const cast = db.prepare("SELECT CAST(?1 AS TEXT) AS text");
+        for (const value of corpus) {
+          const shown = cast.get<{ text: string }>(value as never)?.text;
+          expect({ value: String(value), text: regexInputText(value) })
+            .toEqual({ value: String(value), text: shown });
+        }
+      } finally {
+        db.close();
+      }
+    });
+
+    it("is not a function of the double, for a REAL", () => {
+      // The evidence behind refusing a REAL. SQLite renders one from its own
+      // decoded digits, which stop at the round-trip point and round up from
+      // there; the correctly rounded 15-digit value differs in the last
+      // place. Reproducing SQLite here would mean reimplementing its
+      // decoder's approximation, quirks included — and a gate compares the
+      // text SQLite would show, so "close" is a gate that misses rows.
+      const value = -0.009598882198146955;
+      const db = new Database(":memory:");
+      try {
+        const shown = db.prepare("SELECT CAST(?1 AS TEXT) AS text")
+          .get<{ text: string }>(value)?.text;
+        expect(shown).toBe("-0.00959888219814696");
+        expect(value.toPrecision(15)).toBe("-0.00959888219814695");
+        expect(regexInputText(value)).toBeUndefined();
+      } finally {
+        db.close();
+      }
+    });
+
+    it("diverges only where a JS number has lost the storage class", () => {
+      // The one documented gap for a value that DOES coerce: SQLite writes a
+      // REAL 7.0 as "7.0", and the driver hands that same row value to the
+      // evaluator as the JS number 7, which carries no REAL/INTEGER tag. The
+      // evaluator shows the integer spelling, so a gate is written against
+      // the digits rather than against the column's declared type.
+      const db = new Database(":memory:");
+      try {
+        db.exec("CREATE TABLE t (r real, i integer)");
+        db.exec("INSERT INTO t VALUES (7.0, 7)");
+        const shown = db.prepare(
+          "SELECT CAST(r AS TEXT) AS r, CAST(i AS TEXT) AS i FROM t",
+        ).get<{ r: string; i: string }>();
+        expect(shown).toEqual({ r: "7.0", i: "7" });
+
+        const stored = db.prepare("SELECT r, i FROM t").get<
+          { r: unknown; i: unknown }
+        >();
+        expect(stored).toEqual({ r: 7, i: 7 });
+        expect(regexInputText(stored?.r)).toBe("7");
+        expect(regexInputText(stored?.i)).toBe("7");
+      } finally {
+        db.close();
+      }
+    });
+  });
+
+  describe("declaring the rule", () => {
+    it("takes a gate on a non-TEXT column without complaint", () => {
+      // The refusal was only ever at evaluation: no validator reads a
+      // column's declared type, so nothing had to change at declaration.
+      expect(() =>
+        table({ id: "integer primary key", source_id: "integer" }, (f) => ({
+          confidentiality: all(
+            whenMatches(f.source_id, /^7$/, constant(GATED)),
+            dbOwner(),
+          ),
+        }))
+      ).not.toThrow();
+    });
+  });
+});
