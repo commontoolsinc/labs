@@ -13,6 +13,8 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import type { NormalizedFullLink } from "../src/link-utils.ts";
+import type { JSONSchema } from "../src/builder/types.ts";
+import type { Cell } from "../src/cell.ts";
 
 const signer = await Identity.fromPassphrase("argument scheduler read links");
 const space = signer.did();
@@ -34,14 +36,15 @@ describe("argument scheduler read links", () => {
     await storageManager?.close();
   });
 
+  // The fixtures' schemas are plain literals; they declare themselves here,
+  // where the walk is handed them.
   const collect = (
     argumentSchema: unknown,
     value: unknown,
-    resultCell: unknown,
+    resultCell: Cell<any>,
   ): NormalizedFullLink[] =>
-    // deno-lint-ignore no-explicit-any
-    (runtime.runner as any).collectArgumentSchedulerReadLinks(
-      argumentSchema,
+    runtime.runner.accessForTestingOnly.collectArgumentSchedulerReadLinks(
+      argumentSchema as JSONSchema | undefined,
       value,
       resultCell,
     );

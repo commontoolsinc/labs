@@ -484,15 +484,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     const Piece = pattern<{ value: number }>(({ value }) => ({
       doubled: lift((input: number) => input * 2)(value),
     }));
-    const harness = runtime.runner as unknown as {
-      runWithStartOwnership(
-        tx: unknown,
-        pattern: unknown,
-        argument: unknown,
-        resultCell: unknown,
-        options?: unknown,
-      ): { cancelDeferredStart?: () => void };
-    };
+    const harness = runtime.runner.accessForTestingOnly;
     const tx = gatedTxOn(runtime);
     const result = runtime.getCell<{ doubled?: number }>(
       space,
@@ -556,17 +548,11 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     const Piece = pattern<{ value: number }>(({ value }) => ({
       doubled: lift((input: number) => input * 2)(value),
     }));
-    const harness = runtime.runner as unknown as {
-      runWithStartOwnership(
-        tx: unknown,
-        pattern: unknown,
-        argument: unknown,
-        resultCell: unknown,
-        options?: unknown,
-      ): { cancelDeferredStart?: () => void };
+    const harness = runtime.runner.accessForTestingOnly;
+    // Replaced by assignment below, which only a TypeScript-private member
+    // allows, so it is reached the old way.
+    const stubbed = runtime.runner as unknown as {
       syncCellsForRunningPattern(...args: unknown[]): Promise<unknown>;
-      locallyStoppedResults: { delete(key: string): void };
-      locallyPreparedResults: { delete(key: string): void };
     };
     const tx = gatedTxOn(runtime);
     const result = runtime.getCell<{ doubled?: number }>(
@@ -592,9 +578,9 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     // The competitor: a second, independent public start of the same
     // result (the navigate landing flow), fired inside the recovery
     // walk's dependency-sync await.
-    const originalSync = harness.syncCellsForRunningPattern;
+    const originalSync = stubbed.syncCellsForRunningPattern;
     let competitorRan = false;
-    harness.syncCellsForRunningPattern = async function (...args: unknown[]) {
+    stubbed.syncCellsForRunningPattern = async function (...args: unknown[]) {
       if (
         !competitorRan &&
         key(args[0] as Cell<unknown>) === key(result)
@@ -636,7 +622,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       cancelDeferredStart!();
       expect(runtime.runner.cancels.has(key(result))).toBe(true);
     } finally {
-      harness.syncCellsForRunningPattern = originalSync;
+      stubbed.syncCellsForRunningPattern = originalSync;
       injector.restore();
     }
   });
@@ -657,14 +643,10 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     const Piece = pattern<{ value: number }>(({ value }) => ({
       doubled: lift((input: number) => input * 2)(value),
     }));
-    const harness = runtime.runner as unknown as {
-      runWithStartOwnership(
-        tx: unknown,
-        pattern: unknown,
-        argument: unknown,
-        resultCell: unknown,
-        options?: unknown,
-      ): { cancelDeferredStart?: () => void };
+    const harness = runtime.runner.accessForTestingOnly;
+    // Replaced by assignment below, which only a TypeScript-private member
+    // allows, so it is reached the old way.
+    const stubbed = runtime.runner as unknown as {
       startCore: (...args: unknown[]) => () => void;
     };
     const tx = gatedTxOn(runtime);
@@ -682,8 +664,8 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     // assembly — the widest point of the walk window.
     let parentCancel: (() => void) | undefined;
     let assemblies = 0;
-    const originalStartCore = harness.startCore;
-    harness.startCore = (...args: unknown[]) => {
+    const originalStartCore = stubbed.startCore;
+    stubbed.startCore = (...args: unknown[]) => {
       if (key(args[0] as Cell<unknown>) === key(result)) {
         assemblies++;
         if (assemblies === 2) parentCancel?.();
@@ -716,7 +698,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       expect(assemblies).toBe(2);
       expect(runtime.runner.cancels.has(key(result))).toBe(false);
     } finally {
-      harness.startCore = originalStartCore;
+      stubbed.startCore = originalStartCore;
       injector.restore();
     }
   });
@@ -1105,15 +1087,10 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     const Piece = pattern<{ value: number }>(({ value }) => ({
       doubled: lift((input: number) => input * 2)(value),
     }));
-    const harness = runtime.runner as unknown as {
-      runPatternAfterSuccessfulCommit(
-        tx: unknown,
-        resultCell: unknown,
-        pattern: unknown,
-        inputs: unknown,
-        pullOnceAfterStart?: boolean,
-        markCreateOnlyResult?: boolean,
-      ): () => void;
+    const harness = runtime.runner.accessForTestingOnly;
+    // Replaced by assignment below, which only a TypeScript-private member
+    // allows, so it is reached the old way.
+    const stubbed = runtime.runner as unknown as {
       catchUpAndStartOnStaleRead(...args: unknown[]): boolean;
     };
     const tx = runtime.edit();
@@ -1174,10 +1151,10 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     // demands the error arm actually ROUTED here and the recovery was
     // SCHEDULED — deleting the call site from
     // runPatternAfterSuccessfulCommit reds this, where it used to pass.
-    const originalEntry = harness.catchUpAndStartOnStaleRead;
+    const originalEntry = stubbed.catchUpAndStartOnStaleRead;
     let routed = 0;
     let scheduled = 0;
-    harness.catchUpAndStartOnStaleRead = function (...args: unknown[]) {
+    stubbed.catchUpAndStartOnStaleRead = function (...args: unknown[]) {
       const took = Reflect.apply(
         originalEntry,
         runtime.runner,
@@ -1217,7 +1194,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       expect(refusals).toBe(1);
       expect(runtime.runner.cancels.has(key(receipt))).toBe(false);
     } finally {
-      harness.catchUpAndStartOnStaleRead = originalEntry;
+      stubbed.catchUpAndStartOnStaleRead = originalEntry;
       replica.commitNative = originalCommitNative;
       runnerForMark.startWithTx = originalStartWithTx;
     }

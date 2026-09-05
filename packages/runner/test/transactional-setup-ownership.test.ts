@@ -37,10 +37,7 @@ describe("transactional setup ownership", () => {
     // The requirement is that the child comes back and stays reactive, not that
     // any particular bookkeeping survives the abort untouched.
 
-    type RegistrationKey = Parameters<typeof runtime.runner.cancels.has>[0];
-    const internals = runtime.runner as unknown as {
-      resultPatternCache: Map<RegistrationKey, string>;
-    };
+    const internals = runtime.runner.accessForTestingOnly;
     const originalEdit = runtime.edit.bind(runtime);
     type TestTx = ReturnType<typeof originalEdit>;
     type CommitResult = Awaited<ReturnType<TestTx["commit"]>>;

@@ -10,6 +10,7 @@ import { createModuleCompartmentGlobals } from "../src/sandbox/mod.ts";
 import { createCallbackCompartmentGlobals } from "../src/sandbox/compartment-globals.ts";
 import { evaluateFunctionSourceInSES } from "../src/sandbox/ses-runtime.ts";
 import { createBuilder } from "../src/builder/factory.ts";
+import type { Module } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
@@ -341,14 +342,8 @@ describe("SES security regressions", () => {
     // succeeds — no invocation-time blessing is needed, and the index stays
     // consistent (load-time blessing covered every nested callback).
     expect(() =>
-      (runtime.runner as unknown as {
-        invokeJavaScriptImplementation(
-          module: { wrapper?: string },
-          fn: (...args: any[]) => unknown,
-          argument: unknown,
-        ): unknown;
-      }).invokeJavaScriptImplementation(
-        main?.makeNested as { wrapper?: string },
+      runtime.runner.accessForTestingOnly.invokeJavaScriptImplementation(
+        main?.makeNested as Module,
         (main?.makeNested as { implementation: (...args: any[]) => unknown })
           .implementation,
         { $event: undefined, $ctx: undefined },

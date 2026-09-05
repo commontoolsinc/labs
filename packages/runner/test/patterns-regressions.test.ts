@@ -248,7 +248,7 @@ describe("Pattern Runner - Regressions", () => {
       tx,
     );
 
-    const runner = runtime.runner as any;
+    const runner = runtime.runner.accessForTestingOnly;
     runner.setupInternal(tx, echoPattern, { title: "draft" }, resultCell);
     const key = runner.getDocKey(resultCell);
     expect(runner.locallyPreparedResults.has(key)).toBe(true);

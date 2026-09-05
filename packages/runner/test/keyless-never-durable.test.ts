@@ -56,6 +56,11 @@ import {
 const signer = await Identity.fromPassphrase("keyless-never-durable");
 const space = signer.did();
 
+// Synthetic churn keys, declared as the keys the pointer table holds.
+type PointerKey = Parameters<
+  Runtime["runner"]["accessForTestingOnly"]["sessionPatternPointers"]["set"]
+>[0];
+
 // A minimal map-over-pattern program. Bare-evaluated (non-registering), its
 // op pattern carries no content-addressed entry ref, so node instantiation
 // mints the op's `keyless:` session identity (the CT-1812 keyless-op path).
@@ -788,18 +793,14 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
 
     // Capacity-evict the piece's pointer with synthetic churn — the map's
     // REAL eviction path, just fed faster than a server would.
-    const pointers = (runtime.runner as unknown as {
-      sessionPatternPointers: {
-        set(key: string, value: { identity: string; symbol: string }): void;
-      };
-    }).sessionPatternPointers;
+    const pointers = runtime.runner.accessForTestingOnly.sessionPatternPointers;
     for (
       let i = 0;
       runtime.runner.sessionPatternPointerFor(cell) !== undefined;
       i++
     ) {
       if (i > 100_000) throw new Error("the pointer never evicted");
-      pointers.set(`synthetic/${i}`, {
+      pointers.set(`synthetic/${i}` as PointerKey, {
         identity: `keyless:churn-${i}`,
         symbol: "default",
       });
@@ -878,18 +879,14 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     runtime.runner.stop(cell);
 
     // Capacity-evict the pointer (same churn as above).
-    const pointers = (runtime.runner as unknown as {
-      sessionPatternPointers: {
-        set(key: string, value: { identity: string; symbol: string }): void;
-      };
-    }).sessionPatternPointers;
+    const pointers = runtime.runner.accessForTestingOnly.sessionPatternPointers;
     for (
       let i = 0;
       runtime.runner.sessionPatternPointerFor(cell) !== undefined;
       i++
     ) {
       if (i > 100_000) throw new Error("the pointer never evicted");
-      pointers.set(`same-synthetic/${i}`, {
+      pointers.set(`same-synthetic/${i}` as PointerKey, {
         identity: `keyless:churn-${i}`,
         symbol: "default",
       });
@@ -982,18 +979,14 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     void rerun;
     // …then a capacity wave evicts the STAGED pointer inside its own
     // staging window…
-    const pointers = (runtime.runner as unknown as {
-      sessionPatternPointers: {
-        set(key: string, value: { identity: string; symbol: string }): void;
-      };
-    }).sessionPatternPointers;
+    const pointers = runtime.runner.accessForTestingOnly.sessionPatternPointers;
     for (
       let i = 0;
       runtime.runner.sessionPatternPointerFor(cell) !== undefined;
       i++
     ) {
       if (i > 100_000) throw new Error("the pointer never evicted");
-      pointers.set(`uncommitted-synthetic/${i}`, {
+      pointers.set(`uncommitted-synthetic/${i}` as PointerKey, {
         identity: `keyless:churn-${i}`,
         symbol: "default",
       });
@@ -1110,18 +1103,15 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
       // deno-lint-ignore no-explicit-any
       runtime.run(tx2, handBuiltPattern() as any, undefined, cell2);
       expect(runtime.runner.sessionPatternPointerFor(cell2)).toBeDefined();
-      const pointers = (runtime.runner as unknown as {
-        sessionPatternPointers: {
-          set(key: string, value: { identity: string; symbol: string }): void;
-        };
-      }).sessionPatternPointers;
+      const pointers =
+        runtime.runner.accessForTestingOnly.sessionPatternPointers;
       for (
         let i = 0;
         runtime.runner.sessionPatternPointerFor(cell2) !== undefined;
         i++
       ) {
         if (i > 100_000) throw new Error("the pointer never evicted");
-        pointers.set(`first-staging-synthetic/${i}`, {
+        pointers.set(`first-staging-synthetic/${i}` as PointerKey, {
           identity: `keyless:churn-${i}`,
           symbol: "default",
         });
