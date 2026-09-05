@@ -2659,6 +2659,12 @@ export const formatCfHarnessCliResult = (
     lines.push(
       `fabricSessionCfc: ${posture.enforcementMode} (${posture.enforcementModeSource}), flow-labels ${posture.flowLabels} (${posture.flowLabelsSource})${
         posture.posture !== undefined ? `, posture ${posture.posture}` : ""
+      }${
+        posture.readMaxConfidentiality !== undefined
+          ? `, read-ceiling ${posture.readMaxConfidentiality.length} clause(s) onExceed ${
+            posture.readOnExceed ?? "fail"
+          } (${posture.readMaxConfidentialitySource ?? "unknown"})`
+          : ""
       }`,
     );
     if (posture.record !== undefined) {
@@ -3335,6 +3341,24 @@ export const runCfHarnessCli = async (
         throw new HarnessControlError(
           "provider-mismatch",
           "resume credential owner mismatch: requested owner does not match the recorded run",
+        );
+      }
+      // A manifest handed to a resume must agree with the recorded one on
+      // the read ceiling, as it must on the model and the credential owner:
+      // the recorded manifest is what the run resumes under, and a different
+      // ceiling silently set aside would leave the operator believing the
+      // run reads under the one they passed.
+      if (
+        runManifest !== undefined && recordedRunManifest !== undefined &&
+        (JSON.stringify(runManifest.cfc?.maxConfidentiality) !==
+            JSON.stringify(recordedRunManifest.cfc?.maxConfidentiality) ||
+          runManifest.cfc?.onExceed !== recordedRunManifest.cfc?.onExceed)
+      ) {
+        throw new HarnessControlError(
+          "provider-mismatch",
+          "resume read ceiling mismatch: the requested manifest's " +
+            "cfc.maxConfidentiality or cfc.onExceed does not match the " +
+            "recorded run's",
         );
       }
       const credentialOwnerKey = credentialOwner.ownerKey;

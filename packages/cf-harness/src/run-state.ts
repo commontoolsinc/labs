@@ -113,12 +113,19 @@ export interface HarnessFabricSessionCfcPosture {
   readOnExceed?: CfcReadOnExceed;
 
   /**
+   * Where the ceiling came from: the operator's session config, the run
+   * manifest, or both met. Absent with the ceiling.
+   */
+  readMaxConfidentialitySource?: "session" | "run-manifest" | "both";
+
+  /**
    * The session runtime's whole posture, as the shared record every surface
-   * publishes (`cfc-posture.ts`). The itemized fields above are the two dials
-   * an operator sets and where each came from; this is what those dials, the
-   * named bundle, and the runtime's own defaults resolve to — every dial, the
-   * policy digest, every known sink governed or explicitly not, and every
-   * published deviation.
+   * publishes (`cfc-posture.ts`). The itemized fields above are the dials an
+   * operator or a run manifest sets and where each came from; this is what
+   * the enforcement and flow-label dials, the named bundle, and the runtime's
+   * own defaults resolve to — every dial, the policy digest, every known sink
+   * governed or explicitly not, and every published deviation. The read
+   * ceiling is not part of the record; the itemized fields carry it.
    *
    * Absent on a run recorded before the record existed. Such a run stays
    * frozen as history rather than being backfilled: the values would be this
