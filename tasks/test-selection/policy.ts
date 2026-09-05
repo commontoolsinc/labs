@@ -36,11 +36,34 @@ export const LANE_SAFETY_SECONDS = 30;
 export const LANE_BUDGET_SECONDS = LANE_BOUND_SECONDS -
   LANE_PROLOGUE_SECONDS - LANE_SAFETY_SECONDS;
 
-/** What one lane of the full run on `main` may hold. */
-export const FULL_LANE_BUDGET_SECONDS = 600;
+/**
+ * The hard bound on a lane of the full run on `main`. Ten minutes: `main`
+ * makes no promise about a first answer the way a pull request does, so
+ * this is chosen for how many jobs the run should take rather than for
+ * how long anybody waits.
+ */
+export const FULL_LANE_BOUND_SECONDS = 600;
+
+/**
+ * What the packer may fill in a lane of the full run, derived from that
+ * lane's bound exactly as a pull request's is from its own. A lane of
+ * either run pays the same prologue and wants the same headroom, because
+ * both are the same job doing the same setup on the same runner; what
+ * differs between them is only the bound they are held to.
+ */
+export const FULL_LANE_BUDGET_SECONDS = FULL_LANE_BOUND_SECONDS -
+  LANE_PROLOGUE_SECONDS - LANE_SAFETY_SECONDS;
 
 /** The label that runs everything on a pull request. */
 export const FULL_RUN_LABEL = "ci: full";
+
+/**
+ * What one execution of a test nothing has measured is charged, where the
+ * suite it belongs to has no measured test to take a figure from. Charging
+ * nothing instead would make the packer treat every unmeasured test as
+ * free, and free work all fits in the first lane it is offered.
+ */
+export const UNMEASURED_COST_SECONDS = 1;
 
 /** The score of a test that has never failed anywhere. */
 export const VALUE_FLOOR = 0.05;
@@ -314,12 +337,22 @@ export const DIALS: readonly Dial[] = [
       "written down.",
   },
   {
-    name: "FULL_LANE_BUDGET_SECONDS",
-    value: FULL_LANE_BUDGET_SECONDS,
+    name: "FULL_LANE_BOUND_SECONDS",
+    value: FULL_LANE_BOUND_SECONDS,
     unit: "seconds",
     setBy: "chosen",
     why: "Up when the run on `main` uses more jobs than it needs; down when " +
       "`main` takes too long to say something broke.",
+  },
+  {
+    name: "FULL_LANE_BUDGET_SECONDS",
+    value: FULL_LANE_BUDGET_SECONDS,
+    unit: "seconds",
+    setBy: "derived",
+    why: "Nothing edits this. It is the full run's bound less the same " +
+      "prologue and safety margin a pull request's lane pays, so a lane of " +
+      "either run is packed against what is left after the parts the " +
+      "packer does not control.",
   },
   {
     name: "FULL_RUN_LABEL",
@@ -328,6 +361,16 @@ export const DIALS: readonly Dial[] = [
     setBy: "chosen",
     why: "Not a quantity. Change it only if the label collides with one the " +
       "repository already uses for something else.",
+  },
+  {
+    name: "UNMEASURED_COST_SECONDS",
+    value: UNMEASURED_COST_SECONDS,
+    unit: "seconds",
+    setBy: "chosen",
+    why: "Up when a lane holding new tests runs long; down when it finishes " +
+      "early. It is reached for only by a suite with no measured test at " +
+      "all, since a suite that has any charges an unmeasured one what its " +
+      "middle test costs.",
   },
   {
     name: "VALUE_FLOOR",

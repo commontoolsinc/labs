@@ -13,19 +13,30 @@ import {
   describeConflicts,
   describePlan,
   describeWithheld,
-  everyBatch,
+  fullLanes,
   main,
-  mandatoryFor,
   manifestMoment,
   parseLaneArgs,
   runBatch,
   runInvocation,
   runLane,
   spoolRecords,
-  unknownIdentity,
 } from "./ci-lane.ts";
+import { capabilitiesBySuite } from "./test-topology.ts";
+import { census } from "./test-selection/census.ts";
 import type { Suite } from "./test-topology/suite.ts";
+import {
+  plan,
+  type Selection,
+  type SelectionReason,
+} from "./test-selection/plan.ts";
 import type { Manifest, ManifestEntry } from "./test-selection/manifest.ts";
+import {
+  FULL_LANE_BOUND_SECONDS,
+  FULL_LANE_BUDGET_SECONDS,
+  LANE_BUDGET_SECONDS,
+  UNMEASURED_COST_SECONDS,
+} from "./test-selection/policy.ts";
 
 /**
  * The repository, found from this file rather than from the process's
@@ -104,13 +115,19 @@ describe("reading the lane's command line", () => {
     expect(parseLaneArgs(["--lane", "0", "--of", "5"])).toBeUndefined();
   });
 
+  it("refuses to count lanes for a run that is not the full one", () => {
+    // Only `main` works its lane count out; a pull request's is a dial.
+    expect(parseLaneArgs(["--lane-count"])).toBeUndefined();
+    expect(parseLaneArgs(["--full", "--lane-count"])?.laneCount).toBe(true);
+  });
+
   it("refuses a flag it does not know", () => {
     expect(parseLaneArgs(["--shard", "1/5"])).toBeUndefined();
   });
 });
 
 describe("the moment a lane resolves its manifest at", () => {
-  const lane = { lane: 1, of: 5, full: false, dryRun: false };
+  const lane = { lane: 1, of: 5, full: false, dryRun: false, laneCount: false };
 
   /** A repository whose one commit was made at a moment a case chose. */
   async function repository(committed: string): Promise<string> {
@@ -173,140 +190,6 @@ describe("the moment a lane resolves its manifest at", () => {
     const moment = await manifestMoment({ ...lane, root });
     expect(moment.note).toContain("cannot read the commit's date");
     expect(Number.isNaN(new Date(moment.at).getTime())).toBe(false);
-  });
-});
-
-describe("what a lane must run whatever the score says", () => {
-  const bakery = suite({
-    id: "workspace-unit",
-    units: ["packages/bakery/glaze.test.ts", "packages/bakery/proof.test.ts"],
-  });
-
-  it("runs a unit no manifest has ever seen", () => {
-    const manifest = manifestOf([{}]);
-    const { mandatory, unknown } = mandatoryFor([bakery], manifest, new Set());
-    const key = testIdentityKey(
-      unknownIdentity(bakery, "packages/bakery/proof.test.ts"),
-    );
-    expect(mandatory.get(key)).toBe("unknown");
-    expect(unknown.get(key)).toEqual({
-      suite: "workspace-unit",
-      unit: "packages/bakery/proof.test.ts",
-    });
-  });
-
-  it("runs every unit when there is no manifest at all", () => {
-    const { mandatory } = mandatoryFor([bakery], undefined, new Set());
-    expect(mandatory.size).toBe(2);
-    expect([...mandatory.values()]).toEqual(["unknown", "unknown"]);
-  });
-
-  it("runs the identities of a unit the change touched", () => {
-    const manifest = manifestOf([
-      {},
-      { test: { k: "unit", s: "bakery", n: "glaze > browns" } },
-    ]);
-    const { mandatory } = mandatoryFor(
-      [bakery],
-      manifest,
-      new Set(["packages/bakery/glaze.test.ts"]),
-    );
-    expect(
-      mandatory.get(
-        testIdentityKey({ k: "unit", s: "bakery", n: "glaze > sets" }),
-      ),
-    ).toBe("changed");
-    expect(
-      mandatory.get(
-        testIdentityKey({ k: "unit", s: "bakery", n: "glaze > browns" }),
-      ),
-    ).toBe("changed");
-  });
-
-  it("asks a suite which of its units a change reaches", () => {
-    // A unit that is not a path — a type-check group, a binary — is one
-    // only its suite can map the diff onto, so the suite is asked rather
-    // than the diff being matched against the unit's name.
-    const binaries = suite({
-      id: "binaries",
-      mandatory: "changed",
-      recordSurfaces: [{ kind: "gate", scope: "repo" }],
-      units: ["toolshed", "cf"],
-      unitsForChange: (changed) =>
-        changed.has("packages/shell/index.ts") ? ["toolshed"] : [],
-    });
-    const manifest = manifestOf([
-      {
-        test: { k: "gate", s: "repo", n: "build-binary toolshed" },
-        suite: "binaries",
-        unit: "toolshed",
-      },
-      {
-        test: { k: "gate", s: "repo", n: "build-binary cf" },
-        suite: "binaries",
-        unit: "cf",
-      },
-    ]);
-    const { mandatory } = mandatoryFor(
-      [binaries],
-      manifest,
-      new Set(["packages/shell/index.ts"]),
-    );
-    expect(
-      mandatory.get(
-        testIdentityKey({ k: "gate", s: "repo", n: "build-binary toolshed" }),
-      ),
-    ).toBe("changed");
-    expect(
-      mandatory.get(
-        testIdentityKey({ k: "gate", s: "repo", n: "build-binary cf" }),
-      ),
-    ).toBeUndefined();
-  });
-
-  it("runs every unit of a suite marked always", () => {
-    const gates = suite({
-      id: "repo-gates",
-      mandatory: "always",
-      recordSurfaces: [{ kind: "gate", scope: "repo" }],
-      units: ["deno-fmt"],
-    });
-    const manifest = manifestOf([{
-      test: { k: "gate", s: "repo", n: "deno-fmt" },
-      suite: "repo-gates",
-      unit: "deno-fmt",
-    }]);
-    const { mandatory } = mandatoryFor([gates], manifest, new Set());
-    expect([...mandatory.values()]).toEqual(["always"]);
-  });
-
-  it("says nothing about a unit a configuration declares unavailable", () => {
-    const on = suite({
-      id: "package-integration-on",
-      variant: "server-execution",
-      units: ["packages/oven/a.test.ts"],
-      unavailable: [{
-        unit: "packages/oven/a.test.ts",
-        reason: "the surface it exercises has not landed",
-      }],
-    });
-    expect(mandatoryFor([on], undefined, new Set()).mandatory.size).toBe(0);
-  });
-
-  it("keeps a unit whose unavailability names only one leaf", () => {
-    // Every other identity in the file still runs, so taking the file
-    // out would stop far more than the configuration asked to stop.
-    const on = suite({
-      id: "package-integration-on",
-      variant: "server-execution",
-      units: ["packages/oven/a.test.ts"],
-      unavailable: [{
-        unit: "packages/oven/a.test.ts",
-        leafName: "bakes > slowly",
-        reason: "the surface that step exercises has not landed",
-      }],
-    });
-    expect(mandatoryFor([on], undefined, new Set()).mandatory.size).toBe(1);
   });
 });
 
@@ -390,24 +273,104 @@ describe("turning a lane's selections into batches", () => {
   });
 });
 
-describe("running everything", () => {
-  it("gives each lane its own share and no unit twice", () => {
-    const suites = [
-      suite({
-        id: "workspace-unit",
-        units: ["a.test.ts", "b.test.ts", "c.test.ts", "d.test.ts"],
-      }),
-    ];
-    const lanes = [1, 2, 3].map((lane) => everyBatch(suites, lane, 3));
-    const placed = lanes.flatMap((batches) =>
-      batches.flatMap((batch) => batch.units.map((unit) => unit.unit))
+/** Every unit each lane of a plan would run, in lane order. */
+function unitsPerLane(
+  suites: readonly Suite[],
+  manifest: Manifest | undefined,
+  lanes: number,
+  policy?: "everything",
+): string[][] {
+  const seen = census(suites, manifest, new Set());
+  const laid = plan({
+    manifest: seen.manifest,
+    mandatory: seen.mandatory,
+    capabilities: capabilitiesBySuite(suites),
+    lanes,
+    ...(policy === undefined ? {} : { policy }),
+  });
+  return laid.lanes.map((lane) =>
+    batchesOf(suites, seen.manifest, lane.selections)
+      .flatMap((batch) => batch.units.map((unit) => unit.unit))
+      .toSorted()
+  );
+}
+
+describe("the order a runner is handed its work in", () => {
+  const bakery = [
+    suite({
+      id: "workspace-unit",
+      units: ["c.test.ts", "a.test.ts", "b.test.ts"],
+    }),
+    suite({
+      id: "repo-gates",
+      recordSurfaces: [{ kind: "gate", scope: "repo" }],
+      units: ["deno-fmt"],
+    }),
+  ];
+
+  /** The units of one batch, in the order `batchesOf` returns them. */
+  function handed(selections: readonly Selection[]): string[] {
+    const seen = census(bakery, undefined, new Set());
+    return batchesOf(bakery, seen.manifest, selections)
+      .flatMap((batch) => batch.units.map((unit) => unit.unit));
+  }
+
+  it("hands the units over in the order the suite enumerates them", () => {
+    const seen = census(bakery, undefined, new Set());
+    const entries = seen.manifest.entries.filter((entry) =>
+      entry.suite === "workspace-unit"
     );
-    expect(placed.toSorted()).toEqual([
+    const selections = entries.map((entry) => ({
+      entry,
+      reason: "value" as const,
+      repeats: 1,
+    }));
+    expect(handed(selections)).toEqual(["c.test.ts", "a.test.ts", "b.test.ts"]);
+    // The same set chosen in a different order is handed over the same
+    // way, which is what stops the two runs ordering one batch's work
+    // differently from each other.
+    expect(handed([...selections].reverse())).toEqual(handed(selections));
+  });
+
+  it("puts the batches themselves in one order whatever chose them", () => {
+    const seen = census(bakery, undefined, new Set());
+    const selections = seen.manifest.entries.map((entry) => ({
+      entry,
+      reason: "value" as const,
+      repeats: 1,
+    }));
+    const suiteIds = (chosen: readonly Selection[]) =>
+      batchesOf(bakery, seen.manifest, chosen).map((batch) => batch.suite.id);
+    expect(suiteIds(selections)).toEqual(["repo-gates", "workspace-unit"]);
+    expect(suiteIds([...selections].reverse())).toEqual(suiteIds(selections));
+  });
+});
+
+describe("running everything", () => {
+  const four = [
+    suite({
+      id: "workspace-unit",
+      units: ["a.test.ts", "b.test.ts", "c.test.ts", "d.test.ts"],
+    }),
+  ];
+
+  it("gives each lane its own share and no unit twice", () => {
+    const lanes = unitsPerLane(four, undefined, 3, "everything");
+    expect(lanes.flat().toSorted()).toEqual([
       "a.test.ts",
       "b.test.ts",
       "c.test.ts",
       "d.test.ts",
     ]);
+  });
+
+  it("spreads the units rather than piling them into one lane", () => {
+    // Nothing has measured any of these, so they cost the same as one
+    // another. Costing them nothing would make every lane after the
+    // first look more expensive than the one already holding the suite,
+    // and the whole suite would land in lane one.
+    const lanes = unitsPerLane(four, undefined, 4, "everything");
+    expect(lanes.map((units) => units.length)).toEqual([1, 1, 1, 1]);
   });
 
   it("leaves out a unit a configuration declares unavailable", () => {
@@ -418,7 +381,7 @@ describe("running everything", () => {
         unavailable: [{ unit: "a.test.ts", reason: "not landed yet" }],
       }),
     ];
-    expect(everyBatch(suites, 1, 1)[0]!.units.map((unit) => unit.unit))
+    expect(unitsPerLane(suites, undefined, 1, "everything")[0])
       .toEqual(["b.test.ts"]);
   });
 
@@ -434,13 +397,368 @@ describe("running everything", () => {
         }],
       }),
     ];
-    expect(everyBatch(suites, 1, 1)[0]!.units.map((unit) => unit.unit))
+    expect(unitsPerLane(suites, undefined, 1, "everything")[0])
       .toEqual(["a.test.ts", "b.test.ts"]);
   });
 });
 
+describe("how many lanes the full run asks for", () => {
+  const options = {
+    lane: 1,
+    of: 1,
+    full: true,
+    dryRun: true,
+    laneCount: true,
+    root: REPOSITORY,
+  };
+
+  /** A topology holding `count` units of one suite, each costing `cost`. */
+  function corpus(count: number, cost: number) {
+    const units = Array.from({ length: count }, (_, i) => `unit-${i}.test.ts`);
+    return {
+      topology: () => Promise.resolve([suite({ id: "workspace-unit", units })]),
+      manifest: () =>
+        Promise.resolve({
+          manifest: manifestOf(units.map((unit, i) => ({
+            test: { k: "unit", s: "bakery", n: `case ${i}` },
+            unit,
+            cost,
+          }))),
+          objectName: "manifest-fixture.json.gz",
+        }),
+    };
+  }
+
+  it("asks for one lane for work that fits in one", async () => {
+    expect(await fullLanes(options, corpus(10, 1))).toBe(1);
+  });
+
+  it("asks for enough lanes that none of them runs long", async () => {
+    const deps = corpus(FULL_LANE_BUDGET_SECONDS * 4, 1);
+    expect(await fullLanes(options, deps)).toBe(4);
+  });
+
+  /**
+   * A corpus with the shapes that make packing hard: several suites, the
+   * measured skew the plan document records with a tenth of the tests
+   * holding most of the time, capabilities whose setup a lane pays once,
+   * fitted overheads, and one identity larger than a whole lane.
+   */
+  function awkward() {
+    const suites = [
+      suite({ id: "workspace-unit", needs: ["deno"], units: [] }),
+      suite({
+        id: "pattern-integration",
+        needs: ["deno", "browser"],
+        units: [],
+      }),
+      suite({ id: "cli-core", needs: ["deno", "toolshed"], units: [] }),
+    ].map((s, i) => ({
+      ...s,
+      units: Array.from({ length: 40 }, (_, u) => `s${i}/unit-${u}.test.ts`),
+    }));
+    const entries = suites.flatMap((s, i) =>
+      s.units.map((unit, u) => ({
+        test: { k: "unit", s: "bakery", n: `s${i} case ${u}` },
+        suite: s.id,
+        unit,
+        // A tenth of them hold most of the time, and one is larger than
+        // any lane can hold.
+        cost: u === 0 && i === 0
+          ? FULL_LANE_BUDGET_SECONDS * 2
+          : u % 10 === 0
+          ? 40
+          : 0.4,
+      }))
+    );
+    const manifest = manifestOf(entries);
+    manifest.calibration = {
+      setupCost: { deno: 15, browser: 60, toolshed: 45 },
+      suites: Object.fromEntries(
+        suites.map((s) => [s.id, { overhead: 12, correction: 1.3 }]),
+      ),
+      unitOverhead: {},
+      prologue: 40,
+    };
+    return {
+      suites,
+      topology: () => Promise.resolve(suites),
+      manifest: () =>
+        Promise.resolve({ manifest, objectName: "manifest-fixture.json.gz" }),
+    };
+  }
+
+  it("gives every unit a lane at the count it asked for", async () => {
+    // The integer is the whole of what the job ahead of the full run
+    // emits, so it has to be a count the lanes can honor. Every identity
+    // placed exactly once is the property that matters: what the full
+    // run does not run, nothing runs.
+    const deps = awkward();
+    const lanes = await fullLanes(options, deps);
+    const seen = census(
+      deps.suites,
+      (await deps.manifest()).manifest,
+      new Set(),
+    );
+    const laid = plan({
+      manifest: seen.manifest,
+      mandatory: seen.mandatory,
+      capabilities: capabilitiesBySuite(deps.suites),
+      policy: "everything",
+      lanes,
+    });
+    const placed = laid.lanes.flatMap((lane) =>
+      lane.selections.map((s) => testIdentityKey(s.entry.test))
+    );
+    expect(placed.length).toBe(seen.manifest.entries.length);
+    expect(new Set(placed).size).toBe(seen.manifest.entries.length);
+    // The lanes the count was chosen for hold what it promised, save the
+    // one carrying an identity larger than any lane, which carries it
+    // alone because nothing else would fit beside it.
+    const over = laid.lanes.filter((lane) =>
+      lane.projectedSeconds > laid.budgetSeconds
+    );
+    expect(over.length).toBe(1);
+    expect(over[0]!.selections.length).toBe(1);
+  });
+
+  it("gives every unit a lane when nothing has been measured", async () => {
+    // The same property down the fallback path, where the count comes
+    // from the shape of the topology rather than from a cost model.
+    const deps = awkward();
+    const lanes = await fullLanes(options, {
+      topology: deps.topology,
+      manifest: () => Promise.resolve({ absent: "the store is gone" }),
+    });
+    const seen = census(deps.suites, undefined, new Set());
+    const laid = plan({
+      manifest: seen.manifest,
+      mandatory: seen.mandatory,
+      capabilities: capabilitiesBySuite(deps.suites),
+      policy: "everything",
+      lanes,
+    });
+    const placed = laid.lanes.flatMap((lane) =>
+      lane.selections.map((s) => testIdentityKey(s.entry.test))
+    );
+    expect(placed.length).toBe(120);
+    expect(new Set(placed).size).toBe(120);
+    expect(laid.overBudgetSeconds).toBe(0);
+  });
+
+  it("takes the topology's shape when a manifest knows none of it", async () => {
+    // A manifest that arrived is not the question. One published before
+    // this tree existed arrives and still knows none of it, and a cost
+    // model reading it is as blind as one reading nothing.
+    const suites = [
+      suite({ id: "workspace-unit", units: ["a.test.ts", "b.test.ts"] }),
+      suite({ id: "repo-gates", units: ["deno-fmt"] }),
+    ];
+    const errors: string[] = [];
+    const error = console.error;
+    console.error = (line: string) => errors.push(line);
+    let lanes: number;
+    try {
+      lanes = await fullLanes(options, {
+        topology: () => Promise.resolve(suites),
+        manifest: () =>
+          Promise.resolve({
+            manifest: manifestOf([{ unit: "somewhere/else.test.ts" }]),
+            objectName: "manifest-fixture.json.gz",
+          }),
+      });
+    } finally {
+      console.error = error;
+    }
+    expect(lanes).toBe(2);
+    expect(errors.join("\n")).toContain("measured");
+  });
+
+  it("grows the fallback with the units, not only with the suites", async () => {
+    // A repository can gain units without gaining a suite, and the suite
+    // count alone would not notice. Two suites here hold more units than
+    // two lanes can, so the count comes from packing them instead.
+    const perLane = Math.floor(
+      FULL_LANE_BUDGET_SECONDS / UNMEASURED_COST_SECONDS,
+    );
+    const suites = [0, 1].map((i) =>
+      suite({
+        id: `suite-${i}`,
+        units: Array.from(
+          { length: perLane + 40 },
+          (_, u) => `s${i}/unit-${u}.test.ts`,
+        ),
+      })
+    );
+    const lanes = await fullLanes(options, {
+      topology: () => Promise.resolve(suites),
+      manifest: () => Promise.resolve({ absent: "the store is gone" }),
+    });
+    expect(lanes).toBeGreaterThan(suites.length);
+    expect(lanes).toBe(Math.ceil((perLane + 40) * 2 / perLane));
+  });
+
+  it("charges a stand-in what the census charged it, not the dial", async () => {
+    // A suite whose measured units have all been renamed away carries
+    // its old median onto every stand-in, so the units cost far more
+    // than the bare unmeasured figure. A count that assumed the figure
+    // would be out by that whole multiple, and each lane would run past
+    // the bound its job is killed at.
+    const units = Array.from({ length: 300 }, (_, i) => `new/u-${i}.test.ts`);
+    const suites = [suite({ id: "pattern-integration", units })];
+    const renamed = manifestOf(
+      Array.from({ length: 50 }, (_, i) => ({
+        test: { k: "unit", s: "bakery", n: `old ${i}` },
+        suite: "pattern-integration",
+        unit: `old/u-${i}.test.ts`,
+        cost: 40,
+      })),
+    );
+    const lanes = await fullLanes(options, {
+      topology: () => Promise.resolve(suites),
+      manifest: () =>
+        Promise.resolve({ manifest: renamed, objectName: "m.json.gz" }),
+    });
+    const seen = census(suites, renamed, new Set());
+    expect(seen.unmeasured).toBe(seen.manifest.entries.length);
+    expect(seen.manifest.entries[0]!.cost).toBe(40);
+    const laid = plan({
+      manifest: seen.manifest,
+      mandatory: seen.mandatory,
+      capabilities: capabilitiesBySuite(suites),
+      policy: "everything",
+      lanes,
+    });
+    expect(laid.overBudgetSeconds).toBe(0);
+  });
+
+  it("takes the topology's shape when there is no manifest", async () => {
+    // Nothing has a measured cost, so a projection from costs would be
+    // arithmetic over an invented figure, and being wrong downward means
+    // every lane runs past the bound its job is killed at.
+    const suites = [
+      suite({ id: "workspace-unit", units: ["a.test.ts", "b.test.ts"] }),
+      suite({ id: "repo-gates", units: ["deno-fmt"] }),
+      suite({
+        id: "package-integration-opposite",
+        units: ["c.test.ts"],
+        unavailable: [{ unit: "c.test.ts", reason: "not in this posture" }],
+      }),
+    ];
+    const errors: string[] = [];
+    const error = console.error;
+    console.error = (line: string) => errors.push(line);
+    let lanes: number;
+    try {
+      lanes = await fullLanes(options, {
+        topology: () => Promise.resolve(suites),
+        manifest: () => Promise.resolve({ absent: "the store is gone" }),
+      });
+    } finally {
+      console.error = error;
+    }
+    // A lane for each suite with anything to run, so the suite whose
+    // every unit this configuration declares unavailable takes none.
+    expect(lanes).toBe(2);
+    expect(errors.join("\n")).toContain("measured");
+  });
+
+  it("answers with an integer on its own, and exits zero", async () => {
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    let status: number;
+    try {
+      status = await main(
+        ["--full", "--lane-count"],
+        REPOSITORY,
+        corpus(10, 1),
+      );
+    } finally {
+      console.log = log;
+    }
+    expect(status).toBe(0);
+    expect(lines).toEqual(["1"]);
+  });
+});
+
+describe("what the two runs agree about", () => {
+  const bakery = [
+    suite({
+      id: "workspace-unit",
+      units: ["packages/bakery/glaze.test.ts", "packages/bakery/proof.test.ts"],
+      unavailable: [{
+        unit: "packages/bakery/gone.test.ts",
+        reason: "not in this configuration",
+      }],
+    }),
+  ];
+
+  /**
+   * A manifest naming a unit this tree does not have and one it declares
+   * unavailable, which is what a manifest published before the tree
+   * changed looks like.
+   */
+  const stale = manifestOf([
+    { unit: "packages/bakery/glaze.test.ts" },
+    {
+      test: { k: "unit", s: "bakery", n: "gone > entirely" },
+      unit: "packages/bakery/gone.test.ts",
+    },
+    {
+      test: { k: "unit", s: "bakery", n: "deleted > long ago" },
+      unit: "packages/bakery/deleted.test.ts",
+    },
+  ]);
+
+  it("runs the same units in both, since both read the same tree", () => {
+    const full = unitsPerLane(bakery, stale, 1, "everything")[0];
+    const budgeted = unitsPerLane(bakery, stale, 1)[0];
+    expect(full).toEqual([
+      "packages/bakery/glaze.test.ts",
+      "packages/bakery/proof.test.ts",
+    ]);
+    expect(budgeted).toEqual(full);
+  });
+
+  it("selects the same set as a full run when nothing is scarce", () => {
+    // The one difference between the two policies is what a run can
+    // afford. Given a budget nothing exhausts and a corpus nothing is
+    // withheld from, they must choose the same tests; if they ever stop
+    // doing so, something has been added to one and not the other.
+    const suites = [
+      suite({
+        id: "workspace-unit",
+        units: Array.from({ length: 12 }, (_, i) => `unit-${i}.test.ts`),
+      }),
+    ];
+    const seen = census(suites, undefined, new Set());
+    const shared = {
+      manifest: seen.manifest,
+      mandatory: new Map<string, SelectionReason>(),
+      capabilities: capabilitiesBySuite(suites),
+      lanes: 3,
+      budgetSeconds: 1_000_000,
+    };
+    const full = plan({ ...shared, policy: "everything" as const });
+    const budgeted = plan(shared);
+    const keys = (result: ReturnType<typeof plan>) =>
+      result.lanes.flatMap((lane) =>
+        lane.selections.map((s) => testIdentityKey(s.entry.test))
+      ).toSorted();
+    expect(keys(budgeted)).toEqual(keys(full));
+  });
+});
+
 describe("running a lane's work", () => {
-  const lane = { lane: 1, of: 5, full: false, dryRun: false, root: REPOSITORY };
+  const lane = {
+    lane: 1,
+    of: 5,
+    full: false,
+    dryRun: false,
+    laneCount: false,
+    root: REPOSITORY,
+  };
 
   /** A suite that runs the command a case gives it. */
   function runnable(command: readonly string[], id = "probe"): Suite {
@@ -545,6 +863,10 @@ describe("running a lane's work", () => {
         ["deno", "toolshed"],
         { objectName: "manifest-x.json.gz" },
         ["binaries: build-binary toolshed costs 900s"],
+        { selections: [], projectedSeconds: 0 },
+        LANE_BUDGET_SECONDS,
+        0,
+        0,
       );
     } finally {
       console.log = log;
@@ -588,6 +910,9 @@ describe("running a lane's work", () => {
           selections: [{ entry, reason: "value", repeats: 2 }],
           projectedSeconds: 96,
         },
+        LANE_BUDGET_SECONDS,
+        0,
+        1,
       );
     } finally {
       console.log = log;
@@ -603,7 +928,17 @@ describe("running a lane's work", () => {
     const log = console.log;
     console.log = (line: string) => lines.push(line);
     try {
-      describePlan(lane, [], [], { absent: "the store is unreachable" });
+      describePlan(
+        lane,
+        [],
+        [],
+        { absent: "the store is unreachable" },
+        [],
+        { selections: [], projectedSeconds: 0 },
+        LANE_BUDGET_SECONDS,
+        0,
+        0,
+      );
     } finally {
       console.log = log;
     }
@@ -697,6 +1032,7 @@ describe("planning a lane without running it", () => {
         of: 5,
         full: true,
         dryRun: true,
+        laneCount: false,
         root: REPOSITORY,
       });
     } finally {
@@ -705,9 +1041,12 @@ describe("planning a lane without running it", () => {
     expect(ok).toBe(true);
     const printed = lines.join("\n");
     expect(printed).toContain("Lane 2 of 5");
-    expect(printed).toContain("running everything");
-    // A lane's share of the full run is a real share of real suites.
+    // A lane's share of the full run is a real share of real suites,
+    // measured against the full run's own budget rather than a pull
+    // request's.
     expect(printed).toContain("workspace-unit");
+    expect(printed).toContain(`of ${FULL_LANE_BUDGET_SECONDS}s`);
+    expect(FULL_LANE_BUDGET_SECONDS).toBeLessThan(FULL_LANE_BOUND_SECONDS);
   });
 });
 
@@ -729,6 +1068,7 @@ describe("planning a lane the manifest chose", () => {
           of: 5,
           full: false,
           dryRun: true,
+          laneCount: false,
           root,
           at: "2026-09-01T00:00:00Z",
         },
@@ -755,6 +1095,7 @@ describe("planning a lane the manifest chose", () => {
         of: 2,
         full: false,
         dryRun: true,
+        laneCount: false,
         root,
         at: "2026-09-01T00:00:00Z",
       },
@@ -802,7 +1143,7 @@ describe("planning a lane the manifest chose", () => {
     console.log = (line: string) => lines.push(line);
     try {
       await runLane(
-        { lane: 1, of: 5, full: false, dryRun: true, root },
+        { lane: 1, of: 5, full: false, dryRun: true, laneCount: false, root },
         { manifest: () => Promise.resolve({ absent: "the store is gone" }) },
       );
     } finally {
@@ -892,10 +1233,15 @@ describe("the lane's own housekeeping", () => {
     console.log = () => {};
     try {
       describePlan(
-        { lane: 1, of: 5, full: false, dryRun: true, root },
+        { lane: 1, of: 5, full: false, dryRun: true, laneCount: false, root },
         [],
         [],
         { objectName: "manifest-x.json.gz" },
+        [],
+        { selections: [], projectedSeconds: 0 },
+        LANE_BUDGET_SECONDS,
+        0,
+        0,
       );
     } finally {
       console.log = log;
@@ -934,6 +1280,7 @@ describe("the lane's own housekeeping", () => {
         of: 10000,
         full: true,
         dryRun: false,
+        laneCount: false,
         root,
       });
     } finally {
@@ -965,7 +1312,14 @@ describe("the lane's own housekeeping", () => {
 });
 
 describe("what a lane records about itself", () => {
-  const lane = { lane: 1, of: 5, full: false, dryRun: false, root: REPOSITORY };
+  const lane = {
+    lane: 1,
+    of: 5,
+    full: false,
+    dryRun: false,
+    laneCount: false,
+    root: REPOSITORY,
+  };
 
   it("records what each batch cost, beside the records it gathered", async () => {
     // The publisher fits the suite overheads and corrections from these,
@@ -1132,6 +1486,7 @@ describe("what a lane records about itself", () => {
           of: 5,
           full: false,
           dryRun: true,
+          laneCount: false,
           root: REPOSITORY,
           at: "2026-09-01T00:00:00Z",
         },
@@ -1269,6 +1624,7 @@ describe("what a lane does with the batches it was given", () => {
           of: 1,
           full: false,
           dryRun: false,
+          laneCount: false,
           root: REPOSITORY,
           at: "2026-09-01T00:00:00Z",
         },
@@ -1299,7 +1655,14 @@ describe("what a lane does with the batches it was given", () => {
     console.log = (line: string) => lines.push(line);
     try {
       await runLane(
-        { lane: 1, of: 1, full: false, dryRun: true, root: outside },
+        {
+          lane: 1,
+          of: 1,
+          full: false,
+          dryRun: true,
+          laneCount: false,
+          root: outside,
+        },
         {
           manifest: () => Promise.resolve({ absent: "nothing published" }),
           topology: () => Promise.resolve([]),

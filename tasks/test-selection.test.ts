@@ -176,9 +176,26 @@ describe("test-selection", () => {
         ],
       });
       const text = planLines(manifest, TOPOLOGY, undefined).join("\n");
-      expect(text).toContain("2 known identities");
+      expect(text).toContain("2 identities in this tree");
       expect(text).toContain(`${LANES} lanes`);
       expect(text).toContain("lane 1:");
+    });
+
+    it("counts the corpus the lanes were packed from", () => {
+      // The manifest's own entries are not that corpus: one of these
+      // names a unit this tree does not have, and no lane can run it.
+      const manifest = sampleManifest({
+        entries: [
+          sampleEntry({ k: "unit", s: "memory", n: "here" }, {
+            unit: "packages/memory/test/memory.test.ts",
+          }),
+          sampleEntry({ k: "unit", s: "memory", n: "gone" }, {
+            unit: "packages/memory/test/deleted.test.ts",
+          }),
+        ],
+      });
+      const text = planLines(manifest, TOPOLOGY, undefined).join("\n");
+      expect(text).toContain("1 identities in this tree");
     });
 
     it("prints one lane when asked for one", () => {
@@ -288,11 +305,11 @@ describe("verdictFor()", () => {
     const manifest = sampleManifest({
       entries: [sampleEntry({ k: "unit", s: "memory", n: "heavy" }, {
         cost: 200,
-        suite: "pattern-integration",
+        unit: "packages/memory/test/memory.test.ts",
       })],
       calibration: {
         setupCost: {},
-        suites: { "pattern-integration": { overhead: 400, correction: 1 } },
+        suites: { "workspace-unit": { overhead: 400, correction: 1 } },
         unitOverhead: {},
         prologue: 0,
       },
@@ -325,10 +342,35 @@ describe("verdictFor()", () => {
 
   it("reports a test the manifest has never heard of as unselected", () => {
     const manifest = manifestOf(entry("cheap", 0.1));
-    expect(
-      verdictFor(manifest, TOPOLOGY, { k: "unit", s: "memory", n: "absent" }),
-    )
-      .toEqual({ selected: false });
+    const verdict = verdictFor(manifest, TOPOLOGY, {
+      k: "unit",
+      s: "memory",
+      n: "absent",
+    });
+    expect(verdict.selected).toBe(false);
+    expect(verdict.repeats).toBeUndefined();
+    expect(verdict.unschedulable).toBeUndefined();
+  });
+
+  it("hands back the corpus its verdict was reached over", () => {
+    // Whatever explains an identity has to explain it against the set
+    // the verdict came from. The published manifest is a different set:
+    // it names units this tree has dropped and misses units it has
+    // gained, so a reader given that one is told there is no record of a
+    // test the verdict beside it says a lane runs.
+    const manifest = manifestOf(
+      sampleEntry({ k: "unit", s: "memory", n: "gone" }, {
+        unit: "packages/memory/test/deleted.test.ts",
+      }),
+    );
+    const verdict = verdictFor(manifest, TOPOLOGY, {
+      k: "unit",
+      s: "memory",
+      n: "gone",
+    });
+    const units = verdict.corpus.entries.map((e) => e.unit);
+    expect(units).not.toContain("packages/memory/test/deleted.test.ts");
+    expect(units).toContain("packages/memory/test/memory.test.ts");
   });
 
   it("tells two configurations of one name apart", () => {

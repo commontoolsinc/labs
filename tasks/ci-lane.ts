@@ -1,19 +1,32 @@
 #!/usr/bin/env -S deno run -A
 
 /**
- * The script every pull-request lane runs, and the full run on `main`
- * runs with selection switched off.
+ * The script every pull-request lane runs, and the script every lane of
+ * the full run on `main` runs.
  *
- * Five lanes call this with their own lane number and nothing else.
- * There is no job ahead of them deciding what each will do: packing is a
- * pure function of the manifest, the diff, and the lane number, so all
- * five compute the same plan over the same inputs and take their own
- * share of it. That only holds while every lane resolves the same
- * manifest, which is why the moment they resolve it at is when the
- * commit under test was made rather than anything about the run.
+ * Lanes call this with their own lane number and nothing else. There is
+ * no job ahead of them deciding what each will do: packing is a pure
+ * function of the working tree, the manifest, the diff, and the lane
+ * number, so every lane computes the same plan over the same inputs and
+ * takes its own share of it. That only holds while every lane resolves
+ * the same manifest, which is why the moment they resolve it at is when
+ * the commit under test was made rather than anything about the run.
+ *
+ * The full run differs in two values: it runs the whole corpus rather
+ * than a budgeted part of it, and it has no diff. Everything else — what
+ * the tree holds, what each test costs, how the work groups into lanes,
+ * which identities inside a unit are skipped — is the same code, so the
+ * two runs cannot come to different answers about the same tree.
+ *
+ * `main` cannot fix its number of lanes ahead of time the way a pull
+ * request does, because the number depends on how much work there is and
+ * the job matrix has to exist before anything starts. So one job asks
+ * `--lane-count` and emits an integer, and that integer is the whole of
+ * what passes from it to the lanes.
  *
  *   deno run -A tasks/ci-lane.ts --lane 3 --of 5 --base origin/main
  *   deno run -A tasks/ci-lane.ts --full --lane 1 --of 4
+ *   deno run -A tasks/ci-lane.ts --full --lane-count
  *   deno run -A tasks/ci-lane.ts --lane 1 --of 5 --dry-run
  */
 
@@ -36,12 +49,14 @@ import {
 import { collectRecords } from "./test-records-gather.ts";
 import { fetchManifest, type ManifestFetch } from "./test-selection/store.ts";
 import {
+  fullLaneCount,
   plan,
   type Selection,
   type SelectionReason,
 } from "./test-selection/plan.ts";
+import { type Census, census } from "./test-selection/census.ts";
 import type { Manifest, WithheldReason } from "./test-selection/manifest.ts";
-import { LANE_BUDGET_SECONDS, LANES } from "./test-selection/policy.ts";
+import { LANES } from "./test-selection/policy.ts";
 
 /** What the lane was asked to do. */
 export interface LaneOptions {
@@ -53,6 +68,14 @@ export interface LaneOptions {
 
   /** Print the plan and run nothing. */
   dryRun: boolean;
+
+  /**
+   * Print how many lanes the full run needs, and nothing else. This is
+   * what the job ahead of the full run asks, and it asks it of this
+   * script rather than of one of its own so that the number and the
+   * lanes that will honor it come from the same code.
+   */
+  laneCount: boolean;
 
   /** What the change is measured against. */
   base?: string;
@@ -78,6 +101,7 @@ export function parseLaneArgs(
     of: LANES,
     full: false,
     dryRun: false,
+    laneCount: false,
     root,
   };
   const rest = [...args];
@@ -89,6 +113,10 @@ export function parseLaneArgs(
     }
     if (flag === "--dry-run") {
       options.dryRun = true;
+      continue;
+    }
+    if (flag === "--lane-count") {
+      options.laneCount = true;
       continue;
     }
     const value = rest.shift();
@@ -114,6 +142,11 @@ export function parseLaneArgs(
   if (!Number.isInteger(options.of) || options.of < options.lane) {
     return undefined;
   }
+  // Only the full run has a lane count to work out; a pull request's is
+  // the dial. Accepting the question without `--full` would answer the
+  // full run's question for a command line that did not ask it, and a
+  // workflow edit dropping the flag would still get a plausible integer.
+  if (options.laneCount && !options.full) return undefined;
   return options;
 }
 
@@ -165,95 +198,6 @@ export async function manifestMoment(
     };
   }
   return { at: new Date(at).toISOString() };
-}
-
-/**
- * A stand-in identity for a unit no manifest has ever seen. Records exist
- * only for tests that ran, so a unit with none is either brand new or
- * renamed, and both must run. The packer needs something to place, and
- * this is the least it can be given: the suite's own record surface and
- * the unit's path, which no real record will ever collide with because a
- * real record is named for a test rather than for a file.
- */
-export function unknownIdentity(suite: Suite, unit: string): TestIdentity {
-  const surface = suite.recordSurfaces[0];
-  const test: TestIdentity = {
-    k: surface?.kind ?? "unit",
-    s: surface?.scope ?? "repo",
-    n: `unrecorded ${unit}`,
-  };
-  if (suite.variant !== undefined) test.v = suite.variant;
-  return test;
-}
-
-/** What the diff and the topology together make mandatory. */
-export interface MandatoryInput {
-  mandatory: Map<string, SelectionReason>;
-  unknown: Map<string, { suite: string; unit: string }>;
-}
-
-/**
- * What must run whatever the score says: every unit of an `always` suite,
- * every unit the change touched, and every unit no manifest knows.
- *
- * The last of those is the rule the test-record spec requires of any
- * consumer that selects which tests run. A selector that never runs the
- * unselected starves its own data, and a renamed test is an unknown
- * identity until an alias lands.
- */
-export function mandatoryFor(
-  suites: readonly Suite[],
-  manifest: Manifest | undefined,
-  changed: ReadonlySet<string>,
-): MandatoryInput {
-  const mandatory = new Map<string, SelectionReason>();
-  const unknown = new Map<string, { suite: string; unit: string }>();
-  const known = new Map<string, Set<string>>();
-  for (const entry of manifest?.entries ?? []) {
-    const units = known.get(entry.suite);
-    if (units === undefined) known.set(entry.suite, new Set([entry.unit]));
-    else units.add(entry.unit);
-  }
-  const identitiesOf = new Map<string, string[]>();
-  for (const entry of manifest?.entries ?? []) {
-    const key = `${entry.suite}\t${entry.unit}`;
-    identitiesOf.set(key, [
-      ...identitiesOf.get(key) ?? [],
-      testIdentityKey(entry.test),
-    ]);
-  }
-  for (const suite of suites) {
-    const unavailable = unavailableUnits(suite);
-    // A unit that is a path is made mandatory by the diff naming it. A
-    // unit that is not — a type-check group, a binary — is one the suite
-    // has to map the diff onto itself, because only it knows what its
-    // unit covers.
-    const touched = new Set<string>(
-      suite.unitsForChange !== undefined
-        ? suite.unitsForChange(changed)
-        : suite.units.filter((unit) => changed.has(unit)),
-    );
-    for (const unit of suite.units) {
-      if (unavailable.has(unit)) continue;
-      const reason: SelectionReason | undefined = suite.mandatory === "always"
-        ? "always"
-        : touched.has(unit)
-        ? "changed"
-        : undefined;
-      const recorded = identitiesOf.get(`${suite.id}\t${unit}`);
-      if (recorded === undefined) {
-        // Nothing in the manifest runs this unit, so it is unknown
-        // whatever else made it mandatory.
-        const key = testIdentityKey(unknownIdentity(suite, unit));
-        mandatory.set(key, reason ?? "unknown");
-        unknown.set(key, { suite: suite.id, unit });
-        continue;
-      }
-      if (reason === undefined) continue;
-      for (const key of recorded) mandatory.set(key, reason);
-    }
-  }
-  return { mandatory, unknown };
 }
 
 /** The files this change touched, as the repository names them. */
@@ -346,29 +290,29 @@ export function batchesOf(
       batch.repeats = Math.max(batch.repeats, repeats);
     }
   }
-  return [...batches.values()];
-}
-
-/** Every unit of every suite, which is what the full run holds. */
-export function everyBatch(
-  suites: readonly Suite[],
-  lane: number,
-  of: number,
-): Batch[] {
-  const batches: Batch[] = [];
-  let index = 0;
+  // Both orders are the tree's rather than the packer's, so what a
+  // runner is handed is decided by which units are in the batch and
+  // never by which pass put them there. A test that leans on running
+  // after a sibling then behaves the same on `main` as on a pull
+  // request, rather than passing in whichever mode happened to order
+  // them the way it wanted.
+  const enumerated = new Map<string, number>();
   for (const suite of suites) {
-    const unavailable = unavailableUnits(suite);
-    const units: UnitRequest[] = [];
-    for (const unit of suite.units) {
-      if (unavailable.has(unit)) continue;
-      // A suite's units are spread across the lanes in the order they
-      // enumerate, so every lane knows its own share without being told.
-      if (index++ % of === lane - 1) units.push({ unit, skip: [] });
-    }
-    if (units.length > 0) batches.push({ suite, units, repeats: 1 });
+    suite.units.forEach((unit, index) =>
+      enumerated.set(`${suite.id}\t${unit}`, index)
+    );
   }
-  return batches;
+  const order = (suiteId: string, unit: string): number =>
+    enumerated.get(`${suiteId}\t${unit}`) ?? Number.MAX_SAFE_INTEGER;
+  for (const [suiteId, batch] of batches) {
+    batch.units.sort((a, b) =>
+      order(suiteId, a.unit) - order(suiteId, b.unit) ||
+      (a.unit < b.unit ? -1 : a.unit > b.unit ? 1 : 0)
+    );
+  }
+  return [...batches.values()].sort((a, b) =>
+    a.suite.id < b.suite.id ? -1 : a.suite.id > b.suite.id ? 1 : 0
+  );
 }
 
 /** What running one invocation came to. */
@@ -630,8 +574,11 @@ export function describePlan(
   batches: readonly Batch[],
   capabilities: readonly CapabilityId[],
   manifest: { objectName?: string; absent?: string },
-  unschedulable: readonly string[] = [],
-  chosen?: { selections: readonly Selection[]; projectedSeconds: number },
+  unschedulable: readonly string[],
+  chosen: { selections: readonly Selection[]; projectedSeconds: number },
+  budget: number,
+  unmeasured: number,
+  entries: number,
 ): void {
   const lines: string[] = [];
   lines.push(`## Lane ${options.lane} of ${options.of}`);
@@ -643,32 +590,27 @@ export function describePlan(
   );
   lines.push("");
   lines.push(`Capabilities: ${capabilities.join(", ") || "none"}`);
-  if (chosen !== undefined) {
-    lines.push("");
-    lines.push(
-      `Projected: ${chosen.projectedSeconds.toFixed(0)}s of ` +
-        `${LANE_BUDGET_SECONDS}s`,
-    );
-  }
   lines.push("");
-  if (chosen === undefined) {
-    lines.push("| Suite | Units | Repeats |");
-    lines.push("| --- | --- | --- |");
-    for (const batch of batches) {
-      lines.push(
-        `| ${batch.suite.id} | ${batch.units.length} | ${batch.repeats} |`,
-      );
-    }
-  } else {
-    lines.push("| Suite | Units | Tests | Their own time | Repeats | Chosen |");
-    lines.push("| --- | --- | --- | --- | --- | --- |");
-    for (const batch of batches) {
-      const share = chosenFor(batch.suite.id, chosen.selections);
-      lines.push(
-        `| ${batch.suite.id} | ${batch.units.length} | ${share.identities} | ` +
-          `${share.seconds.toFixed(1)}s | ${batch.repeats} | ${share.why} |`,
-      );
-    }
+  lines.push(
+    `Projected: ${chosen.projectedSeconds.toFixed(0)}s of ${budget}s` +
+      // Every stand-in in that figure is a guess at what a unit costs,
+      // so a projection carrying many of them says what the lane would
+      // take if the guesses were right rather than what it will take.
+      // Somebody reading a summary beside a lane that ran four times as
+      // long deserves to be told which of the two they have.
+      (unmeasured === 0
+        ? ""
+        : `, ${unmeasured} of ${entries} costs unmeasured`),
+  );
+  lines.push("");
+  lines.push("| Suite | Units | Tests | Their own time | Repeats | Chosen |");
+  lines.push("| --- | --- | --- | --- | --- | --- |");
+  for (const batch of batches) {
+    const share = chosenFor(batch.suite.id, chosen.selections);
+    lines.push(
+      `| ${batch.suite.id} | ${batch.units.length} | ${share.identities} | ` +
+        `${share.seconds.toFixed(1)}s | ${batch.repeats} | ${share.why} |`,
+    );
   }
   if (unschedulable.length > 0) {
     lines.push("");
@@ -698,90 +640,169 @@ export interface LaneDeps {
   topology?: (root: string) => Promise<Suite[]>;
 }
 
+/** What reading this tree against its manifest came to. */
+interface Reading {
+  seen: Census;
+  fetched: { objectName?: string; absent?: string };
+}
+
+/**
+ * Resolves the manifest this commit belongs to and reads the working
+ * tree against it.
+ *
+ * Everything that plans anything starts here — a lane, and the job that
+ * counts the full run's lanes — so the tree and the manifest are
+ * resolved one way. Two readers of the same tree that resolved it
+ * differently would be the drift this whole path exists to remove,
+ * appearing one level above the packer instead of inside it.
+ */
+async function read(
+  options: LaneOptions,
+  suites: readonly Suite[],
+  deps: LaneDeps,
+  say: (line: string) => void,
+): Promise<Reading> {
+  const moment = await manifestMoment(options);
+  if (moment.note !== undefined) say(`ci-lane: ${moment.note}`);
+  const fetch = deps.manifest ?? ((at: string) => fetchManifest({ at }));
+  const manifest = await fetch(moment.at);
+  // A full run reads the manifest for what things cost and nothing else,
+  // and a run with no diff has touched nothing.
+  const changed = options.full
+    ? new Set<string>()
+    : await changedFiles(options.root, options.base);
+  return {
+    seen: census(suites, manifest.manifest, changed),
+    fetched: {
+      ...(manifest.objectName === undefined
+        ? {}
+        : { objectName: manifest.objectName }),
+      ...(manifest.absent === undefined ? {} : { absent: manifest.absent }),
+    },
+  };
+}
+
+/**
+ * Packs what this tree holds into the lanes this run has.
+ *
+ * The policy is the whole of what the two runs differ by here. Under
+ * `everything` every identity is required, so the exclusions and the
+ * value, density and exploration passes have nothing left to act on and
+ * the packer behaves the same way for both.
+ */
+function packing(
+  options: LaneOptions,
+  suites: readonly Suite[],
+  seen: Census,
+): ReturnType<typeof plan> {
+  return plan({
+    manifest: seen.manifest,
+    mandatory: seen.mandatory,
+    capabilities: capabilitiesBySuite(suites),
+    lanes: options.of,
+    ...(options.full ? { policy: "everything" as const } : {}),
+  });
+}
+
+/**
+ * How many lanes the full run on `main` needs.
+ *
+ * This is the whole of what the job ahead of the full run decides, and an
+ * integer is the whole of what it emits. The lanes then read the same
+ * tree against the same manifest and take their own share, the way the
+ * pull-request lanes do, so nothing about what runs passes through a job
+ * output and there is no second packing to disagree with theirs.
+ *
+ * Notes about resolving the manifest go to the error stream, because
+ * this answers on the standard one and a job reads the answer from
+ * there.
+ */
+export async function fullLanes(
+  options: LaneOptions,
+  deps: LaneDeps = {},
+): Promise<number> {
+  const suites = await (deps.topology ?? loadTopology)(options.root);
+  const { seen } = await read(options, suites, deps, console.error);
+  if (seen.unmeasured === seen.manifest.entries.length) {
+    // Nothing at all has a measured cost, so a cost model here would be
+    // arithmetic over a figure this invented, and the answer would be
+    // wrong by whatever that figure is wrong by. It errs in the
+    // direction that breaks a run, too: too few lanes means every one of
+    // them runs past the bound its job is killed at, where too many
+    // means some jobs finish early.
+    //
+    // So a lane per suite with anything to run goes in as a floor. It
+    // needs no number nobody measured, and it keeps the count growing as
+    // test surfaces are added.
+    //
+    // The packing is still asked what it would need, and the larger of
+    // the two wins. Its answer is only as good as the stand-in costs
+    // behind it, which is why it cannot be the whole of this — but those
+    // costs are what the lanes will actually be packed against, so an
+    // answer below what they imply is one the lanes cannot honor
+    // whatever else is true. That matters most where a stand-in costs
+    // more than the bare unmeasured figure: a suite whose measured units
+    // have all been renamed away carries its old median onto every
+    // stand-in, and a count that assumed the bare figure would be out by
+    // that whole multiple.
+    const running = suites.filter((suite) => {
+      const unavailable = unavailableUnits(suite);
+      return suite.units.some((unit) => !unavailable.has(unit));
+    });
+    const byCost = fullLaneCount({
+      manifest: seen.manifest,
+      capabilities: capabilitiesBySuite(suites),
+    });
+    const lanes = Math.max(1, running.length, byCost);
+    console.error(
+      `ci-lane: nothing in this tree has a measured cost, so the lane ` +
+        `count is ${lanes} — ${running.length} suites with anything to ` +
+        `run, and ${byCost} from packing the stand-ins — rather than a ` +
+        `projection from costs nobody has measured`,
+    );
+    return lanes;
+  }
+  return fullLaneCount({
+    manifest: seen.manifest,
+    capabilities: capabilitiesBySuite(suites),
+  });
+}
+
 /** Runs one lane, and says whether everything in it passed. */
 export async function runLane(
   options: LaneOptions,
   deps: LaneDeps = {},
 ): Promise<boolean> {
   const suites = await (deps.topology ?? loadTopology)(options.root);
-  let batches: Batch[];
-  let unschedulable: string[] = [];
-  let fetched: { objectName?: string; absent?: string } = {};
-  let sayWithheld = (): void => {};
-  let chosen:
-    | { selections: readonly Selection[]; projectedSeconds: number }
-    | undefined;
-  if (options.full) {
-    batches = everyBatch(suites, options.lane, options.of);
-    fetched = { absent: "running everything, so nothing is selected" };
-  } else {
-    const moment = await manifestMoment(options);
-    if (moment.note !== undefined) console.log(`ci-lane: ${moment.note}`);
-    const manifest = await (deps.manifest ?? ((at: string) =>
-      fetchManifest({ at })))(moment.at);
-    fetched = {
-      ...(manifest.objectName === undefined
-        ? {}
-        : { objectName: manifest.objectName }),
-      ...(manifest.absent === undefined ? {} : { absent: manifest.absent }),
-    };
-    const changed = await changedFiles(options.root, options.base);
-    const { mandatory, unknown } = mandatoryFor(
-      suites,
-      manifest.manifest,
-      changed,
+  const { seen, fetched } = await read(options, suites, deps, console.log);
+  const laid = packing(options, suites, seen);
+  const mine = laid.lanes.find((lane) => lane.lane === options.lane);
+  if (mine === undefined) {
+    // A lane outside the run it belongs to. Taking an empty share
+    // instead would run nothing and exit zero, reporting a pass over
+    // a set no lane ran, which is the one failure of this design
+    // that would be silent.
+    throw new RangeError(
+      `lane ${options.lane} has no share of a plan for ${options.of} lanes`,
     );
-    if (manifest.manifest === undefined) {
-      // With no manifest there is nothing to score, so the lane runs the
-      // mandatory set and a deterministic slice of the corpus. That is no
-      // worse than a coin toss about which tests run, which is what a
-      // fixed shard layout was.
-      batches = everyBatch(suites, options.lane, options.of);
-    } else {
-      const laid = plan({
-        manifest: manifest.manifest,
-        mandatory,
-        capabilities: capabilitiesBySuite(suites),
-        unknown,
-        lanes: options.of,
-      });
-      const mine = laid.lanes.find((lane) =>
-        lane.lane === options.lane
-      );
-      if (mine === undefined) {
-        // A lane outside the run it belongs to. Taking an empty share
-        // instead would run nothing and exit zero, reporting a pass over
-        // a set no lane ran, which is the one failure of this design
-        // that would be silent.
-        throw new RangeError(
-          `lane ${options.lane} has no share of a plan for ${options.of} ` +
-            `lanes`,
-        );
-      }
-      batches = batchesOf(suites, manifest.manifest, mine.selections);
-      chosen = {
-        selections: mine.selections,
-        projectedSeconds: mine.projectedSeconds,
-      };
-      sayWithheld = () => describeWithheld(laid.withheld, mandatory);
-      // A discretionary identity costing more than a lane's hard bound
-      // runs nowhere, because a lane holding it would be killed before it
-      // reported anything. Naming it is what turns that into something
-      // somebody can act on; the sixty-second rule is where such a test
-      // gets split. A mandatory one is placed however much it costs, and
-      // the over-budget line below is where a lane says it ran long.
-      unschedulable = laid.unschedulable.map((entry) =>
-        `${entry.suite}: ${testIdentityKey(entry.test)} costs ` +
-        `${entry.cost.toFixed(0)}s, more than a lane can hold`
-      );
-      if (laid.overBudgetSeconds > 0) {
-        console.log(
-          `ci-lane: the mandatory set puts a lane ` +
-            `${laid.overBudgetSeconds.toFixed(0)} seconds past the ` +
-            `${LANE_BUDGET_SECONDS}-second budget`,
-        );
-      }
-    }
+  }
+  const batches = batchesOf(suites, seen.manifest, mine.selections);
+  // A discretionary identity costing more than a lane's hard bound
+  // runs nowhere, because a lane holding it would be killed before it
+  // reported anything. Naming it is what turns that into something
+  // somebody can act on; the sixty-second rule is where such a test
+  // gets split. A mandatory one is placed however much it costs, and
+  // the over-budget line below is where a lane says it ran long.
+  const unschedulable = laid.unschedulable.map((entry) =>
+    `${entry.suite}: ${testIdentityKey(entry.test)} costs ` +
+    `${entry.cost.toFixed(0)}s, more than a lane can hold`
+  );
+  if (laid.overBudgetSeconds > 0) {
+    console.log(
+      `ci-lane: the mandatory set puts a lane ` +
+        `${laid.overBudgetSeconds.toFixed(0)} seconds past the ` +
+        `${laid.budgetSeconds}-second budget`,
+    );
   }
 
   const needs = new Set<CapabilityId>();
@@ -794,9 +815,12 @@ export async function runLane(
     [...needs].sort(),
     fetched,
     unschedulable,
-    chosen,
+    { selections: mine.selections, projectedSeconds: mine.projectedSeconds },
+    laid.budgetSeconds,
+    seen.unmeasured,
+    seen.manifest.entries.length,
   );
-  sayWithheld();
+  describeWithheld(laid.withheld, seen.mandatory);
   if (options.dryRun) return true;
 
   const workDir = await Deno.makeTempDir({ prefix: "ci-lane-" });
@@ -849,9 +873,13 @@ export async function main(
   if (options === undefined) {
     console.error(
       "usage: ci-lane.ts [--lane N] [--of M] [--full] [--dry-run] " +
-        "[--base <ref>] [--at <iso>]",
+        "[--lane-count] [--base <ref>] [--at <iso>]",
     );
     return 2;
+  }
+  if (options.laneCount) {
+    console.log(String(await fullLanes(options, deps)));
+    return 0;
   }
   return await runLane(options, deps) ? 0 : 1;
 }

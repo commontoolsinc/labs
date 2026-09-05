@@ -193,8 +193,20 @@ A manifest is **untrusted input**. It is validated whole, and one bad
 field rejects the object rather than leaving a consumer obeying half of
 it. A manifest whose schema version a reader does not know is treated as
 absent, because a reader that does not know a field cannot know what
-obeying the rest would mean. A consumer that finds no manifest runs the
-mandatory set and a deterministic slice of the corpus rather than failing.
+obeying the rest would mean.
+
+A consumer that finds no manifest runs rather than failing. Nothing then
+has records, so every unit the tree holds is an identity with none, and
+the rule that such an identity must run makes the whole corpus mandatory.
+What a consumer must not do in that state is project from costs. Every
+cost is a stand-in, so a projection is arithmetic over whatever figure
+stands in for the ones nobody measured and is wrong by however wrong that
+figure is; a consumer deciding how many lanes to divide the work into
+takes the shape of the topology instead. The same holds for a manifest
+that arrives and knows none of the tree, which is why the question is
+whether anything is measured rather than whether a manifest was found. A
+consumer that reports a projected time says how much of it rests on
+stand-ins.
 
 That the manifest may be an ordinary public object rather than a signed
 artifact follows from what it can do. It can only change *which* tests
@@ -220,11 +232,30 @@ writing one unasked is not.
 ## Determinism
 
 The packing function is pure. No clock, no unseeded randomness, no
-dependence on anything but the manifest, the diff, and the lane number.
-That is what lets every lane compute its own share and agree with the
-others by construction. The exploration draw's seed comes from the
-manifest, so the draw is the same in every lane and different between
-manifests.
+dependence on anything but the working tree, the manifest, the diff, the
+policy, and the lane number. That is what lets every lane compute its own
+share and agree with the others by construction. The exploration draw's
+seed comes from the manifest, so the draw is the same in every lane and
+different between manifests.
+
+The tree is an input alongside the manifest because the two answer
+different questions. The tree says which tests exist, and the manifest
+says what each of them is worth and costs; a manifest is hours old by
+construction, so an entry naming a unit the tree no longer holds is work
+no lane can be asked to do, and a unit the tree has gained is work no
+manifest can price. A consumer reconciles the two before packing, and
+packs what the reconciliation produced.
+
+The policy is an input because one function serves both the run on the
+default branch and the run on a change. It takes two values. The budgeted
+policy spends a bounded amount on the tests worth the most, by the rules
+under [what must run](#what-must-run-and-what-must-not) and the score
+above them. The full policy requires every identity, so the two rules
+that keep a test out have nothing to act on and the discretionary part of
+the packing finds nothing left to take; everything after that behaves the
+same for both. A consumer that packs the two runs through different code
+will drift, and what it drifts into is running different sets of tests in
+the two places that are meant to agree.
 
 Before the lanes start, a selector calls a trusted reusable workflow by its
 default-branch ref. The reusable workflow checks out no repository code and
