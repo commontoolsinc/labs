@@ -636,6 +636,65 @@ describe("run_pattern publish render gate", () => {
     expect(published(index)).toEqual([]);
   });
 
+  it("opens the render-gate probe under the session runtime's read ceiling", async () => {
+    // The probe reads the same space the session does, so it reads under the
+    // same ceiling; a probe opened unbounded against the live API would be
+    // the leak the ceiling exists to close, through the render path.
+    const boundedManager = StorageManager.emulate({ as: signer });
+    const boundedRuntime = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager: boundedManager,
+      cfcReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+      cfcReadOnExceed: "skip",
+    });
+    extraRuntimes.push(boundedRuntime);
+    const boundedPieces = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `publish-gate-bounded-${crypto.randomUUID()}`,
+      }),
+      boundedRuntime,
+    );
+    await boundedPieces.synced();
+    const index = stubIndex();
+    let probeCeiling: unknown = "never opened";
+    try {
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: `publish-gate-${crypto.randomUUID()}`,
+        cfcEnforcementMode: "disabled",
+        fabricSessionFactory: () =>
+          Promise.resolve({ pieces: boundedPieces, identity: signer }),
+        patternIndexClientFactory: () =>
+          Promise.resolve(
+            new PatternIndexClient({
+              baseUrl: "https://index.test",
+              fetchFn: index.fetchFn,
+              signer,
+            }),
+          ),
+        openProbeRuntime: (_identity, _apiUrl, _mode, ceiling) => {
+          probeCeiling = ceiling;
+          return Promise.resolve(undefined);
+        },
+      });
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: WORKING_SORTABLE_TABLE,
+        inputs: { rows: [{ name: "Avery", score: 12 }] },
+        description: "Sortable table that reads its cells",
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect(output.patternPublication?.reason).toBe("probe-failed");
+      expect(probeCeiling).toEqual({
+        cfcReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+        cfcReadOnExceed: "skip",
+      });
+    } finally {
+      await boundedManager.close();
+    }
+  });
+
   it("records without a verdict when the probe fails for its own reasons", async () => {
     // No abort: the failure is the probe's, and it is no evidence about the
     // rendering either way. The run still succeeds and the entry is recorded.

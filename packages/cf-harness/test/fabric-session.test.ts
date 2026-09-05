@@ -1,10 +1,34 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
+import type { PiecesController } from "@commonfabric/piece/ops";
 import {
   cacheHarnessFabricSessionFactory,
+  createHarnessFabricSessionFactory,
   type HarnessFabricSession,
   harnessFabricSessionControllerOptions,
 } from "../src/fabric-session.ts";
+
+const identity = await Identity.fromPassphrase("fabric-session factory");
+
+/** A controller whose runtime reports the given read ceiling. */
+const controllerBoundedBy = (
+  ceiling: {
+    cfcReadMaxConfidentiality?: readonly unknown[];
+    cfcReadOnExceed?: "fail" | "skip";
+  },
+  disposed: string[],
+): PiecesController =>
+  ({
+    runtime: {
+      cfcReadMaxConfidentiality: ceiling.cfcReadMaxConfidentiality,
+      cfcReadOnExceed: ceiling.cfcReadOnExceed,
+      dispose: () => {
+        disposed.push("runtime");
+        return Promise.resolve();
+      },
+    },
+  }) as unknown as PiecesController;
 
 describe("fabric-session", () => {
   describe("harnessFabricSessionControllerOptions()", () => {
@@ -48,6 +72,65 @@ describe("fabric-session", () => {
       expect(options.cfcEnforcementMode).toBe("enforce-strict");
       expect(options.cfcFlowLabels).toBe("persist");
       expect(options.cfcPosture).toBe("max-enforcement");
+    });
+  });
+
+  describe("createHarnessFabricSessionFactory()", () => {
+    const bounded = {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+      cfcReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+      cfcReadOnExceed: "skip" as const,
+    };
+
+    it("hands the controller the read ceiling and returns the bounded session", async () => {
+      const disposed: string[] = [];
+      let received: Record<string, unknown> | undefined;
+      const factory = createHarnessFabricSessionFactory(bounded, {
+        loadIdentity: () => Promise.resolve(identity),
+        initialize: (options) => {
+          received = options as Record<string, unknown>;
+          return Promise.resolve(controllerBoundedBy(bounded, disposed));
+        },
+      });
+      const session = await factory();
+      expect(received?.cfcReadMaxConfidentiality).toEqual(
+        bounded.cfcReadMaxConfidentiality,
+      );
+      expect(received?.cfcReadOnExceed).toBe("skip");
+      expect(session.identity).toBe(identity);
+      expect(disposed).toEqual([]);
+    });
+
+    it("refuses a session whose runtime is not bounded as configured, and disposes it", async () => {
+      const disposed: string[] = [];
+      const factory = createHarnessFabricSessionFactory(bounded, {
+        loadIdentity: () => Promise.resolve(identity),
+        initialize: () => Promise.resolve(controllerBoundedBy({}, disposed)),
+      });
+      await expect(factory()).rejects.toThrow(
+        /not bounded by the configured read ceiling/,
+      );
+      expect(disposed).toEqual(["runtime"]);
+    });
+
+    it("refuses a session whose runtime is bounded by another ceiling", async () => {
+      const disposed: string[] = [];
+      const factory = createHarnessFabricSessionFactory(bounded, {
+        loadIdentity: () => Promise.resolve(identity),
+        initialize: () =>
+          Promise.resolve(
+            controllerBoundedBy({
+              cfcReadMaxConfidentiality: ["did:key:zOwner"],
+              cfcReadOnExceed: "skip",
+            }, disposed),
+          ),
+      });
+      await expect(factory()).rejects.toThrow(
+        /not bounded by the configured read ceiling/,
+      );
+      expect(disposed).toEqual(["runtime"]);
     });
   });
 

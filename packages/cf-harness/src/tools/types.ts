@@ -21,6 +21,7 @@ import type { HarnessDocsCorpus } from "../docs-corpus/corpus.ts";
 import type { HarnessExploreQueryRunner } from "../docs-corpus/explore.ts";
 import type { HarnessHandleTable } from "../contracts/handle-table.ts";
 import type { HarnessFabricSession } from "../fabric-session.ts";
+import type { openProbeRuntime } from "../pattern-index/probe-runtime.ts";
 import type { PatternIndexClient } from "../pattern-index/client.ts";
 import type { PatternIndexPublicationLedger } from "../pattern-index/publish-ledger.ts";
 import type { SkillsShAcquisitionClient } from "../skills-sh/acquisition.ts";
@@ -62,6 +63,12 @@ export interface HarnessToolContext {
    * keeps `run_pattern` and `acquire_skill` out of the tool surface.
    */
   getFabricSession?: () => Promise<HarnessFabricSession>;
+
+  /**
+   * Opens the render gate's probe runtime; `openProbeRuntime` by default. A
+   * test replaces it to see what the gate opens the probe under.
+   */
+  openProbeRuntime?: typeof openProbeRuntime;
 
   /**
    * The run's pattern-index client, lazy and cached by the engine.
