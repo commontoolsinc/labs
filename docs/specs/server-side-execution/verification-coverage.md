@@ -8562,7 +8562,7 @@ supply; OW29/OW32/OW34 closed):
     referenced `cid:` document as arrived metadata integrates
     (deferred, deduped, failure-retried on a later frame), the
     standing-watch sibling of the explicit-sync path's existing
-    `syncCfcSchemaDocument` hydration; not unit-pinnable in the
+    `StorageManager.#syncCfcSchemaDocument` hydration; not unit-pinnable in the
     emulated harness (loopback frames already carry refs — a pin
     there is vacuous by construction), so the ON gate below is its
     red-first bench. (4) The verifier read's commit-set entry is

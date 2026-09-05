@@ -156,6 +156,17 @@ import {
   watchIdForEntry,
 } from "./v2-watch.ts";
 
+/**
+ * Syncs the CFC schema document a document's `cfc.schemaHash` names, and
+ * resolves to the sync's error if it had one: the shape of
+ * `StorageManager`'s own step, and of the syncer a test supplies in its
+ * place.
+ */
+export type CfcSchemaDocumentSyncer = (
+  space: MemorySpace,
+  document: EntityDocument | undefined,
+) => Promise<Error | undefined>;
+
 // A cell's CFC write-policy label lives at ["cfc"]. A mergeable write reads it as
 // part of the write; that read is dropped from its conflict set.
 const isCfcLabelPath = (path: readonly string[]): boolean =>
@@ -1066,10 +1077,12 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
-   * The pending-load registration step and the linked-cell sync collector,
-   * which a test drives directly.
+   * The CFC schema document syncer a test may supply, the pending-load
+   * registration step, and the linked-cell sync collector, which a test
+   * drives directly.
    */
   get accessForTestingOnly(): {
+    cfcSchemaDocumentSyncer: CfcSchemaDocumentSyncer | undefined;
     registerPendingLoad(address: {
       space: MemorySpace;
       scope: CellScope;
@@ -1084,7 +1097,15 @@ export class StorageManager implements IStorageManager {
       seen: Set<unknown>,
     ): void;
   } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
     return {
+      get cfcSchemaDocumentSyncer() {
+        return outerThis.#cfcSchemaDocumentSyncer;
+      },
+      set cfcSchemaDocumentSyncer(value) {
+        outerThis.#cfcSchemaDocumentSyncer = value;
+      },
       registerPendingLoad: (address) => this.#registerPendingLoad(address),
       collectLinkedCellSyncs: (value, base, schema, promises, seen) =>
         this.#collectLinkedCellSyncs(value, base, schema, promises, seen),
@@ -1396,7 +1417,7 @@ export class StorageManager implements IStorageManager {
               ...this.#servingActingAs(),
             }, routeSignal),
         syncReplayDependencies: (document) =>
-          this.syncCfcSchemaDocument(space, document),
+          this.#syncCfcSchemaDocument(space, document),
         getTelemetry: () => this.#telemetry,
         eventAppendQueueStore: this.#eventAppendQueueStore,
         eventAppendPacing: this.#eventAppendPacing,
@@ -2003,6 +2024,9 @@ export class StorageManager implements IStorageManager {
   // per distinct failure keeps the surfacing readable. Bounded: at the cap the
   // set resets, trading a repeated line for an unbounded set.
   #loggedSyncFailures = new Set<string>();
+  // The syncer a test supplies in place of the CFC schema document sync;
+  // undefined means the manager's own.
+  #cfcSchemaDocumentSyncer: CfcSchemaDocumentSyncer | undefined = undefined;
 
   /**
    * Registers one pending load of `address` and returns its release step,
@@ -2197,7 +2221,7 @@ export class StorageManager implements IStorageManager {
         instance,
       );
       loadFailure = result.error;
-      const schemaFailure = await this.syncCfcSchemaDocument(
+      const schemaFailure = await this.#syncCfcSchemaDocument(
         space,
         (provider as {
           get?: (uri: URI, scope?: CellScope) => EntityDocument | undefined;
@@ -2268,14 +2292,18 @@ export class StorageManager implements IStorageManager {
   }
 
   /**
-   * TypeScript-private rather than a `#` name, because
-   * `test/storage-pending-load.test.ts` replaces this member by assignment,
-   * which a `#` method does not allow.
+   * Syncs the CFC schema document `document`'s `cfc.schemaHash` names, and
+   * resolves to the sync's error if it had one; a document naming none
+   * resolves at once. A syncer a test supplied stands in for the whole step.
    */
-  private async syncCfcSchemaDocument(
+  async #syncCfcSchemaDocument(
     space: MemorySpace,
     document: EntityDocument | undefined,
   ): Promise<Error | undefined> {
+    const syncer = this.#cfcSchemaDocumentSyncer;
+    if (syncer !== undefined) {
+      return syncer(space, document);
+    }
     const cfc = isObjectNotArray(document?.cfc) ? document.cfc : undefined;
     const schemaHash = cfc?.schemaHash;
     if (typeof schemaHash !== "string" || schemaHash.length === 0) {
