@@ -572,10 +572,13 @@ these URLs keeps reading the segments apart from resolving them.
 That split is also what bounds who resolves a fully qualified reference. The
 shell reads it and `cf` reads it, both holding a session that can turn a space
 name into a DID and walk a collection. The pattern-facing reader, the
-`cellFromUrl` builtin, does not: it is the pure and synchronous contract
-above, its rooted-path branch wants an entity id where a collection's name
-sits, and giving a pattern this grammar is a decision about that builtin
-rather than a gap in this step.
+`cellFromUrl` builtin (`packages/runner/src/builtins/cell-from-url.ts`), does
+not, and what refuses it is the parse rather than the builtin: it reads
+through `parseFabricUrl`, whose rooted-path branch wants an entity id where a
+collection's name sits. The builtin is not that pure contract itself — it
+holds a runtime and a transaction, resolves a space name through one, and
+reaches a cell — so what it lacks is the collection walk, and giving a pattern
+one is a decision about that builtin rather than a gap in this step.
 
 **5. Add the prose layer.** Sigil parsing, canonicalize-on-write,
 context-computed rendering with round-trip verification, the two render modes,
