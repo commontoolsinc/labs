@@ -948,6 +948,96 @@ describe("AppView collection members", () => {
     }
   });
 
+  it("retries a load that failed after the watch behind it was replaced", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const first = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        first,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      // A piece is on screen, so an answer is recorded.
+      view.updated(new Map([["app", undefined], ["rt", undefined]]));
+      await first.settle();
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      // A replacement runtime takes over. It reaches the same answer, and the
+      // load of it fails — so what the recorded answer names is not what is
+      // on screen, and the answer alone cannot say so.
+      const replacement = stubRuntime({
+        pieceId: "fid1:member-42",
+        pathAfter: [],
+      });
+      replacement.failLoads(new Error("the socket went away"));
+      view.rt = replacement.rt;
+      view.updated(new Map([["rt", undefined]]));
+      await replacement.settle();
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete.catch(() => {});
+      const afterFailedLoad = view.accessForTestingOnly.slugRevision;
+
+      // Nothing about the reference changed, so no later answer differs from
+      // the one recorded. Recovery has to come from the run having reported
+      // that it reached nothing to show.
+      replacement.failLoads(undefined);
+      await replacement.poll();
+
+      expect(view.accessForTestingOnly.slugRevision).toBeGreaterThan(
+        afterFailedLoad,
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("retries a load that failed with the reference and its watch unchanged", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view.updated(new Map([["app", undefined], ["rt", undefined]]));
+      await stub.settle();
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      // A new app state naming the same reference: every input the watch is
+      // built from is what it was, so the running watch stands and no
+      // teardown runs at all. The selection runs again anyway, and its load
+      // fails.
+      view.app = {
+        identity: {},
+        config: {},
+        view: viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      };
+      view.updated(new Map([["app", undefined]]));
+      await stub.settle();
+      stub.failLoads(new Error("the socket went away"));
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete.catch(() => {});
+      const afterFailedLoad = view.accessForTestingOnly.slugRevision;
+
+      stub.failLoads(undefined);
+      await stub.poll();
+
+      expect(view.accessForTestingOnly.slugRevision).toBeGreaterThan(
+        afterFailedLoad,
+      );
+      expect(stub.started.map((call) => call[1])).toContain("fid1:member-42");
+    } finally {
+      restore();
+    }
+  });
+
   it("watches each reference through a slug separately", async () => {
     const restore = installBrowserGlobals();
     try {

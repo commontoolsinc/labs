@@ -241,8 +241,8 @@ export class XAppView extends BaseView {
 
   /**
    * The answer the view is SHOWING: the resolution whose piece is on screen,
-   * or whose refusal is the error on screen. Undefined until one of those
-   * has happened.
+   * or whose refusal is the error on screen. Undefined where neither holds —
+   * before the first of them, and after a load that could not finish.
    *
    * One fact, not several about one thing. What was resolved, whether it was
    * applied, which piece it reached, and which answer is newest are all read
@@ -259,18 +259,16 @@ export class XAppView extends BaseView {
    * stopping leaves it standing and the selection is what moves it on.
    *
    * That lifetime qualifies the first sentence. Only the selection moves this
-   * on, and the selection answers only an address that names a reference — so
-   * on an address naming none, and between an address changing and the
-   * selection answering the new one, this names what the view came to show
-   * LAST rather than anything on screen. Both readers are bounded by that
-   * same condition, so neither sees the first state:
+   * on, and the selection reports only for an address that names a reference
+   * — so on an address naming none, and between an address changing and the
+   * run for the new one reporting, this names what the view came to show LAST
+   * rather than anything on screen. Both readers are bounded by that same
+   * condition, so neither sees the first state:
    * {@link XAppView.#resolveAgainst} compares against this only through a
    * watch, which is built only for an address that names a reference, and
    * {@link XAppView.#shownPieceId} is read only under one. In the second
    * state a runtime error naming the previous piece is attributed to this
-   * view, and a run whose load fails records nothing — so an address whose
-   * loads keep failing holds that state open.
-   * {@link XAppView.#resolveAgainst} says what the comparison covers there.
+   * view, which the run reporting ends however it went.
    */
   #shownResolution: SlugReferenceTarget | SlugReferenceRefusal | undefined =
     undefined;
@@ -404,12 +402,20 @@ export class XAppView extends BaseView {
           if (member !== undefined && pathAfter.length > 0) {
             this.#replaceViewWithoutMember(app.view);
           }
-          const pattern = await rt.getPattern(space, pieceId, { scope });
+          let pattern: PieceHandle<NameSchema>;
+          try {
+            pattern = await rt.getPattern(space, pieceId, { scope });
+          } catch (error) {
+            // Around the load alone. The run's outer catch also takes the
+            // refusal's own throw, and recording nothing there would undo
+            // the mark a refusal just made — leaving every poll to re-resolve
+            // an answer the view is already showing.
+            this.#markShown(undefined, signal);
+            throw error;
+          }
           // `landed` and not whatever is current: this run finished THIS
           // answer, and saying so with another's identity is how a slow load
-          // came to claim a newer answer was on screen. A throw above writes
-          // nothing, so the watch's next re-resolution sees the view still
-          // showing something else and asks for this one again.
+          // came to claim a newer answer was on screen.
           this.#markShown(landed, signal);
           if (!signal.aborted) this.#maybeDeliverOpenPath(pattern);
           return pattern;
@@ -566,14 +572,21 @@ export class XAppView extends BaseView {
   }
 
   /**
-   * Record that the view has come to show `answer`.
+   * Record that the view has come to show `answer`, or `undefined` where the
+   * run reached nothing for it to show.
    *
    * The only writer of {@link XAppView.#shownResolution}, and it takes the
    * signal of the run that resolved `answer` so a run the view has moved on
    * from cannot report what it finished as what is on screen.
+   *
+   * Every outcome of a run is reported through here — the piece it loaded,
+   * the refusal it was given, and the load it could not finish. That is what
+   * lets one comparison stand for all of them: an outcome that wrote nothing
+   * would leave the answer before it standing as though it were still what
+   * the view had settled on.
    */
   #markShown(
-    answer: SlugReferenceTarget | SlugReferenceRefusal,
+    answer: SlugReferenceTarget | SlugReferenceRefusal | undefined,
     signal: AbortSignal,
   ): void {
     if (signal.aborted) return;
@@ -650,12 +663,13 @@ export class XAppView extends BaseView {
     }
     if (!this.#isCurrentSlugWatch(watch)) return;
     // The one question, asked of what the selection recorded. A difference
-    // covers the reference moving, a member arriving, and a refusal changing,
-    // and it covers a load that failed before anything was recorded, where
-    // there is nothing for an answer to match. It does not cover a load that
-    // failed under a recorded answer: the selection records a success and a
-    // refusal and nothing at all for a failure, so the earlier answer stands,
-    // an answer equal to it reads as settled, and the view keeps the error.
+    // covers every reason the view could be behind — the reference moved, a
+    // member arrived, a refusal changed, a load failed and left the view on
+    // an error — because each of them is the same fact: what the view
+    // settled on is not this. That holds because every outcome of a run is
+    // recorded, a load that could not finish among them; an outcome that
+    // recorded nothing would leave the answer before it reading as settled,
+    // and the retry it needs would never be asked for.
     const shown = this.#shownResolution;
     if (shown && slugResolutionKey(shown) === slugResolutionKey(landed)) return;
     this.#handleSlugCellUpdate(watch);
