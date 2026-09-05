@@ -263,7 +263,12 @@ exposes, and the name says the rest.
 - Each entry is typed as the class types the member. A stand-in the test
   supplies then declares itself where it is passed in — an `as` on the
   argument, or one small helper taking a `Partial<T>` — rather than on the
-  receiver, and a value the test reads back is what the class holds.
+  receiver, and a value the test reads back is what the class holds. A test
+  holding the value under an interface type narrows it to the class to reach
+  the getter, `tx as ExtendedStorageTransaction`: that is a cast to the real
+  type, which is what the accessor is typed by, and a different
+  implementation behind the interface would leave the read `undefined` and
+  the call throwing rather than passing.
 - It is a public getter, so it sits where the order above puts public getters,
   and first among them.
 - Prose names the member `Class.#member`.

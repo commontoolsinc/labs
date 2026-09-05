@@ -20,17 +20,15 @@ describe("SESRuntime", () => {
 
     expect(next(1)).toBe(2);
     expect(
-      (runtime as unknown as {
-        callbackEvaluator: { callbackCreatorCache: Map<string, () => unknown> };
-      }).callbackEvaluator.callbackCreatorCache.size,
+      runtime.accessForTestingOnly.callbackEvaluator.accessForTestingOnly
+        .callbackCreatorCache.size,
     ).toBe(1);
 
     runtime.clear();
 
     expect(
-      (runtime as unknown as {
-        callbackEvaluator: { callbackCreatorCache: Map<string, () => unknown> };
-      }).callbackEvaluator.callbackCreatorCache.size,
+      runtime.accessForTestingOnly.callbackEvaluator.accessForTestingOnly
+        .callbackCreatorCache.size,
     ).toBe(0);
   });
 });

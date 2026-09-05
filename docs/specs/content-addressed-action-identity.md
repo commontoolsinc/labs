@@ -612,7 +612,7 @@ canary test compiling+resolving with `$implRef` stripped.
    the `implementationRef` writer removed the unbounded legacy registry's
    eviction insurance for new data, so E1 ships the replacement: a strong,
    session-lifetime, per-engine content-addressed implementation index
-   (`ExecutableRegistry.verifiedImplementationsByEntryRef`, populated by
+   (`ExecutableRegistry.#verifiedImplementationsByEntryRef`, populated by
    `Engine.#recordModuleProvenance`, surfaced as
    `Engine.getVerifiedImplementation`, consulted by `resolveByImplRef` after
    the bounded artifact index misses). Chosen over refcount pinning (piece

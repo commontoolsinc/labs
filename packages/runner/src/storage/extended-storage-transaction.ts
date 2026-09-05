@@ -501,6 +501,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcInstrumentation = cfcInstrumentation;
   }
 
+  /**
+   * The prepared-digest input this transaction would hand to verification,
+   * which a test reads directly to pin what it carries.
+   */
+  get accessForTestingOnly(): {
+    buildPreparedDigestInput(): PreparedDigestInput;
+  } {
+    return {
+      buildPreparedDigestInput: () => this.#buildPreparedDigestInput(),
+    };
+  }
+
   /** Stage C tuning T1: any transaction activity that could change the
    * flow-label probe's answer moves the epoch. */
   #noteCfcActivity(): void {
@@ -1766,11 +1778,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     return this.#verdict.promise;
   }
 
-  /**
-   * TypeScript-private rather than a `#` name: `test/cfc-boundary.test.ts`
-   * drives this member directly.
-   */
-  private buildPreparedDigestInput(): PreparedDigestInput {
+  #buildPreparedDigestInput(): PreparedDigestInput {
     // Each pushed record is deepFrozen so that every CfcAddress (and every
     // path inside one) that flows into the digest input is immutable from
     // the moment of construction. This makes the records safe to use as
@@ -2162,7 +2170,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       this.#cfcState.diagnostics.push(...reasons.map(plainReason));
       return "";
     }
-    const preparedInput = this.buildPreparedDigestInput();
+    const preparedInput = this.#buildPreparedDigestInput();
     const digest = preparedDigestFor(preparedInput);
     this.#cfcState.prepare = {
       status: "prepared",
@@ -2813,7 +2821,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
 
       if (this.#cfcState.prepare.status === "prepared") {
         const currentDigest = preparedDigestFor(
-          this.buildPreparedDigestInput(),
+          this.#buildPreparedDigestInput(),
         );
         if (currentDigest !== this.#cfcState.prepare.digest) {
           this.invalidateCfc("prepared-digest-mismatch");

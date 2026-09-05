@@ -327,11 +327,8 @@ describe("SES security regressions", () => {
 
     const { main } = await engine.compileAndEvaluateModules(program);
     const countVerifiedFunctions = () =>
-      (engine as unknown as {
-        executableRegistry: {
-          verifiedImplementationsByEntryRef: Map<string, Map<string, unknown>>;
-        };
-      }).executableRegistry.verifiedImplementationsByEntryRef.values()
+      engine.accessForTestingOnly.executableRegistry.accessForTestingOnly
+        .verifiedImplementationsByEntryRef.values()
         .reduce((n, bucket) => n + bucket.size, 0);
 
     // The nested computation (now the module-scope `__cfLift_N`) and the

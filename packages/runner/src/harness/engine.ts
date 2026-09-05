@@ -318,19 +318,11 @@ export class Engine extends EventTarget {
   #compilerInternals: CompilerInternals | undefined;
   #ctRuntime: Runtime;
 
-  /**
-   * TypeScript-private rather than a `#` name: `test/engine-ses.test.ts` drives
-   * this member directly.
-   */
-  private sesRuntime: SESRuntime | undefined;
+  #sesRuntime: SESRuntime | undefined;
 
   #nextEvalId = 0;
 
-  /**
-   * TypeScript-private rather than a `#` name: `test/engine-ses.test.ts` drives
-   * this member directly.
-   */
-  private readonly executableRegistry = new ExecutableRegistry();
+  readonly #executableRegistry = new ExecutableRegistry();
 
   readonly #consoleShim = createSafeConsoleGlobal(new Console(this));
   readonly #patternCoverageByGraph = new WeakMap<
@@ -347,6 +339,24 @@ export class Engine extends EventTarget {
     super();
     this.#options = options;
     this.#ctRuntime = ctRuntime;
+  }
+
+  /**
+   * The SES runtime, once one has been made, and the implementation index,
+   * which a test reads directly.
+   */
+  get accessForTestingOnly(): {
+    readonly executableRegistry: ExecutableRegistry;
+    readonly sesRuntime: SESRuntime | undefined;
+  } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      executableRegistry: this.#executableRegistry,
+      get sesRuntime() {
+        return outerThis.#sesRuntime;
+      },
+    };
   }
 
   async initializeRuntime(): Promise<RuntimeInternals> {
@@ -1613,7 +1623,7 @@ export class Engine extends EventTarget {
       // The strong content-addressed implementation index — the resolution
       // (and eviction-insurance) backing for serialized `$implRef`s; see
       // `ExecutableRegistry.registerVerifiedImplementation`.
-      this.executableRegistry.registerVerifiedImplementation(
+      this.#executableRegistry.registerVerifiedImplementation(
         identity,
         symbol,
         implementation as HarnessedFunction,
@@ -1771,7 +1781,7 @@ export class Engine extends EventTarget {
     // be set up.
     // Some tests invoke values outside of this SES runtime, so just
     // execute and return if runtime internals have not been initialized.
-    if (!this.#runtimeInternals && !this.sesRuntime) {
+    if (!this.#runtimeInternals && !this.#sesRuntime) {
       return fn();
     }
     return this.#getSESRuntime().exec(fn);
@@ -1785,14 +1795,14 @@ export class Engine extends EventTarget {
     identity: string,
     symbol: string,
   ): HarnessedFunction | undefined {
-    return this.executableRegistry.getVerifiedImplementation(identity, symbol);
+    return this.#executableRegistry.getVerifiedImplementation(identity, symbol);
   }
 
   unsafeTrustHostValue(
     value: unknown,
     options: UnsafeHostTrustOptions,
   ): void {
-    this.executableRegistry.trustHostValue(value, options);
+    this.#executableRegistry.trustHostValue(value, options);
   }
 
   // Parse an error stack trace, mapping all positions back to original sources.
@@ -1837,20 +1847,20 @@ export class Engine extends EventTarget {
    * Clears accumulated source maps and other state to prevent memory leaks.
    */
   dispose(): void {
-    if (this.sesRuntime) {
-      this.sesRuntime.clear();
+    if (this.#sesRuntime) {
+      this.#sesRuntime.clear();
     }
-    this.sesRuntime = undefined;
+    this.#sesRuntime = undefined;
     this.#runtimeInternals = undefined;
     this.#compilerInternals = undefined;
     this.#nextEvalId = 0;
-    this.executableRegistry.clear();
+    this.#executableRegistry.clear();
   }
 
   #getSESRuntime(): SESRuntime {
-    if (!this.sesRuntime) {
+    if (!this.#sesRuntime) {
       ensureSESLockdown();
-      this.sesRuntime = new SESRuntime({
+      this.#sesRuntime = new SESRuntime({
         globals: createModuleCompartmentGlobals({
           console: this.#consoleShim,
         }),
@@ -1858,7 +1868,7 @@ export class Engine extends EventTarget {
         lockdown: false,
       });
     }
-    return this.sesRuntime;
+    return this.#sesRuntime;
   }
 }
 

@@ -1723,7 +1723,7 @@ describe("CompoundCycleTracker cleanup", () => {
     const disposable = tracker.include(key, true);
     expect(disposable).not.toBeNull();
     disposable![Symbol.dispose]();
-    expect((tracker as any).partial.size).toBe(0);
+    expect(tracker.accessForTestingOnly.partial.size).toBe(0);
   });
 
   it("retains partial-key entries while sibling entries are live", () => {
@@ -1739,11 +1739,11 @@ describe("CompoundCycleTracker cleanup", () => {
     // Disposing only A must not remove the outer `partial` entry —
     // B's live entry still keys on the same partialKey.
     dispA![Symbol.dispose]();
-    expect((tracker as any).partial.size).toBe(1);
-    expect((tracker as any).partial.get(key)!.size).toBe(1);
+    expect(tracker.accessForTestingOnly.partial.size).toBe(1);
+    expect(tracker.accessForTestingOnly.partial.get(key)!.size).toBe(1);
     // Disposing B then cleans up.
     dispB![Symbol.dispose]();
-    expect((tracker as any).partial.size).toBe(0);
+    expect(tracker.accessForTestingOnly.partial.size).toBe(0);
   });
 });
 

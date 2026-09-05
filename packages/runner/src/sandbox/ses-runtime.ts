@@ -92,16 +92,19 @@ class SESInternals {
 export class SESRuntime extends EventTarget {
   #internals: SESInternals;
 
-  /**
-   * TypeScript-private rather than a `#` name: `test/runtime.test.ts` drives
-   * this member directly.
-   */
-  private callbackEvaluator: SESCallbackEvaluator;
+  readonly #callbackEvaluator: SESCallbackEvaluator;
 
   constructor(options: SESRuntimeOptions = {}) {
     super();
     this.#internals = new SESInternals(options);
-    this.callbackEvaluator = new SESCallbackEvaluator(options);
+    this.#callbackEvaluator = new SESCallbackEvaluator(options);
+  }
+
+  /** The callback evaluator, which a test reads directly. */
+  get accessForTestingOnly(): {
+    readonly callbackEvaluator: SESCallbackEvaluator;
+  } {
+    return { callbackEvaluator: this.#callbackEvaluator };
   }
 
   /**
@@ -153,12 +156,12 @@ export class SESRuntime extends EventTarget {
   }
 
   evaluateCallback(source: string): unknown {
-    return this.callbackEvaluator.evaluate(source);
+    return this.#callbackEvaluator.evaluate(source);
   }
 
   clear(): void {
     this.#internals.clear();
-    this.callbackEvaluator.clear();
+    this.#callbackEvaluator.clear();
   }
 }
 
@@ -293,16 +296,19 @@ function createCompartment(globals: Record<string, unknown>) {
 class SESCallbackEvaluator {
   #callbackCompartment: SESCompartmentLike | undefined;
 
-  /**
-   * TypeScript-private rather than a `#` name: `test/engine-ses.test.ts` drives
-   * this member directly.
-   */
-  private callbackCreatorCache = new Map<string, () => unknown>();
+  readonly #callbackCreatorCache = new Map<string, () => unknown>();
 
   #options: SESRuntimeOptions;
 
   constructor(options: SESRuntimeOptions = {}) {
     this.#options = options;
+  }
+
+  /** The callback-creator cache, which a test reads directly. */
+  get accessForTestingOnly(): {
+    readonly callbackCreatorCache: Map<string, () => unknown>;
+  } {
+    return { callbackCreatorCache: this.#callbackCreatorCache };
   }
 
   evaluate(source: string): unknown {
@@ -323,12 +329,12 @@ class SESCallbackEvaluator {
   }
 
   clear(): void {
-    this.callbackCreatorCache.clear();
+    this.#callbackCreatorCache.clear();
     this.#callbackCompartment = undefined;
   }
 
   #getCachedCallbackCreator(source: string): () => unknown {
-    const cached = this.callbackCreatorCache.get(source);
+    const cached = this.#callbackCreatorCache.get(source);
     if (cached) {
       return cached;
     }
@@ -339,7 +345,7 @@ class SESCallbackEvaluator {
       throw new Error("Callback source must evaluate to a function creator");
     }
 
-    this.callbackCreatorCache.set(source, creator as () => unknown);
+    this.#callbackCreatorCache.set(source, creator as () => unknown);
     return creator as () => unknown;
   }
 

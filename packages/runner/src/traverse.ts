@@ -1205,11 +1205,16 @@ export class CompoundCycleTracker<
   Value = unknown,
 > {
   // partialKey (identity) → Map<interned extraKey hashString, Value?>
-  // TypeScript-private rather than a `#` name: `test/traverse.test.ts` drives
-  // this member directly.
-  private partial: Map<EqualKey, Map<string, Value | undefined>>;
-  constructor() {
-    this.partial = new Map();
+  readonly #partial = new Map<EqualKey, Map<string, Value | undefined>>();
+
+  /**
+   * The partial-key table, which a test drives directly to watch entries
+   * come and go.
+   */
+  get accessForTestingOnly(): {
+    readonly partial: Map<EqualKey, Map<string, Value | undefined>>;
+  } {
+    return { partial: this.#partial };
   }
 
   include(
@@ -1218,10 +1223,10 @@ export class CompoundCycleTracker<
     value?: Value,
     _context?: unknown,
   ): Disposable | null {
-    let existing = this.partial.get(partialKey);
+    let existing = this.#partial.get(partialKey);
     if (existing === undefined) {
       existing = new Map();
-      this.partial.set(partialKey, existing);
+      this.#partial.set(partialKey, existing);
     }
     const hash = internSchemaAsTaggedHashString(extraKey ?? true);
     if (existing.has(hash)) {
@@ -1230,11 +1235,11 @@ export class CompoundCycleTracker<
     existing.set(hash, value);
     return {
       [Symbol.dispose]: () => {
-        const entries = this.partial.get(partialKey);
+        const entries = this.#partial.get(partialKey);
         if (entries) {
           entries.delete(hash);
           if (entries.size === 0) {
-            this.partial.delete(partialKey);
+            this.#partial.delete(partialKey);
           }
         }
       },
@@ -1243,7 +1248,7 @@ export class CompoundCycleTracker<
 
   // After a failed include (that returns null), we can use getExisting to find the registered value
   getExisting(partialKey: EqualKey, extraKey: ExtraKey): Value | undefined {
-    const existing = this.partial.get(partialKey);
+    const existing = this.#partial.get(partialKey);
     if (existing === undefined) {
       return undefined;
     }

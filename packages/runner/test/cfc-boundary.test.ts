@@ -43,6 +43,7 @@ import { ignoreReadForScheduling } from "../src/scheduler.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { internalVerifierRead } from "../src/storage/reactivity-log.ts";
+import type { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import * as V2Storage from "../src/storage/v2.ts";
 import {
   TEST_MEMORY_SERVER_AUTH,
@@ -1729,11 +1730,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         }),
       );
 
-      const digestInput = (
-        metadataTx as unknown as {
-          buildPreparedDigestInput(): { consumedReads: unknown[] };
-        }
-      ).buildPreparedDigestInput();
+      const digestInput = (metadataTx as ExtendedStorageTransaction)
+        .accessForTestingOnly.buildPreparedDigestInput();
       expect(digestInput.consumedReads).toEqual([]);
       expect(metadataTx.getCfcState().relevant).toBe(false);
 
@@ -2013,20 +2011,8 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       cell.key("secret").set("same");
       expect(tx.getCfcState().relevant).toBe(true);
 
-      const digestInput = (
-        tx as unknown as {
-          buildPreparedDigestInput(): {
-            attemptedWrites: Array<{
-              space: string;
-              scope: "space";
-              id: string;
-              type: string;
-              path: string[];
-            }>;
-            writes: Array<unknown>;
-          };
-        }
-      ).buildPreparedDigestInput();
+      const digestInput = (tx as ExtendedStorageTransaction)
+        .accessForTestingOnly.buildPreparedDigestInput();
       expect(digestInput.attemptedWrites).toContainEqual({
         space: signer.did(),
         scope: "space",
