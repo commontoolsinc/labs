@@ -87,6 +87,32 @@ describe("pieces-controller", () => {
           }
         });
 
+        it("hands the read ceiling and its mode to the runtime it builds", async () => {
+          const originalHealthCheck = Runtime.prototype.healthCheck;
+          let created: Runtime | undefined;
+          Runtime.prototype.healthCheck = function () {
+            created = this;
+            return Promise.resolve(false);
+          };
+          try {
+            await expect(PiecesController.initialize({
+              apiUrl,
+              identity,
+              space: "read-ceiling-forwarded",
+              cfcReadMaxConfidentiality: [identity.did()],
+              cfcReadOnExceed: "skip",
+            })).rejects.toThrow(
+              'Could not connect to "http://toolshed.test/".',
+            );
+            expect(created?.cfcReadMaxConfidentiality).toEqual([
+              identity.did(),
+            ]);
+            expect(created?.cfcReadOnExceed).toBe("skip");
+          } finally {
+            Runtime.prototype.healthCheck = originalHealthCheck;
+          }
+        });
+
         it("throws the connection error for a space given as a `did:key:` DID", async () => {
           const spaceDid = (await Identity.fromPassphrase("a space of its own"))
             .did();

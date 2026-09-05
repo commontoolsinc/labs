@@ -27,6 +27,7 @@ import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import type { CfcConfClause } from "../src/cfc/clause.ts";
+import { buildCfcReadCeiling } from "../src/cfc/read-ceiling.ts";
 import {
   type ErrorWithContext,
   Runtime,
@@ -215,6 +216,17 @@ describe("sqliteQuery under a runtime read ceiling", () => {
       );
     });
 
+    it("throws on a ceiling for a client under server execution", () => {
+      // Such a client stages its queries for the space server's runtime to
+      // serve, which this ceiling does not reach.
+      expect(() =>
+        construct({
+          experimental: { serverExecution: true },
+          cfcReadMaxConfidentiality: ["did:key:owner"],
+        })
+      ).toThrow(/does not bound a client under server execution/);
+    });
+
     it("holds a frozen copy of the ceiling it was given", async () => {
       const given: CfcConfClause[] = ["did:key:owner", { anyOf: ["a", "b"] }];
       const runtime = construct({ cfcReadMaxConfidentiality: given });
@@ -231,6 +243,39 @@ describe("sqliteQuery under a runtime read ceiling", () => {
       } finally {
         await runtime.dispose();
       }
+    });
+  });
+
+  describe("buildCfcReadCeiling()", () => {
+    it("names the fields a caller labels in its refusals", () => {
+      const labels = {
+        ceiling: "run manifest cfc.maxConfidentiality",
+        onExceed: "run manifest cfc.onExceed",
+      };
+      expect(() =>
+        buildCfcReadCeiling({ cfcReadMaxConfidentiality: [] }, labels)
+      ).toThrow(/^run manifest cfc\.maxConfidentiality: an empty ceiling/);
+      expect(() =>
+        buildCfcReadCeiling(
+          { cfcReadMaxConfidentiality: ["a", 42 as unknown as string] },
+          labels,
+        )
+      ).toThrow(/^run manifest cfc\.maxConfidentiality\[1\]: expected an atom/);
+      expect(() =>
+        buildCfcReadCeiling(
+          { cfcReadOnExceed: "drop" as unknown as "skip" },
+          labels,
+        )
+      ).toThrow(/^run manifest cfc\.onExceed: expected "fail" or "skip"/);
+      expect(() => buildCfcReadCeiling({ cfcReadOnExceed: "skip" }, labels))
+        .toThrow(
+          /^run manifest cfc\.onExceed: qualifies `run manifest cfc\.maxConfidentiality`/,
+        );
+    });
+
+    it("names the runtime options when no labels are given", () => {
+      expect(() => buildCfcReadCeiling({ cfcReadMaxConfidentiality: [] }))
+        .toThrow(/^cfcReadMaxConfidentiality: an empty ceiling/);
     });
   });
 

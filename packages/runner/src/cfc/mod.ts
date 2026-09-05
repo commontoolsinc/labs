@@ -305,6 +305,7 @@ export type {
 export {
   buildCfcReadCeiling,
   type CfcReadCeiling,
+  type CfcReadCeilingLabels,
   type CfcReadCeilingOptions,
   type CfcReadOnExceed,
 } from "./read-ceiling.ts";
@@ -335,6 +336,7 @@ export {
   type CfcOpaqueLink,
   cfcOpaqueLinkForPath,
   joinCfcObservedConfidentiality,
+  meetCfcObservationCeilings,
   uniqueCfcAtoms,
 } from "./observation.ts";
 export {

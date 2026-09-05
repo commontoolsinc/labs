@@ -45,7 +45,18 @@ export interface CfcReadCeiling {
   readonly onExceed: CfcReadOnExceed | undefined;
 }
 
-const OPTION = "cfcReadMaxConfidentiality";
+/**
+ * The names a refusal reports the two inputs under. A host validating the
+ * same shape from another surface — a run manifest field, a command-line
+ * flag — passes its own, so the refusal names the field the operator wrote.
+ */
+export interface CfcReadCeilingLabels {
+  /** Name of the ceiling field; defaults to `cfcReadMaxConfidentiality`. */
+  readonly ceiling?: string;
+
+  /** Name of the mode field; defaults to `cfcReadOnExceed`. */
+  readonly onExceed?: string;
+}
 
 /**
  * Whether `value` is a well-formed atom for a ceiling: a non-empty string or
@@ -80,18 +91,21 @@ const freezeClause = (clause: CfcConfClause): CfcConfClause =>
  * the acting principal and the db owner of each query, and it does not judge
  * whether an atom names a principal that exists.
  *
- * @throws If either option is malformed, naming the option.
+ * @throws If either option is malformed, naming the field under `labels`.
  */
 export function buildCfcReadCeiling(
   options: CfcReadCeilingOptions,
+  labels: CfcReadCeilingLabels = {},
 ): CfcReadCeiling {
   const { cfcReadMaxConfidentiality: ceiling, cfcReadOnExceed: onExceed } =
     options;
+  const ceilingName = labels.ceiling ?? "cfcReadMaxConfidentiality";
+  const onExceedName = labels.onExceed ?? "cfcReadOnExceed";
   if (
     onExceed !== undefined && onExceed !== "fail" && onExceed !== "skip"
   ) {
     throw new Error(
-      `cfcReadOnExceed: expected "fail" or "skip", got ${
+      `${onExceedName}: expected "fail" or "skip", got ${
         JSON.stringify(onExceed)
       }`,
     );
@@ -99,23 +113,23 @@ export function buildCfcReadCeiling(
   if (ceiling === undefined) {
     if (onExceed !== undefined) {
       throw new Error(
-        "cfcReadOnExceed: qualifies `cfcReadMaxConfidentiality`, which is " +
-          "not set — set both, or neither",
+        `${onExceedName}: qualifies \`${ceilingName}\`, which is not set — ` +
+          "set both, or neither",
       );
     }
     return Object.freeze({ maxConfidentiality: undefined, onExceed });
   }
   if (!Array.isArray(ceiling)) {
-    throw new Error(`${OPTION}: expected an array of clauses`);
+    throw new Error(`${ceilingName}: expected an array of clauses`);
   }
   if (ceiling.length === 0) {
     throw new Error(
-      `${OPTION}: an empty ceiling admits nothing — omit the option for ` +
+      `${ceilingName}: an empty ceiling admits nothing — omit the field for ` +
         "no ceiling",
     );
   }
   ceiling.forEach((clause, index) => {
-    const where = `${OPTION}[${index}]`;
+    const where = `${ceilingName}[${index}]`;
     if (isOrClause(clause)) {
       if (clause.anyOf.length === 0) {
         throw new Error(`${where}: an \`anyOf\` with no alternatives`);

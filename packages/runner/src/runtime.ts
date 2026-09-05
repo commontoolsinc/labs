@@ -679,7 +679,9 @@ export interface RuntimeOptions {
    * reads are governed by the commit-boundary gates, and a host's direct
    * sqlite bridge refuses labeled tables outright. Validated and deep-frozen
    * at construction; an empty list, which admits nothing, is refused (omit
-   * the option for no ceiling).
+   * the option for no ceiling), and so is a ceiling on a client under
+   * server execution, whose queries the space server's runtime serves
+   * outside this ceiling's reach.
    */
   cfcReadMaxConfidentiality?: readonly CfcConfClause[];
 
@@ -1578,6 +1580,21 @@ export class Runtime {
       // malformed or empty read ceiling refuses to boot rather than admitting
       // nothing at every query.
       const readCeiling = buildCfcReadCeiling(options);
+      // A client under server execution stages its queries for the space
+      // server's runtime to serve, and the ceiling reaches only the runtime
+      // it is configured on. Accepting it there would read as a bounded
+      // session whose reads nothing bounds, so it is refused until a run
+      // carries its ceiling to the runtime that serves it.
+      if (
+        readCeiling.maxConfidentiality !== undefined &&
+        this.experimental.serverExecution === true && !this.servingPosture
+      ) {
+        throw new Error(
+          "cfcReadMaxConfidentiality does not bound a client under server " +
+            "execution: its queries are served by the space server's " +
+            "runtime, which this ceiling does not reach",
+        );
+      }
       this.cfcReadMaxConfidentiality = readCeiling.maxConfidentiality;
       this.cfcReadOnExceed = readCeiling.onExceed;
       // Validates + digests + deep-freezes; throws on malformed records so a

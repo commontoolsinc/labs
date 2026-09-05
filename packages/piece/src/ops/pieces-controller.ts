@@ -58,8 +58,10 @@ import {
 } from "@commonfabric/runner";
 import type { CfcPosture } from "@commonfabric/runner";
 import type {
+  CfcConfClause,
   CfcEnforcementMode,
   CfcFlowLabelsMode,
+  CfcReadOnExceed,
   CfcWriteFloorMode,
 } from "@commonfabric/runner/cfc";
 import { CFC_SCHEMA_MIGRATION_INCOMPATIBLE_REASON } from "@commonfabric/runner/cfc/migration-reason";
@@ -282,6 +284,8 @@ export class PiecesController<T = unknown> {
       cfcFlowLabels,
       cfcPosture,
       cfcWriteFloor,
+      cfcReadMaxConfidentiality,
+      cfcReadOnExceed,
     }: {
       apiUrl: URL | string;
       identity: Identity;
@@ -330,6 +334,12 @@ export class PiecesController<T = unknown> {
       // still apply over it.
       cfcPosture?: CfcPosture;
       cfcWriteFloor?: CfcWriteFloorMode;
+      // The runtime-wide read ceiling for this controller's session (the
+      // remoteClient preset's host-controlled pair): every `db.query` the
+      // session issues reads under it, and a query's own ceiling only
+      // tightens it.
+      cfcReadMaxConfidentiality?: readonly CfcConfClause[];
+      cfcReadOnExceed?: CfcReadOnExceed;
     },
   ): Promise<PiecesController> {
     const api = new URL(apiUrl);
@@ -364,6 +374,10 @@ export class PiecesController<T = unknown> {
       ...(cfcFlowLabels !== undefined ? { cfcFlowLabels } : {}),
       ...(cfcPosture !== undefined ? { cfcPosture } : {}),
       ...(cfcWriteFloor !== undefined ? { cfcWriteFloor } : {}),
+      ...(cfcReadMaxConfidentiality !== undefined
+        ? { cfcReadMaxConfidentiality }
+        : {}),
+      ...(cfcReadOnExceed !== undefined ? { cfcReadOnExceed } : {}),
       ...(navigateCallback !== undefined ? { navigateCallback } : {}),
       ...(onPatternInstantiated !== undefined ? { onPatternInstantiated } : {}),
       trustSnapshotProvider: () => ({
