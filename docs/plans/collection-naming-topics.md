@@ -19,7 +19,7 @@ This block is LIVE: the change that moves a stage updates it here.
 | S2b — assignment refuses by default | on main (#6898) |
 | S3 — the shell opens `/<space>/top/42` | on main (#6896) |
 | S4 — `#42` in text | on main (#6887) |
-| S6 — graft onto Topics | items 1, 2, 3, 5 built; item 4 is Mike's call |
+| S6 — graft onto Topics | items 1, 2, 3, 5 on main (#6937); item 4 rehearsed 2026-09-05, and now needs a schema-flag ruling |
 | S5 — deferred, not scheduled | — |
 
 ## Decisions, ruled 2026-09-03
@@ -278,16 +278,47 @@ Mike's call, after S4.
    strings off each one.
 4. The production backfill is rehearsed on a clone per
    `../development/space-clone-rehearsal.md`; the deployed vintage includes
-   #6827 before the backfill runs. Not started, and one decision items 1-3
-   could not make for it stands: a topic filed before the namespace reads its
-   name only once `namesTable` is link-bound onto it, and nothing in a pattern
-   can reach a member's argument to do that.
+   #6827 before the backfill runs. One decision items 1-3 could not make for it
+   stands: a topic filed before the namespace reads its name only once
+   `namesTable` is link-bound onto it, and nothing in a pattern can reach a
+   member's argument to do that. The rehearsal of 2026-09-05 measured that step
+   end to end and is recorded at
+   `../history/plans/collection-naming-s6-backfill-rehearsal-2026-09-05.md`:
+   `backfillNames` writes the name into the board's map, the topic goes on
+   reading none, and one `cf piece link` per topic closes it. The operator
+   procedure is the "Naming the Topics that predate the namespace" section of
+   `skills/topics/SKILL.md`.
 
-   The graft's own contract IS applicable over the deployed one — every row
-   demand declares `shortName` optional rather than defaulted, which is what
-   keeps it so — so the update needs no schema flag. It does need `--root` at
-   or above `packages/patterns`, because the board imports the naming library
-   from a sibling directory and the default program root is the entry's own.
+   **The board leg of the deploy needs
+   `--dangerously-allow-incompatible-schema`.** `setsrc --check` refuses it over
+   a board holding topics filed before the namespace, with
+   `input link at topics.0.shortName: an unconstrained schema is no longer
+   accepted`. That refusal is not about `shortName`, and not about the
+   property's spelling: adding `probeField?: string` to `TopicDemand` and
+   nothing else produces the identical message at `topics.0.probeField`, and so
+   does `probeField?: unknown`. ANY new property on a per-member demand is
+   refused
+   over a board whose members do not publish it, because the schema recorded on
+   the retained link to each member is unconstrained at that path. The flag is
+   held behind explicit team authorization by `skills/topics/SKILL.md`, so this
+   step now carries a decision it did not carry before, and what the forced
+   deploy leaves behind is itself unmeasured.
+
+   **Why the gates said otherwise.** `deno task pattern-compat` and
+   `deno task pattern-vintage` are both clean and neither can see this: the
+   first judges a pattern's declared contract against the contracts it has
+   declared before, the second replays the pattern's own stored documents, and
+   neither examines the schema recorded on a link into a SIBLING piece — which
+   is the check that fires. A gate passing is not the claim; the claim is what
+   the gate examines, and the only instrument that examines this one is
+   `setsrc --check` against the deployment itself.
+
+   The board moves FIRST, which is what clears the topic leg's own
+   `mentionable[].shortName` refusal; the topic leg then meets an older blocker
+   that predates the graft, which the record names. The deploy also needs
+   `--root` at or above `packages/patterns`, because the board imports the
+   naming library from a sibling directory and the default program root is the
+   entry's own.
 5. `skills/topics/SKILL.md` describes `top/42` addressing.
 
 ### S5 — Deferred, not scheduled
