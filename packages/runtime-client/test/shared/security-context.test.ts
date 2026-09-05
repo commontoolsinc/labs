@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import type { DID } from "@commonfabric/identity";
 
 import type { RuntimeSecurityContext } from "@/protocol/mod.ts";
+import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import {
   normalizeOrigin,
   normalizeSpaceHostMap,
@@ -50,6 +51,21 @@ describe("securityContextDifferences()", () => {
       cfcReadMaxConfidentiality: [{ anyOf: ["b", "a"] }, signerDid],
     };
     expect(securityContextDifferences(asserted, running)).toEqual([]);
+  });
+
+  it("keeps a malformed OR-shaped object opaque, as the runner does", () => {
+    // `{ anyOf: [A], extra: 1 }` is not an OR clause to the runner; it is an
+    // opaque atom, so it is not the same posture as `[A]`.
+    const asserted = {
+      ...running,
+      cfcReadMaxConfidentiality: [
+        signerDid,
+        { anyOf: ["a", "b"], extra: 1 } as unknown as CfcConfClause,
+      ],
+    };
+    expect(securityContextDifferences(asserted, running)).toEqual([
+      "cfcReadMaxConfidentiality",
+    ]);
   });
 
   it("names the read ceiling when an alternative differs", () => {
