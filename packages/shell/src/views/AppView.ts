@@ -267,9 +267,10 @@ export class XAppView extends BaseView {
    * {@link XAppView.#resolveAgainst} compares against this only through a
    * watch, which is built only for an address that names a reference, and
    * {@link XAppView.#shownPieceId} is read only under one. In the second
-   * state a watch's first answer either differs — a reload — or is the answer
-   * the selection is already applying, and a runtime error naming the
-   * previous piece is attributed to this view until the selection answers.
+   * state a runtime error naming the previous piece is attributed to this
+   * view, and a run whose load fails records nothing — so an address whose
+   * loads keep failing holds that state open.
+   * {@link XAppView.#resolveAgainst} says what the comparison covers there.
    */
   #shownResolution: SlugReferenceTarget | SlugReferenceRefusal | undefined =
     undefined;
@@ -648,10 +649,13 @@ export class XAppView extends BaseView {
       return;
     }
     if (!this.#isCurrentSlugWatch(watch)) return;
-    // The one question. A yes covers every reason the view could be behind —
-    // the reference moved, a member arrived, a refusal changed, a load failed
-    // and left something else on screen — because each of them is the same
-    // fact: what is showing is not this.
+    // The one question, asked of what the selection recorded. A difference
+    // covers the reference moving, a member arriving, and a refusal changing,
+    // and it covers a load that failed before anything was recorded, where
+    // there is nothing for an answer to match. It does not cover a load that
+    // failed under a recorded answer: the selection records a success and a
+    // refusal and nothing at all for a failure, so the earlier answer stands,
+    // an answer equal to it reads as settled, and the view keeps the error.
     const shown = this.#shownResolution;
     if (shown && slugResolutionKey(shown) === slugResolutionKey(landed)) return;
     this.#handleSlugCellUpdate(watch);
