@@ -139,7 +139,7 @@ function getStaleSchedulerInternals(
       const record = internal.nodes.get(action);
       if (!record) return;
       if (record.status === "invalid") {
-        record.status = "clean";
+        internal.nodes.setStatus(action, "clean");
       }
       record.invalidCauses.clear();
     },
