@@ -79,6 +79,20 @@ import type {
 } from "./storage/interface.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
 
+/**
+ * Writes a compiled closure back to a space's compile cache: the shape of
+ * `PatternManager`'s own write-back, and of the writer a test supplies in
+ * its place.
+ */
+export type CompileCacheWriter = (
+  space: MemorySpace,
+  modules: CacheableModule[],
+  entryIdentity: string,
+  opts: { runtimeVersion: string },
+  moduleDelegations?: ModuleDelegationMap,
+  delegated?: WritebackDelegation,
+) => Promise<void>;
+
 const logger = getLogger("pattern-manager");
 
 // Cap for `#parkedFailedReplications` (distinct WANTED identities with at
@@ -659,6 +673,9 @@ export class PatternManager {
     string,
     { closureSignature: string; persistence: Promise<void> }
   >();
+  // The writer a test supplies in place of the compile-cache write-back;
+  // undefined means the manager's own.
+  #compileCacheWriter: CompileCacheWriter | undefined = undefined;
   // A best-effort identity recovery that failed to persist skips the in-memory
   // artifact shortcuts on the next load so storage recovery runs again.
   #failedCompileCacheRecoveries = new Set<string>();
@@ -666,11 +683,13 @@ export class PatternManager {
   constructor(readonly runtime: Runtime) {}
 
   /**
-   * The in-flight and cached compilation tables, the module-cache bound, and
-   * the three closure steps that a test drives directly.
+   * The in-flight and cached compilation tables, the module-cache bound, the
+   * compile-cache writer a test may supply, and the three closure steps that
+   * a test drives directly.
    */
   get accessForTestingOnly(): {
     readonly addressableByIdentity: Map<string, Map<string, unknown>>;
+    compileCacheWriter: CompileCacheWriter | undefined;
     readonly compileCacheWrites: Set<Promise<unknown>>;
     readonly inProgressByIdentityLoads: Map<
       string,
@@ -705,6 +724,12 @@ export class PatternManager {
     const outerThis = this;
     return {
       addressableByIdentity: this.#addressableByIdentity,
+      get compileCacheWriter() {
+        return outerThis.#compileCacheWriter;
+      },
+      set compileCacheWriter(value) {
+        outerThis.#compileCacheWriter = value;
+      },
       compileCacheWrites: this.#compileCacheWrites,
       inProgressByIdentityLoads: this.#inProgressByIdentityLoads,
       inProgressCompilations: this.#inProgressCompilations,
@@ -2630,7 +2655,10 @@ export class PatternManager {
         this.#persistedCompileCacheClosures.delete(persistenceSlotKey);
       }
 
-      await this.writeBackCompileCache(
+      // A writer a test supplied stands in for the write-back.
+      const write: CompileCacheWriter = this.#compileCacheWriter ??
+        ((...args) => this.#writeBackCompileCache(...args));
+      await write(
         space,
         modules,
         entryIdentity,
@@ -2800,11 +2828,8 @@ export class PatternManager {
    * pattern's own space writes) retries rather than silently dropping the
    * entry. A final failure throws because persisted refs-only pattern JSON
    * requires a durable closure behind every `$patternRef`.
-   *
-   * TypeScript-private rather than a `#` name, because `test/cell-cache.test.ts`
-   * replaces this member by assignment, which a `#` method does not allow.
    */
-  private async writeBackCompileCache(
+  async #writeBackCompileCache(
     space: MemorySpace,
     modules: CacheableModule[],
     entryIdentity: string,
@@ -2911,7 +2936,7 @@ export class PatternManager {
   // them blind and conflicts one engine round per edge (the CT-1824 loop).
   // With the edge docs materialized up front the write-back diffs against
   // true state and commits on the first attempt; the retry budget in
-  // writeBackCompileCache remains as a backstop. Same-microtask syncs batch
+  // `#writeBackCompileCache` remains as a backstop. Same-microtask syncs batch
   // into a single server round trip.
   async #syncSourceCacheWriteTargets(
     space: MemorySpace,

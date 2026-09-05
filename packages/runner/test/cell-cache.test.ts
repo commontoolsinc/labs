@@ -2160,17 +2160,6 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
       ],
     });
     const manager = runtime.patternManager.accessForTestingOnly;
-    // Replaced by assignment below, which only a TypeScript-private member
-    // allows, so it is reached the old way.
-    const stubbed = runtime.patternManager as unknown as {
-      writeBackCompileCache(
-        space: string,
-        modules: CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-      ): Promise<void>;
-    };
-    const originalWriteBack = stubbed.writeBackCompileCache;
     const firstStarted = Promise.withResolvers<void>();
     const releaseFirst = Promise.withResolvers<void>();
     const secondStarted = Promise.withResolvers<void>();
@@ -2178,7 +2167,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     let writeCount = 0;
     let firstWrite: Promise<void> | undefined;
     let secondWrite: Promise<void> | undefined;
-    stubbed.writeBackCompileCache = async () => {
+    manager.compileCacheWriter = async () => {
       writeCount++;
       if (writeCount === 1) {
         firstStarted.resolve();
@@ -2218,25 +2207,14 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
           (write): write is Promise<void> => write !== undefined,
         ),
       );
-      stubbed.writeBackCompileCache = originalWriteBack;
+      manager.compileCacheWriter = undefined;
     }
   });
 
   it("retains persistence entries for the runner session", async () => {
     const { modules, entryIdentity } = toModules(PROGRAM);
     const manager = runtime.patternManager.accessForTestingOnly;
-    // Replaced by assignment below, which only a TypeScript-private member
-    // allows, so it is reached the old way.
-    const stubbed = runtime.patternManager as unknown as {
-      writeBackCompileCache(
-        space: string,
-        modules: CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-      ): Promise<void>;
-    };
-    const originalWriteBack = stubbed.writeBackCompileCache;
-    stubbed.writeBackCompileCache = () => Promise.resolve();
+    manager.compileCacheWriter = () => Promise.resolve();
     try {
       for (let index = 0; index <= 1000; index++) {
         await manager.persistCompileCacheTracked(
@@ -2247,7 +2225,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
         );
       }
     } finally {
-      stubbed.writeBackCompileCache = originalWriteBack;
+      manager.compileCacheWriter = undefined;
     }
 
     expect(manager.persistedCompileCacheClosures.size).toBe(1001);
