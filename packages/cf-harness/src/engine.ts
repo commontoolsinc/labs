@@ -29,6 +29,7 @@ import {
   loadHarnessDocsCorpus,
 } from "./docs-corpus/corpus.ts";
 import type { HarnessExploreQueryRunner } from "./docs-corpus/explore.ts";
+import type { HarnessToolContext } from "./tools/types.ts";
 import type { HarnessDocsCorpusRecord } from "./contracts/docs-corpus.ts";
 import {
   createHarnessCfcInvocationContext,
@@ -303,6 +304,13 @@ export interface CreateHarnessEngineOptions
   inheritedFabricSessionPosture?: CfcPostureReport;
 
   /**
+   * Injection seam for the render gate's probe runtime, mirroring
+   * `fabricSessionFactory`: a test supplies one to see what the gate opens
+   * the probe under. When absent, the gate opens a real isolated runtime.
+   */
+  openProbeRuntime?: HarnessToolContext["openProbeRuntime"];
+
+  /**
    * Injection seam for the pattern-index client, mirroring
    * `fabricSessionFactory`. When absent, a factory is built from
    * `patternIndex` in the resolved config; when both are absent, the run has
@@ -470,6 +478,7 @@ export class CfHarnessEngine {
   #outputSequence: number;
   readonly #now: () => string;
   readonly #fabricSessionFactory?: HarnessFabricSessionFactory;
+  readonly #openProbeRuntime?: HarnessToolContext["openProbeRuntime"];
   readonly #patternIndexClientFactory?: HarnessPatternIndexClientFactory;
   readonly #skillsShSearchClientFactory?: HarnessSkillsShSearchClientFactory;
   readonly #skillsShAcquisitionClientFactory?:
@@ -633,6 +642,7 @@ export class CfHarnessEngine {
           this.config.fabricSession.identityKeyPath,
         )
         : undefined);
+    this.#openProbeRuntime = options.openProbeRuntime;
     this.#patternIndexClientFactory = patternIndexClientFactory === undefined
       ? undefined
       : cacheHarnessPatternIndexClientFactory(patternIndexClientFactory);
@@ -776,6 +786,21 @@ export class CfHarnessEngine {
         ...(this.config.fabricSession.cfcPosture !== undefined
           ? { posture: this.config.fabricSession.cfcPosture }
           : {}),
+        ...(this.config.fabricSession.cfcReadMaxConfidentiality !== undefined
+          ? {
+            readMaxConfidentiality:
+              this.config.fabricSession.cfcReadMaxConfidentiality,
+          }
+          : {}),
+        ...(this.config.fabricSession.cfcReadOnExceed !== undefined
+          ? { readOnExceed: this.config.fabricSession.cfcReadOnExceed }
+          : {}),
+        ...(this.config.fabricSession.readCeilingSource !== "none"
+          ? {
+            readMaxConfidentialitySource:
+              this.config.fabricSession.readCeilingSource,
+          }
+          : {}),
         ...(sessionRecord !== undefined ? { record: sessionRecord } : {}),
       }
       : undefined;
@@ -806,6 +831,12 @@ export class CfHarnessEngine {
         recorded.enforcementMode !== fabricSessionCfc.enforcementMode ||
         recorded.flowLabels !== fabricSessionCfc.flowLabels ||
         recorded.posture !== fabricSessionCfc.posture ||
+        // The read ceiling too: a resume that would read wider (or under
+        // another ceiling) than the artifacts attest is the same
+        // contradiction as a moved dial.
+        JSON.stringify(recorded.readMaxConfidentiality) !==
+          JSON.stringify(fabricSessionCfc.readMaxConfidentiality) ||
+        recorded.readOnExceed !== fabricSessionCfc.readOnExceed ||
         // The whole record too, where the run recorded one. The two dials
         // above can agree while a dial neither of them names has moved under
         // the run — a changed runtime default, a changed posture bundle — and
@@ -2064,6 +2095,9 @@ export class CfHarnessEngine {
       handleTable: this.handleTable,
       ...(this.#fabricSessionFactory !== undefined
         ? { getFabricSession: this.#fabricSessionFactory }
+        : {}),
+      ...(this.#openProbeRuntime !== undefined
+        ? { openProbeRuntime: this.#openProbeRuntime }
         : {}),
       ...(this.#patternIndexClientFactory !== undefined
         ? {

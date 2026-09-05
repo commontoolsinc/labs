@@ -319,6 +319,26 @@ in-flight external side effect.
    check consumes, and handle resolution into a child input is rejected when it
    exceeds that ceiling.
 
+9. **The run's read ceiling gates session-scoped query results only.** The
+   ceiling a run carries — `--max-confidentiality`, or `cfc.maxConfidentiality`
+   in the run manifest, met into the fabric session's runtime as
+   `cfcReadMaxConfidentiality` — is applied by the runner's `db.query` builtin
+   at the query, not at the cell: a query whose result is session-scoped
+   (`PerSession<>`, `scope: "session"`, `.asScope("session")`, or a
+   session-scoped db) reads under the meet of its own ceiling and the run's; a
+   query with a space- or user-scoped result is refused before it is staged,
+   because that result is one cell every runtime on the space resolves and the
+   run's runtime cannot narrow it for itself. The refusal reaches the runtime's
+   error handlers, so an authored pattern that declares no scope fails on its
+   first query rather than reading under a wider view. What the option does not
+   reach is a shared cell another runtime already filled: that is protected by
+   the cell's own label under the commit-boundary gates, not by the run's
+   ceiling. Owner: `cf-harness` and the CFC runtime. Retirement: the ceiling is
+   carried into the runtime's cell read path (a labeled cell that does not fit
+   reads as withheld), and the served-execution arm carries a per-session
+   ceiling to the serving runtime, at which point the scope requirement and the
+   OFF-arm-only limit both retire.
+
 ## Test evidence
 
 - `deno task test` — package contract suite.

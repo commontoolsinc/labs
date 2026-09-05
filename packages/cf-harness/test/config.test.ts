@@ -1,9 +1,11 @@
 import { checkoutDocsCorpusRoots } from "../src/docs-corpus/corpus.ts";
 import { resolveHarnessSkillsRoot } from "../src/skills/root.ts";
 import { assert, assertEquals, assertExists, assertThrows } from "@std/assert";
+import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import {
   type CfcEnforcementMode,
   cfcEnforcementStrictness,
+  cfcObservationFitsCeiling,
 } from "@commonfabric/runner/cfc";
 import { presetCfcOptions } from "@commonfabric/runner";
 import {
@@ -13,6 +15,7 @@ import {
   type HarnessConfig,
   parseCfcEnforcementMode,
   parseHarnessGatewayAuthMode,
+  readCeilingsEqual,
   resolveCfcEnforcementMode,
   resolveCfcEnforcementModeSource,
   resolveGatewayAuthMode,
@@ -458,4 +461,326 @@ Deno.test("resolveHarnessConfig carries a skills.sh discovery registry", () => {
     skillScriptExecutionTarget: "sandbox",
   });
   assertEquals(config.skillsSh, { baseUrl: "https://registry.example/" });
+});
+
+Deno.test("resolveHarnessConfig bounds the fabric session by the run manifest's read ceiling", () => {
+  const config = resolveHarnessConfig({
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+    },
+    runManifest: {
+      type: "cf-harness.loom-run-manifest",
+      version: 1,
+      source: "loom",
+      cfc: {
+        maxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+        onExceed: "skip",
+      },
+    },
+    skillScriptExecutionTarget: "sandbox",
+  });
+  assertEquals(config.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+    cfcReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+    cfcReadOnExceed: "skip",
+    readCeilingSource: "run-manifest",
+    manifestReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+    manifestReadOnExceed: "skip",
+  });
+});
+
+Deno.test("resolveHarnessConfig meets the run manifest's read ceiling with the session's own", () => {
+  const config = resolveHarnessConfig({
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+      cfcReadMaxConfidentiality: ["did:key:zA", "did:key:zB"],
+      cfcReadOnExceed: "fail",
+    },
+    runManifest: {
+      type: "cf-harness.loom-run-manifest",
+      version: 1,
+      source: "loom",
+      cfc: {
+        maxConfidentiality: ["did:key:zB", "did:key:zC"],
+        onExceed: "skip",
+      },
+    },
+    skillScriptExecutionTarget: "sandbox",
+  });
+  const ceiling = config.fabricSession?.cfcReadMaxConfidentiality;
+  // Only what both admit fits the result: neither side's ceiling replaced
+  // the other's.
+  assertEquals(cfcObservationFitsCeiling(["did:key:zB"], ceiling), true);
+  assertEquals(cfcObservationFitsCeiling(["did:key:zA"], ceiling), false);
+  assertEquals(cfcObservationFitsCeiling(["did:key:zC"], ceiling), false);
+  // The session's own onExceed stands over the manifest's.
+  assertEquals(config.fabricSession?.cfcReadOnExceed, "fail");
+});
+
+Deno.test("resolveHarnessConfig leaves a session with no ceiling unbounded when the manifest declares none", () => {
+  const config = resolveHarnessConfig({
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+    },
+    runManifest: {
+      type: "cf-harness.loom-run-manifest",
+      version: 1,
+      source: "loom",
+      cfc: { enforcementMode: "observe" },
+    },
+    skillScriptExecutionTarget: "sandbox",
+  });
+  assertEquals(config.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+    readCeilingSource: "none",
+  });
+});
+
+Deno.test("resolveHarnessConfig refuses a run manifest read ceiling with no fabric session to apply it", () => {
+  assertThrows(
+    () =>
+      resolveHarnessConfig({
+        runManifest: {
+          type: "cf-harness.loom-run-manifest",
+          version: 1,
+          source: "loom",
+          cfc: { maxConfidentiality: ["did:key:zOwner"] },
+        },
+        skillScriptExecutionTarget: "sandbox",
+      }),
+    Error,
+    "run manifest cfc.maxConfidentiality names a read ceiling for the fabric session's runtime, and the run has no fabric session",
+  );
+});
+
+Deno.test("resolveHarnessConfig folds the run manifest's read ceiling once: a resolved session passes through unchanged", () => {
+  const runManifest = {
+    type: "cf-harness.loom-run-manifest" as const,
+    version: 1 as const,
+    source: "loom" as const,
+    cfc: {
+      maxConfidentiality: [
+        "did:key:zO",
+        { type: "Facet", owner: "did:key:zO", id: "work" },
+      ],
+    },
+  };
+  const parent = resolveHarnessConfig({
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+      cfcReadMaxConfidentiality: ["did:key:zO", "did:key:zX"],
+    },
+    runManifest,
+    skillScriptExecutionTarget: "sandbox",
+  });
+  // A delegated child is built from its parent's resolved session and the
+  // same manifest; it must record the ceiling its parent's runtime holds,
+  // byte for byte, not a second meet of it.
+  const child = resolveHarnessConfig({
+    fabricSession: parent.fabricSession,
+    runManifest,
+    skillScriptExecutionTarget: "sandbox",
+  });
+  assertEquals(child.fabricSession, parent.fabricSession);
+});
+
+Deno.test("resolveHarnessConfig meets onExceed toward the stricter mode", () => {
+  const session = {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+  };
+  const manifestWith = (onExceed: "fail" | "skip") => ({
+    type: "cf-harness.loom-run-manifest" as const,
+    version: 1 as const,
+    source: "loom" as const,
+    cfc: { maxConfidentiality: ["did:key:zO"], onExceed },
+  });
+  // A session's `skip` is a wider release than the manifest's `fail`, and
+  // the operator cannot widen what the dispatch declared.
+  assertEquals(
+    resolveHarnessConfig({
+      fabricSession: {
+        ...session,
+        cfcReadMaxConfidentiality: ["did:key:zO"],
+        cfcReadOnExceed: "skip",
+      },
+      runManifest: manifestWith("fail"),
+      skillScriptExecutionTarget: "sandbox",
+    }).fabricSession?.cfcReadOnExceed,
+    "fail",
+  );
+  assertEquals(
+    resolveHarnessConfig({
+      fabricSession: {
+        ...session,
+        cfcReadMaxConfidentiality: ["did:key:zO"],
+        cfcReadOnExceed: "skip",
+      },
+      runManifest: manifestWith("skip"),
+      skillScriptExecutionTarget: "sandbox",
+    }).fabricSession?.cfcReadOnExceed,
+    "skip",
+  );
+  assertEquals(
+    resolveHarnessConfig({
+      fabricSession: session,
+      runManifest: manifestWith("skip"),
+      skillScriptExecutionTarget: "sandbox",
+    }).fabricSession?.cfcReadOnExceed,
+    "skip",
+  );
+});
+
+Deno.test("resolveHarnessConfig refuses a resolved session beside a manifest ceiling it did not fold", () => {
+  const session = {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+  };
+  const manifestWith = (ceiling: string[]) => ({
+    type: "cf-harness.loom-run-manifest" as const,
+    version: 1 as const,
+    source: "loom" as const,
+    cfc: { maxConfidentiality: ceiling },
+  });
+  // A config resolved with no manifest, then handed on beside a manifest
+  // that declares a ceiling: passing it through would run unbounded under a
+  // manifest that asked for a bound.
+  const unbounded = resolveHarnessConfig({
+    fabricSession: session,
+    skillScriptExecutionTarget: "sandbox",
+  }).fabricSession;
+  assertThrows(
+    () =>
+      resolveHarnessConfig({
+        fabricSession: unbounded,
+        runManifest: manifestWith(["did:key:zO"]),
+        skillScriptExecutionTarget: "sandbox",
+      }),
+    Error,
+    "resolved fabric session did not fold the run manifest's read ceiling",
+  );
+  // A config resolved under one manifest, handed on beside another: passing
+  // it through would attest a ceiling the manifest beside it never declared.
+  const underA = resolveHarnessConfig({
+    fabricSession: session,
+    runManifest: manifestWith(["did:key:zO", "did:key:zA"]),
+    skillScriptExecutionTarget: "sandbox",
+  }).fabricSession;
+  assertThrows(
+    () =>
+      resolveHarnessConfig({
+        fabricSession: underA,
+        runManifest: manifestWith(["did:key:zO", "did:key:zB"]),
+        skillScriptExecutionTarget: "sandbox",
+      }),
+    Error,
+    "resolved fabric session did not fold the run manifest's read ceiling",
+  );
+  // The same manifest it folded passes through unchanged.
+  assertEquals(
+    resolveHarnessConfig({
+      fabricSession: underA,
+      runManifest: manifestWith(["did:key:zO", "did:key:zA"]),
+      skillScriptExecutionTarget: "sandbox",
+    }).fabricSession,
+    underA,
+  );
+});
+
+Deno.test("resolveHarnessConfig snapshots the run manifest's read ceiling rather than holding it by reference", () => {
+  const ceiling: string[] = ["did:key:zOwner"];
+  const runManifest = {
+    type: "cf-harness.loom-run-manifest" as const,
+    version: 1 as const,
+    source: "loom" as const,
+    cfc: { maxConfidentiality: ceiling },
+  };
+  const config = resolveHarnessConfig({
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+    },
+    runManifest,
+    skillScriptExecutionTarget: "sandbox",
+  });
+  // The session is built lazily, on the first tool call; a manifest object
+  // mutated in between must not widen what that session is built under.
+  ceiling.push("did:key:zEveryone");
+  assertEquals(config.fabricSession?.cfcReadMaxConfidentiality, [
+    "did:key:zOwner",
+  ]);
+  assertEquals(config.fabricSession?.manifestReadMaxConfidentiality, [
+    "did:key:zOwner",
+  ]);
+});
+
+Deno.test("readCeilingsEqual is a multiset match with order-insensitive alternatives, never a string compare", () => {
+  const A = "did:key:zA";
+  const B = "did:key:zB";
+  const O = "did:key:zO";
+  assertEquals(
+    readCeilingsEqual([{ anyOf: [A, B] }, O], [O, { anyOf: [B, A] }]),
+    true,
+  );
+  assertEquals(readCeilingsEqual([{ anyOf: [A, B] }], [{ anyOf: [A] }]), false);
+  assertEquals(readCeilingsEqual([O], [O, O]), false);
+  assertEquals(readCeilingsEqual(undefined, undefined), true);
+  assertEquals(readCeilingsEqual(undefined, [O]), false);
+  assertEquals(readCeilingsEqual([O], undefined), false);
+});
+
+Deno.test("resolveHarnessConfig refuses a resolved session beside a manifest that dropped its ceiling, and passes through the same ceiling respelled", () => {
+  const session = {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+  };
+  const manifestWith = (ceiling: CfcConfClause[] | undefined) => ({
+    type: "cf-harness.loom-run-manifest" as const,
+    version: 1 as const,
+    source: "loom" as const,
+    ...(ceiling !== undefined ? { cfc: { maxConfidentiality: ceiling } } : {}),
+  });
+  const underAB = resolveHarnessConfig({
+    fabricSession: session,
+    runManifest: manifestWith([{ anyOf: ["did:key:zA", "did:key:zB"] }]),
+    skillScriptExecutionTarget: "sandbox",
+  }).fabricSession;
+  // Folded under a ceiling, handed on beside a manifest that now declares
+  // none: the config would attest a ceiling this manifest never carried.
+  assertThrows(
+    () =>
+      resolveHarnessConfig({
+        fabricSession: underAB,
+        runManifest: manifestWith(undefined),
+        skillScriptExecutionTarget: "sandbox",
+      }),
+    Error,
+    "resolved fabric session did not fold the run manifest's read ceiling",
+  );
+  // The same ceiling with its alternatives in another order is the same
+  // ceiling: passed through, not refused over spelling.
+  assertEquals(
+    resolveHarnessConfig({
+      fabricSession: underAB,
+      runManifest: manifestWith([{ anyOf: ["did:key:zB", "did:key:zA"] }]),
+      skillScriptExecutionTarget: "sandbox",
+    }).fabricSession,
+    underAB,
+  );
 });

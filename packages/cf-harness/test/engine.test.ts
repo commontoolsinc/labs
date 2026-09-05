@@ -1718,3 +1718,132 @@ Deno.test("CfHarnessEngine exposes a handle table carried by a resumed run state
 
   assertEquals(resumed.handleTable, table);
 });
+
+Deno.test("CfHarnessEngine records the fabric session's read ceiling in run state and refuses to resume under another", () => {
+  const boundedSession = {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+    cfcReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+    cfcReadOnExceed: "skip",
+  } as const;
+  const runState = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: boundedSession,
+  }).getRunState();
+  assertEquals(runState.fabricSessionCfc, {
+    enforcementMode: "enforce-explicit",
+    enforcementModeSource: "preset-pin",
+    flowLabels: "off",
+    flowLabelsSource: "default",
+    readMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+    readOnExceed: "skip",
+    readMaxConfidentialitySource: "session",
+    record: recordFor(boundedSession),
+  });
+
+  // The same bounded session resumes cleanly.
+  const resumed = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: boundedSession,
+    runState,
+  });
+  assertEquals(
+    resumed.getRunState().fabricSessionCfc?.readMaxConfidentiality,
+    ["did:key:zOwner", "did:key:zFacet"],
+  );
+
+  // A resume that would run the session unbounded, or under another ceiling,
+  // contradicts what the artifacts attest.
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        fabricSession: {
+          apiUrl: boundedSession.apiUrl,
+          identityKeyPath: boundedSession.identityKeyPath,
+          space: boundedSession.space,
+        },
+        runState,
+      }),
+    Error,
+    "fabric session CFC posture mismatch on resume",
+  );
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        fabricSession: {
+          ...boundedSession,
+          cfcReadMaxConfidentiality: ["did:key:zOwner"],
+        },
+        runState,
+      }),
+    Error,
+    "fabric session CFC posture mismatch on resume",
+  );
+  assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        fabricSession: { ...boundedSession, cfcReadOnExceed: "fail" },
+        runState,
+      }),
+    Error,
+    "fabric session CFC posture mismatch on resume",
+  );
+});
+
+Deno.test("CfHarnessEngine records the same read ceiling in a delegated child as in its parent", () => {
+  const runManifest = {
+    type: "cf-harness.loom-run-manifest" as const,
+    version: 1 as const,
+    source: "loom" as const,
+    cfc: {
+      maxConfidentiality: [
+        "did:key:zO",
+        { type: "Facet", owner: "did:key:zO", id: "work" },
+      ],
+      onExceed: "skip" as const,
+    },
+  };
+  const parent = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: {
+      apiUrl: "https://toolshed.example/",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "my-space",
+      cfcReadMaxConfidentiality: ["did:key:zO", "did:key:zX"],
+    },
+    runManifest,
+  });
+  // The shape a delegating parent builds its child with: the parent's
+  // resolved session config beside the shared session factory, and the
+  // same manifest.
+  const child = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: parent.config.fabricSession,
+    fabricSessionFactory: () =>
+      Promise.reject(new Error("never built in this test")),
+    inheritedFabricSessionPosture: parent.getRunState().fabricSessionCfc!
+      .record,
+    runManifest,
+  });
+  const grandchild = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: child.config.fabricSession,
+    fabricSessionFactory: () =>
+      Promise.reject(new Error("never built in this test")),
+    runManifest,
+  });
+  const recorded = parent.getRunState().fabricSessionCfc!;
+  assertEquals(
+    child.getRunState().fabricSessionCfc?.readMaxConfidentiality,
+    recorded.readMaxConfidentiality,
+  );
+  assertEquals(
+    grandchild.getRunState().fabricSessionCfc?.readMaxConfidentiality,
+    recorded.readMaxConfidentiality,
+  );
+  assertEquals(child.getRunState().fabricSessionCfc?.readOnExceed, "skip");
+});

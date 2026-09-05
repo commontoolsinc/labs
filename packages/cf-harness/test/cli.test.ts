@@ -1,4 +1,9 @@
-import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import {
+  assertEquals,
+  assertMatch,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 
@@ -7258,4 +7263,282 @@ Deno.test("parseCfHarnessCliArgs rejects --allow-tool record_feedback without a 
     Error,
     "missing --pattern-index-url",
   );
+});
+
+Deno.test("parseCfHarnessCliArgs carries --max-confidentiality into the fabric session as its read ceiling", async () => {
+  const parsed = await parseCfHarnessCliArgs(
+    [
+      "--prompt",
+      "hi",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+      "--max-confidentiality",
+      JSON.stringify([
+        "did:key:zOwner",
+        { type: "Facet", owner: "did:key:zOwner", id: "work" },
+      ]),
+    ],
+    { cwd: "/tmp/project", env: {} },
+  );
+
+  if ("help" in parsed) {
+    throw new Error("expected config result");
+  }
+  assertEquals(parsed.fabricSession, {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/tmp/project/keys/agent.pkcs8",
+    space: "my-space",
+    cfcReadMaxConfidentiality: [
+      "did:key:zOwner",
+      { type: "Facet", owner: "did:key:zOwner", id: "work" },
+    ],
+  });
+});
+
+Deno.test("parseCfHarnessCliArgs refuses a --max-confidentiality that is not a ceiling", async () => {
+  const fabric = [
+    "--prompt",
+    "hi",
+    "--fabric-api-url",
+    "https://toolshed.example/",
+    "--fabric-identity",
+    "keys/agent.pkcs8",
+    "--fabric-space",
+    "my-space",
+  ];
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [...fabric, "--max-confidentiality", "did:key:zOwner"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--max-confidentiality must be JSON",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [...fabric, "--max-confidentiality", "[]"],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--max-confidentiality: an empty ceiling admits",
+  );
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        [...fabric, "--max-confidentiality", '{"anyOf":["did:key:zOwner"]}'],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--max-confidentiality: expected an array of clauses",
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs refuses --max-confidentiality without a fabric session", async () => {
+  await assertRejects(
+    () =>
+      parseCfHarnessCliArgs(
+        ["--prompt", "hi", "--max-confidentiality", '["did:key:zOwner"]'],
+        { cwd: "/tmp/project", env: {} },
+      ),
+    Error,
+    "--max-confidentiality bounds the fabric session's reads and needs --fabric-api-url, --fabric-identity, and --fabric-space",
+  );
+});
+
+Deno.test("a resume whose manifest declares another read ceiling is refused as a structured mismatch", async () => {
+  const buffers = createIoBuffers();
+  let promptLoopsCreated = 0;
+  const recordedManifest = {
+    type: "cf-harness.loom-run-manifest",
+    version: 1,
+    source: "loom",
+    cfc: { maxConfidentiality: ["did:key:zOwner", "did:key:zFacet"] },
+  } as const;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--resume-run",
+      "/tmp/project/.cf-harness-artifacts/run-1/run-state.json",
+      "--run-manifest",
+      "/tmp/loom-run-manifest.json",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      io: buffers.io,
+      structuredHostFailures: true,
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("factory is forwarded, not invoked")),
+      readTextFile: () =>
+        Promise.resolve(JSON.stringify({
+          ...recordedManifest,
+          cfc: { maxConfidentiality: ["did:key:zOwner"] },
+        })),
+      readRunArtifacts: () =>
+        Promise.resolve({
+          runRoot: "/tmp/project/.cf-harness-artifacts/run-1",
+          runStatePath:
+            "/tmp/project/.cf-harness-artifacts/run-1/run-state.json",
+          transcriptPath:
+            "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+          runState: {
+            runId: "run-1",
+            status: "failed",
+            createdAt: "2026-04-15T22:10:00.000Z",
+            updatedAt: "2026-04-15T22:10:01.000Z",
+            cfcEnforcementMode: "disabled",
+            currentDir: "/workspace",
+            model: "gpt-5.4",
+            artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
+            transcriptPath:
+              "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+            policyEvents: [],
+            toolOutputs: [],
+            runManifest: recordedManifest,
+          },
+          transcript: [{ role: "user", content: "Continue." }],
+        }),
+      createPromptLoop: () => {
+        promptLoopsCreated += 1;
+        throw new Error("must not construct a prompt loop");
+      },
+    },
+  );
+  assertEquals(exitCode, 1);
+  assertEquals(promptLoopsCreated, 0);
+  const failure = JSON.parse(buffers.stderr[0]);
+  assertEquals(failure.type, "cf-harness.host-failure");
+  assertEquals(failure.error.code, "provider-mismatch");
+  assertStringIncludes(failure.error.message, "resume read ceiling mismatch");
+});
+
+Deno.test("a resume whose manifest respells the recorded ceiling (anyOf reordered) is not a mismatch", async () => {
+  const buffers = createIoBuffers();
+  let promptLoopsCreated = 0;
+  const recordedManifest = {
+    type: "cf-harness.loom-run-manifest",
+    version: 1,
+    source: "loom",
+    cfc: {
+      maxConfidentiality: [{ anyOf: ["did:key:zOwner", "did:key:zFacet"] }],
+    },
+  } as const;
+  const exitCode = await runCfHarnessCli(
+    [
+      "--resume-run",
+      "/tmp/project/.cf-harness-artifacts/run-1/run-state.json",
+      "--run-manifest",
+      "/tmp/loom-run-manifest.json",
+      "--fabric-api-url",
+      "https://toolshed.example/",
+      "--fabric-identity",
+      "keys/agent.pkcs8",
+      "--fabric-space",
+      "my-space",
+    ],
+    {
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      io: buffers.io,
+      structuredHostFailures: true,
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("factory is forwarded, not invoked")),
+      readTextFile: () =>
+        Promise.resolve(JSON.stringify({
+          ...recordedManifest,
+          cfc: {
+            maxConfidentiality: [{
+              anyOf: ["did:key:zFacet", "did:key:zOwner"],
+            }],
+          },
+        })),
+      readRunArtifacts: () =>
+        Promise.resolve({
+          runRoot: "/tmp/project/.cf-harness-artifacts/run-1",
+          runStatePath:
+            "/tmp/project/.cf-harness-artifacts/run-1/run-state.json",
+          transcriptPath:
+            "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+          runState: {
+            runId: "run-1",
+            status: "failed",
+            createdAt: "2026-04-15T22:10:00.000Z",
+            updatedAt: "2026-04-15T22:10:01.000Z",
+            cfcEnforcementMode: "disabled",
+            currentDir: "/workspace",
+            model: "gpt-5.4",
+            artifactRoot: "/tmp/project/.cf-harness-artifacts/run-1",
+            transcriptPath:
+              "/tmp/project/.cf-harness-artifacts/run-1/transcript.json",
+            policyEvents: [],
+            toolOutputs: [],
+            runManifest: recordedManifest,
+          },
+          transcript: [{ role: "user", content: "Continue." }],
+        }),
+      createPromptLoop: () => {
+        promptLoopsCreated += 1;
+        throw new Error("must not construct a prompt loop");
+      },
+    },
+  );
+  // The mismatch guard let it through, so the resume reached the prompt
+  // loop the fixture refuses to build; that refusal, not the ceiling, is
+  // what failed the run.
+  assertEquals(promptLoopsCreated, 1);
+  assertEquals(exitCode, 1);
+  const failure = JSON.parse(buffers.stderr[0]);
+  assertEquals(
+    String(failure.error?.message ?? failure.error).includes(
+      "resume read ceiling mismatch",
+    ),
+    false,
+  );
+});
+
+Deno.test("parseCfHarnessCliArgs refuses a present --max-confidentiality with no value rather than running unbounded", async () => {
+  const fabric = [
+    "--prompt",
+    "hi",
+    "--fabric-api-url",
+    "https://toolshed.example/",
+    "--fabric-identity",
+    "keys/agent.pkcs8",
+    "--fabric-space",
+    "my-space",
+  ];
+  // Bare at the end of the line, bare before another flag, and with an
+  // empty value: each is a ceiling the operator meant to state and did not,
+  // never a run with no ceiling.
+  for (
+    const args of [
+      [...fabric, "--max-confidentiality"],
+      [...fabric, "--max-confidentiality", "--print-transcript"],
+      [...fabric, "--max-confidentiality="],
+      [...fabric, "--max-confidentiality", "   "],
+    ]
+  ) {
+    // Two refusals cover the shapes: the parser reads a bare flag as an
+    // empty string, which the JSON step refuses; a non-string value is
+    // refused before it. Either way the run never starts unbounded.
+    const err = await assertRejects(
+      () => parseCfHarnessCliArgs(args, { cwd: "/tmp/project", env: {} }),
+      Error,
+    );
+    assertMatch(
+      err.message,
+      /--max-confidentiality (requires a JSON array|must be JSON)/,
+    );
+  }
 });
