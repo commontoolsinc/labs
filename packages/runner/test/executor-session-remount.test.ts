@@ -8,7 +8,7 @@
 // authorizes that pre-genesis session BY DESIGN — the service principal
 // holds no READ under the landed ACL, and there is no `"*"` grant.
 //
-// Nothing then re-established it. `SpaceReplica.sessionHandle()`
+// Nothing then re-established it. `SpaceReplica.#memoizedSessionHandle()`
 // memoizes the mount and drops it only in close(), so every later
 // cross-space read into that space reused the dead session and failed
 // `ConnectionError: memory session revoked: unauthorized`, forever. In
@@ -441,8 +441,8 @@ describe("the session remount (profile-starvation fifth face)", () => {
   it("a doc watched on the DEAD session is refetched after the remount, not answered stale from the watch tracker", async () => {
     // Cubic P1 (three violations, one property). A pull whose selector the
     // watch tracker already covers returns WITHOUT reaching
-    // `sessionHandle()` — so for such a doc the remount's latch is never
-    // consumed, and worse, the read is answered from a replica whose
+    // `#memoizedSessionHandle()` — so for such a doc the remount's latch is
+    // never consumed, and worse, the read is answered from a replica whose
     // watch died with the revoked session. My first pass flagged this as
     // a residual and claimed "each address re-installs on its next pull";
     // that claim was FALSE for exactly the tracker-covered case, which is

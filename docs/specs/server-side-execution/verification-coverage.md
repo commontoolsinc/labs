@@ -7476,7 +7476,7 @@ supply; OW29/OW32/OW34 closed):
     profile program materialized fine (not OW45's write path). The
     refused doc is PRESENT and durable: "sync completed without data"
     was an AUTHORIZATION outcome, not an absence.
-    **The mechanism.** `SpaceReplica.sessionHandle()` (storage/v2.ts)
+    **The mechanism.** `SpaceReplica.#memoizedSessionHandle()` (storage/v2.ts)
     memoized the mount and dropped it only in `close()`, and
     `terminateSession` (memory/v2/client.ts) is terminal for a
     session — so every re-drain's load reused the very session the
@@ -7493,7 +7493,7 @@ supply; OW29/OW32/OW34 closed):
     an admitted commit touches `of:<space>`
     (`#rootEnsureAwaitingOwner`). The session analog: `SpaceReplica`
     latches an ACL-doc admission (`noteAclChanged`) and consumes it at
-    `sessionHandle()` (`consumeOwedSessionRemount`) — the one place
+    `#memoizedSessionHandle()` (`#consumeOwedSessionRemount`) — the one place
     every read and commit reaches a session — dropping a mount that
     `SessionRevokedError` or `AuthorizationError` terminated so the
     next load re-opens. `ExecutorHost.#onCommitAdmitted` fans an

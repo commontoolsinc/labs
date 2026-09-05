@@ -38,6 +38,7 @@ import { Runtime, type ServerRunInfo } from "../src/runtime.ts";
 import { stampWaveRunContext } from "../src/executor/wave.ts";
 import { entityKey, entityNameKey } from "../src/scheduler/keys.ts";
 import { sortAndCompactPaths } from "../src/reactive-dependencies.ts";
+import type { SpaceReplica } from "../src/storage/v2.ts";
 import { watchIdForEntry } from "../src/storage/v2-watch.ts";
 import type {
   IExtendedStorageTransaction,
@@ -277,14 +278,7 @@ describe("stage A: instance keying — unit pins", () => {
     // unkeyed one to the own instance — so both halves together are what
     // keeps the own doc intact.
 
-    const replica = storageManager.open(space).replica as unknown as {
-      getDocument: (
-        id: string,
-        scope?: string,
-        identity?: ScopeKeyIdentity,
-      ) => { value?: unknown } | undefined;
-      applySessionSync: (sync: unknown, type: "pull" | "integrate") => void;
-    };
+    const replica = storageManager.open(space).replica as SpaceReplica;
     const ownCell = runtime.getCell<{ value: string }>(
       space,
       "stagea-keyed-retraction-cell",
@@ -304,7 +298,7 @@ describe("stage A: instance keying — unit pins", () => {
     expect(readAs(undefined)).toBe("own");
 
     // A KEYED lease-holder frame delivers Alice's instance.
-    replica.applySessionSync({
+    replica.accessForTestingOnly.applySessionSync({
       type: "sync",
       fromSeq: 0,
       toSeq: 5,
@@ -325,7 +319,7 @@ describe("stage A: instance keying — unit pins", () => {
     // instance is untouched. (Mutation: `applySessionSync` ignoring
     // `remove.scopeKey` wipes the own instance and keeps Alice's stale
     // one — the exact inverse.)
-    replica.applySessionSync({
+    replica.accessForTestingOnly.applySessionSync({
       type: "sync",
       fromSeq: 5,
       toSeq: 6,
@@ -341,7 +335,7 @@ describe("stage A: instance keying — unit pins", () => {
     // is exactly why the memory server keys every retraction on a keyed
     // wire (the pre-fix former-holder catch-up sent this frame for
     // ALICE's entry and wiped the own doc: `own: undefined, alice: alice`).
-    replica.applySessionSync({
+    replica.accessForTestingOnly.applySessionSync({
       type: "sync",
       fromSeq: 6,
       toSeq: 7,
@@ -356,7 +350,7 @@ describe("stage A: instance keying — unit pins", () => {
       removes: [],
     }, "integrate");
     expect(readAs(alice)).toBe("alice-2");
-    replica.applySessionSync({
+    replica.accessForTestingOnly.applySessionSync({
       type: "sync",
       fromSeq: 7,
       toSeq: 8,
@@ -735,9 +729,7 @@ describe("stage A: instance keying — unit pins", () => {
     const docId = scoped.getAsNormalizedFullLink().id;
     // Alice's instance arrives KEYED at seq 5; the replica's own instance
     // of the doc is never loaded (seq 0).
-    (replica as unknown as {
-      applySessionSync: (sync: unknown, type: "pull" | "integrate") => void;
-    }).applySessionSync({
+    (replica as SpaceReplica).accessForTestingOnly.applySessionSync({
       type: "sync",
       fromSeq: 0,
       toSeq: 5,

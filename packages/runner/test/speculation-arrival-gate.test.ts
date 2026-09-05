@@ -56,8 +56,10 @@ import {
   type CommitClass,
   resolveScopeKey,
   SERVER_EXECUTION_WATERMARK_DOC_ID,
+  type SessionSync,
 } from "@commonfabric/memory/v2";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import type { SpaceReplica } from "../src/storage/v2.ts";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type {
@@ -1160,36 +1162,22 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       experimental: { serverExecution: true },
     });
     try {
-      const replica = runtime.storageManager.open(space).replica as unknown as {
-        applySessionSync(
-          sync: {
-            type: "sync";
-            fromSeq: number;
-            toSeq: number;
-            upserts: Array<Record<string, unknown>>;
-            removes: Array<Record<string, unknown>>;
-          },
-          type: "pull" | "integrate",
-        ): void;
-        speculationRetirementView(
-          id: string,
-          scope?: string,
-        ): { confirmedSeq: number; coverClass?: CommitClass };
-      };
+      const replica = runtime.storageManager.open(space)
+        .replica as SpaceReplica;
       const upsert = (
         seq: number,
         coverClass?: CommitClass,
       ) => ({
         branch: "",
         id: "of:threading-doc",
-        scope: "space",
+        scope: "space" as const,
         seq,
         doc: { value: { n: seq } },
         ...(coverClass === undefined ? {} : { coverClass }),
       });
       const view = () =>
         replica.speculationRetirementView("of:threading-doc", "space");
-      replica.applySessionSync({
+      replica.accessForTestingOnly.applySessionSync({
         type: "sync",
         fromSeq: 0,
         toSeq: 5,
@@ -1200,7 +1188,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       // A same-seq re-upsert WITHOUT a class (a watch-refresh replay, an
       // OFF-arm or pre-predicate frame echo) preserves the known class —
       // the cover is the same commit.
-      replica.applySessionSync({
+      replica.accessForTestingOnly.applySessionSync({
         type: "sync",
         fromSeq: 5,
         toSeq: 5,
@@ -1210,7 +1198,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       expect(view()).toMatchObject({ confirmedSeq: 5, coverClass: "derived" });
       // A FORWARD move without a class is a different commit: the stale
       // class must not survive onto it.
-      replica.applySessionSync({
+      replica.accessForTestingOnly.applySessionSync({
         type: "sync",
         fromSeq: 5,
         toSeq: 6,
@@ -1234,31 +1222,18 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       experimental: { serverExecution: true },
     });
     try {
-      const replica = runtime.storageManager.open(space).replica as unknown as {
-        applySessionSync(
-          sync: {
-            type: "sync";
-            fromSeq: number;
-            toSeq: number;
-            upserts: Array<Record<string, unknown>>;
-            removes: Array<Record<string, unknown>>;
-          },
-          type: "pull" | "integrate",
-        ): void;
-        speculationArrivalObserver:
-          | ((docs: Array<{ id: string; scope?: string }>) => void)
-          | undefined;
-      };
+      const replica = runtime.storageManager.open(space)
+        .replica as SpaceReplica;
       const upsert = (seq: number, coverClass?: CommitClass) => ({
         branch: "",
         id: "of:wake-doc",
-        scope: "space",
+        scope: "space" as const,
         seq,
         doc: { value: { n: seq } },
         ...(coverClass === undefined ? {} : { coverClass }),
       });
-      const sync = (up: Record<string, unknown>) =>
-        replica.applySessionSync({
+      const sync = (up: SessionSync["upserts"][number]) =>
+        replica.accessForTestingOnly.applySessionSync({
           type: "sync",
           fromSeq: 0,
           toSeq: 5,
@@ -1269,7 +1244,7 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
       // mixed window: a pre-predicate frame, or one from before this
       // client learned the class).
       sync(upsert(5));
-      const wakes: Array<Array<{ id: string; scope?: string }>> = [];
+      const wakes: Array<readonly { id: string; scope?: string }[]> = [];
       replica.speculationArrivalObserver = (docs) => wakes.push(docs);
       // A same-seq echo still without a class: nothing changed, no wake.
       sync(upsert(5));

@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import type { FabricValue, JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { SessionSync } from "@commonfabric/memory/v2";
 import type * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import {
@@ -10,6 +11,7 @@ import {
   newLoopbackServer,
 } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
+import type { SpaceReplica } from "../src/storage/v2.ts";
 import {
   type DecomposedSchema,
   decomposeSchema,
@@ -503,7 +505,7 @@ describe("schema-doc-sync", () => {
     // the ARRIVING copy — no throw (a throw here killed the background
     // consumer wholesale, verification-coverage.md OW61) — and the stored,
     // verified document stays.
-    const forged = {
+    const forged: SessionSync = {
       type: "sync",
       fromSeq: 900_000,
       toSeq: 900_001,
@@ -516,11 +518,8 @@ describe("schema-doc-sync", () => {
       }],
       removes: [],
     };
-    const replica = provider.replica as unknown as {
-      applySessionSync(sync: unknown, type: string): void;
-      getDocument(uri: string): unknown;
-    };
-    replica.applySessionSync(forged, "integrate");
+    const replica = provider.replica as SpaceReplica;
+    replica.accessForTestingOnly.applySessionSync(forged, "integrate");
     expect(
       (replica.getDocument(`cid:${hash}`) as { value?: unknown })?.value,
     ).toEqual(schema);
@@ -580,11 +579,13 @@ describe("schema-doc-sync", () => {
       ],
       removes: [],
     };
-    const replica = provider.replica as unknown as {
-      applySessionSync(sync: unknown, type: string): void;
-      getDocument(uri: string): unknown;
-    };
-    replica.applySessionSync(frame, "integrate");
+    const replica = provider.replica as SpaceReplica;
+    // The frame is malformed on purpose, so it declares itself a frame only
+    // where it is handed over.
+    replica.accessForTestingOnly.applySessionSync(
+      frame as unknown as SessionSync,
+      "integrate",
+    );
     expect(replica.getDocument("of:frame-innocent-sibling")).toEqual({
       value: { fine: true },
     });
@@ -598,10 +599,7 @@ describe("schema-doc-sync", () => {
     } as const;
     const depHash = internSchemaAsTaggedHashString(depSchema);
     const provider = readerStorage.open(space);
-    const replica = provider.replica as unknown as {
-      applySessionSync(sync: unknown, type: string): void;
-      getDocument(uri: string): unknown;
-    };
+    const replica = provider.replica as SpaceReplica;
     const carrierDoc = {
       value: {
         linked: {
@@ -620,7 +618,7 @@ describe("schema-doc-sync", () => {
     // sees (the OW61 client-side defect class; the server's elision of
     // already-delivered cid docs is the design). Quarantined, replica
     // untouched for it.
-    replica.applySessionSync({
+    replica.accessForTestingOnly.applySessionSync({
       type: "sync",
       fromSeq: 700_000,
       toSeq: 700_001,
@@ -640,7 +638,7 @@ describe("schema-doc-sync", () => {
     // shape a FULL evaluation produces (watch.set / reconnect ship the
     // whole assembled closure; per-frame resend was reversed, OW61
     // RULED 2026-08-24). The doc applies: quarantine heals there.
-    replica.applySessionSync({
+    replica.accessForTestingOnly.applySessionSync({
       type: "sync",
       fromSeq: 700_001,
       toSeq: 700_002,
@@ -667,20 +665,21 @@ describe("schema-doc-sync", () => {
 
   it("the background consumer survives a frame that fails to apply and keeps consuming", async () => {
     const provider = readerStorage.open(space);
-    const replica = provider.replica as unknown as {
-      applySessionSync(sync: unknown, type: string): void;
-      consumeUpdates(iterator: AsyncIterator<unknown>): Promise<void>;
-      getDocument(uri: string): unknown;
-    };
+    const replica = provider.replica as SpaceReplica;
     // Throw once from applySessionSync itself (any non-validation apply
     // bug), self-restoring: the belt in consumeUpdates must swallow it,
-    // keep the loop alive, and apply the NEXT frame.
-    const original = replica.applySessionSync.bind(replica);
-    replica.applySessionSync = (_sync: unknown, _type: string) => {
-      replica.applySessionSync = original;
+    // keep the loop alive, and apply the NEXT frame. The member is replaced
+    // by assignment, which its `private` rather than `#` name allows; the
+    // cast reaches only it.
+    const stubbed = replica as unknown as {
+      applySessionSync(sync: SessionSync, type: "pull" | "integrate"): void;
+    };
+    const original = stubbed.applySessionSync.bind(stubbed);
+    stubbed.applySessionSync = () => {
+      stubbed.applySessionSync = original;
       throw new Error("synthetic apply failure");
     };
-    const frames = [
+    const frames: SessionSync[] = [
       {
         type: "sync",
         fromSeq: 600_000,
@@ -709,7 +708,7 @@ describe("schema-doc-sync", () => {
       },
     ];
     let index = 0;
-    const iterator: AsyncIterator<unknown> = {
+    const iterator: AsyncIterator<SessionSync> = {
       next: () =>
         Promise.resolve(
           index < frames.length
@@ -719,18 +718,20 @@ describe("schema-doc-sync", () => {
     };
     // Must resolve (not reject): a rejection here was the unhandled
     // rejection that killed consuming workers wholesale (OW61).
-    await replica.consumeUpdates(iterator);
+    await replica.accessForTestingOnly.consumeUpdates(iterator);
     expect(replica.getDocument("of:survivor-1")).toBeUndefined();
     expect(replica.getDocument("of:survivor-2")).toEqual({ value: { n: 2 } });
   });
 
   it("closes the staged watch view when a frame fails validation", async () => {
     const provider = readerStorage.open(space);
-    const replica = provider.replica as unknown as {
-      applySessionSync(sync: unknown, type: string): void;
+    // The member is replaced by assignment, which its `private` rather than
+    // `#` name allows; the cast reaches only it.
+    const stubbed = provider.replica as unknown as {
+      applySessionSync(sync: SessionSync, type: "pull" | "integrate"): void;
     };
-    const original = replica.applySessionSync.bind(replica);
-    replica.applySessionSync = () => {
+    const original = stubbed.applySessionSync.bind(stubbed);
+    stubbed.applySessionSync = () => {
       throw new Error("synthetic frame validation failure");
     };
     try {
@@ -742,7 +743,7 @@ describe("schema-doc-sync", () => {
         "synthetic frame validation failure",
       );
     } finally {
-      replica.applySessionSync = original;
+      stubbed.applySessionSync = original;
     }
   });
 
