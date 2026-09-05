@@ -214,7 +214,7 @@ that package's own `AGENTS.md`.
 
 #### Adding New Packages
 
-A new workspace package needs two edits, and the second one bites hard when it
+A new workspace package needs three edits, and the second one bites hard when it
 is missed:
 
 1. Its path added to the `"workspace"` array in the root `deno.jsonc`.
@@ -226,6 +226,11 @@ is missed:
    runs any of their test tasks, and refuses to start when one has no `"test"`
    entry, so what a missing entry costs is a message naming the member rather
    than a CI timeout. `packages/utils/deno.jsonc` is a correct example.
+3. A checked path in `tasks/typecheck.ts`, usually a single directory entry, so
+   `deno task check` opens the package at all. The first edit is what puts the
+   package under the type check's coverage claim, so leaving this one out fails
+   `tasks/typecheck.test.ts` with the unchecked files named — unless the package
+   earns an `UNCHECKED_TREES` entry recording why it has no path.
 
 When the package needs a dependency, follow `docs/development/DEPENDENCIES.md`.
 
@@ -248,14 +253,23 @@ difficulties getting coverage checks to pass, consider the information in
 
 `deno task check` type-checks a hand-maintained list of paths in
 `tasks/typecheck.ts` (`tasks/check.sh` owns the Deno version gate and delegates
-there), and that list now names every workspace package. Most are covered in
-full; a few are partial by design. The `*.input.ts` transformer fixtures under
-`schema-generator` and `ts-transformers` name ambient wrappers the transformer
-supplies, so they do not compile on their own and are left out. The declaration
-bundles under `packages/static/assets/types` are left out for the same reason:
-they are the ambient types handed to the in-memory pattern compiler, so they
-redeclare what `packages/html` declares and use ambient-context forms that do
-not compile beside the tree they describe.
+there). The list is written by hand; its completeness is not left to hand.
+`UNCHECKED_TREES` beside it records every tree the list leaves out together with
+the reason, and `tasks/typecheck.test.ts` walks the workspace that `deno.jsonc`
+declares and fails — naming the files — on any TypeScript file that is neither
+checked nor covered by one of those entries. A directory left out on purpose and
+one left out by accident look identical in a list of paths, so the record is
+what separates them: a tree nobody decided about fails the test rather than
+passing in silence. Adding an exemption means adding an entry that says why.
+
+Four trees are recorded as unchecked. The transformer fixtures under
+`schema-generator/test/fixtures` and `ts-transformers/test/fixtures` name
+ambient wrappers the transformer supplies, so they do not compile on their own.
+The declaration bundles under `packages/static/assets/types` are left out for
+the same reason: they are the ambient types handed to the in-memory pattern
+compiler, so they redeclare what `packages/html` declares and use
+ambient-context forms that do not compile beside the tree they describe. The
+fourth is `packages/patterns`, which the next paragraph covers.
 
 Patterns are the exception `deno task check` does not own. It lists some pattern
 directories and checks them through the automatic-JSX environment the rest of

@@ -22,10 +22,7 @@ const DIRS = [
   "packages/api",
   "packages/background-piece-service",
   "packages/cf-harness",
-  "packages/cli/commands",
-  "packages/cli/lib",
-  "packages/cli/support",
-  "packages/cli/test",
+  "packages/cli",
   "packages/connectors/agents/connector",
   "packages/connectors/agents/debug-view",
   "packages/connectors/agents/host",
@@ -79,7 +76,10 @@ const DIRS = [
   "packages/static/test",
   "packages/test-support",
   "packages/toolshed",
+  "packages/ts-transformers/lint-plugins",
   "packages/ts-transformers/src",
+  "packages/ts-transformers/test/diagnostics",
+  "packages/ts-transformers/test/reactive",
   "packages/ui",
   "packages/utils",
   "tasks",
@@ -88,7 +88,6 @@ const DIRS = [
 // Glob patterns, expanded the way the shell used to expand them.
 const GLOBS = [
   "scripts/*.ts",
-  "packages/cli/*.ts",
   "packages/static/*.ts",
   "packages/patterns/*.ts",
   "packages/patterns/*.tsx",
@@ -97,14 +96,16 @@ const GLOBS = [
   // `deno task cfcheck`.
   "packages/patterns/*/guest.ts",
   "packages/patterns/*/guest.tsx",
+  // The transformer test trees are reached by glob rather than as directory
+  // entries because each holds a `test/fixtures` subtree that `deno check`
+  // must not open, and `deno check` takes no exclusion. The pair of patterns
+  // per tree covers the test files at any depth and the helper modules
+  // sitting beside them at the top level; `UNCHECKED_TREES` records the
+  // fixtures the patterns leave behind.
+  "packages/ts-transformers/test/*.ts",
   "packages/ts-transformers/test/**/*.test.ts",
-  // schema-generator tests, excluding test/fixtures: the `*.input.ts`
-  // fixtures name ambient wrappers (Cell, Stream, Writable) without
-  // importing them, since the transformer supplies those, so they do not
-  // type-check on their own. The test-file suffix keeps them out.
+  "packages/schema-generator/test/*.ts",
   "packages/schema-generator/test/**/*.test.ts",
-  // Google patterns (previously checked individually to avoid OOM, now
-  // included with the increased heap limit).
   "packages/patterns/google/core/*.ts",
   "packages/patterns/google/core/*.tsx",
   "packages/patterns/google/core/experimental/*.ts",
@@ -113,6 +114,56 @@ const GLOBS = [
   "packages/patterns/google/extractors/*.tsx",
   "packages/patterns/google/WIP/*.ts",
   "packages/patterns/google/WIP/*.tsx",
+];
+
+/** A tree of TypeScript files the checked paths leave out, and why. */
+export interface UncheckedTree {
+  /** Repository-relative directory no checked path names. */
+  readonly tree: string;
+
+  /** Why this task does not type-check it. */
+  readonly because: string;
+}
+
+/**
+ * Every tree the checked paths deliberately leave out.
+ *
+ * A list of what is checked cannot on its own distinguish a tree somebody
+ * decided to leave out from one the list forgot: both are simply absent, and
+ * the task reports a clean run over either. Recording the decision is what
+ * tells them apart, and `typecheck.test.ts` holds the pair to being
+ * exhaustive — a workspace file that is neither checked nor named by an entry
+ * here fails that test, naming the file.
+ */
+export const UNCHECKED_TREES: readonly UncheckedTree[] = [
+  {
+    tree: "packages/patterns",
+    because:
+      "patterns compile under the classic-`h` JSX runtime rather than the " +
+      "automatic-JSX environment this task uses, and the two disagree on " +
+      "some pattern types, so `deno task cfcheck` is their type check. The " +
+      "checked paths reaching into this tree name the harness and tooling " +
+      "beside the patterns, which do compile under this environment.",
+  },
+  {
+    tree: "packages/schema-generator/test/fixtures",
+    because: "transformer inputs name the ambient wrappers (Cell, Stream, " +
+      "Writable) that the transformer supplies rather than importing them, " +
+      "so they do not compile on their own.",
+  },
+  {
+    tree: "packages/ts-transformers/test/fixtures",
+    because: "transformer inputs naming ambient wrappers the transformer " +
+      "supplies, which do not compile on their own.",
+  },
+  {
+    tree: "packages/static/assets/types",
+    because:
+      "the declaration bundles handed to the in-memory pattern compiler. " +
+      "They redeclare what `packages/html` declares and use " +
+      "ambient-context forms that do not compile beside the tree they " +
+      "describe.",
+  },
 ];
 
 /** The owning scope of a checked path: the workspace member's name. */
