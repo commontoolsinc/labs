@@ -207,25 +207,9 @@ describe("event dispatch parks on in-flight closure loads", () => {
 
     // An unrelated scheduler wake while the load is still pending must observe
     // the parked head rather than re-running its dependency preflight or
-    // dispatching through it.
-    const schedulerHarness = runtime.scheduler as unknown as {
-      execute(): Promise<void>;
-    };
-    const originalExecute = schedulerHarness.execute.bind(runtime.scheduler);
-    const rerunCompleted = Promise.withResolvers<void>();
-    schedulerHarness.execute = async () => {
-      try {
-        await originalExecute();
-      } finally {
-        rerunCompleted.resolve();
-      }
-    };
-    try {
-      runtime.scheduler.queueExecution();
-      await rerunCompleted.promise;
-    } finally {
-      schedulerHarness.execute = originalExecute;
-    }
+    // dispatching through it. The pass is run directly, which is what a queued
+    // wake does once its task fires, so its end is the pass's own promise.
+    await runtime.scheduler.accessForTestingOnly.execute();
     expect(handlerRuns, "a scheduler re-tick must keep the parked head blocked")
       .toBe(0);
 
