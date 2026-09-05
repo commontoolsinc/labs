@@ -592,6 +592,15 @@ function normalizeForProtocol(protocol: string, v: string): string {
   }
 }
 
+/**
+ * The text a row value presents to a rule's regex, or `undefined` for a value
+ * class this evaluator refuses. Today only TEXT has a text form here; a
+ * number refuses, which is what the coercion below replaces.
+ */
+export function regexInputText(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
 /** Extract the match list for a field per the strict-if-present contract. */
 function evalMatch(
   node: Record<string, unknown>,
@@ -604,7 +613,8 @@ function evalMatch(
   const value = row[field];
   const values: string[] = [];
   if (value !== null && value !== undefined && value !== "") {
-    if (typeof value !== "string") {
+    const text = regexInputText(value);
+    if (text === undefined) {
       return fail(
         `field "${field}" is ${typeof value}, not a string — regex input`,
       );
@@ -616,7 +626,7 @@ function evalMatch(
     const flags = rawFlags.includes("g") ? rawFlags : rawFlags + "g";
     const re = new RegExp(node.source as string, flags);
     const group = node.group as number | undefined;
-    for (const m of value.matchAll(re)) {
+    for (const m of text.matchAll(re)) {
       const picked = group !== undefined ? m[group] : m[0];
       if (typeof picked === "string") values.push(picked);
     }
@@ -652,12 +662,13 @@ function evalTest(
   }
   const value = row[field];
   if (value === null || value === undefined || value === "") return false;
-  if (typeof value !== "string") {
+  const text = regexInputText(value);
+  if (text === undefined) {
     return fail(
       `field "${field}" is ${typeof value}, not a string — regex input`,
     );
   }
-  return new RegExp(source as string, (flags as string) ?? "").test(value);
+  return new RegExp(source as string, (flags as string) ?? "").test(text);
 }
 
 function evalPrincipal(
