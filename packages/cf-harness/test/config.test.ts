@@ -486,6 +486,8 @@ Deno.test("resolveHarnessConfig bounds the fabric session by the run manifest's 
     cfcReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
     cfcReadOnExceed: "skip",
     readCeilingSource: "run-manifest",
+    manifestReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+    manifestReadOnExceed: "skip",
   });
 });
 
@@ -637,5 +639,62 @@ Deno.test("resolveHarnessConfig meets onExceed toward the stricter mode", () => 
       skillScriptExecutionTarget: "sandbox",
     }).fabricSession?.cfcReadOnExceed,
     "skip",
+  );
+});
+
+Deno.test("resolveHarnessConfig refuses a resolved session beside a manifest ceiling it did not fold", () => {
+  const session = {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+  };
+  const manifestWith = (ceiling: string[]) => ({
+    type: "cf-harness.loom-run-manifest" as const,
+    version: 1 as const,
+    source: "loom" as const,
+    cfc: { maxConfidentiality: ceiling },
+  });
+  // A config resolved with no manifest, then handed on beside a manifest
+  // that declares a ceiling: passing it through would run unbounded under a
+  // manifest that asked for a bound.
+  const unbounded = resolveHarnessConfig({
+    fabricSession: session,
+    skillScriptExecutionTarget: "sandbox",
+  }).fabricSession;
+  assertThrows(
+    () =>
+      resolveHarnessConfig({
+        fabricSession: unbounded,
+        runManifest: manifestWith(["did:key:zO"]),
+        skillScriptExecutionTarget: "sandbox",
+      }),
+    Error,
+    "resolved fabric session did not fold the run manifest's read ceiling",
+  );
+  // A config resolved under one manifest, handed on beside another: passing
+  // it through would attest a ceiling the manifest beside it never declared.
+  const underA = resolveHarnessConfig({
+    fabricSession: session,
+    runManifest: manifestWith(["did:key:zO", "did:key:zA"]),
+    skillScriptExecutionTarget: "sandbox",
+  }).fabricSession;
+  assertThrows(
+    () =>
+      resolveHarnessConfig({
+        fabricSession: underA,
+        runManifest: manifestWith(["did:key:zO", "did:key:zB"]),
+        skillScriptExecutionTarget: "sandbox",
+      }),
+    Error,
+    "resolved fabric session did not fold the run manifest's read ceiling",
+  );
+  // The same manifest it folded passes through unchanged.
+  assertEquals(
+    resolveHarnessConfig({
+      fabricSession: underA,
+      runManifest: manifestWith(["did:key:zO", "did:key:zA"]),
+      skillScriptExecutionTarget: "sandbox",
+    }).fabricSession,
+    underA,
   );
 });

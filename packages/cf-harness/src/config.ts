@@ -89,6 +89,16 @@ export type HarnessFabricReadCeilingSource =
 export interface ResolvedHarnessFabricSessionConfig
   extends HarnessFabricSessionConfig {
   readCeilingSource: HarnessFabricReadCeilingSource;
+
+  /**
+   * The run manifest's ceiling this config folded, when it folded one. What
+   * a second resolution checks the manifest beside it against: a resolved
+   * config passes through only beside the manifest it was resolved under.
+   */
+  manifestReadMaxConfidentiality?: readonly CfcConfClause[];
+
+  /** The manifest's `onExceed` that was folded, when it declared one. */
+  manifestReadOnExceed?: CfcReadOnExceed;
 }
 
 /**
@@ -462,6 +472,22 @@ export const resolveFabricSessionConfig = (
     options.fabricSession !== undefined &&
     isResolvedFabricSessionConfig(options.fabricSession)
   ) {
+    // Resolved once, and only ever beside the manifest it was resolved
+    // under: a resolved config beside a manifest ceiling it never folded
+    // would either run unbounded under a manifest that asked for a bound or
+    // attest a ceiling that manifest never declared.
+    if (
+      manifestCeiling !== undefined &&
+      (JSON.stringify(options.fabricSession.manifestReadMaxConfidentiality) !==
+          JSON.stringify(manifestCeiling) ||
+        options.fabricSession.manifestReadOnExceed !==
+          options.runManifest?.cfc?.onExceed)
+    ) {
+      throw new Error(
+        "resolved fabric session did not fold the run manifest's read " +
+          "ceiling beside it; resolve the session under this manifest",
+      );
+    }
     return options.fabricSession;
   }
   if (manifestCeiling === undefined) {
@@ -494,6 +520,10 @@ export const resolveFabricSessionConfig = (
       options.fabricSession.cfcReadMaxConfidentiality !== undefined
         ? "both"
         : "run-manifest",
+    manifestReadMaxConfidentiality: manifestCeiling,
+    ...(options.runManifest?.cfc?.onExceed !== undefined
+      ? { manifestReadOnExceed: options.runManifest.cfc.onExceed }
+      : {}),
   };
 };
 
