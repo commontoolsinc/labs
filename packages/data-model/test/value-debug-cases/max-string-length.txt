@@ -1,0 +1,115 @@
+{
+  // A string longer than the limit renders as an excerpt of that length, and
+  // then its actual length.
+  "/options": { maxStringLength: 5 },
+  "past the limit": "abcdefgh",
+  "at the limit": "abcde",
+  "in an object": { s: "abcdefgh" },
+  "in an array": ["abcdefgh"],
+  "class instance's `toString()` form": new (class Foo {
+    toString() {
+      return "abcdefgh";
+    }
+  })(),
+  // A multi-line string cut by the limit renders the cut line's excerpt with
+  // a ` +` of its own, and then the length.
+  "cut inside the second line": "abc\ndef",
+  // An excerpt never ends in half of a surrogate pair: a pair the limit
+  // would split is dropped, and one the limit ends after is kept.
+  "surrogate pair split by the limit": "abcd\u{1F600}x",
+  "surrogate pair ending at the limit": "abc\u{1F600}xy",
+}
+
+past the limit:
+"abcde"+...length:8
+"abcde" +
+  ... length: 8
+{
+  "/partialString": {
+    length: 8,
+    excerpt: "abcde"
+  }
+}
+
+at the limit:
+"abcde"
+"abcde"
+"abcde"
+
+in an object:
+{s:"abcde"+...length:8}
+{
+  s: "abcde" +
+    ... length: 8
+}
+{
+  s: {
+    "/partialString": {
+      length: 8,
+      excerpt: "abcde"
+    }
+  }
+}
+
+in an array:
+["abcde"+...length:8]
+[
+  "abcde" +
+    ... length: 8
+]
+[
+  {
+    "/partialString": {
+      length: 8,
+      excerpt: "abcde"
+    }
+  }
+]
+
+class instance's `toString()` form:
+/Foo("abcde"+...length:8)
+/Foo("abcde" +
+  ... length: 8)
+{
+  "/Foo": {
+    "/partialString": {
+      length: 8,
+      excerpt: "abcde"
+    }
+  }
+}
+
+cut inside the second line:
+"abc\nd"+...length:7
+"abc\n" +
+  "d" +
+  ... length: 7
+{
+  "/partialString": {
+    length: 7,
+    excerpt: "abc\n" +
+      "d"
+  }
+}
+
+surrogate pair split by the limit:
+"abcd"+...length:7
+"abcd" +
+  ... length: 7
+{
+  "/partialString": {
+    length: 7,
+    excerpt: "abcd"
+  }
+}
+
+surrogate pair ending at the limit:
+"abc😀"+...length:7
+"abc😀" +
+  ... length: 7
+{
+  "/partialString": {
+    length: 7,
+    excerpt: "abc😀"
+  }
+}

@@ -1,0 +1,126 @@
+{
+  // The rendering stops descending at its depth limit, and whatever lies
+  // below is elided, with its kind in its place. A scalar, a primitive, and
+  // an elision form at the limit are not containers, and are carried whole.
+  "/options": { maxDepth: 2 },
+  "object within the limit": { a: 1, b: "two" },
+  "object at the limit": { a: { b: 1 } },
+  "array at the limit": { a: [1, 2] },
+  "nested arrays": [[1, [2]]],
+  "unique symbol at the limit": { s: Symbol("leaf") },
+  "function at the limit": { f: function foo() {} },
+  "primitive at the limit": { t: new FabricEpochNsec(123n) },
+  "instance at the limit": {
+    e: FabricError.fromNativeError(new Error("boom")),
+  },
+  "class instance at the limit": { r: /ab+c/gi },
+  "map at the limit": { m: new Map([["a", 1]]) },
+}
+
+object within the limit:
+{a:1,b:"two"}
+{
+  a: 1,
+  b: "two"
+}
+{
+  a: 1,
+  b: "two"
+}
+
+object at the limit:
+{a:...}
+{
+  a: ...
+}
+{
+  a: {
+    "/...": "object"
+  }
+}
+
+array at the limit:
+{a:...}
+{
+  a: ...
+}
+{
+  a: {
+    "/...": "array"
+  }
+}
+
+nested arrays:
+[...]
+[
+  ...
+]
+[
+  {
+    "/...": "array"
+  }
+]
+
+unique symbol at the limit:
+{s:Symbol("leaf")}
+{
+  s: Symbol("leaf")
+}
+{
+  s: {
+    "/uniqueSymbol": "leaf"
+  }
+}
+
+function at the limit:
+{f:function foo(...){...}}
+{
+  f: function foo(...) {...}
+}
+{
+  f: {
+    "/function": "foo(...)"
+  }
+}
+
+primitive at the limit:
+{t:/EpochNsec(123n)}
+{
+  t: /EpochNsec(123n)
+}
+{
+  t: /EpochNsec(123n)
+}
+
+instance at the limit:
+{e:...}
+{
+  e: ...
+}
+{
+  e: {
+    "/...": "FabricInstance (FabricError)"
+  }
+}
+
+class instance at the limit:
+{r:...}
+{
+  r: ...
+}
+{
+  r: {
+    "/...": "RegExp"
+  }
+}
+
+map at the limit:
+{m:...}
+{
+  m: ...
+}
+{
+  m: {
+    "/...": "Map"
+  }
+}

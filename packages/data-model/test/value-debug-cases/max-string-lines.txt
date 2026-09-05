@@ -1,0 +1,107 @@
+{
+  // A string of more lines than the limit renders as an excerpt of that many
+  // lines, line breaks included, and then its actual length.
+  "/options": { maxStringLines: 2 },
+  "past the limit": "a\nb\nc\nd",
+  "at the limit": "a\nb",
+  "in an object": { s: "a\nb\nc" },
+  // A line break is a newline, a carriage return, or the two together.
+  "carriage returns": "a\r\nb\rc\nd",
+  // A line break at the end of the string ends its last line rather than
+  // starting another.
+  "ending in a line break, at the limit": "a\nb\n",
+  "ending in an empty line, past the limit": "a\nb\n\n",
+  // A line cut keeps a lone high surrogate ahead of the line break, where a
+  // length cut would drop it.
+  "high surrogate before the break": "a\nb\ud800\nc",
+  // The length limit is not applied when only the line limit is given.
+  "210 characters on one line": "x".repeat(210),
+}
+
+past the limit:
+"a\nb\n"+...length:7
+"a\n" +
+  "b\n" +
+  ... length: 7
+{
+  "/partialString": {
+    length: 7,
+    excerpt: "a\n" +
+      "b\n"
+  }
+}
+
+at the limit:
+"a\nb"
+"a\n" +
+  "b"
+"a\n" +
+  "b"
+
+in an object:
+{s:"a\nb\n"+...length:5}
+{
+  s: "a\n" +
+    "b\n" +
+    ... length: 5
+}
+{
+  s: {
+    "/partialString": {
+      length: 5,
+      excerpt: "a\n" +
+        "b\n"
+    }
+  }
+}
+
+carriage returns:
+"a\r\nb\r"+...length:8
+"a\r\n" +
+  "b\r" +
+  ... length: 8
+{
+  "/partialString": {
+    length: 8,
+    excerpt: "a\r\n" +
+      "b\r"
+  }
+}
+
+ending in a line break, at the limit:
+"a\nb\n"
+"a\n" +
+  "b\n"
+"a\n" +
+  "b\n"
+
+ending in an empty line, past the limit:
+"a\nb\n"+...length:5
+"a\n" +
+  "b\n" +
+  ... length: 5
+{
+  "/partialString": {
+    length: 5,
+    excerpt: "a\n" +
+      "b\n"
+  }
+}
+
+high surrogate before the break:
+"a\nb\ud800\n"+...length:6
+"a\n" +
+  "b\ud800\n" +
+  ... length: 6
+{
+  "/partialString": {
+    length: 6,
+    excerpt: "a\n" +
+      "b\ud800\n"
+  }
+}
+
+210 characters on one line:
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"

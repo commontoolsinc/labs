@@ -1,0 +1,28 @@
+{
+  // The compact rendering is quoted as a Markdown code span, with a delimiter
+  // longer than any backtick run inside it. The indented rendering does not
+  // read the option.
+  "/options": { backtickQuote: true },
+  object: { a: 1 },
+  "with a backtick": "a`b",
+  "with a run of backticks": "a``b",
+}
+
+object:
+`{a:1}`
+{
+  a: 1
+}
+{
+  a: 1
+}
+
+with a backtick:
+``"a`b"``
+"a`b"
+"a`b"
+
+with a run of backticks:
+```"a``b"```
+"a``b"
+"a``b"
