@@ -628,11 +628,13 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   async getPieceSource(
     pieceId: string,
     space: DID,
+    scope?: CellScope,
   ): Promise<PieceSourceView> {
     const response = await this.#conn.request<RequestType.PieceGetSource>({
       type: RequestType.PieceGetSource,
       pieceId,
       space,
+      scope,
     });
     return response.source;
   }
@@ -642,6 +644,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     pieceId: string,
     space: DID,
     revisionId: string,
+    scope?: CellScope,
   ): Promise<PieceSourceRevisionSourceView> {
     const response = await this.#conn.request<
       RequestType.PieceGetSourceRevision
@@ -650,22 +653,27 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       pieceId,
       space,
       revisionId,
+      scope,
     });
     return response.source;
   }
 
-  /** Create a copy that follows the selected piece's source. */
+  /**
+   * Create a copy that follows the selected piece's source. `options.scope` is
+   * the scope the source piece sits in within `sourceSpace`.
+   */
   async clonePiece(
     pieceId: string,
     sourceSpace: DID,
     destinationSpace: DID,
-    options: { copyData?: boolean } = {},
+    options: { copyData?: boolean; scope?: CellScope } = {},
   ): Promise<PieceHandle> {
     const response = await this.#conn.request<RequestType.PieceClone>({
       type: RequestType.PieceClone,
       pieceId,
       sourceSpace,
       destinationSpace,
+      scope: options.scope,
       ...(options.copyData === true ? { copyData: true } : {}),
     });
     return new PieceHandle(this, response.piece);
@@ -679,13 +687,14 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     pieceId: string,
     space: DID,
     action: PieceSourceAction,
-    options: { confirmationToken?: string } = {},
+    options: { confirmationToken?: string; scope?: CellScope } = {},
   ): Promise<PieceUpdateSourceResponse> {
     return await this.#conn.request<RequestType.PieceUpdateSource>({
       type: RequestType.PieceUpdateSource,
       pieceId,
       space,
       action,
+      scope: options.scope,
       ...(options.confirmationToken === undefined
         ? {}
         : { confirmationToken: options.confirmationToken }),
@@ -729,11 +738,16 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return response.access;
   }
 
-  async getPieceSlug(pieceId: string, space: DID): Promise<string | undefined> {
+  async getPieceSlug(
+    pieceId: string,
+    space: DID,
+    scope?: CellScope,
+  ): Promise<string | undefined> {
     const response = await this.#conn.request<RequestType.PieceGetSlug>({
       type: RequestType.PieceGetSlug,
       pieceId,
       space,
+      scope,
     });
     return response.slug;
   }
@@ -801,11 +815,16 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     };
   }
 
-  async removePiece(pieceId: string, space: DID): Promise<boolean> {
+  async removePiece(
+    pieceId: string,
+    space: DID,
+    scope?: CellScope,
+  ): Promise<boolean> {
     const res = await this.#conn.request<RequestType.PieceRemove>({
       type: RequestType.PieceRemove,
       pieceId: pieceId,
       space,
+      scope,
     });
     return res.value;
   }

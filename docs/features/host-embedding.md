@@ -183,13 +183,13 @@ through `RuntimeClient.getPieceSource()`,
 The menu addresses a space, and usually a piece in it. A divider separates the
 two: above it the entries that need a piece, below it a heading naming the
 space and the entries that act on the space itself. `openPieceMenu()` takes
-either — a `cell`, from which the space and runtime are read, or a `space` and
-`runtime` with no piece. A host with a surface that no piece loaded into opens
-the menu that second way: the piece heading reads "Piece unavailable", every
-entry that needs a piece is disabled, and the space entries stay live. A call
-carrying neither leaves the menu closed. The menu covers the viewport while it
-is up, so one with nothing to show would take the page's clicks with nothing on
-screen to account for it.
+either — a `cell`, from which the space, the scope, and the runtime are read,
+or a `space` and `runtime` with no piece. A host with a surface that no piece
+loaded into opens the menu that second way: the piece heading reads "Piece
+unavailable", every entry that needs a piece is disabled, and the space
+entries stay live. A call carrying neither leaves the menu closed. The menu
+covers the viewport while it is up, so one with nothing to show would take the
+page's clicks with nothing on screen to account for it.
 
 **Space access rights...** reads the target space's ACL through
 `RuntimeClient.getSpaceAcl()`.

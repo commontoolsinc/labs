@@ -2181,7 +2181,7 @@ export class RuntimeProcessor {
       [],
       undefined,
       undefined,
-      request.scope ?? "space",
+      request.scope,
     );
     await requestedCell.sync();
     const redirect = parseLink(
@@ -2236,6 +2236,10 @@ export class RuntimeProcessor {
     const cell = this.runtime.getCellFromEntityId(
       pieces.getSpace(),
       entityIdFrom(request.pieceId),
+      [],
+      undefined,
+      undefined,
+      request.scope,
     );
     await cell.sync();
     const slug = cell.getMetaRaw("slug");
@@ -2302,14 +2306,14 @@ export class RuntimeProcessor {
     request: PieceRemoveRequest,
   ): Promise<BooleanResponse> {
     const cc = this.getSpaceCtx(request.space);
-    return { value: await cc.remove(request.pieceId) };
+    return { value: await cc.remove(request.pieceId, request.scope) };
   }
 
   async handlePieceStart(
     request: PieceStartRequest,
   ): Promise<BooleanResponse> {
     const cc = this.getSpaceCtx(request.space);
-    await cc.startPiece(request.pieceId);
+    await cc.startPiece(request.pieceId, request.scope);
     // @TODO(runtime-worker-refactor): Return status based on if
     // pattern was actually found and stopped
     return { value: true };
@@ -2319,7 +2323,7 @@ export class RuntimeProcessor {
     request: PieceStopRequest,
   ): Promise<BooleanResponse> {
     const cc = this.getSpaceCtx(request.space);
-    await cc.stopPiece(request.pieceId);
+    await cc.stopPiece(request.pieceId, request.scope);
     // @TODO(runtime-worker-refactor): Return status based on if
     // pattern was actually found and stopped
     return { value: true };
@@ -2346,6 +2350,10 @@ export class RuntimeProcessor {
     const cell = this.runtime.getCellFromEntityId(
       pieces.getSpace(),
       entityIdFrom(request.pieceId),
+      [],
+      undefined,
+      undefined,
+      request.scope,
     );
     const state = await readPieceSourceState(this.runtime, cell);
     return { source: { ...state, space: state.space as DID } };
@@ -2358,6 +2366,10 @@ export class RuntimeProcessor {
     const cell = this.runtime.getCellFromEntityId(
       pieces.getSpace(),
       entityIdFrom(request.pieceId),
+      [],
+      undefined,
+      undefined,
+      request.scope,
     );
     return {
       source: await readPieceSourceRevision(
@@ -2374,6 +2386,10 @@ export class RuntimeProcessor {
     const sourceCell = this.runtime.getCellFromEntityId(
       sourcePieces.getSpace(),
       entityIdFrom(request.pieceId),
+      [],
+      undefined,
+      undefined,
+      request.scope,
     );
     const source = new PieceController(sourcePieces, sourceCell);
     const clone = await source.cloneTo(
@@ -2394,12 +2410,15 @@ export class RuntimeProcessor {
       throw new Error("confirmationToken must be a non-empty string");
     }
     const pieces = this.getSpaceCtx(request.space);
-    // Keyed on the piece's bare hash rather than the request's spelling of it:
-    // a caller may prepare a change under one accepted address form and
-    // confirm it under the other, and both must reach the one pending entry.
+    // Keyed on the piece's whole address, and on its bare hash rather than on
+    // the request's spelling of it: a caller may prepare a change under one
+    // accepted address form and confirm it under the other, and both must
+    // reach the one pending entry. The scope is part of that address, so a
+    // confirmation prepared against one document cannot be spent against the
+    // same-id document in another scope.
     const confirmationKey = `${request.space}\u0000${
-      hashStringForEntityAddress(request.pieceId)
-    }`;
+      request.scope ?? "space"
+    }\u0000${hashStringForEntityAddress(request.pieceId)}`;
     let confirmedChange: PreparedPieceSourceChange | undefined;
     if (request.confirmationToken === undefined) {
       this.pieceSourceConfirmations.delete(confirmationKey);
@@ -2419,6 +2438,10 @@ export class RuntimeProcessor {
     const cell = this.runtime.getCellFromEntityId(
       pieces.getSpace(),
       entityIdFrom(request.pieceId),
+      [],
+      undefined,
+      undefined,
+      request.scope,
     );
     const controller = new PieceController(pieces, cell);
     const result = await controller.changeSource(request.action, {

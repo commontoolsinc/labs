@@ -1673,6 +1673,7 @@ export class CFPieceMenu extends BaseElement {
         cell.id(),
         cell.space(),
         revision.revisionId,
+        cell.ref().scope,
       );
       if (token !== this.revisionReadToken) return;
       this.revisionSource = source;
@@ -1706,6 +1707,7 @@ export class CFPieceMenu extends BaseElement {
       const source = await cell.runtime().getPieceSource(
         cell.id(),
         cell.space(),
+        cell.ref().scope,
       );
       if (token !== this.readToken) return;
       this.source = source;
@@ -1729,7 +1731,12 @@ export class CFPieceMenu extends BaseElement {
     const fresh = () => generation === this.#dataGeneration;
     try {
       const rt = cell.runtime();
-      const piece = await rt.getPiece(cell.id(), cell.space(), true);
+      const piece = await rt.getPiece(
+        cell.id(),
+        cell.space(),
+        true,
+        cell.ref().scope,
+      );
       if (!fresh()) return;
       const pieceCell = (piece?.cell() as CellHandle | undefined) ?? cell;
       this.#pieceCell = pieceCell;
@@ -1950,7 +1957,10 @@ export class CFPieceMenu extends BaseElement {
         cell.id(),
         cell.space(),
         action,
-        confirmationToken === undefined ? {} : { confirmationToken },
+        {
+          ...(confirmationToken === undefined ? {} : { confirmationToken }),
+          scope: cell.ref().scope,
+        },
       );
       if (actionToken !== this.sourceActionToken) return;
       this.source = response.source;
@@ -2019,6 +2029,7 @@ export class CFPieceMenu extends BaseElement {
       const source = await cell.runtime().getPieceSource(
         cell.id(),
         cell.space(),
+        cell.ref().scope,
       );
       if (actionToken === this.sourceActionToken) this.source = source;
     } catch {
@@ -2054,7 +2065,7 @@ export class CFPieceMenu extends BaseElement {
         cell.id(),
         cell.space(),
         destinationSpace,
-        { copyData },
+        { copyData, scope: cell.ref().scope },
       );
       this.clonePending = false;
       this.close();

@@ -1,6 +1,7 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import type { CellScope } from "@commonfabric/api";
 import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import {
   type FabricValue,
@@ -1309,6 +1310,188 @@ describe("runtime-processor", () => {
 
       expect(calls).toEqual([[pieceCell, true]]);
       expect(result.piece.cell).toMatchObject(resultRef);
+    });
+  });
+
+  describe("piece-addressed request scopes", () => {
+    // Every request here names a piece by id, and an id alone names a
+    // different document in each scope. The stub records the scope the
+    // handler resolved in and then refuses, so a handler that never passes
+    // the request's scope on records `undefined` rather than reading an
+    // unrelated document.
+
+    const space = "did:key:z6Mk-runtime-processor-piece-scope" as CellRef[
+      "space"
+    ];
+    const pieceId = fid("scoped-piece");
+    const REFUSED = "the scope probe goes no further";
+
+    /**
+     * A processor whose piece lookups record the scope they were handed and
+     * then throw {@link REFUSED}, along with the array they record into.
+     * Every route a lookup can take is stubbed — the runtime's entity-id
+     * lookup and the pieces controller's id-taking operations — so a handler
+     * that changes which one it goes through still records.
+     */
+    function makeProcessor() {
+      const scopes: (CellScope | undefined)[] = [];
+      const refuse = (scope: CellScope | undefined): never => {
+        scopes.push(scope);
+        throw new Error(REFUSED);
+      };
+      const processor = {
+        getSpaceCtx: homeSpaceCtx,
+        runtime: {
+          getCellFromEntityId: (
+            _space: unknown,
+            _entityId: unknown,
+            _path?: unknown,
+            _schema?: unknown,
+            _tx?: unknown,
+            scope?: CellScope,
+          ) => refuse(scope),
+        },
+        cc: {
+          getSpace: () => space,
+          getPieceCell: (
+            _id: unknown,
+            _open?: unknown,
+            _schema?: unknown,
+            scope?: CellScope,
+          ) => refuse(scope),
+          remove: (_id: string, scope?: CellScope) => refuse(scope),
+          startPiece: (_id: string, scope?: CellScope) => refuse(scope),
+          stopPiece: (_id: string, scope?: CellScope) => refuse(scope),
+        },
+        pieceSourceConfirmations: new Map(),
+      };
+      return { processor, scopes };
+    }
+
+    /** One case per request naming a piece, by the handler serving it. */
+    const cases = [
+      {
+        handler: "handlePieceGet",
+        request: { type: RequestType.PieceGet, pieceId, space },
+      },
+      {
+        handler: "handlePieceGetSlug",
+        request: { type: RequestType.PieceGetSlug, pieceId, space },
+      },
+      {
+        handler: "handlePieceRemove",
+        request: { type: RequestType.PieceRemove, pieceId, space },
+      },
+      {
+        handler: "handlePieceStart",
+        request: { type: RequestType.PieceStart, pieceId, space },
+      },
+      {
+        handler: "handlePieceStop",
+        request: { type: RequestType.PieceStop, pieceId, space },
+      },
+      {
+        handler: "handlePieceGetSource",
+        request: { type: RequestType.PieceGetSource, pieceId, space },
+      },
+      {
+        handler: "handlePieceGetSourceRevision",
+        request: {
+          type: RequestType.PieceGetSourceRevision,
+          pieceId,
+          space,
+          revisionId: "revision-1",
+        },
+      },
+      {
+        handler: "handlePieceClone",
+        request: {
+          type: RequestType.PieceClone,
+          pieceId,
+          sourceSpace: space,
+          destinationSpace: space,
+        },
+      },
+      {
+        handler: "handlePieceUpdateSource",
+        request: {
+          type: RequestType.PieceUpdateSource,
+          pieceId,
+          space,
+          action: { kind: "detach" },
+        },
+      },
+    ] as const;
+
+    for (const { handler, request } of cases) {
+      it(`${handler}() resolves the piece in the scope the request names`, async () => {
+        const { processor, scopes } = makeProcessor();
+        await expect(
+          (RuntimeProcessor.prototype as any)[handler].call(processor, {
+            ...request,
+            scope: "user",
+          }),
+        ).rejects.toThrow(REFUSED);
+        expect(scopes).toEqual(["user"]);
+      });
+    }
+
+    it("names no scope for a request carrying none, leaving the resolver's own default to apply", async () => {
+      // The control on the cases above: what they read back tracks the
+      // request rather than being a constant the stub supplies.
+
+      for (const { handler, request } of cases) {
+        const { processor, scopes } = makeProcessor();
+        await expect(
+          (RuntimeProcessor.prototype as any)[handler].call(processor, request),
+        ).rejects.toThrow(REFUSED);
+        expect(scopes).toEqual([undefined]);
+      }
+    });
+
+    describe("the pending source-confirmation key", () => {
+      // A confirmation binds a reviewed change to one document, and one id in
+      // two scopes is two documents. The handler deletes the entry under the
+      // key it computed before doing anything else, so what it deletes is
+      // what it would have stored under.
+
+      /** The keys `handlePieceUpdateSource` addressed its confirmations by. */
+      class RecordingConfirmations extends Map<string, unknown> {
+        readonly keysAddressed: string[] = [];
+
+        override delete(key: string): boolean {
+          this.keysAddressed.push(key);
+          return super.delete(key);
+        }
+      }
+
+      async function keyFor(scope?: CellScope): Promise<string> {
+        const { processor } = makeProcessor();
+        const confirmations = new RecordingConfirmations();
+        processor.pieceSourceConfirmations = confirmations;
+        await expect(
+          (RuntimeProcessor.prototype as any).handlePieceUpdateSource.call(
+            processor,
+            {
+              type: RequestType.PieceUpdateSource,
+              pieceId,
+              space,
+              action: { kind: "detach" },
+              ...(scope === undefined ? {} : { scope }),
+            },
+          ),
+        ).rejects.toThrow(REFUSED);
+        expect(confirmations.keysAddressed.length).toBe(1);
+        return confirmations.keysAddressed[0];
+      }
+
+      it("differs between two scopes of one piece", async () => {
+        expect(await keyFor("user")).not.toBe(await keyFor("space"));
+      });
+
+      it("is the same whether the space scope is named or left to default", async () => {
+        expect(await keyFor(undefined)).toBe(await keyFor("space"));
+      });
     });
   });
 

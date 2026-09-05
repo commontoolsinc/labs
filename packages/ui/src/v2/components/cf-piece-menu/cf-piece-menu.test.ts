@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { CellScope } from "@commonfabric/api";
 import { $conn, CellHandle, RequestType } from "@commonfabric/runtime-client";
 import type {
   CellRef,
@@ -277,9 +278,14 @@ const SOURCE: PieceSourceView = {
  * does, so a test can resolve it, reject it, or leave it pending.
  */
 function pieceCell(
-  read: () => Promise<PieceSourceView> = () => Promise.resolve(SOURCE),
+  read: (
+    pieceId?: string,
+    space?: typeof SPACE,
+    scope?: CellScope,
+  ) => Promise<PieceSourceView> = () => Promise.resolve(SOURCE),
   {
     aborted = false,
+    scope = "space",
     readRevision = () =>
       Promise.resolve({ pattern: SOURCE.pattern!, files: SOURCE.files }),
     update = () => Promise.resolve({ source: SOURCE }),
@@ -288,10 +294,12 @@ function pieceCell(
     removeAccess = () => Promise.resolve(OWNER_ACCESS),
   }: {
     aborted?: boolean | (() => boolean);
+    scope?: CellScope;
     readRevision?: (
       pieceId: string,
       space: typeof SPACE,
       revisionId: string,
+      scope?: CellScope,
     ) => Promise<PieceSourceRevisionSourceView>;
     update?: (
       pieceId: string,
@@ -332,6 +340,7 @@ function pieceCell(
   return {
     id: () => "of:fid1:piece",
     space: () => SPACE,
+    ref: () => ({ id: "of:fid1:piece", space: SPACE, scope, path: [] }),
     runtime: () => runtime,
     equals(other: unknown) {
       return other === this;
@@ -805,7 +814,7 @@ describe("the menu a right-click opens", () => {
         pieceId: "of:fid1:piece",
         sourceSpace: SPACE,
         destinationSpace: SPACE,
-        options: { copyData: false },
+        options: { copyData: false, scope: "space" },
       },
     ]);
     expect(navigations).toEqual([{
@@ -1025,7 +1034,7 @@ describe("the menu a right-click opens", () => {
 
     await clickTestId(menu, "piece-menu-clone-copy-data");
 
-    expect(calls).toEqual([{ copyData: true }]);
+    expect(calls).toEqual([{ copyData: true, scope: "space" }]);
     expect(shows(menu)).toContain("Clone piece and copy data");
     expect(shows(menu)).not.toContain("piece-menu-clone-copy-data");
   });
@@ -1044,6 +1053,173 @@ describe("the menu a right-click opens", () => {
     expect(shows(menu)).toContain(
       "The clone was canceled because the runtime stopped.",
     );
+  });
+});
+
+describe("addressing a piece in a narrower scope", () => {
+  // A piece reached through a link into a narrower scope is addressed by its
+  // id and that scope together, and the id alone names a different document.
+  // The menu holds both on the cell it was opened over, so every request it
+  // makes about the piece carries both.
+
+  /** A source view with one retained revision to open. */
+  const SCOPED_SOURCE: PieceSourceView = {
+    ...SOURCE,
+    origin: undefined,
+    currentRevisionId: "current",
+    history: [
+      {
+        revisionId: "older",
+        timestamp: 1,
+        pattern: SOURCE.pattern!,
+        origin: SOURCE.origin,
+        operation: "baseline",
+      },
+      {
+        revisionId: "current",
+        timestamp: 2,
+        pattern: SOURCE.pattern!,
+        operation: "detach",
+      },
+    ],
+  };
+
+  it("reads the source in the scope the cell was reached through", async () => {
+    const reads: unknown[] = [];
+    const menu = openMenu(pieceCell(
+      (pieceId, space, scope) => {
+        reads.push({ pieceId, space, scope });
+        return Promise.resolve(SOURCE);
+      },
+      { scope: "user" },
+    ));
+
+    await menu.showPanel("source");
+
+    expect(reads).toEqual([{
+      pieceId: "of:fid1:piece",
+      space: SPACE,
+      scope: "user",
+    }]);
+  });
+
+  it("reads a retained revision in that scope", async () => {
+    const reads: unknown[] = [];
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(SCOPED_SOURCE),
+      {
+        scope: "user",
+        readRevision: (pieceId, space, revisionId, scope) => {
+          reads.push({ pieceId, space, revisionId, scope });
+          return Promise.resolve({
+            pattern: SOURCE.pattern!,
+            files: [{ name: "/main.tsx", contents: "the older source" }],
+          });
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+
+    await clickTestId(menu, "piece-source-view-older");
+
+    expect(reads).toEqual([{
+      pieceId: "of:fid1:piece",
+      space: SPACE,
+      revisionId: "older",
+      scope: "user",
+    }]);
+  });
+
+  it("changes the source in that scope", async () => {
+    const changes: unknown[] = [];
+    const menu = openMenu(pieceCell(
+      () => Promise.resolve(SCOPED_SOURCE),
+      {
+        scope: "user",
+        update: (pieceId, space, action, options) => {
+          changes.push({ pieceId, space, action, options });
+          return Promise.resolve({ source: SCOPED_SOURCE });
+        },
+      },
+    ));
+
+    await menu.changeSource({ kind: "detach" });
+
+    expect(changes).toEqual([{
+      pieceId: "of:fid1:piece",
+      space: SPACE,
+      action: { kind: "detach" },
+      options: { scope: "user" },
+    }]);
+  });
+
+  it("re-reads the source in that scope after a change that failed", async () => {
+    const reads: unknown[] = [];
+    const menu = openMenu(pieceCell(
+      (pieceId, space, scope) => {
+        reads.push({ pieceId, space, scope });
+        return Promise.resolve(SCOPED_SOURCE);
+      },
+      {
+        scope: "user",
+        update: () => Promise.reject(new Error("the change did not land")),
+      },
+    ));
+
+    await menu.changeSource({ kind: "detach" });
+
+    // Opening the menu reads eagerly, so the read this pins is the last one:
+    // the one the failed change triggers. The count is what says it happened
+    // at all.
+    expect(reads.length).toBe(2);
+    expect(reads.at(-1)).toEqual({
+      pieceId: "of:fid1:piece",
+      space: SPACE,
+      scope: "user",
+    });
+  });
+
+  it("clones from that scope", async () => {
+    const clones: unknown[] = [];
+    const cell = pieceCell(undefined, { scope: "user" });
+    const runtime = cell.runtime() as unknown as {
+      resolveSpaceName(name: string): Promise<typeof SPACE>;
+      clonePiece(
+        pieceId: string,
+        sourceSpace: typeof SPACE,
+        destinationSpace: typeof SPACE,
+        options: { copyData?: boolean; scope?: CellScope },
+      ): Promise<{ id(): string }>;
+    };
+    runtime.resolveSpaceName = () => Promise.resolve(SPACE);
+    runtime.clonePiece = (pieceId, sourceSpace, destinationSpace, options) => {
+      clones.push({ pieceId, sourceSpace, destinationSpace, options });
+      return Promise.resolve({ id: () => "fid1:clone" });
+    };
+    const menu = openMenu(cell);
+
+    await menu.cloneIntoNewSpace({ spaceName: "copied-piece" });
+
+    expect(clones).toEqual([{
+      pieceId: "of:fid1:piece",
+      sourceSpace: SPACE,
+      destinationSpace: SPACE,
+      options: { copyData: false, scope: "user" },
+    }]);
+  });
+
+  it("reads the piece's own state in that scope", async () => {
+    const piece = statefulPiece({ scope: "user" });
+    const menu = openMenu(piece.cell);
+
+    await menu.showPanel("data");
+
+    expect(piece.getPieceCalls).toEqual([[
+      "of:fid1:piece",
+      SPACE,
+      true,
+      "user",
+    ]]);
   });
 });
 
@@ -1969,10 +2145,10 @@ describe("the origin and history panel", () => {
     await settled();
 
     expect(calls).toEqual([
-      { action: { kind: "adopt" }, options: {} },
+      { action: { kind: "adopt" }, options: { scope: "space" } },
       {
         action: { kind: "adopt" },
-        options: { confirmationToken: "token-1" },
+        options: { confirmationToken: "token-1", scope: "space" },
       },
     ]);
     // The warning is spent rather than left on the panel to answer again.
@@ -2016,7 +2192,9 @@ describe("the origin and history panel", () => {
     const rendered = shows(menu);
     expect(rendered).not.toContain("piece-source-warning");
     expect(rendered).toContain("piece-panel-origin");
-    expect(calls).toEqual([{ action: { kind: "adopt" }, options: {} }]);
+    expect(calls).toEqual([
+      { action: { kind: "adopt" }, options: { scope: "space" } },
+    ]);
   });
 
   it("does not offer to ignore a check that is not what refused it", async () => {
@@ -2217,11 +2395,11 @@ describe("the origin and history panel", () => {
     expect(calls).toEqual([
       {
         action: { kind: "repoint", url: "https://example.test/other.tsx" },
-        options: {},
+        options: { scope: "space" },
       },
       {
         action: { kind: "repoint", url: "https://example.test/other.tsx" },
-        options: { confirmationToken: "token-1" },
+        options: { confirmationToken: "token-1", scope: "space" },
       },
     ]);
     expect(shows(menu)).not.toContain("piece-origin-entry");
@@ -2291,7 +2469,9 @@ describe("the origin and history panel", () => {
 
     // The origin was resolved again and what it offers now is compatible, so
     // there is no warning to confirm and the one attempt is the whole of it.
-    expect(calls).toEqual([{ action: { kind: "adopt" }, options: {} }]);
+    expect(calls).toEqual([
+      { action: { kind: "adopt" }, options: { scope: "space" } },
+    ]);
   });
 
   it("abandons a failed attempt rather than passing it to the panel", async () => {
@@ -2517,7 +2697,7 @@ describe("the origin and history panel", () => {
       pieceId: "of:fid1:piece",
       space: SPACE,
       action: { kind: "detach" },
-      options: {},
+      options: { scope: "space" },
     }]);
     expect(shows(menu)).toContain("Detached");
     expect(shows(menu)).toContain("Stopped following source · Current");
@@ -2646,10 +2826,10 @@ describe("the origin and history panel", () => {
 
     await menu.changeSource(action, "confirm-older");
     expect(calls).toEqual([
-      { requested: action, options: {} },
+      { requested: action, options: { scope: "space" } },
       {
         requested: action,
-        options: { confirmationToken: "confirm-older" },
+        options: { confirmationToken: "confirm-older", scope: "space" },
       },
     ]);
     expect(shows(menu)).not.toContain("result schema narrowed");
@@ -3170,10 +3350,14 @@ function statefulPiece(
     getPieceFails = false,
     deferGetPiece = false,
     sendFails = false,
+    scope = "space",
     pieceSchema = { type: "object" } as Record<string, unknown>,
   }: {
     result?: Record<string, unknown>;
     argument?: unknown;
+
+    /** The scope the piece's own cell was reached through. */
+    scope?: CellScope;
 
     /** When set, the argument read also returns this schema-bearing ref. */
     argumentRef?: CellRef;
@@ -3220,11 +3404,13 @@ function statefulPiece(
     signal: { aborted: false },
   };
   const pendingPieces: Array<() => void> = [];
+  const getPieceCalls: unknown[][] = [];
   const rt = {
     [$conn]: () => conn,
     signal: { aborted: false },
     getPieceSource: () => Promise.resolve(SOURCE),
-    getPiece: (..._args: unknown[]) => {
+    getPiece: (...args: unknown[]) => {
+      getPieceCalls.push(args);
       if (getPieceFails) {
         return Promise.reject(new Error("no piece handle for this piece"));
       }
@@ -3240,6 +3426,7 @@ function statefulPiece(
   const pieceRef: CellRef = {
     id: "of:fid1:piece",
     space: SPACE,
+    scope,
     path: [],
     schema: pieceSchema,
   } as unknown as CellRef;
@@ -3275,6 +3462,7 @@ function statefulPiece(
     cell,
     requests,
     counters,
+    getPieceCalls,
     streamHandle,
     handlerHandle,
     resolveGetPiece,

@@ -50,9 +50,11 @@ export class PieceHandle<T = PieceType> {
     const res = await this.#conn.request<RequestType.PieceStart>({
       type: RequestType.PieceStart,
       pieceId: this.id(),
-      // The piece's cell knows its space — start/stop route to that
-      // space's piece context.
+      // The piece's cell knows its whole address — start/stop route to that
+      // space's piece context, and resolve the id in the scope the cell was
+      // reached through. One id in two scopes is two documents.
       space: this.#cell.space(),
+      scope: this.#cell.ref().scope,
     });
     return res.value;
   }
@@ -62,6 +64,7 @@ export class PieceHandle<T = PieceType> {
       type: RequestType.PieceStop,
       pieceId: this.id(),
       space: this.#cell.space(),
+      scope: this.#cell.ref().scope,
     });
     return res.value;
   }

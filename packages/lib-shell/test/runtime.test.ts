@@ -69,15 +69,38 @@ class MockRuntimeClient {
     return Promise.resolve(`did:key:z6Mk-${name}` as DID);
   }
 
-  getPieceSlug(pieceId: string): Promise<string | undefined> {
+  /** Records the scope each slug read named, alongside the piece. */
+  pieceSlugCalls: Array<{ pieceId: string; space: DID; scope?: string }> = [];
+
+  getPieceSlug(
+    pieceId: string,
+    space: DID,
+    scope?: string,
+  ): Promise<string | undefined> {
+    this.pieceSlugCalls.push({ pieceId, space, scope });
     return Promise.resolve(this.slugByPieceId.get(pieceId));
   }
 
-  /** Records the (pieceId, space) argument order source reads arrive in. */
-  pieceSourceCalls: Array<{ pieceId: string; space: DID }> = [];
+  /** Records the piece each removal named, and the scope completing its id. */
+  removePieceCalls: Array<{ pieceId: string; space: DID; scope?: string }> = [];
 
-  getPieceSource(pieceId: string, space: DID): Promise<{ pieceId: string }> {
-    this.pieceSourceCalls.push({ pieceId, space });
+  removePiece(pieceId: string, space: DID, scope?: string): Promise<boolean> {
+    this.removePieceCalls.push({ pieceId, space, scope });
+    return Promise.resolve(true);
+  }
+
+  /**
+   * Records the (pieceId, space) argument order source reads arrive in, and
+   * the scope completing the id into a document address.
+   */
+  pieceSourceCalls: Array<{ pieceId: string; space: DID; scope?: string }> = [];
+
+  getPieceSource(
+    pieceId: string,
+    space: DID,
+    scope?: string,
+  ): Promise<{ pieceId: string }> {
+    this.pieceSourceCalls.push({ pieceId, space, scope });
     return Promise.resolve({ pieceId });
   }
 
@@ -311,7 +334,34 @@ describe("RuntimeInternals", () => {
       expect(client.pieceSourceCalls).toEqual([{
         pieceId: "of:fid1:piece",
         space,
+        scope: undefined,
       }]);
+    } finally {
+      await runtime.dispose();
+    }
+  });
+
+  it("carries a narrower scope through to every piece-addressed client call", async () => {
+    // A piece reached through a link into a narrower scope is addressed by
+    // its id and that scope together, so the facade has to be able to say
+    // both — the id alone names a different document.
+
+    const client = new MockRuntimeClient();
+    const runtime = new RuntimeInternals(client as any);
+    const space = "did:key:z6Mk-scoped-space" as DID;
+    try {
+      await runtime.getPieceSource(space, "of:fid1:piece", "user");
+      await runtime.getSlug(space, "of:fid1:piece", "user");
+      await runtime.removePiece(space, "of:fid1:piece", "user");
+
+      const addressed = {
+        pieceId: "of:fid1:piece",
+        space,
+        scope: "user",
+      };
+      expect(client.pieceSourceCalls).toEqual([addressed]);
+      expect(client.pieceSlugCalls).toEqual([addressed]);
+      expect(client.removePieceCalls).toEqual([addressed]);
     } finally {
       await runtime.dispose();
     }
