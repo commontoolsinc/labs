@@ -265,11 +265,12 @@ const statedCfcEnforcementMode = (
 /**
  * Whether the session's dial decides this run's harness dial.
  *
- * Only `enforce-strict` does. The session's preset pins `enforce-explicit`
- * whether an operator asked for it or not, and a harness loop deliberately run
- * weaker than that pin is an ordinary configuration; a loop left weaker than a
- * session an operator raised to strict is the pair nobody stated, and the one
- * an audit reads as an enforcing run that did not enforce.
+ * Only an operator naming `enforce-strict` on the session does. The session's
+ * preset pins a rung whether an operator asked for it or not, and a harness
+ * loop deliberately run weaker than the pin is an ordinary configuration; a
+ * loop left weaker than a session an operator raised to strict is the pair
+ * nobody stated, and the one an audit reads as an enforcing run that did not
+ * enforce.
  */
 const fabricSessionRaisesCfcEnforcement = (
   options: Pick<
@@ -284,7 +285,7 @@ const fabricSessionRaisesCfcEnforcement = (
   if (options.fabricSession === undefined) {
     return undefined;
   }
-  const session = fabricSessionCfcEnforcementMode(options.fabricSession);
+  const session = options.fabricSession.cfcEnforcementMode;
   if (session !== "enforce-strict") {
     return undefined;
   }
