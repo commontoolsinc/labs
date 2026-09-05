@@ -4,6 +4,8 @@
   several: { constructor: 3, prototype: 4 },
 }
 
+--
+
 single:
 {constructor:1}
 {

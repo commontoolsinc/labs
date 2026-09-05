@@ -3,19 +3,31 @@
   // below is elided, with its kind in its place. A scalar, a primitive, and
   // an elision form at the limit are not containers, and are carried whole.
   "/options": { maxDepth: 2 },
+
   "object within the limit": { a: 1, b: "two" },
+
   "object at the limit": { a: { b: 1 } },
+
   "array at the limit": { a: [1, 2] },
+
   "nested arrays": [[1, [2]]],
+
   "unique symbol at the limit": { s: Symbol("leaf") },
+
   "function at the limit": { f: function foo() {} },
+
   "primitive at the limit": { t: new FabricEpochNsec(123n) },
+
   "instance at the limit": {
     e: FabricError.fromNativeError(new Error("boom")),
   },
+
   "class instance at the limit": { r: /ab+c/gi },
+
   "map at the limit": { m: new Map([["a", 1]]) },
 }
+
+--
 
 object within the limit:
 {a:1,b:"two"}

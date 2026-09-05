@@ -11,6 +11,8 @@
   })(),
 }
 
+--
+
 with a throwing getter:
 {x:/unconvertible("nope")}
 {

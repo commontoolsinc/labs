@@ -46,6 +46,8 @@
   };
 })()
 
+--
+
 plain:
 /Error(type:"Error",name:null,message:"boom",stack:"Error: boom\n    at frob (file:///example/frob.ts:12:34)")
 /Error(

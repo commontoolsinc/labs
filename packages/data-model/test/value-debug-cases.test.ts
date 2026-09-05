@@ -5,20 +5,22 @@
  * it, and the value is what gets rendered, on its own. The one property that is
  * not a case is `/options`, which holds the options every case in the file is
  * rendered with; a file that binds none renders its cases with the defaults.
- * After a blank line, the file records one section per case, the sections
- * separated by blank lines: the label followed by a colon on a line of its own,
- * then three renderings of the value, each starting on a line of its own. The
- * first is its `toCompactDebugString()` rendering, whole. The second is its
- * `toIndentedDebugString()` rendering, which can run to several lines. The
- * third is its `toStructuredDebugValue()` result, the structure the two strings
- * were rendered from, rendered by `toIndentedDebugString()` with every limit at
- * `Infinity` so that it shows whole; where a string rendering interprets a form
- * of the structured value, this rendering shows the form itself. The file's
- * options reach all three calls, and the two that only the compact rendering
- * reads, `maxLength` and `backtickQuote`, therefore reach the compact rendering
- * alone. A recorded rendering is a fact about the renderer, to be read as such
- * when it changes. What `maxLength` does to a compact rendering is
- * `value-debug.test.ts`'s to check, so no case here is cut by one.
+ * The expression may run to any number of lines, blank ones included. A line
+ * holding nothing but `--`, with a blank line above it and another below,
+ * divides the expression from what follows: one section per case, the sections
+ * separated by blank lines, each being the label followed by a colon on a line
+ * of its own, then three renderings of the value, each starting on a line of
+ * its own. The first is its `toCompactDebugString()` rendering, whole. The
+ * second is its `toIndentedDebugString()` rendering, which can run to several
+ * lines. The third is its `toStructuredDebugValue()` result, the structure the
+ * two strings were rendered from, rendered by `toIndentedDebugString()` with
+ * every limit at `Infinity` so that it shows whole; where a string rendering
+ * interprets a form of the structured value, this rendering shows the form
+ * itself. The file's options reach all three calls, and the two that only the
+ * compact rendering reads, `maxLength` and `backtickQuote`, therefore reach the
+ * compact rendering alone. A recorded rendering is a fact about the renderer,
+ * to be read as such when it changes. What `maxLength` does to a compact
+ * rendering is `value-debug.test.ts`'s to check, so no case here is cut by one.
  *
  * The expression is evaluated with every `FabricInstance` and
  * `FabricPrimitive` class in scope under its own name, along with the three
@@ -61,6 +63,9 @@ const CASES_DIR = new URL("./value-debug-cases/", import.meta.url);
 
 /** Key under which a case file's expression binds its rendering options. */
 const OPTIONS_KEY = "/options";
+
+/** The line which divides a case file's expression from its sections. */
+const DIVIDER = "--";
 
 /**
  * Options for rendering a structured value whole: every limit at `Infinity`,
@@ -147,18 +152,29 @@ function evaluateExpression(expression: string): {
 
 /**
  * Splits a case file into its expression and its recorded sections, one per
- * case. The expression runs to the first blank line, and the sections are
- * what follow it, separated by blank lines. The split rests on no rendering
- * holding a blank line, which holds for every rendering but that of an
- * instance whose class name itself holds one, and no case has such a class.
- * A file with nothing but an expression is accepted when the recordings are
+ * case. The expression runs to the first divider line, and the sections are
+ * what follow it, separated by blank lines; blank lines around the divider
+ * belong to neither. The split of the sections rests on no rendering holding
+ * a blank line, which holds for every rendering but that of an instance whose
+ * class name itself holds one, and no case has such a class. A file with no
+ * divider, or with nothing after it, is accepted as one with nothing but an
+ * expression when the recordings are about to be rewritten.
+ *
+ * @throws {Error} if the file records no sections, and the recordings are not
  * about to be rewritten.
  */
 function parseCaseFile(text: string): {
   expression: string;
   sections: string[];
 } {
-  const [expression = "", ...sections] = text.trimEnd().split("\n\n");
+  const lines = text.split("\n");
+  const dividerAt = lines.indexOf(DIVIDER);
+  const expression = lines.slice(0, (dividerAt === -1) ? undefined : dividerAt)
+    .join("\n").trimEnd();
+  const recorded = (dividerAt === -1)
+    ? ""
+    : lines.slice(dividerAt + 1).join("\n").trim();
+  const sections = (recorded === "") ? [] : recorded.split("\n\n");
 
   if ((sections.length === 0) && !UPDATE_GOLDENS) {
     throw new Error("Case file records no sections.");
@@ -206,7 +222,7 @@ describe("value-debug-cases", () => {
       if (UPDATE_GOLDENS) {
         await Deno.writeTextFile(
           url,
-          `${recorded.expression}\n\n${actual.join("\n\n")}\n`,
+          `${recorded.expression}\n\n${DIVIDER}\n\n${actual.join("\n\n")}\n`,
         );
         return;
       }

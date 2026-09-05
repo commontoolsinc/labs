@@ -7,6 +7,8 @@
   })(),
 }
 
+--
+
 with a non-enumerable property:
 {shown:1}
 {

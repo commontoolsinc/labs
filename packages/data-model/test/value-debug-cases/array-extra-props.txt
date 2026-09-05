@@ -8,6 +8,8 @@
   })(),
 }
 
+--
+
 with a named property:
 [1,2]
 [

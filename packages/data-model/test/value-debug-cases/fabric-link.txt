@@ -1,24 +1,32 @@
 {
   plain: new FabricLink({ id: "of:fid1:abc", path: ["x"], space: "did:key:z" }),
+
   "empty payload": new FabricLink({}),
+
   "empty path, no space": new FabricLink({ id: "of:fid1:abc", path: [] }),
+
   "mixed path": new FabricLink({ id: "of:fid1:abc", path: ["items", 3, "name"] }),
+
   "other keys": new FabricLink({
     id: "of:fid1:abc",
     path: [],
     schema: { type: "object" },
     overwrite: "this",
   }),
+
   "fabric values in the payload": new FabricLink({
     id: "of:fid1:abc",
     at: new FabricEpochNsec(1n),
     bytes: new FabricBytes(new Uint8Array([1, 2])),
   }),
+
   "link in the payload": new FabricLink({
     id: "of:fid1:abc",
     target: new FabricLink({ id: "of:fid1:def", path: ["y"] }),
   }),
 }
+
+--
 
 plain:
 /Link(id:"of:fid1:abc",path:["x"],space:"did:key:z")

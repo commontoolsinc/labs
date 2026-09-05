@@ -2,6 +2,8 @@
   "three levels": { a: { b: { c: [1n, { d: undefined }, Symbol.for("s")] } } },
 }
 
+--
+
 three levels:
 {a:{b:{c:[1n,{d:undefined},@s]}}}
 {

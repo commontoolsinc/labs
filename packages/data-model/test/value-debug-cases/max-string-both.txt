@@ -2,10 +2,13 @@
   // When both string limits are given, the excerpt is the shorter of the
   // two.
   "/options": { maxStringLines: 2, maxStringLength: 8 },
+
   "cut by the length": "abcdefghij\nkl\nmn",
   "cut by the lines": "ab\ncd\nef",
   "within both": "ab\ncd",
 }
+
+--
 
 cut by the length:
 "abcdefgh"+...length:16

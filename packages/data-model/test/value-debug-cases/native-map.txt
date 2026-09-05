@@ -4,6 +4,8 @@
   "object key": new Map([[{ k: 1 }, "v"]]),
 }
 
+--
+
 empty:
 /Map(...)
 /Map(...)

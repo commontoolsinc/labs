@@ -2,6 +2,8 @@
   "null prototype": Object.assign(Object.create(null), { a: 1, b: { c: 2 } }),
 }
 
+--
+
 null prototype:
 {a:1,b:{c:2}}
 {

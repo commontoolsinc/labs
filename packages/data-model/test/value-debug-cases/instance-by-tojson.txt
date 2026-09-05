@@ -13,6 +13,8 @@
   return { object: new HasJson(), array: new JsonArray() };
 })()
 
+--
+
 object:
 /HasJson(j:1)
 /HasJson(
