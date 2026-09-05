@@ -105,6 +105,18 @@ block `file:` navigation from automation:
 cd packages/cf-harness/docs/system-map && python3 -m http.server 8765 --bind 127.0.0.1
 ```
 
+## Since the snapshot
+
+The map predates the run read ceiling (`--max-confidentiality` /
+`cfc.maxConfidentiality`, [CURRENT_STATE.md](../CURRENT_STATE.md) "Fabric
+session" and deviation 9 in
+[IMPLEMENTATION_PROFILE.md](../IMPLEMENTATION_PROFILE.md)). It still draws the
+harness's fixed answer ceiling as the only read boundary. The ceiling a run
+carries is enforced by the runner's `db.query` builtin, on session-scoped
+query results only, with a space-scoped query refused; a shared cell another
+runtime filled is outside it. Redraw that boundary the next time the map is
+regenerated.
+
 ## Relation to the other documents here
 
 The map is a reading aid, not a source of truth. Where it and
