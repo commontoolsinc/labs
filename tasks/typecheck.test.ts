@@ -12,19 +12,16 @@ import {
   runTypecheck,
   scopeOfPath,
   selectScopes,
+  UNCHECKED_TREES,
 } from "./typecheck.ts";
+import { readWorkspaceMembers } from "./workspace-tests.ts";
 
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 
-/**
- * Trees the task checks in full. What a package's own test run checks is
- * whatever its test files happen to import, and the `tasks` run passes
- * `--no-check`, so coverage here is what the repository actually relies
- * on. A tree checked only in part belongs elsewhere:
- * `packages/static/assets/types` holds declaration bundles that do not
- * compile on their own, and patterns answer to `deno task cfcheck`.
- */
-const FULLY_CHECKED_TREES = ["packages/ui", "tasks"];
+/** Whether a checked path or unchecked tree covers a repository file. */
+function covers(tree: string, file: string): boolean {
+  return file === tree || file.startsWith(`${tree}/`);
+}
 
 describe("typecheck", () => {
   describe("scopeOfPath()", () => {
@@ -68,31 +65,48 @@ describe("typecheck", () => {
       }
     });
 
-    it("covers every TypeScript file in the trees it checks in full", async () => {
-      // An entry naming part of a tree type-checks that part and reports
-      // a clean run over the rest, so what this asserts is coverage
-      // rather than the shape of the entry that gives it. These trees
-      // are read from disk rather than from a fixture, so a directory
-      // added to one later is held to the same claim.
+    it("names every workspace TypeScript file no recorded tree excuses", async () => {
+      // The membership this walks is the workspace the repository declares,
+      // not a list restated here, so a package added to `deno.jsonc` is held
+      // to the claim on the day it arrives rather than on the day somebody
+      // remembers to add it. What the assertion buys is the distinction the
+      // checked paths cannot draw on their own: a tree left out on purpose
+      // and a tree left out by accident are both simply absent from the
+      // list, and this fails on the second while `UNCHECKED_TREES` excuses
+      // the first. Naming the files is the point of the failure — the
+      // defect this guards against is a gate reporting a clean run over
+      // code it never opened, which no green result can reveal.
 
       const checked = [...(await collectPathsByScope(REPO_ROOT)).values()]
         .flat();
+      const members = await readWorkspaceMembers(
+        join(REPO_ROOT, "deno.jsonc"),
+      );
       const uncovered: string[] = [];
-      for (const tree of FULLY_CHECKED_TREES) {
+      for (const member of members) {
         for await (
-          const entry of walk(join(REPO_ROOT, tree), {
+          const entry of walk(join(REPO_ROOT, member), {
             includeDirs: false,
             exts: [".ts", ".tsx"],
           })
         ) {
           const file = relative(REPO_ROOT, entry.path);
-          const covered = checked.some((checkPath) =>
-            file === checkPath || file.startsWith(`${checkPath}/`)
-          );
-          if (!covered) uncovered.push(file);
+          if (checked.some((checkPath) => covers(checkPath, file))) continue;
+          if (UNCHECKED_TREES.some(({ tree }) => covers(tree, file))) continue;
+          uncovered.push(file);
         }
       }
-      expect(uncovered).toEqual([]);
+      expect([...new Set(uncovered)].sort()).toEqual([]);
+    });
+
+    it("records no tree that has left the repository", async () => {
+      // An entry outliving its tree excuses a path nothing occupies, and
+      // would go on excusing whatever later took the name.
+
+      for (const { tree } of UNCHECKED_TREES) {
+        const stat = await Deno.stat(join(REPO_ROOT, tree)).catch(() => null);
+        expect(stat?.isDirectory, tree).toBe(true);
+      }
     });
 
     it("includes iframe guests of either extension under arbitrary names", async () => {
