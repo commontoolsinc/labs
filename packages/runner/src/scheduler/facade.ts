@@ -265,11 +265,7 @@ export {
 };
 
 export class Scheduler {
-  // A member below declared `private` rather than `#` is one the scheduler
-  // suites reach and drive directly; a `#` name would put it out of their
-  // reach.
-
-  private eventQueue: QueuedEvent[] = [];
+  readonly #eventQueue: QueuedEvent[] = [];
   #eventHandlers: [NormalizedFullLink, EventHandler][] = [];
   readonly lineage = new SpeculationLineage({
     dropQueuedEvent: (event, reason) => this.#dropEvent(event, reason),
@@ -277,9 +273,9 @@ export class Scheduler {
     onError: (error) => logger.error("lineage", () => [error]),
   });
 
-  private pending = new Set<Action>();
+  readonly #pending = new Set<Action>();
   #dependencies = new WeakMap<Action, ReactivityLog>();
-  private cancels = new WeakMap<Action, Cancel>();
+  readonly #cancels = new WeakMap<Action, Cancel>();
   // Thunk, not a captured value: keys must always resolve against the
   // runtime's CURRENT authenticated session (one source of truth), and a
   // field initializer runs before constructor parameter properties assign.
@@ -287,11 +283,11 @@ export class Scheduler {
     () => this.runtime.scopeKeyIdentity,
   );
   #actionChangeGroups = new WeakMap<Action, ChangeGroup>();
-  private retries = new WeakMap<Action, number>();
+  readonly #retries = new WeakMap<Action, number>();
   #offBudgetRetries = new WeakMap<Action, number>();
 
   // Effect/computation tracking for pull-based scheduling
-  private nodes = new NodeRegistry();
+  readonly #nodes = new NodeRegistry();
   #dependents = new WeakMap<Action, Set<Action>>();
   #reverseDependencies = new WeakMap<Action, Set<Action>>();
   #passCounter = 0;
@@ -303,12 +299,12 @@ export class Scheduler {
 
   // Compute time tracking for auto-debounce and diagnostics
   // Keyed by action ID (source location) to persist stats across action recreation
-  private actionStats = new BoundedKeyMap<string, ActionStats>(
+  readonly #actionStats = new BoundedKeyMap<string, ActionStats>(
     MAX_ACTION_STATS,
   );
   #actionTimingState: ActionTimingState = {
-    actionStats: this.actionStats,
-    getActionId: (action) => this.getActionId(action),
+    actionStats: this.#actionStats,
+    getActionId: (action) => this.#getActionId(action),
   };
   #actionIdentityState: SchedulerActionIdentityState = {
     anonymousActionIds: new WeakMap<Action | EventHandler, string>(),
@@ -319,11 +315,11 @@ export class Scheduler {
   #rerunAfterCurrentExecute = false;
 
   // Non-settling heuristic (Phase 1): detects when the system is churning
-  private settlingTracker: SettlingTracker = createSettlingTracker();
+  #settlingTracker: SettlingTracker = createSettlingTracker();
   #autoTriggerDiagnosis = false;
 
   // Idempotency diagnosis (Phase 2): captures read/write values per action run
-  private diagnosisEnabled = false;
+  #diagnosisEnabled = false;
   #diagnosisTimeout: ReturnType<typeof setTimeout> | null = null;
   #diagnosisStartTime = 0;
   #diagnosisBusyTime = 0;
@@ -349,19 +345,19 @@ export class Scheduler {
   #diagnosisControlState!: SchedulerDiagnosisControlState;
 
   // Debounce infrastructure for throttling slow actions
-  private pendingQueueTaskTimer: ReturnType<typeof setTimeout> | null = null;
-  private eventQueueState!: SchedulerEventQueueState;
-  private eventExecutionState!: SchedulerEventExecutionState;
-  private gates = new SchedulerGates({
-    nodes: this.nodes,
-    actionStats: this.actionStats,
-    getActionId: (action) => this.getActionId(action),
+  #pendingQueueTaskTimer: ReturnType<typeof setTimeout> | null = null;
+  #eventQueueState!: SchedulerEventQueueState;
+  #eventExecutionState!: SchedulerEventExecutionState;
+  readonly #gates = new SchedulerGates({
+    nodes: this.#nodes,
+    actionStats: this.#actionStats,
+    getActionId: (action) => this.#getActionId(action),
     isDisposed: () => this.#disposed,
     queueExecution: () => this.queueExecution(),
   });
   #writeIndex!: SchedulerWriteIndex;
-  private materializers = new SchedulerMaterializers(
-    this.nodes.effects,
+  readonly #materializers = new SchedulerMaterializers(
+    this.#nodes.effects,
     () => this.runtime.scopeKeyIdentity,
   );
   #eventPreflightDependencyState!: EventPreflightDependencyState;
@@ -384,7 +380,7 @@ export class Scheduler {
   #executingAction: Action | null = null;
   currentActionId?: string;
   #dependencyGraphState!: DependencyGraphState;
-  private dependencyUpdateState!: DependencyUpdateState;
+  #dependencyUpdateState!: DependencyUpdateState;
   #triggerSubscriptionState!: TriggerSubscriptionState;
   #pendingPullRunnableState!: PendingPullRunnableState;
   #dirtyPullRunnableState!: DirtyPullRunnableState;
@@ -430,10 +426,10 @@ export class Scheduler {
   // distinguish a genuine concurrent refresh from a load kicked by preflight
   // itself (the latter must not re-arm the same event forever).
   #preflightPendingLoadGenerations = new Map<string, number>();
-  private errorHandlers = new Set<ErrorHandler>();
+  readonly #errorHandlers = new Set<ErrorHandler>();
   #consoleHandler: ConsoleHandler;
   #running: Promise<unknown> | undefined = undefined;
-  private scheduled = false;
+  #scheduled = false;
   #disposed = false;
   #actionRunState!: SchedulerActionRunState;
   #graphSnapshotState!: SchedulerGraphSnapshotState;
@@ -469,7 +465,7 @@ export class Scheduler {
       };
 
     if (errorHandlers) {
-      errorHandlers.forEach((handler) => this.errorHandlers.add(handler));
+      errorHandlers.forEach((handler) => this.#errorHandlers.add(handler));
     }
 
     // Subscribe to storage notifications. The subscriber is retained because
@@ -489,6 +485,97 @@ export class Scheduler {
       const target = output.target ?? console;
       target[output.method].apply(target, output.args);
     });
+  }
+
+  /**
+   * The scheduler's tables, states, and collaborators, its wake timer and
+   * flags, and the steps of a pass, which the scheduler suites drive
+   * directly.
+   */
+  get accessForTestingOnly(): {
+    readonly actionStats: BoundedKeyMap<string, ActionStats>;
+    readonly dependencyUpdateState: DependencyUpdateState;
+    readonly diagnosisEnabled: boolean;
+    readonly errorHandlers: Set<ErrorHandler>;
+    readonly eventExecutionState: SchedulerEventExecutionState;
+    readonly eventQueue: QueuedEvent[];
+    readonly eventQueueState: SchedulerEventQueueState;
+    readonly gates: SchedulerGates;
+    readonly materializers: SchedulerMaterializers;
+    readonly nodes: NodeRegistry;
+    readonly pending: Set<Action>;
+    pendingQueueTaskTimer: ReturnType<typeof setTimeout> | null;
+    scheduled: boolean;
+    readonly settlingTracker: SettlingTracker;
+    clearBackoffForCleanNodes(): void;
+    execute(): Promise<void>;
+    getActionId(action: Action | EventHandler): string;
+    isDemandedPullComputation(action: Action): boolean;
+    markAndScheduleInvalidAction(
+      action: Action,
+      cause?: IMemorySpaceAddress,
+    ): void;
+    maybeAutoDebounce(action: Action): void;
+    recordBudgetBackoffTelemetry(settleResult: SchedulerSettleResult): void;
+    recordExecuteEndTelemetry(): void;
+    updateDependents(action: Action, log: ReactivityLog): void;
+  } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      actionStats: this.#actionStats,
+      get dependencyUpdateState() {
+        return outerThis.#dependencyUpdateState;
+      },
+      get diagnosisEnabled() {
+        return outerThis.#diagnosisEnabled;
+      },
+      errorHandlers: this.#errorHandlers,
+      get eventExecutionState() {
+        return outerThis.#eventExecutionState;
+      },
+      eventQueue: this.#eventQueue,
+      get eventQueueState() {
+        return outerThis.#eventQueueState;
+      },
+      gates: this.#gates,
+      materializers: this.#materializers,
+      nodes: this.#nodes,
+      pending: this.#pending,
+      get pendingQueueTaskTimer() {
+        return outerThis.#pendingQueueTaskTimer;
+      },
+      set pendingQueueTaskTimer(value) {
+        outerThis.#pendingQueueTaskTimer = value;
+      },
+      get scheduled() {
+        return outerThis.#scheduled;
+      },
+      set scheduled(value) {
+        outerThis.#scheduled = value;
+      },
+      get settlingTracker() {
+        return outerThis.#settlingTracker;
+      },
+      clearBackoffForCleanNodes: () => this.#clearBackoffForCleanNodes(),
+      // Forwards to the TypeScript-private member so that a test which
+      // replaces it by assignment is honored here too.
+      // TODO(danfuzz): Make `execute()` a `#` method, which needs
+      // `test/scheduler-event-load-park.test.ts` to observe a pass ending some
+      // other way than by wrapping the method: a hook the scheduler offers, or
+      // the telemetry it already emits at the end of a pass.
+      execute: () => this.execute(),
+      getActionId: (action) => this.#getActionId(action),
+      isDemandedPullComputation: (action) =>
+        this.#isDemandedPullComputation(action),
+      markAndScheduleInvalidAction: (action, cause) =>
+        this.#markAndScheduleInvalidAction(action, cause),
+      maybeAutoDebounce: (action) => this.#maybeAutoDebounce(action),
+      recordBudgetBackoffTelemetry: (settleResult) =>
+        this.#recordBudgetBackoffTelemetry(settleResult),
+      recordExecuteEndTelemetry: () => this.#recordExecuteEndTelemetry(),
+      updateDependents: (action, log) => this.#updateDependents(action, log),
+    };
   }
 
   get runningPromise(): Promise<unknown> | undefined {
@@ -589,7 +676,7 @@ export class Scheduler {
       0,
       options.timeoutMs ?? INITIAL_RUN_SYNC_HOLD_TIMEOUT_MS,
     );
-    this.gates.holdInitialRun(action, performance.now() + timeoutMs);
+    this.#gates.holdInitialRun(action, performance.now() + timeoutMs);
     const task = (async () => {
       const provider = this.runtime.storageManager.open(options.space);
       const synced = provider?.synced?.bind(provider);
@@ -610,14 +697,14 @@ export class Scheduler {
     })().catch((error) => {
       logger.warn("scheduler-initial-sync-hold", () => [
         "Failed to await sync before initial run; releasing the hold",
-        this.getActionId(action),
+        this.#getActionId(action),
         error,
       ]);
     }).finally(() => {
       // Release even on error/timeout: the gate exists to sequence the common
       // case, not to block the action forever behind a stuck sync.
-      if (this.nodes.get(action)) {
-        this.gates.releaseInitialRunHold(action);
+      if (this.#nodes.get(action)) {
+        this.#gates.releaseInitialRunHold(action);
       }
     });
     this.trackBackgroundTask(task);
@@ -658,7 +745,7 @@ export class Scheduler {
       changeGroup?: ChangeGroup;
     } = {},
   ): void {
-    const record = this.nodes.get(action);
+    const record = this.#nodes.get(action);
     const wasLiveBeforeRootRegistration = record !== undefined &&
       isLive(this.#dependencyGraphState, record);
     this.#updateMaterializerRegistration(action);
@@ -698,7 +785,7 @@ export class Scheduler {
     options: { preserveChangeGroup?: boolean } = {},
   ): void {
     unsubscribeSchedulerAction(this.#unsubscribeState, action, options);
-    this.materializers.clearAction(action);
+    this.#materializers.clearAction(action);
   }
 
   async run(action: Action): Promise<any> {
@@ -776,8 +863,8 @@ export class Scheduler {
     return !this.runningPromise &&
       this.#backgroundTasks.size === 0 &&
       !this.#wakeShaper.hasPending() &&
-      this.eventQueue.length === 0 &&
-      !this.scheduled &&
+      this.#eventQueue.length === 0 &&
+      !this.#scheduled &&
       !this.#hasRunnablePullWork();
   }
 
@@ -788,7 +875,7 @@ export class Scheduler {
    * trailing debounce flushes on park.
    */
   hasArmedGateWake(): boolean {
-    return this.gates.hasWakeTimer();
+    return this.#gates.hasWakeTimer();
   }
 
   #waitForQuiescence(awaitPendingCommits: boolean): Promise<void> {
@@ -879,9 +966,9 @@ export class Scheduler {
         // scheduler disposed with pull work outstanding.
         resolve();
       } else if (
-        this.gates.hasWakeTimer() &&
-        ((this.eventQueue.length > 0 &&
-          isHeadEventParkedState({ eventQueue: this.eventQueue })) ||
+        this.#gates.hasWakeTimer() &&
+        ((this.#eventQueue.length > 0 &&
+          isHeadEventParkedState({ eventQueue: this.#eventQueue })) ||
           this.#hasIdleBlockingDeferredPullWork())
       ) {
         // A queued event or idle-blocking pull node is parked behind a time
@@ -895,7 +982,7 @@ export class Scheduler {
         // drops on an explicit load failure. Either way idle must stay open
         // until the callback re-queues execution.
         this.#idlePromises.push(park);
-      } else if (!this.scheduled) {
+      } else if (!this.#scheduled) {
         if (this.#hasRunnablePullWork()) {
           this.queueExecution();
           this.#idlePromises.push(park);
@@ -922,7 +1009,7 @@ export class Scheduler {
    * result document confirmed absent). No-op for an unsubscribed action.
    */
   invalidateAction(action: Action): void {
-    this.markAndScheduleInvalidAction(action);
+    this.#markAndScheduleInvalidAction(action);
   }
 
   /**
@@ -941,7 +1028,7 @@ export class Scheduler {
   invalidateActionsForDemandRoots(rootIds: readonly string[]): number {
     const roots = new Set(rootIds);
     let rearmed = 0;
-    for (const record of this.nodes.nodes()) {
+    for (const record of this.#nodes.nodes()) {
       if (record.fanOut === undefined || !record.fanOut.narrowed) continue;
       const identity = (record.action as Partial<TelemetryAnnotations>)
         .schedulerObservationIdentity;
@@ -954,7 +1041,7 @@ export class Scheduler {
       this.#markActionInvalid(record.action, undefined, {
         fanOutInstances: "keep",
       });
-      this.pending.add(record.action);
+      this.#pending.add(record.action);
       rearmed += 1;
     }
     if (rearmed > 0) this.queueExecution();
@@ -975,10 +1062,10 @@ export class Scheduler {
   transientEventDemandersFor(
     rootIds: readonly string[],
   ): ScopeKeyIdentity[] {
-    if (this.eventQueue.length === 0) return [];
+    if (this.#eventQueue.length === 0) return [];
     const roots = new Set(rootIds);
     const demanders: ScopeKeyIdentity[] = [];
-    for (const queued of this.eventQueue) {
+    for (const queued of this.#eventQueue) {
       const firedAt = queued.served?.firedAt;
       if (firedAt?.user === undefined) continue;
       const identity = (queued.handler as Partial<TelemetryAnnotations>)
@@ -1044,13 +1131,13 @@ export class Scheduler {
     const directWriters = collectDirectWritersForLog({
       scopeKeyIdentity: () => this.runtime.scopeKeyIdentity,
       writersByEntity: this.#writeIndex.writersByEntity,
-      effects: this.nodes.effects,
+      effects: this.#nodes.effects,
       getSchedulingWrites: (action) =>
         this.#writeIndex.getSchedulingWrites(action),
     }, deps);
     const rearmed: Action[] = [];
     for (const writer of directWriters) {
-      const record = this.nodes.get(writer);
+      const record = this.#nodes.get(writer);
       if (record?.fanOut === undefined) continue;
       const actorKey = keyAtRatchet(record.fanOut, actor);
       if (actorKey === undefined) continue;
@@ -1058,7 +1145,7 @@ export class Scheduler {
       // cause dirtied it — nothing to materialize.
       if (record.fanOut.clean.has(actorKey)) continue;
       this.#markActionInvalid(writer, undefined, { fanOutInstances: "keep" });
-      this.pending.add(writer);
+      this.#pending.add(writer);
       rearmed.push(writer);
     }
     if (rearmed.length > 0) this.queueExecution();
@@ -1127,16 +1214,16 @@ export class Scheduler {
         }
       }
     }
-    const isRoot = this.nodes.isDemandedWriter(action);
+    const isRoot = this.#nodes.isDemandedWriter(action);
     if (shouldBeRoot === isRoot) return;
-    const record = this.nodes.get(action);
+    const record = this.#nodes.get(action);
     const wasLive = record !== undefined &&
       isLive(this.#dependencyGraphState, record);
     if (shouldBeRoot) {
-      this.nodes.demandedWriters.add(action);
+      this.#nodes.demandedWriters.add(action);
       this.demandRootCounters.enters += 1;
     } else {
-      this.nodes.demandedWriters.delete(action);
+      this.#nodes.demandedWriters.delete(action);
       this.demandRootCounters.leaves += 1;
     }
     if (record === undefined) return;
@@ -1147,7 +1234,7 @@ export class Scheduler {
     ) {
       // A dirty / never-ran node that just became live is a runnable seed
       // (work-oracle: dirty ∧ live); make sure the loop wakes for it.
-      this.pending.add(action);
+      this.#pending.add(action);
       this.queueExecution();
     }
   }
@@ -1208,14 +1295,14 @@ export class Scheduler {
     if (writers === undefined || writers.size === 0) return 0;
     let rearmed = 0;
     for (const writer of writers) {
-      const record = this.nodes.get(writer);
+      const record = this.#nodes.get(writer);
       if (record === undefined) continue;
       if (record.fanOut === undefined) continue;
       const pairKey = keyAtRatchet(record.fanOut, demander);
       if (pairKey === undefined) continue;
       if (record.fanOut.clean.has(pairKey)) continue;
       this.#markActionInvalid(writer, undefined, { fanOutInstances: "keep" });
-      this.pending.add(writer);
+      this.#pending.add(writer);
       rearmed += 1;
     }
     if (rearmed > 0) {
@@ -1228,7 +1315,7 @@ export class Scheduler {
   /** DIAGNOSTIC: the standing demanded-writer root set's size (T9′: empty
    * off the serving posture). */
   get demandedWriterCount(): number {
-    return this.nodes.demandedWriters.size;
+    return this.#nodes.demandedWriters.size;
   }
 
   /** DIAGNOSTIC: the demanded entity refcount map's size. */
@@ -1246,10 +1333,10 @@ export class Scheduler {
     cleanKeys: string[];
   } | undefined {
     const record = typeof action === "string"
-      ? [...this.nodes.nodes()].find((candidate) =>
-        this.getActionId(candidate.action) === action
+      ? [...this.#nodes.nodes()].find((candidate) =>
+        this.#getActionId(candidate.action) === action
       )
-      : this.nodes.get(action);
+      : this.#nodes.get(action);
     const state = record?.fanOut;
     if (state === undefined) return undefined;
     return {
@@ -1275,17 +1362,17 @@ export class Scheduler {
 
   queueExecution(): void {
     if (this.#disposed) return;
-    if (this.scheduled) {
-      if (this.pendingQueueTaskTimer === null) {
+    if (this.#scheduled) {
+      if (this.#pendingQueueTaskTimer === null) {
         this.#rerunAfterCurrentExecute = true;
       }
       return;
     }
-    this.pendingQueueTaskTimer = queueTask(() => {
-      this.pendingQueueTaskTimer = null;
+    this.#pendingQueueTaskTimer = queueTask(() => {
+      this.#pendingQueueTaskTimer = null;
       this.execute();
     });
-    this.scheduled = true;
+    this.#scheduled = true;
   }
 
   queueEvent(
@@ -1367,7 +1454,7 @@ export class Scheduler {
       );
       return;
     }
-    queueSchedulerEvent(this.eventQueueState, {
+    queueSchedulerEvent(this.#eventQueueState, {
       eventLink,
       event,
       retries,
@@ -1391,7 +1478,7 @@ export class Scheduler {
     onCommit,
     opts,
   ) =>
-    queueSchedulerEvent(this.eventQueueState, {
+    queueSchedulerEvent(this.#eventQueueState, {
       eventLink,
       event,
       retries,
@@ -1496,7 +1583,7 @@ export class Scheduler {
   }
 
   onError(fn: ErrorHandler): void {
-    this.errorHandlers.add(fn);
+    this.#errorHandlers.add(fn);
   }
 
   setEventPreflightTelemetryEnabled(enabled: boolean): void {
@@ -1517,15 +1604,15 @@ export class Scheduler {
    * If triggered again during the delay, the timer resets.
    */
   setDebounce(action: Action, ms: number): void {
-    this.gates.setDebounce(action, ms);
+    this.#gates.setDebounce(action, ms);
     // Configuring a debounce on an already-invalid computation starts its
     // trailing window now — the same re-arm an invalidation would do
     // (arming is otherwise the invalidation path's job; queries stay pure).
-    const record = this.nodes.get(action);
+    const record = this.#nodes.get(action);
     if (
       ms > 0 && record?.kind === "computation" && this.#isInvalidAction(action)
     ) {
-      this.gates.onInvalidated(
+      this.#gates.onInvalidated(
         record,
         performance.now(),
         this.#createDebouncedComputationContext(),
@@ -1537,14 +1624,14 @@ export class Scheduler {
    * Gets the current debounce delay for an action, if set.
    */
   getDebounce(action: Action): number | undefined {
-    return this.gates.getDebounce(action);
+    return this.#gates.getDebounce(action);
   }
 
   /**
    * Clears the debounce setting for an action.
    */
   clearDebounce(action: Action): void {
-    this.gates.clearDebounce(action);
+    this.#gates.clearDebounce(action);
   }
 
   /**
@@ -1553,7 +1640,7 @@ export class Scheduler {
    * By default, slow actions (> 50ms avg after 3 runs) will automatically get debounced.
    */
   setNoDebounce(action: Action, optOut: boolean): void {
-    this.gates.setNoDebounce(action, optOut);
+    this.#gates.setNoDebounce(action, optOut);
   }
 
   //
@@ -1568,21 +1655,21 @@ export class Scheduler {
    * dependencies are throttled are parked until the earliest eligible wake time.
    */
   setThrottle(action: Action, ms: number): void {
-    this.gates.setThrottle(action, ms);
+    this.#gates.setThrottle(action, ms);
   }
 
   /**
    * Gets the current throttle period for an action, if set.
    */
   getThrottle(action: Action): number | undefined {
-    return this.gates.getThrottle(action);
+    return this.#gates.getThrottle(action);
   }
 
   /**
    * Clears the throttle setting for an action.
    */
   clearThrottle(action: Action): void {
-    this.gates.clearThrottle(action);
+    this.#gates.clearThrottle(action);
   }
 
   /**
@@ -1615,9 +1702,9 @@ export class Scheduler {
    */
   getStats(): { effects: number; computations: number; pending: number } {
     return {
-      effects: this.nodes.effects.size,
-      computations: this.nodes.computations.size,
-      pending: this.pending.size,
+      effects: this.#nodes.effects.size,
+      computations: this.#nodes.computations.size,
+      pending: this.#pending.size,
     };
   }
 
@@ -1625,14 +1712,14 @@ export class Scheduler {
    * Returns whether an action is registered as an effect.
    */
   isEffect(action: Action): boolean {
-    return this.nodes.effects.has(action);
+    return this.#nodes.effects.has(action);
   }
 
   /**
    * Returns whether an action is registered as a computation.
    */
   isComputation(action: Action): boolean {
-    return this.nodes.computations.has(action);
+    return this.#nodes.computations.has(action);
   }
 
   /**
@@ -1776,7 +1863,7 @@ export class Scheduler {
    * indicating the system is churning.
    */
   isNonSettling(): boolean {
-    return this.settlingTracker.nonSettlingDetected;
+    return this.#settlingTracker.nonSettlingDetected;
   }
 
   /**
@@ -1837,10 +1924,10 @@ export class Scheduler {
     this.#headEventLoadPark = null;
     this.#headEventLoadParkHistory = null;
     this.#disposed = true;
-    this.gates.cancelWake();
-    if (this.pendingQueueTaskTimer !== null) {
-      clearTimeout(this.pendingQueueTaskTimer);
-      this.pendingQueueTaskTimer = null;
+    this.#gates.cancelWake();
+    if (this.#pendingQueueTaskTimer !== null) {
+      clearTimeout(this.#pendingQueueTaskTimer);
+      this.#pendingQueueTaskTimer = null;
     }
     this.#triggerIndex.clear();
     this.#wakeShaper.dispose();
@@ -1873,7 +1960,7 @@ export class Scheduler {
       clearTimeout(this.#diagnosisTimeout);
       this.#diagnosisTimeout = null;
     }
-    this.diagnosisEnabled = false;
+    this.#diagnosisEnabled = false;
   }
 
   //
@@ -1883,7 +1970,7 @@ export class Scheduler {
   #handleError(error: Error, action: any) {
     handleSchedulerError(
       {
-        errorHandlers: this.errorHandlers,
+        errorHandlers: this.#errorHandlers,
         parseStack: (stack) => this.runtime.harness.parseStack(stack),
       },
       error,
@@ -1891,6 +1978,13 @@ export class Scheduler {
     );
   }
 
+  /**
+   * Runs one scheduler pass.
+   *
+   * TypeScript-private rather than a `#` name, because
+   * `test/scheduler-event-load-park.test.ts` replaces this member by
+   * assignment, which a `#` method does not allow.
+   */
   private async execute(): Promise<void> {
     if (this.#disposed) return;
     logger.timeStart("scheduler", "execute");
@@ -1907,8 +2001,8 @@ export class Scheduler {
     const initialSeeds = this.#buildInitialExecuteSeeds(eventBlockingDeps);
 
     const settleResult = await this.#runSettleLoop(initialSeeds);
-    this.recordBudgetBackoffTelemetry(settleResult);
-    this.recordExecuteEndTelemetry();
+    this.#recordBudgetBackoffTelemetry(settleResult);
+    this.#recordExecuteEndTelemetry();
     this.#applyExecuteContinuation();
     logger.timeEnd("scheduler", "execute");
   }
@@ -1916,12 +2010,12 @@ export class Scheduler {
   #beginExecuteCycle(): void {
     this.#activePassId = ++this.#passCounter;
     this.#provisionalDemandThisPass.clear();
-    for (const record of this.nodes.nodes()) {
+    for (const record of this.#nodes.nodes()) {
       record.passRuns = 0;
     }
 
     // Non-settling heuristic: record execute() start
-    markExecuteStart(this.settlingTracker);
+    markExecuteStart(this.#settlingTracker);
   }
 
   async #processExecuteEventPhase(): Promise<Set<Action>> {
@@ -1932,7 +2026,7 @@ export class Scheduler {
     logger.timeStart("scheduler", "execute", "event");
     try {
       await processPullQueuedEventDuringExecute(
-        this.eventExecutionState,
+        this.#eventExecutionState,
         eventBlockingDeps,
       );
       return eventBlockingDeps;
@@ -1977,7 +2071,7 @@ export class Scheduler {
     });
 
     this.#clearProvisionalDemandAtPassEnd();
-    this.clearBackoffForCleanNodes();
+    this.#clearBackoffForCleanNodes();
     this.#activePassId = undefined;
 
     return settleResult;
@@ -1987,7 +2081,7 @@ export class Scheduler {
     applyPullExecuteContinuation(this.#executeContinuationState);
   }
 
-  private recordBudgetBackoffTelemetry(
+  #recordBudgetBackoffTelemetry(
     settleResult: SchedulerSettleResult,
   ): void {
     if (!settleResult.backoffApplied) return;
@@ -1997,14 +2091,14 @@ export class Scheduler {
     );
     this.runtime.telemetry.submit({
       type: "scheduler.non-settling",
-      ...summarizeNonSettlingWindow(this.settlingTracker),
+      ...summarizeNonSettlingWindow(this.#settlingTracker),
       deferredActions,
       deferredActionCount: settleResult.backoffActions.length,
     });
 
     // The marker carries every episode; the warning is a latched
     // summary so a permanently non-converging graph does not flood the log.
-    if (markNonSettlingEpisode(this.settlingTracker)) {
+    if (markNonSettlingEpisode(this.#settlingTracker)) {
       this.#warnNonSettlingActions(
         settleResult.backoffActions,
         deferredActions,
@@ -2024,7 +2118,7 @@ export class Scheduler {
   ): NonSettlingDeferredAction[] {
     const maxListedActions = 10;
     return actions.slice(0, maxListedActions).map((action) => {
-      const actionId = this.getActionId(action);
+      const actionId = this.#getActionId(action);
       const info = getSchedulerActionTelemetryInfo(action);
       const readableName = info?.moduleName ?? info?.patternName;
       const label = readableName && readableName !== actionId
@@ -2066,10 +2160,10 @@ export class Scheduler {
     ]);
   }
 
-  private recordExecuteEndTelemetry(): void {
+  #recordExecuteEndTelemetry(): void {
     // Non-settling heuristic: accumulate busy time at end of execute()
-    const executeEnd = recordExecuteEnd(this.settlingTracker);
-    if (this.diagnosisEnabled) {
+    const executeEnd = recordExecuteEnd(this.#settlingTracker);
+    if (this.#diagnosisEnabled) {
       this.#diagnosisBusyTime += executeEnd.diagnosisBusyTimeMs;
     }
     if (executeEnd.nonSettlingTelemetry) {
@@ -2078,7 +2172,7 @@ export class Scheduler {
         ...executeEnd.nonSettlingTelemetry,
       });
       // Auto-trigger diagnosis if enabled
-      if (this.#autoTriggerDiagnosis && !this.diagnosisEnabled) {
+      if (this.#autoTriggerDiagnosis && !this.#diagnosisEnabled) {
         this.#startDiagnosis();
       }
     }
@@ -2107,8 +2201,8 @@ export class Scheduler {
    * Updates the reverse dependency graph (dependents map).
    * For each action that writes to paths this action reads, add this action as a dependent.
    */
-  private updateDependents(action: Action, log: ReactivityLog): void {
-    const actionId = this.getActionId(action);
+  #updateDependents(action: Action, log: ReactivityLog): void {
+    const actionId = this.#getActionId(action);
     updateDependentEdgesForLog(this.#dependencyGraphState, action, log);
 
     // Emit telemetry for dependency updates
@@ -2134,7 +2228,7 @@ export class Scheduler {
     this.#eventPreflightDependencyState = this
       .#createEventPreflightDependencyState();
     this.#dependencyGraphState = this.#createDependencyGraphState();
-    this.dependencyUpdateState = this.#createDependencyUpdateState();
+    this.#dependencyUpdateState = this.#createDependencyUpdateState();
     this.#triggerSubscriptionState = this.#createTriggerSubscriptionState();
     this.#storageNotificationState = this.#createStorageNotificationState();
     this.#pendingPullRunnableState = this.#createPendingPullRunnableState();
@@ -2147,17 +2241,17 @@ export class Scheduler {
     this.#unsubscribeState = this.#createUnsubscribeState();
     this.#settleLoopState = this.#createSettleLoopState();
     this.#executeContinuationState = this.#createExecuteContinuationState();
-    this.eventQueueState = this.#createEventQueueState();
-    this.eventExecutionState = this.#createEventExecutionState();
+    this.#eventQueueState = this.#createEventQueueState();
+    this.#eventExecutionState = this.#createEventExecutionState();
     this.#actionRunState = this.#createActionRunState();
     this.#graphSnapshotState = this.#createGraphSnapshotState();
   }
 
   #createDiagnosisControlState(): SchedulerDiagnosisControlState {
     return {
-      getDiagnosisEnabled: () => this.diagnosisEnabled,
+      getDiagnosisEnabled: () => this.#diagnosisEnabled,
       setDiagnosisEnabled: (enabled) => {
-        this.diagnosisEnabled = enabled;
+        this.#diagnosisEnabled = enabled;
       },
       getDiagnosisTimeout: () => this.#diagnosisTimeout,
       setDiagnosisTimeout: (timeout) => {
@@ -2179,7 +2273,7 @@ export class Scheduler {
       diagnosisNonIdempotent: this.#diagnosisNonIdempotent,
       causalEdges: this.#causalEdges,
       idempotencyViolations: this.#idempotencyViolations,
-      computations: this.nodes.computations,
+      computations: this.#nodes.computations,
       setIdempotencyCheckMode: (enabled) => {
         this.#idempotencyCheckMode = enabled;
       },
@@ -2195,18 +2289,18 @@ export class Scheduler {
     return {
       scopeKeyIdentity: () => this.runtime.scopeKeyIdentity,
       getTrace: () => this.#eventPreflightTraceContext,
-      nodes: this.nodes,
-      pending: this.pending,
+      nodes: this.#nodes,
+      pending: this.#pending,
       reverseDependencies: this.#reverseDependencies,
       dependents: this.#dependents,
       dependencies: this.#dependencies,
       writersByEntity: this.#writeIndex.writersByEntity,
-      effects: this.nodes.effects,
-      materializerIndex: this.materializers,
+      effects: this.#nodes.effects,
+      materializerIndex: this.#materializers,
       triggerIndex: this.#triggerIndex,
       getSchedulingWrites: (target) =>
         this.#writeIndex.getSchedulingWrites(target),
-      getActionId: (target) => this.getActionId(target),
+      getActionId: (target) => this.#getActionId(target),
     };
   }
 
@@ -2218,8 +2312,8 @@ export class Scheduler {
       dependencies: this.#dependencies,
       dependents: this.#dependents,
       reverseDependencies: this.#reverseDependencies,
-      nodes: this.nodes,
-      materializerIndex: this.materializers,
+      nodes: this.#nodes,
+      materializerIndex: this.#materializers,
       getSchedulingWrites: (action) =>
         this.#writeIndex.getSchedulingWrites(action),
     };
@@ -2235,8 +2329,8 @@ export class Scheduler {
   #createTriggerSubscriptionState(): TriggerSubscriptionState {
     return new SchedulerTriggerSubscriptions({
       triggerIndex: this.#triggerIndex,
-      cancels: this.cancels,
-      getActionId: (action) => this.getActionId(action),
+      cancels: this.#cancels,
+      getActionId: (action) => this.#getActionId(action),
       onTriggerUnsubscribe: (actionId, entityCount) => {
         logger.debug("schedule-unsubscribe", () => [
           `Action: ${actionId}`,
@@ -2249,17 +2343,17 @@ export class Scheduler {
   #createStorageNotificationState(): StorageNotificationState {
     return {
       triggerIndex: this.#triggerIndex,
-      nodes: this.nodes,
-      getDiagnosisEnabled: () => this.diagnosisEnabled,
+      nodes: this.#nodes,
+      getDiagnosisEnabled: () => this.#diagnosisEnabled,
       getCollectTriggerTrace: () => this.#collectTriggerTrace,
       changeGroupToActionId: this.#changeGroupToActionId,
       recordCausalEdge: (edge) => {
         this.#causalEdges.push(edge);
       },
       actionChangeGroups: this.#actionChangeGroups,
-      effects: this.nodes.effects,
-      pending: this.pending,
-      getActionId: (target) => this.getActionId(target),
+      effects: this.#nodes.effects,
+      pending: this.#pending,
+      getActionId: (target) => this.#getActionId(target),
       recordCellUpdate: (change) =>
         this.runtime.telemetry.submit({
           type: "cell.update",
@@ -2269,9 +2363,9 @@ export class Scheduler {
         recordTriggerTraceState({ triggerTrace: this.#triggerTrace }, entry),
       scheduleWithDebounce: (target) => this.#scheduleWithDebounce(target),
       markInvalid: (target, cause) =>
-        this.markAndScheduleInvalidAction(target, cause),
+        this.#markAndScheduleInvalidAction(target, cause),
       isInvalid: (target) => this.#isInvalidAction(target),
-      materializerIndex: this.materializers,
+      materializerIndex: this.#materializers,
       queueExecution: () => this.queueExecution(),
       isRendererInputSource: (source) =>
         source !== undefined && isRendererInputTx(source),
@@ -2298,9 +2392,9 @@ export class Scheduler {
 
   #createPendingPullRunnableState(): PendingPullRunnableState {
     return {
-      effects: this.nodes.effects,
+      effects: this.#nodes.effects,
       isDemandedPullComputation: (action) =>
-        this.isDemandedPullComputation(action),
+        this.#isDemandedPullComputation(action),
       shouldRunFirstPullComputationInDemandContext: (action) =>
         this.#shouldRunFirstPullComputationInDemandContext(action),
     };
@@ -2308,10 +2402,10 @@ export class Scheduler {
 
   #createDirtyPullRunnableState(): DirtyPullRunnableState {
     return {
-      effects: this.nodes.effects,
+      effects: this.#nodes.effects,
       isDemandedPullComputation: (action) =>
-        this.isDemandedPullComputation(action),
-      isThrottled: (action) => this.gates.isThrottled(action),
+        this.#isDemandedPullComputation(action),
+      isThrottled: (action) => this.#gates.isThrottled(action),
     };
   }
 
@@ -2325,17 +2419,17 @@ export class Scheduler {
 
   #createPullSchedulingState(): PullSchedulingState {
     return {
-      nodes: this.nodes,
-      pending: this.pending,
-      effects: this.nodes.effects,
-      materializerIndex: this.materializers,
+      nodes: this.#nodes,
+      pending: this.#pending,
+      effects: this.#nodes.effects,
+      materializerIndex: this.#materializers,
       pendingPullRunnableState: this.#pendingPullRunnableState,
       dirtyPullRunnableState: this.#dirtyPullRunnableState,
       dirtyPullRunnableStateWithDebounce: this
         .#dirtyPullRunnableStateWithDebounce,
       isLiveAction: (action) => this.#isLiveAction(action),
       hasActiveDebounceTimer: (action) =>
-        this.gates.hasActiveDebounceTimer(action),
+        this.#gates.hasActiveDebounceTimer(action),
       getNextEligibleRunTime: (action) => this.#getNextEligibleRunTime(action),
       // Engaged only while an initial rehydration is being applied (synchronous
       // post-phase-7). MUST NOT read backgroundTasks: that set holds work such
@@ -2351,12 +2445,12 @@ export class Scheduler {
   }
 
   #isConvergenceHoldActive(action: Action): boolean {
-    return (this.nodes.get(action)?.gate.convergenceHoldPasses ?? 0) <
+    return (this.#nodes.get(action)?.gate.convergenceHoldPasses ?? 0) <
       CONVERGENCE_IDLE_HOLD_MAX_BACKOFF_PASSES;
   }
 
   #resetConvergenceHoldPasses(): void {
-    for (const record of this.nodes.nodes()) {
+    for (const record of this.#nodes.nodes()) {
       record.gate.convergenceHoldPasses = 0;
     }
   }
@@ -2367,7 +2461,7 @@ export class Scheduler {
   // also rides `backoffUntil` only applies to never-ran nodes. Throttle and
   // debounce use their own gate fields, so this cleanly excludes them.
   #isConvergenceBackoffDeferred(action: Action): boolean {
-    const backoffUntil = this.nodes.get(action)?.gate.backoffUntil;
+    const backoffUntil = this.#nodes.get(action)?.gate.backoffUntil;
     return backoffUntil !== undefined && backoffUntil > performance.now();
   }
 
@@ -2375,11 +2469,11 @@ export class Scheduler {
     return {
       actionChangeGroups: this.#actionChangeGroups,
       changeGroupToActionId: this.#changeGroupToActionId,
-      nodes: this.nodes,
+      nodes: this.#nodes,
       dependencyGraphState: this.#dependencyGraphState,
       getIdempotencyCheckMode: () => this.#idempotencyCheckMode,
       queueExecution: () => this.queueExecution(),
-      getActionId: (target) => this.getActionId(target),
+      getActionId: (target) => this.#getActionId(target),
       getExecutingAction: () => this.#executingAction,
     };
   }
@@ -2387,23 +2481,23 @@ export class Scheduler {
   #createSubscribeActionState(): SchedulerSubscribeActionState {
     return {
       subscriptionState: this.#subscriptionState,
-      dependencyUpdateState: this.dependencyUpdateState,
+      dependencyUpdateState: this.#dependencyUpdateState,
       triggerSubscriptionState: this.#triggerSubscriptionState,
       markProvisionalDemand: (record) => this.#markProvisionalDemand(record),
-      pending: this.pending,
-      effects: this.nodes.effects,
+      pending: this.#pending,
+      effects: this.#nodes.effects,
       writeIndex: this.#writeIndex,
-      adoptGateConfig: (action) => this.gates.adopt(action),
+      adoptGateConfig: (action) => this.#gates.adopt(action),
       setDebounce: (action, ms) => this.setDebounce(action, ms),
       setNoDebounce: (action, optOut) => this.setNoDebounce(action, optOut),
       setThrottle: (action, ms) => this.setThrottle(action, ms),
       getSchedulingWrites: (action) =>
         this.#writeIndex.getSchedulingWrites(action),
-      isThrottled: (action) => this.gates.isThrottled(action),
+      isThrottled: (action) => this.#gates.isThrottled(action),
       isDebouncedComputationWaiting: (action) =>
         this.#isDebouncedComputationWaiting(action),
-      markInvalid: (action) => this.markAndScheduleInvalidAction(action),
-      updateDependents: (action, log) => this.updateDependents(action, log),
+      markInvalid: (action) => this.#markAndScheduleInvalidAction(action),
+      updateDependents: (action, log) => this.#updateDependents(action, log),
       registerWriterDependents: (action, writes) =>
         registerDependentsForWriterSurface(
           this.#dependencyGraphState,
@@ -2411,7 +2505,7 @@ export class Scheduler {
           writes,
         ),
       queueExecution: () => this.queueExecution(),
-      getActionId: (action) => this.getActionId(action),
+      getActionId: (action) => this.#getActionId(action),
       unsubscribe: (action) => this.unsubscribe(action),
       submitSubscribeTelemetry: (event) => {
         this.runtime.telemetry.submit(event);
@@ -2421,22 +2515,22 @@ export class Scheduler {
 
   #createUnsubscribeState(): SchedulerUnsubscribeActionState {
     return {
-      cancels: this.cancels,
+      cancels: this.#cancels,
       dependencies: this.#dependencies,
       actionChangeGroups: this.#actionChangeGroups,
       changeGroupToActionId: this.#changeGroupToActionId,
-      pending: this.pending,
+      pending: this.#pending,
       reverseDependencies: this.#reverseDependencies,
       dependents: this.#dependents,
       dependencyGraphState: this.#dependencyGraphState,
-      nodes: this.nodes,
+      nodes: this.#nodes,
       writeIndex: this.#writeIndex,
-      getActionId: (target) => this.getActionId(target),
+      getActionId: (target) => this.#getActionId(target),
       clearInvalid: (target) => this.#clearInvalidAction(target),
-      cancelDebounceTimer: (target) => this.gates.cancelDebounceTimer(target),
+      cancelDebounceTimer: (target) => this.#gates.cancelDebounceTimer(target),
       clearComputationDebounceState: (target, targetOptions) =>
-        this.gates.clearComputationDebounceState(target, targetOptions),
-      recomputeWakeAfterClear: () => this.gates.recomputeWakeAfterClear(),
+        this.#gates.clearComputationDebounceState(target, targetOptions),
+      recomputeWakeAfterClear: () => this.#gates.recomputeWakeAfterClear(),
     };
   }
 
@@ -2444,14 +2538,14 @@ export class Scheduler {
     return {
       scopeKeyIdentity: () => this.runtime.scopeKeyIdentity,
       getCollectSettleStats: () => this.#collectSettleStats,
-      effects: this.nodes.effects,
-      computations: this.nodes.computations,
-      pending: this.pending,
+      effects: this.#nodes.effects,
+      computations: this.#nodes.computations,
+      pending: this.#pending,
       dependencies: this.#dependencies,
-      nodes: this.nodes,
+      nodes: this.#nodes,
       dependents: this.#dependents,
       filterStats: this.#filterStats,
-      materializerIndex: this.materializers,
+      materializerIndex: this.#materializers,
       writersByEntity: this.#writeIndex.writersByEntity,
       getSchedulingWrites: (action) =>
         this.#writeIndex.getSchedulingWrites(action),
@@ -2461,13 +2555,13 @@ export class Scheduler {
       refreshPassScopedDemand: (demand) => {
         this.#eventPassDemandRefresh?.(demand);
       },
-      getActionId: (action) => this.getActionId(action),
-      isThrottled: (action) => this.gates.isThrottled(action),
+      getActionId: (action) => this.#getActionId(action),
+      isThrottled: (action) => this.#gates.isThrottled(action),
       getNextEligibleRunTime: (action) => this.#getNextEligibleRunTime(action),
       isDebouncedComputationWaiting: (action) =>
         this.#isDebouncedComputationWaiting(action),
       clearComputationDebounceState: (action) =>
-        this.gates.clearComputationDebounceState(action),
+        this.#gates.clearComputationDebounceState(action),
       isLiveAction: (action) => this.#isLiveAction(action),
       runAction: (action) => this.run(action),
       // Stage C tuning T3: only a serving runtime yields between runs.
@@ -2480,7 +2574,7 @@ export class Scheduler {
   #createExecuteContinuationState(): ExecuteContinuationState {
     return {
       pullScheduling: this.#pullSchedulingState,
-      eventQueue: this.eventQueue,
+      eventQueue: this.#eventQueue,
       idlePromises: this.#idlePromises,
       consumeRerunAfterCurrentExecute: () => {
         const shouldRerun = this.#rerunAfterCurrentExecute;
@@ -2489,19 +2583,19 @@ export class Scheduler {
       },
       hasPendingLineageHeadEvent: () => this.#hasPendingLineageHeadEvent(),
       hasLoadParkedHeadEvent: () => this.#hasLoadParkedHeadEvent(),
-      scheduleWake: (at) => this.gates.scheduleWake(at),
-      hasWakeTimer: () => this.gates.hasWakeTimer(),
+      scheduleWake: (at) => this.#gates.scheduleWake(at),
+      hasWakeTimer: () => this.#gates.hasWakeTimer(),
       setScheduled: (scheduled) => {
-        this.scheduled = scheduled;
+        this.#scheduled = scheduled;
       },
       resetSettlingTracker: () => {
-        this.settlingTracker = createSettlingTracker();
+        this.#settlingTracker = createSettlingTracker();
       },
       resetConvergenceHoldPasses: () => {
         this.#resetConvergenceHoldPasses();
       },
       setPendingQueueTaskTimer: (timer) => {
-        this.pendingQueueTaskTimer = timer;
+        this.#pendingQueueTaskTimer = timer;
       },
       execute: () => this.execute(),
     };
@@ -2511,7 +2605,7 @@ export class Scheduler {
     return {
       runtime: this.runtime,
       eventHandlers: this.#eventHandlers,
-      eventQueue: this.eventQueue,
+      eventQueue: this.#eventQueue,
       backgroundTasks: this.#backgroundTasks,
       queueExecution: () => this.queueExecution(),
       recordLineageEvent: (originTx, queuedEvent) => {
@@ -2528,7 +2622,7 @@ export class Scheduler {
       this.#eventPreflightTelemetryEnabled;
     return {
       runtime: this.runtime,
-      eventQueue: this.eventQueue,
+      eventQueue: this.#eventQueue,
       backpressure: this.runtime.commitBackpressure,
       collectPendingLoadParkKeys: (event, deps) =>
         this.#collectPendingLoadParkKeys(event, deps),
@@ -2537,15 +2631,15 @@ export class Scheduler {
       parkHeadEventForLoads: (event, keys) =>
         this.#parkHeadEventForLoads(event, keys),
       isHeadEventLoadParked: (event) => this.#isHeadEventLoadParked(event),
-      nodes: this.nodes,
-      pending: this.pending,
+      nodes: this.#nodes,
+      pending: this.#pending,
       get eventPreflightTelemetryEnabled() {
         return getEventPreflightTelemetryEnabled();
       },
       setRunningPromise: (promise) => {
         this.runningPromise = promise;
       },
-      getActionId: (target) => this.getActionId(target),
+      getActionId: (target) => this.#getActionId(target),
       getActionTelemetryInfo: (target) =>
         getSchedulerActionTelemetryInfo(target),
       handleError: (error, target) => this.#handleError(error, target),
@@ -2576,7 +2670,7 @@ export class Scheduler {
         this.#isDebouncedComputationWaiting(target),
       getNextDebounceRunTime: (target) => this.#getNextDebounceRunTime(target),
       getNextEligibleRunTime: (target) => this.#getNextEligibleRunTime(target),
-      scheduleWake: (notBefore) => this.gates.scheduleWake(notBefore),
+      scheduleWake: (notBefore) => this.#gates.scheduleWake(notBefore),
       lineageStatus: (originTx) => this.lineage.originStatus(originTx),
       releaseLineageEvent: (originTx, queuedEvent) => {
         this.lineage.release(originTx, queuedEvent);
@@ -2602,11 +2696,11 @@ export class Scheduler {
       runtime: this.runtime,
       actionChangeGroups: this.#actionChangeGroups,
       actionTimingState: this.#actionTimingState,
-      retries: this.retries,
+      retries: this.#retries,
       offBudgetRetries: this.#offBudgetRetries,
-      pending: this.pending,
+      pending: this.#pending,
       actionRunTrace: this.#actionRunTrace,
-      nodes: this.nodes,
+      nodes: this.#nodes,
       diagnosisHistory: this.#diagnosisHistory,
       diagnosisNonIdempotent: this.#diagnosisNonIdempotent,
       idempotencyViolations: this.#idempotencyViolations,
@@ -2615,20 +2709,20 @@ export class Scheduler {
         this.runningPromise = promise;
       },
       getCollectActionRunTrace: () => this.#collectActionRunTrace,
-      getDiagnosisEnabled: () => this.diagnosisEnabled,
+      getDiagnosisEnabled: () => this.#diagnosisEnabled,
       getIdempotencyCheckMode: () => this.#idempotencyCheckMode,
-      getActionId: (target) => this.getActionId(target),
+      getActionId: (target) => this.#getActionId(target),
       getActionTelemetryInfo: (target) =>
         getSchedulerActionTelemetryInfo(target),
       getSchedulingWrites: (target) =>
         this.#writeIndex.getSchedulingWrites(target),
       getMaterializerWriteEnvelopes: (target) =>
-        this.materializers.getMaterializerWriteEnvelopes(target),
-      getDebounce: (target) => this.gates.getDebounce(target),
-      getNoDebounce: (target) => this.gates.getNoDebounce(target),
-      getThrottle: (target) => this.gates.getThrottle(target),
-      maybeAutoDebounce: (target) => this.maybeAutoDebounce(target),
-      markActionHasRun: (target) => this.gates.markActionHasRun(target),
+        this.#materializers.getMaterializerWriteEnvelopes(target),
+      getDebounce: (target) => this.#gates.getDebounce(target),
+      getNoDebounce: (target) => this.#gates.getNoDebounce(target),
+      getThrottle: (target) => this.#gates.getThrottle(target),
+      maybeAutoDebounce: (target) => this.#maybeAutoDebounce(target),
+      markActionHasRun: (target) => this.#gates.markActionHasRun(target),
       markNodeHasRun: (target) => this.#markNodeHasRun(target),
       handleError: (error, target) => this.#handleError(error, target),
       resubscribe: (target, log) => this.resubscribe(target, log),
@@ -2649,24 +2743,24 @@ export class Scheduler {
   #createGraphSnapshotState(): SchedulerGraphSnapshotState {
     return {
       scopeKeyIdentity: () => this.runtime.scopeKeyIdentity,
-      effects: this.nodes.effects,
-      computations: this.nodes.computations,
-      pending: this.pending,
+      effects: this.#nodes.effects,
+      computations: this.#nodes.computations,
+      pending: this.#pending,
       dependencies: this.#dependencies,
       dependents: this.#dependents,
-      nodes: this.nodes,
-      actionStats: this.actionStats,
-      getDebounce: (action) => this.gates.getDebounce(action),
-      getThrottle: (action) => this.gates.getThrottle(action),
+      nodes: this.#nodes,
+      actionStats: this.#actionStats,
+      getDebounce: (action) => this.#gates.getDebounce(action),
+      getThrottle: (action) => this.#gates.getThrottle(action),
       hasActiveDebounceTimer: (action) =>
-        this.gates.hasActiveDebounceTimer(action),
-      getActionId: (action) => this.getActionId(action),
+        this.#gates.hasActiveDebounceTimer(action),
+      getActionId: (action) => this.#getActionId(action),
       getSchedulingWrites: (action) =>
         this.#writeIndex.getSchedulingWrites(action),
       getNextDebounceRunTime: (action) => this.#getNextDebounceRunTime(action),
       getNextEligibleRunTime: (action) => this.#getNextEligibleRunTime(action),
       isDemandedPullComputation: (action) =>
-        this.isDemandedPullComputation(action),
+        this.#isDemandedPullComputation(action),
       isLiveEffect: (action) => this.#isLiveEffect(action),
       isPullDemandRootEffect: (action) => this.#isPullDemandRootEffect(action),
       getPatternIdentity: (action) => {
@@ -2687,12 +2781,12 @@ export class Scheduler {
    * Prefers .src (set as backup) over .name, falls back to a generated ID.
    * This ID is used for stats tracking to persist across action recreation.
    */
-  private getActionId(action: Action | EventHandler): string {
+  #getActionId(action: Action | EventHandler): string {
     return getSchedulerActionId(this.#actionIdentityState, action);
   }
 
-  private isDemandedPullComputation(action: Action): boolean {
-    const record = this.nodes.get(action);
+  #isDemandedPullComputation(action: Action): boolean {
+    const record = this.#nodes.get(action);
     return record?.kind === "computation" &&
       isLive(this.#dependencyGraphState, record);
   }
@@ -2700,34 +2794,34 @@ export class Scheduler {
   #shouldRunFirstPullComputationInDemandContext(
     action: Action,
   ): boolean {
-    const record = this.nodes.get(action);
+    const record = this.#nodes.get(action);
     return record?.kind === "computation" &&
       record.status === "never-ran" &&
       record.provisionalDemand;
   }
 
   #isLiveEffect(action: Action): boolean {
-    return this.nodes.get(action)?.kind === "effect";
+    return this.#nodes.get(action)?.kind === "effect";
   }
 
   #isLiveAction(action: Action): boolean {
-    const record = this.nodes.get(action);
+    const record = this.#nodes.get(action);
     return record !== undefined && isLive(this.#dependencyGraphState, record);
   }
 
   #isPullDemandRootEffect(action: Action): boolean {
-    const record = this.nodes.get(action);
+    const record = this.#nodes.get(action);
     return record?.kind === "effect" &&
       (this.#writeIndex.getSchedulingWrites(action)?.length ?? 0) === 0;
   }
 
   #isInvalidAction(action: Action): boolean {
-    const record = this.nodes.get(action);
+    const record = this.#nodes.get(action);
     return record?.status === "invalid" || record?.status === "never-ran";
   }
 
   #getNextEligibleRunTime(action: Action): number | undefined {
-    return this.gates.getNextEligibleRunTime(action);
+    return this.#gates.getNextEligibleRunTime(action);
   }
 
   #markActionInvalid(
@@ -2735,15 +2829,15 @@ export class Scheduler {
     cause?: IMemorySpaceAddress,
     options?: MarkInvalidOptions,
   ): void {
-    const record = this.nodes.get(action);
+    const record = this.#nodes.get(action);
     if (!record) return;
-    markInvalidRecord(this.nodes, action, cause, options);
+    markInvalidRecord(this.#nodes, action, cause, options);
     // Trailing computation debounce re-arms on every invalidation (§8.1:
     // debounceReadyAt resets while gated). Arming here — in the one
     // invalid-setter — covers every path (channel, registration, retry), so
     // gate QUERIES stay side-effect-free.
     if (record.kind === "computation") {
-      this.gates.onInvalidated(
+      this.#gates.onInvalidated(
         record,
         performance.now(),
         this.#createDebouncedComputationContext(),
@@ -2752,28 +2846,28 @@ export class Scheduler {
   }
 
   #clearInvalidAction(action: Action): void {
-    const record = this.nodes.get(action);
+    const record = this.#nodes.get(action);
     if (!record) return;
     if (record.status === "invalid") {
-      this.nodes.setStatus(action, "clean");
+      this.#nodes.setStatus(action, "clean");
     }
     record.invalidCauses.clear();
   }
 
-  private markAndScheduleInvalidAction(
+  #markAndScheduleInvalidAction(
     action: Action,
     cause?: IMemorySpaceAddress,
   ): void {
     this.#markActionInvalid(action, cause);
 
-    if (this.nodes.effects.has(action) && this.gates.getDebounce(action)) {
+    if (this.#nodes.effects.has(action) && this.#gates.getDebounce(action)) {
       this.#scheduleWithDebounce(action);
       return;
     }
     if (
       this.#isLiveAction(action) ||
-      this.materializers.isMaterializer(action) ||
-      this.pending.has(action)
+      this.#materializers.isMaterializer(action) ||
+      this.#pending.has(action)
     ) {
       this.queueExecution();
     }
@@ -2943,7 +3037,7 @@ export class Scheduler {
         },
       },
     );
-    for (const later of [...this.eventQueue]) {
+    for (const later of [...this.#eventQueue]) {
       if (later.eventLink.space !== event.eventLink.space) continue;
       if (later.served?.streamEntry === undefined) continue;
       this.#dropEvent(
@@ -2988,7 +3082,7 @@ export class Scheduler {
     dropQueuedEvent(
       {
         runtime: this.runtime,
-        eventQueue: this.eventQueue,
+        eventQueue: this.#eventQueue,
         releaseLineageEvent: (originTx, queuedEvent) => {
           this.lineage.release(originTx, queuedEvent);
         },
@@ -3020,7 +3114,7 @@ export class Scheduler {
     predicate: (event: QueuedEvent) => boolean,
     reason: string,
   ): number {
-    const matches = this.eventQueue.filter(predicate);
+    const matches = this.#eventQueue.filter(predicate);
     for (const event of matches) {
       this.#dropEvent(event, reason, { quiet: true });
     }
@@ -3032,13 +3126,13 @@ export class Scheduler {
   }
 
   #hasLoadParkedHeadEvent(): boolean {
-    const head = this.eventQueue[0];
+    const head = this.#eventQueue[0];
     return head !== undefined && this.#headEventLoadPark?.eventId === head.id;
   }
 
   #canAutomaticallyDebounce(action: Action): boolean {
-    return this.gates.canAutomaticallyDebounce(action, {
-      effects: this.nodes.effects,
+    return this.#gates.canAutomaticallyDebounce(action, {
+      effects: this.#nodes.effects,
     });
   }
 
@@ -3054,22 +3148,22 @@ export class Scheduler {
     return hasIdleBlockingDeferredPullWorkState(this.#pullSchedulingState);
   }
 
-  private clearBackoffForCleanNodes(): void {
+  #clearBackoffForCleanNodes(): void {
     let clearedDeadline = false;
-    for (const record of this.nodes.nodes()) {
+    for (const record of this.#nodes.nodes()) {
       if (record.status === "clean") {
         clearedDeadline = this.#clearNodeBackoff(record) || clearedDeadline;
       }
     }
-    if (clearedDeadline) this.gates.recomputeWakeAfterClear();
+    if (clearedDeadline) this.#gates.recomputeWakeAfterClear();
   }
 
   #clearNodeBackoff(record: SchedulerNode): boolean {
-    return this.gates.clearBackoff(record);
+    return this.#gates.clearBackoff(record);
   }
 
   #hasPendingLineageHeadEvent(): boolean {
-    const head = this.eventQueue[0];
+    const head = this.#eventQueue[0];
     if (head?.originTx === undefined) return false;
     if (this.lineage.originStatus(head.originTx) !== "pending") return false;
     return getCommitLocalSeq(head.originTx.tx, head.eventLink.space) ===
@@ -3077,9 +3171,9 @@ export class Scheduler {
   }
 
   #updateMaterializerRegistration(action: Action): void {
-    const record = this.nodes.get(action);
+    const record = this.#nodes.get(action);
     const wasLive = record ? isLive(this.#dependencyGraphState, record) : false;
-    this.materializers.register(
+    this.#materializers.register(
       action,
       (action as Partial<TelemetryAnnotations>).materializerWriteEnvelopes,
     );
@@ -3099,11 +3193,11 @@ export class Scheduler {
   }
 
   #markNodeHasRun(action: Action): void {
-    const record = this.nodes.get(action);
+    const record = this.#nodes.get(action);
     if (!record) return;
 
     if (record.status === "never-ran") {
-      this.nodes.setStatus(action, "clean");
+      this.#nodes.setStatus(action, "clean");
     }
 
     if (
@@ -3135,14 +3229,14 @@ export class Scheduler {
     // Same context as the waiting/schedule paths — the planner must agree
     // with them on the first-run debounce gate (shouldDebounceFirstRun), or a
     // scheduled debounce has no wake time.
-    return this.gates.getNextDebounceRunTime(
+    return this.#gates.getNextDebounceRunTime(
       action,
       this.#createDebouncedComputationContext(),
     );
   }
 
   #isDebouncedComputationWaiting(action: Action): boolean {
-    return this.gates.isDebouncedComputationWaiting(
+    return this.#gates.isDebouncedComputationWaiting(
       action,
       this.#createDebouncedComputationContext(),
     );
@@ -3154,8 +3248,8 @@ export class Scheduler {
    * Otherwise, it's added immediately.
    */
   #scheduleWithDebounce(action: Action): void {
-    this.gates.scheduleWithDebounce(action, {
-      pending: this.pending,
+    this.#gates.scheduleWithDebounce(action, {
+      pending: this.#pending,
       queueExecution: () => this.queueExecution(),
       logDebounce: (message) =>
         logger.debug("schedule-debounce", () => [message]),
@@ -3167,8 +3261,8 @@ export class Scheduler {
    * Called after recording action time to potentially enable debouncing for slow actions.
    * Auto-debounce is enabled by default; use noDebounce to opt out.
    */
-  private maybeAutoDebounce(action: Action): void {
-    const update = this.gates.maybeAutoDebounce(action, {
+  #maybeAutoDebounce(action: Action): void {
+    const update = this.#gates.maybeAutoDebounce(action, {
       canAutomaticallyDebounce: (candidate) =>
         this.#canAutomaticallyDebounce(candidate),
     });
@@ -3184,15 +3278,15 @@ export class Scheduler {
 
   #createDebouncedComputationContext() {
     return {
-      computations: this.nodes.computations,
-      effects: this.nodes.effects,
+      computations: this.#nodes.computations,
+      effects: this.#nodes.effects,
       isInvalid: (target: Action) => this.#isInvalidAction(target),
-      pending: this.pending,
+      pending: this.#pending,
       queueExecution: () => this.queueExecution(),
       logDebounce: (message: string) =>
         logger.debug("schedule-debounce", () => [message]),
       shouldDebounceFirstRun: (target: Action) => {
-        const record = this.nodes.get(target);
+        const record = this.#nodes.get(target);
         return record?.provisionalDemand === true &&
           record.status === "never-ran";
       },

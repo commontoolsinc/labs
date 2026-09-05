@@ -320,14 +320,7 @@ describe("scheduler v2 cutover fixtures", () => {
       await runtime.scheduler.idle();
       expect(runtime.scheduler.isDirty(effect)).toBe(false);
 
-      const internal = runtime.scheduler as unknown as {
-        nodes: {
-          get: (action: Action) =>
-            | { gate: { backoffUntil?: number } }
-            | undefined;
-        };
-        markAndScheduleInvalidAction: (action: Action) => void;
-      };
+      const internal = runtime.scheduler.accessForTestingOnly;
       internal.nodes.get(writer)!.gate.backoffUntil = performance.now() +
         30_000;
       internal.markAndScheduleInvalidAction(writer);
@@ -896,15 +889,7 @@ describe("scheduler v2 cutover fixtures", () => {
         writes: [outputLink],
       },
     );
-    const internal = runtime.scheduler as unknown as {
-      nodes: {
-        get(action: Action): {
-          status: string;
-          declaredReads: unknown[];
-          invalidCauses: Map<string, unknown>;
-        } | undefined;
-      };
-    };
+    const internal = runtime.scheduler.accessForTestingOnly;
 
     const cancel = runtime.scheduler.subscribe(writer);
 
@@ -1449,11 +1434,7 @@ describe("scheduler v2 cutover fixtures", () => {
   });
 
   it("cancels the shared wake when a clean node clears backoff", () => {
-    const scheduler = runtime.scheduler as unknown as {
-      nodes: NodeRegistry;
-      gates: SchedulerGates;
-      clearBackoffForCleanNodes: () => void;
-    };
+    const scheduler = runtime.scheduler.accessForTestingOnly;
     const action: Action = function adoptedBeforeBackoffWake() {};
     const record = scheduler.nodes.register(action, "computation");
     scheduler.nodes.setStatus(action, "clean");
@@ -1471,9 +1452,7 @@ describe("scheduler v2 cutover fixtures", () => {
   });
 
   it("resets a dormant node's convergence episode at an already-idle boundary", async () => {
-    const scheduler = runtime.scheduler as unknown as {
-      nodes: NodeRegistry;
-    };
+    const scheduler = runtime.scheduler.accessForTestingOnly;
     const action: Action = function dormantPreviousEpisode() {};
     const record = scheduler.nodes.register(action, "computation");
     scheduler.nodes.setStatus(action, "invalid");

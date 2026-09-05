@@ -125,24 +125,7 @@ type StaleSchedulerInternals = {
 function getStaleSchedulerInternals(
   scheduler: Runtime["scheduler"],
 ): StaleSchedulerInternals {
-  const internal = scheduler as unknown as {
-    pending: Set<Action>;
-    dependencyUpdateState: Parameters<typeof setSchedulerDependencies>[0];
-    nodes: {
-      register: (action: Action, kind: "effect" | "computation") => unknown;
-      get: (
-        action: Action,
-      ) =>
-        | {
-          status: "never-ran" | "clean" | "invalid";
-          invalidCauses: Map<string, unknown>;
-        }
-        | undefined;
-    };
-    markAndScheduleInvalidAction: (action: Action) => void;
-    isDemandedPullComputation: (action: Action) => boolean;
-    updateDependents: StaleSchedulerInternals["updateDependents"];
-  };
+  const internal = scheduler.accessForTestingOnly;
 
   return {
     pending: internal.pending,
@@ -156,7 +139,7 @@ function getStaleSchedulerInternals(
       const record = internal.nodes.get(action);
       if (!record) return;
       if (record.status === "invalid") {
-        record.status = "clean";
+        internal.nodes.setStatus(action, "clean");
       }
       record.invalidCauses.clear();
     },

@@ -14,9 +14,7 @@ type SchedulerInternals = {
 function getSchedulerInternals(
   scheduler: Runtime["scheduler"],
 ): SchedulerInternals {
-  const internal = scheduler as unknown as {
-    markAndScheduleInvalidAction: SchedulerInternals["markDirty"];
-  };
+  const internal = scheduler.accessForTestingOnly;
 
   return {
     markDirty: (action) => internal.markAndScheduleInvalidAction(action),
