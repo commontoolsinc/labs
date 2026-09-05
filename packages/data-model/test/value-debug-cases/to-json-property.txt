@@ -11,6 +11,8 @@
   },
 }
 
+--
+
 with a toJSON property:
 {toJSON:function toJSON(...){...}}
 {

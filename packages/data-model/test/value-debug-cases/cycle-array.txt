@@ -6,6 +6,8 @@
   })(),
 }
 
+--
+
 array holding itself:
 [1,2,<circle>]
 [

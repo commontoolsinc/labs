@@ -1,6 +1,7 @@
 {
   // A limit of `Infinity` renders past the default depth of ten levels.
   "/options": { maxDepth: Infinity },
+
   "twelve levels": (() => {
     let value = "bottom";
     for (let i = 0; i < 12; i++) {
@@ -9,6 +10,8 @@
     return value;
   })(),
 }
+
+--
 
 twelve levels:
 {d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:{d:"bottom"}}}}}}}}}}}}

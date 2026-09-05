@@ -5,16 +5,23 @@
   // object, a class instance's own properties, a primitive's realm state,
   // and an instance's contents.
   "/options": { maxProperties: 2 },
+
   "past the limit": { a: 1, b: 2, c: 3, d: 4 },
+
   "at the limit": { a: 1, b: 2 },
+
   "below the limit": { a: 1 },
+
   "in an object": { o: { a: 1, b: 2, c: 3 } },
+
   "in an array": [{ a: 1, b: 2, c: 3 }],
+
   "class instance": new (class Data {
     a = 1;
     b = 2;
     c = 3;
   })(),
+
   "primitive's realm state": new (class Wide extends FabricPrimitive {
     static get [REALM_CODEC]() {
       return {
@@ -23,10 +30,14 @@
       };
     }
   })(),
+
   "instance's contents": new FabricLink({ id: "of:fid1:abc", a: 1, b: 2 }),
+
   // A key of `/...` is escaped, and so is told apart from the count form.
   "with a `/...` key": { "/...": 1, b: 2, c: 3 },
 }
+
+--
 
 past the limit:
 {a:1,b:2,...count:4}

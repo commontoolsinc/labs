@@ -4,12 +4,15 @@
     "other key": Symbol.for("my-key"),
     "empty key": Symbol.for(""),
   },
+
   unique: {
     described: Symbol("d"),
     "no description": Symbol(),
     "empty description": Symbol(""),
   },
 }
+
+--
 
 interned:
 {"identifier key":@k,"other key":@"my-key","empty key":@""}

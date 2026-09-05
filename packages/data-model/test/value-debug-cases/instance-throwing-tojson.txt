@@ -9,6 +9,8 @@
   return { instance: new Throws() };
 })()
 
+--
+
 instance:
 /unconvertible("nope")
 /unconvertible("nope")

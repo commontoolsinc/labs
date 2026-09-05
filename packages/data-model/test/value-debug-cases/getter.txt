@@ -11,6 +11,8 @@
   })(),
 }
 
+--
+
 with a getter:
 {plain:1,computed:{from:"getter"}}
 {

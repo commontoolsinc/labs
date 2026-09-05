@@ -8,14 +8,23 @@
     maxProperties: 1,
     maxStringLength: 3,
   },
+
   "array length": { a: [1, 2, 3] },
+
   "property count": { o: { a: 1, b: 2 } },
+
   "partial string": { o: { s: "abcdef" } },
+
   "unique symbol": { o: { s: Symbol("desc") } },
+
   function: { o: { f: function foo() {} } },
+
   "class instance": { o: { m: new Map() } },
+
   "elided object": { o: { p: { q: 1 } } },
 }
+
+--
 
 array length:
 {a:[1,...length:3]}

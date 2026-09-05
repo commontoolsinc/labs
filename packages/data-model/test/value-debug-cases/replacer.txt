@@ -11,11 +11,17 @@
       return value;
     },
   },
+
   "in place": { a: 1, b: 5 },
+
   "converted, not verbatim": { a: 2 },
+
   "declined by a throw": { a: 3, m: new Map() },
+
   "top level": { whole: true, a: 1 },
 }
+
+--
 
 in place:
 {a:"one",b:5}

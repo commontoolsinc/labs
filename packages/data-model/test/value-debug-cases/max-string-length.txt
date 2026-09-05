@@ -2,23 +2,33 @@
   // A string longer than the limit renders as an excerpt of that length, and
   // then its actual length.
   "/options": { maxStringLength: 5 },
+
   "past the limit": "abcdefgh",
+
   "at the limit": "abcde",
+
   "in an object": { s: "abcdefgh" },
+
   "in an array": ["abcdefgh"],
+
   "class instance's `toString()` form": new (class Foo {
     toString() {
       return "abcdefgh";
     }
   })(),
+
   // A multi-line string cut by the limit renders the cut line's excerpt with
   // a ` +` of its own, and then the length.
   "cut inside the second line": "abc\ndef",
+
   // An excerpt never ends in half of a surrogate pair: a pair the limit
   // would split is dropped, and one the limit ends after is kept.
   "surrogate pair split by the limit": "abcd\u{1F600}x",
+
   "surrogate pair ending at the limit": "abc\u{1F600}xy",
 }
+
+--
 
 past the limit:
 "abcde"+...length:8

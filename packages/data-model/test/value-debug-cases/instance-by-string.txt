@@ -4,6 +4,8 @@
   url: new URL("https://example.com/x?y=1"),
 }
 
+--
+
 regexp:
 /RegExp("/ab+c/gi")
 /RegExp("/ab+c/gi")

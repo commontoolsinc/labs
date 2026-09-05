@@ -27,6 +27,8 @@
   };
 })()
 
+--
+
 plain:
 /Error("Error: boom")
 /Error("Error: boom")

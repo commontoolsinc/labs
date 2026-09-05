@@ -4,6 +4,7 @@
     y = "two";
     nested = { z: [3] };
   }
+
   // A class name that is not a valid identifier renders quoted, as a key
   // does; a class with no name renders under the `<anonymous>` marker.
   class Renamed {
@@ -20,6 +21,8 @@
     "name with a newline": new WithNewline(),
   };
 })()
+
+--
 
 data:
 /Data(x:1,y:"two",nested:{z:[3]})
