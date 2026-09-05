@@ -375,10 +375,10 @@ same way before the live run: `docs/development/space-clone-rehearsal.md`.
    piece. Run `setsrc --check` against the deployment itself and read what it
    says before scheduling the window.
 
-2. **Then each Topic's source.** Moving the board first is what clears the Topic
-   leg's `mentionable[].shortName` refusal. What remains is older than the graft
-   and is #6968: a Topic wired to a board's `mentionable` cannot be re-sourced
-   with its OWN bytes either.
+2. **Then each Topic's source — and this step is BLOCKED as written.** Moving
+   the board first clears the Topic leg's `mentionable[].shortName` refusal, and
+   what is left underneath is #6968: a Topic wired to a board's `mentionable`
+   cannot be re-sourced at all, not even with the bytes it is already running.
 
    ```
    piece source is incompatible with retained input: input link at mentionable
@@ -390,10 +390,48 @@ same way before the live run: `docs/development/space-clone-rehearsal.md`.
    write-back direction too and demands that the Topic's projection accept
    everything the board's row publishes. Measured identically on a clean control
    piece that was never touched, so it is a property of the wiring, not of any
-   one migration.
+   one migration — and it is not downstream of step 1's schema question.
+   Clearing that one does not clear this.
+
+   **What you lose by skipping it, measured.** Less than the step's position
+   suggests. A Topic still running pre-graft source, sitting on a grafted board:
+
+   - is named by `backfillNames` like any other member;
+   - answers to `cf cell get /top/4 title` with its own title, so the number
+     works as a citation;
+   - reads back as an ordinary `index` row, with its title and no `shortName`,
+     and does not empty the array around it.
+
+   What it does not have is `shortName` — no badge on the Topic, no number on
+   its index row, and `cf cell get --cell "$TOPIC" shortName` reports the
+   property does not exist rather than failing to materialize. **So step 2 buys
+   the number's visibility on the member, and nothing else.** A board that stops
+   after step 3 is a coherent end state, not a half-migration, and step 4's
+   refusal on such a Topic (first trap below) is that state being enforced
+   rather than an error.
+
+   **If you must have it anyway**, the only exit the CLI offers is
+   `--dangerously-allow-incompatible-schema`, whose help covers exactly this
+   proof: "Replace the source even when pattern or retained-link schema
+   compatibility cannot be proven." Three things before taking it, and the first
+   is the one this document cannot answer for you:
+
+   - **It was not rehearsed.** No run in this procedure's evidence forced a
+     Topic update. That the flag would succeed is read off its help text, not
+     measured, and what a forced Topic update leaves behind is unknown.
+   - **It is permanent, not one-off.** The refusal is on the Topic's own bytes,
+     so `--check` will refuse every future Topic source update too, including
+     one that changes nothing. There is no version of this step that carries a
+     compatibility signal — the pre-flight is already gone, today, whether or
+     not anyone forces anything, and the 2026-08-28 record establishes that a
+     Topic source update is one-way once taken.
+   - **It needs the same team authorization step 1 needs**, for an unrelated
+     reason. Two separate decisions, not one.
 
 3. **`backfillNames` once**, through the board.
-4. **`cf piece link` once per Topic that `addTopic` did not wire.**
+4. **`cf piece link` once per Topic that `addTopic` did not wire** — that is,
+   per Topic that took step 2. A Topic that skipped it has no `boardNames` input
+   to bind, and the bind says so.
 
 ### The two commands, and what they return
 
@@ -493,8 +531,9 @@ Topic publishes `shortName` at all.
 ### Two traps
 
 **Never pass `--allow-non-existing` to the bind** (#6965). On a Topic whose
-pattern has no `boardNames` input — one whose source has not been migrated yet —
-the bind refuses, and that refusal is the guard that keeps step 4 behind step 2:
+pattern has no `boardNames` input — one that has not taken step 2, whether
+because the order slipped or because step 2 was deliberately skipped — the bind
+refuses, and that refusal is the guard that keeps step 4 behind step 2:
 
 ```
 Target path "boardNames" does not exist on piece fid1:6hFfedg…

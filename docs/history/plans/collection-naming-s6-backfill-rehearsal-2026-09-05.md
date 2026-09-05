@@ -127,6 +127,18 @@ IDENTICAL — yet `setsrc --check` of that byte-identical source over its own
 piece is refused with the same message. It reproduced in both stores, including
 on a control piece deployed clean and never otherwise touched.
 
+**What a Topic loses by never taking this step, measured.** Less than the
+blocker's position in the order suggests. A Topic still running pre-graft source
+on a grafted board is named by `backfillNames` like any other member, answers to
+`cf cell get /top/4 title` with `"Legacy topic C (pre-graft source)"`, and reads
+back as an ordinary `index` row carrying its title and no `shortName` without
+emptying the array around it. What it does not have is `shortName` itself — no
+badge, no number on its index row, and `cf cell get --cell <topic> shortName`
+reports the property does not exist rather than failing to materialize. So the
+Topic-side source update buys the number's VISIBILITY on the member and nothing
+else; allocation, the map, and `/top/<n>` addressing are all the board's and all
+work without it. A board that stops before it is a coherent end state.
+
 The mechanism: `mentionable` is declared `Writable` on the Topic
 (`packages/patterns/topics/topic.tsx`), and `provePreservedContracts` in
 `packages/piece/src/ops/piece-controller.ts` proves both directions when the
