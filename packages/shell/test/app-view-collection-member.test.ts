@@ -4,8 +4,9 @@
 
 /**
  * What the shell does with `/<space>/<collection>/<member>`: which piece it
- * selects, which address it settles on, what it offers to cite, and how the
- * watch behind it behaves as the reference stops and starts resolving.
+ * selects, which address it settles on, what it offers to cite, which runtime
+ * error it shows as its own, and how the watch behind it behaves as the
+ * reference stops and starts resolving.
  *
  * The view is driven directly rather than through a runtime. Every fact these
  * tests are about is settled between a resolution's answer and the view's own
@@ -123,6 +124,36 @@ function templateText(value: unknown): string {
   return text;
 }
 
+/**
+ * Every value bound to the property `name` across nested Lit template
+ * results, in the order the walk reaches them.
+ *
+ * A template result carries its literal text in `strings` and its bound
+ * values in `values`, in step, so the chunk before a value ends with that
+ * binding's own `.name="`. Reading a binding by name is what keeps this off
+ * counting positions, which a template gains and loses. Returning every match
+ * rather than the first is what tells a binding holding `undefined` from a
+ * name nothing binds: the first is `[undefined]` and the second is `[]`.
+ */
+function templateBindings(value: unknown, name: string): unknown[] {
+  if (value == null || typeof value !== "object") return [];
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => templateBindings(entry, name));
+  }
+  const template = value as {
+    strings?: readonly string[];
+    values?: readonly unknown[];
+  };
+  const strings = template.strings ?? [];
+  const values = template.values ?? [];
+  const bound: unknown[] = [];
+  for (let index = 0; index < values.length; index++) {
+    if (strings[index]?.endsWith(`.${name}="`)) bound.push(values[index]);
+    else bound.push(...templateBindings(values[index], name));
+  }
+  return bound;
+}
+
 /** Where a resolution lands, as the runtime answers it. */
 interface Resolved {
   pieceId: string;
@@ -138,6 +169,17 @@ interface Resolved {
  */
 interface Refused {
   refusal: { code: string; message: string };
+}
+
+/**
+ * A runtime error as the view reads one: the space it happened in, the piece
+ * it names, and what to tell a reader. The notification a worker sends
+ * carries more, and none of the rest decides which view shows it.
+ */
+interface Reported {
+  space: DID;
+  pieceId: string;
+  message: string;
 }
 
 /**
@@ -330,6 +372,9 @@ function stubRuntime(
 
 const SPACE = "did:key:z6Mk-shell-collection-member" as DID;
 
+/** A second space, for the cases that turn on which space is being read. */
+const OTHER_SPACE = "did:key:z6Mk-shell-collection-member-other" as DID;
+
 /**
  * The timer functions as this module found them, before any test ran. Every
  * test here replaces them, and they are process-wide.
@@ -373,6 +418,7 @@ interface AppViewLike {
   app: unknown;
   space: DID | undefined;
   rt: unknown;
+  runtimeLoadErrors: readonly Reported[];
   render(): unknown;
   updated(changed: Map<string, unknown>): void;
   _selectedPattern: { run(): void; taskComplete: Promise<unknown> };
@@ -1038,6 +1084,73 @@ describe("AppView collection members", () => {
     }
   });
 
+  it("watches each slug separately", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:member-1", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "1" }),
+      );
+
+      view.updated(new Map([["app", undefined]]));
+      await stub.poll();
+
+      // A different collection is a different reference, whatever the member
+      // after it is called.
+      view.app = {
+        identity: {},
+        config: {},
+        view: viewOf({ pieceSlug: "side", pieceMember: "1" }),
+      };
+      view.updated(new Map([["app", undefined]]));
+      await stub.poll();
+
+      expect(stub.cancels).toBe(1);
+      expect(stub.resolved.map((call) => call[1])).toContain("side");
+    } finally {
+      restore();
+    }
+  });
+
+  it("watches each space separately", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:member-1", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "1" }),
+      );
+
+      view.updated(new Map([["app", undefined]]));
+      await stub.poll();
+
+      // One name reads to one piece in one space and to another elsewhere,
+      // so the space the reference is read in is part of what it names.
+      view.space = OTHER_SPACE;
+      view.app = {
+        identity: {},
+        config: {},
+        view: viewOf({
+          spaceName: "other-demo",
+          pieceSlug: "top",
+          pieceMember: "1",
+        }),
+      };
+      view.updated(new Map([["app", undefined], ["space", undefined]]));
+      await stub.poll();
+
+      expect(stub.cancels).toBe(1);
+      expect(stub.resolved.map((call) => call[0])).toContain(OTHER_SPACE);
+    } finally {
+      restore();
+    }
+  });
+
   it("watches each reference through a slug separately", async () => {
     const restore = installBrowserGlobals();
     try {
@@ -1136,6 +1249,99 @@ describe("AppView collection members", () => {
       expect(errors.lines).toEqual([]);
     } finally {
       errors.restore();
+      restore();
+    }
+  });
+
+  it("asks for no reload from a poll fired while the selection is loading", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view.updated(new Map([["app", undefined], ["rt", undefined]]));
+      await stub.settle();
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      // The selection runs again and stops in the load, which is where a run
+      // spends most of its time. What the view came to show is the piece the
+      // last run reached, and the run in flight is on its way to the same
+      // answer.
+      stub.holdLoads();
+      view._selectedPattern.run();
+      await stub.settle();
+      const before = view.accessForTestingOnly.slugRevision;
+
+      // A poll lands there. It reaches the answer the view is showing, so
+      // there is nothing to reload — and a reload here aborts the run in
+      // flight in favor of an identical one, which the next poll does again
+      // for as long as a load outlasts the interval.
+      await stub.poll();
+
+      expect(view.accessForTestingOnly.slugRevision).toBe(before);
+
+      await stub.releaseLoads();
+    } finally {
+      restore();
+    }
+  });
+
+  it("shows no runtime error naming the piece a changed address left behind", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view.updated(new Map([["app", undefined], ["rt", undefined]]));
+      await stub.settle();
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      // Member 42 is what the view came to show, so an error the worker
+      // reports against that piece is this view's to show — and reading the
+      // binding at all is what the case below rests on.
+      const reported: Reported = {
+        space: SPACE,
+        pieceId: "of:fid1:member-42",
+        message: "the piece threw",
+      };
+      view.runtimeLoadErrors = [reported];
+      expect(templateBindings(view.render(), "runtimeError")).toEqual([{
+        kind: "piece",
+        error: reported,
+      }]);
+
+      // The address moves to member 43, and every answer is held: the
+      // selection for the new reference is still resolving, so nothing is on
+      // screen and no run has said what replaced 42.
+      stub.answer({ pieceId: "fid1:member-43", pathAfter: [] });
+      stub.hold();
+      view.app = {
+        identity: {},
+        config: {},
+        view: viewOf({ pieceSlug: "top", pieceMember: "43" }),
+      };
+      view.updated(new Map([["app", undefined]]));
+      view._selectedPattern.run();
+      await stub.settle();
+
+      // 42 is the answer to a reference this address does not carry, and the
+      // error naming it belongs to no view the reader is looking at.
+      expect(templateBindings(view.render(), "runtimeError")).toEqual([
+        undefined,
+      ]);
+    } finally {
       restore();
     }
   });
