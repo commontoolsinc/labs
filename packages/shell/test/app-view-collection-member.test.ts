@@ -83,6 +83,26 @@ function installBrowserGlobals(): () => void {
   };
 }
 
+/**
+ * Record what `console.error` is given, until `restore` puts it back.
+ *
+ * A test that prints an error it is not about trains a reader to skip this
+ * file's output, which is where the next real diagnostic goes missing. Reading
+ * the log is also the only way a stub too small for what a collaborator calls
+ * shows up at all, where that collaborator logs the failure and carries on.
+ */
+function captureErrors(): { lines: string[]; restore: () => void } {
+  const lines: string[] = [];
+  const real = console.error;
+  console.error = (...args: unknown[]) => lines.push(args.join(" "));
+  return {
+    lines,
+    restore: () => {
+      console.error = real;
+    },
+  };
+}
+
 /** Return the rendered text of nested Lit template results. */
 function templateText(value: unknown): string {
   if (value == null) return "";
@@ -268,12 +288,19 @@ function stubRuntime(
         queue.push(() => resolve(loaded));
       });
     },
-    // What handing a runtime to the view's debugger controller reads. A
-    // replacement runtime goes through that hand-off on its way to the watch.
+    // What handing a runtime to the view's debugger controller reads, here
+    // and on what `runtime()` returns. A replacement runtime goes through
+    // that hand-off on its way to the watch, and the controller reports a
+    // member it cannot call by logging rather than by throwing — so the case
+    // driving that hand-off reads the log, and a member missing from here
+    // fails it.
     addEventListener: () => {},
     removeEventListener: () => {},
     telemetry: () => [],
-    runtime: () => ({ setTelemetryEnabled: () => Promise.resolve() }),
+    runtime: () => ({
+      setTelemetryEnabled: () => Promise.resolve(),
+      setBreakpoints: () => Promise.resolve(),
+    }),
     getSlugCell: () =>
       Promise.resolve({
         subscribe: () => () => {
@@ -978,6 +1005,7 @@ describe("AppView collection members", () => {
 
   it("reloads nothing when a replacement watch reaches the answer on screen", async () => {
     const restore = installBrowserGlobals();
+    const errors = captureErrors();
     try {
       const { XAppView } = await import("../src/views/AppView.ts");
       const first = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
@@ -1007,7 +1035,11 @@ describe("AppView collection members", () => {
       await replacement.settle();
 
       expect(view.accessForTestingOnly.slugRevision).toBe(before);
+      // Nothing here drives an error path, so the whole of what the runtime
+      // is asked for on its way to the watch answered.
+      expect(errors.lines).toEqual([]);
     } finally {
+      errors.restore();
       restore();
     }
   });
