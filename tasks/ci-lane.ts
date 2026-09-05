@@ -56,7 +56,11 @@ import {
 } from "./test-selection/plan.ts";
 import { type Census, census } from "./test-selection/census.ts";
 import type { Manifest, WithheldReason } from "./test-selection/manifest.ts";
-import { LANES } from "./test-selection/policy.ts";
+import {
+  FULL_LANE_BUDGET_SECONDS,
+  LANES,
+  UNMEASURED_COST_SECONDS,
+} from "./test-selection/policy.ts";
 
 /** What the lane was asked to do. */
 export interface LaneOptions {
@@ -731,20 +735,36 @@ export async function fullLanes(
     // them runs past the bound its job is killed at, where too many
     // means some jobs finish early.
     //
-    // So the shape of the topology answers instead, at a lane per suite
-    // that has anything to run. That is a bound rather than a plan — the
-    // lanes still pack themselves, and a lane may hold more than one
-    // suite — and it needs no number nobody measured.
+    // So the shape of the tree answers instead, in two figures that can
+    // only raise the count between them. A lane per suite that has
+    // anything to run keeps the count growing as test surfaces are
+    // added. A lane per budget's worth of units at the stand-in rate
+    // keeps it growing as units are added to the suites there already
+    // are, which the suite count alone would not notice: a repository
+    // that grew to five times the units without gaining a suite would
+    // otherwise be given the same number of lanes and run every one of
+    // them past the bound its job is killed at.
+    //
+    // Neither is a projection. Both are shapes counted off the tree, and
+    // taking the larger errs the way this has to err, since too few
+    // lanes kills a run where too many only finishes some jobs early.
     const running = suites.filter((suite) => {
       const unavailable = unavailableUnits(suite);
       return suite.units.some((unit) => !unavailable.has(unit));
     });
+    const perLane = Math.max(
+      1,
+      Math.floor(FULL_LANE_BUDGET_SECONDS / UNMEASURED_COST_SECONDS),
+    );
+    const byUnits = Math.ceil(seen.manifest.entries.length / perLane);
+    const lanes = Math.max(1, running.length, byUnits);
     console.error(
       `ci-lane: nothing in this tree has a measured cost, so the lane ` +
-        `count is one per suite with anything to run rather than a ` +
-        `projection from costs nobody has measured`,
+        `count is ${lanes} from the shape of the tree — ${running.length} ` +
+        `suites with anything to run, and ${byUnits} lanes' worth of ` +
+        `units — rather than a projection from costs nobody has measured`,
     );
-    return Math.max(1, running.length);
+    return lanes;
   }
   return fullLaneCount({
     manifest: seen.manifest,

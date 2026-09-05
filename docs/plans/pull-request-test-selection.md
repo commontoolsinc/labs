@@ -2314,9 +2314,10 @@ drift.
 
 The full run's packing needs durations but no selection, so it reads the
 manifest for its cost table. Where nothing in the tree has a measured
-cost it falls back to one lane per suite that has anything to run: less
-even, still complete, and requiring no committed weight table to
-maintain.
+cost it falls back to the shape of the tree: the larger of one lane per
+suite that has anything to run, and one lane per budget's worth of units
+at the stand-in rate. Less even, still complete, and requiring no
+committed weight table to maintain.
 
 The condition is what the tree holds rather than whether a manifest
 arrived, because those are not the same question. A manifest published
@@ -2332,8 +2333,16 @@ figure puts the whole corpus at 2,403 seconds where the reference build
 measured 9,960, and the count that follows from it is five lanes for a
 run that today takes 67 jobs. The error is also in the direction that
 breaks a run: too few lanes means every one of them runs past the bound
-its job is killed at, where too many means some jobs finish early. So the shape of the topology answers instead. It needs no
-number nobody measured, and it is a bound rather than a plan — the lanes
+its job is killed at, where too many means some jobs finish early.
+
+So the shape of the tree answers instead, in two figures that can only
+raise the count between them. The suite count grows as test surfaces are
+added. The unit count grows as units are added to the suites there
+already are, which the suite count alone would not notice: a repository
+that grew to five times the units without gaining a suite would
+otherwise be given the same number of lanes. Neither figure is a
+projection, both are counted off the tree, and taking the larger errs
+the way this has to err. It is a bound rather than a plan — the lanes
 still pack themselves, and one of them may hold several suites.
 
 A lane packing against stand-in costs says so in its summary, for the

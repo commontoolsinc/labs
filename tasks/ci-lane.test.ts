@@ -35,6 +35,7 @@ import {
   FULL_LANE_BOUND_SECONDS,
   FULL_LANE_BUDGET_SECONDS,
   LANE_BUDGET_SECONDS,
+  UNMEASURED_COST_SECONDS,
 } from "./test-selection/policy.ts";
 
 /**
@@ -571,6 +572,30 @@ describe("how many lanes the full run asks for", () => {
     }
     expect(lanes).toBe(2);
     expect(errors.join("\n")).toContain("measured");
+  });
+
+  it("grows the fallback with the units, not only with the suites", async () => {
+    // A repository can gain units without gaining a suite, and the suite
+    // count alone would not notice. Two suites here hold more units than
+    // two lanes can, so the count comes from the units instead.
+    const perLane = Math.floor(
+      FULL_LANE_BUDGET_SECONDS / UNMEASURED_COST_SECONDS,
+    );
+    const suites = [0, 1].map((i) =>
+      suite({
+        id: `suite-${i}`,
+        units: Array.from(
+          { length: perLane + 40 },
+          (_, u) => `s${i}/unit-${u}.test.ts`,
+        ),
+      })
+    );
+    const lanes = await fullLanes(options, {
+      topology: () => Promise.resolve(suites),
+      manifest: () => Promise.resolve({ absent: "the store is gone" }),
+    });
+    expect(lanes).toBeGreaterThan(suites.length);
+    expect(lanes).toBe(Math.ceil((perLane + 40) * 2 / perLane));
   });
 
   it("takes the topology's shape when there is no manifest", async () => {
