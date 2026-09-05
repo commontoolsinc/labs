@@ -31,6 +31,11 @@ export interface LoomRunManifestCfc {
    * declaring its own ceiling is bounded by both. Absent is no ceiling —
    * the owner's whole view; an empty list is refused at normalization
    * rather than read either way.
+   *
+   * A v0 carrier: the ceiling is an assertion the dispatcher writes, fixed
+   * at prepare time the way spec §19.6.1 has a context read bounded, and not
+   * yet a posture the runtime mints from a delegation record (§19.5). The
+   * field is what a delegation-record integration replaces.
    */
   maxConfidentiality?: readonly CfcConfClause[];
 

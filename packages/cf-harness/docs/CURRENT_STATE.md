@@ -230,13 +230,16 @@ The current package provides:
   state and the run report, and printed in the operator summary — the whole
   posture record with it, which a delegated child carries from its parent
   stamped `inherited` because it runs on that parent's session; the session
-  runtime can further run under a read ceiling —
-  `--max-confidentiality
-  <json>`, or `cfc.maxConfidentiality` (with
-  `cfc.onExceed`) in the run manifest, met when both are given — that every
-  `db.query` the run issues is bounded by, a query's own declaration met with it
-  rather than replacing it, refused without a fabric session and recorded as
-  `readMaxConfidentiality` in `fabricSessionCfc`;
+  runtime can further run under a read ceiling — the `--max-confidentiality`
+  flag, or `cfc.maxConfidentiality` (with `cfc.onExceed`) in the run manifest,
+  met when both are given — that bounds every `db.query` the run issues, a
+  query's own declaration met with it rather than replacing it; the ceiling
+  governs only query results declared per session (`PerSession<>`,
+  `scope: "session"`, `.asScope("session")`, or a session-scoped db) and the
+  runtime refuses any other query under it, so a pattern authored for a bounded
+  run declares its results per session; it is refused without a fabric session,
+  recorded with its source as `readMaxConfidentiality` in `fabricSessionCfc`,
+  printed in the operator summary, and inherited unchanged by a delegated child;
 - an opt-in pattern index (`--pattern-index-url`, or its
   `CF_HARNESS_PATTERN_INDEX_URL` environment fallback), which needs the fabric
   session configuration: index requests are signed with the session identity

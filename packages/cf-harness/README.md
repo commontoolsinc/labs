@@ -1269,22 +1269,33 @@ summary prints it beside the harness's own `cfcMode`.
 
 The session's runtime can also run under a read ceiling: a flat list of
 confidentiality clauses (the same shape a pattern's `db.query` takes as
-`maxConfidentiality`) that every `db.query` the run issues is bounded by,
-whatever the pattern wrote. A query declaring no ceiling reads under the run's;
-one declaring its own reads under the meet of the two, so a pattern cannot widen
-its run's ceiling from inside. The ceiling comes from
-`--max-confidentiality
-<json>` on the command line, from
+`maxConfidentiality`) that bounds every `db.query` the run issues. The ceiling
+governs only a query whose result is declared per session — `PerSession<>` on
+the result type, the `scope: "session"` query option, `.asScope("session")`, or
+a session-scoped db — and the runtime refuses any other query outright under a
+ceiling, before it is staged, rather than reading it unbounded: a result shared
+by every runtime on the space cannot hold one runtime's filtered rows. So a
+pattern authored for a bounded run declares its query results per session; a
+plain `db.query` fails with an error naming the fix. A session-scoped query
+declaring no ceiling reads under the run's; one declaring its own reads under
+the meet of the two, so a pattern cannot widen its run's ceiling from inside.
+The ceiling comes from the `--max-confidentiality` flag (a JSON array), from
 `cfc.maxConfidentiality` in the run manifest (with `cfc.onExceed`, `fail` or
-`skip`, as the default for a query that says nothing), or from both, met. An
-empty list is refused rather than read as no ceiling, a malformed one refuses
-the manifest rather than being dropped, and either source without a fabric
-session is refused, since a ceiling with nothing bounding reads would read as
-working all run. Absent both, the session reads unbounded — the owner's whole
-view. The effective ceiling is recorded in `fabricSessionCfc` as
-`readMaxConfidentiality`, so a resume under another (or none) is refused like
-any other moved dial; the manifest's declaration is projected into the policy
-snapshot and every invocation context for the audit.
+`skip`, as the default for a query that says nothing), or from both, met — and
+`onExceed` meets toward `fail`, so neither source can turn the other's refusal
+into a release. An empty list is refused rather than read as no ceiling, a
+malformed one refuses the manifest rather than being dropped, and either source
+without a fabric session is refused, since a ceiling with nothing bounding reads
+would read as working all run. Absent both, the session reads unbounded — the
+owner's whole view. The effective ceiling, with its source, is recorded in
+`fabricSessionCfc` as `readMaxConfidentiality`, so a resume under another (or
+none) is refused like any other moved dial, and a resume handed a manifest
+declaring another ceiling is refused too; the session factory refuses a session
+whose runtime is not bounded as configured; the manifest's declaration is
+projected into the policy snapshot and every invocation context for the audit;
+and the operator summary prints the ceiling beside the other session dials. A
+delegated child runs on its parent's session and records the parent's ceiling as
+its own.
 
 The tool takes `sourceText` (inline pattern source, at most 256 KiB — an
 over-cap source is a structured tool error), an optional `inputs` object, and an
