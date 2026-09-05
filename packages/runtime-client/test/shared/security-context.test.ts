@@ -41,6 +41,27 @@ describe("securityContextDifferences()", () => {
     expect(securityContextDifferences(asserted, running)).toEqual([]);
   });
 
+  it("reads the same read ceiling with its alternatives reordered as the same posture", () => {
+    // Two documents spelling one ceiling: the clause order and the order
+    // of an `anyOf`'s alternatives are not posture, so an attach that
+    // respells them is not refused.
+    const asserted = {
+      ...running,
+      cfcReadMaxConfidentiality: [{ anyOf: ["b", "a"] }, signerDid],
+    };
+    expect(securityContextDifferences(asserted, running)).toEqual([]);
+  });
+
+  it("names the read ceiling when an alternative differs", () => {
+    const asserted = {
+      ...running,
+      cfcReadMaxConfidentiality: [signerDid, { anyOf: ["a", "c"] }],
+    };
+    expect(securityContextDifferences(asserted, running)).toEqual([
+      "cfcReadMaxConfidentiality",
+    ]);
+  });
+
   it("names the backend when it differs", () => {
     expect(
       securityContextDifferences(

@@ -786,9 +786,11 @@ export type InitializationData = {
    * worker is one device's runtime, so a ceiling set here is per device by
    * construction: it never touches the space, and a query's own ceiling can
    * only tighten it. It applies to session-scoped query results; a query
-   * with a broader result is refused. Absent means no ceiling — the owner
-   * view. An empty list admits nothing and the runtime refuses to start on
-   * it.
+   * whose result is space- or user-scoped is refused before it is staged,
+   * and a row the ceiling does not admit is handled as `cfcReadOnExceed`
+   * says (`fail` refuses the query, `skip` drops the row). Absent means no
+   * ceiling — the owner view. An empty list admits nothing and the runtime
+   * refuses to start on it.
    */
   cfcReadMaxConfidentiality?: readonly CfcConfClause[];
 

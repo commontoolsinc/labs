@@ -276,6 +276,20 @@ describe("sqliteQuery under a runtime read ceiling", () => {
   });
 
   describe("buildCfcReadCeiling()", () => {
+    it("detaches and freezes the ceiling to its leaves, so a retained alias cannot move it", () => {
+      const nested = { type: "https://example.test/atom", subject: { id: 1 } };
+      const clause = { anyOf: [nested, "did:key:zOther"] };
+      const built = buildCfcReadCeiling({ cfcReadMaxConfidentiality: [clause] });
+      nested.subject.id = 2;
+      clause.anyOf.push("did:key:zWidened");
+      const alternatives = (built.maxConfidentiality![0] as { anyOf: unknown[] }).anyOf;
+      expect(alternatives.length).toBe(2);
+      expect((alternatives[0] as { subject: { id: number } }).subject.id).toBe(1);
+      expect(Object.isFrozen(alternatives)).toBe(true);
+      expect(Object.isFrozen(alternatives[0])).toBe(true);
+      expect(Object.isFrozen((alternatives[0] as { subject: unknown }).subject)).toBe(true);
+    });
+
     it("names the fields a caller labels in its refusals", () => {
       const labels = {
         ceiling: "run manifest cfc.maxConfidentiality",

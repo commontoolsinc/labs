@@ -2776,7 +2776,9 @@ export interface ISqliteQueryable {
       /** Scope of the result cell. A `session`-scoped result is one each
        *  session reads alone, which a runtime-wide read ceiling
        *  (`cfcReadMaxConfidentiality`) requires; absent, the result takes the
-       *  scope of the db and of the pattern's output. */
+       *  narrowest of the db's scope, the pattern's output scope, and — when
+       *  `readClearance` is set — `user`, since a cleared result is one
+       *  reader's view. */
       scope?: CellScope;
     },
   ): Reactive<

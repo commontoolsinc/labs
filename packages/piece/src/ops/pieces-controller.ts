@@ -361,31 +361,36 @@ export class PiecesController<T = unknown> {
     // EXPERIMENTAL_* still winning per flag — a controller opened by a cf
     // binary or a fuse mount is not built alongside the server it talks to
     // (docs/development/EXPERIMENTAL_OPTIONS.md).
-    const runtime = new Runtime(runtimePresets.remoteClient({
-      apiUrl: api,
-      storageManager,
-      experimental: await experimentalOptionsForDeployedClient({
-        apiUrl: api,
-        env: readEnv,
-      }),
-      moduleByteCache,
-      patternCoverage,
-      ...(cfcEnforcementMode !== undefined ? { cfcEnforcementMode } : {}),
-      ...(cfcFlowLabels !== undefined ? { cfcFlowLabels } : {}),
-      ...(cfcPosture !== undefined ? { cfcPosture } : {}),
-      ...(cfcWriteFloor !== undefined ? { cfcWriteFloor } : {}),
-      ...(cfcReadMaxConfidentiality !== undefined
-        ? { cfcReadMaxConfidentiality }
-        : {}),
-      ...(cfcReadOnExceed !== undefined ? { cfcReadOnExceed } : {}),
-      ...(navigateCallback !== undefined ? { navigateCallback } : {}),
-      ...(onPatternInstantiated !== undefined ? { onPatternInstantiated } : {}),
-      trustSnapshotProvider: () => ({
-        id: `principal:${session.as.did()}`,
-        actingPrincipal: session.as.did(),
-      }),
-    }));
+    // Constructed inside the cleanup scope: a runtime the constructor
+    // refuses (a read ceiling on a client under server execution, say)
+    // still leaves the storage manager open, and the enabler state the
+    // constructor claimed, unless the same teardown runs for it.
+    let runtime: Runtime | undefined;
     try {
+      runtime = new Runtime(runtimePresets.remoteClient({
+        apiUrl: api,
+        storageManager,
+        experimental: await experimentalOptionsForDeployedClient({
+          apiUrl: api,
+          env: readEnv,
+        }),
+        moduleByteCache,
+        patternCoverage,
+        ...(cfcEnforcementMode !== undefined ? { cfcEnforcementMode } : {}),
+        ...(cfcFlowLabels !== undefined ? { cfcFlowLabels } : {}),
+        ...(cfcPosture !== undefined ? { cfcPosture } : {}),
+        ...(cfcWriteFloor !== undefined ? { cfcWriteFloor } : {}),
+        ...(cfcReadMaxConfidentiality !== undefined
+          ? { cfcReadMaxConfidentiality }
+          : {}),
+        ...(cfcReadOnExceed !== undefined ? { cfcReadOnExceed } : {}),
+        ...(navigateCallback !== undefined ? { navigateCallback } : {}),
+        ...(onPatternInstantiated !== undefined ? { onPatternInstantiated } : {}),
+        trustSnapshotProvider: () => ({
+          id: `principal:${session.as.did()}`,
+          actingPrincipal: session.as.did(),
+        }),
+      }));
       if (!await runtime.healthCheck()) {
         throw new Error(`Could not connect to "${api.toString()}".`);
       }
@@ -407,7 +412,7 @@ export class PiecesController<T = unknown> {
       // failed, and `dispose()` takes the rest of the runtime with it. The
       // error that started the teardown is the one that leaves.
       await storageManager.closeNow().catch(() => {});
-      await runtime.dispose().catch(() => {});
+      await runtime?.dispose().catch(() => {});
       throw error;
     }
   }

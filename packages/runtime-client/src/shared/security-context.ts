@@ -8,6 +8,8 @@
  */
 
 import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { clausesEqual } from "@commonfabric/runner/cfc";
+import type { CfcConfClause } from "@commonfabric/runner/cfc";
 
 import type { RuntimeSecurityContext } from "@/protocol/mod.ts";
 
@@ -77,6 +79,31 @@ const SECURITY_CONTEXT_FIELDS: Record<
  * carried as an absent property in one and as an explicit `undefined` in the
  * other is the same posture and compares equal here.
  */
+
+/**
+ * A read ceiling compares by clause, with the runner's structural clause
+ * equality — insensitive to the order of an `anyOf`'s alternatives — and as a
+ * multiset of clauses, since a ceiling is a conjunction. Two documents that
+ * spell the same ceiling with its alternatives in another order hold the same
+ * posture; a byte comparison would fail the attach over spelling.
+ */
+function readCeilingsEqual(
+  left: readonly CfcConfClause[] | undefined,
+  right: readonly CfcConfClause[] | undefined,
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  if (left.length !== right.length) return false;
+  const used = new Array<boolean>(right.length).fill(false);
+  for (const clause of left) {
+    const at = right.findIndex((candidate, i) =>
+      !used[i] && clausesEqual(clause, candidate)
+    );
+    if (at === -1) return false;
+    used[at] = true;
+  }
+  return true;
+}
+
 export function securityContextDifferences(
   asserted: RuntimeSecurityContext,
   running: RuntimeSecurityContext,
@@ -84,5 +111,9 @@ export function securityContextDifferences(
   const fields = Object.keys(SECURITY_CONTEXT_FIELDS).sort() as (
     keyof RuntimeSecurityContext
   )[];
-  return fields.filter((field) => !deepEqual(asserted[field], running[field]));
+  return fields.filter((field) =>
+    field === "cfcReadMaxConfidentiality"
+      ? !readCeilingsEqual(asserted[field], running[field])
+      : !deepEqual(asserted[field], running[field])
+  );
 }

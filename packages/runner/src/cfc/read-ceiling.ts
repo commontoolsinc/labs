@@ -68,10 +68,22 @@ const isCeilingAtom = (value: unknown): boolean =>
   (typeof value === "string" && value.length > 0) ||
   (isObjectNotArray(value) && !isOrClause(value));
 
+// Detached and frozen to the leaves: an atom may be an object with nested
+// values, and a nested alias the caller retained would otherwise mutate the
+// runtime's effective ceiling after validation. `structuredClone` drops the
+// aliases; the walk freezes every object and array the clone holds.
+const deepFreeze = <T>(value: T): T => {
+  if (value !== null && typeof value === "object") {
+    for (const inner of Object.values(value as Record<string, unknown>)) {
+      deepFreeze(inner);
+    }
+    Object.freeze(value);
+  }
+  return value;
+};
+
 const freezeClause = (clause: CfcConfClause): CfcConfClause =>
-  isOrClause(clause)
-    ? Object.freeze({ anyOf: Object.freeze([...clause.anyOf]) })
-    : (isObjectNotArray(clause) ? Object.freeze({ ...clause }) : clause);
+  typeof clause === "string" ? clause : deepFreeze(structuredClone(clause));
 
 /**
  * Validates the read-ceiling options and returns the frozen form, or throws
