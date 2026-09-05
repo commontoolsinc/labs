@@ -2775,9 +2775,7 @@ export class Session {
       ? this.#newSideBomCarrier(parsed.model, parsed.hunk)
       : null;
     if (!this.#adjustHunkCounts(0, 1, hunkHeader)) {
-      // A resurrectable line sits inside a parsed hunk, and the adjuster's
-      // header pattern accepts every header the parser's does, so a header
-      // that stops parsing here is a broken invariant, not a refusal.
+      // Cannot happen for a resurrectable line; see `#adjustHunkCounts`.
       throw new Error(
         "the hunk header of a resurrectable line did not parse",
       );
