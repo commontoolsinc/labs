@@ -2314,10 +2314,9 @@ drift.
 
 The full run's packing needs durations but no selection, so it reads the
 manifest for its cost table. Where nothing in the tree has a measured
-cost it falls back to the shape of the tree: the larger of one lane per
-suite that has anything to run, and one lane per budget's worth of units
-at the stand-in rate. Less even, still complete, and requiring no
-committed weight table to maintain.
+cost it falls back to the larger of one lane per suite that has anything
+to run and what packing the stand-ins asks for. Less even, still
+complete, and requiring no committed weight table to maintain.
 
 The condition is what the tree holds rather than whether a manifest
 arrived, because those are not the same question. A manifest published
@@ -2335,15 +2334,21 @@ run that today takes 67 jobs. The error is also in the direction that
 breaks a run: too few lanes means every one of them runs past the bound
 its job is killed at, where too many means some jobs finish early.
 
-So the shape of the tree answers instead, in two figures that can only
-raise the count between them. The suite count grows as test surfaces are
-added. The unit count grows as units are added to the suites there
-already are, which the suite count alone would not notice: a repository
-that grew to five times the units without gaining a suite would
-otherwise be given the same number of lanes. Neither figure is a
-projection, both are counted off the tree, and taking the larger errs
-the way this has to err. It is a bound rather than a plan — the lanes
-still pack themselves, and one of them may hold several suites.
+So a lane per suite with anything to run goes in as a floor. It needs no
+number nobody measured, and it grows as test surfaces are added.
+
+The packing is still asked what it would need, and the larger of the two
+wins. Its answer is only as good as the stand-in costs behind it, which
+is why it cannot be the whole of this — but those costs are what the
+lanes will actually be packed against, so an answer below what they
+imply is one the lanes cannot honor whatever else is true. That matters
+most where a stand-in costs more than the bare unmeasured figure. A
+suite whose measured units have all been renamed away carries its old
+median onto every stand-in, and a count that assumed the bare figure
+would be out by that whole multiple.
+
+What comes out is a bound rather than a plan: the lanes still pack
+themselves, and one of them may hold several suites.
 
 A lane packing against stand-in costs says so in its summary, for the
 same reason: a projected time that rests on nothing measured is a

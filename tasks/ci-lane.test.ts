@@ -577,7 +577,7 @@ describe("how many lanes the full run asks for", () => {
   it("grows the fallback with the units, not only with the suites", async () => {
     // A repository can gain units without gaining a suite, and the suite
     // count alone would not notice. Two suites here hold more units than
-    // two lanes can, so the count comes from the units instead.
+    // two lanes can, so the count comes from packing them instead.
     const perLane = Math.floor(
       FULL_LANE_BUDGET_SECONDS / UNMEASURED_COST_SECONDS,
     );
@@ -596,6 +596,40 @@ describe("how many lanes the full run asks for", () => {
     });
     expect(lanes).toBeGreaterThan(suites.length);
     expect(lanes).toBe(Math.ceil((perLane + 40) * 2 / perLane));
+  });
+
+  it("charges a stand-in what the census charged it, not the dial", async () => {
+    // A suite whose measured units have all been renamed away carries
+    // its old median onto every stand-in, so the units cost far more
+    // than the bare unmeasured figure. A count that assumed the figure
+    // would be out by that whole multiple, and each lane would run past
+    // the bound its job is killed at.
+    const units = Array.from({ length: 300 }, (_, i) => `new/u-${i}.test.ts`);
+    const suites = [suite({ id: "pattern-integration", units })];
+    const renamed = manifestOf(
+      Array.from({ length: 50 }, (_, i) => ({
+        test: { k: "unit", s: "bakery", n: `old ${i}` },
+        suite: "pattern-integration",
+        unit: `old/u-${i}.test.ts`,
+        cost: 40,
+      })),
+    );
+    const lanes = await fullLanes(options, {
+      topology: () => Promise.resolve(suites),
+      manifest: () =>
+        Promise.resolve({ manifest: renamed, objectName: "m.json.gz" }),
+    });
+    const seen = census(suites, renamed, new Set());
+    expect(seen.unmeasured).toBe(seen.manifest.entries.length);
+    expect(seen.manifest.entries[0]!.cost).toBe(40);
+    const laid = plan({
+      manifest: seen.manifest,
+      mandatory: seen.mandatory,
+      capabilities: capabilitiesBySuite(suites),
+      policy: "everything",
+      lanes,
+    });
+    expect(laid.overBudgetSeconds).toBe(0);
   });
 
   it("takes the topology's shape when there is no manifest", async () => {

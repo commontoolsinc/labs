@@ -100,9 +100,9 @@ a job output.
 Run it yourself to see how many jobs the default branch would take. Where
 nothing in the tree has a measured cost it answers from the shape of the
 tree instead — the larger of the number of suites with anything to run
-and the number of lanes the units would fill at the stand-in rate — and
-says on the error stream that it did so, since a projection from costs
-nobody has measured would be arithmetic over an invented figure.
+and what packing the stand-ins asks for — and says on the error stream
+that it did so, since a projection from costs nobody has measured would
+be arithmetic over an invented figure.
 
 ## The publisher
 

@@ -56,11 +56,7 @@ import {
 } from "./test-selection/plan.ts";
 import { type Census, census } from "./test-selection/census.ts";
 import type { Manifest, WithheldReason } from "./test-selection/manifest.ts";
-import {
-  FULL_LANE_BUDGET_SECONDS,
-  LANES,
-  UNMEASURED_COST_SECONDS,
-} from "./test-selection/policy.ts";
+import { LANES } from "./test-selection/policy.ts";
 
 /** What the lane was asked to do. */
 export interface LaneOptions {
@@ -735,34 +731,34 @@ export async function fullLanes(
     // them runs past the bound its job is killed at, where too many
     // means some jobs finish early.
     //
-    // So the shape of the tree answers instead, in two figures that can
-    // only raise the count between them. A lane per suite that has
-    // anything to run keeps the count growing as test surfaces are
-    // added. A lane per budget's worth of units at the stand-in rate
-    // keeps it growing as units are added to the suites there already
-    // are, which the suite count alone would not notice: a repository
-    // that grew to five times the units without gaining a suite would
-    // otherwise be given the same number of lanes and run every one of
-    // them past the bound its job is killed at.
+    // So a lane per suite with anything to run goes in as a floor. It
+    // needs no number nobody measured, and it keeps the count growing as
+    // test surfaces are added.
     //
-    // Neither is a projection. Both are shapes counted off the tree, and
-    // taking the larger errs the way this has to err, since too few
-    // lanes kills a run where too many only finishes some jobs early.
+    // The packing is still asked what it would need, and the larger of
+    // the two wins. Its answer is only as good as the stand-in costs
+    // behind it, which is why it cannot be the whole of this — but those
+    // costs are what the lanes will actually be packed against, so an
+    // answer below what they imply is one the lanes cannot honor
+    // whatever else is true. That matters most where a stand-in costs
+    // more than the bare unmeasured figure: a suite whose measured units
+    // have all been renamed away carries its old median onto every
+    // stand-in, and a count that assumed the bare figure would be out by
+    // that whole multiple.
     const running = suites.filter((suite) => {
       const unavailable = unavailableUnits(suite);
       return suite.units.some((unit) => !unavailable.has(unit));
     });
-    const perLane = Math.max(
-      1,
-      Math.floor(FULL_LANE_BUDGET_SECONDS / UNMEASURED_COST_SECONDS),
-    );
-    const byUnits = Math.ceil(seen.manifest.entries.length / perLane);
-    const lanes = Math.max(1, running.length, byUnits);
+    const byCost = fullLaneCount({
+      manifest: seen.manifest,
+      capabilities: capabilitiesBySuite(suites),
+    });
+    const lanes = Math.max(1, running.length, byCost);
     console.error(
       `ci-lane: nothing in this tree has a measured cost, so the lane ` +
-        `count is ${lanes} from the shape of the tree — ${running.length} ` +
-        `suites with anything to run, and ${byUnits} lanes' worth of ` +
-        `units — rather than a projection from costs nobody has measured`,
+        `count is ${lanes} — ${running.length} suites with anything to ` +
+        `run, and ${byCost} from packing the stand-ins — rather than a ` +
+        `projection from costs nobody has measured`,
     );
     return lanes;
   }
