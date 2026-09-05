@@ -28,7 +28,7 @@ import {
   ruleInputFields,
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
-import { sqlAffinity } from "@commonfabric/memory/sqlite/schema";
+import { sqlAffinity } from "@commonfabric/memory/sqlite/columns";
 import {
   blankWriteSql,
   parseUpdateSetColumns,
@@ -160,7 +160,7 @@ export function checkSqliteRowLabelWrite(
   const properties =
     (declared as { properties?: Record<string, unknown> }).properties ?? {};
   const columnNames = Object.keys(properties);
-  const invalid = validateRowLabelSpec(spec, columnNames);
+  const invalid = validateRowLabelSpec(spec, columnNames, properties);
   if (invalid) {
     return {
       error: `sqlite: table "${declaredKey}" declares an invalid rowLabel ` +

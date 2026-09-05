@@ -21,6 +21,7 @@
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import type { MutableFabricPlainObjectLayer } from "@commonfabric/data-model";
 import { isObjectNotArray } from "@commonfabric/utils/types";
+import { sqlAffinity } from "./columns.ts";
 
 /** A reference to a declared column, handed to the rule as `f.<col>`. */
 export type FieldRef = {
@@ -489,15 +490,46 @@ function validateIntegTerm(
   return unknownOp(node, "integrity");
 }
 
+// A rule reads a column as text, and two declared types settle what the column
+// holds before any rule sees it. A REAL-affinity column forces every value it
+// stores to a float, and this evaluator renders none: the fractional ones
+// refuse (its rendering is not reproducible — see `regexInputText`) and a
+// whole one shows "7" where SQLite shows "7.0", so a rule written from the
+// column's declared type never fires, and a gate that never fires drops a
+// confidentiality clause. A BLOB column's bytes are refused outright. Neither
+// is a rule anyone can write correctly, so neither is accepted — declare a
+// column that carries text as TEXT.
+function unreadableRuleInput(
+  field: string,
+  sqlType: unknown,
+): string | undefined {
+  if (typeof sqlType !== "string") return undefined; // no declared type
+  if (/blob/i.test(sqlType)) {
+    return `rule input "${field}" is declared ${sqlType} — a rule reads a ` +
+      "column as text, and a BLOB has none";
+  }
+  if (sqlAffinity(sqlType) === "real") {
+    return `rule input "${field}" is declared ${sqlType}, which gives it ` +
+      "REAL affinity — a rule reads a column as text, and this evaluator " +
+      "renders no REAL (declare a column holding text as TEXT)";
+  }
+  return undefined;
+}
+
 /**
  * Validate a rowLabel spec against the declared column names. Returns the
  * failure reason, or undefined when valid. Used by `table()` at authoring
  * (throws) and MUST be re-run on wire-supplied specs before evaluation —
  * "couldn't validate" is never "no label".
+ *
+ * `properties` is the table schema's column map, when the caller holds one:
+ * with it, a rule reading a column whose declared type settles its storage
+ * class against the rule is refused here rather than at evaluation.
  */
 export function validateRowLabelSpec(
   spec: unknown,
   columns: readonly string[],
+  properties?: Readonly<Record<string, unknown>>,
 ): string | undefined {
   if (!isObjectNotArray(spec)) return "rowLabel spec must be an object";
   if (spec.version !== 1) {
@@ -515,6 +547,18 @@ export function validateRowLabelSpec(
     const r = validateIntegTerm(spec.integrity, cols);
     if (r) return r;
   }
+  if (properties !== undefined) {
+    // After the structural pass, so the walk reads a spec whose match nodes
+    // are known to be well formed.
+    for (const field of ruleInputFields(spec as RowLabelSpec)) {
+      const column = properties[field];
+      const reason = unreadableRuleInput(
+        field,
+        isObjectNotArray(column) ? column.sqlType : undefined,
+      );
+      if (reason) return reason;
+    }
+  }
   return undefined;
 }
 
@@ -523,6 +567,7 @@ export function validateRowLabelSpec(
 export function buildRowLabelSpec<C extends Record<string, unknown>>(
   columns: readonly string[],
   rule: RowLabelRule<C>,
+  properties?: Readonly<Record<string, unknown>>,
 ): RowLabelSpec {
   const handles = Object.fromEntries(
     columns.map((name) => [name, { field: name }]),
@@ -538,7 +583,7 @@ export function buildRowLabelSpec<C extends Record<string, unknown>>(
     spec.confidentiality = out.confidentiality;
   }
   if (out.integrity !== undefined) spec.integrity = out.integrity;
-  const reason = validateRowLabelSpec(spec, columns);
+  const reason = validateRowLabelSpec(spec, columns, properties);
   if (reason) {
     throw new TypeError(`table(): invalid rowLabel rule — ${reason}`);
   }

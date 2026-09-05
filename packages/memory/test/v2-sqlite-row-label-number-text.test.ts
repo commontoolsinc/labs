@@ -27,6 +27,7 @@ import {
   principal,
   regexInputText,
   type RowLabelSpec,
+  validateRowLabelSpec,
   whenMatches,
 } from "../v2/sqlite/row-label.ts";
 import { table } from "../v2/sqlite/schema.ts";
@@ -114,24 +115,22 @@ describe("row-label numeric regex input", () => {
     });
   });
 
-  describe("a gate on a REAL column", () => {
+  describe("a REAL a column happens to hold", () => {
+    // A rule cannot name a REAL-declared column at all (see "declaring the
+    // rule"), but affinity is not a type: an INTEGER-affinity column keeps a
+    // value it cannot convert losslessly, so a REAL still reaches a rule.
     it("refuses a fractional value rather than approximating its text", () => {
-      // Not squeamishness about floats: SQLite's own REAL text is not a
-      // function of the double (see "the text SQLite shows" below), and a
-      // gate that nearly reproduces it is a gate that silently misses rows.
-      const res = gate(/^7\.5$/, 7.5, "real");
-      expect(res).toEqual({ error: expect.stringContaining("REAL") });
+      // SQLite's own REAL text is not a function of the double (see "the text
+      // SQLite shows" below), and a gate that nearly reproduces it is a gate
+      // that silently misses rows.
+      expect(gate(/^7\.5$/, 7.5)).toEqual({
+        error: expect.stringContaining("REAL"),
+      });
     });
 
     it("refuses an infinity", () => {
       expect(refusal(Infinity)).toMatch(/infinity/);
       expect(refusal(-Infinity)).toMatch(/infinity/);
-    });
-
-    it("takes a whole value stored in a REAL column", () => {
-      // What the driver hands over for a REAL 7.0 is the JS number 7, and a
-      // whole number is exactly what does coerce.
-      expect(gate(/^7$/, 7, "real")).toEqual({ fired: true });
     });
   });
 
@@ -333,6 +332,52 @@ describe("row-label numeric regex input", () => {
   });
 
   describe("declaring the rule", () => {
+    it("refuses a rule that reads a REAL column", () => {
+      // Every value a REAL-affinity column holds is a REAL, and this
+      // evaluator will not render one. A rule there is either dead (the
+      // fractional values refuse) or misleading (a whole value shows "7"
+      // where SQLite shows "7.0", so a rule written from the column's type
+      // never fires, and a gate that never fires drops a clause). Refusing
+      // at declaration is the only place that can be said out loud.
+      expect(() =>
+        table({ id: "integer primary key", score: "real" }, (f) => ({
+          confidentiality: all(
+            whenMatches(f.score, /^7$/, constant(GATED)),
+            dbOwner(),
+          ),
+        }))
+      ).toThrow(/REAL/);
+    });
+
+    it("refuses a rule that reads a BLOB column", () => {
+      expect(() =>
+        table({ id: "integer primary key", raw: "blob" }, (f) => ({
+          confidentiality: all(
+            principal("acct", match(f.raw, /\d+/)),
+            dbOwner(),
+          ),
+        }))
+      ).toThrow(/BLOB/);
+    });
+
+    it("re-runs that refusal on a wire-supplied spec", () => {
+      // `db.tables` arrives over the wire, so a spec that never went through
+      // `table()` reaches the same refusal before anything is evaluated.
+      const spec = table({ id: "integer primary key", score: "text" }, (f) => ({
+        confidentiality: all(
+          whenMatches(f.score, /^7$/, constant(GATED)),
+          dbOwner(),
+        ),
+      })).rowLabel as RowLabelSpec;
+      expect(validateRowLabelSpec(spec, ["id", "score"])).toBeUndefined();
+      expect(
+        validateRowLabelSpec(spec, ["id", "score"], {
+          id: { sqlType: "integer primary key" },
+          score: { sqlType: "double precision" },
+        }),
+      ).toMatch(/REAL/);
+    });
+
     it("takes a gate on a non-TEXT column without complaint", () => {
       // The refusal was only ever at evaluation: no validator reads a
       // column's declared type, so nothing had to change at declaration.

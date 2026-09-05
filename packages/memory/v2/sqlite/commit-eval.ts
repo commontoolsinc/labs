@@ -172,12 +172,12 @@ export function applySqliteCommitWrite(
   }
 
   const spec = (declared as { rowLabel: RowLabelSpec }).rowLabel;
-  const columnNames = Object.keys(
-    (declared as { properties?: Record<string, unknown> }).properties ?? {},
-  );
+  const properties =
+    (declared as { properties?: Record<string, unknown> }).properties ?? {};
+  const columnNames = Object.keys(properties);
   // `db.tables` is wire-supplied: re-validate before evaluating anything —
   // "couldn't validate" is never "no label".
-  const invalid = validateRowLabelSpec(spec, columnNames);
+  const invalid = validateRowLabelSpec(spec, columnNames, properties);
   if (invalid) {
     return fail(
       `table "${declaredKey}" declares an invalid rowLabel rule — ${invalid}`,
