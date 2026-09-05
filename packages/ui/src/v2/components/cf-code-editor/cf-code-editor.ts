@@ -901,9 +901,12 @@ export class CFCodeEditor extends BaseElement {
       // row cannot be completed against, exactly or otherwise.
       if (this._isIndexRow(i) && !this._resolvedPieceIds.has(i)) continue;
       const mention = mentionableData[i];
-      const name = mention?.[NAME] ?? "";
+      // Skip degraded holes (CT-1863): a null slot has no name to match on,
+      // and an empty query would otherwise falsely "exact-match" it.
+      if (!mention) continue;
+      const name = mention[NAME] ?? "";
       if (name.toLowerCase() === queryLower) {
-        return [handle.key(i), i];
+        return [handle.key(i) as CellHandle<Mentionable>, i];
       }
     }
 
