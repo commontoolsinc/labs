@@ -3473,11 +3473,23 @@ export class CellImpl<T extends FabricValue>
       maxConfidentiality?: ReadonlyArray<unknown>;
       onExceed?: "fail" | "skip";
       readClearance?: boolean;
+      scope?: CellScope;
     },
   ): Reactive<
     { pending: boolean; result?: Row[]; error?: unknown; withheld?: number }
   > {
-    return sqliteQueryNodeFactory({
+    // The scope binds the node the way `.asScope` binds the builder export:
+    // the runner folds the node's default scope into the result cell's link.
+    // Validated at the boundary: an invalid scope must not reach the link.
+    if (options?.scope !== undefined && !isCellScope(options.scope)) {
+      throw new TypeError(
+        `sqlite: invalid query result scope ${JSON.stringify(options.scope)}`,
+      );
+    }
+    const factory = options?.scope === undefined
+      ? sqliteQueryNodeFactory
+      : sqliteQueryNodeFactory.asScope(options.scope);
+    return factory({
       db: this,
       sql,
       params: options?.params,
