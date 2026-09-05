@@ -257,6 +257,19 @@ export class XAppView extends BaseView {
    * which is how a slow load came to claim a newer answer's identity. Its
    * lifetime is the view's display rather than any watch's, so a watch
    * stopping leaves it standing and the selection is what moves it on.
+   *
+   * That lifetime qualifies the first sentence. Only the selection moves this
+   * on, and the selection answers only an address that names a reference — so
+   * on an address naming none, and between an address changing and the
+   * selection answering the new one, this names what the view came to show
+   * LAST rather than anything on screen. Both readers are bounded by that
+   * same condition, so neither sees the first state:
+   * {@link XAppView.#resolveAgainst} compares against this only through a
+   * watch, which is built only for an address that names a reference, and
+   * {@link XAppView.#shownPieceId} is read only under one. In the second
+   * state a watch's first answer either differs — a reload — or is the answer
+   * the selection is already applying, and a runtime error naming the
+   * previous piece is attributed to this view until the selection answers.
    */
   #shownResolution: SlugReferenceTarget | SlugReferenceRefusal | undefined =
     undefined;

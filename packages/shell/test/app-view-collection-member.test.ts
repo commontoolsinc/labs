@@ -1015,7 +1015,12 @@ describe("AppView collection members", () => {
         viewOf({ pieceSlug: "top", pieceMember: "42" }),
       );
 
-      view.updated(new Map([["app", undefined]]));
+      // The runtime arrives with the rest of the view's state, as it does on
+      // a first update. Naming it is what installs it, and a runtime is
+      // released only where one was installed before it — so a replacement
+      // that never had a predecessor exercises less of the hand-off than a
+      // replacement has to.
+      view.updated(new Map([["app", undefined], ["rt", undefined]]));
       await first.settle();
       view._selectedPattern.run();
       await view._selectedPattern.taskComplete;
@@ -1035,8 +1040,9 @@ describe("AppView collection members", () => {
       await replacement.settle();
 
       expect(view.accessForTestingOnly.slugRevision).toBe(before);
-      // Nothing here drives an error path, so the whole of what the runtime
-      // is asked for on its way to the watch answered.
+      // Nothing here drives an error path, so every member the hand-off
+      // reaches for answered — the release of the first runtime among them,
+      // which only a replacement reaches.
       expect(errors.lines).toEqual([]);
     } finally {
       errors.restore();
