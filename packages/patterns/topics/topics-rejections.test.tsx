@@ -2,20 +2,26 @@
  * Rejection-path tests for the Topics mutating verbs (verb contract rule 4,
  * docs/plans/pattern-verb-contract.md: rejection is a value, never a silent
  * no-op). Every action here makes a verb throw, so the runtime errors are
- * required (`expectRuntimeErrors: 34` — exact count, so a rejection quietly
+ * required (`expectRuntimeErrors: 35` — exact count, so a rejection quietly
  * reverting to a silent return fails the suite); each assertion then verifies
  * the write did NOT land. Happy and legacy paths live in topics.test.tsx — including the UI
  * composer wrappers, whose silent guards are correct behavior (an empty draft
  * is a non-event in a composer, not a headless mutation).
  */
-import { action, assert, TESTS, Writable } from "commonfabric";
+import { action, assert, type Default, TESTS, Writable } from "commonfabric";
 import { pattern } from "commonfabric";
-import Topics from "./main.tsx";
+import Topics, { type TopicDemand } from "./main.tsx";
 import Topic, { type TopicComment, type TopicLink } from "./topic.tsx";
 
 export default pattern(() => {
   const board = Topics({});
-  const legacyBoard = Topics({});
+  // Its list and namespace are held here so an UNNAMED topic can be filed
+  // straight into the list, past `addTopic`. Without one there is nothing a
+  // wrongly-running backfill could name, and the assertion that the namespace
+  // stayed empty would hold however the guard behaved.
+  const legacyTopics = new Writable<TopicDemand[] | Default<[]>>([]);
+  const legacyNames = new Writable<Record<string, unknown>>({});
+  const legacyBoard = Topics({ topics: legacyTopics, names: legacyNames });
 
   // One valid signed topic on the board, so `addTopic`'s own rejections have a
   // board to leave unchanged.
@@ -40,6 +46,28 @@ export default pattern(() => {
   });
   const action_add_blank_legacy_agent = action(() => {
     legacyBoard.addTopic.send({ title: "must not land", agentName: " " });
+  });
+
+  // One unnamed topic, filed straight into the list past `addTopic` and
+  // link-bound to the board's table — the state an operator leaves behind
+  // before a backfill. Both halves earn their place: without the topic there
+  // is nothing a backfill could name, and without the wiring its row reads no
+  // name whether one was written or not.
+  const action_file_an_unnamed_topic = action(() => {
+    legacyTopics.push(
+      Topic({
+        title: "Unnamed",
+        createdAt: 1,
+        boardNames: legacyBoard.namesTable,
+      }),
+    );
+  });
+
+  // backfillNames: blank agentName. It writes the namespace rather than a
+  // topic's content, and it is signed on the same terms — a run nobody signed
+  // is a mutation nobody is accountable for.
+  const action_backfill_unsigned = action(() => {
+    legacyBoard.backfillNames.send({ agentName: "   " });
   });
 
   // addComment: empty body; blank agentName.
@@ -362,13 +390,26 @@ export default pattern(() => {
 
   const assert_legacy_board_empty = assert(() => legacyBoard.topicCount === 0);
 
+  // The refused backfill wrote no name, which is the half a throw alone does
+  // not prove: the verb rejects before it reaches the namespace. The board
+  // holds one unnamed topic, link-bound to its table, so a backfill that ran
+  // would write `1` and the row would show it. Removing the verb's guard reds
+  // every clause here: the count moves only if the create's rejection also
+  // stopped landing, the namespace gains the key the run wrote, and the row
+  // follows the namespace through the member's own wiring.
+  const assert_unnamed_topic_went_unnamed = assert(() =>
+    legacyBoard.topicCount === 1 &&
+    Object.keys(legacyNames.get()).length === 0 &&
+    legacyBoard.index?.[0]?.shortName === undefined
+  );
+
   return {
     // Every rejection below MUST surface as a thrown handler error —
-    // thirty-four throwing actions, thirty-four runtime errors. The exact count
+    // thirty-five throwing actions, thirty-five runtime errors. The exact count
     // means a
     // single verb quietly reverting to a silent early-return fails this suite;
     // the no-write assertions then prove the throw also blocked the write.
-    expectRuntimeErrors: 34,
+    expectRuntimeErrors: 35,
     [TESTS]: [
       { action: action_seed_topic },
       { assertion: assert_seeded },
@@ -378,6 +419,9 @@ export default pattern(() => {
       { assertion: assert_board_unchanged },
       { action: action_add_blank_legacy_agent },
       { assertion: assert_legacy_board_empty },
+      { action: action_file_an_unnamed_topic },
+      { action: action_backfill_unsigned },
+      { assertion: assert_unnamed_topic_went_unnamed },
       { action: action_blank_comment },
       { assertion: assert_seed_topic_untouched },
       { action: action_comment_unsigned },

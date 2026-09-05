@@ -1,11 +1,15 @@
 /**
- * The Topics-shape rehearsal: a test-only board whose members are the real
- * Topic pattern, unmodified, wired through the naming library the way the
- * exemplar board is. What it proves is the board side — allocation on
- * create, the backfill over a list filed before the board numbered anything,
- * the names table giving a topic its name by identity, and a topic's own
- * lookup over that table. An unmodified Topic publishes no `shortName`, so
- * the item side is proven on the exemplar item.
+ * A test-only board whose members are the real Topic pattern, wired through the
+ * naming library the way the exemplar board is. It holds the library to a
+ * member pattern it does not own — allocation on create, the backfill over a
+ * list filed before the board numbered anything, the names table giving a topic
+ * its name by identity, and a topic's own lookup over that table — through a
+ * board that is not the Topics board, so the library keeps its own coverage
+ * over topics however the Topics board changes.
+ *
+ * The lookup here is driven from OUTSIDE the member, over the list position's
+ * cell. What a topic does with its own `shortName` belongs to the Topics board
+ * and is covered in `../topics/naming.test.tsx`.
  */
 
 import {
@@ -133,9 +137,9 @@ export default pattern(() => {
   const topics = new Writable<TopicDemand[] | Default<[]>>([]);
   const names = new Writable<NamesMap>({});
   const board = ShapeBoard({ topics, names });
-  // The item-side lookup the graft gives a topic, driven here against real
-  // topic identities from the outside: the same lift, over the board's table,
-  // with the list position's cell standing where a topic's `[SELF]` will.
+  // The same lift a topic runs over its own `boardNames`, driven here against
+  // real topic identities from the outside: over the board's table, with the
+  // list position's cell standing where a topic's `[SELF]` does.
   const nameOfFirst = ownName({ table: board.namesTable, self: topics.key(0) });
   const nameOfSecond = ownName({
     table: board.namesTable,
@@ -180,7 +184,7 @@ export default pattern(() => {
   // topic, each row's `member` the topic itself — and the reverse lookup
   // returns it for the identity a caller holds, here the list position's
   // cell. The `ownName` lifts are the same lookup as a derivation, which is
-  // what a grafted topic runs over this table.
+  // what a topic wired to this table runs.
   const assert_table_names_each_topic = assert(() =>
     (board.namesTable ?? []).length === 2 &&
     board.namesTable?.[0]?.name === "1" &&

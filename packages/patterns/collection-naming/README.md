@@ -1,7 +1,9 @@
 # Collection naming
 
 A library a collection pattern calls to give its members names of its own, and
-an exemplar collection that uses it. The design is
+an exemplar collection that uses it. The Topics board in
+[`../topics/`](../topics/README.md) is the collection it exists for and calls
+the same library. The design is
 [Naming in collections](../../../docs/specs/collection-naming.md); this
 directory is its first customer. Member names here are decimal strings, dense
 from `1`, so a member is cited as `<collection>/42`.
@@ -38,10 +40,10 @@ collection does with it:
   the exemplar: the stage that binds the board's namespace as a slug fills it,
   and that binding is what a resolver can then check the declaration against.
 
-Nothing in the library knows what kind of piece a member is. A member is a cell,
-compared by identity and never read through, which is what keeps every read here
-— the allocator surveying keys, the table over the map, a member finding its row
-— from expanding a member document.
+Nothing in `naming.ts` knows what kind of piece a member is. A member is a cell,
+compared by identity and never read through, which is what keeps every read
+there — the allocator surveying keys, the table over the map, a member finding
+its row — from expanding a member document.
 
 ### Declaring the namespace
 
@@ -63,6 +65,28 @@ A verb reads its binding through a schema that carries no default, so inside a
 verb the map is `undefined` until the first name is written. `NamesMapCell`
 declares that structurally, and the library's readers take an absent map as
 empty.
+
+## The mention universe: `mentionable.ts`
+
+The one derivation both this exemplar and the Topics board build their mention
+universe with. `mentionableIndex` reads three display strings off each member —
+its display name, its title, and its own `shortName` — and returns one document
+of `MentionableRow` copies, each carrying the member itself as an unread
+reference under the `piece` key;
+[the mentionable convention](../../../docs/common/conventions/mentionable.md) is
+what the editors consume it through. `mentionableRowsOf` is the per-member
+projection on its own, over any list of cells.
+
+Copies rather than the members are what bounds the read, and that is what
+separates a universe from an index: a survey index whose rows ARE the members
+costs nothing extra, because a survey reads those members anyway, while the
+universe is read by EVERY member's editor — wiring it to the members would
+multiply the collection by itself.
+
+It is a module of its own rather than part of `naming.ts` because it reads
+THROUGH a member, which is exactly what that module does not do; and it is one
+module rather than a copy per board because a board importing the other board's
+copy would carry that whole board into its own program.
 
 ## The exemplar: `board.tsx` and `item.tsx`
 
@@ -97,11 +121,8 @@ wired. A caller that needs to know which reads the namespace, where the answer
 is: `nameOf` over `namesTable` returns the name for either, and returns
 `undefined` only for the first.
 
-`mentionable` is the board's mention universe: one row per member carrying the
-display name, the title, the board's name for the member as `shortName`, and the
-member itself as an unread reference. Unlike `index`, whose rows ARE the items,
-these rows are copies: the universe is read by every item's editor, so wiring it
-to the items would multiply the board by itself. Every item the board creates is
+`mentionable` is the board's mention universe, derived through
+`mentionableIndex` from `mentionable.ts` above. Every item the board creates is
 wired to it, so an item's body editor completes `#42` over the board's own
 numbering. The query matches a row's copied `shortName`, taken off the member's
 own — the same property a member publishes for itself, and the one `index` shows
@@ -152,15 +173,20 @@ cf piece call --cell /of:<board> backfillNames --json '{"agentName":"Sol"}'
   universe and the name each of its rows carries, the item reading its own name,
   the bound on what a read of the namespace or the universe expands, a board
   given no namespace at all, and the rejections.
-- `topics-shape.test.tsx` — the rehearsal for the Topics board: a test-only
-  board whose members are the real `Topic` pattern, unmodified, wired through
-  the library the way the exemplar is. It proves the board side through the
-  names table and the reverse lookup; an unmodified Topic publishes no
-  `shortName`, so the item side is proven on the exemplar item.
+- `topics-shape.test.tsx` — a test-only board whose members are the real `Topic`
+  pattern, wired through the library the way the exemplar is. It holds the
+  library to a member pattern it does not own — allocation on create, the
+  backfill, the names table, and the reverse lookup, all over topics, through a
+  board that is not the Topics board.
 
 ## Topics
 
-The Topics board (`../topics/`) is the collection this library exists for. It
-adopts the library with the wiring the rehearsal board already carries, and its
-topic gains the item-side display the exemplar item proves, on the schedule in
-[the plan](../../../docs/plans/collection-naming-topics.md).
+The Topics board (`../topics/`) is the collection this library exists for, and
+it calls it: `addTopic` allocates in the same transaction as its append,
+`backfillNames` names what the board held before, each topic reads its own name
+out of `boardNames` and publishes it as `shortName`, and both boards derive
+their mention universe through `mentionable.ts`. What is still to come is in
+[the plan](../../../docs/plans/collection-naming-topics.md): the production
+backfill, which needs the one-time link-bind of `namesTable` onto every topic
+filed before the namespace, and the slug that binds the board's `names` cell as
+`top`.

@@ -30,10 +30,11 @@
  * `cf piece link` against the board recorded in the export.
  *
  * Those wiring links are `STRUCTURAL_LINK_SOURCES`, which maps each one to
- * the board path it points at: `mentionable` to the board's `topics`, and
- * `boardCrossrefs` to its `crossrefs`. A link-valued field absent from that
- * map stops the restore rather than being guessed at, so a wiring input
- * added to the topic pattern announces itself here.
+ * the board path it points at: `mentionable` to the board's `topics`,
+ * `boardCrossrefs` to its `crossrefs`, and `boardNames` to its `namesTable`.
+ * A link-valued field absent from that map stops the restore rather than
+ * being guessed at, so a wiring input added to the topic pattern announces
+ * itself here.
  *
  * Four honest costs. Comment and link elements are re-written as plain
  * values, so their element entities are minted fresh: content, order,

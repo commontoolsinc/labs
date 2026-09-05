@@ -90,18 +90,19 @@ directly.
 
 The current declared contract is:
 
-| Piece | Verb            | Input                                           | Declared result       |
-| ----- | --------------- | ----------------------------------------------- | --------------------- |
-| Board | `addTopic`      | `title`, optional `body`, `agentName`           | created `topic`       |
-| Topic | `addComment`    | `body`, `agentName`                             | appended `comment`    |
-| Topic | `addLink`       | `url`, optional `kind` and `label`, `agentName` | appended `link`       |
-| Topic | `setBody`       | complete `body`, `agentName`                    | body and attribution  |
-| Topic | `setTitle`      | `title`, `agentName`                            | title and attribution |
-| Topic | `mention`       | Topic reference                                 | none                  |
-| Topic | `unmention`     | Topic reference                                 | none                  |
-| Topic | `editComment`   | comment reference, `body`, `agentName`          | body and `editedAt`   |
-| Topic | `removeComment` | comment reference, `agentName`                  | the retraction stamp  |
-| Topic | `removeLink`    | link reference **or** `url`, `agentName`        | url and stamp         |
+| Piece | Verb            | Input                                           | Declared result         |
+| ----- | --------------- | ----------------------------------------------- | ----------------------- |
+| Board | `addTopic`      | `title`, optional `body`, `agentName`           | created `topic`, `name` |
+| Board | `backfillNames` | `agentName`                                     | the names it wrote      |
+| Topic | `addComment`    | `body`, `agentName`                             | appended `comment`      |
+| Topic | `addLink`       | `url`, optional `kind` and `label`, `agentName` | appended `link`         |
+| Topic | `setBody`       | complete `body`, `agentName`                    | body and attribution    |
+| Topic | `setTitle`      | `title`, `agentName`                            | title and attribution   |
+| Topic | `mention`       | Topic reference                                 | none                    |
+| Topic | `unmention`     | Topic reference                                 | none                    |
+| Topic | `editComment`   | comment reference, `body`, `agentName`          | body and `editedAt`     |
+| Topic | `removeComment` | comment reference, `agentName`                  | the retraction stamp    |
+| Topic | `removeLink`    | link reference **or** `url`, `agentName`        | url and stamp           |
 
 A retraction stamps the record rather than deleting it: the comment or link
 stays, carrying what it always said, while readers stop showing it and
@@ -164,6 +165,46 @@ Input reads are the durable source of truth. Use `--step` for computed results
 such as the board's `index` and a Topic's `commentCount`, `lastActivityAt`,
 `mentions`, or `referencedBy`.
 
+## `top/42` — a Topic addressed by the board's name for it
+
+The board gives each Topic a name of its own: a decimal number, dense from `1`,
+allocated when the Topic is filed and never reused. It is not a display name — a
+Topic's display name stays its title, and the number renders as a badge beside
+it. `addTopic` returns the name it allocated as `name` beside the created
+`topic`, and each Topic publishes its own as `shortName`, which the board's
+`index` rows and mention universe carry a copy of. So a survey reads every name
+in one bounded read:
+
+```bash
+cf cell get "$TOPICS_BOARD" index --step --select @,title,shortName
+```
+
+The number is what a short reference is written with. Once the board's `names`
+map is bound as a slug, `<collection>/<member>` names a Topic wherever an
+address is taken — `cf cell get /@<space>/top/42 title`,
+`cf piece describe --cell /@<space>/top/42`,
+`cf piece call --cell /@<space>/top/42 setTitle '{...}'` — and exactly one
+segment reaches a member, so `/@<space>/top/42/title` is that Topic's `title`
+field. A name with no member after it is refused, naming the piece holding the
+collection; and `no member 999 in top` is the refusal for a member the board
+does not hold. `packages/cli/README.md` is the whole grammar, and
+`docs/specs/collection-naming.md` the design.
+
+A member name is the board's, not the fabric's: it means something only through
+the collection that issued it, so a citation carries the collection —
+`/@<space>/top/42`, never a bare `42`. A canonical `/of:` address remains the
+thing to pass in a reference position; the member name is for a person to read
+and type.
+
+**What the Estuary deployment carries.** The verbs and the naming above are what
+the pattern in this checkout declares. The deployed board runs whatever commit
+`/api/meta` reports, and until a pattern update lands there it has no `names`
+map, no `top` slug, and no named Topic — a Topic publishes no `shortName` and
+`/top/42` resolves to nothing. Ask the deployment before citing a number, and
+treat `top/42` as unavailable there until the plan's remaining step is done
+(`docs/plans/collection-naming-topics.md`). Deploying it and naming the Topics
+already on the board are the team's steps, not an agent's.
+
 ## Create and recover the address
 
 Mint one invocation session for the agent run. Replace every angle-bracketed
@@ -177,13 +218,22 @@ CREATE="$(cf piece call --cell "$TOPICS_BOARD" \
   --invocation '<unique-topic-create-id>' \
   addTopic \
   '{"title":"<title>","body":"<initial living document>","agentName":"Sol"}' \
-  -- --schema '{"properties":{"topic":{"$link":true}}}')"
+  -- --schema '{"properties":{"topic":{"$link":true},"name":{"type":"string"}}}')"
 TOPIC="$(printf '%s\n' "$CREATE" | jq -r '.result.topic["$link"] // empty')"
+NAME="$(printf '%s\n' "$CREATE" | jq -r '.result.name // empty')"
 ```
 
-When the result is present, carry `TOPIC` into the next command. Use JSON
-encoding or schema-derived flags for multiline Markdown; do not interpolate
-unescaped content into JSON.
+The projection names BOTH results, and that is load-bearing: a schema listing
+only `topic` drops `name` from the envelope, so `NAME` comes back empty and the
+allocated number is lost. Dropping the projection entirely returns the name and
+the whole created topic with it — a rendered view included, two orders of
+magnitude more payload — which is what the projection exists to avoid.
+
+When the result is present, carry `TOPIC` into the next command. `NAME` is the
+member name the board allocated — read it here rather than from the Topic's own
+`shortName`, which is a derivation that may not have produced a value when the
+call returns. Use JSON encoding or schema-derived flags for multiline Markdown;
+do not interpolate unescaped content into JSON.
 
 Current Estuary calls have a known observation asymmetry. `addTopic` has
 reported an error after committing and has reported success without committing.
@@ -271,6 +321,12 @@ source is a production migration over team-critical data. Before any `setsrc`,
 read `docs/development/space-clone-rehearsal.md` and the latest Topics migration
 record in `docs/history/topics-board-migration-2026-08-28.md`. Do not use
 `--dangerously-allow-incompatible-schema` without explicit team authorization.
+
+Pass `--root` at or above `packages/patterns` on every `piece new` and `setsrc`
+of the board or a Topic. Both import the member-naming library from a sibling
+directory, and the default program root is the entry's own directory, so without
+the flag every such import is refused as escaping the program root and the
+deploy fails before it reaches the server.
 
 Do not substitute `piece ls` for the board index: handler-created Topics need
 not appear in the registry. If a deployed field or verb differs from this map,
