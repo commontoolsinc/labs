@@ -15,7 +15,9 @@ import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { Runtime, UI } from "@commonfabric/runner";
 import type { Cell } from "@commonfabric/runner";
+import type { CfcLabelView } from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { cfcLabelViewSymbol } from "../../runner/src/cfc/label-view-state.ts";
 
 import type { VDomOp } from "../src/vdom-ops.ts";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
@@ -124,6 +126,16 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
 
     isStream() {
       return false;
+    }
+
+    // A mock names no link, so it resolves to itself and has no schema to
+    // fall back on for a label; a step that needs either overrides it.
+    resolveAsCell() {
+      return this;
+    }
+
+    get schema(): undefined {
+      return undefined;
     }
   }
 
@@ -1888,8 +1900,12 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
     "updates same-key subpatterns and retargets unchanged UI",
     async () => {
       const collector = createOpsCollector();
+      // A public-only ceiling, so that the one output labeled confidential
+      // below is refused by the real render policy while the unlabeled ones
+      // render as before.
       const reconciler = new WorkerReconciler({
         onOps: collector.onOps,
+        renderConfidentialityCeiling: { atoms: [] },
       });
       // A subpattern's output reaches the reconciler as a cell, and a cell
       // keys by the link it names rather than by the payload behind it. That
@@ -1907,6 +1923,14 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       });
       const outputCell = new MockCell(initialOutput);
       let resolvedOutputId = "of:fid1:nested-pattern";
+      // The one output the render policy refuses: while the resolved output
+      // is this one, it carries a confidentiality label no public-only
+      // ceiling admits; otherwise it carries none.
+      const deniedOutputId = "of:fid1:retargeted-to-blocked";
+      const deniedLabelView: CfcLabelView = {
+        version: 1,
+        entries: [{ path: [], label: { confidentiality: ["secret"] } }],
+      };
       outputCell.getAsNormalizedFullLink = () => ({
         id: "of:fid1:stable-link-container",
         space: signer.did(),
@@ -1927,6 +1951,8 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
           field === "patternIdentity"
             ? { identity: "nested-pattern", symbol: "default" }
             : undefined,
+        [cfcLabelViewSymbol]: () =>
+          resolvedOutputId === deniedOutputId ? deniedLabelView : undefined,
       } as unknown as Cell<unknown>;
       outputCell.resolveAsCell = () => resolvedOutputCell;
 
@@ -2062,10 +2088,6 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         props: { "data-row": "blocked" },
         children: ["blocked"],
       });
-      const deniedOutputId = "of:fid1:retargeted-to-blocked";
-      (reconciler as unknown as {
-        canRenderCellUnderPolicy: () => boolean;
-      }).canRenderCellUnderPolicy = () => resolvedOutputId !== deniedOutputId;
       resolvedOutputId = deniedOutputId;
       outputCell.set(blockedCandidate);
       await t.settle();

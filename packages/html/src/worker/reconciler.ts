@@ -263,14 +263,8 @@ export class WorkerReconciler {
       rootRenderPolicy: this.#rootRenderPolicy,
       atomRenderableUnderPolicy: (atom, policy) =>
         this.#atomRenderableUnderPolicy(atom, policy),
-      // Forwards to the TypeScript-private member so that a test which
-      // replaces it by assignment is honored here too.
-      // TODO(danfuzz): Find a way to make `canRenderCellUnderPolicy()` a `#`
-      // method, which needs `test/worker-reconciler-cell-child.test.ts` to stop
-      // replacing it by assignment: a seam this class offers, or a test written
-      // against the public behavior.
       canRenderCellUnderPolicy: (cell, policy) =>
-        this.canRenderCellUnderPolicy(cell, policy),
+        this.#canRenderCellUnderPolicy(cell, policy),
     };
   }
 
@@ -357,7 +351,7 @@ export class WorkerReconciler {
         // configured) before rendering its resolved content. Checked per
         // update so label changes re-evaluate, mirroring renderCellChild.
         if (
-          !this.canRenderCellUnderPolicy(
+          !this.#canRenderCellUnderPolicy(
             vnode as Cell<unknown>,
             this.#rootRenderPolicy,
           )
@@ -1000,7 +994,7 @@ export class WorkerReconciler {
     }
     const protectedValue = this.#boundaryProtectedValueCell(node);
     return protectedValue !== undefined &&
-      !this.canRenderCellUnderPolicy(protectedValue, policy);
+      !this.#canRenderCellUnderPolicy(protectedValue, policy);
   }
 
   #boundaryProtectedValueCell(
@@ -1142,11 +1136,13 @@ export class WorkerReconciler {
   }
 
   /**
-   * TypeScript-private rather than a `#` name, because
-   * `test/worker-reconciler-cell-child.test.ts` replaces this member by
-   * assignment, which a `#` method does not allow.
+   * Whether `cell` may render under `policy`: every atom of its
+   * confidentiality label (its schema's, when it carries none) sits under
+   * the ceiling or is declassified, resolved through the display-boundary
+   * exchange rules when a resolver is wired and a ceiling is in force. A
+   * label that cannot be read fails closed.
    */
-  private canRenderCellUnderPolicy(
+  #canRenderCellUnderPolicy(
     cell: Cell<unknown>,
     policy: RenderPolicy,
   ): boolean {
@@ -3675,7 +3671,7 @@ export class WorkerReconciler {
         addCancel,
         () => renderResolved(childState.currentValue, true),
       );
-      const blockedByPolicy = !this.canRenderCellUnderPolicy(cell, policy);
+      const blockedByPolicy = !this.#canRenderCellUnderPolicy(cell, policy);
       const blockedByIntegrity = !blockedByPolicy &&
         this.#shouldBlockTextFromCell(resolvedChild, cell, policy);
 
