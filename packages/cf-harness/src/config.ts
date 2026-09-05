@@ -4,8 +4,8 @@ import {
   cfcEnforcementStrictness,
   type CfcFlowLabelsMode,
   type CfcReadOnExceed,
-  isCfcEnforcementMode,
   clausesEqual,
+  isCfcEnforcementMode,
   meetCfcObservationCeilings,
 } from "@commonfabric/runner/cfc";
 import type { CfcPosture } from "@commonfabric/runner";

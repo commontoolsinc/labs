@@ -1,5 +1,9 @@
-import { assertEquals, assertRejects,
-  assertMatch, assertStringIncludes } from "@std/assert";
+import {
+  assertEquals,
+  assertMatch,
+  assertRejects,
+  assertStringIncludes,
+} from "@std/assert";
 import { decodeBase64 } from "@std/encoding/base64";
 import { join } from "@std/path";
 
@@ -7419,7 +7423,6 @@ Deno.test("a resume whose manifest declares another read ceiling is refused as a
   assertStringIncludes(failure.error.message, "resume read ceiling mismatch");
 });
 
-
 Deno.test("a resume whose manifest respells the recorded ceiling (anyOf reordered) is not a mismatch", async () => {
   const buffers = createIoBuffers();
   let promptLoopsCreated = 0;
@@ -7427,7 +7430,9 @@ Deno.test("a resume whose manifest respells the recorded ceiling (anyOf reordere
     type: "cf-harness.loom-run-manifest",
     version: 1,
     source: "loom",
-    cfc: { maxConfidentiality: [{ anyOf: ["did:key:zOwner", "did:key:zFacet"] }] },
+    cfc: {
+      maxConfidentiality: [{ anyOf: ["did:key:zOwner", "did:key:zFacet"] }],
+    },
   } as const;
   const exitCode = await runCfHarnessCli(
     [
@@ -7452,7 +7457,11 @@ Deno.test("a resume whose manifest respells the recorded ceiling (anyOf reordere
       readTextFile: () =>
         Promise.resolve(JSON.stringify({
           ...recordedManifest,
-          cfc: { maxConfidentiality: [{ anyOf: ["did:key:zFacet", "did:key:zOwner"] }] },
+          cfc: {
+            maxConfidentiality: [{
+              anyOf: ["did:key:zFacet", "did:key:zOwner"],
+            }],
+          },
         })),
       readRunArtifacts: () =>
         Promise.resolve({
@@ -7527,6 +7536,9 @@ Deno.test("parseCfHarnessCliArgs refuses a present --max-confidentiality with no
       () => parseCfHarnessCliArgs(args, { cwd: "/tmp/project", env: {} }),
       Error,
     );
-    assertMatch(err.message, /--max-confidentiality (requires a JSON array|must be JSON)/);
+    assertMatch(
+      err.message,
+      /--max-confidentiality (requires a JSON array|must be JSON)/,
+    );
   }
 });

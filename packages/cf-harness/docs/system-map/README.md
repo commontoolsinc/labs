@@ -112,10 +112,9 @@ The map predates the run read ceiling (`--max-confidentiality` /
 session" and deviation 9 in
 [IMPLEMENTATION_PROFILE.md](../IMPLEMENTATION_PROFILE.md)). It still draws the
 harness's fixed answer ceiling as the only read boundary. The ceiling a run
-carries is enforced by the runner's `db.query` builtin, on session-scoped
-query results only, with a space-scoped query refused; a shared cell another
-runtime filled is outside it. Redraw that boundary the next time the map is
-regenerated.
+carries is enforced by the runner's `db.query` builtin, on session-scoped query
+results only, with a space-scoped query refused; a shared cell another runtime
+filled is outside it. Redraw that boundary the next time the map is regenerated.
 
 ## Relation to the other documents here
 

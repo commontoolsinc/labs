@@ -325,8 +325,8 @@ in-flight external side effect.
    `cfcReadMaxConfidentiality` — is applied by the runner's `db.query` builtin
    at the query, not at the cell: a query whose result is session-scoped
    (`PerSession<>`, `scope: "session"`, `.asScope("session")`, or a
-   session-scoped db) reads under the meet of its own ceiling and the run's;
-   a query with a space- or user-scoped result is refused before it is staged,
+   session-scoped db) reads under the meet of its own ceiling and the run's; a
+   query with a space- or user-scoped result is refused before it is staged,
    because that result is one cell every runtime on the space resolves and the
    run's runtime cannot narrow it for itself. The refusal reaches the runtime's
    error handlers, so an authored pattern that declares no scope fails on its

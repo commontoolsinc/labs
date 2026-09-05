@@ -9,13 +9,13 @@ import {
 } from "@commonfabric/runner/cfc";
 import { presetCfcOptions } from "@commonfabric/runner";
 import {
-  readCeilingsEqual,
   DEFAULT_GATEWAY_BASE_URL,
   DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE,
   fabricSessionCfcEnforcementMode,
   type HarnessConfig,
   parseCfcEnforcementMode,
   parseHarnessGatewayAuthMode,
+  readCeilingsEqual,
   resolveCfcEnforcementMode,
   resolveCfcEnforcementModeSource,
   resolveGatewayAuthMode,
@@ -729,12 +729,14 @@ Deno.test("resolveHarnessConfig snapshots the run manifest's read ceiling rather
   ]);
 });
 
-
 Deno.test("readCeilingsEqual is a multiset match with order-insensitive alternatives, never a string compare", () => {
   const A = "did:key:zA";
   const B = "did:key:zB";
   const O = "did:key:zO";
-  assertEquals(readCeilingsEqual([{ anyOf: [A, B] }, O], [O, { anyOf: [B, A] }]), true);
+  assertEquals(
+    readCeilingsEqual([{ anyOf: [A, B] }, O], [O, { anyOf: [B, A] }]),
+    true,
+  );
   assertEquals(readCeilingsEqual([{ anyOf: [A, B] }], [{ anyOf: [A] }]), false);
   assertEquals(readCeilingsEqual([O], [O, O]), false);
   assertEquals(readCeilingsEqual(undefined, undefined), true);
