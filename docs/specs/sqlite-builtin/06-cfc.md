@@ -248,40 +248,67 @@ argument of `match` / `whenMatches`.
 **What a regex may read.** TEXT, and a **whole INTEGER** by its decimal
 digits — the ordinary key column a rule wants to gate on (msgvault's
 per-mailbox `source_id`), written as `whenMatches(f.source_id, /^7$/, …)`.
-The digits are the text SQLite shows for that INTEGER, so the gate compares
-what an operator reads off the row. A JS number carries no INTEGER/REAL tag,
-so a whole value stored in a REAL column also shows its integer spelling
-(`7`, where `CAST(col AS TEXT)` would say `7.0`): gate on the digits, not on
-the column's declared type. Everything else refuses at evaluation, and each
-refusal names the value's **class** only, never the value (invariant 14):
+The digits are the ones SQLite shows for that INTEGER, so a rule is written
+from the row. Everything else refuses at evaluation, and each refusal names
+the value's **class** only, never the value (invariant 14):
 
 - a **REAL** with a fraction, and an infinity. SQLite renders a REAL with
   `%!.15g` over its own decoded digits, and the rendering is not a function
-  of the double the evaluator holds: the prebuilt SQLite libraries the driver
-  loads on macOS and on Linux disagree about the last digit of
-  `-0.009598882198146955` (`…696` against the correctly rounded `…695`), so
-  no formatter is right on both. A gate is an anchored comparison against the
-  text SQLite *would* show, and a text we could only nearly reproduce is a
-  gate that silently fails to fire on some rows, dropping a confidentiality
-  clause.
-- a whole number past 2^53, where a double no longer names one int64 (a large
-  INTEGER read into one has already lost its low digits), and a bigint
-  outside int64.
+  of the double the evaluator holds: the SQLite builds behind the driver
+  disagree about the last digit of `-0.009598882198146955` (`…696` against
+  the correctly rounded `…695`, the split following the architecture, whose
+  long double the decoder uses where it is wider than a double), so no
+  formatter is right on both. A gate is an anchored comparison against the
+  text SQLite *would* show, and a text that can only be nearly reproduced is
+  a gate that silently fails to fire on some rows, dropping a
+  confidentiality clause.
+- a whole number past 2^53, and a bigint outside int64: past there a JS
+  number no longer names one integer, so no text derived from it is
+  honestly the row's.
 - NaN (SQLite stores one as NULL, so it never came out of a row), a boolean
   (not a SQLite value), and a BLOB.
 
 NULL and the empty string are not refusals: a gate stays quiet and an
-extractor yields nothing, as they always have (`min` still applies).
+extractor yields nothing, as they always have (`min` still applies). A zero
+is a value, not an absence.
 
-A rule reads the value **as it reaches the evaluator**, which is the bound
-value at the write gate and the stored value everywhere else. SQLite's type
-affinity can convert one into the other — a `"7.0"` bound into an INTEGER
-column stores as `7` — and the two texts then differ, so the runner's
-prospective label and the re-derived one disagree for that row. The
-re-derived label is the one that protects the row (the server's commit
-evaluation and the read side both compute it from the post-image); what the
-disagreement costs is the accuracy of the write gate's no-laundering check.
-Bind a rule-input column the value it stores.
+**A rule input's column is declared, and two declarations settle the
+question before any rule runs.** A column whose declared type gives it REAL
+affinity, or names BLOB, is refused a rule at declaration — by `table()`,
+and again wherever a wire-supplied `db.tables` is re-validated. Every value a
+REAL-affinity column holds is a REAL, so a rule there is dead (the fractional
+values refuse) or misleading (a whole one shows `7` where `CAST` says `7.0`,
+so a rule written from the column's type never fires); a BLOB has no text at
+all. SQLite's dynamic typing would allow either column to hold text, and this
+refuses it anyway: declare a column that holds text as TEXT.
+
+**The digits have to be the stored ones.** `@db/sqlite` reads an INTEGER
+column through `sqlite3_column_int`, the 32-bit accessor, unless the
+connection sets `int64` — so a stored `4294967303` arrives as `7`, and a
+label derived from that is a label for another key's rows. Two paths read
+rule inputs, and each answers it where it reads:
+
+- the **read** side runs labeled queries (`queryWithOrigins`, issued only for
+  a db that declares `ifc` or a row rule) on an `int64` connection, where a
+  value past 2^53 arrives as a `bigint`. Ordinary reads keep the connection
+  and the values they have always had.
+- **commit evaluation** runs on the engine connection, which serves
+  everything and cannot flip mode for this, so SQLite renders instead: the
+  affected rowid as text (the read-back addresses the row that was written
+  rather than whichever row shares its low 32 bits), and a rule input as text
+  only when its storage class is INTEGER — a rendered REAL would reach the
+  evaluator as a string and be gated on, where the read side refuses it.
+
+**The write gate evaluates what the column will store.** A rule's prospective
+label is computed from the BOUND values, and everything else re-derives it
+from the stored ones; SQLite's affinity sits between the two. A rule input
+bound a string that a numeric-affinity column would store as a number
+(`"007"` into an INTEGER column) is refused at the gate, because the label
+the gate computes for it is not the label the row will carry — and the check
+that rides on it, no-laundering, is the one the server cannot redo (it is
+the only place the inputs' own labels are known). No other pairing converts:
+a number bound to a TEXT column is stored as the text the evaluator already
+renders it to.
 
 **No acting-principal term in rules.** `currentUser()` is deliberately not a
 helper: a rule must compute the **same** label at the write gate, the server
@@ -568,15 +595,17 @@ re-derives.
 ### Fail-closed rules (consolidated)
 
 1. **Authoring:** unknown column, unknown op, unsafe regex, an integrity/
-   confidentiality op in the wrong position, or a malformed `any()` alternative
-   (a nested `all()`/`any()`) ⟶ `table()` throws. A well-formed `any(...)` is
+   confidentiality op in the wrong position, a malformed `any()` alternative
+   (a nested `all()`/`any()`), or a rule input declared REAL or BLOB ⟶
+   `table()` throws. A well-formed `any(...)` is
    accepted as an authored OR-clause (Epic E1). The same validation re-runs on
    wire-supplied specs before evaluation.
 2. **Read, unresolvable input:** a rule input missing from the projection by
    origin, or ambiguous (two columns, same origin) ⟶ refuse the query.
-3. **Read, bad data:** evaluator `{error}` (a regex input SQLite has no
-   reproducible text for, strict-if-present zero match, `min` miss,
-   multi-match integrity subject) ⟶ refuse the query.
+3. **Read, bad data:** evaluator `{error}` (a regex input with no text this
+   evaluator can honestly show — a REAL, a BLOB, a number past 2^53 —
+   strict-if-present zero match, `min` miss, multi-match integrity subject) ⟶
+   refuse the query.
 4. **Read, unattributable output:** a null-origin column on a rule-bearing query
    lifts by the common-alternative property (rule 2 / CFC spec §8.17.4) when a
    reader is a static unconditional reader of every row; otherwise ⟶ refuse.

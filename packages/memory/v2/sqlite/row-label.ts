@@ -655,28 +655,31 @@ const INT64_MAX = 2n ** 63n - 1n;
  *
  * A rule gates on stored data, and a column keyed by an INTEGER — a mailbox
  * id, an account id — is the ordinary thing to gate on, so a whole integer
- * shows the regex its decimal digits: the same text SQLite shows for that
- * INTEGER, and the text an operator reads off the row. One value has one
- * text, so the write gate, the server commit, and read re-derivation still
+ * shows the regex its decimal digits. Those are the digits SQLite shows for
+ * that INTEGER, which is what makes a rule writable from the row: the read
+ * side reads whole integers (`read-pool.ts` opens the labeled reads with
+ * `int64`) and commit evaluation renders them (`commit-eval.ts`), so the
+ * digits here are the stored ones rather than a truncation of them. One value
+ * has one text, so the write gate, the server commit, and read re-derivation
  * derive one label from one row.
  *
- * A REAL does NOT coerce, and the reason is not squeamishness about floats:
- * SQLite renders one with "%!.15g" over its OWN decoded digits, and that
- * rendering is not a function of the double this evaluator holds. The two
- * prebuilt libraries this driver loads disagree about the last digit of
- * -0.009598882198146955 — the macOS one shows "-0.00959888219814696", the
- * Linux one the correctly rounded "-0.00959888219814695" — so no formatter
- * written here is right on both. A gate is an anchored comparison against the
- * text SQLite would show, so a text we can only nearly reproduce is a gate
- * that silently fails to fire on some rows, dropping a confidentiality
- * clause. Refusing is the fail-closed half of that choice, and it is what a
- * REAL did before this coercion existed.
+ * A REAL does not coerce. SQLite renders one with "%!.15g" over its OWN
+ * decoded digits, and that rendering is not a function of the double this
+ * evaluator holds: the SQLite builds behind this driver disagree about the
+ * last digit of -0.009598882198146955, which one returns as
+ * "-0.00959888219814696" and another as the correctly rounded
+ * "-0.00959888219814695" (the split follows the architecture, whose long
+ * double the decoder uses where it is wider than a double). A gate is an
+ * anchored comparison against the text SQLite would show, so a text that can
+ * only be nearly reproduced is a gate that silently fails to fire on some
+ * rows, dropping a confidentiality clause.
  * (`v2-sqlite-row-label-number-text.test.ts` pins the disagreement.)
  *
- * The one place an INTEGER's text is not literally `CAST(col AS TEXT)`: a JS
- * number carries no INTEGER/REAL tag, so a whole value stored in a REAL
- * column shows its integer spelling ("7") where SQLite would show "7.0".
- * Gate on a column that holds whole numbers, and write the digits.
+ * A column declared REAL or BLOB is refused a rule outright, at declaration —
+ * see `validateRowLabelSpec`. What reaches here is a REAL a column of some
+ * other affinity happens to hold, and one exception to the digits being
+ * SQLite's: a whole REAL in a column with no affinity arrives as a JS number
+ * carrying no storage class, and shows "7" where SQLite shows "7.0".
  */
 export function regexInputText(value: unknown): string | undefined {
   if (typeof value === "string") return value;
