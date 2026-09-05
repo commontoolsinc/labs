@@ -247,6 +247,76 @@ describe("RuntimeClient", () => {
     });
   });
 
+  describe("piece-addressed requests", () => {
+    it("carries a narrower scope on every request naming a piece by id", async () => {
+      // The id alone names a different document in every other scope, so a
+      // method that takes a scope and drops it reaches the wrong piece
+      // rather than failing.
+
+      const space = "did:key:z6Mk-runtime-client-scoped";
+      const requests: Array<Record<string, unknown>> = [];
+      const cell = { id: "of:fid1:mine", space, scope: "user", path: [] };
+      const conn = {
+        on: () => {},
+        request: (message: Record<string, unknown>) => {
+          requests.push(message);
+          switch (message.type) {
+            case RequestType.PieceGetSlug:
+              return Promise.resolve({ slug: "mine" });
+            case RequestType.PieceRemove:
+              return Promise.resolve({ value: true });
+            case RequestType.PieceClone:
+              return Promise.resolve({ piece: { cell } });
+            default:
+              return Promise.resolve({ source: { files: [], history: [] } });
+          }
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, undefined);
+
+      await client.getPieceSlug("fid1:mine", space as never, "user");
+      await client.removePiece("fid1:mine", space as never, "user");
+      await client.getPieceSource("fid1:mine", space as never, "user");
+      await client.getPieceSourceRevision(
+        "fid1:mine",
+        space as never,
+        "revision-1",
+        "user",
+      );
+      await client.clonePiece(
+        "fid1:mine",
+        space as never,
+        space as never,
+        { scope: "user" },
+      );
+      await client.updatePieceSource(
+        "fid1:mine",
+        space as never,
+        { kind: "detach" },
+        { scope: "user" },
+      );
+
+      expect(requests.map((request) => request.scope)).toEqual([
+        "user",
+        "user",
+        "user",
+        "user",
+        "user",
+        "user",
+      ]);
+      expect(requests.map((request) => request.type)).toEqual([
+        RequestType.PieceGetSlug,
+        RequestType.PieceRemove,
+        RequestType.PieceGetSource,
+        RequestType.PieceGetSourceRevision,
+        RequestType.PieceClone,
+        RequestType.PieceUpdateSource,
+      ]);
+    });
+  });
+
   describe("resolveSlug", () => {
     it("asks the worker where a slug reference lands", async () => {
       const space = "did:key:z6Mk-runtime-client-slug";

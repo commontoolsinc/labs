@@ -2093,16 +2093,34 @@ export type RecreateSpaceRootPatternRequest = BaseRequest & {
 };
 
 /**
+ * Which document a request means by a piece: an id, and the scope that id is
+ * resolved in within whichever space the request names. A piece reached
+ * through a link into a narrower scope is addressed by both, and the id alone
+ * reaches nothing — or reaches a different document that happens to share it.
+ *
+ * Every request naming a piece by id intersects this, so that the two halves
+ * of one address cannot be declared apart. The assertion under
+ * {@link IPCClientRequest} is what holds a new one to it, and says with what
+ * bound.
+ */
+export type PieceAddress = {
+  /**
+   * The piece's document id.
+   */
+  pieceId: string;
+
+  /**
+   * The scope that id resolves in, defaulting to the space.
+   */
+  scope?: CellScope;
+};
+
+/**
  * The {@link RequestType.PieceGet} request. `runIt` starts the piece as part of
  * the read.
  */
-export type PieceGetRequest = BaseRequest & {
+export type PieceGetRequest = BaseRequest & PieceAddress & {
   type: RequestType.PieceGet;
-
-  /**
-   * The piece to read.
-   */
-  pieceId: string;
 
   /**
    * Start the piece as part of the read.
@@ -2113,23 +2131,11 @@ export type PieceGetRequest = BaseRequest & {
    * The space the piece lives in.
    */
   space: DID;
-
-  /**
-   * The scope the piece's document sits in, defaulting to the space. A piece
-   * reached through a link into a narrower scope is addressed by its id plus
-   * that scope, and the id alone reaches nothing.
-   */
-  scope?: CellScope;
 };
 
 /** The {@link RequestType.PieceGetSlug} request. */
-export type PieceGetSlugRequest = BaseRequest & {
+export type PieceGetSlugRequest = BaseRequest & PieceAddress & {
   type: RequestType.PieceGetSlug;
-
-  /**
-   * The piece whose slug to read.
-   */
-  pieceId: string;
 
   /**
    * The space the piece lives in.
@@ -2160,28 +2166,18 @@ export type SlugResolveRequest = BaseRequest & {
 };
 
 /** The {@link RequestType.PieceRemove} request. */
-export type PieceRemoveRequest = BaseRequest & {
+export type PieceRemoveRequest = BaseRequest & PieceAddress & {
   type: RequestType.PieceRemove;
 
   /**
-   * The piece to remove.
-   */
-  pieceId: string;
-
-  /**
-   * The space to remove it from.
+   * The space to remove the piece from.
    */
   space: DID;
 };
 
 /** The {@link RequestType.PieceStart} request. */
-export type PieceStartRequest = BaseRequest & {
+export type PieceStartRequest = BaseRequest & PieceAddress & {
   type: RequestType.PieceStart;
-
-  /**
-   * The piece to start.
-   */
-  pieceId: string;
 
   /**
    * The space the piece lives in.
@@ -2190,13 +2186,8 @@ export type PieceStartRequest = BaseRequest & {
 };
 
 /** The {@link RequestType.PieceStop} request. */
-export type PieceStopRequest = BaseRequest & {
+export type PieceStopRequest = BaseRequest & PieceAddress & {
   type: RequestType.PieceStop;
-
-  /**
-   * The piece to stop.
-   */
-  pieceId: string;
 
   /**
    * The space the piece lives in.
@@ -2229,22 +2220,17 @@ export type PieceSyncedRequest = BaseRequest & {
  * history metadata it carries, and its authored source files. See
  * `docs/specs/piece-source-lifecycle.md`.
  */
-export type PieceGetSourceRequest = BaseRequest & {
+export type PieceGetSourceRequest = BaseRequest & PieceAddress & {
   type: RequestType.PieceGetSource;
 
   /**
    * The space the piece lives in.
    */
   space: DID;
-
-  /**
-   * The piece whose source to read.
-   */
-  pieceId: string;
 };
 
 /** Read the authored files retained for one recorded source revision. */
-export type PieceGetSourceRevisionRequest = BaseRequest & {
+export type PieceGetSourceRevisionRequest = BaseRequest & PieceAddress & {
   type: RequestType.PieceGetSourceRevision;
 
   /**
@@ -2253,29 +2239,22 @@ export type PieceGetSourceRevisionRequest = BaseRequest & {
   space: DID;
 
   /**
-   * The piece whose history to read from.
-   */
-  pieceId: string;
-
-  /**
    * The revision to read.
    */
   revisionId: string;
 };
 
-/** Create a copy of a piece in another space. */
-export type PieceCloneRequest = BaseRequest & {
+/**
+ * Create a copy of a piece in another space. The address is read in
+ * `sourceSpace`, that being the space the request names a piece in.
+ */
+export type PieceCloneRequest = BaseRequest & PieceAddress & {
   type: RequestType.PieceClone;
 
   /**
    * The space to copy from.
    */
   sourceSpace: DID;
-
-  /**
-   * The piece to copy.
-   */
-  pieceId: string;
 
   /**
    * The space to copy into.
@@ -2576,18 +2555,13 @@ export type PieceSourceAction =
  * token an incompatibility warning returned; sending it back is what confirms
  * the update.
  */
-export type PieceUpdateSourceRequest = BaseRequest & {
+export type PieceUpdateSourceRequest = BaseRequest & PieceAddress & {
   type: RequestType.PieceUpdateSource;
 
   /**
    * The space the piece lives in.
    */
   space: DID;
-
-  /**
-   * The piece to update.
-   */
-  pieceId: string;
 
   /**
    * What to change about which source the piece follows.
@@ -2886,6 +2860,56 @@ export type IPCClientRequest =
   | GetPatternSourcesRequest
   | SetBreakpointsRequest
   | UploadBlobRequest;
+
+/**
+ * The requests naming a piece by id, read off {@link IPCClientRequest} rather
+ * than listed, so that a request joins this by being declared rather than by
+ * anyone remembering to enroll it.
+ *
+ * Membership is having a `pieceId` member at all, whatever its type: an
+ * optional one, and one whose type admits `undefined`, each still name a
+ * piece on the requests that send one, so both are in. That is what the test
+ * on `keyof` buys. A property that may be absent, and one whose type includes
+ * `undefined`, are each unassignable to a required `string`, so a membership
+ * test written as an assignment would see neither.
+ */
+export type PieceAddressedRequest = IPCClientRequest extends infer Request
+  ? Request extends unknown ? "pieceId" extends keyof Request ? Request : never
+  : never
+  : never;
+
+/**
+ * Those {@link PieceAddressedRequest}s declaring no `scope`, which is `never`
+ * exactly while every one of them intersects {@link PieceAddress}.
+ *
+ * The bound is the member name, on both sides. What puts a request in front
+ * of this check is declaring `pieceId`, so a request naming a piece under
+ * some other field is outside it, as is one reaching a piece through a
+ * {@link CellRef}, which carries its own scope. And what satisfies the check
+ * is declaring `scope` in any form: the shape a scope has is
+ * {@link PieceAddress}'s to state, and is not read here.
+ */
+type PieceAddressedRequestMissingScope = PieceAddressedRequest extends
+  infer Request
+  ? Request extends unknown ? "scope" extends keyof Request ? never : Request
+  : never
+  : never;
+
+/**
+ * Refuses anything but `never`, so that instantiating it with a union of
+ * requests reports those requests as the error.
+ */
+type NoSuchRequest<T extends never> = T;
+
+/**
+ * A piece's address is its id and its scope together, and this is what says
+ * so at the protocol level: a new request naming a piece by id without a
+ * scope inhabits {@link PieceAddressedRequestMissingScope}, and this
+ * declaration then fails `deno task check` naming that request.
+ */
+type EveryPieceAddressCarriesItsScope = NoSuchRequest<
+  PieceAddressedRequestMissingScope
+>;
 
 /** A response whose whole content is `null`. */
 export type NullResponse = null;

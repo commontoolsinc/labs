@@ -1262,10 +1262,24 @@ export class PiecesController<T = unknown> {
    * commit, so the registry and the link cannot land in a split state. A
    * removal that cannot commit throws instead, so `false` never stands in for
    * a storage failure.
+   *
+   * `scope` completes an id into a document address and defaults to the
+   * space, as it does for {@link getPieceCell}. A `Cell` argument already
+   * carries one, and is taken as it stands.
    */
-  async remove(pieceOrId: string | Cell<unknown>): Promise<boolean> {
+  async remove(
+    pieceOrId: string | Cell<unknown>,
+    scope?: CellScope,
+  ): Promise<boolean> {
     const piece = typeof pieceOrId === "string"
-      ? this.runtime.getCellFromEntityId(this.#space, entityIdFrom(pieceOrId))
+      ? this.runtime.getCellFromEntityId(
+        this.#space,
+        entityIdFrom(pieceOrId),
+        [],
+        undefined,
+        undefined,
+        scope,
+      )
       : pieceOrId;
     const piecesCell = await this.getPieceRegistry();
     await this.syncPieces(piecesCell);
@@ -1552,14 +1566,19 @@ export class PiecesController<T = unknown> {
     );
   }
 
-  /** Start scheduling and running a prepared piece. */
+  /**
+   * Start scheduling and running a prepared piece. `scope` completes an id
+   * into a document address and defaults to the space, as it does for
+   * {@link getPieceCell}; a `Cell` argument already carries one.
+   */
   async startPiece<T = unknown>(
     pieceOrId: string | Cell<T>,
+    scope?: CellScope,
   ): Promise<void> {
     const piece = typeof pieceOrId === "string"
       ? await timePiecePhase(
         "startPiece.get",
-        () => this.getPieceCell<T>(pieceOrId),
+        () => this.getPieceCell<T>(pieceOrId, false, undefined, scope),
       )
       : pieceOrId;
     if (!piece) throw new Error("Piece not found");
@@ -1574,10 +1593,17 @@ export class PiecesController<T = unknown> {
     await timePiecePhase("startPiece.synced", () => this.synced());
   }
 
-  /** Stop a running piece (no-op if not running). */
-  async stopPiece<T = unknown>(pieceOrId: string | Cell<T>): Promise<void> {
+  /**
+   * Stop a running piece (no-op if not running). `scope` completes an id into
+   * a document address and defaults to the space, as it does for
+   * {@link getPieceCell}; a `Cell` argument already carries one.
+   */
+  async stopPiece<T = unknown>(
+    pieceOrId: string | Cell<T>,
+    scope?: CellScope,
+  ): Promise<void> {
     const piece = typeof pieceOrId === "string"
-      ? await this.getPieceCell<T>(pieceOrId)
+      ? await this.getPieceCell<T>(pieceOrId, false, undefined, scope)
       : pieceOrId;
     if (!piece) throw new Error("Piece not found");
     this.runtime.runner.stop(piece);

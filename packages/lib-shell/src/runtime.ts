@@ -523,11 +523,16 @@ export class RuntimeInternals extends EventTarget {
 
   /**
    * A piece's source state: the pattern it runs, the origin it tracks, the
-   * history metadata it carries, and its authored source files.
+   * history metadata it carries, and its authored source files. `scope`
+   * completes the id into a document address and defaults to the space.
    */
-  getPieceSource(space: DID, pieceId: string): Promise<PieceSourceView> {
+  getPieceSource(
+    space: DID,
+    pieceId: string,
+    scope?: CellScope,
+  ): Promise<PieceSourceView> {
     this.#check();
-    return this.#client.getPieceSource(pieceId, space);
+    return this.#client.getPieceSource(pieceId, space, scope);
   }
 
   getPiecesListCell<T>(space: DID): Promise<CellHandle<T[]>> {
@@ -691,9 +696,17 @@ export class RuntimeInternals extends EventTarget {
     );
   }
 
-  async getSlug(space: DID, id: string): Promise<string | undefined> {
+  /**
+   * The name the piece answers to, where it has one. `scope` completes the id
+   * into a document address and defaults to the space.
+   */
+  async getSlug(
+    space: DID,
+    id: string,
+    scope?: CellScope,
+  ): Promise<string | undefined> {
     this.#check();
-    return await this.#client.getPieceSlug(id, space);
+    return await this.#client.getPieceSlug(id, space, scope);
   }
 
   /**
@@ -736,9 +749,18 @@ export class RuntimeInternals extends EventTarget {
     };
   }
 
-  async removePiece(space: DID, id: string): Promise<boolean> {
+  /**
+   * Removes the piece from the space's registry, returning whether this call
+   * removed it. `scope` completes the id into a document address and defaults
+   * to the space.
+   */
+  async removePiece(
+    space: DID,
+    id: string,
+    scope?: CellScope,
+  ): Promise<boolean> {
     this.#check();
-    return await this.#client.removePiece(id, space);
+    return await this.#client.removePiece(id, space, scope);
   }
 
   async synced(space: DID): Promise<void> {
