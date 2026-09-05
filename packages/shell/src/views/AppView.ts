@@ -10,6 +10,7 @@ import { slugIdForSpace, validateSlug } from "@commonfabric/runner/slugs";
 import {
   type Cancel,
   type ErrorNotification,
+  type FavoritePieceAddress,
   NAME,
   PieceHandle,
 } from "@commonfabric/runtime-client";
@@ -903,6 +904,22 @@ export class XAppView extends BaseView {
   }
 
   /**
+   * The whole address of the piece on screen — its space, its id there, and
+   * the scope that id resolves in — taken from the loaded pattern's own cell,
+   * which is the thing that was reached and so carries all three.
+   *
+   * Undefined until that pattern loads. The two placeholders
+   * `#getActivePatternId()` falls back to carry an id and no scope, and an id
+   * under a guessed scope addresses whichever document the guess lands on.
+   */
+  #getActivePieceAddress(): FavoritePieceAddress | undefined {
+    const activePattern = this._patterns.value?.activePattern;
+    if (!activePattern) return;
+    const ref = activePattern.cell().ref();
+    return { space: ref.space, pieceId: activePattern.id(), scope: ref.scope };
+  }
+
+  /**
    * How the piece this view addresses is cited from anywhere:
    * `/@<space>/<collection>/<member>`, the spelling this shell's own URLs and
    * `cf` both read and which depends on no binding of the reader's; a
@@ -1041,6 +1058,7 @@ export class XAppView extends BaseView {
             .keyStore="${this.keyStore}"
             .pieceTitle="${this.pieceTitle}"
             .pieceId="${pieceId}"
+            .pieceAddress="${this.#getActivePieceAddress()}"
             .pieceReference="${this.#getPieceReference()}"
             .isViewingDefaultPattern="${isViewingDefaultPattern}"
             .showDebuggerView="${config.showDebuggerView ?? false}"
