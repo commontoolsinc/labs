@@ -48,6 +48,18 @@ const tables = {
     }),
   ),
   notes: table({ id: "integer primary key", body: "text" }),
+  // A mailbox-keyed table, for what a numeric-affinity column does to a bound
+  // value on the way in.
+  mailboxes: table(
+    { id: "integer primary key", source_id: "integer", note: "text" },
+    (f) => ({
+      confidentiality: all(
+        whenMatches(f.source_id, /^007$/, constant("did:mailbox:007")),
+        whenMatches(f.source_id, /^7$/, constant("did:mailbox:seven")),
+        dbOwner(),
+      ),
+    }),
+  ),
 };
 
 const unlabeled = (_v: unknown): readonly unknown[] => [];
@@ -69,6 +81,70 @@ function expectOk(
   if ("error" in res) throw new Error(`unexpected error: ${res.error}`);
   return res;
 }
+
+describe("checkSqliteRowLabelWrite — the value the column will store", () => {
+  it("refuses a numeric string bound to a numeric-affinity rule input", () => {
+    // The gate reads the BOUND value and the store re-derives from the
+    // STORED one. INTEGER affinity turns "007" into 7, so the gate would
+    // compute [did:mailbox:007, owner] for a row that reads back as
+    // [did:mailbox:seven, owner] — and the no-laundering check, the one
+    // thing the server cannot redo, would have run against a label the row
+    // never carries.
+    expectError(
+      checkSqliteRowLabelWrite({
+        sql: "INSERT INTO mailboxes (source_id) VALUES (?)",
+        params: ["007"],
+        tables,
+        owner: OWNER,
+        confidentialityOf: unlabeled,
+      }),
+      "source_id",
+    );
+  });
+
+  it("takes the number itself", () => {
+    const res = expectOk(checkSqliteRowLabelWrite({
+      sql: "INSERT INTO mailboxes (source_id) VALUES (?)",
+      params: [7],
+      tables,
+      owner: OWNER,
+      confidentialityOf: unlabeled,
+    }));
+    assertEquals(res.policies?.[0].label.confidentiality, [
+      "did:mailbox:seven",
+      OWNER,
+    ]);
+  });
+
+  it("takes a string the column will store as it stands", () => {
+    // Affinity only converts text that is a well-formed number, so "later"
+    // reaches the row unchanged and the gate reads what the store will.
+    const res = expectOk(checkSqliteRowLabelWrite({
+      sql: "INSERT INTO mailboxes (source_id) VALUES (?)",
+      params: ["later"],
+      tables,
+      owner: OWNER,
+      confidentialityOf: unlabeled,
+    }));
+    assertEquals(res.policies?.[0].label.confidentiality, [OWNER]);
+  });
+
+  it("leaves a TEXT column alone", () => {
+    // TEXT affinity renders a bound number the same way the evaluator does,
+    // so there is nothing for the two sides to disagree about.
+    const res = expectOk(checkSqliteRowLabelWrite({
+      sql: "INSERT INTO mailboxes (source_id, note) VALUES (?, ?)",
+      params: [7, 7],
+      tables,
+      owner: OWNER,
+      confidentialityOf: unlabeled,
+    }));
+    assertEquals(res.policies?.[0].label.confidentiality, [
+      "did:mailbox:seven",
+      OWNER,
+    ]);
+  });
+});
 
 describe("checkSqliteRowLabelWrite — INSERT evaluates the rule", () => {
   it("computes the prospective row label from the bound values", () => {

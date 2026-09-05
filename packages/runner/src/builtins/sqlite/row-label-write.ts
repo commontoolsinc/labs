@@ -28,6 +28,7 @@ import {
   ruleInputFields,
   validateRowLabelSpec,
 } from "@commonfabric/memory/sqlite/row-label";
+import { sqlAffinity } from "@commonfabric/memory/sqlite/schema";
 import {
   blankWriteSql,
   parseUpdateSetColumns,
@@ -41,6 +42,43 @@ import {
 
 import type { CfcConfClause } from "../../cfc/clause.ts";
 import { cfcObservationFitsCeiling } from "../../cfc/observation.ts";
+
+// Whether a numeric-affinity column would convert this bound string on the way
+// in. SQLite converts text that is a well-formed integer or real literal and
+// leaves everything else as TEXT, so this asks the same question one step more
+// broadly: anything JS reads as a finite number counts, which over-refuses a
+// spelling SQLite would have kept (`0x10`) rather than admitting one it
+// converts.
+function storesAsANumber(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed !== "" && Number.isFinite(Number(trimmed));
+}
+
+/**
+ * Why a bound value cannot stand in for the stored one, or undefined when it
+ * can. The gate evaluates the rule over BOUND values while every other
+ * evaluation reads what was stored, so a value the column converts on the way
+ * in gives the two sides different text — and the check that rides on the
+ * gate's label, no-laundering, is the one the server cannot redo: it is the
+ * only place the inputs' own labels are known. A string bound to a numeric
+ * column is the case that converts; a number bound to a TEXT column renders
+ * the same text the evaluator would show it, and no other pairing converts.
+ */
+function boundValueMismatch(
+  column: string,
+  value: unknown,
+  sqlType: unknown,
+): string | undefined {
+  if (typeof value !== "string" || !storesAsANumber(value)) return undefined;
+  const affinity = sqlAffinity(typeof sqlType === "string" ? sqlType : "");
+  if (affinity !== "integer" && affinity !== "real" && affinity !== "numeric") {
+    return undefined;
+  }
+  return `a number written as text is bound to rule input "${column}", ` +
+    `which has ${affinity.toUpperCase()} affinity and stores it as a ` +
+    "number — the rule would be evaluated over text the row will not hold; " +
+    "bind the number";
+}
 
 /** One written row's computed label — recorded as the write's CFC policy
  *  input (sink-request) before the commit. */
@@ -119,9 +157,9 @@ export function checkSqliteRowLabelWrite(
   if (!tableDeclaresRowLabel(declared)) return {}; // rule-less target table
 
   const spec = (declared as { rowLabel: RowLabelSpec }).rowLabel;
-  const columnNames = Object.keys(
-    (declared as { properties?: Record<string, unknown> }).properties ?? {},
-  );
+  const properties =
+    (declared as { properties?: Record<string, unknown> }).properties ?? {};
+  const columnNames = Object.keys(properties);
   const invalid = validateRowLabelSpec(spec, columnNames);
   if (invalid) {
     return {
@@ -269,6 +307,17 @@ export function checkSqliteRowLabelWrite(
         const field = inputFields.find(
           (f) => f.toLowerCase() === col.toLowerCase(),
         )!;
+        const mismatch = boundValueMismatch(
+          field,
+          value,
+          (properties[field] as { sqlType?: unknown } | undefined)?.sqlType,
+        );
+        if (mismatch) {
+          return {
+            error: `sqlite: the INSERT into rule-bearing table ` +
+              `"${declaredKey}" (row ${r}) cannot be evaluated — ${mismatch}`,
+          };
+        }
         rowValues[field] = value;
       }
     }
