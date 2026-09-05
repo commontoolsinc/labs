@@ -332,3 +332,187 @@ Do not substitute `piece ls` for the board index: handler-created Topics need
 not appear in the registry. If a deployed field or verb differs from this map,
 trust `piece describe`, `piece verbs`, and verb help, then update this skill in
 the same change that updates the deployment contract.
+
+## Naming the Topics that predate the namespace
+
+A Topic reads its own name by looking itself up in the board's names table,
+which reaches it as its `boardNames` ARGUMENT — `addTopic` wires it at create,
+and `ownName` in `packages/patterns/collection-naming/naming.ts` is the lookup.
+A parent writes its member's result and never its member's argument, so
+`backfillNames` names a Topic filed before the namespace in the board's map
+while that Topic goes on reading no name. No pattern can close that gap. One
+`cf piece link` per Topic can, and this is that procedure.
+
+Everything below was run against local stores — a `cf space clone` of a board
+whose Topics were filed by the pre-graft pattern, and a second store holding the
+grafted board beside Topics `addTopic` never wired — and the quoted output is
+what came back, with long single-line messages wrapped to fit. Rehearse it the
+same way before the live run: `docs/development/space-clone-rehearsal.md`.
+
+### The order, and why it is not free
+
+1. **The board's source first.** Over a board whose Topics predate the
+   namespace, `setsrc --check` refuses BOTH legs, so the checker does not pick
+   the order for you — the board's refusal is the one the graft can clear:
+
+   ```
+   piece source is incompatible with retained input: input link at topics.0
+   schema is not compatible: input link at topics.0.shortName: an
+   unconstrained schema is no longer accepted
+   ```
+
+   That refusal is not about `shortName`. Adding `probeField?: string` — or
+   `probeField?: unknown` — to `TopicDemand` and nothing else produces the same
+   message at `topics.0.probeField`. **Any** new property on a per-member demand
+   is refused over a board holding members that do not publish it, so the board
+   leg needs `--dangerously-allow-incompatible-schema` and therefore the team's
+   explicit authorization. The forced deploy itself is UNREHEARSED — the
+   rehearsal stopped at the refusal rather than waive a proof it had no
+   authorization to waive, so what the flag leaves behind on a real board is
+   still unmeasured. `deno task pattern-compat` and `deno task pattern-vintage`
+   do not see this: they judge a pattern against its own baselines and its own
+   stored documents, never against the schema recorded on a link into a sibling
+   piece. Run `setsrc --check` against the deployment itself and read what it
+   says before scheduling the window.
+
+2. **Then each Topic's source.** Moving the board first is what clears the Topic
+   leg's `mentionable[].shortName` refusal. What remains is older than the
+   graft: a Topic wired to a board's `mentionable` cannot be re-sourced with its
+   OWN bytes either.
+
+   ```
+   piece source is incompatible with retained input: input link at mentionable
+   schema is not compatible: input link at mentionable[].piece: newly required
+   argument field has no default
+   ```
+
+   `mentionable` is declared `Writable` on the Topic, so the proof runs the
+   write-back direction too and demands that the Topic's projection accept
+   everything the board's row publishes. Measured identically on a clean control
+   piece that was never touched, so it is a property of the wiring, not of any
+   one migration.
+
+3. **`backfillNames` once**, through the board.
+4. **`cf piece link` once per Topic that `addTopic` did not wire.**
+
+### The two commands, and what they return
+
+```bash
+cf piece call --cell "$TOPICS_BOARD" --invocation '<id>' backfillNames \
+  '{"agentName":"Sol"}'
+cf piece link "$TOPICS_BOARD/namesTable" "$TOPIC/boardNames"
+```
+
+```
+{
+  "invocation": "backfill-1",
+  "status": "settled",
+  "receipt": "/of:fid1:jN3t1AzX5Uq_R2Tj-j2zlchglDmyIak4PTytJ9YBGNw",
+  "result": {
+    "assigned": [
+      "2",
+      "3"
+    ]
+  }
+}
+Linked fid1:PsEKqxGfhAaFgHbDMukzSr7_8qF3wISOsKPL0BSsoXs/namesTable to fid1:0SpKr2JWj939XCwSEX4H6uyXA8fzx5HILsNBCPLiiFQ/boardNames
+```
+
+After the backfill and before the bind, the board's map holds the name and the
+Topic does not — this is the whole gap, in one read each:
+
+```
+$ cf cell get --cell "$TOPICS_BOARD" names --step
+{
+  "1": {},
+  "2": {},
+  "3": {}
+}
+$ cf cell get --cell "$TOPIC" shortName --step
+Cannot read piece result at "shortName": stored data is present, but its schema
+could not resolve all required values. The piece was stepped, but the required
+value still did not materialize.
+```
+
+After the bind the same read answers `"2"`, the board's `index` row for that
+Topic carries `"shortName": "2"`, and `cf cell get /top/2 title` returns its
+title. A Topic left unbound in the same board keeps reporting the message above,
+which is how a half-finished run reads: the board serves every Topic either way,
+named ones beside unnamed ones, and the repair is to bind the rest. Nothing has
+to be undone.
+
+### Audit which Topics still need it
+
+The derived `shortName` is the wrong thing to audit — read the durable argument:
+
+```bash
+cf cell get --cell "$TOPIC" boardNames --input --select name
+```
+
+A bound Topic returns the whole names table (`[{"name":"1"},…]`); an unbound one
+returns `[]`. The KEY is present either way, because a Topic deployed with the
+current source materializes `boardNames` at its `Default<[]>`, so `keys` says
+nothing.
+
+Audit only Topics whose source has already been migrated. This read answers for
+the argument document, not for what the pattern can see, so a Topic that was
+force-bound before its source moved — see the first trap below — reads as bound
+here while its name never appears anywhere. On a board migrated in the order
+above that case cannot arise; if the order slipped, the honest check is that the
+Topic publishes `shortName` at all.
+
+### What the rehearsal measured
+
+- **Idempotent, twice over.** A second `backfillNames` returns
+  `{"assigned": []}` and writes no key. A second `cf piece link` with the same
+  two endpoints prints `Linked …` and commits nothing — measured with
+  `cf inspect churn --bucket 5` over the window, which reported
+  `no timed commits in window`. `wrote to space` is not evidence of a commit.
+- **Cost is one commit and one revision per Topic**, on the same measurement,
+  plus a CLI process per Topic. For a board of ~125 that is ~125 sequential
+  invocations, which is the shape the 2026-08-28 run found unreliable from a
+  laptop — see `docs/history/topics-board-migration-2026-08-28.md`.
+- **Binding before the backfill works**, but the first read afterwards can still
+  report no name. A Topic bound before it was named read the failure message
+  above immediately after `backfillNames` returned `["4","5"]`, and read `"5"`
+  on the next identical command with no write in between. Read twice before
+  concluding a bind failed.
+- **`/top/<n>` resolves without the bind.** Address resolution follows the
+  board's map, so a backfilled Topic answers to `cf cell get /top/3 title` while
+  its own `shortName` is still absent. `/top/999` answers
+  `no member 999 in top`.
+- **`addTopic` keeps wiring its own children afterwards.** A Topic filed after
+  the operator step came back with `"name": "6"` and its own table; the step is
+  one-time, not a recurring chore.
+- **`setsrc --check` is not read-only against the store** (#6964). Isolated on a
+  reset clone: serving it and stopping again leaves `content unchanged`, and
+  then ONE `--check` — one that was refused, replacing no source — verifies
+  `removed 0 · changed 0 · added 18`, `commits 170 → 172`. Nothing authored
+  moved, but the clone is spent and a second pass needs `cf space reset`.
+
+### Two traps
+
+**Never pass `--allow-non-existing` to the bind** (#6965). On a Topic whose
+pattern has no `boardNames` input — one whose source has not been migrated yet —
+the bind refuses, and that refusal is the guard that keeps step 4 behind step 2:
+
+```
+Target path "boardNames" does not exist on piece fid1:6hFfedg…
+Use --allow-non-existing to link anyway.
+```
+
+Taking that suggestion prints `Linked …` and buys nothing: the Topic's input map
+does not gain the key — neither `cf cell get --cell "$TOPIC" --input` nor
+`cf piece inspect`'s Source (Inputs) shows it — and its name never appears. What
+it does do is write the link into the argument document, where the pattern
+cannot reach it but `cf cell get --cell "$TOPIC" boardNames --input` can, which
+is what makes the audit above read it as bound. The next `setsrc` of that Topic
+then fails with an extra
+`updated arguments do not match the candidate schema: boardNames: value does not
+match type array`
+that a clean control piece does not produce. The forced bind poisons the Topic
+against its own migration.
+
+**Binding a piece the board does not hold does nothing wrong and nothing
+useful.** It succeeds, and the Topic reads no name, because the table addresses
+its rows by member identity and holds no row for a non-member.
