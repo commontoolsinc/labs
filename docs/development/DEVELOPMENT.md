@@ -242,7 +242,11 @@ The way is a public getter named `accessForTestingOnly`, which hands over
 exactly what a test needs and nothing else. The name is the documentation:
 everything behind it is internals free to change, and a reader who sees it in
 a test knows the test is written against them. Its doc comment says what it
-exposes, and the name says the rest.
+exposes, and the name says the rest. The `cf-source/no-access-for-testing-only`
+lint rule (`tasks/lint-access-for-testing-only.ts`, registered in the root
+`deno.jsonc`) reports a read of the getter from anywhere but a test, a
+benchmark, or a file under a `test/`, `integration/`, or `bench/` directory, so
+a plain `deno lint` catches source that has come to depend on it.
 
 - Instance members go behind an instance getter; static members behind a
   static one. A class may have both, and never more than one of each.

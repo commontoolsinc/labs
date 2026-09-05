@@ -25,31 +25,21 @@
  * because it is expected — `cf-imports/no-inline-type-import` rejects the form
  * outright, so one reaches here only in a file that has suppressed that rule.
  *
- * A file under a package's `test/` or `integration/` directory is exempt, as is
- * one named `*.test.ts` or `*.bench.ts` anywhere in the package. A test that
- * names its own package is reaching for the surface a consumer sees, which is
- * the thing it is there to check.
+ * A file under a package's `test/`, `integration/`, or `bench/` directory is
+ * exempt, as is one named `*.test.ts` or `*.bench.ts` anywhere in the package;
+ * `test-files.ts` is what draws that line. A test that names its own package
+ * is reaching for the surface a consumer sees, which is the thing it is there
+ * to check.
  *
  * See docs/development/DEVELOPMENT.md.
  */
 
 import { parse as parseJsonc } from "@std/jsonc";
 import { dirname, relative, resolve } from "@std/path";
+import { isTestFile } from "./test-files.ts";
 
 /** The file names a Deno configuration is allowed to take. */
 const CONFIG_FILE_NAMES = ["deno.json", "deno.jsonc"] as const;
-
-/** The directories of a package that hold its tests rather than its source. */
-const TEST_DIRECTORY_NAMES: ReadonlySet<string> = new Set([
-  "test",
-  "integration",
-]);
-
-/** The file names that are a test wherever in a package they sit. */
-const TEST_FILE_PATTERN = /\.(?:test|bench)\.tsx?$/;
-
-/** Either separator `relative()` can return, the host deciding which. */
-const PATH_SEPARATOR = /[/\\]/;
 
 /**
  * A type written `import("...").Name`, which holds its specifier inside a
@@ -140,14 +130,6 @@ function computeOwner(directory: string): OwningPackage | null {
   const name = config.name;
   if (typeof name !== "string" || name === "") return null;
   return { root: directory, name, exports: exportMap(config.exports) };
-}
-
-/** True when `filename` is one of its package's tests rather than its source. */
-function isTestFile(root: string, filename: string): boolean {
-  const parts = relative(root, filename).split(PATH_SEPARATOR);
-  const base = parts.pop() ?? "";
-  return TEST_FILE_PATTERN.test(base) ||
-    parts.some((part) => TEST_DIRECTORY_NAMES.has(part));
 }
 
 /** The specifier that reaches `to` from the file at `from`. */
