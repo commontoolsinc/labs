@@ -631,19 +631,21 @@ mentionables, profile elements — and may return several candidates and a picke
 resolves deterministically through the scope chain. Both spell themselves with
 `#`.
 
-They do not meet today, and the difference is where each `#` is read. A wish's
-is a character inside a query string a pattern author writes in source, or
-inside a `#tag` in a JSDoc comment declaring what a schema offers; nothing
-scans prose for it. A citation's is a trigger matched as a person types into a
-document. No reader parses both, so neither spelling is currently ambiguous to
-any code.
+They do not meet today, and the difference is not that one is typed and the
+other is not — both reach a reader from a person. `cf wish '#profile'` takes
+its query as a command argument, and the omnibox passes a user-facing tool's
+`query` straight through. What separates them is that **each input surface has
+exactly one interpretation**: text handed to `cf wish` or to the omnibox is a
+wish query because of where it was entered, and the editor's `#` trigger is a
+citation for the same reason. No surface asks which of the two a token is, so
+neither spelling is currently ambiguous to any code.
 
 What is open is therefore a reservation rather than a conflict: `#` is spent
-twice, and whichever widens first collides. **Step 5 is that widening**, which
-is why it is blocked here and not merely awaiting an answer: sigil parsing
-reads `#` out of prose generally, rather than recording a reference the way the
-editor's trigger does, so a tag and a citation become candidates for the same
-token in the same reader. Answer it before that step, not during. At that point
+twice, and the collision arrives with a surface that accepts both. **Step 5 is
+that surface**, which is why it is blocked here and not merely awaiting an
+answer: sigil parsing reads `#` out of prose generally, rather than taking a
+token from a place that already fixes its meaning, so a tag and a citation
+become candidates for the same token with nothing to separate them. Answer it before that step, not during. At that point
 either they are one system, in which case a tag search is the
 outermost rung of the same scope chain and the well-known targets that resolve
 by recency need reconciling with the rule that nothing hidden decides what a
