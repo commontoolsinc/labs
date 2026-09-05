@@ -385,7 +385,9 @@ export class PiecesController<T = unknown> {
           : {}),
         ...(cfcReadOnExceed !== undefined ? { cfcReadOnExceed } : {}),
         ...(navigateCallback !== undefined ? { navigateCallback } : {}),
-        ...(onPatternInstantiated !== undefined ? { onPatternInstantiated } : {}),
+        ...(onPatternInstantiated !== undefined
+          ? { onPatternInstantiated }
+          : {}),
         trustSnapshotProvider: () => ({
           id: `principal:${session.as.did()}`,
           actingPrincipal: session.as.did(),
