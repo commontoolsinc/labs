@@ -546,11 +546,14 @@ inside it. Resolving the two together is what the split is for — the path is
 the part that says which member, so a resolver handed the address on its own
 has nothing to walk with.
 
-**4. Walk segments in the URL layer.** Built for the shell's page URLs, in
-review. `urlToAppView` (`packages/navigation/src/view.ts`) reads the segment
-after a slug as the member name and carries it in the view, which serializes
-back to `<space>/<collection>/<member>`. Resolution is a separate worker round
-trip, `slug:resolve`
+**4. Walk segments in the URL layer.** Built for the shell's page URLs.
+`urlToAppView` (`packages/navigation/src/view.ts`) reads the segment after a
+slug as the member name and carries it in the view, which serializes back to
+`<space>/<collection>/<member>`. It reads a leading `@` on the first segment as
+the mark on the space, so the fully qualified reference and the page URL are
+one address written two ways: the mark is what a reference carries and is no
+part of the space, so the shell opens `/@<space>/top/42` and settles on
+`/<space>/top/42`. Resolution is a separate worker round trip, `slug:resolve`
 (`packages/runtime-client/src/backends/runtime-processor.ts`), which hands the
 reference to the runner's walk and answers with the piece and whatever the walk
 did not spend. A name with no member after it is a different question of the

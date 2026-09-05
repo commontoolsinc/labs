@@ -904,9 +904,9 @@ export class XAppView extends BaseView {
 
   /**
    * How the piece this view addresses is cited from anywhere:
-   * `/@<space>/<collection>/<member>`, the spelling `cf` resolves and which
-   * depends on no binding of the reader's. Only a member of a named
-   * collection has one — a piece
+   * `/@<space>/<collection>/<member>`, the spelling this shell's own URLs and
+   * `cf` both read and which depends on no binding of the reader's. Only a
+   * member of a named collection has one — a piece
    * reached by identity carries its own, a collection's name with no member
    * after it names no piece at all, and a segment the walk did not spend
    * named nothing to cite.

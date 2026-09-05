@@ -1,4 +1,5 @@
 import { DID, isDID } from "@commonfabric/identity";
+import { asSpaceSegment } from "@commonfabric/runner/fabric-url";
 import { isSlugAddress, isValidSlug } from "@commonfabric/runner/slugs";
 
 export type AppBuiltInView = "home";
@@ -178,7 +179,16 @@ export function urlToAppView(url: URL): AppView {
   segments.shift(); // shift off the pathnames' prefix "/";
   const mode = segments[0] === EMBED_PATH_PREFIX ? "embed" : undefined;
   if (mode) segments.shift();
-  const [first, pieceId] = [segments[0], segments[1]];
+  // A leading `@` marks the space, which is how a reference that travels is
+  // written: `/@<space>/<collection>/<member>` is the spelling the header
+  // hands out, and it addresses what `/<space>/<collection>/<member>` does.
+  // The mark is the whole difference, so it comes off and the segment reads
+  // as any other space does — which leaves a segment that is nothing but the
+  // mark naming no space, the address a bare origin already carries.
+  const first = segments[0] === undefined
+    ? undefined
+    : asSpaceSegment(segments[0]) ?? segments[0];
+  const pieceId = segments[1];
   const modeRef: AppViewModeRef = mode ? { mode } : {};
   // The segment after a slug selects a member of the collection it names.
   // Reading it apart from resolving it is what keeps this pure: whether the

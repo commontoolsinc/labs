@@ -364,19 +364,25 @@ export class ShellIntegration {
   // `spaceName`, and `pieceId`. Waits for state to settle
   // reflecting these properties.
   //
+  // `urlPath` sends a different spelling of the same address: the rooted path
+  // to navigate to, where the caller is checking a form the shell reads but
+  // does not write. `view` remains the state this waits for, so such a caller
+  // states what it sends and what that has to reach as two separate things.
+  //
   // If `identity` provided, logs in with the identity
   // after navigation.
   async goto(
-    { frontendUrl, view, identity }: {
+    { frontendUrl, view, urlPath, identity }: {
       frontendUrl: string;
       view: AppView;
+      urlPath?: `/${string}`;
       identity?: Identity;
     },
   ): Promise<void> {
     this.#checkIsOk();
 
     // Strip the proceeding "/" in the url path
-    const path = appViewToUrlPath(view).substring(1);
+    const path = (urlPath ?? appViewToUrlPath(view)).substring(1);
 
     const url = `${frontendUrl}${path}`;
     const page = this.page();

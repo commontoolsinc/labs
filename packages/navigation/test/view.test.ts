@@ -54,6 +54,54 @@ describe("view", () => {
     ).toBe(`/${SPACE_DID}/top/42`);
   });
 
+  it("parses a space written with the reference's leading mark", () => {
+    // `/@<space>/<collection>/<member>` is the reference the shell's header
+    // hands out, so the shell reads back what it gives away. A name and a DID
+    // both answer to the mark, and the mark reaches a space naming no piece
+    // as well as one naming a member.
+    expect(urlToAppView(new URL("http://common.test/@space/top/42"))).toEqual({
+      spaceName: "space",
+      pieceSlug: "top",
+      pieceMember: "42",
+    });
+    expect(urlToAppView(new URL(`http://common.test/@${SPACE_DID}/top/42`)))
+      .toEqual({ spaceDid: SPACE_DID, pieceSlug: "top", pieceMember: "42" });
+    expect(urlToAppView(new URL("http://common.test/@space/demo"))).toEqual({
+      spaceName: "space",
+      pieceSlug: "demo",
+    });
+    expect(urlToAppView(new URL("http://common.test/@space"))).toEqual({
+      spaceName: "space",
+    });
+    // Embed mode belongs to the route rather than to the space, so the two
+    // prefixes compose.
+    expect(urlToAppView(new URL("http://common.test/.embed/@space/top/42")))
+      .toEqual({
+        spaceName: "space",
+        pieceSlug: "top",
+        pieceMember: "42",
+        mode: "embed",
+      });
+    // The mark is no part of the space, so a page URL built from the route
+    // carries the space in its segments and nothing else.
+    expect(
+      appViewToUrlPath(
+        urlToAppView(new URL("http://common.test/@space/top/42")),
+      ),
+    ).toBe("/space/top/42");
+  });
+
+  it("routes a mark naming no space to the home view", () => {
+    // A segment that is nothing but the mark names no space, which is the
+    // address a bare origin already carries.
+    expect(urlToAppView(new URL("http://common.test/@"))).toEqual({
+      builtin: "home",
+    });
+    expect(urlToAppView(new URL("http://common.test/.embed/@"))).toEqual({
+      builtin: "home",
+    });
+  });
+
   it("reads one segment after a slug as the member", () => {
     // A member's own fields are a cell path inside the piece it resolves to,
     // so nothing past the first segment is part of the address.
