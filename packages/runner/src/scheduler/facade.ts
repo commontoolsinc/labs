@@ -558,13 +558,7 @@ export class Scheduler {
         return outerThis.#settlingTracker;
       },
       clearBackoffForCleanNodes: () => this.#clearBackoffForCleanNodes(),
-      // Forwards to the TypeScript-private member so that a test which
-      // replaces it by assignment is honored here too.
-      // TODO(danfuzz): Make `execute()` a `#` method, which needs
-      // `test/scheduler-event-load-park.test.ts` to observe a pass ending some
-      // other way than by wrapping the method: a hook the scheduler offers, or
-      // the telemetry it already emits at the end of a pass.
-      execute: () => this.execute(),
+      execute: () => this.#execute(),
       getActionId: (action) => this.#getActionId(action),
       isDemandedPullComputation: (action) =>
         this.#isDemandedPullComputation(action),
@@ -946,7 +940,7 @@ export class Scheduler {
         this.runtime.patternManager.pendingPatternWorkSettled().then(recheck);
       } else if (this.#disposed) {
         // Every branch below parks on `#idlePromises`, which only the execute
-        // loop drains — and `execute()` returns immediately once disposed. So
+        // loop drains — and `#execute()` returns immediately once disposed. So
         // parking here would park FOREVER, which is how a caller that disposed
         // the scheduler by hand made `Runtime.dispose()` hang: its teardown
         // awaits `scheduler.idle()`. A disposed scheduler will never run
@@ -1370,7 +1364,7 @@ export class Scheduler {
     }
     this.#pendingQueueTaskTimer = queueTask(() => {
       this.#pendingQueueTaskTimer = null;
-      this.execute();
+      this.#execute();
     });
     this.#scheduled = true;
   }
@@ -1784,7 +1778,7 @@ export class Scheduler {
   }
 
   /**
-   * Enables collection of per-iteration settle stats during execute().
+   * Enables collection of per-iteration settle stats during `#execute()`.
    * Call this once before running patterns to opt in to the overhead.
    */
   enableSettleStats(): void {
@@ -1792,7 +1786,7 @@ export class Scheduler {
   }
 
   /**
-   * Enables or disables collection of per-iteration settle stats during execute().
+   * Enables or disables collection of per-iteration settle stats during `#execute()`.
    * Disabling also clears the last collected stats to avoid outdated reads.
    */
   setSettleStatsEnabled(enabled: boolean): void {
@@ -1804,14 +1798,14 @@ export class Scheduler {
   }
 
   /**
-   * Returns settle stats from the last execute() call, or null if not enabled/collected.
+   * Returns settle stats from the last `#execute()` call, or null if not enabled/collected.
    */
   getSettleStats(): SettleStats | null {
     return this.#lastSettleStats;
   }
 
   /**
-   * Returns recent settle stats history from execute() calls, oldest first.
+   * Returns recent settle stats history from `#execute()` calls, oldest first.
    */
   getSettleStatsHistory(): SettleStatsHistoryEntry[] {
     return [...this.#settleStatsHistory];
@@ -1859,7 +1853,7 @@ export class Scheduler {
 
   /**
    * Returns whether the scheduler has detected a non-settling condition.
-   * This means execute() is consuming a high fraction of wall-clock time,
+   * This means `#execute()` is consuming a high fraction of wall-clock time,
    * indicating the system is churning.
    */
   isNonSettling(): boolean {
@@ -1933,7 +1927,7 @@ export class Scheduler {
     this.#wakeShaper.dispose();
     // Release waiters already parked when dispose arrived. The branch in
     // waitForQuiescence covers idle() calls made AFTER this point; it cannot
-    // reach these, and nothing else will — `execute()` is the only other drain
+    // reach these, and nothing else will — `#execute()` is the only other drain
     // and it is now a no-op. Same contract the wake shaper's own dispose keeps
     // for its drain waiters, one line up. Drained in place rather than by
     // reassigning the field: createExecuteContinuationState() hands this exact
@@ -1941,7 +1935,7 @@ export class Scheduler {
     // detached one.
     //
     // Routed back through waitForQuiescence rather than resolved here, because
-    // dispose does NOT cancel a run already under way — `execute()` tests
+    // dispose does NOT cancel a run already under way — `#execute()` tests
     // `#disposed` only on entry. Every parking branch is reached with
     // `runningPromise` unset, so a waiter parked while execution was merely
     // SCHEDULED is still parked once the run begins; resolving it directly
@@ -1978,14 +1972,8 @@ export class Scheduler {
     );
   }
 
-  /**
-   * Runs one scheduler pass.
-   *
-   * TypeScript-private rather than a `#` name, because
-   * `test/scheduler-event-load-park.test.ts` replaces this member by
-   * assignment, which a `#` method does not allow.
-   */
-  private async execute(): Promise<void> {
+  /** Runs one scheduler pass. */
+  async #execute(): Promise<void> {
     if (this.#disposed) return;
     logger.timeStart("scheduler", "execute");
     // Each execute pass starts in a fresh macrotask (queueTask): restart
@@ -2014,7 +2002,7 @@ export class Scheduler {
       record.passRuns = 0;
     }
 
-    // Non-settling heuristic: record execute() start
+    // Non-settling heuristic: record `#execute()` start
     markExecuteStart(this.#settlingTracker);
   }
 
@@ -2161,7 +2149,7 @@ export class Scheduler {
   }
 
   #recordExecuteEndTelemetry(): void {
-    // Non-settling heuristic: accumulate busy time at end of execute()
+    // Non-settling heuristic: accumulate busy time at end of `#execute()`
     const executeEnd = recordExecuteEnd(this.#settlingTracker);
     if (this.#diagnosisEnabled) {
       this.#diagnosisBusyTime += executeEnd.diagnosisBusyTimeMs;
@@ -2597,7 +2585,7 @@ export class Scheduler {
       setPendingQueueTaskTimer: (timer) => {
         this.#pendingQueueTaskTimer = timer;
       },
-      execute: () => this.execute(),
+      execute: () => this.#execute(),
     };
   }
 

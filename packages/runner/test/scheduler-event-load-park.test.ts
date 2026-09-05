@@ -9,6 +9,7 @@ import type {
 } from "../src/storage/interface.ts";
 import { ReplicaLoadFailureError } from "../src/storage/interface.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
+import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 import {
   createSchedulerTestRuntime,
   disposeSchedulerTestRuntime,
@@ -180,7 +181,21 @@ describe("event dispatch parks on in-flight closure loads", () => {
     const release = holdSyncFor(coldDoc.getAsNormalizedFullLink().id);
     const loadInFlight = runtime.storageManager.syncCell(coldDoc)
       .catch(() => {});
-    const loadParkObserved = observeNextLoadPark();
+    // The park is observed from inside the event phase of the pass that
+    // registers it, and that pass goes on to settle. Its settle marker is
+    // the first one after the park, so listen from before the event.
+    let parkObserved = false;
+    const parkingPassSettled = Promise.withResolvers<void>();
+    const onTelemetry = (event: Event) => {
+      const { marker } = (event as RuntimeTelemetryEvent).detail;
+      if (parkObserved && marker.type === "scheduler.settle") {
+        parkingPassSettled.resolve();
+      }
+    };
+    runtime.telemetry.addEventListener("telemetry", onTelemetry);
+    const loadParkObserved = observeNextLoadPark().then(() => {
+      parkObserved = true;
+    });
 
     runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
 
@@ -207,25 +222,15 @@ describe("event dispatch parks on in-flight closure loads", () => {
 
     // An unrelated scheduler wake while the load is still pending must observe
     // the parked head rather than re-running its dependency preflight or
-    // dispatching through it.
-    const schedulerHarness = runtime.scheduler as unknown as {
-      execute(): Promise<void>;
-    };
-    const originalExecute = schedulerHarness.execute.bind(runtime.scheduler);
-    const rerunCompleted = Promise.withResolvers<void>();
-    schedulerHarness.execute = async () => {
-      try {
-        await originalExecute();
-      } finally {
-        rerunCompleted.resolve();
-      }
-    };
+    // dispatching through it. A queued wake runs only after the pass that
+    // parked the head has settled, so wait for that, then run the pass
+    // directly: its end is the pass's own promise.
     try {
-      runtime.scheduler.queueExecution();
-      await rerunCompleted.promise;
+      await parkingPassSettled.promise;
     } finally {
-      schedulerHarness.execute = originalExecute;
+      runtime.telemetry.removeEventListener("telemetry", onTelemetry);
     }
+    await runtime.scheduler.accessForTestingOnly.execute();
     expect(handlerRuns, "a scheduler re-tick must keep the parked head blocked")
       .toBe(0);
 
