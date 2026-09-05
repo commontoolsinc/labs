@@ -29,7 +29,8 @@
  * scope.
  *
  * To rewrite each file's recorded renderings from the actual ones, run this
- * from the package directory:
+ * from the package directory. A new file holds its expression alone, and the
+ * rewrite adds the divider and the sections after it:
  *
  * ```
  * UPDATE_GOLDENS=1 deno test --allow-read --allow-write --allow-env \
