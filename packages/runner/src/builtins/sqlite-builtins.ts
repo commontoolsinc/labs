@@ -1225,6 +1225,8 @@ export function sqliteQuery(
               onExceed: inputs.onExceed === undefined
                 ? runtime.cfcReadOnExceed
                 : inputs.onExceed,
+              onExceedIsRuntimeDefault: inputs.onExceed === undefined &&
+                runtime.cfcReadOnExceed !== undefined,
               // Phase 3.b read-time clearance: the reader is the acting
               // principal of the REQUESTING run (same identity the ceiling
               // placeholders resolve against, and the USER half of the

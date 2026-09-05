@@ -57,6 +57,13 @@ export interface RowLabelReadArgs {
 
   /** What to do when a row's label exceeds the ceiling (default "fail"). */
   onExceed?: unknown;
+  /** True when `onExceed` is the runtime's default rather than the query's
+   *  own declaration. A runtime-wide `skip` is a mode the query author never
+   *  chose, so on an aggregate/expression projection — where skip is refused
+   *  because a withheld row already contributed server-side — the runtime's
+   *  default falls back to `fail` instead of refusing a query that declared
+   *  nothing. A query's OWN `skip` on such a projection is still refused. */
+  onExceedIsRuntimeDefault?: boolean;
 
   /** CFC Phase 3.b read-time clearance: when set, keep only rows the acting
    *  reader may read (a declared existence release, §8.17/inv-14). Requires the
@@ -170,7 +177,7 @@ export function computeRowLabelRead(
       } — expected "fail" or "skip"`,
     };
   }
-  const onExceed = (args.onExceed ?? "fail") as "fail" | "skip";
+  let onExceed = (args.onExceed ?? "fail") as "fail" | "skip";
 
   // Discover + re-validate rule-bearing tables (db.tables is wire-supplied;
   // "couldn't validate" is never "no label"). `allowReadClearance` is the
@@ -320,6 +327,14 @@ export function computeRowLabelRead(
   // reader-clearance (none exists), a declared contract (06-cfc.md ceiling).
   let keep: boolean[] | undefined;
   if (ceiling !== undefined) {
+    if (
+      onExceed === "skip" && nullOrigin && args.onExceedIsRuntimeDefault
+    ) {
+      // The runtime's default, not the query's word: fall back to the
+      // builtin's own `fail` rather than refuse a projection the query
+      // author never opted into skipping.
+      onExceed = "fail";
+    }
     if (onExceed === "skip" && nullOrigin) {
       return {
         error: 'sqlite: onExceed:"skip" never applies to an aggregate/' +

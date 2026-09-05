@@ -673,6 +673,16 @@ export interface RuntimeOptions {
    * cannot narrow it for itself. A query with a broader result is refused
    * through the runtime's error handlers, and nothing shared is written.
    *
+   * The refusal bounds what THIS runtime queries; it does not reach a
+   * shared cell another runtime already filled. A pattern whose output is
+   * space-scoped and that an unbounded runtime ran first leaves its result
+   * in a cell this runtime resolves like any other shared value, refusal or
+   * not — so a bounded runtime must run its patterns with session-scoped
+   * outputs, and what protects a shared cell is the cell's own label under
+   * the commit-boundary gates, not this option. Carrying the ceiling into
+   * the cell read path (a labeled cell that does not fit reads as withheld)
+   * is the follow-up that closes that seam.
+   *
    * Governs the runtime that performs the query — a client runtime executing
    * its own patterns, or a serving runtime for every run it serves — and the
    * sqlite read surface only: every `db.query`, aggregates included. Cell
@@ -689,8 +699,11 @@ export interface RuntimeOptions {
    * What a read under the runtime's ceiling does with a row the ceiling does
    * not admit when the query declares no `onExceed` of its own: `fail`
    * refuses the whole query, `skip` drops the row (a declared existence
-   * release, refused on aggregate projections as the query option is). A
-   * query's own `onExceed` stands over this. Defaults to `fail`. Qualifies
+   * release). On an aggregate/expression projection, where a query's own
+   * `skip` is refused because a withheld row already contributed, this
+   * default falls back to `fail` rather than refusing a query that declared
+   * nothing. A query's own `onExceed` stands over this. Defaults to `fail`.
+   * Qualifies
    * `cfcReadMaxConfidentiality` and is refused without it.
    */
   cfcReadOnExceed?: CfcReadOnExceed;

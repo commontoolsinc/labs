@@ -506,13 +506,45 @@ describe("sqliteQuery under a runtime read ceiling", () => {
         expect(String(state.error)).toMatch(/ceiling/);
       });
 
-      it("refuses `skip`, as the query option does", async () => {
+      // A runtime-wide `skip` is a mode the query author never chose. On a
+      // projection where skip cannot apply, refusing would fail every
+      // aggregate on the runtime for a word the query never said, so the
+      // default falls back to the builtin's `fail`: admitted, the aggregate
+      // returns; not admitted, the ceiling refuses it. A query's OWN `skip`
+      // on the same projection is still refused, as it is without a runtime
+      // ceiling.
+      it("a runtime `skip` falls back to `fail` and returns the admitted aggregate", async () => {
         const rt = await start({
           cfcReadMaxConfidentiality: [signer.did()],
           cfcReadOnExceed: "skip",
         });
         const { state } = await runQuery(rt, space, aggregateDb, {
           sql: COUNT_SQL,
+        });
+        expect(state.error).toBeUndefined();
+        expect(state.result?.[0]?.n).toBe(2);
+      });
+
+      it("a runtime `skip` falls back to `fail` and refuses the aggregate its ceiling omits", async () => {
+        const rt = await start({
+          cfcReadMaxConfidentiality: ["did:key:someone-else"],
+          cfcReadOnExceed: "skip",
+        });
+        const { state } = await runQuery(rt, space, aggregateDb, {
+          sql: COUNT_SQL,
+        });
+        expect(String(state.error)).toMatch(/ceiling/);
+        expect(String(state.error)).not.toMatch(/aggregate/);
+      });
+
+      it("the query's own `skip` is still refused on an aggregate", async () => {
+        const rt = await start({
+          cfcReadMaxConfidentiality: [signer.did()],
+          cfcReadOnExceed: "skip",
+        });
+        const { state } = await runQuery(rt, space, aggregateDb, {
+          sql: COUNT_SQL,
+          onExceed: "skip",
         });
         expect(String(state.error)).toMatch(/aggregate/);
       });
