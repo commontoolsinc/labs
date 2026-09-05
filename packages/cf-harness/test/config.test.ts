@@ -1,10 +1,15 @@
 import { checkoutDocsCorpusRoots } from "../src/docs-corpus/corpus.ts";
 import { resolveHarnessSkillsRoot } from "../src/skills/root.ts";
-import { assertEquals, assertThrows } from "@std/assert";
-import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
+import { assert, assertEquals, assertExists, assertThrows } from "@std/assert";
+import {
+  type CfcEnforcementMode,
+  cfcEnforcementStrictness,
+} from "@commonfabric/runner/cfc";
+import { presetCfcOptions } from "@commonfabric/runner";
 import {
   DEFAULT_GATEWAY_BASE_URL,
   DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE,
+  fabricSessionCfcEnforcementMode,
   type HarnessConfig,
   parseCfcEnforcementMode,
   parseHarnessGatewayAuthMode,
@@ -201,6 +206,52 @@ Deno.test("resolveCfcEnforcementMode follows a fabric session raised to strict",
       cfcEnforcementModeOverride: "observe",
     }),
     "observe",
+  );
+});
+
+Deno.test("resolveCfcEnforcementMode leaves the loop alone under a session nobody stated a mode on", () => {
+  const unstatedSession = {
+    apiUrl: "https://fabric.test",
+    identityKeyPath: "/keys/identity.pkcs8",
+    space: "demo",
+  };
+
+  // The session enforces at whatever rung its preset pins, and that rung is
+  // not an operator raise: a loop weaker than the pin is what every run that
+  // states neither dial is. The loop keeps its own default and names it,
+  // whatever `fabricSessionCfcEnforcementMode` reports the session to be at.
+  assertEquals(
+    resolveCfcEnforcementMode({ fabricSession: unstatedSession }),
+    DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE,
+  );
+  assertEquals(
+    resolveCfcEnforcementModeSource({ fabricSession: unstatedSession }),
+    "default",
+  );
+});
+
+Deno.test("the harness loop's own default matches the rung an unstated fabric session enforces at", () => {
+  const unstatedSession = {
+    apiUrl: "https://fabric.test",
+    identityKeyPath: "/keys/identity.pkcs8",
+    space: "demo",
+  };
+
+  // The rung a session nobody stated a dial on runs at, read from the runner's
+  // preset rather than from anything this package writes down.
+  const pinned = presetCfcOptions({}).cfcEnforcementMode;
+  assertExists(pinned, "the session runtime preset pins no enforcement mode");
+
+  assertEquals(
+    fabricSessionCfcEnforcementMode(unstatedSession),
+    pinned,
+    "`fabricSessionCfcEnforcementMode` restates the rung `presetCfcOptions` pins, and the two have parted; move the fallback in `config.ts` to the rung the preset now pins",
+  );
+
+  assert(
+    cfcEnforcementStrictness(DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE) >=
+      cfcEnforcementStrictness(pinned),
+    `the harness loop defaults to ${DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE} while an unstated fabric session enforces at ${pinned}, so a run stating neither dial enforces less than the session it writes through, which AUD-15 fails; raise DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE to the pinned rung`,
   );
 });
 
