@@ -444,7 +444,7 @@ with could not be removed. Over-acceptance lets the ACL document reach a state
 no admission check ever validated.
 
 Checked by: example-based server tests only — no oracle, TLA+, or differential
-coverage. `packages/memory/test/v2-server-acl-test.ts`: "ACL mutations must
+coverage. `packages/memory/test/v2-server-acl.test.ts`: "ACL mutations must
 preserve a concrete owner" (rejects `delete`, `patch`, `scope: "user"`, and
 empty / wildcard-only-owner / downgraded-owner / invalid-capability values) and
 "ACL mutations are default-branch ACL-only commits" (rejects a non-default
@@ -484,11 +484,13 @@ direct write to the ACL document, so genesis cannot be performed off-protocol.
 Soundness direction: none — exact.
 
 Checked by: example-based server tests only.
-`packages/memory/test/v2-server-acl-test.ts`: "an ordinary opener cannot claim
+`packages/memory/test/v2-server-acl.test.ts`: "an ordinary opener cannot claim
 or write a new space", "the space identity initializes a private space",
 "service DIDs have implicit OWNER and do not claim spaces", "acl observe:
 fresh-space genesis remains a hard invariant", "direct writes cannot create or
-mutate ACL state", "a retracted ACL fails closed instead of becoming public".
+mutate ACL state", "a retracted ACL fails closed instead of becoming public",
+"a genesis ACL without a concrete OWNER is refused and the space stays
+uninitialized".
 
 ### INV-14 — Reconnect convergence
 

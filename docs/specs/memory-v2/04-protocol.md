@@ -924,12 +924,20 @@ and is refused with "ACL mutations must replace the space-scoped ACL document";
 it must address the whole document instead.
 
 Genesis remains an explicit transaction. For a fresh named space, the storage
-manager briefly authenticates as the derived space identity, writes
-`{ [activeUser]: "OWNER", "*": "WRITE" }` against a confirmed absent ACL,
-closes that bootstrap session, and mounts the durable session as the active
-user. The wildcard grant is the rollout default until ACL management has a UI;
-the active user remains the concrete owner who can later narrow it. This
-preserves user/session-scoped partitioning. When the active identity already is
+manager briefly authenticates as the derived space identity, writes the genesis
+document against a confirmed absent ACL, closes that bootstrap session, and
+mounts the durable session as the active user. The document is whichever the
+caller registered beside the space key
+(`registerSpaceIdentity(identity, { genesisAcl })` — the space is then born
+with exactly that ACL, this admission check is the only validation it
+receives, and an open of a space that already exists proceeds only if it is
+owned exactly as that document says — grants below OWNER are the owner's to
+evolve — else is refused), else the fallback
+`{ [activeUser]: "OWNER", "*": "WRITE" }`. The wildcard grant is the rollout
+default until ACL management has a UI, spelled once as the runner's
+`DEFAULT_GENESIS_GRANTS`; the active user remains the concrete owner who can
+later narrow it. This preserves user/session-scoped partitioning. When the
+active identity already is
 the space DID (the home space), the same flow instead writes
 `{ [space]: "OWNER" }`; that narrow path also privatizes a populated legacy
 home with no ACL. Populated named spaces with no ACL remain public under the

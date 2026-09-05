@@ -38,7 +38,9 @@ import { isDeno } from "@commonfabric/utils/env";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
 import { getDirectTransactionReadActivities } from "./storage/transaction-inspection.ts";
+import { sameAcl } from "@commonfabric/memory/acl";
 import type {
+  ACL,
   ChangeGroup,
   CommitError,
   DID,
@@ -1030,6 +1032,13 @@ export class Runtime {
 
   /** Cache of resolved PatternFactory.inSpace("name") space DIDs. */
   readonly #spaceNameToDid = new Map<string, MemorySpace>();
+  /** The genesisAcl each name was first resolved with, so an identical
+   * re-resolution is a retry and a different one is refused. */
+  readonly #spaceNameGenesisAcls = new Map<string, ACL>();
+  /** Resolutions in flight, by name: a second caller joins the first
+   * rather than racing it to registration, so two documents for one name
+   * cannot both register before either is cached. */
+  readonly #spaceNameResolutions = new Map<string, Promise<MemorySpace>>();
 
   #defaultFrame?: Frame;
   #queues = new Map<string, AsyncSemaphoreQueue>();
@@ -3339,13 +3348,95 @@ export class Runtime {
    * mint a service-owned space (builtins.md §5; protocol.md §2b). On a
    * client the owner is omitted and the genesis names the manager's own
    * signer — the active user, byte-identical to before.
+   *
+   * `options.genesisAcl` is the exact ACL document the space is born with
+   * when this resolution creates it (its first and only commit — no
+   * world-writable default is ever written), validated by the memory
+   * server's genesis admission; on a space that already exists the open
+   * proceeds only if it is owned exactly as the document says, else
+   * refuses. It is
+   * refused together with `owner` (two descriptions of one document), for
+   * a bare DID (no key to register against), and for a name already
+   * resolved — by anything, including a pattern's `inSpace(name)` — unless
+   * with the identical document; see `IStorageManager.registerSpaceIdentity`.
+   * The name is cached at resolution, before the server can refuse the
+   * document, so a refusal surfaced later (on the first sync) has no
+   * correction path through this method: register a corrected document
+   * with the storage manager directly, or use a fresh runtime. A SERVING
+   * runtime refuses it outright: served provisioning names the run's
+   * acting user OWNER through the OW31 owner path, and a document that
+   * bypassed that path could name any principal — including the service —
+   * on a space the acting user asked for. A creator that wants a sealed
+   * space mints it from its own (client) runtime.
    */
   async resolveSpaceName(
     name: string,
-    options?: { owner?: DID },
+    options?: { owner?: DID; genesisAcl?: ACL },
   ): Promise<MemorySpace> {
+    if (options?.owner !== undefined && options?.genesisAcl !== undefined) {
+      // Two descriptions of one document: refused before anything else,
+      // cached path included, mirroring registerSpaceIdentity.
+      throw new Error(
+        `space-name resolution for "${name}": supply either owner or ` +
+          "genesisAcl, not both — genesisAcl is the whole genesis document, " +
+          "and owner only names the OWNER of the default one",
+      );
+    }
+    if (
+      options?.genesisAcl !== undefined &&
+      this.storageManager.registerSpaceIdentity === undefined
+    ) {
+      // No seam to hand the document to; the optional call below would
+      // drop it and the space would be born with the default.
+      throw new Error(
+        `space-name resolution for "${name}" cannot register a genesisAcl: ` +
+          "this storage manager has no registerSpaceIdentity seam, so " +
+          "nothing would write the document",
+      );
+    }
+    const inFlight = this.#spaceNameResolutions.get(name);
+    if (inFlight !== undefined) {
+      // Join the resolution already under way — its rejection is this
+      // caller's too — then take the cached path: an identical document is
+      // a retry, a different one is refused.
+      await inFlight;
+      return await this.resolveSpaceName(name, options);
+    }
     const cached = this.resolveSpaceNameSync(name);
+    if (options?.genesisAcl !== undefined) {
+      // A document the resolution cannot honor is refused, never dropped:
+      // the caller asked for a space born closed.
+      if (isMemorySpaceDID(name)) {
+        throw new Error(
+          `space-name resolution for the DID ${name} cannot register a ` +
+            "genesisAcl: the runtime derives no space key for a bare DID, " +
+            "so nothing would write the document (register the identity " +
+            "with the storage manager directly)",
+        );
+      }
+      if (cached !== undefined) {
+        const recorded = this.#spaceNameGenesisAcls.get(name);
+        if (recorded === undefined || !sameAcl(recorded, options.genesisAcl)) {
+          throw new Error(
+            `space-name "${name}" was already resolved` +
+              (recorded === undefined
+                ? " without a genesisAcl"
+                : " with a different genesisAcl") +
+              "; the supplied document cannot be the space's genesis",
+          );
+        }
+        return cached;
+      }
+    }
     if (cached !== undefined) return cached;
+    if (this.servingPosture && options?.genesisAcl !== undefined) {
+      throw new Error(
+        `space-name resolution for "${name}" on a serving runtime does not ` +
+          "accept genesisAcl: served provisioning names the run's acting " +
+          "identity OWNER through the owner path (OW31, RULED 2026-08-18), " +
+          "and a caller-supplied document would bypass it",
+      );
+    }
     if (this.servingPosture && options?.owner === undefined) {
       throw new Error(
         `space-name resolution for "${name}" on a serving runtime requires ` +
@@ -3355,23 +3446,47 @@ export class Runtime {
           "genesis would name the SERVICE as owner",
       );
     }
-    const session = await createSession({
-      identity: this.storageManager.as as unknown as Identity,
-      spaceName: name,
-    });
-    // Register the derived identity only as fresh-space ACL bootstrap
-    // authority. Storage continues to authenticate ordinary reads and writes
-    // as the active user (`storageManager.as`), so resolving a name does not
-    // grant an existing space's key to the caller.
-    if (session.spaceIdentity) {
-      this.storageManager.registerSpaceIdentity?.(
-        session.spaceIdentity,
-        options?.owner !== undefined ? { owner: options.owner } : undefined,
-      );
+    const resolution = (async (): Promise<MemorySpace> => {
+      const session = await createSession({
+        identity: this.storageManager.as as unknown as Identity,
+        spaceName: name,
+      });
+      if (options?.genesisAcl !== undefined && !session.spaceIdentity) {
+        throw new Error(
+          `space-name resolution for "${name}" derived no space identity, ` +
+            "so the supplied genesisAcl could not be registered",
+        );
+      }
+      // Register the derived identity only as fresh-space ACL bootstrap
+      // authority. Storage continues to authenticate ordinary reads and
+      // writes as the active user (`storageManager.as`), so resolving a name
+      // does not grant an existing space's key to the caller.
+      if (session.spaceIdentity) {
+        this.storageManager.registerSpaceIdentity?.(
+          session.spaceIdentity,
+          options?.owner !== undefined || options?.genesisAcl !== undefined
+            ? {
+              ...(options.owner !== undefined ? { owner: options.owner } : {}),
+              ...(options.genesisAcl !== undefined
+                ? { genesisAcl: options.genesisAcl }
+                : {}),
+            }
+            : undefined,
+        );
+      }
+      const did = session.space as MemorySpace;
+      this.#spaceNameToDid.set(name, did);
+      if (options?.genesisAcl !== undefined) {
+        this.#spaceNameGenesisAcls.set(name, { ...options.genesisAcl });
+      }
+      return did;
+    })();
+    this.#spaceNameResolutions.set(name, resolution);
+    try {
+      return await resolution;
+    } finally {
+      this.#spaceNameResolutions.delete(name);
     }
-    const did = session.space as MemorySpace;
-    this.#spaceNameToDid.set(name, did);
-    return did;
   }
 
   // Convenience methods that delegate to the runner

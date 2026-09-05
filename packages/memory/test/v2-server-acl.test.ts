@@ -2,6 +2,7 @@ import { assert, assertEquals, assertExists, assertRejects } from "@std/assert";
 import { toFileUrl } from "@std/path";
 import { Database } from "@db/sqlite";
 import { Server, SessionRegistry } from "../v2/server.ts";
+import { sameAcl } from "../acl.ts";
 import {
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
@@ -1319,6 +1320,79 @@ Deno.test("acl enforce: ACL mutations must preserve a concrete owner", async () 
   }
 });
 
+Deno.test("acl enforce: a genesis ACL without a concrete OWNER is refused and the space stays uninitialized", async () => {
+  // The runner's genesis-supplied ACL option hands the caller's document to
+  // this same admission check (no client-side validation): a space identity
+  // that tries to mint an unowned or malformed space is refused at genesis
+  // with the existing shape error, and genesis stays owed. This pins
+  // behavior the server already had — no server code changed — rather than
+  // driving new behavior; it reddens when `hasConcreteOwner` is dropped
+  // from `#validateAclCommit` (mutation witnessed).
+  const server = createAclServer("memory://acl-genesis-unowned", {
+    mode: "enforce",
+  });
+  const space = "did:key:z6Mk-acl-genesis-unowned";
+  const authority = await connect(server);
+  try {
+    const opened = await openSession(authority, space, space);
+    assertExists(opened.ok, "space identity should open its own space");
+    const unowned: Record<string, unknown>[] = [
+      {},
+      { "*": "OWNER" },
+      { "*": "OWNER", [ALICE]: "WRITE" },
+      { [ALICE]: "WRITE", [BOB]: "READ" },
+      { [ALICE]: "ADMIN" },
+    ];
+    let localSeq = 1;
+    for (const acl of unowned) {
+      const response = await transactSet(
+        authority,
+        space,
+        opened.ok.sessionId,
+        `of:${space}`,
+        acl,
+        localSeq++,
+      );
+      assertEquals(response.error?.name, "ProtocolError");
+      assertEquals(
+        response.error?.message,
+        "ACL must be valid and retain at least one concrete OWNER",
+      );
+    }
+    // Still fresh: an ordinary write is refused for want of genesis, and
+    // there is no ACL document.
+    const ordinary = await transactSet(
+      authority,
+      space,
+      opened.ok.sessionId,
+      "of:after-refused-genesis",
+      { value: 1 },
+      localSeq++,
+    );
+    assertEquals(ordinary.error?.name, "AuthorizationError");
+    assertEquals(
+      ordinary.error?.message,
+      `Space ${space} requires an ACL genesis commit before ordinary writes`,
+    );
+    assertEquals(await server.readDocument(space, `of:${space}`), null);
+
+    // A concrete OWNER then initializes it — the check refused the
+    // document, not the identity.
+    const sealed = await transactSet(
+      authority,
+      space,
+      opened.ok.sessionId,
+      `of:${space}`,
+      { [space]: "OWNER", [ALICE]: "WRITE" },
+      localSeq++,
+    );
+    assertExists(sealed.ok);
+    assertEquals(sealed.ok.seq, 1, "the genesis ACL is the first commit");
+  } finally {
+    await server.close();
+  }
+});
+
 Deno.test("acl enforce: ACL mutations are default-branch ACL-only commits", async () => {
   const server = createAclServer("memory://acl-validate-commit-shape", {
     mode: "enforce",
@@ -2110,4 +2184,22 @@ Deno.test("OW31 acl enforce: an OWNER-class service envelope stores NO binding �
   } finally {
     await server.close();
   }
+});
+
+Deno.test("sameAcl: exact principals and capabilities, key order free, never an array or scalar", () => {
+  const expected = { [ALICE]: "OWNER" as const, [BOB]: "WRITE" as const };
+  assertEquals(sameAcl({ [BOB]: "WRITE", [ALICE]: "OWNER" }, expected), true);
+  assertEquals(sameAcl({ [ALICE]: "OWNER" }, expected), false, "missing row");
+  assertEquals(
+    sameAcl({ ...expected, [CAROL]: "READ" }, expected),
+    false,
+    "extra row",
+  );
+  assertEquals(sameAcl({ [ALICE]: "OWNER", [BOB]: "READ" }, expected), false);
+  assertEquals(sameAcl(null, expected), false);
+  assertEquals(sameAcl("OWNER", expected), false);
+  // Red-first witnessed: an array is an object with zero keys, so [] matched
+  // an empty expected document.
+  assertEquals(sameAcl([], {}), false);
+  assertEquals(sameAcl(undefined, {}), false);
 });

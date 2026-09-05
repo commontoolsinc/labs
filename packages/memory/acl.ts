@@ -46,6 +46,16 @@ export function hasConcreteOwner(acl: ACL): boolean {
   );
 }
 
+/** Whether a stored ACL document is exactly `expected`: same principals,
+ *  same capabilities, nothing more. Key order is not part of the contract. */
+export function sameAcl(stored: unknown, expected: ACL): boolean {
+  if (!isObjectNotArray(stored)) return false;
+  const actual = stored as Record<string, unknown>;
+  const expectedKeys = Object.keys(expected);
+  return Object.keys(actual).length === expectedKeys.length &&
+    expectedKeys.every((key) => actual[key] === expected[key as ACLUser]);
+}
+
 const CapabilityMap: Record<Capability, number> = {
   READ: 0,
   WRITE: 1,

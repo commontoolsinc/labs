@@ -162,11 +162,13 @@ configured service DID writes a valid ACL with a concrete OWNER. A populated
 space that has never had an ACL remains authenticated-public READ/WRITE as a
 temporary pre-launch compatibility rule; public access never includes OWNER.
 Retracted, malformed, and ownerless ACLs fail closed.
-Normal fresh named-space bootstrap currently creates
-`{ [activeUser]: "OWNER", "*": "WRITE" }` so new non-home spaces are public
-read/write until ACL management has a UI. Home bootstrap remains owner-only.
-The wildcard is a default, not a fixture: the space's owner can narrow it today
-with `cf acl remove ANYONE` (see
+Normal fresh named-space bootstrap writes the genesis document the caller
+registered beside the space key (`registerSpaceIdentity(identity,
+{ genesisAcl })`), else the fallback `{ [activeUser]: "OWNER", "*": "WRITE" }`,
+so new non-home spaces that asked for nothing are public read/write until ACL
+management has a UI. Home bootstrap remains owner-only. The wildcard is a
+default, not a fixture: a caller can supply its own document at genesis, and
+the space's owner can narrow it afterwards with `cf acl remove ANYONE` (see
 [tutorial chapter 10](../tutorial/10-identity-and-security.md#reading-and-changing-a-spaces-acl)).
 Whatever writes the ACL must send it as a single whole-document replacement —
 the server's admission rules for ACL commits are INV-12 and INV-13 in
