@@ -1948,15 +1948,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     const requiredDelegations = new Map([
       [entryIdentity, new Set(["required-predecessor"])],
     ]);
-    const manager = runtime.patternManager as unknown as {
-      hasStoredCompileCacheClosure(
-        space: string,
-        modules: readonly CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-        moduleDelegations: ReadonlyMap<string, ReadonlySet<string>>,
-      ): Promise<boolean>;
-    };
+    const manager = runtime.patternManager.accessForTestingOnly;
 
     const initialWrite = runtime.edit();
     writeSourceDocs(
@@ -2096,14 +2088,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     });
     expect(second.entryIdentity).toBe(first.entryIdentity);
 
-    const manager = runtime.patternManager as unknown as {
-      persistCompileCacheTracked(
-        space: string,
-        modules: CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-      ): Promise<void>;
-    };
+    const manager = runtime.patternManager.accessForTestingOnly;
     await manager.persistCompileCacheTracked(
       targetSpace,
       first.modules,
@@ -2174,22 +2159,18 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
         { name: "/second.ts", contents: "export const second = 2;" },
       ],
     });
-    const manager = runtime.patternManager as unknown as {
-      persistCompileCacheTracked(
-        space: string,
-        modules: CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-      ): Promise<void>;
+    const manager = runtime.patternManager.accessForTestingOnly;
+    // Replaced by assignment below, which only a TypeScript-private member
+    // allows, so it is reached the old way.
+    const stubbed = runtime.patternManager as unknown as {
       writeBackCompileCache(
         space: string,
         modules: CacheableModule[],
         entryIdentity: string,
         opts: { runtimeVersion: string },
       ): Promise<void>;
-      pendingCacheWriteBacks: Set<Promise<unknown>>;
     };
-    const originalWriteBack = manager.writeBackCompileCache;
+    const originalWriteBack = stubbed.writeBackCompileCache;
     const firstStarted = Promise.withResolvers<void>();
     const releaseFirst = Promise.withResolvers<void>();
     const secondStarted = Promise.withResolvers<void>();
@@ -2197,7 +2178,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     let writeCount = 0;
     let firstWrite: Promise<void> | undefined;
     let secondWrite: Promise<void> | undefined;
-    manager.writeBackCompileCache = async () => {
+    stubbed.writeBackCompileCache = async () => {
       writeCount++;
       if (writeCount === 1) {
         firstStarted.resolve();
@@ -2237,29 +2218,25 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
           (write): write is Promise<void> => write !== undefined,
         ),
       );
-      manager.writeBackCompileCache = originalWriteBack;
+      stubbed.writeBackCompileCache = originalWriteBack;
     }
   });
 
   it("retains persistence entries for the runner session", async () => {
     const { modules, entryIdentity } = toModules(PROGRAM);
-    const manager = runtime.patternManager as unknown as {
-      persistCompileCacheTracked(
-        space: string,
-        modules: CacheableModule[],
-        entryIdentity: string,
-        opts: { runtimeVersion: string },
-      ): Promise<void>;
+    const manager = runtime.patternManager.accessForTestingOnly;
+    // Replaced by assignment below, which only a TypeScript-private member
+    // allows, so it is reached the old way.
+    const stubbed = runtime.patternManager as unknown as {
       writeBackCompileCache(
         space: string,
         modules: CacheableModule[],
         entryIdentity: string,
         opts: { runtimeVersion: string },
       ): Promise<void>;
-      persistedCompileCacheClosures: Map<string, string>;
     };
-    const originalWriteBack = manager.writeBackCompileCache;
-    manager.writeBackCompileCache = () => Promise.resolve();
+    const originalWriteBack = stubbed.writeBackCompileCache;
+    stubbed.writeBackCompileCache = () => Promise.resolve();
     try {
       for (let index = 0; index <= 1000; index++) {
         await manager.persistCompileCacheTracked(
@@ -2270,7 +2247,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
         );
       }
     } finally {
-      manager.writeBackCompileCache = originalWriteBack;
+      stubbed.writeBackCompileCache = originalWriteBack;
     }
 
     expect(manager.persistedCompileCacheClosures.size).toBe(1001);

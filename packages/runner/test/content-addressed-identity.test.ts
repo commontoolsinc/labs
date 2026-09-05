@@ -175,10 +175,7 @@ describe("content-addressed action identity", () => {
     // Simulate the bounded artifact index rolling the module out mid-session
     // (FIFO eviction after ~1000 other identities) — the worst case for a
     // `$implRef`-only stored graph, which has no legacy ref and no body.
-    const manager = runtime!.patternManager as unknown as {
-      addressableByIdentity: Map<string, unknown>;
-      modulesByIdentity: Map<string, unknown>;
-    };
+    const manager = runtime!.patternManager.accessForTestingOnly;
     manager.addressableByIdentity.clear();
     manager.modulesByIdentity.clear();
     expect(

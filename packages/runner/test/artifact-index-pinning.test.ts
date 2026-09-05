@@ -58,8 +58,7 @@ describe("artifact index pinning (session-lifetime)", () => {
     const pm = runtime.patternManager;
     // Shrink the bounded module-namespace cache so three compiles overflow it.
     // The ARTIFACT index must not be governed by this bound.
-    (pm as unknown as { maxEvaluatedModuleCacheSize: number })
-      .maxEvaluatedModuleCacheSize = 1;
+    pm.accessForTestingOnly.maxEvaluatedModuleCacheSize = 1;
 
     const first = await pm.compilePattern(program(1));
     const firstRef = pm.getArtifactEntryRef(first);
@@ -93,8 +92,7 @@ describe("artifact index pinning (session-lifetime)", () => {
     const tx = runtime.edit();
     await pm.compilePattern(program(7), { space: signer.did(), tx });
     await tx.commit();
-    const pending = (pm as unknown as { pendingCacheWriteBacks: Set<unknown> })
-      .pendingCacheWriteBacks;
+    const pending = pm.accessForTestingOnly.pendingCacheWriteBacks;
     expect(pending.size).toBe(0);
   });
 });
