@@ -86,20 +86,23 @@ async function excludedByManifest(
     if (text === undefined) continue;
     const manifest = parseJsonc(text) as { exclude?: string[] };
     for (const pattern of manifest.exclude ?? []) {
-      const stripped = pattern.replace(/^\.\//, "");
-      // Deno reads a leading `!` as un-excluding what a broader entry took,
-      // and `globToRegExp` reads it as a literal character. The mismatch is
-      // silent and lands on the shrinking side: the entry never matches, the
+      // Deno un-excludes on a bare leading `!` and on nothing else: measured
+      // against 2.9.4, `!build/keep.ts` restores that file to the check while
+      // `./!build/keep.ts` restores nothing and matches nothing, so the prefix
+      // is not stripped before the negation is looked for. `globToRegExp`
+      // reads `!` as a literal either way, which for the spelling Deno
+      // negates lands on the shrinking side: the entry matches nothing, the
       // broader exclusion goes on firing, and a file the checker opens is
-      // counted as excused. Refusing it fails this file instead. Read after
-      // the prefix strip, so that `./!build/` is refused as `!build/` is.
-      if (stripped.startsWith("!")) {
+      // counted as excused. Refusing it fails this file instead. Read on the
+      // pattern as written, which is what Deno reads.
+      if (pattern.startsWith("!")) {
         throw new Error(
           `${join(directory, "deno.json(c)")} un-excludes ${pattern}, which ` +
             `this check cannot read; teach it the negation or the census is ` +
             `short by whatever the entry restores.`,
         );
       }
+      const stripped = pattern.replace(/^\.\//, "");
       const scoped = directory === "" ? stripped : `${directory}/${stripped}`;
       patterns.push(
         globToRegExp(scoped.endsWith("/") ? `${scoped}**` : scoped, {
@@ -576,17 +579,18 @@ describe("typecheck", () => {
           /un-excludes/,
         );
 
-        // The same entry written with the `./` prefix the loop strips. Read
-        // before the strip, this spelling passes the guard and reaches
-        // `globToRegExp` as a literal.
+        // The lookalike Deno does not negate. `./!build/keep.ts` restores
+        // nothing and matches nothing, so it is an ordinary entry and this
+        // check has no reason to refuse it — the boundary the guard draws is
+        // the one Deno draws, and a fixture on each side is what says so.
         await Deno.writeTextFile(
           join(root, "deno.jsonc"),
           `{ "workspace": [], "exclude": ["**/build/", "./!build/keep.ts"] }`,
         );
 
-        await expect(excludedByManifest(root, [])).rejects.toThrow(
-          /un-excludes/,
-        );
+        const dropped = await excludedByManifest(root, []);
+        expect(dropped.some((pattern) => pattern.test("build/keep.ts")))
+          .toBe(true);
       } finally {
         await Deno.remove(root, { recursive: true });
       }
