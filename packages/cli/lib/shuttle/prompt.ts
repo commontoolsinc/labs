@@ -1,6 +1,6 @@
 /**
  * The prompt: a line read off the keyboard, handed to the dispatch, and its
- * outcome written under it.
+ * outcome written above the line being typed next.
  *
  * This is where a run's output comes from. A verb returns what it did rather
  * than writing it, so everything a line puts on screen passes through here, in
@@ -8,6 +8,14 @@
  * cause and effect rather than of whatever reached the terminal first. The one
  * thing shuttle writes outside this loop is the entry's own report of a run
  * that could not start.
+ *
+ * It is an event loop rather than a read-then-run: the keys are read
+ * continuously and a running line is a task beside them, so a line that is
+ * waiting on a server holds up neither the keyboard nor the screen. Two things
+ * follow, and they are the whole reason for the shape. `ctrl-c` reaches a line
+ * that is already running, which is the only way a shell whose server has gone
+ * quiet is still a shell. And a key typed during that wait is drawn as it
+ * arrives instead of being queued unseen and run blind afterwards.
  *
  * The line editor is the view substrate's rather than `node:readline`'s.
  * `EditBuffer` (`lib/view/editbuffer.ts`) holds the motions and `decodeKeys`
@@ -34,18 +42,23 @@ import {
   holdsControlCharacter,
   messageOf,
 } from "./place.ts";
-import { runLine, type Shuttle, type VerbDeps } from "./verbs.ts";
+import { type Outcome, runLine, type Shuttle, type VerbDeps } from "./verbs.ts";
 
 /** What the prompt opens every line with, before the place it carries. */
 const PROMPT_NAME = "shuttle";
 
+/** What a line that was cancelled leaves behind it. */
+const INTERRUPTED = "Interrupted.";
+
 /**
  * Where the prompt reads its keys and writes what it has to write.
  *
- * The two writes are different acts and not one. {@link PromptTerminal.edit}
+ * The three writes are different acts and not one. {@link PromptTerminal.edit}
  * shows a line that is still being typed, and may be called any number of
- * times for one line; {@link PromptTerminal.finish} ends that line and puts
- * what it produced under it, once.
+ * times for one line; {@link PromptTerminal.finish} ends that line, once; and
+ * {@link PromptTerminal.announce} puts a line above the one being typed, which
+ * is where everything a run has to say lands, whether or not a line is in
+ * flight when it is said.
  */
 export interface PromptTerminal {
   /**
@@ -61,29 +74,59 @@ export interface PromptTerminal {
    */
   edit(text: string, column: number): void;
 
+  /** Ends the line being edited, leaving it where it was shown. */
+  finish(): void;
+
   /**
-   * Ends the line being edited, leaving it where it was shown, and writes
-   * `text` under it — nothing under it where `text` is empty.
+   * Writes `text` above the line being edited, and draws that line again
+   * beneath it.
+   *
+   * This is the out-of-band line, and it is one door with three producers: a
+   * line's own outcome, written when the line settles rather than when it was
+   * typed; the runtime's console and the warnings a connection writes for
+   * itself (`announce.ts`); and, when watches arrive, an event line per
+   * settled change. What the last two carry is a user program's own output,
+   * which passed no door of shuttle's, so an implementation holds `text` to
+   * the class a terminal acts on before any of it is sent — `above`
+   * (`paint.ts`) is where the one this package uses does it. A line feed in
+   * `text` is a row, and every other character of that class is shown as the
+   * glyph naming it.
    */
-  finish(text: string): void;
+  announce(text: string): void;
 }
 
 /**
  * Reads lines against `shuttle` until `terminal` runs out of keys, and returns
- * once it has.
+ * once it has and once the line it was running has settled.
  *
- * Every line goes to `runLine`, and what comes back is written under it: text
- * a verb composed, a value the fabric holds, or the reason a line was refused.
- * A read that failed reaches here as a throw rather than as an outcome, and is
- * written under the line the same way — the difference the seam draws is that
- * a shell whose server went away is still a shell, so this reports it and
- * reads the next line where a one-shot command would exit.
+ * Every line goes to `runLine`, and what comes back is written above the line
+ * being typed next: text a verb composed, a value the fabric holds, or the
+ * reason a line was refused. A read that failed reaches here as a throw rather
+ * than as an outcome, and is written the same way — the difference the seam
+ * draws is that a shell whose server went away is still a shell, so this
+ * reports it and reads the next line where a one-shot command would exit.
  *
- * Two keys end a line rather than editing it. `enter` runs it. `ctrl-d` on an
- * empty line ends the run, which is the end-of-input every shell spells that
- * way, and on a line with anything on it deletes forward instead. `ctrl-c`
- * abandons the line and starts a new one, so what it interrupts is the typing
- * and never the run.
+ * One line runs at a time, and the keys keep arriving while it does. Three
+ * keys mean something other than editing:
+ *
+ * - `enter` runs the line. Pressed while a line is in flight it is held,
+ *   along with every key after it, and the held keys are replayed the moment
+ *   the prompt is free — so a pasted script runs line by line, each against
+ *   the place the line before it settled on, and nothing runs against a
+ *   prompt that has already moved.
+ * - `ctrl-d` on an empty line ends the run, which is the end-of-input every
+ *   shell spells that way, and on a line with anything on it deletes forward
+ *   instead. On an empty line while a line is in flight it is held, as
+ *   `enter` is.
+ * - `ctrl-c` cancels: the line in flight, or the line being typed where none
+ *   is. It is never held, and it drops what was typed ahead of it, which is
+ *   what a terminal does with type-ahead when the interrupt arrives.
+ *
+ * Cancelling is honest about what it can reach. The line is abandoned and the
+ * prompt comes back, but a read already sent to the server is not something
+ * this can call off: it finishes into nothing, and the checks along the way
+ * are what stop it taking effect — a `cd` cancelled after its read returned
+ * does not move (`verbs.ts`).
  */
 export async function runPrompt(
   shuttle: Shuttle,
@@ -98,23 +141,144 @@ export async function runPrompt(
       codePoints(prompt) + buffer.col,
     );
   show();
-  for await (const key of terminal.keys) {
-    if (key.name === "ctrl-d" && buffer.text() === "") break;
-    if (key.name === "enter") {
-      terminal.finish(await report(buffer.text(), shuttle, deps));
+
+  const keys = terminal.keys[Symbol.asyncIterator]();
+  /** The key stream's next answer, once asked for and until it is used. */
+  let typing: Promise<Arrival> | undefined;
+  /** The line in flight, and the whole of what may cancel it. */
+  let running: Running | undefined;
+  /** Keys read while a line was in flight, from the first line-ender on. */
+  let held: Key[] = [];
+  /** Whether the keys have run out, which ends the run once nothing is left. */
+  let ended = false;
+
+  /** Acts on `key` at a prompt with no line in flight. */
+  const act = (key: Key): void => {
+    if (key.name === "ctrl-c") {
+      terminal.finish();
       buffer.setText("");
-      // After the line, not before it: `cd` is what moves the place, so the
-      // prompt a line is typed at is the place it is read against.
-      prompt = promptFor(shuttle);
-    } else if (key.name === "ctrl-c") {
-      terminal.finish("");
+    } else if (endsLine(key, buffer)) {
+      if (key.name === "ctrl-d") {
+        ended = true;
+        held = [];
+        return;
+      }
+      const line = buffer.text();
+      terminal.finish();
       buffer.setText("");
+      running = start(line, shuttle, deps);
+      // Nothing is drawn: the prompt for the next line appears when the line
+      // settles, or when a key is typed before it does, so a line that
+      // answers before anyone types looks exactly as it did when the loop
+      // waited for it.
+      return;
     } else {
       apply(buffer, key);
     }
     show();
+  };
+
+  while (!(ended && running === undefined && held.length === 0)) {
+    if (running === undefined && held.length > 0) {
+      act(held.shift()!);
+      continue;
+    }
+    if (!ended) typing ??= nextKey(keys);
+    const arrival = await (
+      ended
+        ? running!.settled
+        : running === undefined
+        ? typing!
+        : Promise.race([typing!, running.settled])
+    );
+    if (arrival.kind === "ran") {
+      running = undefined;
+      if (arrival.text !== "") terminal.announce(arrival.text);
+      // After the line, not before it: `cd` is what moves the place, so the
+      // prompt a line is typed at is the place it was read against.
+      prompt = promptFor(shuttle);
+      show();
+      continue;
+    }
+    typing = undefined;
+    if (arrival.step.done) {
+      ended = true;
+      continue;
+    }
+    const key = arrival.step.value;
+    if (running === undefined) {
+      act(key);
+    } else if (key.name === "ctrl-c") {
+      running.stop();
+      held = [];
+      buffer.setText("");
+      show();
+    } else if (held.length > 0 || endsLine(key, buffer)) {
+      held.push(key);
+    } else {
+      apply(buffer, key);
+      show();
+    }
   }
-  terminal.finish("");
+  terminal.finish();
+}
+
+/** What the loop is waiting on: the next key, or the line it is running. */
+type Arrival =
+  /** The key stream answered, with a key or with the end of the keys. */
+  | { readonly kind: "typed"; readonly step: IteratorResult<Key> }
+  /** The line in flight settled, and `text` is what it produced. */
+  | { readonly kind: "ran"; readonly text: string };
+
+/** A line in flight: what it will produce, and how to cancel it. */
+interface Running {
+  /** Settles with what the line produced, cancelled or not. */
+  readonly settled: Promise<Arrival>;
+
+  /** Cancels the line, which settles it with what a cancelled line says. */
+  stop(): void;
+}
+
+/**
+ * Helper for {@link runPrompt}, which asks `keys` for the next one.
+ *
+ * It is a function so that the answer is a value the loop holds until it uses
+ * it: a key asked for while a line was running is still the next key when that
+ * line settles, and asking twice would drop one.
+ */
+function nextKey(keys: AsyncIterator<Key>): Promise<Arrival> {
+  return keys.next().then((step) => ({ kind: "typed", step }) as const);
+}
+
+/**
+ * Helper for {@link runPrompt}, which starts `line` and returns what running
+ * it is.
+ *
+ * The signal rides the deps bag the verbs already read their collaborators
+ * through, so a verb honors it wherever it has a phase to stop between and
+ * nothing else has to be threaded to reach one.
+ */
+function start(line: string, shuttle: Shuttle, deps: VerbDeps): Running {
+  const stopper = new AbortController();
+  return {
+    stop: () => stopper.abort(),
+    settled: report(line, shuttle, { ...deps, signal: stopper.signal })
+      .then((text) => ({ kind: "ran", text }) as const),
+  };
+}
+
+/**
+ * Helper for {@link runPrompt}, which is whether `key` ends the line `buffer`
+ * holds rather than editing it.
+ *
+ * These are the two keys a prompt cannot honor while a line is in flight —
+ * one would run a second line and the other would end the run under the first
+ * — so they are the two that are held, and this is the one place that says
+ * which they are.
+ */
+function endsLine(key: Key, buffer: EditBuffer): boolean {
+  return key.name === "enter" ||
+    (key.name === "ctrl-d" && buffer.text() === "");
 }
 
 /**
@@ -177,8 +341,8 @@ function promptFor(shuttle: Shuttle): string {
 }
 
 /**
- * Helper for {@link runPrompt}, which runs `line` and returns what to write
- * under it — the empty string where it produced nothing to say.
+ * Helper for {@link start}, which runs `line` and returns what to write above
+ * the next one — the empty string where it produced nothing to say.
  *
  * A value prints as indented JSON, and what cannot be written that way is
  * said rather than shown — by {@link written} for a value the writer declines,
@@ -191,10 +355,19 @@ function promptFor(shuttle: Shuttle): string {
  * rejection can carry, and a throw raised while answering a failure is the
  * failure this catch exists to stop.
  *
+ * A cancelled line is answered by whichever of two things happens first, and
+ * the answer is the same word either way. The line may reach a phase boundary
+ * and stop there, which is the arm `runLine` returns; or it may be waiting on
+ * a read that nothing can call off, and then the signal answers for it and the
+ * read finishes into nothing. What the second delivers is the prompt, which is
+ * what a person pressing `ctrl-c` at a server that has gone quiet is asking
+ * for; what it does not deliver is a server that stopped working, and no
+ * caller of a read here can deliver that.
+ *
  * The two prose answers are escaped here rather than where they were written.
  * A refusal's reason and a thrown read's message both carry text the fabric
  * wrote, which passed no door and so was never held to the class a terminal
- * acts on; and both reach a person only by becoming the line under this one.
+ * acts on; and both reach a person only by becoming a line of their own.
  * Escaping at that point covers a refusal built as a literal rather than
  * through `refuse`, and a message from a `throw` this module never sees, in a
  * way that escaping at each site cannot. It leaves the other two arms alone
@@ -208,11 +381,16 @@ async function report(
   deps: VerbDeps,
 ): Promise<string> {
   try {
-    const outcome = await runLine(line, shuttle, deps);
+    const running = runLine(line, shuttle, deps);
+    const outcome = await (deps.signal === undefined
+      ? running
+      : Promise.race([running, abandoned(deps.signal)]));
     switch (outcome.kind) {
       case "nothing":
       case "moved":
         return "";
+      case "interrupted":
+        return INTERRUPTED;
       case "text":
         return outcome.text;
       case "refused":
@@ -223,6 +401,23 @@ async function report(
   } catch (thrown) {
     return escapeControlCharacters(messageOf(thrown));
   }
+}
+
+/**
+ * Helper for {@link report}, which settles once `signal` is aborted and never
+ * otherwise.
+ *
+ * A promise that never settles is exactly what is wanted for a line nobody
+ * cancels: it loses every race it is in and is collected with the controller
+ * the line held. Nothing here waits on a clock, so a line that is slow is a
+ * line that is still running.
+ */
+function abandoned(signal: AbortSignal): Promise<Outcome> {
+  return new Promise((resolve) => {
+    signal.addEventListener("abort", () => resolve({ kind: "interrupted" }), {
+      once: true,
+    });
+  });
 }
 
 /**

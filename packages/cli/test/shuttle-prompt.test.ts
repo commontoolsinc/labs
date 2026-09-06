@@ -1,10 +1,16 @@
 /**
- * Unit tests for the prompt: the loop that reads a line and writes what it
- * produced.
+ * Unit tests for the prompt: the loop that reads a line, runs it beside the
+ * keys, and writes what it produced.
  *
  * Every case drives the whole loop with a scripted key stream and reads back
  * the writes it made, so what is under test is the loop and the bindings — the
  * terminal, the keyboard and the escape sequences are all somewhere else.
+ *
+ * A case that needs a line to still be running while it types the next keys
+ * scripts the keys against the read itself ({@link gated}) rather than against
+ * a clock: the stream waits for the read to have started, and the read answers
+ * when the stream says so, so which of the two the loop sees first is decided
+ * by the case and not by how many microtasks a verb happens to take.
  *
  * The connection is a borrowed one throughout and no case reaches it: a verb
  * that reads stands its read in through the deps bag, so what the prompt does
@@ -38,12 +44,17 @@ const CONFIG: SpaceConfig = {
 /** The prompt a shuttle standing at the space root carries. */
 const AT_ROOT = "shuttle / @space> ";
 
+/** The prompt a shuttle standing at {@link HANDLE} carries. */
+const AT_PIECE = `shuttle ${HANDLE} @space> `;
+
 /** What the prompt wrote, in the order it wrote it. */
 type Write =
   /** It drew `text` as the line being edited, the cursor `column` into it. */
   | { readonly kind: "edit"; readonly text: string; readonly column: number }
-  /** It ended that line and wrote `text` under it. */
-  | { readonly kind: "finish"; readonly text: string };
+  /** It ended the line it was drawing. */
+  | { readonly kind: "finish" }
+  /** It wrote `text` above the line being edited. */
+  | { readonly kind: "announce"; readonly text: string };
 
 /** Helper for the cases below, which is a shuttle at the space root. */
 function shuttleIn(): Shuttle {
@@ -87,25 +98,66 @@ function alt(letter: string): Key {
 }
 
 /**
+ * Helper for the cases below, which is a read a case starts and answers, and
+ * the two events either side of it.
+ *
+ * A line is in flight for exactly as long as its read has not answered, so a
+ * case that wants to type into a running line waits on {@link Gated.started}
+ * and then calls {@link Gated.answer}. Neither wait is a poll and neither is a
+ * clock: the read resolves the first promise as it is called, and the case
+ * resolves the second.
+ */
+interface Gated {
+  /** Settles once the read has been called. */
+  readonly started: Promise<void>;
+
+  /** Answers the read with `value`, which settles the line. */
+  answer(value: unknown): void;
+
+  /** The read itself, for the deps bag. */
+  readonly read: () => Promise<unknown>;
+}
+
+/** Helper for the cases below, which is a read a case drives. */
+function gated(): Gated {
+  const started = Promise.withResolvers<void>();
+  const answered = Promise.withResolvers<unknown>();
+  return {
+    started: started.promise,
+    answer: (value) => answered.resolve(value),
+    read: () => {
+      started.resolve();
+      return answered.promise;
+    },
+  };
+}
+
+/**
  * Helper for the cases below, which runs `keys` against `shuttle` and returns
  * what the prompt wrote.
  *
  * The keys are a stream that ends, which is the only thing that ends a run
- * that no key ended: a case says what it types and the loop returns.
+ * that no key ended: a case says what it types and the loop returns once the
+ * line it was running has settled.
  */
 async function running(
-  keys: readonly Key[],
+  keys: readonly Key[] | AsyncIterable<Key>,
   shuttle: Shuttle = shuttleIn(),
   deps: VerbDeps = {},
 ): Promise<Write[]> {
   const writes: Write[] = [];
   const terminal: PromptTerminal = {
-    keys: ReadableStream.from(keys),
+    keys: Array.isArray(keys)
+      ? ReadableStream.from(keys as readonly Key[])
+      : keys as AsyncIterable<Key>,
     edit: (text, column) => {
       writes.push({ kind: "edit", text, column });
     },
-    finish: (text) => {
-      writes.push({ kind: "finish", text });
+    finish: () => {
+      writes.push({ kind: "finish" });
+    },
+    announce: (text) => {
+      writes.push({ kind: "announce", text });
     },
   };
   await runPrompt(shuttle, terminal, deps);
@@ -119,7 +171,7 @@ function drawn(writes: readonly Write[]): Write | undefined {
 
 /** Helper for the cases below, which is what each line produced, in order. */
 function produced(writes: readonly Write[]): string[] {
-  return writes.filter((write) => write.kind === "finish")
+  return writes.filter((write) => write.kind === "announce")
     .map((write) => write.text);
 }
 
@@ -128,43 +180,44 @@ describe("prompt", () => {
     it("draws the prompt before a key is typed", async () => {
       expect(await running([])).toEqual([
         { kind: "edit", text: AT_ROOT, column: AT_ROOT.length },
-        { kind: "finish", text: "" },
+        { kind: "finish" },
       ]);
     });
 
     it("draws the line as it is typed, and writes what it produced under it", async () => {
       // The one case reading the whole log. What it pins is the order: the
-      // line is drawn where it was typed and its result lands under it, which
-      // is what makes a transcript a record of what happened.
+      // line is drawn where it was typed, ended where it was run, and its
+      // result written above the prompt that came next — which is what makes
+      // a transcript a record of what happened.
 
       expect(await running([...typed("pw"), ENTER])).toEqual([
         { kind: "edit", text: AT_ROOT, column: 18 },
         { kind: "edit", text: `${AT_ROOT}p`, column: 19 },
         { kind: "edit", text: `${AT_ROOT}pw`, column: 20 },
+        { kind: "finish" },
         {
-          kind: "finish",
+          kind: "announce",
           text: "`pw` is not a verb. The verbs are `cd`, `get`, `help`, " +
             "`ls`, `pwd`, `where`, and `wish`.",
         },
         { kind: "edit", text: AT_ROOT, column: 18 },
-        { kind: "finish", text: "" },
+        { kind: "finish" },
       ]);
     });
 
     it("writes the text a verb composed", async () => {
       expect(produced(await running([...typed("pwd"), ENTER]))).toEqual([
         `position  @${SPACE}/\nscope     @space`,
-        "",
       ]);
     });
 
     it("writes nothing under a line naming no verb at all", async () => {
-      expect(produced(await running([ENTER]))).toEqual(["", ""]);
+      expect(produced(await running([ENTER]))).toEqual([]);
     });
 
     it("writes nothing under a line that moved the place", async () => {
       expect(produced(await running([...typed("cd slugs"), ENTER])))
-        .toEqual(["", ""]);
+        .toEqual([]);
     });
 
     it("draws the place a line moved to at the next prompt", async () => {
@@ -180,7 +233,7 @@ describe("prompt", () => {
       const writes = await running([...typed("get"), ENTER], atPiece(), {
         getCellValue: () => Promise.resolve({ title: "a" }),
       });
-      expect(produced(writes)).toEqual(['{\n  "title": "a"\n}', ""]);
+      expect(produced(writes)).toEqual(['{\n  "title": "a"\n}']);
     });
 
     it("writes `undefined` for a value nothing else can be written for", async () => {
@@ -191,7 +244,7 @@ describe("prompt", () => {
       const writes = await running([...typed("get"), ENTER], atPiece(), {
         getCellValue: () => Promise.resolve(undefined),
       });
-      expect(produced(writes)).toEqual(["undefined", ""]);
+      expect(produced(writes)).toEqual(["undefined"]);
     });
 
     it("writes a value's acted-on characters as the escapes JSON spells them with", async () => {
@@ -359,13 +412,12 @@ describe("prompt", () => {
       expect(produced(writes)).toEqual([
         "The server cannot be reached.",
         `position  /@${SPACE}/${HANDLE}@space\nscope     @space`,
-        "",
       ]);
     });
 
     it("ends the run on `ctrl-d` at an empty line", async () => {
       expect(produced(await running([control("d"), ...typed("pwd"), ENTER])))
-        .toEqual([""]);
+        .toEqual([]);
     });
 
     it("deletes forward on `ctrl-d` with something on the line", async () => {
@@ -382,19 +434,205 @@ describe("prompt", () => {
     });
 
     it("abandons the line on `ctrl-c` and reads the next one", async () => {
-      expect(produced(await running([...typed("pwd"), control("c"), ENTER])))
-        .toEqual(["", "", ""]);
+      // The next line is a whole line rather than the rest of one: were the
+      // abandoned text still there, what ran would be `pwdpwd`, which is no
+      // verb.
+
+      const writes = await running(
+        [...typed("pwd"), control("c"), ...typed("pwd"), ENTER],
+      );
+      expect(produced(writes))
+        .toEqual([`position  @${SPACE}/\nscope     @space`]);
     });
 
     it("ends the line it was drawing when the keys run out", async () => {
-      expect(produced(await running([...typed("pwd")]))).toEqual([""]);
+      const writes = await running([...typed("pwd")]);
+      expect(writes.at(-1)).toEqual({ kind: "finish" });
+      expect(produced(writes)).toEqual([]);
+    });
+  });
+
+  describe("a line in flight", () => {
+    // The loop's other half: the keys are read while a line is running, so a
+    // slow server holds up neither the keyboard nor the screen. Each case
+    // below scripts its keys against the read rather than against a clock —
+    // the stream waits for the read to have started and answers it when the
+    // case is done typing — so what the loop saw and in what order is the
+    // case's to decide.
+
+    /** Helper for the cases below, which is the read `get` at a piece makes. */
+    function reading(read: Gated): VerbDeps {
+      return { getCellValue: read.read };
+    }
+
+    it("draws a key typed while a line is in flight, before the line answers", async () => {
+      const read = gated();
+      const writes = await running(
+        (async function* () {
+          yield* typed("get");
+          yield ENTER;
+          await read.started;
+          yield* typed("pw");
+          read.answer({ title: "a" });
+        })(),
+        atPiece(),
+        reading(read),
+      );
+      const shown = writes.findIndex((write) =>
+        write.kind === "edit" && write.text === `${AT_PIECE}pw`
+      );
+      const answered = writes.findIndex((write) => write.kind === "announce");
+      expect(shown).toBeGreaterThan(-1);
+      expect(answered).toBeGreaterThan(shown);
+    });
+
+    it("keeps what was typed while a line was in flight, under the prompt the line left", async () => {
+      const read = gated();
+      const writes = await running(
+        (async function* () {
+          yield* typed("get");
+          yield ENTER;
+          await read.started;
+          yield* typed("pw");
+          read.answer({ title: "a" });
+        })(),
+        atPiece(),
+        reading(read),
+      );
+      expect(drawn(writes)).toEqual({
+        kind: "edit",
+        text: `${AT_PIECE}pw`,
+        column: [...AT_PIECE].length + 2,
+      });
+    });
+
+    it("holds `enter` typed while a line is in flight, and runs it once the prompt is free", async () => {
+      const read = gated();
+      const writes = await running(
+        (async function* () {
+          yield* typed("get");
+          yield ENTER;
+          await read.started;
+          yield* typed("pwd");
+          yield ENTER;
+          read.answer({ title: "a" });
+        })(),
+        atPiece(),
+        reading(read),
+      );
+      expect(produced(writes)).toEqual([
+        '{\n  "title": "a"\n}',
+        `position  /@${SPACE}/${HANDLE}@space\nscope     @space`,
+      ]);
+    });
+
+    it("runs a held line against the place the line before it settled on", async () => {
+      // What holding buys over running the line where it was typed: the `cd`
+      // is what moves the place, and the `pwd` behind it names the place the
+      // `cd` reached rather than the one the prompt showed while it ran.
+
+      const board = "of:fid1:qrstuvwxyz012345";
+      const resolution = gated();
+      const shuttle = shuttleIn();
+      moved(shuttle.place, "slugs");
+      const writes = await running(
+        (async function* () {
+          yield* typed("cd board");
+          yield ENTER;
+          await resolution.started;
+          yield* typed("pwd");
+          yield ENTER;
+          resolution.answer(board);
+        })(),
+        shuttle,
+        {
+          resolvePieceReference: async (_pieces, _token, path) => ({
+            piece: (await resolution.read()) as string,
+            pathAfter: [...path],
+          }),
+        },
+      );
+      expect(produced(writes)).toEqual([
+        `position  /@${SPACE}/${board}@space\nscope     @space`,
+      ]);
+    });
+
+    it("cancels the line in flight on `ctrl-c`, and reads the next line", async () => {
+      const read = gated();
+      const writes = await running(
+        (async function* () {
+          yield* typed("get");
+          yield ENTER;
+          await read.started;
+          yield control("c");
+          yield* typed("pwd");
+          yield ENTER;
+          // The read the person stopped waiting for still answers, into
+          // nothing: what a cancel reaches is the line, never the server.
+          read.answer({ title: "a" });
+        })(),
+        atPiece(),
+        reading(read),
+      );
+      expect(produced(writes)).toEqual([
+        "Interrupted.",
+        `position  /@${SPACE}/${HANDLE}@space\nscope     @space`,
+      ]);
+    });
+
+    it("drops what was typed ahead when `ctrl-c` cancels the line", async () => {
+      const read = gated();
+      const writes = await running(
+        (async function* () {
+          yield* typed("get");
+          yield ENTER;
+          await read.started;
+          yield* typed("pw");
+          yield control("c");
+          read.answer({ title: "a" });
+        })(),
+        atPiece(),
+        reading(read),
+      );
+      expect(drawn(writes)).toEqual({
+        kind: "edit",
+        text: AT_PIECE,
+        column: [...AT_PIECE].length,
+      });
+    });
+
+    it("holds `ctrl-d` on an empty line, and ends the run once the prompt is free", async () => {
+      // The key that ends a run would leave a line in flight with nothing to
+      // report it to, so it is held like the other line-ender and acts once
+      // the line it was typed under has answered.
+      //
+      // The `pwd` behind it is what makes the holding readable rather than
+      // merely harmless: keys after a held one are held too, so what the
+      // `ctrl-d` ends the run over is a line already typed, and it never
+      // runs. Were the `ctrl-d` merely ignored, it would.
+
+      const read = gated();
+      const writes = await running(
+        (async function* () {
+          yield* typed("get");
+          yield ENTER;
+          await read.started;
+          yield control("d");
+          yield* typed("pwd");
+          yield ENTER;
+          read.answer({ title: "a" });
+        })(),
+        atPiece(),
+        reading(read),
+      );
+      expect(produced(writes)).toEqual(['{\n  "title": "a"\n}']);
     });
   });
 
   describe("text the fabric wrote", () => {
     // Neither a refusal's reason nor a thrown read's message passed a door, so
     // neither has been held to the class a terminal acts on. Both are held to
-    // it here, where each becomes the line under the one that was typed, and
+    // it here, where each becomes the line above the prompt that follows, and
     // these cases are at that point rather than at either writer for the
     // reason the escaping is: a refusal built as a literal and a `throw` from
     // a module the verbs never see reach the same place by paths no writer
@@ -454,7 +692,7 @@ describe("prompt", () => {
         atPiece(),
         { getCellValue: () => Promise.reject(Object.create(null)) },
       );
-      expect(produced(writes).length).toBe(3);
+      expect(produced(writes).length).toBe(2);
       expect(produced(writes)[1]).toContain("position");
     });
 

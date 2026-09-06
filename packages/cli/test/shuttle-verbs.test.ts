@@ -2119,4 +2119,542 @@ describe("verbs", () => {
       ).toEqual({ kind: "value", value: null });
     });
   });
+
+  describe("a line the prompt cancelled", () => {
+    // What an `AbortSignal` on the deps bag buys, which is a check at each
+    // boundary between a verb's phases rather than anything that reaches a
+    // read already sent. Two properties follow and both are pinned here: a
+    // cancelled line sends no read it had not sent, and it adopts no place.
+    //
+    // `cd` is the verb with boundaries to check, and it has three reads to
+    // sit between: the resolution, the handle lookup, and the walk of the
+    // path. Every case below aborts from inside one of them, which is where a
+    // `ctrl-c` really arrives — while something is in flight. A signal
+    // aborted before the line starts is the one case that does not need a
+    // read to arrange it.
+
+    /** Helper for the cases below, which is a signal already aborted. */
+    function cancelled(): AbortSignal {
+      const stopper = new AbortController();
+      stopper.abort();
+      return stopper.signal;
+    }
+
+    /**
+     * Every read this module can issue, by the name a case knows it by.
+     *
+     * It is the whole set rather than a selection, and what closes it is that
+     * each is a seam a case stands in for: a read this module makes through
+     * anything else is a read no case could have stood in for, which is a
+     * different defect and one `READS_NOTHING` catches on every case in this
+     * file. The one await that reaches the world and is not here is
+     * `connection.pieces()`, which answers off the holder's memo — shuttle
+     * opens its connection before the prompt reads its first line
+     * (`run.ts`), so within a line it sends nothing.
+     */
+    const READS = [
+      "getCellValue",
+      "readWish",
+      "resolvePieceReference",
+      "listSpaceSlugs",
+      "listPieces",
+      "listCellKeys",
+      "entityIdExists",
+    ] as const;
+
+    /** One of {@link READS}. */
+    type Read = typeof READS[number];
+
+    /** Where a case puts the cancel. */
+    type Cancel =
+      /** Inside that read, as it is issued. */
+      | Read
+      /**
+       * The moment the line first gives up control, whatever it was waiting
+       * on. A verb runs synchronously to its first `await`, so the abort
+       * lands in that window without a case having to name what opens it —
+       * which is what lets these cases cover a boundary nobody enumerated.
+       */
+      | "suspend";
+
+    /** What a cancelled line was seen to do. */
+    interface Watched {
+      /** Every read it issued, in order. */
+      readonly reached: Read[];
+
+      /** Every read it issued after the cancel, which must be none. */
+      readonly afterCancel: Read[];
+    }
+
+    /**
+     * Helper for the cases below, which runs `line` against the shuttle
+     * `standing` builds, cancels it at `at`, and returns what it read.
+     *
+     * Every read is stood in for and every one is counted, so what comes back
+     * is the whole of what the line asked the world for. A read is recorded
+     * as after the cancel when the signal was already aborted as it was
+     * issued — the read that carries the cancel is not one of those, the
+     * abort being raised as it is entered rather than before.
+     */
+    async function cancelling(
+      line: string,
+      standing: (pieces: PiecesController) => Shuttle,
+      at: Cancel,
+    ): Promise<Watched> {
+      const stopper = new AbortController();
+      const reached: Read[] = [];
+      const afterCancel: Read[] = [];
+      const note = (name: Read) => {
+        reached.push(name);
+        if (stopper.signal.aborted) afterCancel.push(name);
+        if (name === at) stopper.abort();
+      };
+      const shuttle = standing(
+        {
+          dispose: () => Promise.resolve(),
+          getSpace: () => SPACE,
+          getSpaceName: () => SPACE_NAME,
+          entityIdExists: () => {
+            note("entityIdExists");
+            return Promise.resolve(true);
+          },
+        } as unknown as PiecesController,
+      );
+      const running = runLine(line, shuttle, {
+        getCellValue: () => {
+          note("getCellValue");
+          return Promise.resolve({ title: "a" });
+        },
+        readWish: () => {
+          note("readWish");
+          return Promise.resolve({
+            result: { [LINK_MARKER_KEY]: `/${HANDLE}` },
+          });
+        },
+        resolvePieceReference: (_pieces, token, path) => {
+          note("resolvePieceReference");
+          return Promise.resolve({
+            piece: token === "board" ? BOARD : token,
+            pathAfter: [...path],
+          });
+        },
+        listing: {
+          listSpaceSlugs: () => {
+            note("listSpaceSlugs");
+            return Promise.resolve([]);
+          },
+          listPieces: () => {
+            note("listPieces");
+            return Promise.resolve([]);
+          },
+          listCellKeys: () => {
+            note("listCellKeys");
+            return Promise.resolve([]);
+          },
+        },
+        signal: stopper.signal,
+      });
+      if (at === "suspend") stopper.abort();
+      await running;
+      return { reached, afterCancel };
+    }
+
+    /** Helper for the cases below, which stands at the space root. */
+    const atRoot = (pieces: PiecesController) => shuttleIn(pieces);
+
+    /** Helper for the cases below, which stands at the facet `facet`. */
+    const atFacet = (facet: string) => (pieces: PiecesController) => {
+      const shuttle = shuttleIn(pieces);
+      moved(shuttle.place, facet);
+      return shuttle;
+    };
+
+    /** Helper for the cases below, which stands on a piece. */
+    const onPiece = (pieces: PiecesController) => {
+      const shuttle = shuttleIn(pieces);
+      moved(shuttle.place, `/${HANDLE}`);
+      return shuttle;
+    };
+
+    /**
+     * Every line and cancel these cases drive, which is what closes the claim
+     * they make.
+     *
+     * The claim is a universal — *no* read is issued after a cancel — and the
+     * risk in one is a case that samples the boundaries somebody thought of.
+     * So the rows are not boundaries at all: each names a read to cancel from
+     * inside, or asks for the cancel at the line's first suspension without
+     * naming what that is. A boundary nobody enumerated still fails here,
+     * provided a row reaches it, and the case below the table is what holds
+     * the rows to reaching every read there is.
+     */
+    const CANCELLED: readonly (readonly [
+      string,
+      (pieces: PiecesController) => Shuttle,
+      Cancel,
+    ])[] = [
+      ["cd board/title", atFacet("slugs"), "suspend"],
+      ["cd board/title", atFacet("slugs"), "resolvePieceReference"],
+      ["cd board/title", atFacet("slugs"), "getCellValue"],
+      [`cd /${BOARD}/title`, atRoot, "resolvePieceReference"],
+      [`cd /${BOARD}/title`, atRoot, "entityIdExists"],
+      ["cd #favorites", atRoot, "suspend"],
+      ["cd #favorites", atRoot, "readWish"],
+      ["cd .@session", onPiece, "suspend"],
+      ["get title", onPiece, "suspend"],
+      ["get", onPiece, "suspend"],
+      ["wish #favorites", atRoot, "suspend"],
+      ["ls", atFacet("slugs"), "suspend"],
+      ["get title", onPiece, "getCellValue"],
+      ["wish #favorites", atRoot, "readWish"],
+      ["ls", atFacet("slugs"), "listSpaceSlugs"],
+      ["ls", atFacet("pieces"), "listPieces"],
+      ["ls", onPiece, "listCellKeys"],
+    ];
+
+    it("issues no read after the cancel, on any line and from any read", async () => {
+      // The contract's universal half, driven rather than enumerated. Each
+      // row is reported with the line and the cancel that produced it, so a
+      // row that fails names the boundary that lost its guard rather than
+      // leaving the whole table red with nothing said.
+
+      for (const [line, standing, at] of CANCELLED) {
+        const watched = await cancelling(line, standing, at);
+        expect({ line, at, after: watched.afterCancel })
+          .toEqual({ line, at, after: [] });
+      }
+    });
+
+    /**
+     * The verbs that read nothing, and so have no read for a cancel to stop.
+     *
+     * It is asserted rather than asserted about: the case below runs each
+     * with every read standing in as a throw, so a verb listed here that
+     * reaches one fails instead of being excused by this list.
+     */
+    const READS_NOTHING_AT_ALL = ["help", "pwd", "where"];
+
+    it("cancels a line of every verb, or says why the verb has no read", async () => {
+      // What closes the set of verbs, which is the gap the rows above had:
+      // `wish` and `ls` reach `guarded` with nothing awaited in front of it,
+      // so a cancel at the first suspension is the only cancel that can catch
+      // a guard that has drifted — and neither had a row.
+      //
+      // The list is the module's own answer rather than a list kept here: a
+      // word that is no verb is refused with the verbs named, so a verb added
+      // to the dispatch is a verb this case demands a row for.
+
+      const refusal = await runLine("frob", shuttleIn(), READS_NOTHING);
+      const named = [...reasonOf(refusal).matchAll(/`([a-z]+)`/g)]
+        .map((found) => found[1])
+        .filter((word) => word !== "frob");
+      const suspended = CANCELLED
+        .filter(([, , at]) => at === "suspend")
+        .map(([line]) => line.split(" ")[0]);
+      expect([...new Set(named)].sort())
+        .toEqual([...new Set([...suspended, ...READS_NOTHING_AT_ALL])].sort());
+
+      // And the excused ones are excused truthfully: every read throws, so a
+      // verb that reached one would raise rather than answer.
+      for (const verb of READS_NOTHING_AT_ALL) {
+        const outcome = await runLine(verb, shuttleIn(), READS_NOTHING);
+        expect({ verb, kind: outcome.kind }).toEqual({ verb, kind: "text" });
+      }
+    });
+
+    it("drives every read there is, which is what closes the case above", async () => {
+      // Without this the table would be a sample wearing a universal's
+      // words: rows reaching six of the seven reads would pass while the
+      // seventh went unguarded. A read added to the module is added to
+      // `READS`, and this fails until a row reaches it.
+
+      const reached = new Set<Read>();
+      for (const [line, standing, at] of CANCELLED) {
+        for (const read of (await cancelling(line, standing, at)).reached) {
+          reached.add(read);
+        }
+      }
+      expect([...reached].sort()).toEqual([...READS].sort());
+    });
+
+    it("sends no wish where the cancel arrived while the selection parsed", async () => {
+      // `resolveTarget` parses the selection `--select @` spells before it
+      // sends the wish, and the parse is an await. So a cancel lands in that
+      // window, and what it must stop is the read the parse was preparing.
+
+      const watched = await cancelling("cd #favorites", atRoot, "suspend");
+      expect(watched.reached).toEqual([]);
+    });
+
+    it("resolves no piece where the cancel arrived while the connection was asked for", async () => {
+      // The settle asks the holder for the connection before it resolves
+      // anything, and that ask is an await of its own. The resolution behind
+      // it is a read, so the window the ask opens is a boundary.
+
+      const watched = await cancelling(
+        "cd board/title",
+        atFacet("slugs"),
+        "suspend",
+      );
+      expect(watched.reached).toEqual([]);
+    });
+
+    it("reads no cell where the cancel arrived while the operand was placed", async () => {
+      // Where a `get`'s operand points can itself be a read — a space
+      // written as a name is asked of the connection — so placing the
+      // operand and reading the cell are two phases, and this is the
+      // boundary between them.
+
+      const watched = await cancelling("get title", onPiece, "suspend");
+      expect(watched.reached).toEqual([]);
+    });
+
+    it("runs no verb at all for a line already cancelled", async () => {
+      // The check at the dispatch, which is the only one a verb that reads
+      // nothing ever meets: `pwd` composes its answer out of what the process
+      // is already holding, so no guarded read stands between the cancel and
+      // an answer, and without this check a cancelled line would get one.
+
+      expect(
+        await runLine("pwd", shuttleIn(), {
+          ...READS_NOTHING,
+          signal: cancelled(),
+        }),
+      ).toEqual({ kind: "interrupted" });
+    });
+
+    it("sends no read for a line already cancelled", async () => {
+      let read = 0;
+      const outcome = await runLine("get", atPiece(), {
+        ...READS_NOTHING,
+        getCellValue: () => {
+          read += 1;
+          return Promise.resolve(null);
+        },
+        signal: cancelled(),
+      });
+      expect(outcome).toEqual({ kind: "interrupted" });
+      expect(read).toBe(0);
+    });
+
+    it("still refuses a line that was wrong, cancelled or not", async () => {
+      // The reading of the words happens before the check, and it is worth
+      // making either way: a line that named no verb is not a verb that was
+      // interrupted, and telling a person their line was cancelled when it
+      // was misspelled would send them back to a line that never could run.
+
+      expect(
+        await runLine("frob", shuttleIn(), {
+          ...READS_NOTHING,
+          signal: cancelled(),
+        }),
+      ).toEqual({
+        kind: "refused",
+        reason: "`frob` is not a verb. The verbs are `cd`, `get`, `help`, " +
+          "`ls`, `pwd`, `where`, and `wish`.",
+      });
+    });
+
+    it("walks no path where the cancel arrived during the resolution", async () => {
+      // The first boundary a settle has: the resolution has answered and the
+      // walk has not been asked for. The slug resolves to a piece other than
+      // the one it was spelled as, which is what proves it held — so this
+      // move has no lookup between the two, and the check after the
+      // resolution is the one that stops the walk.
+
+      const shuttle = shuttleIn();
+      moved(shuttle.place, "slugs");
+      const stopper = new AbortController();
+      let walked = 0;
+      const outcome = await runLine("cd board/title", shuttle, {
+        ...READS_NOTHING,
+        resolvePieceReference: (_pieces, _token, path) => {
+          stopper.abort();
+          return Promise.resolve({ piece: BOARD, pathAfter: [...path] });
+        },
+        getCellValue: () => {
+          walked += 1;
+          return Promise.resolve({ title: "a" });
+        },
+        signal: stopper.signal,
+      });
+      expect(outcome).toEqual({ kind: "interrupted" });
+      expect(walked).toBe(0);
+    });
+
+    it("looks no handle up where the cancel arrived during the resolution", async () => {
+      // The lookup's own guard, which the walk's guard would otherwise stand
+      // in for: a cancel arriving during the resolution must stop the lookup,
+      // not merely the walk behind it. The piece is spelled as a handle, so
+      // the resolution proves nothing and the lookup is the read that would
+      // have gone out next.
+
+      const shuttle = shuttleIn(lookingUp(true));
+      const stopper = new AbortController();
+      let looked = 0;
+      const outcome = await runLine(`cd /${BOARD}/title`, {
+        ...shuttle,
+        connection: new HeldConnection({
+          kind: "borrowed",
+          pieces: {
+            dispose: () => Promise.resolve(),
+            getSpace: () => SPACE,
+            getSpaceName: () => SPACE_NAME,
+            entityIdExists: () => {
+              looked += 1;
+              return Promise.resolve(true);
+            },
+          } as unknown as PiecesController,
+        }),
+      }, {
+        ...READS_NOTHING,
+        resolvePieceReference: (_pieces, token, path) => {
+          stopper.abort();
+          return Promise.resolve({ piece: token, pathAfter: [...path] });
+        },
+        signal: stopper.signal,
+      });
+      expect(outcome).toEqual({ kind: "interrupted" });
+      expect(looked).toBe(0);
+    });
+
+    it("walks no path where the cancel arrived during the handle lookup", async () => {
+      // The second boundary, and the one only a move with a handle to look up
+      // reaches: `entityIdExists` has answered and the walk has not been asked
+      // for. A handle is a spelling that proves nothing, so this is the move
+      // that pays for the lookup — and a lookup is a round trip a person is as
+      // likely to be waiting on as any other.
+
+      const shuttle = shuttleIn();
+      const stopper = new AbortController();
+      let walked = 0;
+      const outcome = await runLine(`cd /${BOARD}/title`, {
+        ...shuttle,
+        connection: new HeldConnection({
+          kind: "borrowed",
+          pieces: {
+            dispose: () => Promise.resolve(),
+            getSpace: () => SPACE,
+            getSpaceName: () => SPACE_NAME,
+            entityIdExists: () => {
+              stopper.abort();
+              return Promise.resolve(true);
+            },
+          } as unknown as PiecesController,
+        }),
+      }, {
+        ...READS_NOTHING,
+        resolvePieceReference: (_pieces, token, path) =>
+          Promise.resolve({ piece: token, pathAfter: [...path] }),
+        getCellValue: () => {
+          walked += 1;
+          return Promise.resolve({ title: "a" });
+        },
+        signal: stopper.signal,
+      });
+      expect(outcome).toEqual({ kind: "interrupted" });
+      expect(walked).toBe(0);
+    });
+
+    it("moves nowhere where the cancel arrived during the last read", async () => {
+      // The check before the place is adopted, which is the one that matters:
+      // `cd` is the verb whose success means something, and a line the person
+      // stopped waiting for must not go on to promise a place.
+      //
+      // The cancel arrives during the walk, which is the settle's last read
+      // and the one no check inside the settle follows — it answers, the path
+      // is found, and the settle says the fabric holds the place. So nothing
+      // but the check at the adoption stands between this cancel and a move,
+      // which is why the case aims here rather than at an earlier read: an
+      // earlier one is stopped by a check of its own, and would pass with the
+      // adoption unguarded.
+
+      const shuttle = shuttleIn();
+      moved(shuttle.place, "slugs");
+      const stopper = new AbortController();
+      const outcome = await runLine("cd board/title", shuttle, {
+        ...READS_NOTHING,
+        resolvePieceReference: (_pieces, _token, path) =>
+          Promise.resolve({ piece: BOARD, pathAfter: [...path] }),
+        getCellValue: () => {
+          stopper.abort();
+          return Promise.resolve({ title: "a" });
+        },
+        signal: stopper.signal,
+      });
+      expect(outcome).toEqual({ kind: "interrupted" });
+      expect(shuttle.place.place.position).toEqual({
+        kind: "facet",
+        space: SPACE,
+        facet: "slugs",
+      });
+    });
+
+    it("changes no scope where the cancel arrived during a scope's own settle", async () => {
+      // A scope on its own settles, because a scope selects which document a
+      // piece's id names and the place at the new one is a place nothing has
+      // read. So it reaches the fabric like any other move onto a piece, and
+      // a person waiting on it can stop waiting — and what a cancel has to
+      // leave alone here is the scope rather than the position, which is the
+      // half of a place the other cases do not assert.
+
+      const shuttle = shuttleIn();
+      await runLine(`cd /${HANDLE}/topics`, shuttle, settling({ topics: 1 }));
+      const stopper = new AbortController();
+      const outcome = await runLine("cd .@session", shuttle, {
+        ...settling({ topics: 1 }),
+        getCellValue: () => {
+          stopper.abort();
+          return Promise.resolve({ topics: 1 });
+        },
+        signal: stopper.signal,
+      });
+      expect(outcome).toEqual({ kind: "interrupted" });
+      expect(shuttle.place.place.scope).toBe("space");
+    });
+
+    it("enters no target where the cancel arrived while it was resolving", async () => {
+      // The same check on the arm a `#name` target takes: the fabric answered
+      // with an address, and the place is not moved into it.
+
+      const shuttle = shuttleIn();
+      const stopper = new AbortController();
+      const outcome = await runLine("cd #favorites", shuttle, {
+        ...READS_NOTHING,
+        readWish: () => {
+          stopper.abort();
+          return Promise.resolve({
+            result: { [LINK_MARKER_KEY]: `/${HANDLE}` },
+          });
+        },
+        signal: stopper.signal,
+      });
+      expect(outcome).toEqual({ kind: "interrupted" });
+      expect(shuttle.place.place.position).toEqual({
+        kind: "root",
+        space: SPACE,
+      });
+    });
+
+    it("runs the line to the end where nothing cancelled it", async () => {
+      // The other side of every case above: a signal that is merely present
+      // stops nothing, so what the checks cost a line nobody interrupted is
+      // nothing at all.
+
+      const shuttle = shuttleIn();
+      moved(shuttle.place, "slugs");
+      const outcome = await runLine("cd board", shuttle, {
+        ...settling(null, { board: BOARD }),
+        signal: new AbortController().signal,
+      });
+      expect(outcome.kind).toBe("moved");
+      expect(shuttle.place.place.position).toEqual({
+        kind: "piece",
+        space: SPACE,
+        piece: BOARD,
+        name: "board",
+        path: [],
+      });
+    });
+  });
 });

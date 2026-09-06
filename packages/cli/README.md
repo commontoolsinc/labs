@@ -153,6 +153,22 @@ an operand is quoted where it has to be. Every refusal carries its reason. A
 read that failed is different: it is reported and the prompt reads the next
 line, since a shell whose server went away is still a shell.
 
+The keys are read while a line is running, so a slow server holds up neither the
+keyboard nor the screen. What you type during the wait is drawn as you type it,
+into the line that will run next; `enter` under a running line is held and runs
+that line the moment the prompt is free, against the place the line before it
+settled on. `ctrl-c` cancels the line in flight and drops what was typed ahead
+of it. Cancelling reaches the line and not the server: a read already sent
+finishes into nothing, and the checks along the way are what stop it taking
+effect, so a `cd` you cancelled leaves you where you were.
+
+Everything a run writes lands above the line being edited, with the prompt drawn
+again beneath it — a line's own outcome, the warnings a connection writes for
+itself, and a pattern's `console.log` once a piece runs in the session. That one
+door holds every character a terminal acts on to the glyph naming it, a line
+break excepted, so nothing a user program logged can move the cursor off the row
+it was given.
+
 After the split, a token opening with `-` is an option up to a bare `--`, and
 every other token is an operand. `-` on its own stays an operand, being the
 previous place and the stdin sentinel, and a bare `--` ends the options, so a
@@ -167,16 +183,18 @@ Emacs keys: `ctrl-a`/`ctrl-e` and `home`/`end` for the ends of the line,
 `backspace` and `delete`/`ctrl-d` to delete, `ctrl-w`/`alt-backspace` and
 `alt-d` to kill a word, `ctrl-k` and `ctrl-u` to kill to the end of the line and
 to kill the line, `ctrl-y`/`alt-y` to yank and cycle, `ctrl-c` to abandon the
-line, and `ctrl-d` on an empty line to end the session.
+line or cancel the one in flight, and `ctrl-d` on an empty line to end the
+session.
 
 The code is `lib/shuttle/`: `run.ts` composes a session, `place.ts` holds the
 place and what `cd` refuses, `connection.ts` the one `PiecesController` a
 process holds, `line.ts` the split and the printing that inverts it,
 `options.ts` the option grammar over the tokens after a verb, `listing.ts` what
 `ls` reads, `verbs.ts` the dispatch — which writes nothing — `help.ts` the form
-a verb's account of itself prints in, `prompt.ts` the loop that writes,
-`record.ts` the form `where` and `pwd` share, and `paint.ts` and `terminal.ts`
-the escape sequences and the raw mode under it.
+a verb's account of itself prints in, `prompt.ts` the loop that reads keys and
+runs a line beside them, `announce.ts` what a connection and a pattern write
+onto that loop's out-of-band line, `record.ts` the form `where` and `pwd` share,
+and `paint.ts` and `terminal.ts` the escape sequences and the raw mode under it.
 
 ## Cell references
 

@@ -7,3 +7,4 @@ export {
   readSync,
 } from "node:fs";
 export { Writable } from "node:stream";
+export { format, inspect } from "node:util";

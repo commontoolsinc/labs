@@ -14,8 +14,9 @@ import { describe, it } from "@std/testing/bdd";
 
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { PiecesController } from "@commonfabric/piece/ops";
+import { ConsoleMethod } from "@commonfabric/runner";
 
-import type { SpaceConfig } from "../lib/piece.ts";
+import type { ConnectionOutput, SpaceConfig } from "../lib/piece.ts";
 import type { PromptTerminal } from "../lib/shuttle/prompt.ts";
 import { runShuttle, type ShuttleDeps } from "../lib/shuttle/run.ts";
 import type { Key } from "../lib/view/keys.ts";
@@ -70,7 +71,8 @@ async function running(
   const terminal: PromptTerminal = {
     keys: ReadableStream.from([...typed(line), { name: "enter" }]),
     edit: () => {},
-    finish: (text) => {
+    finish: () => {},
+    announce: (text) => {
       produced.push(text);
     },
   };
@@ -107,6 +109,51 @@ describe("runShuttle()", () => {
     expect(ran.closed()).toBe(1);
   });
 
+  it("opens the connection writing onto the prompt's own line", async () => {
+    // Finding 8's wiring, read at the seam the connection is opened through:
+    // what the connection writes for itself and what a pattern writes to its
+    // console both reach the terminal's out-of-band line, which is the only
+    // place a line can land while a prompt is painted in raw mode.
+
+    const announced: string[] = [];
+    let output: ConnectionOutput | undefined;
+    const pieces = {
+      dispose: () => Promise.resolve(),
+      getSpace: () => SPACE,
+      getSpaceName: () => "board",
+    } as unknown as PiecesController;
+    await runShuttle(CONFIG, {
+      open: (_config, opened) => {
+        output = opened;
+        return Promise.resolve(pieces);
+      },
+      terminal: (body) =>
+        body({
+          keys: ReadableStream.from([]),
+          edit: () => {},
+          finish: () => {},
+          announce: (text) => {
+            announced.push(text);
+          },
+        }),
+    });
+    output?.report?.("navigateTo new piece id of:fid1:whatever");
+    // What the runtime does with a handler's answer: it writes the arguments
+    // to the console the handler named. Where that console writes is what
+    // `announce.ts` decides and what its own cases pin.
+    const routed = output?.consoleHandler?.({
+      metadata: undefined,
+      method: ConsoleMethod.Log,
+      args: ["a pattern said so"],
+    });
+    const target = Array.isArray(routed) ? undefined : routed?.target;
+    target?.log("a pattern said so");
+    expect(announced).toEqual([
+      "navigateTo new piece id of:fid1:whatever",
+      "a pattern said so",
+    ]);
+  });
+
   it("closes the connection where the session threw", async () => {
     let closed = 0;
     const pieces = {
@@ -119,18 +166,44 @@ describe("runShuttle()", () => {
     } as unknown as PiecesController;
     await expect(runShuttle(CONFIG, {
       open: () => Promise.resolve(pieces),
-      terminal: () => Promise.reject(new Error("No terminal.")),
-    })).rejects.toThrow("No terminal.");
+      terminal: (body) =>
+        body({
+          keys: ReadableStream.from([]),
+          edit: () => {
+            throw new Error("No screen.");
+          },
+          finish: () => {},
+          announce: () => {},
+        }),
+    })).rejects.toThrow("No screen.");
     expect(closed).toBe(1);
   });
 
-  it("reports the connection that would not open, and reaches no terminal", async () => {
+  it("opens no connection at all where the terminal would not open", async () => {
+    // The terminal is opened first, because it is where the connection's own
+    // writing has to land. So a terminal that will not open closes nothing —
+    // there is nothing to close, which is a stronger property than closing
+    // what there was.
+
+    let opened = 0;
+    await expect(runShuttle(CONFIG, {
+      open: () => {
+        opened += 1;
+        return Promise.reject(new Error("Never asked."));
+      },
+      terminal: () => Promise.reject(new Error("No terminal.")),
+    })).rejects.toThrow("No terminal.");
+    expect(opened).toBe(0);
+  });
+
+  it("reports the connection that would not open, from inside the terminal", async () => {
     // What the name does not claim is that nothing was closed. With no
     // connection there is no controller to close, so a case asserting a
     // close count would be asserting on a stub nothing could reach. What is
     // observable is that the opener's own failure is what comes back — a
     // disposal that raised over it would say something else — and that the
-    // run stops before the terminal.
+    // terminal was already open when it happened, which is what puts the
+    // connection's own writing on the screen the shell holds.
 
     let reached = false;
     await expect(runShuttle(CONFIG, {
@@ -141,9 +214,10 @@ describe("runShuttle()", () => {
           keys: ReadableStream.from([]),
           edit: () => {},
           finish: () => {},
+          announce: () => {},
         });
       },
     })).rejects.toThrow("The server refused.");
-    expect(reached).toBe(false);
+    expect(reached).toBe(true);
   });
 });
