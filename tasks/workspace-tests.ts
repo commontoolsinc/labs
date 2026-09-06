@@ -17,6 +17,7 @@ import {
 } from "@commonfabric/test-support/records";
 import { parseShard, type Shard } from "./shard-utils.ts";
 import { WORKSPACE_TEST_WEIGHTS } from "./test-timing-weights.ts";
+import { writeUnlaunchedMembers } from "./unlaunched-members.ts";
 import { assignWeightedShards } from "./weighted-shards.ts";
 
 export const ALL_DISABLED: string[] = [];
@@ -484,6 +485,15 @@ export function testConcurrency(
   return Math.max(2, Math.floor(navigator.hardwareConcurrency / 2));
 }
 
+/**
+ * Runs the enabled members of the workspace at `workspaceCwd`, or this shard's
+ * share of them, and returns whether every one of them passed.
+ *
+ * Workers stop taking new members once one fails, so a failing run leaves the
+ * rest unstarted. With coverage collection on, the members it never started
+ * are recorded in the coverage profile directory, since their coverage is
+ * unknown rather than absent; see `unlaunched-members.ts`.
+ */
 export async function runTests(
   disabledPackages: string[],
   shard?: Shard,
@@ -585,6 +595,18 @@ export async function runTests(
   if (junitRoot !== undefined) {
     await Deno.remove(junitRoot, { recursive: true }).catch(() => {});
   }
+  // Every unit below `nextUnit` was handed to a worker; the units above it are
+  // the ones the stop after a failure left unstarted. An internally sharded
+  // package is several units over one member, and a member with any unstarted
+  // slice is measured over less than its own tests, so the member is named
+  // whichever of its slices went unstarted.
+  const unlaunchedMembers = [
+    ...new Set(units.slice(nextUnit).map((unit) => unit.memberPath)),
+  ];
+  if (coverageRoot !== undefined) {
+    await writeUnlaunchedMembers(coverageRoot, unlaunchedMembers);
+  }
+
   const durationResults = [...results].sort((a, b) =>
     b.durationMs - a.durationMs
   );
@@ -607,6 +629,13 @@ export async function runTests(
     console.error("Failed packages:");
     for (const result of failedPackages) {
       console.error(`- ${result.packageName} (${result.packagePath})`);
+    }
+  }
+
+  if (unlaunchedMembers.length > 0) {
+    console.error("Packages this run selected and never started:");
+    for (const member of unlaunchedMembers) {
+      console.error(`- ${member}`);
     }
   }
 

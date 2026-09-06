@@ -4,6 +4,7 @@ import { getBinary } from "@astral/astral";
 import { phaseOf } from "./ci-step-phases.ts";
 import { EXPECTED_COVERAGE_ARTIFACT_NAMES } from "./coverage-check.ts";
 import { PATTERN_INTEGRATION_SHARD_COUNT } from "./select-pattern-integration-files.ts";
+import { UNLAUNCHED_MEMBERS_FILE } from "./unlaunched-members.ts";
 
 function jobBlock(workflow: string, jobId: string): string {
   const jobsStart = workflow.indexOf("jobs:\n");
@@ -473,6 +474,27 @@ Deno.test("coverage requirements follow sharded test matrices", async () => {
       shards.map((shard) => `${artifactPrefix}${shard}`),
       `${jobId} coverage requirements must match its matrix`,
     );
+  }
+});
+
+Deno.test("every workspace test job uploads its unlaunched-package record", async () => {
+  // The record is written only by a run that stopped early, so a job that
+  // leaves it out of its artifact looks exactly like a job that never left
+  // one, and the coverage gate scores the packages that job never started.
+  const contents = await workflow("deno.yml");
+  const runners = jobIds(contents).filter((jobId) =>
+    stepBlocks(jobBlock(contents, jobId)).some((step) =>
+      /^ +run: deno task test$/m.test(step.body)
+    )
+  );
+
+  assertEquals(runners, ["test"], "jobs running the workspace test runner");
+  for (const jobId of runners) {
+    const upload = stepBlock(
+      jobBlock(contents, jobId),
+      "📤 Upload coverage report",
+    );
+    assertStringIncludes(upload, `coverage/lcov/${UNLAUNCHED_MEMBERS_FILE}\n`);
   }
 });
 

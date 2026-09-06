@@ -81,7 +81,12 @@ import {
   collectUncoveredLinesForFiles,
   COVERAGE_PROFILE_ARTIFACT_PREFIX,
   lcovFromCoverageProfile,
+  unscoredMetricGroups,
 } from "./coverage-metrics.ts";
+import {
+  parseUnlaunchedMembers,
+  UNLAUNCHED_MEMBERS_FILE,
+} from "./unlaunched-members.ts";
 
 /** How many recent main-branch runs to scan for the coverage baseline. */
 const BASELINE_RUNS = 20;
@@ -1006,12 +1011,20 @@ function sampleForRun(
   };
 }
 
+/**
+ * Copies one coverage-profile artifact's contents into the directories the
+ * combined report is built from, and reports what it found: how many raw
+ * profile files and how many LCOV reports, plus the members the job that
+ * uploaded it never launched, read from the record it carries.
+ */
 export async function copyCoverageArtifactFiles(
   artifact: Artifact,
   profileDir: string,
   lcovDir: string,
   coverageArtifactsDir?: string,
-): Promise<{ profileFiles: number; lcovFiles: number }> {
+): Promise<
+  { profileFiles: number; lcovFiles: number; unlaunchedMembers: string[] }
+> {
   let sourceDir: string;
   let removeSourceDir = false;
   if (coverageArtifactsDir) {
@@ -1049,14 +1062,22 @@ export async function copyCoverageArtifactFiles(
 
   let profileFiles = 0;
   let lcovFiles = 0;
+  const unlaunchedMembers: string[] = [];
   try {
     for await (
-      const entry of walk(sourceDir, {
-        includeDirs: false,
-        exts: [".json", ".lcov"],
-      })
+      const entry of walk(sourceDir, { includeDirs: false })
     ) {
+      if (path.basename(entry.path) === UNLAUNCHED_MEMBERS_FILE) {
+        unlaunchedMembers.push(
+          ...parseUnlaunchedMembers(await Deno.readTextFile(entry.path)),
+        );
+        continue;
+      }
       const isLcov = entry.path.endsWith(".lcov");
+      // Everything else the artifact carries stays where it is. Copying a file
+      // `deno coverage` cannot parse in among the profiles would fail the
+      // whole conversion.
+      if (!isLcov && !entry.path.endsWith(".json")) continue;
       const count = isLcov ? lcovFiles : profileFiles;
       const destDir = isLcov ? lcovDir : profileDir;
       const dest = path.join(
@@ -1081,7 +1102,7 @@ export async function copyCoverageArtifactFiles(
     }
   }
 
-  return { profileFiles, lcovFiles };
+  return { profileFiles, lcovFiles, unlaunchedMembers };
 }
 
 async function readCombinedLcov(lcovDir: string): Promise<string> {
@@ -1339,19 +1360,28 @@ function coverageProfileArtifacts(artifacts: Artifact[]): Artifact[] {
 }
 
 /**
- * Join one run's coverage-profile artifacts into a single LCOV report. A job
- * uploads its own LCOV; the profile-file branch reads the raw V8 profiles a
- * run predating that upload carries.
+ * Join one run's coverage-profile artifacts into a single LCOV report, and
+ * name the workspace members the run never launched. A job uploads its own
+ * LCOV; the profile-file branch reads the raw V8 profiles a run predating that
+ * upload carries.
+ *
+ * Each artifact carries the record of what the job that wrote it selected and
+ * never started, and one job selects each member, so the union across
+ * artifacts is the set of members nothing in the run measured against their
+ * own tests.
  */
 export async function combinedLcovFromArtifacts(
   coverageArtifacts: Artifact[],
   coverageArtifactsDir?: string,
-): Promise<{ lcov: string; sourceDescription: string }> {
+): Promise<
+  { lcov: string; sourceDescription: string; unlaunchedMembers: Set<string> }
+> {
   const profileDir = await Deno.makeTempDir({ prefix: "coverage-profiles-" });
   const lcovDir = await Deno.makeTempDir({ prefix: "coverage-lcov-" });
   try {
     let profileFileCount = 0;
     let lcovFileCount = 0;
+    const unlaunchedMembers = new Set<string>();
     for (const artifact of coverageArtifacts) {
       const copied = await copyCoverageArtifactFiles(
         artifact,
@@ -1361,6 +1391,9 @@ export async function combinedLcovFromArtifacts(
       );
       profileFileCount += copied.profileFiles;
       lcovFileCount += copied.lcovFiles;
+      for (const member of copied.unlaunchedMembers) {
+        unlaunchedMembers.add(member);
+      }
     }
 
     if (profileFileCount === 0 && lcovFileCount === 0) {
@@ -1376,6 +1409,7 @@ export async function combinedLcovFromArtifacts(
       sourceDescription: lcovFileCount > 0
         ? `${lcovFileCount} LCOV report files`
         : `${profileFileCount} coverage profile files`,
+      unlaunchedMembers,
     };
   } finally {
     try {
@@ -1385,6 +1419,24 @@ export async function combinedLcovFromArtifacts(
       await Deno.remove(lcovDir, { recursive: true });
     } catch { /* ignore cleanup errors */ }
   }
+}
+
+/**
+ * The line the log carries for a run that left members unlaunched: which
+ * members, and which metric groups the run therefore does not score. Returns
+ * `undefined` for a run that launched everything it selected.
+ *
+ * A group the metrics leave out gets no row, so without this line it reads the
+ * same as a group with nothing to report.
+ */
+export function unscoredGroupsReport(
+  unlaunchedMembers: Iterable<string>,
+): string | undefined {
+  const members = [...unlaunchedMembers].sort();
+  if (members.length === 0) return undefined;
+  const groups = [...unscoredMetricGroups(members)].sort();
+  return `This run never launched ${members.join(", ")}, so it carries no ` +
+    `measurement of ${groups.join(", ")} and does not score them.`;
 }
 
 async function extractCoverageDebtSamples(
@@ -1407,10 +1459,11 @@ async function extractCoverageDebtSamples(
     );
   }
 
-  const { lcov, sourceDescription } = await combinedLcovFromArtifacts(
-    coverageArtifacts,
-    coverageArtifactsDir,
-  );
+  const { lcov, sourceDescription, unlaunchedMembers } =
+    await combinedLcovFromArtifacts(
+      coverageArtifacts,
+      coverageArtifactsDir,
+    );
 
   // Every coverage stream feeds the gate: V8 runtime coverage, unit pattern
   // coverage (TN:pattern-runtime), and integration pattern coverage
@@ -1420,6 +1473,7 @@ async function extractCoverageDebtSamples(
   const coverageMetrics = await collectCoverageDebtMetricsFromLcov({
     rootDir: Deno.cwd(),
     lcov,
+    unlaunchedMembers,
   });
   for (const metric of coverageMetrics) {
     metrics.set(metric.name, sampleForRun(run, metric.uncoveredLines));
@@ -1428,6 +1482,9 @@ async function extractCoverageDebtSamples(
   console.log(
     `Extracted ${coverageMetrics.length} coverage debt metrics from ${sourceDescription}.`,
   );
+
+  const unscored = unscoredGroupsReport(unlaunchedMembers);
+  if (unscored !== undefined) console.warn(unscored);
 
   return { samples: metrics, lcov };
 }
