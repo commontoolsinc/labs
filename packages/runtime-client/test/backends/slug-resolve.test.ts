@@ -22,7 +22,7 @@ import {
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import { RuntimeProcessor } from "@/backends/runtime-processor.ts";
+import { buildProcessor } from "./build-processor.ts";
 import { RequestType } from "@/protocol/mod.ts";
 import { createCellRef, getCell } from "@/backends/utils.ts";
 import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
@@ -69,20 +69,13 @@ describe("handleSlugResolve()", () => {
   }
 
   /** Call the handler over a processor that is nothing but this space. */
-  function resolve(
-    slug: string,
-    member?: string,
-  ): Promise<{ piece: { cell: unknown } }> {
-    const processor = {
-      getSpaceCtx: () => ({ getSpace: () => space }),
+  function resolve(slug: string, member?: string) {
+    const processor = buildProcessor({
+      cc: { getSpace: () => space },
+      space,
       runtime,
-    };
-    return (RuntimeProcessor.prototype as unknown as {
-      handleSlugResolve(
-        this: unknown,
-        request: unknown,
-      ): Promise<{ piece: { cell: unknown } }>;
-    }).handleSlugResolve.call(processor, {
+    });
+    return processor.handleSlugResolve({
       type: RequestType.SlugResolve,
       space,
       slug,
@@ -290,18 +283,17 @@ describe("handleSlugResolve()", () => {
     // or a document that will not decode says nothing about whether the name
     // is bound, and folding it into a refusal would tell a reader "no such
     // member" about a collection nobody managed to read.
-    const processor = {
-      getSpaceCtx: () => ({ getSpace: () => space }),
+    const processor = buildProcessor({
+      cc: { getSpace: () => space },
+      space,
       runtime: {
         getCellFromEntityId: () => {
           throw new Error("the socket went away");
         },
       },
-    };
+    });
     await expect(
-      (RuntimeProcessor.prototype as unknown as {
-        handleSlugResolve(this: unknown, request: unknown): Promise<unknown>;
-      }).handleSlugResolve.call(processor, {
+      processor.handleSlugResolve({
         type: RequestType.SlugResolve,
         space,
         slug: "top",
@@ -315,21 +307,12 @@ describe("handleSlugResolve()", () => {
     // map, and every one of those can be right while the dispatch switch has
     // no arm for it — in which case the worker answers nothing and the shell
     // waits forever. Only driving the dispatcher proves the wiring.
-    const processor = {
-      getSpaceCtx: () => ({ getSpace: () => space }),
+    const processor = buildProcessor({
+      cc: { getSpace: () => space },
+      space,
       runtime,
-      // The dispatch calls the handler through `this`, so the stub carries
-      // the real one: what is under test is which method the arm reaches.
-      handleSlugResolve: (RuntimeProcessor.prototype as unknown as {
-        handleSlugResolve: unknown;
-      }).handleSlugResolve,
-    };
-    const response = await (RuntimeProcessor.prototype as unknown as {
-      handleRequest(
-        this: unknown,
-        request: unknown,
-      ): Promise<{ piece: { cell: unknown }; pathAfter: string[] }>;
-    }).handleRequest.call(processor, {
+    });
+    const response = await processor.handleRequest({
       type: RequestType.SlugResolve,
       space,
       slug: "top",

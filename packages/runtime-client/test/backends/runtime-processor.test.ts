@@ -41,7 +41,6 @@ import {
   Runtime,
   type RuntimeFetch,
   runtimePresets,
-  RuntimeTelemetry,
   type SigilLink,
 } from "@commonfabric/runner";
 import {
@@ -84,6 +83,7 @@ import {
   mapCellRefsToSigilLinks,
 } from "@/backends/utils.ts";
 import type { WorkerClient } from "@/backends/worker-client.ts";
+import { buildProcessor } from "./build-processor.ts";
 
 const cfcSigner = await Identity.fromPassphrase(
   "runtime-processor-cfc-label-tests",
@@ -145,13 +145,6 @@ const createRuntime = () => {
   });
   return { runtime, storageManager };
 };
-
-// Handlers resolve their per-space piece context via getSpaceCtx
-// (federation PR2). The duck-typed processors below are single-space:
-// their context is always the home pieces controller.
-function homeSpaceCtx(this: { cc?: unknown }) {
-  return this.cc;
-}
 
 // A valid `fid1:` piece id from a readable seed (handlers parse pieceId via
 // `entityIdFrom`, which requires a real tagged-hash string).
@@ -371,8 +364,9 @@ describe("runtime-processor", () => {
         getAsNormalizedFullLink: () => ({ id: "of:fid1:sourced" }),
         asSchema: () => ({ get: () => ({}) }),
       };
-      const processor = {
-        getSpaceCtx: (requested: string) => ({ getSpace: () => requested }),
+      const processor = buildProcessor({
+        cc: { getSpace: () => space },
+        space,
         runtime: {
           // Stands in for readPieceSourceState's reads: the handler's own job is
           // to address the right cell and hand back what the reader produced.
@@ -388,14 +382,13 @@ describe("runtime-processor", () => {
           },
           hostForSpace: () => new URL("https://toolshed.test"),
         },
-      };
+      });
 
-      const result = await (RuntimeProcessor.prototype as any)
-        .handlePieceGetSource.call(processor, {
-          type: RequestType.PieceGetSource,
-          space,
-          pieceId: fid("sourced-piece"),
-        });
+      const result = await processor.handlePieceGetSource({
+        type: RequestType.PieceGetSource,
+        space,
+        pieceId: fid("sourced-piece"),
+      });
 
       expect(synced).toEqual(["cell"]);
       // The handler addresses the cell by the entity id `entityIdFrom` builds
@@ -415,22 +408,19 @@ describe("runtime-processor", () => {
 
     it("rejects an unknown compatibility confirmation before changing a piece", async () => {
       const space = "did:key:z6Mk-runtime-processor-source" as const;
-      const processor = {
-        getSpaceCtx: () => ({ getSpace: () => space }),
-        pieceSourceConfirmations: new Map(),
-      };
+      const processor = buildProcessor({
+        cc: { getSpace: () => space },
+        space: space,
+      });
 
       await expect(
-        (RuntimeProcessor.prototype as any).handlePieceUpdateSource.call(
-          processor,
-          {
-            type: RequestType.PieceUpdateSource,
-            space,
-            pieceId: fid("sourced-piece"),
-            action: { kind: "restore", revisionId: "older" },
-            confirmationToken: "unknown-confirmation",
-          },
-        ),
+        processor.handlePieceUpdateSource({
+          type: RequestType.PieceUpdateSource,
+          space,
+          pieceId: fid("sourced-piece"),
+          action: { kind: "restore", revisionId: "older" },
+          confirmationToken: "unknown-confirmation",
+        }),
       ).rejects.toThrow(
         "the piece source compatibility confirmation is no longer valid",
       );
@@ -439,16 +429,14 @@ describe("runtime-processor", () => {
     it("rejects empty and non-string compatibility confirmations", async () => {
       for (const confirmationToken of ["", 42]) {
         await expect(
-          (RuntimeProcessor.prototype as any).handlePieceUpdateSource.call(
-            { pieceSourceConfirmations: new Map() },
-            {
+          buildProcessor()
+            .handlePieceUpdateSource({
               type: RequestType.PieceUpdateSource,
               space: "did:key:z6Mk-runtime-processor-source",
               pieceId: fid("sourced-piece"),
               action: { kind: "restore", revisionId: "older" },
-              confirmationToken,
-            },
-          ),
+              confirmationToken: confirmationToken as never,
+            }),
         ).rejects.toThrow("confirmationToken must be a non-empty string");
       }
     });
@@ -464,9 +452,9 @@ describe("runtime-processor", () => {
         getAsNormalizedFullLink: () => ({ id: `of:${pieceId}`, path: [] }),
         asSchema: () => ({ get: () => ({}) }),
       };
-      const processor = {
-        getSpaceCtx: () => ({ getSpace: () => space }),
-        pieceSourceConfirmations: new Map(),
+      const processor = buildProcessor({
+        cc: { getSpace: () => space },
+        space: space,
         runtime: {
           getCellFromEntityId: () => cell,
           patternManager: {
@@ -474,7 +462,7 @@ describe("runtime-processor", () => {
           },
           hostForSpace: () => new URL("https://toolshed.test"),
         },
-      };
+      });
       const action = { kind: "restore", revisionId: "older" } as const;
       const prepared = {
         action,
@@ -509,40 +497,37 @@ describe("runtime-processor", () => {
       }) as typeof changeSource;
 
       try {
-        const first = await (RuntimeProcessor.prototype as any)
-          .handlePieceUpdateSource.call(processor, {
-            type: RequestType.PieceUpdateSource,
-            space,
-            pieceId,
-            action,
-          });
+        const first = await processor.handlePieceUpdateSource({
+          type: RequestType.PieceUpdateSource,
+          space,
+          pieceId,
+          action,
+        });
         expect(first.compatibilityWarning).toBe("result schema narrowed");
         expect(first.confirmationToken).toBeDefined();
-        expect(processor.pieceSourceConfirmations.size).toBe(1);
+        expect(processor.accessForTestingOnly.pieceSourceConfirmations.size)
+          .toBe(1);
 
-        const second = await (RuntimeProcessor.prototype as any)
-          .handlePieceUpdateSource.call(processor, {
+        const second = await processor.handlePieceUpdateSource({
+          type: RequestType.PieceUpdateSource,
+          space,
+          pieceId,
+          action,
+          confirmationToken: first.confirmationToken,
+        });
+        expect(receivedConfirmation).toBe(prepared);
+        expect(second.compatibilityWarning).toBeUndefined();
+        expect(processor.accessForTestingOnly.pieceSourceConfirmations.size)
+          .toBe(0);
+
+        await expect(
+          processor.handlePieceUpdateSource({
             type: RequestType.PieceUpdateSource,
             space,
             pieceId,
             action,
             confirmationToken: first.confirmationToken,
-          });
-        expect(receivedConfirmation).toBe(prepared);
-        expect(second.compatibilityWarning).toBeUndefined();
-        expect(processor.pieceSourceConfirmations.size).toBe(0);
-
-        await expect(
-          (RuntimeProcessor.prototype as any).handlePieceUpdateSource.call(
-            processor,
-            {
-              type: RequestType.PieceUpdateSource,
-              space,
-              pieceId,
-              action,
-              confirmationToken: first.confirmationToken,
-            },
-          ),
+          }),
         ).rejects.toThrow(
           "the piece source compatibility confirmation is no longer valid",
         );
@@ -554,9 +539,9 @@ describe("runtime-processor", () => {
     it("does not hide a source-read failure for an incompatible change", async () => {
       const space = "did:key:z6Mk-runtime-processor-source" as const;
       const pieceId = fid("sourced-piece");
-      const processor = {
-        getSpaceCtx: () => ({ getSpace: () => space }),
-        pieceSourceConfirmations: new Map(),
+      const processor = buildProcessor({
+        cc: { getSpace: () => space },
+        space: space,
         runtime: {
           getCellFromEntityId: () => ({
             space,
@@ -567,7 +552,7 @@ describe("runtime-processor", () => {
             asSchema: () => ({ get: () => ({}) }),
           }),
         },
-      };
+      });
       const changeSource = PieceController.prototype.changeSource;
       PieceController.prototype.changeSource = (() =>
         Promise.resolve({
@@ -578,15 +563,12 @@ describe("runtime-processor", () => {
 
       let reason: unknown;
       try {
-        await (RuntimeProcessor.prototype as any).handlePieceUpdateSource.call(
-          processor,
-          {
-            type: RequestType.PieceUpdateSource,
-            space,
-            pieceId,
-            action: { kind: "restore", revisionId: "older" },
-          },
-        );
+        await processor.handlePieceUpdateSource({
+          type: RequestType.PieceUpdateSource,
+          space,
+          pieceId,
+          action: { kind: "restore", revisionId: "older" },
+        });
       } catch (error) {
         reason = error;
       } finally {
@@ -608,22 +590,21 @@ describe("runtime-processor", () => {
       cell.sync = () => Promise.reject(new Error("refresh unavailable"));
       const getCellFromEntityId = runtime.getCellFromEntityId.bind(runtime);
       runtime.getCellFromEntityId = (() => cell) as typeof getCellFromEntityId;
-      const processor = {
-        getSpaceCtx: () => ({ getSpace: () => space }),
-        pieceSourceConfirmations: new Map(),
+      const processor = buildProcessor({
+        cc: { getSpace: () => space },
+        space: space,
         runtime,
-      };
+      });
       const changeSource = PieceController.prototype.changeSource;
       PieceController.prototype.changeSource =
         (() => Promise.resolve({ status: "applied" })) as typeof changeSource;
       try {
-        const result = await (RuntimeProcessor.prototype as any)
-          .handlePieceUpdateSource.call(processor, {
-            type: RequestType.PieceUpdateSource,
-            space,
-            pieceId: fid("sourced-piece"),
-            action: { kind: "detach" },
-          });
+        const result = await processor.handlePieceUpdateSource({
+          type: RequestType.PieceUpdateSource,
+          space,
+          pieceId: fid("sourced-piece"),
+          action: { kind: "detach" },
+        });
 
         expect(result.source.history).toEqual([]);
         expect(result.executionWarning).toContain(
@@ -647,19 +628,15 @@ describe("runtime-processor", () => {
       // message exists to explain the refusal, so it names the value.
 
       const space = "did:key:z6Mk-runtime-processor-create" as const;
-      const processor = { getSpaceCtx: () => ({}) };
+      const processor = buildProcessor({ cc: {}, space });
       const refusalFor = async (argument: unknown) => {
         try {
-          // deno-lint-ignore no-explicit-any
-          await (RuntimeProcessor.prototype as any).handlePieceCreate.call(
-            processor,
-            {
-              type: RequestType.PieceCreate,
-              space,
-              source: { program: { main: "/main.tsx", files: [] } },
-              argument,
-            },
-          );
+          await processor.handlePieceCreate({
+            type: RequestType.PieceCreate,
+            space,
+            source: { program: { main: "/main.tsx", files: [] } },
+            argument: argument as never,
+          });
         } catch (error) {
           return (error as Error).message;
         }
@@ -682,11 +659,10 @@ describe("runtime-processor", () => {
       // entire input is not one value, whatever that value is.
 
       const space = "did:key:z6Mk-runtime-processor-create" as const;
-      const processor = { getSpaceCtx: () => ({}) };
+      const processor = buildProcessor({ cc: {}, space });
 
       await expect(
-        // deno-lint-ignore no-explicit-any
-        (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
+        processor.handlePieceCreate({
           type: RequestType.PieceCreate,
           space,
           source: { program: { main: "/main.tsx", files: [] } },
@@ -697,8 +673,7 @@ describe("runtime-processor", () => {
       // The other branch of the fabric class hierarchy, which reaches the
       // guard by the same route.
       await expect(
-        // deno-lint-ignore no-explicit-any
-        (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
+        processor.handlePieceCreate({
           type: RequestType.PieceCreate,
           space,
           source: { program: { main: "/main.tsx", files: [] } },
@@ -718,19 +693,19 @@ describe("runtime-processor", () => {
 
       const space = "did:key:z6Mk-runtime-processor-create" as const;
       const created: unknown[] = [];
-      const processor = {
-        getSpaceCtx: () => ({
+      const processor = buildProcessor({
+        cc: {
           create: (_program: unknown, options: { input?: unknown }) => {
             created.push(options.input);
             throw new Error("stop after the guard");
           },
-        }),
-      };
+        },
+        space,
+      });
       const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
 
       await expect(
-        // deno-lint-ignore no-explicit-any
-        (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
+        processor.handlePieceCreate({
           type: RequestType.PieceCreate,
           space,
           source: { program: { main: "/main.tsx", files: [] } },
@@ -753,16 +728,16 @@ describe("runtime-processor", () => {
           get: () => ({ [owner]: "OWNER", "*": "WRITE" }),
         }),
       };
-      const processor = {
-        getSpaceCtx: () => ({ getSpace: () => space }),
+      const processor = buildProcessor({
+        cc: { getSpace: () => space },
+        space: space,
         runtime,
-      };
+      });
 
-      const response = await (RuntimeProcessor.prototype as any)
-        .handleSpaceGetAcl.call(processor, {
-          type: RequestType.SpaceGetAcl,
-          space,
-        });
+      const response = await processor.handleSpaceGetAcl({
+        type: RequestType.SpaceGetAcl,
+        space,
+      });
 
       expect(response.access).toEqual({
         space,
@@ -776,8 +751,9 @@ describe("runtime-processor", () => {
       const space = "did:key:z6Mk-runtime-processor-acl" as const;
       const owner = "did:key:z6Mk-runtime-processor-owner" as const;
       const writer = "did:key:z6Mk-runtime-processor-writer" as const;
-      const processor = {
-        getSpaceCtx: () => ({ getSpace: () => space }),
+      const processor = buildProcessor({
+        cc: { getSpace: () => space },
+        space: space,
         runtime: {
           userIdentityDID: writer,
           storageManager: { synced: () => Promise.resolve() },
@@ -786,13 +762,12 @@ describe("runtime-processor", () => {
             get: () => ({ [owner]: "OWNER", "*": "WRITE" }),
           }),
         },
-      };
+      });
 
-      const response = await (RuntimeProcessor.prototype as any)
-        .handleSpaceGetAcl.call(processor, {
-          type: RequestType.SpaceGetAcl,
-          space,
-        });
+      const response = await processor.handleSpaceGetAcl({
+        type: RequestType.SpaceGetAcl,
+        space,
+      });
 
       expect(response.access.canEdit).toBe(false);
     });
@@ -817,25 +792,18 @@ describe("runtime-processor", () => {
         await runtime.idle();
         await storageManager.synced();
 
-        const processor = {
+        const processor = buildProcessor({
           runtime,
-          getSpaceCtx: () => ({ getSpace: () => space }),
-          handleSpaceGetAcl: RuntimeProcessor.prototype.handleSpaceGetAcl,
-          handleSpaceSetAclEntry:
-            RuntimeProcessor.prototype.handleSpaceSetAclEntry,
-          handleSpaceRemoveAclEntry:
-            RuntimeProcessor.prototype.handleSpaceRemoveAclEntry,
-        } as unknown as RuntimeProcessor;
+          cc: { getSpace: () => space },
+          space,
+        });
 
-        const added = await RuntimeProcessor.prototype.handleRequest.call(
-          processor,
-          {
-            type: RequestType.SpaceSetAclEntry,
-            space,
-            user: writer,
-            capability: "WRITE",
-          },
-        );
+        const added = await processor.handleRequest({
+          type: RequestType.SpaceSetAclEntry,
+          space,
+          user: writer,
+          capability: "WRITE",
+        });
         expect(added).toEqual({
           access: {
             space,
@@ -845,20 +813,17 @@ describe("runtime-processor", () => {
           },
         });
 
-        const read = await RuntimeProcessor.prototype.handleRequest.call(
-          processor,
-          { type: RequestType.SpaceGetAcl, space },
-        );
+        const read = await processor.handleRequest({
+          type: RequestType.SpaceGetAcl,
+          space,
+        });
         expect(read).toEqual(added);
 
-        const removed = await RuntimeProcessor.prototype.handleRequest.call(
-          processor,
-          {
-            type: RequestType.SpaceRemoveAclEntry,
-            space,
-            user: writer,
-          },
-        );
+        const removed = await processor.handleRequest({
+          type: RequestType.SpaceRemoveAclEntry,
+          space,
+          user: writer,
+        });
         expect(removed).toEqual({
           access: {
             space,
@@ -874,52 +839,48 @@ describe("runtime-processor", () => {
     });
 
     it("rejects malformed ACL mutations before opening the space", async () => {
-      const processor = {
-        getSpaceCtx: () => {
-          throw new Error("space must not be opened");
-        },
-      };
+      // The processor's home space is not the one the requests name, so a
+      // handler that opened the space before validating the entry would
+      // leave a context for it in `spaces`.
+      const processor = buildProcessor({
+        space: "did:key:z6Mk-runtime-processor-acl-home",
+      });
 
       await expect(
-        (RuntimeProcessor.prototype as any).handleSpaceSetAclEntry.call(
-          processor,
-          {
-            type: RequestType.SpaceSetAclEntry,
-            space: "did:key:z6Mk-runtime-processor-acl",
-            user: "not-a-did",
-            capability: "WRITE",
-          },
-        ),
+        processor.handleSpaceSetAclEntry({
+          type: RequestType.SpaceSetAclEntry,
+          space: "did:key:z6Mk-runtime-processor-acl",
+          user: "not-a-did",
+          capability: "WRITE",
+        }),
       ).rejects.toThrow("user must be `*` or a valid DID");
       await expect(
-        (RuntimeProcessor.prototype as any).handleSpaceSetAclEntry.call(
-          processor,
-          {
-            type: RequestType.SpaceSetAclEntry,
-            space: "did:key:z6Mk-runtime-processor-acl",
-            user: "did:key:z6Mk-runtime-processor-reader",
-            capability: "ADMIN",
-          },
-        ),
+        processor.handleSpaceSetAclEntry({
+          type: RequestType.SpaceSetAclEntry,
+          space: "did:key:z6Mk-runtime-processor-acl",
+          user: "did:key:z6Mk-runtime-processor-reader",
+          capability: "ADMIN" as never,
+        }),
       ).rejects.toThrow("capability must be `READ`, `WRITE`, or `OWNER`");
       await expect(
-        (RuntimeProcessor.prototype as any).handleSpaceRemoveAclEntry.call(
-          processor,
-          {
-            type: RequestType.SpaceRemoveAclEntry,
-            space: "did:key:z6Mk-runtime-processor-acl",
-            user: "not-a-did",
-          },
-        ),
+        processor.handleSpaceRemoveAclEntry({
+          type: RequestType.SpaceRemoveAclEntry,
+          space: "did:key:z6Mk-runtime-processor-acl",
+          user: "not-a-did",
+        }),
       ).rejects.toThrow("user must be `*` or a valid DID");
+      expect(
+        processor.accessForTestingOnly.spaces.has(
+          "did:key:z6Mk-runtime-processor-acl",
+        ),
+      ).toBe(false);
     });
   });
 
   describe("piece slug metadata", () => {
     it("reads slug metadata from the piece document root", async () => {
       const reads: unknown[] = [];
-      const processor = {
-        getSpaceCtx: homeSpaceCtx,
+      const processor = buildProcessor({
         runtime: {
           getCellFromEntityId: () => ({
             sync: () => Promise.resolve(),
@@ -937,14 +898,14 @@ describe("runtime-processor", () => {
         cc: {
           getSpace: () => "did:key:z6Mk-runtime-processor-slug",
         },
-      };
+        space: "did:key:z6Mk-runtime-processor-slug",
+      });
 
-      const result = await (RuntimeProcessor.prototype as any)
-        .handlePieceGetSlug
-        .call(processor, {
-          type: RequestType.PieceGetSlug,
-          pieceId: fid("slugged-piece"),
-        });
+      const result = await processor.handlePieceGetSlug({
+        type: RequestType.PieceGetSlug,
+        space: "did:key:z6Mk-runtime-processor-slug",
+        pieceId: fid("slugged-piece"),
+      });
 
       expect(result).toEqual({ slug: "demo" });
       expect(reads).toEqual([{
@@ -956,8 +917,7 @@ describe("runtime-processor", () => {
     });
 
     it("ignores non-string slug metadata", async () => {
-      const processor = {
-        getSpaceCtx: homeSpaceCtx,
+      const processor = buildProcessor({
         runtime: {
           getCellFromEntityId: () => ({
             sync: () => Promise.resolve(),
@@ -968,14 +928,14 @@ describe("runtime-processor", () => {
         cc: {
           getSpace: () => "did:key:z6Mk-runtime-processor-slug",
         },
-      };
+        space: "did:key:z6Mk-runtime-processor-slug",
+      });
 
-      const result = await (RuntimeProcessor.prototype as any)
-        .handlePieceGetSlug
-        .call(processor, {
-          type: RequestType.PieceGetSlug,
-          pieceId: fid("slugged-piece"),
-        });
+      const result = await processor.handlePieceGetSlug({
+        type: RequestType.PieceGetSlug,
+        space: "did:key:z6Mk-runtime-processor-slug",
+        pieceId: fid("slugged-piece"),
+      });
 
       expect(result).toEqual({ slug: undefined });
     });
@@ -987,8 +947,7 @@ describe("runtime-processor", () => {
       // is "of:fid1" and silently addresses the nonexistent of:of:fid1:H.
 
       const received: string[] = [];
-      const processor = {
-        getSpaceCtx: homeSpaceCtx,
+      const processor = buildProcessor({
         runtime: {
           getCellFromEntityId: (_space: unknown, entityId: unknown) => {
             received.push(String(entityId));
@@ -1001,20 +960,23 @@ describe("runtime-processor", () => {
         cc: {
           getSpace: () => "did:key:z6Mk-runtime-processor-slug",
         },
-      };
+        space: "did:key:z6Mk-runtime-processor-slug",
+      });
 
       const bare = fid("schemed-piece");
       for (const pieceId of [bare, `of:${bare}`]) {
-        await (RuntimeProcessor.prototype as any).handlePieceGetSlug
-          .call(processor, { type: RequestType.PieceGetSlug, pieceId });
+        await processor.handlePieceGetSlug({
+          type: RequestType.PieceGetSlug,
+          space: "did:key:z6Mk-runtime-processor-slug",
+          pieceId,
+        });
       }
 
       expect(received).toEqual([bare, bare]);
     });
 
     it("throws for a `computed:` piece id, naming the address", async () => {
-      const processor = {
-        getSpaceCtx: homeSpaceCtx,
+      const processor = buildProcessor({
         runtime: {
           getCellFromEntityId: () => {
             throw new Error("computed piece id reached the runtime lookup");
@@ -1023,12 +985,14 @@ describe("runtime-processor", () => {
         cc: {
           getSpace: () => "did:key:z6Mk-runtime-processor-slug",
         },
-      };
+        space: "did:key:z6Mk-runtime-processor-slug",
+      });
 
       const computed = `computed:${fid("not-a-piece")}`;
       await expect(
-        (RuntimeProcessor.prototype as any).handlePieceGetSlug.call(processor, {
+        processor.handlePieceGetSlug({
           type: RequestType.PieceGetSlug,
+          space: "did:key:z6Mk-runtime-processor-slug",
           pieceId: computed,
         }),
       ).rejects.toThrow(`Kinded entity id \`${computed}\``);
@@ -1099,32 +1063,30 @@ describe("runtime-processor", () => {
       const resultCell = mockCell(resultRef);
       const managerCalls: unknown[][] = [];
       const lookedUp: string[] = [];
-      const processor = {
-        getSpaceCtx: () => ({
+      const processor = buildProcessor({
+        cc: {
           getSpace: () => space,
           getPieceCell: (...args: unknown[]) => {
             managerCalls.push(args);
             return Promise.resolve(resultCell);
           },
-        }),
+        },
         runtime: {
           getCellFromEntityId: (_space: unknown, entityId: unknown) => {
             lookedUp.push(String(entityId));
             return requestedCell;
           },
         },
-      };
+        space,
+      });
 
       for (const pieceId of [bare, `of:${bare}`]) {
-        await (RuntimeProcessor.prototype as any).handlePieceGet.call(
-          processor,
-          {
-            type: RequestType.PieceGet,
-            pieceId,
-            runIt: true,
-            space,
-          },
-        );
+        await processor.handlePieceGet({
+          type: RequestType.PieceGet,
+          pieceId,
+          runIt: true,
+          space,
+        });
       }
 
       expect(lookedUp).toEqual([bare, bare]);
@@ -1164,21 +1126,21 @@ describe("runtime-processor", () => {
           );
         },
       };
-      const processor = {
-        getSpaceCtx: homeSpaceCtx,
+      const processor = buildProcessor({
         runtime: {
           getCellFromEntityId: () => slugCell,
           getCellFromLink: () => targetCell,
         },
         cc: pieces,
-      };
+        space,
+      });
 
-      const result = await (RuntimeProcessor.prototype as any).handlePieceGet
-        .call(processor, {
-          type: RequestType.PieceGet,
-          pieceId: fid("slug-doc"),
-          runIt: true,
-        });
+      const result = await processor.handlePieceGet({
+        type: RequestType.PieceGet,
+        pieceId: fid("slug-doc"),
+        space,
+        runIt: true,
+      });
 
       expect(targetSynced).toBe(true);
       expect(result.piece.cell).toMatchObject(targetRef);
@@ -1237,21 +1199,21 @@ describe("runtime-processor", () => {
           );
         },
       };
-      const processor = {
-        getSpaceCtx: homeSpaceCtx,
+      const processor = buildProcessor({
         runtime: {
           getCellFromEntityId: () => slugCell,
           getCellFromLink: () => targetCell,
         },
         cc: pieces,
-      };
+        space,
+      });
 
-      const result = await (RuntimeProcessor.prototype as any).handlePieceGet
-        .call(processor, {
-          type: RequestType.PieceGet,
-          pieceId: fid("slug-doc"),
-          runIt: true,
-        });
+      const result = await processor.handlePieceGet({
+        type: RequestType.PieceGet,
+        pieceId: fid("slug-doc"),
+        space,
+        runIt: true,
+      });
 
       expect(targetSynced).toBe(true);
       expect(schemaPulled).toBe(true);
@@ -1293,21 +1255,21 @@ describe("runtime-processor", () => {
           return Promise.resolve(resultCell);
         },
       };
-      const processor = {
-        getSpaceCtx: homeSpaceCtx,
+      const processor = buildProcessor({
         runtime: {
           getCellFromEntityId: () => slugCell,
           getCellFromLink: () => pieceCell,
         },
         cc: pieces,
-      };
+        space,
+      });
 
-      const result = await (RuntimeProcessor.prototype as any).handlePieceGet
-        .call(processor, {
-          type: RequestType.PieceGet,
-          pieceId: fid("slug-doc"),
-          runIt: true,
-        });
+      const result = await processor.handlePieceGet({
+        type: RequestType.PieceGet,
+        pieceId: fid("slug-doc"),
+        space,
+        runIt: true,
+      });
 
       expect(calls).toEqual([[pieceCell, true]]);
       expect(result.piece.cell).toMatchObject(resultRef);
@@ -1340,8 +1302,7 @@ describe("runtime-processor", () => {
         scopes.push(scope);
         throw new Error(REFUSED);
       };
-      const processor = {
-        getSpaceCtx: homeSpaceCtx,
+      const processor = buildProcessor({
         runtime: {
           getCellFromEntityId: (
             _space: unknown,
@@ -1364,8 +1325,8 @@ describe("runtime-processor", () => {
           startPiece: (_id: string, scope?: CellScope) => refuse(scope),
           stopPiece: (_id: string, scope?: CellScope) => refuse(scope),
         },
-        pieceSourceConfirmations: new Map(),
-      };
+        space,
+      });
       return { processor, scopes };
     }
 
@@ -1428,10 +1389,7 @@ describe("runtime-processor", () => {
       it(`${handler}() resolves the piece in the scope the request names`, async () => {
         const { processor, scopes } = makeProcessor();
         await expect(
-          (RuntimeProcessor.prototype as any)[handler].call(processor, {
-            ...request,
-            scope: "user",
-          }),
+          processor[handler]({ ...request, scope: "user" } as never),
         ).rejects.toThrow(REFUSED);
         expect(scopes).toEqual(["user"]);
       });
@@ -1444,7 +1402,7 @@ describe("runtime-processor", () => {
       for (const { handler, request } of cases) {
         const { processor, scopes } = makeProcessor();
         await expect(
-          (RuntimeProcessor.prototype as any)[handler].call(processor, request),
+          processor[handler](request as never),
         ).rejects.toThrow(REFUSED);
         expect(scopes).toEqual([undefined]);
       }
@@ -1469,18 +1427,16 @@ describe("runtime-processor", () => {
       async function keyFor(scope?: CellScope): Promise<string> {
         const { processor } = makeProcessor();
         const confirmations = new RecordingConfirmations();
-        processor.pieceSourceConfirmations = confirmations;
+        processor.accessForTestingOnly.pieceSourceConfirmations =
+          confirmations as never;
         await expect(
-          (RuntimeProcessor.prototype as any).handlePieceUpdateSource.call(
-            processor,
-            {
-              type: RequestType.PieceUpdateSource,
-              pieceId,
-              space,
-              action: { kind: "detach" },
-              ...(scope === undefined ? {} : { scope }),
-            },
-          ),
+          processor.handlePieceUpdateSource({
+            type: RequestType.PieceUpdateSource,
+            pieceId,
+            space,
+            action: { kind: "detach" },
+            ...(scope === undefined ? {} : { scope }),
+          }),
         ).rejects.toThrow(REFUSED);
         expect(confirmations.keysAddressed.length).toBe(1);
         return confirmations.keysAddressed[0];
@@ -1994,7 +1950,7 @@ describe("runtime-processor", () => {
         busyTime: 123,
       };
       let receivedDuration: number | undefined;
-      const processor = {
+      const processor = buildProcessor({
         runtime: {
           scheduler: {
             runDiagnosis: (durationMs?: number) => {
@@ -2003,16 +1959,12 @@ describe("runtime-processor", () => {
             },
           },
         },
-      } as unknown as RuntimeProcessor;
+      });
 
-      const response = await RuntimeProcessor.prototype.detectNonIdempotent
-        .call(
-          processor,
-          {
-            type: RequestType.DetectNonIdempotent,
-            durationMs: 2500,
-          },
-        );
+      const response = await processor.detectNonIdempotent({
+        type: RequestType.DetectNonIdempotent,
+        durationMs: 2500,
+      });
 
       expect(receivedDuration).toBe(2500);
       expect(response).toEqual({ result: expected });
@@ -2090,7 +2042,7 @@ describe("runtime-processor", () => {
         valueKind: "object" as const,
         stack: "Error\n  at writeValueOrThrow",
       }];
-      const processor = {
+      const processor = buildProcessor({
         runtime: {
           scheduler: {
             setSettleStatsEnabled: (enabled: boolean) => {
@@ -2112,49 +2064,36 @@ describe("runtime-processor", () => {
             writeTraceMatchers.push(matchers);
           },
         },
-      } as unknown as RuntimeProcessor;
+      });
 
-      RuntimeProcessor.prototype.setSettleStatsEnabled.call(processor, {
+      processor.setSettleStatsEnabled({
         type: RequestType.SetSettleStatsEnabled,
         enabled: true,
       });
-      RuntimeProcessor.prototype.setActionRunTraceEnabled.call(processor, {
+      processor.setActionRunTraceEnabled({
         type: RequestType.SetActionRunTraceEnabled,
         enabled: true,
       });
-      RuntimeProcessor.prototype.setTriggerTraceEnabled.call(processor, {
+      processor.setTriggerTraceEnabled({
         type: RequestType.SetTriggerTraceEnabled,
         enabled: true,
       });
 
-      const response = RuntimeProcessor.prototype.getSettleStats.call(
-        processor,
-        {
-          type: RequestType.GetSettleStats,
-        },
-      );
-      const historyResponse = RuntimeProcessor.prototype.getSettleStatsHistory
-        .call(processor, {
-          type: RequestType.GetSettleStatsHistory,
-        });
-      const actionTraceResponse = RuntimeProcessor.prototype.getActionRunTrace
-        .call(processor, {
-          type: RequestType.GetActionRunTrace,
-        });
-      const triggerTraceResponse = RuntimeProcessor.prototype.getTriggerTrace
-        .call(
-          processor,
-          {
-            type: RequestType.GetTriggerTrace,
-          },
-        );
-      const writeTraceResponse = RuntimeProcessor.prototype.getWriteStackTrace
-        .call(
-          processor,
-          {
-            type: RequestType.GetWriteStackTrace,
-          },
-        );
+      const response = processor.getSettleStats({
+        type: RequestType.GetSettleStats,
+      });
+      const historyResponse = processor.getSettleStatsHistory({
+        type: RequestType.GetSettleStatsHistory,
+      });
+      const actionTraceResponse = processor.getActionRunTrace({
+        type: RequestType.GetActionRunTrace,
+      });
+      const triggerTraceResponse = processor.getTriggerTrace({
+        type: RequestType.GetTriggerTrace,
+      });
+      const writeTraceResponse = processor.getWriteStackTrace({
+        type: RequestType.GetWriteStackTrace,
+      });
 
       expect(settleEnabledValues).toEqual([true]);
       expect(actionRunEnabledValues).toEqual([true]);
@@ -2167,13 +2106,10 @@ describe("runtime-processor", () => {
         trace: writeTrace,
       });
 
-      RuntimeProcessor.prototype.setWriteStackTraceMatchers.call(
-        processor,
-        {
-          type: RequestType.SetWriteStackTraceMatchers,
-          matchers: [],
-        },
-      );
+      processor.setWriteStackTraceMatchers({
+        type: RequestType.SetWriteStackTraceMatchers,
+        matchers: [],
+      });
       expect(writeTraceMatchers).toEqual([[]]);
     });
   });
@@ -2200,17 +2136,16 @@ describe("runtime-processor", () => {
         );
       };
       globalThis.fetch = blobFetch as typeof globalThis.fetch;
-      // The constructor performs full runtime initialization; this focused unit
-      // test calls the handler with the fields it reads directly.
+      // A processor over only the fields the handler reads.
       const hostForSpaceCalls: string[] = [];
-      const processor = {
+      const processor = buildProcessor({
         runtime: {
           hostForSpace: (space: string) => {
             hostForSpaceCalls.push(space);
             return new URL("http://toolshed.test/base");
           },
         },
-      } as unknown as RuntimeProcessor;
+      });
 
       // The bytes as the transport's decode delivers them: the handler owns
       // its request's payload. Kept here so the test can check what became of it.
@@ -2218,7 +2153,7 @@ describe("runtime-processor", () => {
 
       try {
         await expect(
-          RuntimeProcessor.prototype.handleUploadBlob.call(processor, {
+          processor.handleUploadBlob({
             type: RequestType.UploadBlob,
             space: "did:key:test-space" as never,
             contentType: "image/png",
@@ -2294,10 +2229,10 @@ describe("runtime-processor", () => {
           return Promise.resolve(true);
         },
       };
-      const processor = {
+      const processor = buildProcessor({
         identity: cfcSigner,
         runtime,
-      } as unknown as RuntimeProcessor;
+      });
 
       const originalEnsure = PiecesController.prototype.ensureDefaultPattern;
       let ensured = false;
@@ -2309,10 +2244,9 @@ describe("runtime-processor", () => {
       };
       try {
         await expect(
-          RuntimeProcessor.prototype.handleEnsureHomePatternRunning.call(
-            processor,
-            { type: RequestType.EnsureHomePatternRunning },
-          ),
+          processor.handleEnsureHomePatternRunning({
+            type: RequestType.EnsureHomePatternRunning,
+          }),
         ).resolves.toEqual({ cell: defaultPatternRef });
       } finally {
         PiecesController.prototype.ensureDefaultPattern = originalEnsure;
@@ -2337,16 +2271,15 @@ describe("runtime-processor", () => {
           ensureDefaultPattern: () =>
             Promise.resolve({ getCell: () => rootCell }),
         };
-        const processor = {
-          getSpaceCtx: () => cc,
-        } as unknown as RuntimeProcessor;
+        const processor = buildProcessor({
+          cc,
+          space: "did:key:test-space",
+        });
 
-        const result = await RuntimeProcessor.prototype
-          .handleGetSpaceRootPattern
-          .call(processor, {
-            type: RequestType.GetSpaceRootPattern,
-            space: "did:key:test-space",
-          });
+        const result = await processor.handleGetSpaceRootPattern({
+          type: RequestType.GetSpaceRootPattern,
+          space: "did:key:test-space",
+        });
         expect(result.piece.cell).toEqual(ref);
       });
 
@@ -2370,17 +2303,16 @@ describe("runtime-processor", () => {
             return Promise.reject(new Error("must not run the root"));
           },
         };
-        const processor = {
-          getSpaceCtx: () => cc,
-        } as unknown as RuntimeProcessor;
+        const processor = buildProcessor({
+          cc,
+          space: "did:key:test-space",
+        });
 
-        const result = await RuntimeProcessor.prototype
-          .handleGetSpaceRootPattern
-          .call(processor, {
-            type: RequestType.GetSpaceRootPattern,
-            space: "did:key:test-space",
-            start: false,
-          });
+        const result = await processor.handleGetSpaceRootPattern({
+          type: RequestType.GetSpaceRootPattern,
+          space: "did:key:test-space",
+          start: false,
+        });
 
         expect(result.piece.cell).toEqual(ref);
         // Reconciled but not started: a read of what the root exported still
@@ -2411,17 +2343,16 @@ describe("runtime-processor", () => {
             });
           },
         };
-        const processor = {
-          getSpaceCtx: () => cc,
-        } as unknown as RuntimeProcessor;
+        const processor = buildProcessor({
+          cc,
+          space: "did:key:test-space",
+        });
 
-        const result = await RuntimeProcessor.prototype
-          .handleGetSpaceRootPattern
-          .call(processor, {
-            type: RequestType.GetSpaceRootPattern,
-            space: "did:key:test-space",
-            start: false,
-          });
+        const result = await processor.handleGetSpaceRootPattern({
+          type: RequestType.GetSpaceRootPattern,
+          space: "did:key:test-space",
+          start: false,
+        });
 
         expect(result.piece.cell).toEqual(ref);
         expect(calls).toEqual(["getDefaultPattern", "ensureDefaultPattern"]);
@@ -2439,29 +2370,24 @@ describe("runtime-processor", () => {
       };
       const calls: string[] = [];
       let durable = false;
-      const processor = Object.assign(
-        Object.create(
-          RuntimeProcessor.prototype,
-        ),
-        {
-          runtime: {
-            getCellFromLink: () => ({
-              pull: () => {
-                calls.push("pull");
-                return Promise.resolve();
-              },
-              get: () => durable ? { ready: true } : undefined,
-            }),
-            scheduler: {
-              idleWithPendingCommits: () => {
-                calls.push("commits");
-                durable = true;
-                return Promise.resolve();
-              },
+      const processor = buildProcessor({
+        runtime: {
+          getCellFromLink: () => ({
+            pull: () => {
+              calls.push("pull");
+              return Promise.resolve();
+            },
+            get: () => durable ? { ready: true } : undefined,
+          }),
+          scheduler: {
+            idleWithPendingCommits: () => {
+              calls.push("commits");
+              durable = true;
+              return Promise.resolve();
             },
           },
         },
-      ) as RuntimeProcessor;
+      });
 
       await expect(
         processor.handleRequest({
@@ -2541,19 +2467,19 @@ describe("runtime-processor", () => {
           }],
         },
       };
-      const processor = {
+      const processor = buildProcessor({
         runtime: {
           getCellFromLink: () => ({
             get: () => "labeled data",
             getMetaRaw: () => rawEnvelope,
           }),
         },
-      } as unknown as RuntimeProcessor;
+      });
 
       // "cfc" is no longer a MetaField, but the wire is untyped JSON — a request
       // that still sends it must get an error, never the raw metadata.
       expect(() =>
-        RuntimeProcessor.prototype.handleCellGet.call(processor, {
+        processor.handleCellGet({
           type: RequestType.CellGet,
           cell: ref,
           meta: "cfc" as never,
@@ -2568,7 +2494,7 @@ describe("runtime-processor", () => {
         scope: "space",
         path: [],
       };
-      const processor = {
+      const processor = buildProcessor({
         runtime: {
           getCellFromLink: () => ({
             runtime: {
@@ -2593,10 +2519,10 @@ describe("runtime-processor", () => {
             getMetaRaw: () => undefined,
           }),
         },
-      } as unknown as RuntimeProcessor;
+      });
 
       expect(
-        RuntimeProcessor.prototype.handleCellGetCfcLabel.call(processor, {
+        processor.handleCellGetCfcLabel({
           type: RequestType.CellGetCfcLabel,
           cell: ref,
         }),
@@ -2618,7 +2544,7 @@ describe("runtime-processor", () => {
         scope: "space",
         path: [],
       };
-      const processor = {
+      const processor = buildProcessor({
         runtime: {
           getCellFromLink: () => ({
             runtime: {
@@ -2650,13 +2576,12 @@ describe("runtime-processor", () => {
             sync: () => Promise.resolve(),
           }),
         },
-      } as unknown as RuntimeProcessor;
+      });
 
-      const response = await RuntimeProcessor.prototype.handleCellGetCfcLabel
-        .call(
-          processor,
-          { type: RequestType.CellGetCfcLabel, cell: ref },
-        );
+      const response = await processor.handleCellGetCfcLabel({
+        type: RequestType.CellGetCfcLabel,
+        cell: ref,
+      });
       const atom = response.cfcLabel?.entries[0].label.confidentiality
         ?.[0] as Record<string, unknown>;
       // The caveat survives with its kind/type, but the source identity is gone.
@@ -2682,21 +2607,18 @@ describe("runtime-processor", () => {
           runtime,
           "cfc-value-view-linked",
         );
-        const processor = {
+        const processor = buildProcessor({
           runtime: {
             getCellFromLink: () => ({
               get: () => ({ nested: carrier }),
             }),
           },
-        } as unknown as RuntimeProcessor;
+        });
 
-        const response = RuntimeProcessor.prototype.handleCellGet.call(
-          processor,
-          {
-            type: RequestType.CellGet,
-            cell: ref,
-          },
-        );
+        const response = processor.handleCellGet({
+          type: RequestType.CellGet,
+          cell: ref,
+        });
         const atom = sourcedCaveatOf(
           (response.value as { nested: SigilLink }).nested,
         );
@@ -2716,7 +2638,7 @@ describe("runtime-processor", () => {
         scope: "space",
         path: [],
       };
-      const processor = {
+      const processor = buildProcessor({
         runtime: {
           getCellFromLink: () => ({
             get: () => "plain value",
@@ -2732,9 +2654,9 @@ describe("runtime-processor", () => {
             }),
           }),
         },
-      } as unknown as RuntimeProcessor;
+      });
 
-      const withRef = RuntimeProcessor.prototype.handleCellGet.call(processor, {
+      const withRef = processor.handleCellGet({
         type: RequestType.CellGet,
         cell: ref,
         includeRef: true,
@@ -2743,7 +2665,7 @@ describe("runtime-processor", () => {
       expect(withRef.cell?.schema).toEqual({ type: "string" });
 
       // Not requested: not returned.
-      const without = RuntimeProcessor.prototype.handleCellGet.call(processor, {
+      const without = processor.handleCellGet({
         type: RequestType.CellGet,
         cell: ref,
       });
@@ -2757,7 +2679,7 @@ describe("runtime-processor", () => {
         scope: "space",
         path: [],
       };
-      const processor = {
+      const processor = buildProcessor({
         runtime: {
           getCellFromLink: () => ({
             get: () => "plain value",
@@ -2779,17 +2701,14 @@ describe("runtime-processor", () => {
             getMetaRaw: () => undefined,
           }),
         },
-      } as unknown as RuntimeProcessor;
+      });
 
-      const response = RuntimeProcessor.prototype.handleCellGet.call(
-        processor,
-        {
-          type: RequestType.CellGet,
-          cell: ref,
-          includeRef: true,
-          includeCfcLabel: true,
-        },
-      );
+      const response = processor.handleCellGet({
+        type: RequestType.CellGet,
+        cell: ref,
+        includeRef: true,
+        includeCfcLabel: true,
+      });
       expect(response.cell?.id).toBe("of:include-ref-label-cell");
       // The cell carries no label; the field is present-but-undefined.
       expect(response.cfcLabel).toBeUndefined();
@@ -2833,21 +2752,18 @@ describe("runtime-processor", () => {
           },
         },
       };
-      const processor = {
+      const processor = buildProcessor({
         runtime: {
           getCellFromLink: () => ({
             get: () => ({ nested: linkWithView }),
           }),
         },
-      } as unknown as RuntimeProcessor;
+      });
 
-      const response = RuntimeProcessor.prototype.handleCellGet.call(
-        processor,
-        {
-          type: RequestType.CellGet,
-          cell: ref,
-        },
-      );
+      const response = processor.handleCellGet({
+        type: RequestType.CellGet,
+        cell: ref,
+      });
       const atom = sourcedCaveatOf(
         (response.value as { nested: SigilLink }).nested,
       );
@@ -2872,8 +2788,7 @@ describe("runtime-processor", () => {
           runtime,
           "cfc-subscribe-view-linked",
         );
-        const processor = {
-          subscriptions: new Map(),
+        const processor = buildProcessor({
           runtime: {
             getCellFromLink: () => ({
               sink: (
@@ -2884,7 +2799,7 @@ describe("runtime-processor", () => {
               },
             }),
           },
-        } as unknown as RuntimeProcessor;
+        });
 
         const posted: Array<{ value?: unknown }> = [];
         const orig = self.postMessage;
@@ -2895,7 +2810,7 @@ describe("runtime-processor", () => {
             fabricFromRealmValue(m as never) as { value?: unknown },
           );
         try {
-          RuntimeProcessor.prototype.handleCellSubscribe.call(processor, {
+          processor.handleCellSubscribe({
             type: RequestType.CellSubscribe,
             cell: ref,
           });
@@ -2962,16 +2877,16 @@ describe("runtime-processor", () => {
           }),
         },
       };
-      const processor = {
+      const processor = buildProcessor({
         runtime: {
           getCellFromLink: () => ({ resolveAsCell: () => resolvedCell }),
         },
-      } as unknown as RuntimeProcessor;
+      });
 
-      const response = RuntimeProcessor.prototype.handleCellResolveAsCell.call(
-        processor,
-        { type: RequestType.CellResolveAsCell, cell: sourceRef },
-      );
+      const response = processor.handleCellResolveAsCell({
+        type: RequestType.CellResolveAsCell,
+        cell: sourceRef,
+      });
       const atom = response.cell.cfcLabelView?.entries[0].label
         .confidentiality?.[0] as Record<string, unknown>;
       expect(atom.type).toBe(CFC_ATOM_TYPE.Caveat);
@@ -3020,14 +2935,14 @@ describe("runtime-processor", () => {
       const sourceCell = {
         resolveAsCell: () => resolvedCell,
       };
-      const processor = {
+      const processor = buildProcessor({
         runtime: {
           getCellFromLink: () => sourceCell,
         },
-      } as unknown as RuntimeProcessor;
+      });
 
       expect(
-        RuntimeProcessor.prototype.handleCellResolveAsCell.call(processor, {
+        processor.handleCellResolveAsCell({
           type: RequestType.CellResolveAsCell,
           cell: sourceRef,
         }),
@@ -3073,16 +2988,16 @@ describe("runtime-processor", () => {
           }),
         },
       };
-      const processor = {
+      const processor = buildProcessor({
         runtime: {
           getCellFromLink: () => ({ resolveAsCell: () => resolvedCell }),
         },
-      } as unknown as RuntimeProcessor;
+      });
 
-      const response = RuntimeProcessor.prototype.handleCellResolveAsCell.call(
-        processor,
-        { type: RequestType.CellResolveAsCell, cell: sourceRef },
-      );
+      const response = processor.handleCellResolveAsCell({
+        type: RequestType.CellResolveAsCell,
+        cell: sourceRef,
+      });
 
       expect(response.cell).toEqual({
         ...resolvedRef,
@@ -3154,10 +3069,10 @@ describe("runtime-processor", () => {
           return Promise.resolve();
         },
       };
-      const processor = { runtime } as unknown as RuntimeProcessor;
+      const processor = buildProcessor({ runtime });
 
       expect(
-        RuntimeProcessor.prototype.handleCellGetCfcLabel.call(processor, {
+        processor.handleCellGetCfcLabel({
           type: RequestType.CellGetCfcLabel,
           cell: resultRef,
         }),
@@ -3205,12 +3120,12 @@ describe("runtime-processor", () => {
           return Promise.resolve();
         },
       };
-      const processor = {
+      const processor = buildProcessor({
         runtime: { getCellFromLink: () => cell },
-      } as unknown as RuntimeProcessor;
+      });
 
       expect(
-        RuntimeProcessor.prototype.handleCellGetCfcLabel.call(processor, {
+        processor.handleCellGetCfcLabel({
           type: RequestType.CellGetCfcLabel,
           cell: ref,
         }),
@@ -3318,22 +3233,18 @@ describe("runtime-processor", () => {
         const nestedId = parseLink(
           replica.getDocument(rootId)?.value?.messages?.[0],
         )!.id!;
-        const processor = { runtime } as unknown as RuntimeProcessor;
+        const processor = buildProcessor({ runtime });
 
-        const response = await RuntimeProcessor.prototype.handleCellGetCfcLabel
-          .call(
-            processor,
-            {
-              type: RequestType.CellGetCfcLabel,
-              cell: {
-                id: nestedId as CellRef["id"],
-                space: cfcSigner.did() as CellRef["space"],
-                scope: "space",
-                path: ["piece"],
-                schema: pieceSchema,
-              },
-            },
-          );
+        const response = await processor.handleCellGetCfcLabel({
+          type: RequestType.CellGetCfcLabel,
+          cell: {
+            id: nestedId as CellRef["id"],
+            space: cfcSigner.did() as CellRef["space"],
+            scope: "space",
+            path: ["piece"],
+            schema: pieceSchema,
+          },
+        });
         expect(response.cfcLabel).toBeDefined();
         expect(response.cfcLabel?.version).toBe(1);
         expect(response.cfcLabel?.entries).toEqual([{
@@ -3472,22 +3383,18 @@ describe("runtime-processor", () => {
         const nestedId = parseLink(
           replica.getDocument(rootId)?.value?.messages?.[0],
         )!.id!;
-        const processor = { runtime } as unknown as RuntimeProcessor;
+        const processor = buildProcessor({ runtime });
 
-        const response = await RuntimeProcessor.prototype.handleCellGetCfcLabel
-          .call(
-            processor,
-            {
-              type: RequestType.CellGetCfcLabel,
-              cell: {
-                id: nestedId as CellRef["id"],
-                space: cfcSigner.did() as CellRef["space"],
-                scope: "space",
-                path: ["piece"],
-                schema: { $ref: "#/$defs/TrustedMessage" },
-              },
-            },
-          );
+        const response = await processor.handleCellGetCfcLabel({
+          type: RequestType.CellGetCfcLabel,
+          cell: {
+            id: nestedId as CellRef["id"],
+            space: cfcSigner.did() as CellRef["space"],
+            scope: "space",
+            path: ["piece"],
+            schema: { $ref: "#/$defs/TrustedMessage" },
+          },
+        });
         expect(response.cfcLabel).toEqual({
           version: 1,
           entries: [{
@@ -3554,7 +3461,7 @@ describe("runtime-processor", () => {
       return {
         calls,
         resolvedCell,
-        processor: Object.assign(Object.create(RuntimeProcessor.prototype), {
+        processor: buildProcessor({
           runtime: {
             edit: () => tx,
             prepareTxForCommit: (candidate: unknown) => {
@@ -3575,14 +3482,14 @@ describe("runtime-processor", () => {
               return Promise.resolve(commitResult);
             },
           },
-        }) as RuntimeProcessor,
+        }),
       };
     };
 
     it("routes a cell set through the blind supersede lane", () => {
       const { processor, calls, resolvedCell } = createProcessor();
 
-      RuntimeProcessor.prototype.handleCellSet.call(processor, {
+      processor.handleCellSet({
         type: RequestType.CellSet,
         cell: ref,
         value: "new value",
@@ -3606,7 +3513,7 @@ describe("runtime-processor", () => {
     it("prepares mergeable cell append transactions before committing", async () => {
       const { processor } = createProcessor();
 
-      await RuntimeProcessor.prototype.handleCellPush.call(processor, {
+      await processor.handleCellPush({
         type: RequestType.CellPush,
         cell: ref,
         values: ["new value"],
@@ -3616,7 +3523,7 @@ describe("runtime-processor", () => {
     it("prepares cell send transactions before committing", async () => {
       const { processor } = createProcessor();
 
-      await RuntimeProcessor.prototype.handleCellSend.call(processor, {
+      await processor.handleCellSend({
         type: RequestType.CellSend,
         cell: ref,
         event: "new value",
@@ -3641,17 +3548,17 @@ describe("runtime-processor", () => {
           new Error("send commit rejected"),
         );
 
-        RuntimeProcessor.prototype.handleCellSet.call(set.processor, {
+        set.processor.handleCellSet({
           type: RequestType.CellSet,
           cell: ref,
           value: "new value",
         });
-        RuntimeProcessor.prototype.handleCellPush.call(push.processor, {
+        push.processor.handleCellPush({
           type: RequestType.CellPush,
           cell: ref,
           values: ["new value"],
         });
-        RuntimeProcessor.prototype.handleCellSend.call(send.processor, {
+        send.processor.handleCellSend({
           type: RequestType.CellSend,
           cell: ref,
           event: "new value",
@@ -3677,17 +3584,17 @@ describe("runtime-processor", () => {
         const push = createProcessor({ error: { message: "push refused" } });
         const send = createProcessor({ error: { message: "send refused" } });
 
-        RuntimeProcessor.prototype.handleCellSet.call(set.processor, {
+        set.processor.handleCellSet({
           type: RequestType.CellSet,
           cell: ref,
           value: "new value",
         });
-        RuntimeProcessor.prototype.handleCellPush.call(push.processor, {
+        push.processor.handleCellPush({
           type: RequestType.CellPush,
           cell: ref,
           values: ["new value"],
         });
-        RuntimeProcessor.prototype.handleCellSend.call(send.processor, {
+        send.processor.handleCellSend({
           type: RequestType.CellSend,
           cell: ref,
           event: "new value",
@@ -3708,7 +3615,7 @@ describe("runtime-processor", () => {
         error: { message: "set refused" },
       });
 
-      await expect(RuntimeProcessor.prototype.handleCellSet.call(processor, {
+      await expect(processor.handleCellSet({
         type: RequestType.CellSet,
         cell: ref,
         value: "new value",
@@ -3722,7 +3629,7 @@ describe("runtime-processor", () => {
       });
 
       await expect(
-        RuntimeProcessor.prototype.handleCellPush.call(processor, {
+        processor.handleCellPush({
           type: RequestType.CellPush,
           cell: ref,
           values: ["new value"],
@@ -3736,7 +3643,7 @@ describe("runtime-processor", () => {
         error: { message: "send refused" },
       });
 
-      await expect(RuntimeProcessor.prototype.handleCellSend.call(processor, {
+      await expect(processor.handleCellSend({
         type: RequestType.CellSend,
         cell: ref,
         event: "new value",
@@ -3778,10 +3685,7 @@ describe("runtime-processor", () => {
         cell.withTx(seed).set([]);
         expect((await seed.commit()).error).toBeUndefined();
 
-        const processor = Object.assign(
-          Object.create(RuntimeProcessor.prototype),
-          { runtime },
-        ) as RuntimeProcessor;
+        const processor = buildProcessor({ runtime });
         const append = async (value: { optionId: string }) => {
           const callerFrame = pushFrame({
             runtime,
@@ -3819,15 +3723,12 @@ describe("runtime-processor", () => {
 
   describe("direct cell initialization", () => {
     it("rejects malformed initializers and surfaces transaction failures", async () => {
-      const failed = Object.assign(
-        Object.create(RuntimeProcessor.prototype),
-        {
-          runtime: {
-            editWithRetry: () =>
-              Promise.resolve({ error: new Error("initialize failed") }),
-          },
+      const failed = buildProcessor({
+        runtime: {
+          editWithRetry: () =>
+            Promise.resolve({ error: new Error("initialize failed") }),
         },
-      ) as RuntimeProcessor;
+      });
       const ref = {
         space: "did:key:test" as CellRef["space"],
         id: "of:initialize-failure" as CellRef["id"],
@@ -3901,10 +3802,9 @@ describe("runtime-processor", () => {
           "user",
         );
         expect(readerCell.get()).toBeUndefined();
-        const processor = Object.assign(
-          Object.create(RuntimeProcessor.prototype),
-          { runtime: readerRuntime },
-        ) as RuntimeProcessor;
+        const processor = buildProcessor({
+          runtime: readerRuntime,
+        }) as RuntimeProcessor;
 
         const selected = await processor.handleCellInitialize({
           type: RequestType.CellInitialize,
@@ -3944,10 +3844,7 @@ describe("runtime-processor", () => {
           },
         );
         await cell.sync();
-        const processor = Object.assign(
-          Object.create(RuntimeProcessor.prototype),
-          { runtime },
-        ) as RuntimeProcessor;
+        const processor = buildProcessor({ runtime });
         const ref = createCellRef(cell);
 
         const [first, second] = await Promise.all([
@@ -4010,10 +3907,7 @@ describe("runtime-processor", () => {
           required: ["bars"],
           default: initial,
         } as const;
-        const processor = Object.assign(
-          Object.create(RuntimeProcessor.prototype),
-          { runtime },
-        ) as RuntimeProcessor;
+        const processor = buildProcessor({ runtime });
         for (const scope of ["user", "session"] as const) {
           const cell = runtime.getCell<typeof initial>(
             space,
@@ -4100,10 +3994,7 @@ describe("runtime-processor", () => {
         expect(alias.get()).toEqual(initial);
         expect(target.asSchema(undefined).getRaw()).toBeUndefined();
 
-        const processor = Object.assign(
-          Object.create(RuntimeProcessor.prototype),
-          { runtime },
-        ) as RuntimeProcessor;
+        const processor = buildProcessor({ runtime });
         await expect(processor.handleCellInitialize({
           type: RequestType.CellInitialize,
           cell: createCellRef(alias),
@@ -4141,10 +4032,7 @@ describe("runtime-processor", () => {
           default: { n: 1 },
           scope: "space",
         } as const;
-        const processor = Object.assign(
-          Object.create(RuntimeProcessor.prototype),
-          { runtime },
-        ) as RuntimeProcessor;
+        const processor = buildProcessor({ runtime });
 
         for (const existing of [undefined, { n: 7 }] as const) {
           const target = runtime.getCell<{ n: number }>(
@@ -4204,10 +4092,7 @@ describe("runtime-processor", () => {
           required: ["n"],
           default: { n: 1 },
         });
-        const processor = Object.assign(
-          Object.create(RuntimeProcessor.prototype),
-          { runtime },
-        ) as RuntimeProcessor;
+        const processor = buildProcessor({ runtime });
 
         await expect(processor.handleCellInitialize({
           type: RequestType.CellInitialize,
@@ -4241,10 +4126,7 @@ describe("runtime-processor", () => {
           `direct-linked-initializer-${crypto.randomUUID()}`,
         );
         await target.sync();
-        const processor = Object.assign(
-          Object.create(RuntimeProcessor.prototype),
-          { runtime },
-        ) as RuntimeProcessor;
+        const processor = buildProcessor({ runtime });
         const linkedRef = createCellRef(linked);
 
         const selected = await processor.handleRequest({
@@ -4440,15 +4322,12 @@ describe("runtime-processor", () => {
     }
 
     it("carries a raised flag's metadata through to the response", () => {
-      // No `this` is read, so the handler runs against a bare receiver.
-
-      const processor = {} as unknown as RuntimeProcessor;
+      const processor = buildProcessor();
 
       withFlag({ a: 1 }, () => {
-        const response = RuntimeProcessor.prototype.getLoggerCounts.call(
-          processor,
-          { type: RequestType.GetLoggerCounts },
-        );
+        const response = processor.getLoggerCounts({
+          type: RequestType.GetLoggerCounts,
+        });
 
         expect(Object.keys(response).sort()).toEqual([
           "counts",
@@ -4466,14 +4345,11 @@ describe("runtime-processor", () => {
       // The assertion is wired into the handler, not merely available beside it:
       // a `Date` raised anywhere in the process stops this read.
 
-      const processor = {} as unknown as RuntimeProcessor;
+      const processor = buildProcessor();
 
       withFlag({ when: new Date(0) }, () => {
         expect(() =>
-          RuntimeProcessor.prototype.getLoggerCounts.call(
-            processor,
-            { type: RequestType.GetLoggerCounts },
-          )
+          processor.getLoggerCounts({ type: RequestType.GetLoggerCounts })
         ).toThrow(/not being a `FabricValue`/);
       });
     });
@@ -4553,21 +4429,20 @@ describe("runtime-processor", () => {
       // worker strips inbound views at this ingress too (codex/cubic review).
 
       const dispatched: unknown[] = [];
-      const processor = {
-        vdomMounts: new Map([[
-          "0 mount-1",
-          {
-            reconciler: {
-              dispatchEvent: (_handlerId: string, event: unknown) => {
-                dispatched.push(event);
-                return true;
-              },
+      const processor = buildProcessor();
+      processor.accessForTestingOnly.vdomMounts = new Map([[
+        "0 mount-1",
+        {
+          reconciler: {
+            dispatchEvent: (_handlerId: string, event: unknown) => {
+              dispatched.push(event);
+              return true;
             },
           },
-        ]]),
-      } as unknown as RuntimeProcessor;
+        },
+      ]]) as never;
 
-      RuntimeProcessor.prototype.handleVDomEvent.call(processor, {
+      processor.handleVDomEvent({
         type: ClientNotificationType.VDomEvent,
         mountId: "mount-1",
         handlerId: "handler-1",
@@ -4618,34 +4493,33 @@ describe("runtime-processor", () => {
     };
 
     it("returns the worker collector's report", () => {
-      const processor = {
+      const processor = buildProcessor({
         runtime: { patternCoverage: { toData: () => report } },
-      } as unknown as RuntimeProcessor;
+      });
       expect(
-        RuntimeProcessor.prototype.getPatternCoverage.call(processor, {
+        processor.getPatternCoverage({
           type: RequestType.GetPatternCoverage,
         }),
       ).toEqual({ data: report });
     });
 
     it("reports null when the worker was built without a collector", () => {
-      const processor = { runtime: {} } as unknown as RuntimeProcessor;
+      const processor = buildProcessor();
       expect(
-        RuntimeProcessor.prototype.getPatternCoverage.call(processor, {
+        processor.getPatternCoverage({
           type: RequestType.GetPatternCoverage,
         }),
       ).toEqual({ data: null });
     });
 
     it("routes a GetPatternCoverage request through the dispatcher", async () => {
-      const processor = {
+      const processor = buildProcessor({
         runtime: { patternCoverage: { toData: () => report } },
         // handleRequest dispatches to this.getPatternCoverage; the stub carries
         // the real method so the routing case executes it.
-        getPatternCoverage: RuntimeProcessor.prototype.getPatternCoverage,
-      } as unknown as RuntimeProcessor;
+      });
       expect(
-        await RuntimeProcessor.prototype.handleRequest.call(processor, {
+        await processor.handleRequest({
           type: RequestType.GetPatternCoverage,
         }),
       ).toEqual({ data: report });
@@ -4842,7 +4716,7 @@ describe("runtime-processor", () => {
         },
       };
       const resolveCalls: unknown[] = [];
-      const processor = {
+      const processor = buildProcessor({
         runtime: {
           storageManager: {
             open: () => provider,
@@ -4865,14 +4739,10 @@ describe("runtime-processor", () => {
           },
         },
         identity: cfcSigner,
-        handleListEventAttention:
-          RuntimeProcessor.prototype.handleListEventAttention,
-        handleResolveEventAttention:
-          RuntimeProcessor.prototype.handleResolveEventAttention,
-      } as unknown as RuntimeProcessor;
+      });
 
       expect(
-        await RuntimeProcessor.prototype.handleRequest.call(processor, {
+        await processor.handleRequest({
           type: RequestType.ListEventAttention,
           space,
         }),
@@ -4904,7 +4774,7 @@ describe("runtime-processor", () => {
         }],
       });
       expect(
-        await RuntimeProcessor.prototype.handleRequest.call(processor, {
+        await processor.handleRequest({
           type: RequestType.ResolveEventAttention,
           space,
           eventId: "evt-valid",
@@ -4935,10 +4805,13 @@ describe("runtime-processor", () => {
         firstFailureAt: attention.firstFailureAt,
       };
       const invoke = (provider: unknown) =>
-        RuntimeProcessor.prototype.handleListEventAttention.call({
+        buildProcessor({
           runtime: { storageManager: { open: () => provider } },
           identity: cfcSigner,
-        } as never, { type: RequestType.ListEventAttention, space });
+        }).handleListEventAttention({
+          type: RequestType.ListEventAttention,
+          space,
+        });
 
       await expect(invoke({
         sync: () => Promise.resolve({ error: indexError }),
@@ -4969,9 +4842,9 @@ describe("runtime-processor", () => {
 
     it("rejects resolution when the storage capability is absent", async () => {
       await expect(
-        RuntimeProcessor.prototype.handleResolveEventAttention.call({
+        buildProcessor({
           runtime: { storageManager: {} },
-        } as never, {
+        }).handleResolveEventAttention({
           type: RequestType.ResolveEventAttention,
           space,
           eventId: "evt-unsupported",
@@ -5198,8 +5071,6 @@ describe("runtime-processor", () => {
     // getSpaceCtx resolves the per-space PiecesController, lazily for
     // foreign spaces, over the shared runtime/storage.
 
-    const getSpaceCtx = (RuntimeProcessor.prototype as any).getSpaceCtx;
-
     function makeProcessorState() {
       const { runtime } = createRuntime();
       const homeSpace = cfcSigner.did();
@@ -5207,27 +5078,28 @@ describe("runtime-processor", () => {
         { as: cfcSigner, space: homeSpace },
         runtime,
       );
-      const processor = {
+      const processor = buildProcessor({
         runtime,
         identity: cfcSigner,
         space: homeSpace,
-        spaces: new Map([[homeSpace, cc]]),
         cc,
-        getSpaceCtx,
-      };
+      });
       return { processor, runtime, homeSpace };
     }
 
     it("resolves the home space to the initialize-time context and rejects a missing space", async () => {
       const { processor, runtime, homeSpace } = makeProcessorState();
       try {
-        expect(processor.getSpaceCtx(homeSpace)).toBe(
-          processor.spaces.get(homeSpace),
+        expect(processor.accessForTestingOnly.getSpaceCtx(homeSpace)).toBe(
+          processor.accessForTestingOnly.spaces.get(homeSpace),
         );
-        expect(processor.getSpaceCtx(homeSpace)).toBe(processor.cc);
+        expect(processor.accessForTestingOnly.getSpaceCtx(homeSpace)).toBe(
+          processor.accessForTestingOnly.cc,
+        );
         expect(() =>
-          (processor as { getSpaceCtx: (s?: string) => unknown })
-            .getSpaceCtx()
+          (processor.accessForTestingOnly.getSpaceCtx as (
+            s?: string,
+          ) => unknown)()
         ).toThrow("name a space");
       } finally {
         await runtime.dispose();
@@ -5240,12 +5112,14 @@ describe("runtime-processor", () => {
         "runtime-processor-space-b",
       )).did();
       try {
-        const ctxB = processor.getSpaceCtx(spaceB);
-        expect(ctxB).not.toBe(processor.cc);
+        const ctxB = processor.accessForTestingOnly.getSpaceCtx(spaceB);
+        expect(ctxB).not.toBe(processor.accessForTestingOnly.cc);
         expect(ctxB.getSpace()).toBe(spaceB);
         // Cached: the same context comes back, and the home context is intact.
-        expect(processor.getSpaceCtx(spaceB)).toBe(ctxB);
-        expect(processor.getSpaceCtx(homeSpace)).toBe(processor.cc);
+        expect(processor.accessForTestingOnly.getSpaceCtx(spaceB)).toBe(ctxB);
+        expect(processor.accessForTestingOnly.getSpaceCtx(homeSpace)).toBe(
+          processor.accessForTestingOnly.cc,
+        );
       } finally {
         await runtime.dispose();
       }
@@ -5257,16 +5131,14 @@ describe("runtime-processor", () => {
         const spaceB = (await Identity.fromPassphrase(
           "runtime-processor-space-b",
         )).did();
-        const handlePieceGet =
-          (RuntimeProcessor.prototype as any).handlePieceGet;
         try {
-          const resHome = await handlePieceGet.call(processor, {
+          const resHome = await processor.handlePieceGet({
             type: RequestType.PieceGet,
             pieceId: fid("cross-space-probe"),
             runIt: false,
             space: homeSpace,
           });
-          const resB = await handlePieceGet.call(processor, {
+          const resB = await processor.handlePieceGet({
             type: RequestType.PieceGet,
             pieceId: fid("cross-space-probe"),
             runIt: false,
@@ -5286,13 +5158,11 @@ describe("runtime-processor", () => {
         const spaceB = (await Identity.fromPassphrase(
           "runtime-processor-space-b",
         )).did();
-        const handleRuntimeSynced =
-          (RuntimeProcessor.prototype as any).handleRuntimeSynced;
         try {
-          processor.getSpaceCtx(spaceB);
+          processor.accessForTestingOnly.getSpaceCtx(spaceB);
           // Resolves across home + spaceB over loopback storage; the request
           // carries no space at all.
-          await handleRuntimeSynced.call(processor);
+          await processor.handleRuntimeSynced();
         } finally {
           await runtime.dispose();
         }
@@ -5307,9 +5177,8 @@ describe("runtime-processor", () => {
         // only). A fake exposing ONLY idleWithPendingCommits pins the wiring: a
         // regression to runtime.idle() throws here.
 
-        const handleIdle = (RuntimeProcessor.prototype as any).handleIdle;
         let calls = 0;
-        const fake = {
+        const fake = buildProcessor({
           runtime: {
             scheduler: {
               idleWithPendingCommits: () => {
@@ -5318,8 +5187,8 @@ describe("runtime-processor", () => {
               },
             },
           },
-        };
-        await handleIdle.call(fake);
+        });
+        await fake.handleIdle();
         expect(calls).toBe(1);
       });
     });
@@ -5375,20 +5244,12 @@ describe("runtime-processor", () => {
           { as: cfcSigner, space: userDid },
           runtime,
         );
-        const ProcessorConstructor = RuntimeProcessor as unknown as new (
-          runtime: Runtime,
-          cc: PiecesController,
-          initSpace: MemorySpace,
-          identity: Identity,
-          telemetry: RuntimeTelemetry,
-        ) => RuntimeProcessor;
-        const processor = new ProcessorConstructor(
+        const processor = buildProcessor({
           runtime,
           cc,
-          userDid,
-          cfcSigner,
-          new RuntimeTelemetry(),
-        );
+          space: userDid,
+          identity: cfcSigner,
+        });
         try {
           processor.watchSiteTable();
           await entriesRegistered;
@@ -5415,25 +5276,20 @@ describe("runtime-processor", () => {
     describe("handleRegisterSpaceHost()", () => {
       it("forwards to the runtime and reports the verdict", () => {
         const calls: Array<[string, string]> = [];
-        const processor = {
+        const processor = buildProcessor({
           runtime: {
             registerSpaceHost: (space: string, host: string) => {
               calls.push([space, host]);
               return host === "http://accepted.test/";
             },
           },
-        } as unknown as RuntimeProcessor;
-        const handle = (RuntimeProcessor.prototype as unknown as {
-          handleRegisterSpaceHost(
-            r: { type: RequestType; space: string; host: string },
-          ): { value: boolean };
-        }).handleRegisterSpaceHost;
-        expect(handle.call(processor, {
+        });
+        expect(processor.handleRegisterSpaceHost({
           type: RequestType.RegisterSpaceHost,
           space: "did:key:z6Mk-ipc-a",
           host: "http://accepted.test/",
         })).toEqual({ value: true });
-        expect(handle.call(processor, {
+        expect(processor.handleRegisterSpaceHost({
           type: RequestType.RegisterSpaceHost,
           space: "did:key:z6Mk-ipc-b",
           host: "http://refused.test/",
@@ -5445,7 +5301,7 @@ describe("runtime-processor", () => {
     describe("setMemoryMessageCompression()", () => {
       it("forwards the requested mode to storage", async () => {
         const modes: boolean[] = [];
-        const processor = {
+        const processor = buildProcessor({
           runtime: {
             storageManager: {
               setMessageCompressionEnabled: (enabled: boolean) => {
@@ -5454,16 +5310,11 @@ describe("runtime-processor", () => {
               },
             },
           },
-          setMemoryMessageCompression:
-            RuntimeProcessor.prototype.setMemoryMessageCompression,
-        } as unknown as RuntimeProcessor;
-        await RuntimeProcessor.prototype.handleRequest.call(
-          processor,
-          {
-            type: RequestType.SetMemoryMessageCompression,
-            enabled: false,
-          },
-        );
+        });
+        await processor.handleRequest({
+          type: RequestType.SetMemoryMessageCompression,
+          enabled: false,
+        });
 
         expect(modes).toEqual([false]);
       });
@@ -5475,12 +5326,13 @@ describe("runtime-processor", () => {
         const spaceB = (await Identity.fromPassphrase(
           "runtime-processor-space-b",
         )).did();
-        const piecesFor = (RuntimeProcessor.prototype as any).piecesFor;
         try {
-          expect(piecesFor.call(processor, homeSpace)).toBe(processor.cc);
-          expect(piecesFor.call(processor, spaceB)).toBeUndefined();
-          const ctxB = processor.getSpaceCtx(spaceB);
-          expect(piecesFor.call(processor, spaceB)).toBe(ctxB);
+          expect(processor.piecesFor(homeSpace)).toBe(
+            processor.accessForTestingOnly.cc,
+          );
+          expect(processor.piecesFor(spaceB)).toBeUndefined();
+          const ctxB = processor.accessForTestingOnly.getSpaceCtx(spaceB);
+          expect(processor.piecesFor(spaceB)).toBe(ctxB);
         } finally {
           await runtime.dispose();
         }
@@ -5492,10 +5344,6 @@ describe("runtime-processor", () => {
     // S16 phase D: the host's render confidentiality ceiling must reach every
     // mount's reconciler — a ceiling configured at initialization that never
     // arrives at the egress surface is silently unbounded rendering.
-
-    const handleVDomMount = (RuntimeProcessor.prototype as any).handleVDomMount;
-    const handleVDomUnmount =
-      (RuntimeProcessor.prototype as any).handleVDomUnmount;
 
     type RootRenderPolicy =
       WorkerReconciler["accessForTestingOnly"]["rootRenderPolicy"];
@@ -5518,35 +5366,25 @@ describe("runtime-processor", () => {
       const commit = await tx.commit();
       expect(commit.ok !== undefined).toBe(true);
 
-      const state = {
-        runtime,
-        // Keyed as the processor keys a mount: by the mounting client's
-        // scoped mount id, which for a call naming no client is the owner's.
-        vdomMounts: new Map<
-          string,
-          { reconciler: unknown; cancel: () => void }
-        >(),
-        vdomBatchIdCounter: 0,
-        renderDeclassificationPolicy: "allow",
-        renderConfidentialityCeiling,
-        handleVDomUnmount,
-      };
+      const state = buildProcessor({ runtime });
+      state.accessForTestingOnly.renderConfidentialityCeiling =
+        renderConfidentialityCeiling as never;
       // handleVDomMount's onOps/onError callbacks post to the worker scope;
       // stub postMessage for the main-thread test.
       const hadPostMessage = "postMessage" in globalThis;
       const originalPostMessage = (globalThis as any).postMessage;
       (globalThis as any).postMessage = () => {};
       try {
-        handleVDomMount.call(state, {
+        state.handleVDomMount({
           type: RequestType.VDomMount,
           mountId: 1,
           cell: cell.getAsNormalizedFullLink() as unknown as CellRef,
         });
-        const mount = state.vdomMounts.get("0 1");
+        const mount = state.accessForTestingOnly.vdomMounts.get("0 1");
         expect(mount).toBeDefined();
         const policy = (mount!.reconciler as WorkerReconciler)
           .accessForTestingOnly.rootRenderPolicy;
-        handleVDomUnmount.call(state, {
+        state.handleVDomUnmount({
           type: RequestType.VDomUnmount,
           mountId: 1,
         });
@@ -5594,24 +5432,22 @@ describe("runtime-processor", () => {
     // processor surfaces that drop as a console.warn carrying the mountId and
     // handlerId so a silently-dropped click is traceable.
 
-    const handleVDomEvent = (RuntimeProcessor.prototype as any).handleVDomEvent;
-
     function makeState(dispatchResult: boolean, calls: unknown[][]) {
-      return {
-        vdomMounts: new Map<string, { reconciler: unknown }>([
-          [
-            "0 7",
-            {
-              reconciler: {
-                dispatchEvent(handlerId: number, event: unknown): boolean {
-                  calls.push([handlerId, event]);
-                  return dispatchResult;
-                },
+      const state = buildProcessor();
+      state.accessForTestingOnly.vdomMounts = new Map([
+        [
+          "0 7",
+          {
+            reconciler: {
+              dispatchEvent(handlerId: number, event: unknown): boolean {
+                calls.push([handlerId, event]);
+                return dispatchResult;
               },
             },
-          ],
-        ]),
-      };
+          },
+        ],
+      ]) as never;
+      return state;
     }
 
     function captureWarn(run: () => void): string[] {
@@ -5632,7 +5468,7 @@ describe("runtime-processor", () => {
       const calls: unknown[][] = [];
       const state = makeState(false, calls);
       const warnings = captureWarn(() =>
-        handleVDomEvent.call(state, {
+        state.handleVDomEvent({
           type: ClientNotificationType.VDomEvent,
           mountId: 7,
           handlerId: 42,
@@ -5650,7 +5486,7 @@ describe("runtime-processor", () => {
       const calls: unknown[][] = [];
       const state = makeState(true, calls);
       const warnings = captureWarn(() =>
-        handleVDomEvent.call(state, {
+        state.handleVDomEvent({
           type: ClientNotificationType.VDomEvent,
           mountId: 7,
           handlerId: 99,
@@ -5666,7 +5502,7 @@ describe("runtime-processor", () => {
       const calls: unknown[][] = [];
       const state = makeState(true, calls);
       const warnings = captureWarn(() =>
-        handleVDomEvent.call(state, {
+        state.handleVDomEvent({
           type: ClientNotificationType.VDomEvent,
           mountId: 404,
           handlerId: 1,
@@ -5681,17 +5517,14 @@ describe("runtime-processor", () => {
   });
 
   describe("RuntimeProcessor.handleNotification", () => {
-    // Base the fake on the real prototype so handleNotification's delegation to
-    // handleVDomEvent / handleVDomBatchApplied resolves, while vdomMounts is a
-    // stub that records what the reconciler is asked to do.
+    // A real processor whose `vdomMounts` holds a stub that records what the
+    // reconciler is asked to do.
 
     function fakeProcessor() {
       const events: Array<{ handlerId: number; event: unknown }> = [];
       const acks: number[] = [];
-      const processor = Object.create(
-        RuntimeProcessor.prototype,
-      ) as RuntimeProcessor;
-      (processor as unknown as { vdomMounts: unknown }).vdomMounts = new Map([[
+      const processor = buildProcessor();
+      processor.accessForTestingOnly.vdomMounts = new Map([[
         "0 1",
         {
           reconciler: {
@@ -5700,7 +5533,7 @@ describe("runtime-processor", () => {
             acknowledgeBatchApplied: (batchId: number) => acks.push(batchId),
           },
         },
-      ]]);
+      ]]) as never;
       return { processor, events, acks };
     }
 
@@ -5752,7 +5585,7 @@ describe("runtime-processor", () => {
     const processorOver = (
       programs: Record<string, unknown>,
     ): RuntimeProcessor =>
-      ({
+      buildProcessor({
         runtime: {
           scheduler: {
             getGraphSnapshot: () => ({
@@ -5765,10 +5598,10 @@ describe("runtime-processor", () => {
             getPatternProgramBySync: (identity: string) => programs[identity],
           },
         },
-      }) as unknown as RuntimeProcessor;
+      });
 
     const sourcesOf = (processor: RuntimeProcessor) =>
-      RuntimeProcessor.prototype.getPatternSources.call(processor, {
+      processor.getPatternSources({
         type: RequestType.GetPatternSources,
       } as GetPatternSourcesRequest);
 
@@ -5835,9 +5668,9 @@ describe("runtime-processor", () => {
         getCellFromLink: () => cell,
         storageManager: { open: () => ({ sqliteQuery }) },
       };
-      return Object.assign(Object.create(RuntimeProcessor.prototype), {
+      return buildProcessor({
         runtime,
-      }) as RuntimeProcessor;
+      });
     };
 
     it("queries an unlabeled database through its storage provider", async () => {
@@ -5886,29 +5719,26 @@ describe("runtime-processor", () => {
         getRaw: () => loaded ? db : {},
         asSchema: () => ({ get: () => loaded ? db : undefined }),
       };
-      const processor = Object.assign(
-        Object.create(RuntimeProcessor.prototype),
-        {
-          runtime: {
-            getCellFromLink: () => cell,
-            scheduler: {
-              idleWithPendingCommits: () => {
-                calls.push("commits");
-                committed = true;
-                return Promise.resolve();
-              },
-            },
-            storageManager: {
-              open: () => ({
-                sqliteQuery: () => {
-                  calls.push("query");
-                  return Promise.resolve({ rows: [] });
-                },
-              }),
+      const processor = buildProcessor({
+        runtime: {
+          getCellFromLink: () => cell,
+          scheduler: {
+            idleWithPendingCommits: () => {
+              calls.push("commits");
+              committed = true;
+              return Promise.resolve();
             },
           },
+          storageManager: {
+            open: () => ({
+              sqliteQuery: () => {
+                calls.push("query");
+                return Promise.resolve({ rows: [] });
+              },
+            }),
+          },
         },
-      ) as RuntimeProcessor;
+      });
 
       await processor.handleSqliteQuery({
         type: RequestType.SqliteQuery,
@@ -5989,10 +5819,7 @@ describe("runtime-processor", () => {
             }),
           },
         };
-        const processor = Object.assign(
-          Object.create(RuntimeProcessor.prototype),
-          { runtime },
-        ) as RuntimeProcessor;
+        const processor = buildProcessor({ runtime });
         const bytes = new FabricBytes(new Uint8Array([7, 8, 9]));
 
         await processor.handleSqliteQuery({
@@ -6090,9 +5917,8 @@ describe("runtime-processor", () => {
         { id: "db-1", tables: { notes: {} } },
         () => Promise.resolve({ rows: [] }),
       );
-      (processor as unknown as {
-        runtime: { storageManager: { open(): object } };
-      }).runtime.storageManager.open = () => ({});
+      processor.accessForTestingOnly.runtime.storageManager.open = () =>
+        ({}) as never;
 
       await expect(processor.handleSqliteQuery({
         type: RequestType.SqliteQuery,
@@ -6133,18 +5959,15 @@ describe("runtime-processor", () => {
         getRaw: () => db,
         asSchema: () => ({ get: () => db }),
       };
-      const execProcessor = Object.assign(
-        Object.create(RuntimeProcessor.prototype),
-        {
-          runtime: {
-            getCellFromLink: () => cell,
-            editWithRetry: () => {
-              edited = true;
-              return Promise.resolve({ ok: undefined });
-            },
+      const execProcessor = buildProcessor({
+        runtime: {
+          getCellFromLink: () => cell,
+          editWithRetry: () => {
+            edited = true;
+            return Promise.resolve({ ok: undefined });
           },
         },
-      ) as RuntimeProcessor;
+      });
       await expect(execProcessor.handleSqliteExec({
         type: RequestType.SqliteExec,
         cell: ref,
@@ -6189,10 +6012,7 @@ describe("runtime-processor", () => {
           return Promise.resolve({ ok: undefined });
         },
       };
-      const processor = Object.assign(
-        Object.create(RuntimeProcessor.prototype),
-        { runtime },
-      ) as RuntimeProcessor;
+      const processor = buildProcessor({ runtime });
 
       await processor.handleSqliteExec({
         type: RequestType.SqliteExec,
@@ -6268,10 +6088,7 @@ describe("runtime-processor", () => {
         }
         await storageManager.synced();
 
-        const processor = Object.assign(
-          Object.create(RuntimeProcessor.prototype),
-          { runtime },
-        ) as RuntimeProcessor;
+        const processor = buildProcessor({ runtime });
         const exec = (id: number) =>
           processor.handleSqliteExec({
             type: RequestType.SqliteExec,
@@ -6358,18 +6175,15 @@ describe("runtime-processor", () => {
         }),
       };
       const tx = { id: "transaction" };
-      const processor = Object.assign(
-        Object.create(RuntimeProcessor.prototype),
-        {
-          runtime: {
-            getCellFromLink: () => cell,
-            editWithRetry: (edit: (tx: unknown) => void) => {
-              edit(tx);
-              return Promise.resolve({ ok: undefined });
-            },
+      const processor = buildProcessor({
+        runtime: {
+          getCellFromLink: () => cell,
+          editWithRetry: (edit: (tx: unknown) => void) => {
+            edit(tx);
+            return Promise.resolve({ ok: undefined });
           },
         },
-      ) as RuntimeProcessor;
+      });
 
       await processor.handleSqliteExec({
         type: RequestType.SqliteExec,
@@ -6400,16 +6214,13 @@ describe("runtime-processor", () => {
         asSchema: () => ({ get: () => db }),
         withTx: () => ({ getRaw: () => db, exec: () => {} }),
       };
-      const processor = Object.assign(
-        Object.create(RuntimeProcessor.prototype),
-        {
-          runtime: {
-            getCellFromLink: () => cell,
-            editWithRetry: () =>
-              Promise.resolve({ error: { message: "write refused" } }),
-          },
+      const processor = buildProcessor({
+        runtime: {
+          getCellFromLink: () => cell,
+          editWithRetry: () =>
+            Promise.resolve({ error: { message: "write refused" } }),
         },
-      ) as RuntimeProcessor;
+      });
 
       await expect(processor.handleSqliteExec({
         type: RequestType.SqliteExec,
@@ -6419,13 +6230,10 @@ describe("runtime-processor", () => {
     });
 
     it("routes SQLite requests through the processor dispatch", async () => {
-      const processor = Object.assign(
-        Object.create(RuntimeProcessor.prototype),
-        {
-          handleSqliteQuery: () => Promise.resolve({ rows: [{ value: 1 }] }),
-          handleSqliteExec: () => Promise.resolve(),
-        },
-      ) as RuntimeProcessor;
+      const processor = buildProcessor();
+      processor.handleSqliteQuery = () =>
+        Promise.resolve({ rows: [{ value: 1 }] } as never);
+      processor.handleSqliteExec = () => Promise.resolve();
 
       await expect(processor.handleRequest({
         type: RequestType.SqliteQuery,
@@ -6474,8 +6282,7 @@ describe("runtime-processor", () => {
       function subscriptionHarness() {
         const cancelled: number[] = [];
         const sinks: Array<(value: unknown, cfcLabel: unknown) => void> = [];
-        const processor = {
-          subscriptions: new Map<string, () => void>(),
+        const processor = buildProcessor({
           runtime: {
             getCellFromLink: () => ({
               sink: (
@@ -6486,7 +6293,7 @@ describe("runtime-processor", () => {
               },
             }),
           },
-        } as unknown as RuntimeProcessor;
+        });
         return { processor, sinks, cancelled };
       }
 
@@ -6494,7 +6301,7 @@ describe("runtime-processor", () => {
         processor: RuntimeProcessor,
         client: WorkerClient,
       ) =>
-        RuntimeProcessor.prototype.handleCellSubscribe.call(processor, {
+        processor.handleCellSubscribe({
           type: RequestType.CellSubscribe,
           cell: cellRef,
         }, client);
@@ -6503,7 +6310,7 @@ describe("runtime-processor", () => {
         processor: RuntimeProcessor,
         client: WorkerClient,
       ) =>
-        RuntimeProcessor.prototype.handleCellUnsubscribe.call(processor, {
+        processor.handleCellUnsubscribe({
           type: RequestType.CellUnsubscribe,
           cell: cellRef,
         }, client);
@@ -6558,15 +6365,6 @@ describe("runtime-processor", () => {
     });
 
     describe("VDOM mounts", () => {
-      const handleVDomMount = (RuntimeProcessor.prototype as unknown as {
-        handleVDomMount: (
-          this: unknown,
-          request: unknown,
-          client: WorkerClient,
-        ) => unknown;
-      }).handleVDomMount;
-      const handleVDomUnmount = RuntimeProcessor.prototype.handleVDomUnmount;
-
       async function mountState() {
         const { runtime } = createRuntime();
         const space = cfcSigner.did();
@@ -6581,23 +6379,13 @@ describe("runtime-processor", () => {
         const commit = await tx.commit();
         expect(commit.ok !== undefined).toBe(true);
 
-        const state = {
-          runtime,
-          vdomMounts: new Map<
-            string,
-            { reconciler: unknown; cancel: () => void }
-          >(),
-          vdomBatchIdCounter: 0,
-          renderDeclassificationPolicy: "allow",
-          renderConfidentialityCeiling: undefined,
-          handleVDomUnmount,
-        };
+        const processor = buildProcessor({ runtime });
         const link = cell.getAsNormalizedFullLink() as unknown as CellRef;
-        return { runtime, state, link };
+        return { runtime, processor, link };
       }
 
       it("keeps one client's mount when another mounts under the same mount id", async () => {
-        const { runtime, state, link } = await mountState();
+        const { runtime, processor, link } = await mountState();
         const first = testClient(1);
         const second = testClient(2);
         const hadPostMessage = "postMessage" in globalThis;
@@ -6605,18 +6393,18 @@ describe("runtime-processor", () => {
           (globalThis as { postMessage?: unknown }).postMessage;
         (globalThis as { postMessage?: unknown }).postMessage = () => {};
         try {
-          handleVDomMount.call(state, {
+          processor.handleVDomMount({
             type: RequestType.VDomMount,
             mountId: 1,
             cell: link,
           }, first.client);
-          handleVDomMount.call(state, {
+          processor.handleVDomMount({
             type: RequestType.VDomMount,
             mountId: 1,
             cell: link,
           }, second.client);
 
-          expect(state.vdomMounts.size).toBe(2);
+          expect(processor.accessForTestingOnly.vdomMounts.size).toBe(2);
         } finally {
           await runtime.dispose();
           if (hadPostMessage) {
@@ -6632,27 +6420,29 @@ describe("runtime-processor", () => {
         // Scoping the key changed which mounts collide, not what a collision
         // does: one client re-using its own mount id still replaces what was
         // there, and is left holding one mount rather than two.
-        const { runtime, state, link } = await mountState();
+        const { runtime, processor, link } = await mountState();
         const { client } = testClient(1);
         const hadPostMessage = "postMessage" in globalThis;
         const originalPostMessage =
           (globalThis as { postMessage?: unknown }).postMessage;
         (globalThis as { postMessage?: unknown }).postMessage = () => {};
         try {
-          handleVDomMount.call(state, {
+          processor.handleVDomMount({
             type: RequestType.VDomMount,
             mountId: 1,
             cell: link,
           }, client);
-          const first = state.vdomMounts.get("1 1");
-          handleVDomMount.call(state, {
+          const first = processor.accessForTestingOnly.vdomMounts.get("1 1");
+          processor.handleVDomMount({
             type: RequestType.VDomMount,
             mountId: 1,
             cell: link,
           }, client);
 
-          expect(state.vdomMounts.size).toBe(1);
-          expect(state.vdomMounts.get("1 1")).not.toBe(first);
+          expect(processor.accessForTestingOnly.vdomMounts.size).toBe(1);
+          expect(processor.accessForTestingOnly.vdomMounts.get("1 1")).not.toBe(
+            first,
+          );
         } finally {
           await runtime.dispose();
           if (hadPostMessage) {
@@ -6665,7 +6455,7 @@ describe("runtime-processor", () => {
       });
 
       it("sends each mount's batches to the client that mounted it", async () => {
-        const { runtime, state, link } = await mountState();
+        const { runtime, processor, link } = await mountState();
         const first = testClient(1);
         const second = testClient(2);
         const hadPostMessage = "postMessage" in globalThis;
@@ -6678,12 +6468,12 @@ describe("runtime-processor", () => {
           strayPosts.push(message);
         };
         try {
-          handleVDomMount.call(state, {
+          processor.handleVDomMount({
             type: RequestType.VDomMount,
             mountId: 1,
             cell: link,
           }, first.client);
-          handleVDomMount.call(state, {
+          processor.handleVDomMount({
             type: RequestType.VDomMount,
             mountId: 1,
             cell: link,
@@ -6747,13 +6537,11 @@ describe("runtime-processor", () => {
           },
           unmount: () => {},
         });
-        const processor = Object.create(
-          RuntimeProcessor.prototype,
-        ) as RuntimeProcessor;
-        (processor as unknown as { vdomMounts: unknown }).vdomMounts = new Map([
+        const processor = buildProcessor();
+        processor.accessForTestingOnly.vdomMounts = new Map([
           ["1 1", { reconciler: reconciler("first"), cancel: () => {} }],
           ["2 1", { reconciler: reconciler("second"), cancel: () => {} }],
-        ]);
+        ]) as never;
         return { processor, dispatched, acknowledged };
       }
 
@@ -6787,13 +6575,8 @@ describe("runtime-processor", () => {
 
       function operationState() {
         const cancelled: string[] = [];
-        const processor = Object.create(
-          RuntimeProcessor.prototype,
-        ) as RuntimeProcessor;
-        const state = processor as unknown as {
-          operationSubscriptions: Map<string, unknown>;
-          operationSessions: Map<string, unknown>;
-        };
+        const processor = buildProcessor();
+        const state = processor.accessForTestingOnly;
         state.operationSubscriptions = new Map([
           ["sub-of-first", {
             cancelled: false,
@@ -6805,7 +6588,7 @@ describe("runtime-processor", () => {
         state.operationSessions = new Map([
           ["session-of-first", {
             cellKey: "cell",
-            target: {},
+            target: {} as never,
             subscriptions: new Set(["sub-of-first"]),
             clientId: 1,
           }],
@@ -6864,21 +6647,8 @@ describe("runtime-processor", () => {
       function departureState() {
         const cancelled: string[] = [];
         const unmounted: string[] = [];
-        const processor = Object.create(
-          RuntimeProcessor.prototype,
-        ) as RuntimeProcessor;
-        const state = processor as unknown as {
-          subscriptions: Map<string, () => void>;
-          operationSubscriptions: Map<string, unknown>;
-          operationSessions: Map<string, {
-            cellKey: string;
-            target: unknown;
-            subscriptions: Set<string>;
-            clientId: number;
-          }>;
-          vdomMounts: Map<string, unknown>;
-          runtime: unknown;
-        };
+        const processor = buildProcessor();
+        const state = processor.accessForTestingOnly;
         state.subscriptions = new Map([
           ["1 cell-a", () => cancelled.push("first/cell-a")],
           ["2 cell-a", () => cancelled.push("second/cell-a")],
@@ -6900,13 +6670,13 @@ describe("runtime-processor", () => {
         state.operationSessions = new Map([
           ["session-of-first", {
             cellKey: "cell",
-            target: {},
+            target: {} as never,
             subscriptions: new Set(["op-of-first"]),
             clientId: 1,
           }],
           ["session-of-second", {
             cellKey: "cell",
-            target: {},
+            target: {} as never,
             subscriptions: new Set(["op-of-second"]),
             clientId: 2,
           }],
@@ -6920,12 +6690,12 @@ describe("runtime-processor", () => {
             reconciler: { unmount: () => unmounted.push("second/1") },
             cancel: () => cancelled.push("second/mount-1"),
           }],
-        ]);
+        ]) as never;
         state.runtime = {
           dispose: () => {
             throw new Error("the runtime must outlive a departing client");
           },
-        };
+        } as never;
         return { processor, state, cancelled, unmounted };
       }
 
@@ -6965,7 +6735,7 @@ describe("runtime-processor", () => {
         const { processor, state } = departureState();
         state.operationSessions.set("session-never-used", {
           cellKey: "cell",
-          target: {},
+          target: {} as never,
           subscriptions: new Set<string>(),
           clientId: 1,
         });
