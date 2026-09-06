@@ -3170,14 +3170,67 @@ describe("source history actions", () => {
     expect(rendered).toContain(">open</a>");
   });
 
-  it("shows no open link when the origin needed no resolving", async () => {
-    const menu = openMenu(pieceCell(() => Promise.resolve(historySource)));
+  it("offers the route only where it is not already the string on show", async () => {
+    const menu = openMenu(pieceCell(() =>
+      Promise.resolve({
+        ...historySource,
+        history: [
+          {
+            revisionId: "recorded",
+            timestamp: 1,
+            pattern: SOURCE.pattern!,
+            origin: {
+              url: "https://toolshed.test/api/patterns/system/home.tsx",
+              kind: "system" as const,
+              recorded: "system:system/home.tsx",
+            },
+            operation: "baseline" as const,
+          },
+          {
+            revisionId: "canonical",
+            timestamp: 2,
+            pattern: SOURCE.pattern!,
+            origin: SOURCE.origin,
+            operation: "repoint" as const,
+          },
+        ],
+      })
+    ));
     await menu.showPanel("origin");
 
+    // Both entries name their origin; only the one whose recorded form differs
+    // from the route it resolves to carries a link to that route.
     const rendered = shows(menu);
+    expect(rendered).toContain("<code>system:system/home.tsx</code>");
     expect(rendered).toContain(
       "<code>https://toolshed.test/api/patterns/recipe.tsx</code>",
     );
+    expect(rendered.split(">open</a>").length - 1).toBe(1);
+  });
+
+  it("offers no route for an origin resolving to a fabric reference", async () => {
+    const menu = openMenu(pieceCell(() =>
+      Promise.resolve({
+        ...historySource,
+        history: [{
+          revisionId: "pinned",
+          timestamp: 1,
+          pattern: SOURCE.pattern!,
+          origin: {
+            url: `cf:pattern:${"A".repeat(43)}`,
+            kind: "fabric-pattern" as const,
+            recorded: "cf:pattern:an-earlier-spelling",
+          },
+          operation: "baseline" as const,
+        }],
+      })
+    ));
+    await menu.showPanel("origin");
+
+    // Nothing a browser can open resolves from a fabric reference, so the
+    // entry names what the piece recorded and stops there.
+    const rendered = shows(menu);
+    expect(rendered).toContain("<code>cf:pattern:an-earlier-spelling</code>");
     expect(rendered).not.toContain(">open</a>");
   });
 
