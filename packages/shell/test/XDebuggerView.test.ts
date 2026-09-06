@@ -1,3 +1,8 @@
+/**
+ * The debugger view's diagnosis panel, rendered through the view's
+ * `accessForTestingOnly` over a controller stand-in.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 

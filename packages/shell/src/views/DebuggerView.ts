@@ -804,7 +804,7 @@ export class XDebuggerView extends LitElement {
   accessor debuggerController: DebuggerController | undefined = undefined;
 
   @state()
-  private accessor _activeTab:
+  private accessor activeTab:
     | "events"
     | "scheduler"
     | "loggers"
@@ -844,7 +844,7 @@ export class XDebuggerView extends LitElement {
   private accessor openDropdowns = new Set<TopicKey>();
 
   @state()
-  private accessor _isRecreatingSpaceRootPattern = false;
+  private accessor isRecreatingSpaceRootPattern = false;
 
   @state()
   private accessor searchText = "";
@@ -1034,15 +1034,15 @@ export class XDebuggerView extends LitElement {
   }
 
   #recreateSpaceRootPattern() {
-    if (this._isRecreatingSpaceRootPattern) return;
-    this._isRecreatingSpaceRootPattern = true;
+    if (this.isRecreatingSpaceRootPattern) return;
+    this.isRecreatingSpaceRootPattern = true;
     this.dispatchEvent(
       new CustomEvent("recreate-space-root-pattern", {
         bubbles: true,
         composed: true,
         detail: {
           done: () => {
-            this._isRecreatingSpaceRootPattern = false;
+            this.isRecreatingSpaceRootPattern = false;
           },
         },
       }),
@@ -1340,10 +1340,6 @@ export class XDebuggerView extends LitElement {
 
     return details;
   }
-
-  //
-  // Logger stats methods
-  //
 
   #getLoggerRegistry(): Record<string, Logger> {
     const global = globalThis as unknown as {
@@ -2439,16 +2435,16 @@ export class XDebuggerView extends LitElement {
       <div class="tabs-container">
         <button
           type="button"
-          class="tab-button ${this._activeTab === "events" ? "active" : ""}"
-          @click="${() => this._activeTab = "events"}"
+          class="tab-button ${this.activeTab === "events" ? "active" : ""}"
+          @click="${() => this.activeTab = "events"}"
         >
           Events
         </button>
         <button
           type="button"
-          class="tab-button ${this._activeTab === "scheduler" ? "active" : ""}"
+          class="tab-button ${this.activeTab === "scheduler" ? "active" : ""}"
           @click="${() => {
-            this._activeTab = "scheduler";
+            this.activeTab = "scheduler";
             // Request a fresh snapshot when tab is opened
             this.debuggerController?.requestGraphSnapshot();
           }}"
@@ -2457,9 +2453,9 @@ export class XDebuggerView extends LitElement {
         </button>
         <button
           type="button"
-          class="tab-button ${this._activeTab === "loggers" ? "active" : ""}"
+          class="tab-button ${this.activeTab === "loggers" ? "active" : ""}"
           @click="${() => {
-            this._activeTab = "loggers";
+            this.activeTab = "loggers";
             // Sample current counts when tab is opened
             this.#sampleLoggerCounts();
           }}"
@@ -2468,8 +2464,8 @@ export class XDebuggerView extends LitElement {
         </button>
         <button
           type="button"
-          class="tab-button ${this._activeTab === "diagnosis" ? "active" : ""}"
-          @click="${() => this._activeTab = "diagnosis"}"
+          class="tab-button ${this.activeTab === "diagnosis" ? "active" : ""}"
+          @click="${() => this.activeTab = "diagnosis"}"
         >
           Diagnosis
         </button>
@@ -2780,16 +2776,16 @@ export class XDebuggerView extends LitElement {
                   class="action-button"
                   style="background-color: #dc2626; color: white;"
                   @click="${this.#recreateSpaceRootPattern}"
-                  ?disabled="${this._isRecreatingSpaceRootPattern}"
+                  ?disabled="${this.isRecreatingSpaceRootPattern}"
                 >
-                  ${this._isRecreatingSpaceRootPattern
+                  ${this.isRecreatingSpaceRootPattern
                     ? "Recreating..."
                     : "Recreate Root Pattern"}
                 </button>
               </div>
             </div>
 
-            ${this.#renderTabs()} ${this._activeTab === "scheduler"
+            ${this.#renderTabs()} ${this.activeTab === "scheduler"
               ? html`
                 <x-scheduler-graph
                   .debuggerController="${this.debuggerController}"
@@ -2798,7 +2794,7 @@ export class XDebuggerView extends LitElement {
                   style="flex: 1; min-height: 0;"
                 ></x-scheduler-graph>
               `
-              : this._activeTab === "loggers"
+              : this.activeTab === "loggers"
               ? html`
                 <div class="content-area ${this.#resizeController.isResizing
                   ? "resizing"
@@ -2806,7 +2802,7 @@ export class XDebuggerView extends LitElement {
                   ${this.#renderLoggers()}
                 </div>
               `
-              : this._activeTab === "diagnosis"
+              : this.activeTab === "diagnosis"
               ? html`
                 <div class="content-area ${this.#resizeController.isResizing
                   ? "resizing"
