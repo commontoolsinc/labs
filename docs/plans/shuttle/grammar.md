@@ -107,6 +107,69 @@ start carrying which parts of a token were quoted, which grows the value it
 returns rather than adding a layer over it, and every reading that consults
 quoting reads that value.
 
+## Options and operands
+
+The split says where a token ends; what a token is *for* is the second
+reading, and it is POSIX's too. After the verb, **a token opening with `-` is
+an option up to a bare `--`, and every other token is an operand**, the options
+being the table that verb declares. Two tokens the rule turns on are the two
+this grammar already spends the character on:
+
+- **`-` on its own is an operand** — `cd`'s previous place and `set`'s stdin
+  sentinel — so the one reading that would make it a flag is the one it does
+  not get.
+- **A bare `--` ends the options.** Every token after the first one is an
+  operand whatever it opens with, and that first `--` is neither an option nor
+  an operand. So a key called `-x` is reached by `cd -- -x`, and one called
+  `--` by `cd -- --`.
+
+Options may sit anywhere among the operands, which is what a `cf` command
+reads unless it declares a section: `cf piece call` and `cf exec` are
+`stopEarly()`, and everything past their first operand belongs to the callable.
+So the line shape at the top of this document says where options usually go
+rather than where they must, and a shuttle verb mirroring either of those two
+carries the call section below rather than this rule.
+
+How many operands a verb takes is part of the same table. A verb declares both
+bounds, and the noun phrase its refusal calls a missing operand by, and the
+reading that divides the line enforces them: the count is applied in one place
+while the wording stays each verb's own — `cd` says it takes a place to move
+to where `wish` says it takes the target to resolve. A verb that takes an
+operand it can do without declares that too, since what it does with none is a
+reading of its own rather than a line for the dispatch to answer: `get` reads
+where it stands, and `help` lists the verbs.
+
+The parse is `cf`'s own: `parseFlags` (`@cliffy/flags`) is what `Command`
+reads a `cf` line's flags through, and it reads a bare token array, so a flag
+is spelled, defaulted and refused here exactly as the same flag is on a `cf`
+command line. That is what keeps decision 7's "data verbs are exactly the
+`cf` ones" true of the flags as well as of the words — `--select` here is
+`--select` there, and a misspelling gets the sentence `cf` gives it, with one
+naming the verb's own page after it.
+
+**`--help` is an option every verb takes**, put in front of whatever a verb
+declares rather than declared by each, so a verb has no way to be without one;
+a line carrying it writes that verb's page instead of running the verb. It
+carries the declaration `cf` gives its own, standalone included, so a verb
+whose required options a line has not supplied still answers what it takes —
+and `--help` written beside another option is refused rather than answered,
+exactly as on a `cf` line. `help`
+is the verb beside it: `help` lists every verb with its one-line summary, and
+`help <verb>` writes the page `<verb> --help` writes. Decision 3 puts
+teammates second and names help as part of what serves them, and a shell whose
+only account of itself is the refusal a mistyped word gets serves nobody who
+does not already know it.
+
+The option reading costs a listing one shape, and it is the shape the quoting
+ruling above already costs one of. Every name a listing prints is one `cd`
+takes back, and a name opening with `-` is read as an option when it stands as
+a token of its own, so such a key is offered as the reference that names it
+rather than as itself — the answer a key called `..` gets, for the same reason
+one layer up. What a listing offers and what can be typed are two questions:
+`cd -- -x` reaches that key and `cd -- --` reaches one called `--`, a bare `--`
+ending the options, and what a listing prints is the name rather than the
+route.
+
 ## Place resolution
 
 A reference on the line resolves against the place, right-anchored, exactly
@@ -182,7 +245,20 @@ holding a line break are refused, while one that merely starts with
 whitespace survives and is not. The first two are refused wherever they sit
 and not only last, because `..` makes any segment the last one.
 
-Only the newline reaches a piece that has one. The scope suffix the
+A control character is refused as well, for a reason the round trip cannot
+see: a rendering is read on a terminal, and there Unicode's `Cc` characters —
+C0, `DEL`, and C1, whose `U+009B` is a sequence introducer needing no escape
+in front of it — are instructions rather than text. Refusing is what a name
+gets rather than the escaping a message gets, and the difference is that an
+escaped name no longer names its row: a message survives being made safe and
+a name does not, so the door is the only place left to stop one. That such a
+name reads back whole is what makes it dangerous rather than what excuses it,
+since what a person copies off the screen is what the terminal did with it.
+`U+00A0`, `U+2028` and `U+2029` are not in that class and are admitted: a
+terminal prints them, and the printer quotes them, being whitespace to the
+split.
+
+Of what a rendering loses, only the newline reaches a piece that has one. The scope suffix the
 rendering always writes sits between the piece and the end of the string,
 so the trim takes the suffix rather than the piece, and the parse's split
 at the last `@` takes the suffix's own. An empty piece is the exception,
@@ -191,19 +267,19 @@ nothing else, so the split finds no id in front of it and the parse refuses
 the whole reference rather than handing anything back.
 
 The piece is nonetheless held to more, for a different reason: one that is
-empty, ends in whitespace, or holds an `@` is refused because no slug or
-handle carries such a name. The reason covers all three. The mechanism
-behind it covers two: for a piece shaped like a handle — a colon, and
-twenty characters — the parse takes it, its handle test being a length rule
-rather than an alphabet one, and hands back verbatim a name the `fid1`
-encoding could not have produced, a rendering that round-trips exactly and
-denotes nothing. That is neither a wrong address nor a dead one, which is
-why the reason cannot be either. For an empty piece, and for anything
+empty, ends in whitespace, holds an `@`, or holds a control character is
+refused because no slug or handle carries such a name. The reason covers all
+four. The mechanism behind it covers three: for a piece shaped like a handle
+— a colon, and twenty characters — the parse takes it, its handle test being
+a length rule rather than an alphabet one, and hands back verbatim a name the
+`fid1` encoding could not have produced, a rendering that round-trips exactly
+and denotes nothing. That is neither a wrong address nor a dead one, which
+is why the reason cannot be either. For an empty piece, and for anything
 shaped like a slug, the parse refuses it already; refusing at the door
 moves the refusal earlier and names the vocabulary where the parse names
 only the failure.
 
-One rule rather than three is a choice about wording, not about safety: the
+One rule rather than four is a choice about wording, not about safety: the
 redundant cases cost nothing.
 
 **Every door holds the piece to the two vocabularies** besides, and the check
@@ -307,9 +383,9 @@ that implied completeness would be false.
 it has no name for prints none at all. Most rows print their own name,
 written as a token by the rule above — a slug, a handle and an ordinary key
 each print as themselves. A row whose name's own characters are readings —
-a key called `..` or `-`, one holding the separator, one beginning with `@` —
-prints the reference that names it instead, which reads none of them and
-unescapes `~1`.
+a key called `..` or `-`, one holding the separator, one beginning with `@` or
+with `-` — prints the reference that names it instead, which reads none of
+them and unescapes `~1`.
 
 The name is the first thing on its line, and the whole of it where the row
 has nothing else to report. What a reader copies off the front is therefore
@@ -326,13 +402,26 @@ no name — while a marker's own payload is not escaped, those brackets
 delimiting for a reader and not for a parser. Nothing parses a listed line.
 
 A row is one line, and the lines are separated by a newline, so a name holding
-one is described rather than written and a message holding one has it written
-as a space. The newline's is the only rewrite there is, so a carriage
-return and the Unicode line and paragraph separators are printed as they
-stand, because a name is printed to be typed back and a rewritten one no
-longer names its row — a carriage return returns a terminal's cursor to the
-start of the line, and that is a thing a terminal does rather than a thing the
-name says, the same bound the rendering of a place is held to.
+one is described rather than written.
+
+A name and a message answer a control character differently, and what each is
+for is the difference. A **name** holding one is described rather than written,
+for the reason the doors refuse one: the marker is the last place such a name
+would still be written, and writing it there would put back on the screen what
+refusing it kept off. A **message** — a row's error, the bound — is escaped
+instead: every character survives and each acted-on one is shown as the Control
+Pictures glyph that names it, so the text a person has to read arrives whole
+and instructs nothing. The newline is the one exception, and the row rather
+than the class is what makes it one: a message is one row, so a newline in it
+is written as a space and every other character in the class is glyphed. A name
+is typed back and a message is read, which is why one may be replaced by a
+description and the other may not.
+
+Nothing else is rewritten. The Unicode line and paragraph separators are
+printed as they stand, a terminal acting on neither, because a name is printed
+to be typed back and a rewritten one no longer names its row; and an angle
+bracket in a message stands too, those delimiting a marker for a reader rather
+than for a parser.
 
 Large collections appear everywhere (a space's pieces, an array of
 thousands). `ls` prints one height-fit page — what the terminal shows

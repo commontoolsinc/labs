@@ -15,10 +15,13 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
+  CFC_ENFORCEMENT_MODES,
+  type CfcEnforcementMode,
   cfcPostureReport,
   inheritedCfcPostureReport,
   KNOWN_SINKS,
   projectedCfcPostureReport,
+  resolveCfcDials,
   RUNTIME_CFC_DIAL_DEFAULTS,
 } from "../src/cfc/mod.ts";
 import type { RuntimeOptions } from "../src/runtime.ts";
@@ -135,6 +138,59 @@ describe("the CFC posture record", () => {
           what.includes("`llm`") || what.includes("`llmDialog`")
         ),
       ).toEqual([]);
+    });
+  });
+
+  describe("the enforcement-mode ladder", () => {
+    const offLadder = "enforce-strictly" as CfcEnforcementMode;
+
+    it("refuses a name off the ladder, naming it and the ladder", () => {
+      const refusal = expect(() =>
+        resolveCfcDials({ cfcEnforcementMode: offLadder })
+      );
+      refusal.toThrow(offLadder);
+      refusal.toThrow(CFC_ENFORCEMENT_MODES.join(", "));
+    });
+
+    it("resolves every name on the ladder", () => {
+      for (const mode of CFC_ENFORCEMENT_MODES) {
+        expect(resolveCfcDials({ cfcEnforcementMode: mode }))
+          .toMatchObject({ cfcEnforcementMode: mode });
+      }
+    });
+
+    it("defaults a construction that names no mode", () => {
+      expect(resolveCfcDials({}).cfcEnforcementMode).toBe(
+        RUNTIME_CFC_DIAL_DEFAULTS.cfcEnforcementMode,
+      );
+    });
+
+    it("refuses a null, which names no member of the ladder", () => {
+      expect(() =>
+        resolveCfcDials({ cfcEnforcementMode: null as unknown as undefined })
+      ).toThrow(CFC_ENFORCEMENT_MODES.join(", "));
+    });
+
+    it("refuses to construct a Runtime on a name off the ladder", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      try {
+        expect(() =>
+          new Runtime({
+            apiUrl: new URL(import.meta.url),
+            storageManager,
+            cfcEnforcementMode: offLadder,
+          })
+        ).toThrow(offLadder);
+      } finally {
+        await storageManager.close();
+      }
+    });
+
+    it("refuses to project a posture on a name off the ladder", () => {
+      // A posture record is published before its runtime exists, so a
+      // projection that answered here would announce a rung nothing runs at.
+      expect(() => projectedCfcPostureReport({ cfcEnforcementMode: offLadder }))
+        .toThrow(offLadder);
     });
   });
 

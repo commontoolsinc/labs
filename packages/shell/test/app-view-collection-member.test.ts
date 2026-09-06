@@ -960,6 +960,82 @@ describe("AppView collection members", () => {
     }
   });
 
+  it("clears the load error when a faulted resolution comes back to the piece already shown", async () => {
+    const restore = installBrowserGlobals();
+    const errors = captureErrors();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view.updated(new Map([["app", undefined]]));
+      await stub.settle();
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      // The selection runs again and stops in the resolution — a dropped
+      // transport, which says nothing about where the reference points. The
+      // view is on the error, and the reference has not moved.
+      stub.answer(new Error("the socket went away"));
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete.catch(() => {});
+      expect(errors.lines).toEqual([
+        "[AppView] Failed to load selected piece: Error: the socket went away",
+      ]);
+
+      // The transport comes back and the reference resolves as it did before.
+      // Recovery has to come from the faulted run having reported that it
+      // reached nothing: an answer left standing would make this one no news,
+      // and the view would sit on the error with the piece it names one
+      // resolution away.
+      stub.answer({ pieceId: "fid1:member-42", pathAfter: [] });
+      await pollAndSettle(view, stub);
+
+      expect(templateBindings(view.render(), "loadError")).toEqual([undefined]);
+    } finally {
+      errors.restore();
+      restore();
+    }
+  });
+
+  it("shows a refusal in the words it was refused in", async () => {
+    const restore = installBrowserGlobals();
+    const errors = captureErrors();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({
+        refusal: { code: "missing-member", message: "no member 42 in top" },
+      });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view.updated(new Map([["app", undefined]]));
+      await stub.settle();
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete.catch(() => {});
+
+      // A refusal is an answer, and the load-error surface tells a reader
+      // what it said. The words travel as the error the run throws rather
+      // than through what it records as shown, so nothing about the recorded
+      // answer decides them and this is the only place they are checked.
+      const [loadError] = templateBindings(view.render(), "loadError") as [
+        { kind: string; error: Error },
+      ];
+      expect(loadError.kind).toBe("piece");
+      expect(loadError.error.message).toBe("no member 42 in top");
+    } finally {
+      errors.restore();
+      restore();
+    }
+  });
+
   it("retries a load that failed after the reference resolved", async () => {
     const restore = installBrowserGlobals();
     try {

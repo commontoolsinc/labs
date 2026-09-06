@@ -410,15 +410,23 @@ and inspect the generated HTML before accepting a new release.
 
 ### Cliffy
 
-The CLI uses three declarations that have to remain compatible:
+The CLI uses four declarations that have to remain compatible:
 
 - The root import map pins `@cliffy/command` at `1.0.0-rc.8`.
-- `packages/cli/deno.jsonc` pins `@cliffy/table` at the same release.
+- `packages/cli/deno.jsonc` pins `@cliffy/flags` at the same release. It is
+  `@cliffy/command`'s own option parser, read directly by the shuttle shell so
+  that a shell verb's flags are spelled and refused as a command's are.
+- That CLI config pins `@cliffy/table` at the same release.
 - That CLI config pins `@std/fmt/colors` to the range used by Cliffy.
 
-The two Cliffy packages share internal packages and resolve as a set. They are
-held at the release candidate because Cliffy 1.2.1 changes how a required
-argument followed by a variadic argument is parsed. With that release,
+`@cliffy/command` and `@cliffy/table` share internal packages, and
+`@cliffy/flags` is `@cliffy/command`'s own dependency, so all three resolve as
+a set. A `@cliffy/flags` pinned here to anything but the release
+`@cliffy/command` resolves puts two copies of the option parser in the
+workspace: the one a `cf` command parses through, and the one the shell does.
+
+They are held at the release candidate because Cliffy 1.2.1 changes how a
+required argument followed by a variadic argument is parsed. With that release,
 `cf piece call` stops receiving its first argument.
 
 The `@std/fmt/colors` pin has a separate single-copy requirement.
@@ -427,7 +435,8 @@ different copy from Cliffy, disabling color does not affect Cliffy's version,
 error, and usage output. `packages/cli/test/color-mode.test.ts` guards that
 shared state.
 
-When rolling Cliffy, update `@cliffy/command` and `@cliffy/table` together.
+When rolling Cliffy, update `@cliffy/command`, `@cliffy/flags` and
+`@cliffy/table` together.
 Inspect the new command package's `@std/fmt` dependency and update the CLI alias
 to a compatible range that resolves to the same copy. Refresh the lockfile and
 run the complete CLI test task:

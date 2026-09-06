@@ -201,6 +201,19 @@ export async function describeStateWaitFailure(
   return lines.join("\n");
 }
 
+/**
+ * The viewport size every page a {@link ShellIntegration} opens is set to.
+ *
+ * The shell's header has a narrow layout and a wide one, and lays out its
+ * breadcrumbs — the piece switcher among them — only in the wide one, from a
+ * viewport width of 769px up. A browser left to its own default picks a width
+ * that varies by platform, so pinning the size is what makes which of the two
+ * a suite drives a property of the harness rather than of the machine running
+ * it. A suite that means to drive the narrow layout sets a viewport of its own
+ * with `Page.setViewportSize`.
+ */
+export const SHELL_VIEWPORT = { width: 1024, height: 768 };
+
 export interface ShellIntegrationConfig {
   pipeConsole?: boolean;
 
@@ -277,6 +290,7 @@ export class ShellIntegration {
   async newPage(url?: string): Promise<Page> {
     this.#checkIsOk();
     const page = await this.#browser!.newPage(url);
+    await page.setViewportSize(SHELL_VIEWPORT);
     this.#attachPage(page);
     // Astral navigates to `url` inside its own `newPage`, before this wrapper
     // exists for an after-navigation hook to run on, so the wait that
@@ -417,6 +431,7 @@ export class ShellIntegration {
   #beforeAll = async () => {
     this.#browser = await Browser.launch({ headless: env.HEADLESS });
     this.#page = await this.#browser.newPage();
+    await this.#page.setViewportSize(SHELL_VIEWPORT);
     this.#attachPage(this.#page);
     await getPresentationSession()?.register(this.#page, this.#presentation);
   };

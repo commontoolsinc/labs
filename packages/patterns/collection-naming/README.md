@@ -106,16 +106,37 @@ in the plan run on it. Its verbs:
   wiring, so the backfill has to be paired with a one-time link-bind of the
   board's `namesTable` onto each member it named. Until that bind the member is
   named — `names` and `namesTable` carry it, and `nameOf` returns it — and its
-  row still reads the empty string.
+  row carries no name.
 
 It publishes `index` — the items themselves, declared through a row schema of
 `title`, `createdAt`, and `shortName`, so a row IS its item and a row's own
-address is the item's address; `shortName` defaults to the empty string for a
-member whose lookup has produced no value, so a board holding older members
-still reads whole — and `names`, `namesTable`, `naming`, `mentionable`,
-`itemCount`, and a card list showing each item with its name.
+address is the item's address; `shortName` is absent for a member whose lookup
+has produced no value, so a board holding members it has not named still reads
+whole — and `names`, `namesTable`, `naming`, `mentionable`, `itemCount`, and a
+card list showing each item with its name.
 
-An empty `shortName` covers two cases a survey cannot tell apart: a member
+`shortName` is written `shortName?: string` at every point the exemplar names it
+— the row schema, the item's own publication, and the demand an item makes of a
+mention-universe entry — which is the spelling the Topics board and Topic ship.
+Optional rather than defaulted, and the two are not interchangeable: a defaulted
+property moves a demand's defaults below an array constraint the compatibility
+proof cannot show stable under default insertion, and dropping the default
+without making the property optional makes it newly required. The item publishes
+it the same way because that is what `TopicPiece` ships, not because the demand
+forces it; `ItemOutput.shortName` in `item.tsx` says which pairing of the two
+the compiler does refuse.
+
+The bound on what that buys is worth stating, because it is narrower than it
+looks. The spelling is about the READ: a board whose members publish no name
+reads whole, one row per member with the name simply absent. It is not what lets
+a namespace be added to a board that is already deployed. `cf piece setsrc`
+refuses a member demand that gains any property at all — optional included —
+over a board whose stored members do not publish it, because the schema recorded
+on the retained link to each member is unconstrained at that path. Naming the
+members of an existing collection therefore takes more than a compatible
+spelling.
+
+An absent `shortName` covers two cases a survey cannot tell apart: a member
 nothing has named, and a member the board has named whose `boardNames` was never
 wired. A caller that needs to know which reads the namespace, where the answer
 is: `nameOf` over `namesTable` returns the name for either, and returns
@@ -130,9 +151,19 @@ own — the same property a member publishes for itself, and the one `index` sho
 is what lets offering the list expand no member; what a picked completion stores
 is the member itself.
 
-A member whose `boardNames` never arrived reads blank in the universe for the
-reason its index row does, so the link-bind the backfill has to be paired with
-governs both.
+A member whose `boardNames` never arrived carries no name in either place, so
+the link-bind the backfill has to be paired with governs both. The two read
+differently, because a universe row is a copy and an index row is the member:
+`mentionableRowsOf` coalesces a member with no name to the empty string, while
+the member's index row simply has no `shortName`.
+
+An item takes the universe as a READABLE binding, as it takes `boardNames`, and
+the difference is not cosmetic: a writable binding puts the board's whole
+published row inside the retained link's proof, which runs both directions, and
+a member demand narrower than that row fails the write-back leg — leaving a
+member that cannot be re-sourced with any source, its own bytes included. So
+every board-wired input an exemplar member declares is readable unless it has a
+write to make.
 
 The item is the member: a title, a body, a filing time, and the board's names
 table wired in at creation as `boardNames`. Its body is drafted per session and
@@ -169,7 +200,7 @@ cf piece call --cell /of:<board> backfillNames --json '{"agentName":"Sol"}'
 - `board.test.tsx` — the exemplar end to end: allocation on create, one more
   than the largest name present, a name kept through a rename and through
   leaving the list, the backfill and its idempotence, index rows that are the
-  members and the default an unnamed member's `shortName` reads as, the mention
+  members and the absence an unnamed member's `shortName` reads as, the mention
   universe and the name each of its rows carries, the item reading its own name,
   the bound on what a read of the namespace or the universe expands, a board
   given no namespace at all, and the rejections.
