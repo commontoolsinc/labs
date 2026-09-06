@@ -421,11 +421,20 @@ export class XAppView extends BaseView {
             slug: app.view.pieceSlug,
             member,
           };
-          const landed = await rt.resolveSlug(
-            space,
-            app.view.pieceSlug,
-            member,
-          );
+          let landed: SlugReferenceTarget | SlugReferenceRefusal;
+          try {
+            landed = await rt.resolveSlug(space, app.view.pieceSlug, member);
+          } catch (error) {
+            // Around the resolution alone, for the reason the load below
+            // carries its own wrapper: the outer catch also takes the
+            // refusal's throw, and recording nothing there would undo the
+            // mark that refusal just made. A fault here is the one throw in
+            // the run that reaches no answer at all, so without the mark the
+            // piece the view was already showing stands as this reference's
+            // answer, and nothing asks again.
+            this.#markShown(reference, undefined, signal);
+            throw error;
+          }
           if (signal.aborted) return;
           if (landed.refusal) {
             // A refusal is the reference's answer, and the load-error surface
@@ -673,8 +682,8 @@ export class XAppView extends BaseView {
    * to show a piece for the reference it follows.
    *
    * The poll runs only while the view is on something that is not a piece —
-   * a refusal, or a load that could not finish — and stops the moment a piece
-   * is on screen. A piece already shown is re-resolved by the subscription: a
+   * a refusal, or a run that could not finish its resolution or its load —
+   * and stops the moment a piece is on screen. A piece already shown is re-resolved by the subscription: a
    * member landing in the collection wakes it, and so does a change inside a
    * member, both measured in
    * `packages/runtime-client/test/backends/slug-resolve.test.ts`. Beside
@@ -686,8 +695,10 @@ export class XAppView extends BaseView {
    * set follows values, so a document gaining the pattern identity that MAKES
    * it a piece moves nothing the watch reads. A member whose target is not
    * yet a piece is refused for exactly that reason, which is why re-asking is
-   * what notices it becoming one. A load that could not finish is the other
-   * unshown state, and re-asking is likewise the only thing that retries it.
+   * what notices it becoming one. A run that could not finish is the other
+   * unshown state: a fault in asking or in loading writes nothing anywhere a
+   * subscription watches, so re-asking is likewise the only thing that
+   * retries it.
    *
    * TODO(slug-watch-wake): Drop the poll once a document gaining the pattern
    * identity wakes a watch on the slug that reaches it.
