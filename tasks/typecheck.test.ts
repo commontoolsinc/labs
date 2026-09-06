@@ -509,99 +509,101 @@ describe("typecheck", () => {
       );
     });
   });
-});
 
-describe("excludedByManifest()", () => {
-  it("drops what the manifest excludes and keeps everything else", async () => {
-    // Over-matching here shrinks the population silently, which is the one
-    // direction that turns this file's whole subject into a false green, so
-    // the lookalikes are asserted beside the matches.
+  describe("excludedByManifest()", () => {
+    it("drops what the manifest excludes and keeps everything else", async () => {
+      // Over-matching here shrinks the population silently, which is the one
+      // direction that turns this file's whole subject into a false green, so
+      // the lookalikes are asserted beside the matches.
 
-    const declared = await readWorkspaceMembers(join(REPO_ROOT, "deno.jsonc"));
-    const dropped = await excludedByManifest(
-      REPO_ROOT,
-      declared.map((member) => member.replace(/^\.\//, "")),
-    );
-    const matches = (file: string) =>
-      dropped.some((pattern) => pattern.test(file));
-
-    expect(matches("packages/shell/dist/bundle.ts")).toBe(true);
-    expect(matches("packages/x/node_modules/dep/index.js")).toBe(true);
-    expect(matches("docs/history/old-plan.ts")).toBe(true);
-    expect(matches("packages/runner/src/runner.ts")).toBe(false);
-    // A directory whose name merely starts with an excluded one stays.
-    expect(matches("packages/x/distribution/index.ts")).toBe(false);
-    expect(matches("docs/history-of-things/note.ts")).toBe(false);
-    // And a subcommand's own exclusion is not the type check's. These two
-    // trees are named by `test` and `fmt` blocks in their members, and
-    // `deno check` opens both, so dropping them would leave the gate
-    // claiming less than it covers.
-    expect(matches("packages/patterns/integration/all.test.ts")).toBe(false);
-    expect(matches("packages/js-compiler/test/fixtures/program.ts")).toBe(
-      false,
-    );
-  });
-
-  it("reads a member's own exclude, resolved against that member", async () => {
-    // Stated over a fixture because no member of this workspace declares a
-    // top-level `exclude` today. Asserted against the tree, reading the
-    // members would be indistinguishable from reading only the root, and an
-    // assertion that cannot tell the two apart is not evidence for either.
-
-    const root = await Deno.makeTempDir({ prefix: "typecheck-excludes-" });
-    try {
-      await Deno.writeTextFile(
-        join(root, "deno.jsonc"),
-        `{ "workspace": ["./packages/thing"], "exclude": ["**/dist/"] }`,
+      const declared = await readWorkspaceMembers(
+        join(REPO_ROOT, "deno.jsonc"),
       );
-      await Deno.mkdir(join(root, "packages", "thing"), { recursive: true });
-      await Deno.writeTextFile(
-        join(root, "packages", "thing", "deno.jsonc"),
-        `{ "exclude": ["generated/"] }`,
+      const dropped = await excludedByManifest(
+        REPO_ROOT,
+        declared.map((member) => member.replace(/^\.\//, "")),
       );
-
-      const dropped = await excludedByManifest(root, ["packages/thing"]);
       const matches = (file: string) =>
         dropped.some((pattern) => pattern.test(file));
 
-      expect(matches("packages/thing/generated/schema.ts")).toBe(true);
-      // Resolved against the member, so the same name elsewhere survives.
-      expect(matches("packages/other/generated/schema.ts")).toBe(false);
-      expect(matches("generated/schema.ts")).toBe(false);
-      // And the root's own exclusions still apply everywhere.
-      expect(matches("packages/thing/dist/out.js")).toBe(true);
-    } finally {
-      await Deno.remove(root, { recursive: true });
-    }
+      expect(matches("packages/shell/dist/bundle.ts")).toBe(true);
+      expect(matches("packages/x/node_modules/dep/index.js")).toBe(true);
+      expect(matches("docs/history/old-plan.ts")).toBe(true);
+      expect(matches("packages/runner/src/runner.ts")).toBe(false);
+      // A directory whose name merely starts with an excluded one stays.
+      expect(matches("packages/x/distribution/index.ts")).toBe(false);
+      expect(matches("docs/history-of-things/note.ts")).toBe(false);
+      // And a subcommand's own exclusion is not the type check's. These two
+      // trees are named by `test` and `fmt` blocks in their members, and
+      // `deno check` opens both, so dropping them would leave the gate
+      // claiming less than it covers.
+      expect(matches("packages/patterns/integration/all.test.ts")).toBe(false);
+      expect(matches("packages/js-compiler/test/fixtures/program.ts")).toBe(
+        false,
+      );
+    });
+
+    it("reads a member's own exclude, resolved against that member", async () => {
+      // Stated over a fixture because no member of this workspace declares a
+      // top-level `exclude` today. Asserted against the tree, reading the
+      // members would be indistinguishable from reading only the root, and an
+      // assertion that cannot tell the two apart is not evidence for either.
+
+      const root = await Deno.makeTempDir({ prefix: "typecheck-excludes-" });
+      try {
+        await Deno.writeTextFile(
+          join(root, "deno.jsonc"),
+          `{ "workspace": ["./packages/thing"], "exclude": ["**/dist/"] }`,
+        );
+        await Deno.mkdir(join(root, "packages", "thing"), { recursive: true });
+        await Deno.writeTextFile(
+          join(root, "packages", "thing", "deno.jsonc"),
+          `{ "exclude": ["generated/"] }`,
+        );
+
+        const dropped = await excludedByManifest(root, ["packages/thing"]);
+        const matches = (file: string) =>
+          dropped.some((pattern) => pattern.test(file));
+
+        expect(matches("packages/thing/generated/schema.ts")).toBe(true);
+        // Resolved against the member, so the same name elsewhere survives.
+        expect(matches("packages/other/generated/schema.ts")).toBe(false);
+        expect(matches("generated/schema.ts")).toBe(false);
+        // And the root's own exclusions still apply everywhere.
+        expect(matches("packages/thing/dist/out.js")).toBe(true);
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
   });
-});
 
-describe("outermost()", () => {
-  it("drops a member another member contains, and keeps the rest", () => {
-    // Dropping too much is the dangerous direction: a member wrongly
-    // removed here is a tree the coverage walk stops visiting, which is
-    // the silence this file exists to break. So the sibling and the
-    // lookalike prefix are asserted alongside the nesting.
+  describe("outermost()", () => {
+    it("drops a member another member contains, and keeps the rest", () => {
+      // Dropping too much is the dangerous direction: a member wrongly
+      // removed here is a tree the coverage walk stops visiting, which is
+      // the silence this file exists to break. So the sibling and the
+      // lookalike prefix are asserted alongside the nesting.
 
-    expect(outermost([
-      "./packages/patterns",
-      "./packages/patterns/auth",
-      "./packages/patterns-adjacent",
-      "./packages/runner",
-      "./tasks",
-    ])).toEqual([
-      "packages/patterns",
-      "packages/patterns-adjacent",
-      "packages/runner",
-      "tasks",
-    ]);
-  });
+      expect(outermost([
+        "./packages/patterns",
+        "./packages/patterns/auth",
+        "./packages/patterns-adjacent",
+        "./packages/runner",
+        "./tasks",
+      ])).toEqual([
+        "packages/patterns",
+        "packages/patterns-adjacent",
+        "packages/runner",
+        "tasks",
+      ]);
+    });
 
-  it("keeps every member when the workspace nests nowhere", () => {
-    expect(outermost(["./packages/api", "./scripts"])).toEqual([
-      "packages/api",
-      "scripts",
-    ]);
+    it("keeps every member when the workspace nests nowhere", () => {
+      expect(outermost(["./packages/api", "./scripts"])).toEqual([
+        "packages/api",
+        "scripts",
+      ]);
+    });
   });
 });
 
