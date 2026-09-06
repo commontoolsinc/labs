@@ -8,8 +8,8 @@ import type { OperationFieldSnapshot } from "@commonfabric/memory/v2";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import type { CellHandle } from "@/cell-handle.ts";
-import { RuntimeClient } from "@/runtime-client.ts";
 import { type CellRef, NotificationType, RequestType } from "@/protocol/mod.ts";
+import { RuntimeClient } from "@/runtime-client.ts";
 import { buildProcessor } from "./backends/build-processor.ts";
 
 const operationRuntime = (

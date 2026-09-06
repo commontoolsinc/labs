@@ -2099,8 +2099,8 @@ export class RuntimeProcessor {
   // These are one walk with two implementations, and this is the copy to
   // retire.
   //
-  // TODO(danfuzz): Refuse a cell that is not a piece cell here, once the
-  // walk above is the one copy and says so.
+  // TODO(danfuzz): Refuse a cell that is not a piece cell in the surviving
+  // walk, once `parseSlugRedirect` is the one copy.
   async handlePieceGet(
     request: PieceGetRequest,
   ): Promise<PieceResponse> {
@@ -2247,7 +2247,9 @@ export class RuntimeProcessor {
   ): Promise<BooleanResponse> {
     const cc = this.#getSpaceCtx(request.space);
     await cc.startPiece(request.pieceId, request.scope);
-    // TODO(danfuzz): Report whether the piece was found and started, once
+    // A missing piece throws in `startPiece()`, so `true` here means the
+    // piece started.
+    // TODO(danfuzz): Report whether it was already running, once
     // `startPiece()` says so.
     return { value: true };
   }
@@ -2257,8 +2259,10 @@ export class RuntimeProcessor {
   ): Promise<BooleanResponse> {
     const cc = this.#getSpaceCtx(request.space);
     await cc.stopPiece(request.pieceId, request.scope);
-    // TODO(danfuzz): Report whether the piece was found and stopped, once
-    // `stopPiece()` says so.
+    // A missing piece throws in `stopPiece()`, so `true` here means the
+    // piece is stopped, whether or not it was running.
+    // TODO(danfuzz): Report whether it was running, once `stopPiece()`
+    // says so.
     return { value: true };
   }
 
