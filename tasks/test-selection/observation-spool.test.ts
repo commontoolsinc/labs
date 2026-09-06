@@ -147,6 +147,21 @@ describe("ObservationSpool", () => {
       expect(spool.count).toBe(0);
     });
 
+    it("refuses a replay started while another is running", () => {
+      // Both would move the one file cursor these share.
+      using spool = new ObservationSpool();
+      spool.add([observation("stored", "2026-08-20T01:00:00Z")]);
+      expect(() => {
+        for (const _ of spool) for (const __ of spool);
+      }).toThrow("already being replayed");
+    });
+
+    it("replays again once the previous replay has finished", () => {
+      using spool = new ObservationSpool();
+      spool.add([observation("stored", "2026-08-20T01:00:00Z")]);
+      expect([...spool]).toEqual([...spool]);
+    });
+
     it("refuses a truncated payload and removes it on disposal", () => {
       const created = spy(Deno, "makeTempFileSync");
       try {

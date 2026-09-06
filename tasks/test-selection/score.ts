@@ -465,12 +465,23 @@ export interface FoldOptions {
  * last said and forwards at what it says next. Observations at one commit
  * are considered together: an identity that both passed and failed there
  * disagreed with itself, which is a flake observation and never a catch.
- * The iterable must replay the complete batch on each iteration.
+ *
+ * Both of those need the whole batch in view before any one observation is
+ * judged, so this walks the batch more than once and the iterable has to
+ * replay it each time. A one-shot iterator would leave every pass after
+ * the first with nothing to read and score the batch as though most of it
+ * had never run, so one is refused rather than folded.
  */
 export function foldObservations(
   observations: Iterable<Observation>,
   options: FoldOptions = {},
 ): FoldResult {
+  // An iterator is its own iterable, which is what tells the two apart.
+  if (Object.is(observations[Symbol.iterator](), observations)) {
+    throw new Error(
+      "foldObservations needs an iterable that replays, not an iterator.",
+    );
+  }
   const states = options.prior ?? new Map<string, IdentityState>();
   const coveredChanged = options.coveredChanged ?? (() => true);
   const context = options.context ?? emptyContext();
@@ -490,14 +501,30 @@ export function foldObservations(
   const failures = context.failures;
   const recent = context.recentCommits;
 
-  // The failure witness first, so that the pass below can tell a test
-  // that has failed from one that never has.
+  // The failure witness first, so that the pass below can tell a test that
+  // has failed from one that never has. What the default branch said at
+  // each commit is gathered alongside it: only the classification pass
+  // reads that, and it depends on nothing gathered here, so it rides along
+  // rather than walking the batch again. Gathering it before anything is
+  // judged is what stops a failure elsewhere at one commit being weighed
+  // against whatever `main` happened to say last in this batch.
+  const mainAtCommit = new Map<string, "pass" | "fail" | "skip">();
   for (const observation of observations) {
-    if (observation.outcome !== "fail") continue;
     const key = testIdentityKey(observation.test);
-    const list = failures.get(key) ?? [];
-    list.push({ day: observation.day, source: observation.source });
-    failures.set(key, list);
+    if (observation.outcome === "fail") {
+      const list = failures.get(key) ?? [];
+      list.push({ day: observation.day, source: observation.source });
+      failures.set(key, list);
+    }
+    if (observation.place !== "main" || observation.outcome === "skip") {
+      continue;
+    }
+    const at = `${key} ${observation.commit}`;
+    // A failure anywhere at one commit is the commit being broken; a pass
+    // beside it does not clear that.
+    if (observation.outcome === "fail" || !mainAtCommit.has(at)) {
+      mainAtCommit.set(at, observation.outcome);
+    }
   }
 
   // Outcomes at a commit, for as long as they can still be asked about.
@@ -536,23 +563,6 @@ export function foldObservations(
     const outcomes = seen.identities.get(key) ?? new Set<string>();
     outcomes.add(observation.outcome);
     seen.identities.set(key, outcomes);
-  }
-
-  // What the default branch said at each commit, gathered before anything
-  // is judged. Otherwise a failure elsewhere at the same commit is
-  // classified against whatever `main` had said *last*, which depends on
-  // whether this batch happened to list the `main` run first.
-  const mainAtCommit = new Map<string, "pass" | "fail" | "skip">();
-  for (const observation of observations) {
-    if (observation.place !== "main" || observation.outcome === "skip") {
-      continue;
-    }
-    const at = `${testIdentityKey(observation.test)} ${observation.commit}`;
-    // A failure anywhere at one commit is the commit being broken; a pass
-    // beside it does not clear that.
-    if (observation.outcome === "fail" || !mainAtCommit.has(at)) {
-      mainAtCommit.set(at, observation.outcome);
-    }
   }
 
   const environmental = (key: string, day: string, source: string): boolean => {

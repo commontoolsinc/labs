@@ -170,6 +170,18 @@ name, so shard order does not describe when the runs happened. Same-commit
 disagreement and environmental failures also require evidence from the
 whole day before any failure is classified.
 
+A busy day is about six million observations, so the temporary file for
+one runs to a gigabyte or two. One day is live at a time, and its file is
+removed before the next day is read.
+
+Keeping those observations in memory rather than in a file would fit
+today. Folding the largest day so far peaks a little over a gigabyte with
+the file, and holding what it spooled would add an estimated gigabyte and
+a half to two gigabytes, against a heap V8 caps near four gigabytes. That
+estimate comes from the size of an observation rather than from a measured
+run without the file. The file is what leaves room for the corpus to grow
+into.
+
 The temporary file is removed when the day finishes or the read fails.
 A shard that cannot be read ends the publisher run without writing a
 manifest or aggregate. The previous manifest stays newest. Completed

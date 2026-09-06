@@ -241,8 +241,9 @@ export interface ReadReport {
 
 /**
  * Reads one stored object. A report a decision must not read contributes
- * nothing: a fork run's records are authored by the fork, and a group
- * with no context cannot say where it came from.
+ * nothing: a fork run's records are authored by the fork, a group with no
+ * context cannot say where it came from, and a group whose start time is
+ * not a time has no place in the order the rules read along.
  */
 export function readReport(
   report: StoredReport,
@@ -253,7 +254,12 @@ export function readReport(
   const durations = new Map<string, Map<string, number[]>>();
   for (const group of report.reports) {
     const where = provenance(group.context, report.objectName);
-    if (where === undefined || group.context === undefined) continue;
+    if (
+      where === undefined || group.context === undefined ||
+      !Number.isFinite(Date.parse(group.context.startedAt))
+    ) {
+      continue;
+    }
     const day = dayOf(group.context.startedAt);
     for (const record of group.records) {
       const test = resolver.resolve(record.test, day);

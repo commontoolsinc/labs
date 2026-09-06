@@ -1,5 +1,8 @@
 import type { Observation } from "./score.ts";
 
+const ENCODER = new TextEncoder();
+const DECODER = new TextDecoder();
+
 /**
  * A replayable batch in time order. Observations live in a temporary file;
  * memory holds one run's payload and an offset and timestamp per run.
@@ -9,6 +12,7 @@ export class ObservationSpool implements Disposable, Iterable<Observation> {
   readonly #file: Deno.FsFile;
   readonly #runs: { at: number; offset: number; length: number }[] = [];
   #length = 0;
+  #replaying = false;
   #count = 0;
   #latest: { at: number; day: string } | undefined;
 
@@ -46,7 +50,7 @@ export class ObservationSpool implements Disposable, Iterable<Observation> {
     ) {
       throw new Error("An observation run must have one valid start time.");
     }
-    const bytes = new TextEncoder().encode(JSON.stringify(observations));
+    const bytes = ENCODER.encode(JSON.stringify(observations));
     this.#file.seekSync(this.#length, Deno.SeekMode.Start);
     for (let written = 0; written < bytes.length;) {
       const count = this.#file.writeSync(bytes.subarray(written));
@@ -63,10 +67,39 @@ export class ObservationSpool implements Disposable, Iterable<Observation> {
     }
   }
 
-  /** Replays the complete batch, preserving insertion order at equal times. */
+  /**
+   * Replays the complete batch, preserving insertion order at equal times.
+   *
+   * One replay at a time: every replay moves the one file cursor these
+   * share, so two running at once would each read from where the other
+   * left off and yield whatever those bytes happened to be.
+   */
   *[Symbol.iterator](): Generator<Observation> {
-    this.#runs.sort((a, b) => a.at - b.at);
-    for (const run of this.#runs) {
+    if (this.#replaying) {
+      throw new Error("The observation spool is already being replayed.");
+    }
+    this.#replaying = true;
+    try {
+      yield* this.#replay();
+    } finally {
+      this.#replaying = false;
+    }
+  }
+
+  /** Closes and removes the temporary file. */
+  [Symbol.dispose](): void {
+    try {
+      this.#file.close();
+    } finally {
+      Deno.removeSync(this.#path);
+    }
+  }
+
+  /** Reads every run back, oldest first. */
+  *#replay(): Generator<Observation> {
+    // A copy, so that reading the batch does not reorder it.
+    const runs = [...this.#runs].sort((a, b) => a.at - b.at);
+    for (const run of runs) {
       this.#file.seekSync(run.offset, Deno.SeekMode.Start);
       const bytes = new Uint8Array(run.length);
       for (let read = 0; read < bytes.length;) {
@@ -79,19 +112,8 @@ export class ObservationSpool implements Disposable, Iterable<Observation> {
         }
         read += count;
       }
-      const observations = JSON.parse(
-        new TextDecoder().decode(bytes),
-      ) as Observation[];
+      const observations = JSON.parse(DECODER.decode(bytes)) as Observation[];
       yield* observations;
-    }
-  }
-
-  /** Closes and removes the temporary file. */
-  [Symbol.dispose](): void {
-    try {
-      this.#file.close();
-    } finally {
-      Deno.removeSync(this.#path);
     }
   }
 }

@@ -234,6 +234,19 @@ describe("build", () => {
       expect(byDay.get("2026-08-20")).toEqual([10, 90]);
     });
 
+    it("reads nothing from a group whose start time is not a time", () => {
+      // Every rule reads along the order these are sorted into, and a
+      // start time that will not parse has no place in it.
+      expect(
+        readReport(
+          stored(CI_NAME, context({ startedAt: "2026-08-20Tnonsense" }), [
+            record(),
+          ]),
+          NO_ALIASES,
+        ).observations,
+      ).toEqual([]);
+    });
+
     it("reads nothing from a fork run", () => {
       const forked = context();
       forked.ci!.fork = true;
