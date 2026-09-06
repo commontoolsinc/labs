@@ -121,10 +121,10 @@ mention-universe entry — which is the spelling the Topics board and Topic ship
 Optional rather than defaulted, and the two are not interchangeable: a defaulted
 property moves a demand's defaults below an array constraint the compatibility
 proof cannot show stable under default insertion, and dropping the default
-without making the property optional makes it newly required. The row demand and
-the item's publication also have to move together, or the pattern compiler
-refuses the board at the two places an item meets the row type: the `addItem`
-result, and the push into `items`.
+without making the property optional makes it newly required. The item publishes
+it the same way because that is what `TopicPiece` ships, not because the demand
+forces it; `ItemOutput.shortName` in `item.tsx` says which pairing of the two
+the compiler does refuse.
 
 The bound on what that buys is worth stating, because it is narrower than it
 looks. The spelling is about the READ: a board whose members publish no name

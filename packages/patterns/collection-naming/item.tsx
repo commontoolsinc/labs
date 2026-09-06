@@ -164,19 +164,21 @@ export interface ItemOutput {
    * `packages/ui/src/v2/components/cf-code-editor/cf-code-editor.ts` reads an
    * absent name exactly as it reads a blank one).
    *
-   * Optional rather than defaulted, and two things settle that. The lookup
-   * produces no value for an item no board has named, so there is nothing to
-   * publish; and the board's row demand is optional, because a board's stored
-   * list is validated against that demand and a defaulted property there
-   * moves its defaults below an array constraint the compatibility proof
-   * cannot show stable under default insertion.
+   * Optional rather than defaulted, and the derivation settles half of it:
+   * `ownName` produces no value for an item no board has named, so whatever
+   * stands here has to admit that absence. Two spellings do, and this takes
+   * the one `TopicPiece` ships. The other — a required property whose type
+   * admits `undefined` — keeps the property in the schema's `required` list,
+   * so a member with no name reads as present-and-undefined rather than as
+   * absent.
    *
-   * The constraint between the two runs one way, which is what pairs their
-   * spellings. A required publication satisfies either demand, since it always
-   * provides a string. An optional one satisfies only an optional demand, so a
-   * required row is refused where an item meets it — `string | undefined` is
-   * not assignable to `string`, at the `addItem` result and the push into
-   * `items`.
+   * The board's row demand is optional for a reason of its own, and the
+   * constraint between the two does NOT pair their spellings. A required
+   * publication satisfies either demand, since it always provides a string,
+   * so the demand could be optional with this one left as it was. What the
+   * compiler refuses is the other pairing: an optional publication satisfies
+   * only an optional demand, so a required ROW is refused where an item meets
+   * it, at the `addItem` result and the push into `items`.
    */
   shortName?: string;
 

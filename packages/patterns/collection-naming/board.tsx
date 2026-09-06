@@ -61,9 +61,10 @@ export interface ItemIndexRow {
    * accepts: a defaulted property moves the demand's defaults below an array
    * constraint the proof cannot show stable under default insertion, while an
    * optional one carries no default to move. `ItemOutput` publishes it the
-   * same way, and the two have to agree — an optional publication does not
-   * satisfy a required row, so the pattern compiler refuses the board where
-   * an item meets this type.
+   * same way, which is alignment rather than a constraint this type imposes:
+   * a required publication would satisfy this demand too. What the compiler
+   * refuses is the other pairing, a required row against an optional
+   * publication; `ItemOutput.shortName` in `item.tsx` states it in full.
    *
    * An item whose lookup has produced no value — one created a moment ago, or
    * one from before the board numbered anything — is absent here rather than

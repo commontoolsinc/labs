@@ -47,14 +47,19 @@ themselves, and `naming.ts` is untouched. The mention universe's binding became
 readable in the same change, which is a separate decision recorded in
 [`collection-naming-mentionable-readonly-break.md`](collection-naming-mentionable-readonly-break.md).
 
-The two halves have to move together. With the item publishing an optional
-property and the board's row demanding a defaulted one, the pattern compiler
-refuses the board at the two places an item meets the row type — the `addItem`
-result and the push into `items` — reporting that `string | undefined` is not
-assignable to `string | ("" & DefaultMarker<"">)`. That was measured at
-`3d0f1e80ae` by declaring `ItemIndexRow.shortName: string | Default<"">`
-against the aligned item and running `deno task cfcheck`, which named
-`board.tsx` lines 230 and 253.
+The publication moved because `TopicPiece` publishes it that way, not because
+the row demand forced it. The constraint between the two runs one way, measured
+on copies of the exemplar carrying one probe property and nothing else changed:
+a required publication satisfies an optional demand and a required one alike,
+and the demand can be made optional with the publication left as it was. What
+the compiler refuses is the other pairing — with the item publishing an
+optional property and the board's row demanding a defaulted one, it refuses the
+board at the two places an item meets the row type, the `addItem` result and
+the push into `items`, reporting that `string | undefined` is not assignable to
+`string | ("" & DefaultMarker<"">)`. That was measured at `3d0f1e80ae` by
+declaring `ItemIndexRow.shortName: string | Default<"">` against the aligned
+item and running `deno task cfcheck`, which named `board.tsx` lines 230 and
+253.
 
 ## Why this could not be done compatibly
 
