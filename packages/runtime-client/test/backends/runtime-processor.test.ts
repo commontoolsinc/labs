@@ -46,6 +46,7 @@ import {
 } from "@commonfabric/runner";
 import {
   atomsOutsideCeiling,
+  CFC_ENFORCEMENT_MODES,
   cfcLabelViewForCell,
   linkCfcLabelView,
   setLinkCfcLabelView,
@@ -5084,6 +5085,34 @@ describe("runtime-processor", () => {
       expect(options.patternEnvironment?.apiUrl.href).toBe(
         "http://worker.test/",
       );
+    });
+
+    it("refuses to build the worker runtime on a mode off the ladder", async () => {
+      // The host states this dial in a message, so the name arrives as plain
+      // data and the protocol type says nothing about what came over.
+      const storageManager = StorageManager.emulate({ as: cfcSigner });
+      try {
+        expect(() =>
+          new Runtime(runtimePresets.browserWorker(
+            browserWorkerParamsFromInitializationData(
+              {
+                apiUrl: "http://worker.test/",
+                identity: {} as never,
+                spaceDid: "did:key:space",
+                cfcEnforcementMode: "enforce-strictly",
+              } as unknown as Parameters<
+                typeof browserWorkerParamsFromInitializationData
+              >[0],
+              storageManager,
+              { marker() {} } as unknown as Parameters<
+                typeof browserWorkerParamsFromInitializationData
+              >[2],
+            ),
+          ))
+        ).toThrow(CFC_ENFORCEMENT_MODES.join(", "));
+      } finally {
+        await storageManager.close();
+      }
     });
 
     it("falls back to the shared CFC pin when the host sends no dial", () => {
