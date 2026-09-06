@@ -30,11 +30,19 @@ export interface WorkerOptions {
   };
 }
 
+/** The `error` event a worker controller dispatches on a terminal failure. */
 export class WorkerControllerErrorEvent extends Event {
-  error?: ErrorEvent;
+  #error: ErrorEvent | undefined;
+
+  /** Constructs an instance carrying `cause`, the worker's own error event. */
   constructor(cause?: ErrorEvent) {
     super("error");
-    this.error = cause;
+    this.#error = cause;
+  }
+
+  /** The worker's own error event, if the worker reported one. */
+  get error(): ErrorEvent | undefined {
+    return this.#error;
   }
 }
 
@@ -66,9 +74,6 @@ export class WorkerController extends EventTarget {
    * ready, rejected with the error that stopped it.
    */
   #initializeDeferred = defer();
-
-  /** Promise that resolves when the worker is fully initialized. */
-  public initializeResolve = this.#initializeDeferred.promise;
 
   #state = WorkerState.Uninitialized;
 
@@ -105,6 +110,11 @@ export class WorkerController extends EventTarget {
       exec: (type, data) => this.#exec(type, data),
       onWorkerMessage: (event) => this.#onWorkerMessage(event),
     };
+  }
+
+  /** Promise that settles when the worker is initialized or has failed to. */
+  get initializeResolve(): Promise<void> {
+    return this.#initializeDeferred.promise;
   }
 
   async startInitialize() {
