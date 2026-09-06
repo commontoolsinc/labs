@@ -161,11 +161,20 @@ choose.
 
 A run reaching a pair nothing is folded from takes that day whole from
 its rollup, which is a manifest and a few tens of shards against the
-day's thousands of raw objects. It reads a day whole or not at all: a
-shard it could not read would leave the day partly folded, and recording
-the day as done would then hide the rest of it from every later run. The
-days it did take are recorded, so no later run over a wide window folds
-their raw objects on top and doubles every catch in them.
+day's thousands of raw objects. The publisher reads four shards at a time
+and writes each run's observations to a temporary file. It keeps an offset
+and timestamp per run in memory. The fold replays that file in time order
+for each evidence pass and the classification pass, holding one run's
+observations at a time. Shards are assigned by a hash of the raw object's
+name, so shard order does not describe when the runs happened. Same-commit
+disagreement and environmental failures also require evidence from the
+whole day before any failure is classified.
+
+The temporary file is removed when the day finishes or the read fails.
+A shard that cannot be read ends the publisher run without writing a
+manifest or aggregate. The previous manifest stays newest. Completed
+days are recorded, so no later run over a wide window folds their raw
+objects on top and doubles every catch in them.
 
 A rollup is written by the one principal here whose credential exists as
 key material, so it carries weaker provenance than the raw records it

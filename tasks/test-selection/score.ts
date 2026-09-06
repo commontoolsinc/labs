@@ -465,9 +465,10 @@ export interface FoldOptions {
  * last said and forwards at what it says next. Observations at one commit
  * are considered together: an identity that both passed and failed there
  * disagreed with itself, which is a flake observation and never a catch.
+ * The iterable must replay the complete batch on each iteration.
  */
 export function foldObservations(
-  observations: readonly Observation[],
+  observations: Iterable<Observation>,
   options: FoldOptions = {},
 ): FoldResult {
   const states = options.prior ?? new Map<string, IdentityState>();
