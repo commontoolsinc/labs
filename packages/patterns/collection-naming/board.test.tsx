@@ -2,7 +2,7 @@
  * Pattern tests for the exemplar board and its item: allocation on create,
  * density, a name never reused, a name kept whatever happens to its item, the
  * backfill, its idempotence, a backfilled name following its member when the
- * list shifts under it and an empty position naming nothing, index rows that
+ * list shifts under it and only a member taking a name, index rows that
  * are the members and the default an unnamed member's `shortName` reads as,
  * the mention universe and the name each of its rows carries, the item reading
  * its own name out of the board's table, the declaration, the bound on what a
@@ -532,33 +532,38 @@ export default pattern(() => {
       equals(map["2"] as object, shiftItems.key(0));
   });
 
-  // A position holding nothing names nothing, `null` as much as `undefined`.
-  // Both sit ahead of the member so that skipping only one of them is visible:
-  // the member takes the first name, and a run that named either value would
-  // show up in what it returned as well as in what it wrote. The list declares
-  // the two so the case needs no cast, and the library is called directly
-  // because no board admits that shape — `Board` demands `ItemDemand` of every
-  // position, which neither value satisfies.
-  const holeItems = new Writable<
-    (ItemDemand | null | undefined)[] | Default<[]>
+  // Only a position holding a member takes a name. Four values that are not
+  // one sit ahead of the member, one per way the guard could be narrowed:
+  // `undefined` and `null` for the two halves of "holds nothing", and a
+  // truthy number and a truthy string so that a truthiness test is no
+  // substitute either. The member behind them takes the FIRST name, so any
+  // value named ahead of it shows up in what the run returned as much as in
+  // what it wrote. The list declares the four so the case needs no cast, and
+  // the library is called directly because no board admits that shape —
+  // `Board` demands `ItemDemand` of every position, which none of them
+  // satisfies.
+  const nonMemberItems = new Writable<
+    (ItemDemand | null | undefined | number | string)[] | Default<[]>
   >([]);
-  const holeNames = new Writable<NamesMap>({});
-  const action_file_behind_two_empty_positions = action(() => {
-    holeItems.set([
+  const nonMemberNames = new Writable<NamesMap>({});
+  const action_file_behind_non_members = action(() => {
+    nonMemberItems.set([
       undefined,
       null,
-      Item({ title: "Behind the empty positions", createdAt: 1 }),
+      42,
+      "not a member",
+      Item({ title: "Behind the non-members", createdAt: 1 }),
     ]);
   });
-  const action_backfill_over_the_empty_positions = action(() => {
-    assigned.set(backfillNames(holeItems, holeNames));
+  const action_backfill_over_non_members = action(() => {
+    assigned.set(backfillNames(nonMemberItems, nonMemberNames));
   });
-  const assert_an_empty_position_names_nothing = assert(() =>
+  const assert_only_a_member_takes_a_name = assert(() =>
     assigned.get().join(",") === "1" &&
-    Object.keys((holeNames.get() ?? {}) as NamesMap).join(",") === "1" &&
+    Object.keys((nonMemberNames.get() ?? {}) as NamesMap).join(",") === "1" &&
     equals(
-      ((holeNames.get() ?? {}) as NamesMap)["1"] as object,
-      holeItems.key(2),
+      ((nonMemberNames.get() ?? {}) as NamesMap)["1"] as object,
+      nonMemberItems.key(4),
     )
   );
 
@@ -704,9 +709,9 @@ export default pattern(() => {
       { assertion: assert_the_shifting_pair_is_named },
       { action: action_remove_the_first_that_shifts },
       { assertion: assert_a_backfilled_name_follows_its_member },
-      { action: action_file_behind_two_empty_positions },
-      { action: action_backfill_over_the_empty_positions },
-      { assertion: assert_an_empty_position_names_nothing },
+      { action: action_file_behind_non_members },
+      { action: action_backfill_over_non_members },
+      { assertion: assert_only_a_member_takes_a_name },
       { assertion: assert_bare_board_has_no_items },
       { assertion: assert_bare_board_names_read_empty },
       { action: action_bare_board_creates },
