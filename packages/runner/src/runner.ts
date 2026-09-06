@@ -1868,9 +1868,6 @@ type PieceRegistration = Cancel & { graphIsInstalled: () => boolean };
 
 export class Runner {
   #runtime: Runtime;
-  // A member below declared `private` rather than `#` is one the runner suites
-  // reach and drive directly; a `#` name would put it out of their reach.
-
   readonly #cancels = new Map<
     `${MemorySpace}/${ScopeKey}/${URI}`,
     PieceRegistration
