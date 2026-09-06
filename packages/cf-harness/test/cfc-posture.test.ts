@@ -55,6 +55,7 @@ describe("cfc-posture", () => {
       const record = harnessFabricSessionPosture({
         ...SESSION,
         cfcPosture: "max-enforcement",
+        // The two rungs the assertions below read back.
         cfcEnforcementMode: "enforce-strict",
         cfcFlowLabels: "observe",
       });
@@ -92,7 +93,10 @@ describe("cfc-posture", () => {
     });
 
     it("marks a diagnostic rung as deciding nothing", () => {
-      expect(rendered(SESSION)).toContain("off (diagnostic only) — decides on");
+      // `off` is the rung the assertion reads back.
+      expect(rendered({ ...SESSION, cfcFlowLabels: "off" })).toContain(
+        "off (diagnostic only) — decides on",
+      );
     });
 
     it("prints every ungated sink with the reason it releases ungated", () => {

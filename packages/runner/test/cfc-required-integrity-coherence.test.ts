@@ -137,10 +137,14 @@ describe("CFC requiredIntegrity coherence (B5)", () => {
       required: unknown,
     ): Promise<{ ok: boolean; message?: string }> => {
       const storageManager = StorageManager.emulate({ as: signer });
+      // The subject here is the read-side coherence matcher. The sink
+      // receives a literal carrying no endorsement of its own, and the
+      // observing rung of the write-floor dial is what lets "admits a shared
+      // witness across every consumed read" reach a committed transaction.
       const runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
+        cfcWriteFloor: "observe",
       });
       try {
         for (const [index, witness] of witnesses.entries()) {
@@ -176,6 +180,9 @@ describe("CFC requiredIntegrity coherence (B5)", () => {
               },
             },
             required: ["out"],
+            // The sink holds what the sources carry, so it declares their
+            // confidentiality at the root the transaction writes.
+            ifc: { confidentiality: ["s"] },
           } as JSONSchema,
           tx,
         ).set({ out: "derived" });
@@ -241,6 +248,9 @@ describe("CFC requiredIntegrity coherence (B5)", () => {
         },
       },
       required: ["out"],
+      // The sink holds what the sources carry, so it declares their
+      // confidentiality at the root the transaction writes.
+      ifc: { confidentiality: ["s"] },
     } as JSONSchema;
 
     // Seed two labeled sources (witnesses A and B), then run one tx that reads
@@ -254,10 +264,15 @@ describe("CFC requiredIntegrity coherence (B5)", () => {
       readBAfterWrite: boolean,
     ): Promise<{ ok: boolean; message?: string }> => {
       const storageManager = StorageManager.emulate({ as: signer });
+      // The subject here is the read-side coherence matcher. The sink
+      // receives a literal carrying no endorsement of its own, and the
+      // observing rung of the write-floor dial is what lets "admits a
+      // heterogeneous witness pair when the second read is past the write
+      // bound" reach a committed transaction.
       const runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
+        cfcWriteFloor: "observe",
       });
       try {
         for (const [index, witness] of [witnessA, witnessB].entries()) {

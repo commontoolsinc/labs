@@ -22,7 +22,12 @@ describe("CFC tx state contracts", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      // The strengthen-after-prepare test raises each of these modes a rung
+      // and asserts the prepared digest turns from "prepared" to
+      // "invalidated". That transition needs the transaction to start on a
+      // rung below the top of each ladder.
+      cfcFlowLabels: "off",
+      cfcWriteFloor: "off",
     });
     try {
       await fn(runtime, runtime.edit() as ExtendedStorageTransaction);
@@ -55,7 +60,6 @@ describe("CFC tx state contracts", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       cfcSinkMaxConfidentiality: { fetchJson: [] },
     });
     try {
@@ -116,7 +120,7 @@ describe("CFC tx state contracts", () => {
       });
       tx.prepareCfc();
       expect(tx.getCfcState().prepare.status).toBe("prepared");
-      tx.setCfcFlowLabelsMode("off"); // no change from default off → no-op
+      tx.setCfcFlowLabelsMode("off"); // no change from the pinned off → no-op
       expect(tx.getCfcState().prepare.status).toBe("prepared");
       tx.setCfcFlowLabelsMode("observe"); // real change → invalidate
       const flow = tx.getCfcState().prepare;

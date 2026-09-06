@@ -38,8 +38,6 @@ describe("cf cell get transforms", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
-      cfcFlowLabels: "persist",
       errorHandlers: [
         (error) => runtimeErrors.push({ message: error.message }),
       ],
@@ -2055,118 +2053,143 @@ describe("cf cell get transforms", () => {
     }
   });
 
-  it("carries predicate labels on filtered membership like a pattern", async () => {
-    await seedLabeledDoc(runtime, "filter-element-a", {
-      id: 1,
-      status: "open",
-    }, "alice-secret");
-    await seedLabeledDoc(runtime, "filter-element-b", {
-      id: 2,
-      status: "closed",
-    }, "bob-secret");
+  describe("the labels a selection carries", () => {
+    // The two assertions here read a derived label component back out of
+    // storage through `derivedConfidentiality`. Persisting flow labels
+    // writes that component. It reaches a probe document that declares no
+    // ceiling of its own at the enforcement rungs where the writer-fit rule
+    // measures a written value's taint, which is every rung below
+    // `enforce-strict`.
+    let measuring: Runtime;
 
-    const setup = runtime.edit();
-    const elementA = runtime.getCell(
-      space,
-      "filter-element-a",
-      undefined,
-      setup,
-    );
-    const elementB = runtime.getCell(
-      space,
-      "filter-element-b",
-      undefined,
-      setup,
-    );
-    const source = runtime.getCell(
-      space,
-      "labeled-filter-source",
-      { type: "array", items: { asCell: ["cell"] } },
-      setup,
-    );
-    source.set([elementA, elementB]);
-    expect((await setup.commit()).ok).toBeDefined();
-    const sourceRead = runtime.getCell(
-      space,
-      "labeled-filter-source",
-      { type: "array", items: { asCell: ["cell"] } },
-    );
-
-    let outputCell: Cell<unknown> | undefined;
-    const result = await deriveSelectedValue(runtime, space, sourceRead, {
-      filter: parseSelectionFilter('.status == "open"'),
-    }, {
-      onOutputCell: (cell) => outputCell = cell,
+    beforeEach(() => {
+      measuring = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+        cfcEnforcementMode: "enforce-explicit",
+        cfcFlowLabels: "persist",
+      });
     });
-    expect(result).toEqual([{ id: 1, status: "open" }]);
 
-    const probeTx = runtime.edit();
-    const kept = outputCell!.withTx(probeTx).get() as unknown[];
-    const probe = runtime.getCell(
-      space,
-      "filter-membership-probe",
-      undefined,
-      probeTx,
-    );
-    probe.set({ count: kept.length });
-    probeTx.prepareCfc();
-    expect((await probeTx.commit()).ok).toBeDefined();
+    afterEach(async () => {
+      await measuring.dispose();
+    });
 
-    const labels = derivedConfidentiality(
-      probe.getAsNormalizedFullLink().id,
-    );
-    expect(labels).toContain("alice-secret");
-    expect(labels).toContain("bob-secret");
-  });
+    it("carries predicate labels on filtered membership like a pattern", async () => {
+      await seedLabeledDoc(measuring, "filter-element-a", {
+        id: 1,
+        status: "open",
+      }, "alice-secret");
+      await seedLabeledDoc(measuring, "filter-element-b", {
+        id: 2,
+        status: "closed",
+      }, "bob-secret");
 
-  it("derives projected field labels from source CFC metadata", async () => {
-    const setup = runtime.edit();
-    const source = runtime.getCell(
-      space,
-      "static-label-projection-source",
-      {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            id: {
-              type: "number",
-              ifc: { confidentiality: ["source-secret"] },
+      const setup = measuring.edit();
+      const elementA = measuring.getCell(
+        space,
+        "filter-element-a",
+        undefined,
+        setup,
+      );
+      const elementB = measuring.getCell(
+        space,
+        "filter-element-b",
+        undefined,
+        setup,
+      );
+      const source = measuring.getCell(
+        space,
+        "labeled-filter-source",
+        { type: "array", items: { asCell: ["cell"] } },
+        setup,
+      );
+      source.set([elementA, elementB]);
+      setup.prepareCfc();
+      expect((await setup.commit()).ok).toBeDefined();
+      const sourceRead = measuring.getCell(
+        space,
+        "labeled-filter-source",
+        { type: "array", items: { asCell: ["cell"] } },
+      );
+
+      let outputCell: Cell<unknown> | undefined;
+      const result = await deriveSelectedValue(measuring, space, sourceRead, {
+        filter: parseSelectionFilter('.status == "open"'),
+      }, {
+        onOutputCell: (cell) => outputCell = cell,
+      });
+      expect(result).toEqual([{ id: 1, status: "open" }]);
+
+      const probeTx = measuring.edit();
+      const kept = outputCell!.withTx(probeTx).get() as unknown[];
+      const probe = measuring.getCell(
+        space,
+        "filter-membership-probe",
+        undefined,
+        probeTx,
+      );
+      probe.set({ count: kept.length });
+      probeTx.prepareCfc();
+      expect((await probeTx.commit()).ok).toBeDefined();
+
+      const labels = derivedConfidentiality(
+        probe.getAsNormalizedFullLink().id,
+      );
+      expect(labels).toContain("alice-secret");
+      expect(labels).toContain("bob-secret");
+    });
+
+    it("derives projected field labels from source CFC metadata", async () => {
+      const setup = measuring.edit();
+      const source = measuring.getCell(
+        space,
+        "static-label-projection-source",
+        {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: {
+                type: "number",
+                ifc: { confidentiality: ["source-secret"] },
+              },
+              ignored: { type: "string" },
             },
-            ignored: { type: "string" },
           },
         },
-      },
-      setup,
-    );
-    source.set([{ id: 7, ignored: "not returned" }]);
-    expect((await setup.commit()).ok).toBeDefined();
+        setup,
+      );
+      source.set([{ id: 7, ignored: "not returned" }]);
+      setup.prepareCfc();
+      expect((await setup.commit()).ok).toBeDefined();
 
-    let outputCell: Cell<unknown> | undefined;
-    const result = await deriveSelectedValue(runtime, space, source, {
-      projection: await parseSelectionProjection("id"),
-    }, {
-      onOutputCell: (cell) => outputCell = cell,
+      let outputCell: Cell<unknown> | undefined;
+      const result = await deriveSelectedValue(measuring, space, source, {
+        projection: await parseSelectionProjection("id"),
+      }, {
+        onOutputCell: (cell) => outputCell = cell,
+      });
+      expect(result).toEqual([{ id: 7 }]);
+
+      const probeTx = measuring.edit();
+      const projectedId = outputCell!.key(0).key("id").withTx(
+        probeTx,
+      ).get();
+      const probe = measuring.getCell(
+        space,
+        "projection-label-probe",
+        undefined,
+        probeTx,
+      );
+      probe.set({ projectedId });
+      probeTx.prepareCfc();
+      expect((await probeTx.commit()).ok).toBeDefined();
+
+      expect(derivedConfidentiality(
+        probe.getAsNormalizedFullLink().id,
+      )).toContain("source-secret");
     });
-    expect(result).toEqual([{ id: 7 }]);
-
-    const probeTx = runtime.edit();
-    const projectedId = outputCell!.key(0).key("id").withTx(
-      probeTx,
-    ).get();
-    const probe = runtime.getCell(
-      space,
-      "projection-label-probe",
-      undefined,
-      probeTx,
-    );
-    probe.set({ projectedId });
-    probeTx.prepareCfc();
-    expect((await probeTx.commit()).ok).toBeDefined();
-
-    expect(derivedConfidentiality(
-      probe.getAsNormalizedFullLink().id,
-    )).toContain("source-secret");
   });
 
   async function seedLabeledDoc(
@@ -3402,8 +3425,6 @@ describe("cf cell get transforms", () => {
       const second = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
-        cfcEnforcementMode: "observe",
-        cfcFlowLabels: "persist",
       });
       try {
         const sourceThere = second.getCell(

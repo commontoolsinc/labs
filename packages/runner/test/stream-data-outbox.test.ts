@@ -30,9 +30,14 @@ describe("stream-data outbox mechanism", () => {
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
+    // The retry cases below need a commit the gate REFUSES: their subject is
+    // what the outbox does after one. Only an enforcing rung produces that
+    // refusal, so the suite names one rather than inheriting whichever rung
+    // the fleet is set to.
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      cfcEnforcementMode: "enforce-explicit",
     });
 
     const { commonfabric } = createTrustedBuilder(runtime);
@@ -217,7 +222,6 @@ describe("stream-data outbox mechanism", () => {
     );
 
     const rejectedTx = runtime.edit();
-    rejectedTx.setCfcEnforcementMode("enforce-explicit");
     rejectedTx.markCfcRelevant("streamData retry regression");
     action(rejectedTx);
     const rejectedResult = await rejectedTx.commit();

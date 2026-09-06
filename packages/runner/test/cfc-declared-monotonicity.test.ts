@@ -127,7 +127,9 @@ const makeRuntime = (opts: {
   new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager: opts.storageManager,
-    cfcEnforcementMode: opts.cfcEnforcementMode ?? "enforce-explicit",
+    ...(opts.cfcEnforcementMode !== undefined
+      ? { cfcEnforcementMode: opts.cfcEnforcementMode }
+      : {}),
     ...(opts.cfcFlowLabels !== undefined
       ? { cfcFlowLabels: opts.cfcFlowLabels }
       : {}),
@@ -183,10 +185,9 @@ const commitWrite = async (
 /**
  * Rewrite the stored declared labelMap entries of an existing doc, keeping
  * the real schemaHash (so the next prepare's stored-schema load succeeds).
- * Runs on a SEPARATE `disabled`-enforcement runtime over the same storage:
- * tests seed stored ["cfc"] metadata via an ungated path-[] full-document
- * write (the shape hydration delivers), and a doc that already carries
- * metadata trips the missing-schema-input reason on enforcing runtimes.
+ * Runs on a SEPARATE runtime over the same storage: tests seed stored
+ * ["cfc"] metadata via an ungated path-[] full-document write, which the
+ * shape hydration delivers.
  * The caller owns the seeder runtime, and both runtimes here share one
  * caller-owned StorageManager: each is torn down with
  * `dispose({ closeStorage: false })` so neither closes the store the other is
@@ -362,11 +363,15 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
       // ratchet fold, a peer's write. Under cfcFlowLabels:"persist" the
       // re-mint derives from the schema alone and DROPS the extra clause.
       const storageManager = StorageManager.emulate({ as: signer });
-      const runtime = makeRuntime({ storageManager, cfcFlowLabels: "persist" });
-      const seeder = makeRuntime({
+      const runtime = makeRuntime({
         storageManager,
-        cfcEnforcementMode: "disabled",
+        // At this rung the writer-fit check flags the second commit and lets
+        // it land. That commit carries the clause the re-mint drops, and the
+        // assertion below reads the entry it persisted.
+        cfcEnforcementMode: "enforce-explicit",
+        cfcFlowLabels: "persist",
       });
+      const seeder = makeRuntime({ storageManager });
       try {
         const first = await commitWrite(
           runtime,
@@ -412,16 +417,13 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
     });
 
     it("with flow labels off, the Wave-2 grow-only ratchet folds the stronger stored entry back in", async () => {
-      // The dual pin: under the default cfcFlowLabels:"off" the legacy
-      // ratchet merges prior confidentiality into the fresh entry, so the
-      // confidentiality half of §8.12.1 cannot regress on this path — which
-      // is why the gate's confidentiality tests run under flow persist.
+      // The dual pin: under cfcFlowLabels:"off" the legacy ratchet merges
+      // prior confidentiality into the fresh entry, so the confidentiality
+      // half of §8.12.1 cannot regress on this path — which is why the
+      // gate's confidentiality tests run under flow persist.
       const storageManager = StorageManager.emulate({ as: signer });
-      const runtime = makeRuntime({ storageManager });
-      const seeder = makeRuntime({
-        storageManager,
-        cfcEnforcementMode: "disabled",
-      });
+      const runtime = makeRuntime({ storageManager, cfcFlowLabels: "off" });
+      const seeder = makeRuntime({ storageManager });
       try {
         const first = await commitWrite(
           runtime,
@@ -509,8 +511,11 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         cell.set({ out: "v1" });
         tx.prepareCfc();
         expect(tx.getCfcState().prepare.status).toBe("prepared");
-        // A no-op re-set of the same mode does not invalidate.
-        tx.setCfcDeclaredMonotonicityMode("off");
+        // A no-op re-set of the mode the transaction already carries does
+        // not invalidate.
+        tx.setCfcDeclaredMonotonicityMode(
+          tx.getCfcState().declaredMonotonicityMode,
+        );
         expect(tx.getCfcState().prepare.status).toBe("prepared");
         tx.setCfcDeclaredMonotonicityMode("enforce");
         const prepare = tx.getCfcState().prepare;
@@ -715,15 +720,16 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
   }) => {
     const runtime = makeRuntime({
       storageManager: opts.storageManager,
+      // At this rung the writer-fit check flags the second commit and lets it
+      // land. That commit carries the clause the seeded entry adds, and the
+      // callers read the error and the entries it produced.
+      cfcEnforcementMode: "enforce-explicit",
       cfcFlowLabels: opts.flowLabels ?? "persist",
       ...(opts.dial !== undefined
         ? { cfcDeclaredMonotonicity: opts.dial }
         : {}),
     });
-    const seeder = makeRuntime({
-      storageManager: opts.storageManager,
-      cfcEnforcementMode: "disabled",
-    });
+    const seeder = makeRuntime({ storageManager: opts.storageManager });
     try {
       const first = await commitWrite(runtime, opts.name, opts.schema, {
         out: "v1",
@@ -820,10 +826,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         cfcFlowLabels: "persist",
         cfcDeclaredMonotonicity: "enforce",
       });
-      const seeder = makeRuntime({
-        storageManager,
-        cfcEnforcementMode: "disabled",
-      });
+      const seeder = makeRuntime({ storageManager });
       try {
         const first = await commitWrite(runtime, "dm-enf-untouched", schema, {
           out: "v1",
@@ -882,10 +885,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         cfcFlowLabels: "persist",
         cfcDeclaredMonotonicity: "enforce",
       });
-      const seeder = makeRuntime({
-        storageManager,
-        cfcEnforcementMode: "disabled",
-      });
+      const seeder = makeRuntime({ storageManager });
       try {
         const first = await commitWrite(
           runtime,
@@ -1123,10 +1123,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         storageManager,
         cfcDeclaredMonotonicity: "enforce",
       });
-      const seeder = makeRuntime({
-        storageManager,
-        cfcEnforcementMode: "disabled",
-      });
+      const seeder = makeRuntime({ storageManager });
       try {
         const first = await commitWrite(
           runtime,
@@ -1184,10 +1181,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         storageManager,
         cfcDeclaredMonotonicity: "enforce",
       });
-      const seeder = makeRuntime({
-        storageManager,
-        cfcEnforcementMode: "disabled",
-      });
+      const seeder = makeRuntime({ storageManager });
       try {
         const first = await commitWrite(
           runtime,
@@ -1524,10 +1518,7 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         cfcFlowLabels: "persist",
         cfcDeclaredMonotonicity: "enforce",
       });
-      const seeder = makeRuntime({
-        storageManager,
-        cfcEnforcementMode: "disabled",
-      });
+      const seeder = makeRuntime({ storageManager });
       try {
         const first = await commitWrite(runtime, "dm-ex-paths", schema, {
           out: "v1",
@@ -1728,13 +1719,14 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
         const storageManager = StorageManager.emulate({ as: signer });
         const runtime = makeRuntime({
           storageManager,
+          // At this rung the writer-fit check flags the second commit and
+          // lets it land, so the transaction reaches the prepared decision
+          // this reads.
+          cfcEnforcementMode: "enforce-explicit",
           cfcFlowLabels: "persist",
           cfcDeclaredMonotonicity: dial,
         });
-        const seeder = makeRuntime({
-          storageManager,
-          cfcEnforcementMode: "disabled",
-        });
+        const seeder = makeRuntime({ storageManager });
         try {
           const first = await commitWrite(
             runtime,
