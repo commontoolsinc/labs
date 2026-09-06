@@ -413,8 +413,9 @@ same way before the live run: `docs/development/space-clone-rehearsal.md`.
    **If you must have it anyway**, the only exit the CLI offers is
    `--dangerously-allow-incompatible-schema`, whose help covers exactly this
    proof: "Replace the source even when pattern or retained-link schema
-   compatibility cannot be proven." Three things before taking it, and the first
-   is the one this document cannot answer for you:
+   compatibility cannot be proven, or when the current pattern cannot be loaded
+   at all." Three things before taking it, and the first is the one this
+   document cannot answer for you:
 
    - **It was not rehearsed.** No run in this procedure's evidence forced a
      Topic update. That the flag would succeed is read off its help text, not

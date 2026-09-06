@@ -111,8 +111,6 @@ therefore still unmeasured.
 
 ## Finding 2 — the topic leg has an older blocker, independent of the graft
 
-Filed as #6968.
-
 Moving the board first clears the topic leg's `mentionable[].shortName`
 refusal: with the grafted board in place, `setsrc --check` of the grafted
 `topic.tsx` over a pre-graft Topic reports something else instead.
@@ -258,8 +256,6 @@ this build for either a space name or a DID.
   non-member.
 
 ## Finding 6 — two tool behaviors that mislead
-
-Filed as #6964 and #6965.
 
 **`setsrc --check` writes to the store.** Isolated on the clone after a
 `cf space reset`, one step at a time. Serving it and stopping again, with
