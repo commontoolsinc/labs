@@ -89,6 +89,22 @@ composite web component; use a flattened-tree tool or the pierce fallback below.
    so a navigation that settled on `load` would otherwise hand back a page
    whose shell is still booting.
 
+   Every such page is also opened at a fixed viewport, `SHELL_VIEWPORT` in
+   `packages/integration/shell-utils.ts`, wide enough for the shell's desktop
+   header layout. The header switches layouts on the viewport width, and a
+   browser left to its own default picks a width that varies by platform, so
+   without the pin which layout a suite drives would be a property of the
+   machine running it. A test that means to drive the narrow layout sets a
+   viewport of its own with `page.setViewportSize()`.
+
+   Pinning the width settles which layout is rendered; it does not settle
+   whether a control in it is there to be clicked. A wait that asks only whether
+   an element exists is satisfied by one laid out at no size, and the failure
+   then surfaces one step later as a click that cannot land. Ask
+   `probe.isRendered` in the wait, as
+   [`waiting-in-tests.md`](waiting-in-tests.md) requires of a wait that
+   precedes a click.
+
 ## Why This Works
 
 - **Host roles** give single-control `cf-*` components one stable semantic
