@@ -29,6 +29,7 @@ import {
   normalizeLLMFriendlyRef,
   validatePieceSegment,
 } from "../llm-friendly-ref.ts";
+import { readsAsOption } from "./options.ts";
 import { type RecordEntry, renderRecord } from "./record.ts";
 
 /** One segment of a path inside a piece, in the form cell traversal takes. */
@@ -285,6 +286,11 @@ export function placeAtSpaceRoot(space: MemorySpace): Place {
  * in one direction only: `-` is never offered, even where shuttle's own
  * history would make it reach the child, and what is offered reaches the child
  * whatever that history holds.
+ *
+ * One reading is asked rather than made, being one layer above a place: a
+ * token opening with `-` reaches a verb as an option and never as an operand
+ * (`readsAsOption`, `options.ts`), so a candidate the option grammar takes is
+ * not offered and the reference is what names such a child.
  */
 export function operandForChild(
   place: Place,
@@ -295,6 +301,7 @@ export function operandForChild(
   const goal: Place = { ...place, position };
   const from: Standing = { place, trail: [] };
   for (const candidate of [child, renderPosition(goal)]) {
+    if (readsAsOption(candidate)) continue;
     const step = movePlace(from, candidate);
     if (step.kind === "moved" && samePlace(step.to.place, goal)) {
       return candidate;

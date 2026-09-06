@@ -112,6 +112,11 @@ describe("place", () => {
     // are is reached by the reference the child renders as, which reads none of
     // them; and a child no rendering names back is reached by neither.
     //
+    // One of the readings is not this module's. A token opening with `-`
+    // reaches a verb as an option rather than as an operand, so a name spelled
+    // that way is offered as its reference too, and the case for it turns on
+    // `readsAsOption` (`options.ts`) rather than on any move made here.
+    //
     // Two clauses of the comparison behind it have no case, and both are
     // unreachable from this door rather than untested. Neither spelling tried
     // moves the scope: the reference is rendered carrying the place's own, and
@@ -142,6 +147,18 @@ describe("place", () => {
     it("returns a reference for a key called `..`", () => {
       expect(operandForChild(atReferencedPiece().place, "..")).toBe(
         `/@${SPACE}/${HANDLE}@space/..`,
+      );
+    });
+
+    it("returns a reference for a key opening with `-`, which the option grammar reads as an option", () => {
+      expect(operandForChild(atReferencedPiece().place, "-x")).toBe(
+        `/@${SPACE}/${HANDLE}@space/-x`,
+      );
+    });
+
+    it("returns a reference for a key called `--`, the token that ends the options", () => {
+      expect(operandForChild(atReferencedPiece().place, "--")).toBe(
+        `/@${SPACE}/${HANDLE}@space/--`,
       );
     });
 

@@ -53,7 +53,8 @@ Shuttle holds one connection and one place — the space, piece and path its
 prompt shows — and reads lines against them: cd, ls, pwd, get, wish, and
 where, which prints the whole ambient record. The place fills in what a
 reference leaves out, so a line names what it acts on rather than repeating
-the address.
+the address. Type help at the prompt for the verbs, and <verb> --help for what
+one of them takes.
 
 The connection is fixed for the run: one shuttle serves one space, and
 restarting is how to reach another.`),
