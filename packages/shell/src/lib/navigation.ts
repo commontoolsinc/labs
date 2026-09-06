@@ -85,17 +85,21 @@ export class Navigation {
     let command = (e as CustomEvent<NavigationCommand>).detail;
     logger.log("Navigate", command);
     command = mapNavigationView(this.#app, command);
-    // A navigation to the address the page is already at rewrites the entry
-    // it is standing on rather than adding one. Two entries for one address
-    // make the first press of Back return to the page it was already on.
+    // A navigation to the address the page is already at rewrites the entry it
+    // is standing on rather than adding one. Two entries for one address make
+    // the first press of Back return to the page it was already on.
     //
-    // The address decides, and it is settled after the mapping: a DID that
-    // names the running space is rewritten as that space's name, and embed
-    // mode is carried into a command that omits it, so the same destination
-    // reaches this comparison written one way. A view also holds `openPath`,
-    // which no address carries, and an entry rewritten from one that held it
-    // holds it no longer.
-    if (appViewToUrlPath(command) === globalThis.location.pathname) {
+    // The address is settled after the mapping, which writes a DID naming the
+    // running space as that space's name and carries embed mode into a command
+    // that omits it. It goes through `URL` to reach the percent-encoded form
+    // `location.pathname` holds, a space name being free to hold a character a
+    // path reserves. A view's `openPath` reaches no address, so an entry
+    // rewritten from one that held it holds it no longer.
+    const address = new URL(
+      appViewToUrlPath(command),
+      globalThis.location.href,
+    );
+    if (address.pathname === globalThis.location.pathname) {
       this.#replace(command);
     } else {
       this.#push(command);

@@ -76,7 +76,7 @@ function withNavigation<T>(
   // in a browser.
   const location = { href, pathname: new URL(href).pathname };
   const arriveAt = (url: string) => {
-    const arrived = new URL(url, href);
+    const arrived = new URL(url, location.href);
     location.href = arrived.href;
     location.pathname = arrived.pathname;
   };
@@ -270,6 +270,23 @@ describe("navigation", () => {
           state: { spaceName: "my-space", pieceId: "fid1:abc" },
           url: "/my-space/fid1:abc",
         });
+      },
+    );
+  });
+
+  it("adds no history entry when the address needs percent-encoding", () => {
+    // `location.pathname` holds the encoded form of a name holding a character
+    // a path reserves, where the view holds the name as it is written.
+    withNavigation(
+      "http://common.test/my%20space/fid1:abc",
+      { view: { builtin: "home" } },
+      (_navigation, recorded) => {
+        globalThis.dispatchEvent(
+          new CustomEvent("cf-navigate", {
+            detail: { spaceName: "my space", pieceId: "fid1:abc" },
+          }),
+        );
+        expect(recorded.push).toEqual([]);
       },
     );
   });
