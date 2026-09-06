@@ -32,9 +32,11 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import type { SessionSync } from "@commonfabric/memory/v2";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
+import type { SpaceReplica } from "../src/storage/v2.ts";
 import { Runtime, type RuntimeFetch } from "../src/runtime.ts";
 import type {
   IExtendedStorageTransaction,
@@ -370,14 +372,16 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     // seam).
     const replica = (reader.storageManager.open(space) as unknown as {
       replica: {
-        applySessionSync(sync: unknown, type: string): void;
+        applySessionSync: SpaceReplica["accessForTestingOnly"][
+          "applySessionSync"
+        ];
         getDocument(uri: string): unknown;
       };
     }).replica;
     let droppedCids = 0;
     const computedSeen = new Set<string>();
     const originalApply = replica.applySessionSync.bind(replica);
-    replica.applySessionSync = (sync: unknown, type: string) => {
+    replica.applySessionSync = (sync, type) => {
       const frame = sync as { upserts?: Array<{ id?: unknown }> };
       const upserts = Array.isArray(frame?.upserts) ? frame.upserts : [];
       const kept = upserts.filter((upsert) => {
@@ -392,7 +396,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
       return originalApply(
         kept.length === upserts.length
           ? sync
-          : { ...(sync as object), upserts: kept },
+          : { ...sync, upserts: kept } as SessionSync,
         type,
       );
     };

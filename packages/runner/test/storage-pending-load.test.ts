@@ -110,7 +110,7 @@ describe("storage pending-load generations", () => {
 
     const base: NormalizedLink = {
       space,
-      id: "of:data-root" as any,
+      id: "of:data-root" as URI,
       scope: "space",
       path: [],
     };
@@ -190,7 +190,7 @@ describe("storage pending-load generations", () => {
     try {
       const base: NormalizedLink = {
         space,
-        id: "of:throwing-data-root" as any,
+        id: "of:throwing-data-root" as URI,
         scope: "space",
         path: [],
       };
@@ -233,7 +233,7 @@ describe("storage pending-load generations", () => {
     try {
       const base: NormalizedLink = {
         space,
-        id: "of:rejecting-data-root" as any,
+        id: "of:rejecting-data-root" as URI,
         scope: "space",
         path: [],
       };

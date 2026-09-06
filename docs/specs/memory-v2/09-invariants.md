@@ -114,7 +114,8 @@ guarded by `assertNoIndexedArrayStructuralOps`).
 
 Layer: `patchOverlapsRead`, `patchOverlapsNonRecursiveRead`,
 `touchedLeafPathsForPatch`, `touchedPathsForPatch` (engine); read tagging and
-exclusion at the client boundary (`reactivity-log.ts`, `buildReads`).
+exclusion at the client boundary (`reactivity-log.ts`,
+`SpaceReplica.#buildReads()`).
 
 Soundness direction: toward precision only from above; never below exact.
 

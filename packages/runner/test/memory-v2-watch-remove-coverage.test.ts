@@ -21,6 +21,7 @@ import {
   SingleSessionFactory,
   TestStorageManager,
 } from "./memory-v2-test-utils.ts";
+import type { SpaceReplica } from "../src/storage/v2.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-watch-remove-coverage");
 const space = signer.did();
@@ -354,8 +355,10 @@ Deno.test("absence reconciliation cleans up after an unexpected probe exception"
     storageManager,
   });
   const provider = storageManager.open(space);
+  // The member is replaced by assignment, which its `private` rather than
+  // `#` name allows; the cast reaches only it, typed as the class types it.
   const replica = provider.replica as unknown as {
-    refreshWatchSet(...args: unknown[]): Promise<unknown>;
+    refreshWatchSet: SpaceReplica["accessForTestingOnly"]["refreshWatchSet"];
   };
   const originalRefresh = replica.refreshWatchSet.bind(replica);
   replica.refreshWatchSet = () =>
@@ -392,8 +395,10 @@ Deno.test("absence reconciliation retries when applying a watch removal sync fai
     storageManager,
   });
   const provider = storageManager.open(space);
+  // The member is replaced by assignment, which its `private` rather than
+  // `#` name allows; the cast reaches only it, typed as the class types it.
   const replica = provider.replica as unknown as {
-    applySessionSync(sync: unknown, type: string): void;
+    applySessionSync: SpaceReplica["accessForTestingOnly"]["applySessionSync"];
   };
   const originalApply = replica.applySessionSync.bind(replica);
   let applyCalls = 0;

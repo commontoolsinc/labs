@@ -267,7 +267,7 @@ export {
 export class Scheduler {
   readonly #eventQueue: QueuedEvent[] = [];
   #eventHandlers: [NormalizedFullLink, EventHandler][] = [];
-  readonly lineage = new SpeculationLineage({
+  readonly #lineage = new SpeculationLineage({
     dropQueuedEvent: (event, reason) => this.#dropEvent(event, reason),
     queueExecution: () => this.queueExecution(),
     onError: (error) => logger.error("lineage", () => [error]),
@@ -378,7 +378,7 @@ export class Scheduler {
   // Parent-child action tracking for proper execution ordering
   // When a child action is created during parent execution, parent must run first
   #executingAction: Action | null = null;
-  currentActionId?: string;
+  #currentActionId?: string;
   #dependencyGraphState!: DependencyGraphState;
   #dependencyUpdateState!: DependencyUpdateState;
   #triggerSubscriptionState!: TriggerSubscriptionState;
@@ -570,6 +570,48 @@ export class Scheduler {
       recordExecuteEndTelemetry: () => this.#recordExecuteEndTelemetry(),
       updateDependents: (action, log) => this.#updateDependents(action, log),
     };
+  }
+
+  /** The speculation lineage this scheduler records queued events into. */
+  get lineage(): SpeculationLineage {
+    return this.#lineage;
+  }
+
+  /** Id of the action executing right now, if one is. */
+  get currentActionId(): string | undefined {
+    return this.#currentActionId;
+  }
+
+  /**
+   * Per-runtime enter, leave, and re-arm tallies of demand roots. The space
+   * server reads the enter and leave delta per pass and folds it into its
+   * space-lived `stats.demand` accumulators; these reset with the runtime on
+   * a reactivation, so they are a per-tenure source, not the total.
+   */
+  get demandRootCounters(): {
+    enters: number;
+    leaves: number;
+    notCurrentRearms: number;
+  } {
+    return this.#demandRootCounters;
+  }
+
+  /**
+   * Size of the standing demanded-writer root set; empty off the serving
+   * posture.
+   */
+  get demandedWriterCount(): number {
+    return this.#nodes.demandedWriters.size;
+  }
+
+  /** Size of the demanded entity refcount map. */
+  get demandedEntityCount(): number {
+    return this.#demandedEntityRefs.size;
+  }
+
+  /** The serving posture's cooperative yielder, if this scheduler has one. */
+  get servingYield(): CooperativeYield | undefined {
+    return this.#cooperativeYield;
   }
 
   get runningPromise(): Promise<unknown> | undefined {
@@ -1159,11 +1201,7 @@ export class Scheduler {
    * count is the number of registry instance keys naming the entity. */
   readonly #demandedEntityRefs = new Map<SpaceScopeAndURI, number>();
 
-  /** Per-runtime enter/leave/re-arm tallies. The SpaceServer reads the
-   * enter/leave DELTA per pass and folds it into its space-lived
-   * `stats.demand` accumulators (these reset with the runtime on a
-   * reactivation, so they are a per-tenure source, not the total). */
-  readonly demandRootCounters = { enters: 0, leaves: 0, notCurrentRearms: 0 };
+  readonly #demandRootCounters = { enters: 0, leaves: 0, notCurrentRearms: 0 };
 
   #demandedWriterHookInstalled = false;
 
@@ -1215,10 +1253,10 @@ export class Scheduler {
       isLive(this.#dependencyGraphState, record);
     if (shouldBeRoot) {
       this.#nodes.demandedWriters.add(action);
-      this.demandRootCounters.enters += 1;
+      this.#demandRootCounters.enters += 1;
     } else {
       this.#nodes.demandedWriters.delete(action);
-      this.demandRootCounters.leaves += 1;
+      this.#demandRootCounters.leaves += 1;
     }
     if (record === undefined) return;
     notifyNodeLivenessChange(this.#dependencyGraphState, action, wasLive);
@@ -1300,21 +1338,10 @@ export class Scheduler {
       rearmed += 1;
     }
     if (rearmed > 0) {
-      this.demandRootCounters.notCurrentRearms += rearmed;
+      this.#demandRootCounters.notCurrentRearms += rearmed;
       this.queueExecution();
     }
     return rearmed;
-  }
-
-  /** DIAGNOSTIC: the standing demanded-writer root set's size (T9′: empty
-   * off the serving posture). */
-  get demandedWriterCount(): number {
-    return this.#nodes.demandedWriters.size;
-  }
-
-  /** DIAGNOSTIC: the demanded entity refcount map's size. */
-  get demandedEntityCount(): number {
-    return this.#demandedEntityRefs.size;
   }
 
   /** DIAGNOSTIC (tests): a node's fan-out record — the known-scope
@@ -1348,12 +1375,10 @@ export class Scheduler {
     | Promise<void>
     | undefined => this.#cooperativeYield?.maybeYield();
 
-  /** DIAGNOSTIC (tests): the serving posture's cooperative yielder, if
-   * this scheduler has one. */
-  get servingYield(): CooperativeYield | undefined {
-    return this.#cooperativeYield;
-  }
-
+  /**
+   * Schedules an execution pass. While one is pending or running, the running
+   * pass is marked to run again instead, so at most one is ever scheduled.
+   */
   queueExecution(): void {
     if (this.#disposed) return;
     if (this.#scheduled) {
@@ -2597,10 +2622,10 @@ export class Scheduler {
       backgroundTasks: this.#backgroundTasks,
       queueExecution: () => this.queueExecution(),
       recordLineageEvent: (originTx, queuedEvent) => {
-        this.lineage.recordEvent(originTx, queuedEvent);
+        this.#lineage.recordEvent(originTx, queuedEvent);
       },
       releaseLineageEvent: (originTx, queuedEvent) => {
-        this.lineage.release(originTx, queuedEvent);
+        this.#lineage.release(originTx, queuedEvent);
       },
     };
   }
@@ -2659,15 +2684,15 @@ export class Scheduler {
       getNextDebounceRunTime: (target) => this.#getNextDebounceRunTime(target),
       getNextEligibleRunTime: (target) => this.#getNextEligibleRunTime(target),
       scheduleWake: (notBefore) => this.#gates.scheduleWake(notBefore),
-      lineageStatus: (originTx) => this.lineage.originStatus(originTx),
+      lineageStatus: (originTx) => this.#lineage.originStatus(originTx),
       releaseLineageEvent: (originTx, queuedEvent) => {
-        this.lineage.release(originTx, queuedEvent);
+        this.#lineage.release(originTx, queuedEvent);
       },
       dropEvent: (queuedEvent, reason) => {
         this.#dropEvent(queuedEvent, reason);
       },
       recordLineageEvent: (originTx, queuedEvent) => {
-        this.lineage.recordEvent(originTx, queuedEvent);
+        this.#lineage.recordEvent(originTx, queuedEvent);
       },
       getOriginLocalSeq: (originTx, targetSpace) =>
         getCommitLocalSeq(originTx.tx, targetSpace),
@@ -2719,11 +2744,11 @@ export class Scheduler {
       queueExecution: () => this.queueExecution(),
       setExecutingAction: (target, targetActionId) => {
         this.#executingAction = target;
-        this.currentActionId = targetActionId;
+        this.#currentActionId = targetActionId;
       },
       clearExecutingAction: () => {
         this.#executingAction = null;
-        this.currentActionId = undefined;
+        this.#currentActionId = undefined;
       },
     };
   }
@@ -3072,7 +3097,7 @@ export class Scheduler {
         runtime: this.runtime,
         eventQueue: this.#eventQueue,
         releaseLineageEvent: (originTx, queuedEvent) => {
-          this.lineage.release(originTx, queuedEvent);
+          this.#lineage.release(originTx, queuedEvent);
         },
       },
       event,
@@ -3153,7 +3178,7 @@ export class Scheduler {
   #hasPendingLineageHeadEvent(): boolean {
     const head = this.#eventQueue[0];
     if (head?.originTx === undefined) return false;
-    if (this.lineage.originStatus(head.originTx) !== "pending") return false;
+    if (this.#lineage.originStatus(head.originTx) !== "pending") return false;
     return getCommitLocalSeq(head.originTx.tx, head.eventLink.space) ===
       undefined;
   }

@@ -56,13 +56,6 @@ import { RuntimeProgram } from "./harness/types.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
 import type { MemorySpace, Runtime, ServerRunInfo } from "./runtime.ts";
 
-/** The §2b delegated carriage a cross-space cache writeback rides (OW31
- * seat S-A): captured verbatim from the TRIGGERING run's wave context
- * (the provisioning handler / demanded run) at `replicatePatternToSpace`
- * and threaded to the writeback stamps, where it applies only to writes
- * FOREIGN to the serving manager's home space. */
-export type WritebackDelegation = NonNullable<ServerRunInfo["delegated"]>;
-
 import {
   isFabricImportSpecifier,
   parseFabricRef,
@@ -78,6 +71,13 @@ import type {
   IExtendedStorageTransaction,
 } from "./storage/interface.ts";
 import { fromURI, toURI } from "./uri-utils.ts";
+
+/** The §2b delegated carriage a cross-space cache writeback rides (OW31
+ * seat S-A): captured verbatim from the TRIGGERING run's wave context
+ * (the provisioning handler / demanded run) at `replicatePatternToSpace`
+ * and threaded to the writeback stamps, where it applies only to writes
+ * FOREIGN to the serving manager's home space. */
+export type WritebackDelegation = NonNullable<ServerRunInfo["delegated"]>;
 
 /**
  * Writes a compiled closure back to a space's compile cache: the shape of
@@ -377,6 +377,22 @@ type ParkedReplication = {
 };
 
 export class PatternManager {
+  #runtime: Runtime;
+  // Maps each storage slot written during this PatternManager session to its
+  // complete module set. One slot can hold only one closure shape at a time.
+  readonly #persistedCompileCacheClosures = new Map<string, string>();
+  // Writes to one storage slot are serialized. Requests for the same closure
+  // share the write that is already running.
+  #inProgressCompileCacheWrites = new Map<
+    string,
+    { closureSignature: string; persistence: Promise<void> }
+  >();
+  // The writer a test supplies in place of the compile-cache write-back;
+  // undefined means the manager's own.
+  #compileCacheWriter: CompileCacheWriter | undefined = undefined;
+  // A best-effort identity recovery that failed to persist skips the in-memory
+  // artifact shortcuts on the next load so storage recovery runs again.
+  #failedCompileCacheRecoveries = new Set<string>();
   // Single-flight dedup + in-memory result cache for `compileOrGetPattern`,
   // keyed by a content hash of the program (NOT a cell id, NOT the retired
   // patternId) so identical source returns one shared, already-compiled pattern
@@ -664,23 +680,14 @@ export class PatternManager {
     ]);
   }
 
-  // Maps each storage slot written during this PatternManager session to its
-  // complete module set. One slot can hold only one closure shape at a time.
-  readonly #persistedCompileCacheClosures = new Map<string, string>();
-  // Writes to one storage slot are serialized. Requests for the same closure
-  // share the write that is already running.
-  #inProgressCompileCacheWrites = new Map<
-    string,
-    { closureSignature: string; persistence: Promise<void> }
-  >();
-  // The writer a test supplies in place of the compile-cache write-back;
-  // undefined means the manager's own.
-  #compileCacheWriter: CompileCacheWriter | undefined = undefined;
-  // A best-effort identity recovery that failed to persist skips the in-memory
-  // artifact shortcuts on the next load so storage recovery runs again.
-  #failedCompileCacheRecoveries = new Set<string>();
+  /** Constructs an instance serving `runtime`. */
+  constructor(runtime: Runtime) {
+    this.#runtime = runtime;
+  }
 
-  constructor(readonly runtime: Runtime) {}
+  //
+  // Instance members
+  //
 
   /**
    * The in-flight and cached compilation tables, the module-cache bound, the
@@ -977,16 +984,6 @@ export class PatternManager {
   }
 
   /**
-   * Whether `identity` is a session-synthetic keyless pointer (minted by
-   * {@link ensureKeylessPatternIdentity}) rather than a durable
-   * content-addressed artifact identity. A fresh runtime can never load a
-   * keyless pointer, so such refs must never be written into durable state.
-   */
-  static isKeylessPatternIdentity(identity: string): boolean {
-    return isKeylessPatternIdentity(identity);
-  }
-
-  /**
    * Make a cross-space child piece independently loadable from its own space
    * (CT-1687). A fresh runtime navigating to a `Factory.inSpace(...)` child
    * loads pattern artifacts from the CHILD's space — but the parent bundle's
@@ -1149,7 +1146,7 @@ export class PatternManager {
     // key (and vice versa).
     const runtimeVersion = moduleByteCacheRuntimeVersion(
       await getCompileCacheRuntimeVersion(),
-      { patternCoverage: this.runtime.patternCoverage !== undefined },
+      { patternCoverage: this.#runtime.patternCoverage !== undefined },
     );
 
     /** One origin's verified closure read, complete or classified.
@@ -1170,12 +1167,12 @@ export class PatternManager {
       }
       | { complete: false; reason: string }
     > => {
-      const readTx = this.runtime.edit();
+      const readTx = this.#runtime.edit();
       let sourceDocs;
       let compiledDocs;
       try {
         sourceDocs = await loadVerifiedSourceClosure(
-          this.runtime,
+          this.#runtime,
           origin,
           entryIdentity,
           readTx,
@@ -1185,7 +1182,7 @@ export class PatternManager {
         } else {
           const cacheOpts = { runtimeVersion };
           compiledDocs = await loadCompiledClosure(
-            this.runtime,
+            this.#runtime,
             origin,
             entryIdentity,
             cacheOpts,
@@ -1426,10 +1423,10 @@ export class PatternManager {
     space: MemorySpace,
     entryIdentity: string,
   ): Promise<Map<string, SourceDoc>> {
-    const tx = this.runtime.edit();
+    const tx = this.#runtime.edit();
     try {
       const closure = await loadVerifiedSourceClosure(
-        this.runtime,
+        this.#runtime,
         space,
         entryIdentity,
         tx,
@@ -1478,11 +1475,11 @@ export class PatternManager {
     // Use the content-addressed cell cache when we have a target space and
     // CFC is enforced (the compiled-set integrity label only persists — and
     // is only trusted on read — under an enforcing mode; see cell-cache).
-    if (cacheCtx && this.runtime.cfcEnforcementMode !== "disabled") {
+    if (cacheCtx && this.#runtime.cfcEnforcementMode !== "disabled") {
       return await this.#compileViaCellCache(program, cacheCtx);
     }
     const patternCoverage = this.#patternCoverageFor();
-    const { id, graph, mainSpecifier, entryIdentity } = await this.runtime
+    const { id, graph, mainSpecifier, entryIdentity } = await this.#runtime
       .harness.compileToRecordGraph(
         program,
         {
@@ -1495,7 +1492,7 @@ export class PatternManager {
     // worker, yield first so event-loop work queued behind the compile runs
     // before it, not after. No-op in Deno, where it would be batch overhead.
     await interleaveCompileYield();
-    const result = this.runtime.harness.evaluateRecordGraph(
+    const result = this.#runtime.harness.evaluateRecordGraph(
       id,
       graph,
       mainSpecifier,
@@ -1512,7 +1509,7 @@ export class PatternManager {
   #patternCoverageFor(
     options?: TypeScriptHarnessProcessOptions,
   ): PatternCoverageCollector | undefined {
-    return options?.patternCoverage ?? this.runtime.patternCoverage;
+    return options?.patternCoverage ?? this.#runtime.patternCoverage;
   }
 
   /**
@@ -1543,7 +1540,7 @@ export class PatternManager {
       ...options,
       patternCoverage,
     };
-    const byteCache = this.runtime.moduleByteCache;
+    const byteCache = this.#runtime.moduleByteCache;
     const runtimeVersion = byteCache === undefined
       ? undefined
       : moduleByteCacheRuntimeVersion(
@@ -1551,7 +1548,7 @@ export class PatternManager {
         { patternCoverage: patternCoverage !== undefined },
       );
     if (byteCache === undefined || runtimeVersion === undefined) {
-      const result = await this.runtime.harness.compileAndEvaluateModules(
+      const result = await this.#runtime.harness.compileAndEvaluateModules(
         program,
         effectiveOptions,
       );
@@ -1559,7 +1556,7 @@ export class PatternManager {
       return result;
     }
 
-    const { id, graph, mainSpecifier, modules } = await this.runtime.harness
+    const { id, graph, mainSpecifier, modules } = await this.#runtime.harness
       .compileToRecordGraph(program, {
         ...effectiveOptions,
         precompiledModulesFor: ({ identities }) =>
@@ -1568,7 +1565,7 @@ export class PatternManager {
     byteCache.putAll(runtimeVersion, modules);
     // Yield ahead of the synchronous SES evaluation (see compilePattern).
     await interleaveCompileYield();
-    const result = this.runtime.harness.evaluateRecordGraph(
+    const result = this.#runtime.harness.evaluateRecordGraph(
       id,
       graph,
       mainSpecifier,
@@ -1595,7 +1592,7 @@ export class PatternManager {
       previousEntryIdentity?: string;
     },
   ): Promise<Pattern> {
-    const harness = this.runtime.harness;
+    const harness = this.#runtime.harness;
     const { space } = cacheCtx;
     const previousSourceDocs = cacheCtx.previousEntryIdentity === undefined
       ? undefined
@@ -1670,9 +1667,9 @@ export class PatternManager {
     // cache-cell reads never enter the caller's transaction (whose commit must
     // not gain dependencies on the write-back), and so repeated compiles don't
     // accumulate open transactions.
-    const readTx = this.runtime.edit();
+    const readTx = this.#runtime.edit();
 
-    const byteCache = this.runtime.moduleByteCache;
+    const byteCache = this.#runtime.moduleByteCache;
     // The per-space storage closure served the full module set (already durable
     // in this space, so no write-back needed).
     let warmHit = false;
@@ -1703,7 +1700,7 @@ export class PatternManager {
           // parallel compiles would clobber). Same for the others below.
           const readStart = performance.now();
           const closure = await loadCompiledClosure(
-            this.runtime,
+            this.#runtime,
             space,
             entryIdentity,
             cacheOpts,
@@ -1743,7 +1740,7 @@ export class PatternManager {
               cacheEntriesIncludePatternCoverage(bodies.values())
             ) {
               const sourceClosure = await loadVerifiedSourceClosure(
-                this.runtime,
+                this.#runtime,
                 space,
                 entryIdentity,
                 readTx,
@@ -1859,17 +1856,17 @@ export class PatternManager {
     cacheOpts: { runtimeVersion: string },
     program: RuntimeProgram,
   ): Promise<Pattern | undefined> {
-    const harness = this.runtime.harness;
+    const harness = this.#runtime.harness;
     // `cacheOpts.runtimeVersion` already selects the coverage variant, so the
     // bodies read below carry probes exactly when this is set.
     const patternCoverage = this.#patternCoverageFor();
-    const readTx = this.runtime.edit();
+    const readTx = this.#runtime.edit();
     let closure;
     let sourceClosure;
     try {
       const readStart = performance.now();
       closure = await loadCompiledClosure(
-        this.runtime,
+        this.#runtime,
         space,
         entryIdentity,
         cacheOpts,
@@ -1877,7 +1874,7 @@ export class PatternManager {
       );
       if (closure.has(entryIdentity)) {
         sourceClosure = await loadVerifiedSourceClosure(
-          this.runtime,
+          this.#runtime,
           space,
           entryIdentity,
           readTx,
@@ -2012,7 +2009,7 @@ export class PatternManager {
       ]);
       return undefined;
     }
-    if (this.runtime.cfcEnforcementMode === "disabled") {
+    if (this.#runtime.cfcEnforcementMode === "disabled") {
       return undefined;
     }
     // In-memory fast path (CT-1623): the module may already be live from a
@@ -2074,7 +2071,7 @@ export class PatternManager {
     symbol: string,
     space: MemorySpace,
   ): Promise<Pattern | undefined> {
-    const harness = this.runtime.harness;
+    const harness = this.#runtime.harness;
     const patternCoverage = this.#patternCoverageFor();
     // Select the same cached variant the compile path wrote. A coverage-on
     // runtime resumes from the instrumented closure; reading the ordinary key
@@ -2088,12 +2085,12 @@ export class PatternManager {
     }
     const cacheOpts = { runtimeVersion };
 
-    const readTx = this.runtime.edit();
+    const readTx = this.#runtime.edit();
     let closure;
     try {
       const readStart = performance.now();
       closure = await loadCompiledClosure(
-        this.runtime,
+        this.#runtime,
         space,
         entryIdentity,
         cacheOpts,
@@ -2222,12 +2219,12 @@ export class PatternManager {
     space: MemorySpace,
     cacheOpts?: { runtimeVersion: string },
   ): Promise<Pattern | undefined> {
-    const harness = this.runtime.harness;
-    const readTx = this.runtime.edit();
+    const harness = this.#runtime.harness;
+    const readTx = this.#runtime.edit();
     let sourceDocs;
     try {
       sourceDocs = await loadVerifiedSourceClosure(
-        this.runtime,
+        this.#runtime,
         space,
         entryIdentity,
         readTx,
@@ -2593,7 +2590,7 @@ export class PatternManager {
     space: MemorySpace,
     delegated: WritebackDelegation | undefined,
   ): { delegated?: WritebackDelegation } {
-    const home = this.runtime.storageManager.servingHomeSpace;
+    const home = this.#runtime.storageManager.servingHomeSpace;
     return delegated !== undefined && home !== undefined && space !== home
       ? { delegated }
       : {};
@@ -2705,10 +2702,10 @@ export class PatternManager {
     opts: { runtimeVersion: string },
     moduleDelegations: ModuleDelegationMap = new Map(),
   ): Promise<boolean> {
-    const readTx = this.runtime.edit();
+    const readTx = this.#runtime.edit();
     try {
       const source = await loadVerifiedSourceClosure(
-        this.runtime,
+        this.#runtime,
         space,
         entryIdentity,
         readTx,
@@ -2727,7 +2724,7 @@ export class PatternManager {
       }
 
       const compiled = await loadCompiledClosure(
-        this.runtime,
+        this.#runtime,
         space,
         entryIdentity,
         opts,
@@ -2786,7 +2783,7 @@ export class PatternManager {
     const writebackStart = performance.now();
     await this.#syncSourceCacheWriteTargets(space, modules);
     let committedModuleDelegations = moduleDelegations;
-    const { error } = await this.runtime.editWithRetry((tx) => {
+    const { error } = await this.#runtime.editWithRetry((tx) => {
       // Compile-cache writeback is runtime-internal bookkeeping
       // (serving-loop.md §3d, RULED 2026-08-05): it runs from async
       // compile flows with no scheduler run around it, and a SERVING
@@ -2796,13 +2793,13 @@ export class PatternManager {
       // additionally carries the triggering run's §2b delegated
       // carriage (OW31 seat S-A) — without it the wave's accept gate
       // refuses the crossing.
-      this.runtime.stampServerRun(tx, {
+      this.#runtime.stampServerRun(tx, {
         actionId: `compile-cache/source-writeback/${entryIdentity}`,
         kind: "bookkeeping",
         ...this.#writebackDelegationFor(space, delegated),
       });
       committedModuleDelegations = writeSourceDocs(
-        this.runtime,
+        this.#runtime,
         space,
         modules,
         entryIdentity,
@@ -2818,7 +2815,7 @@ export class PatternManager {
       ]);
       throw throwableStorageError(error);
     }
-    this.runtime.registerModuleDelegations(space, committedModuleDelegations);
+    this.#runtime.registerModuleDelegations(space, committedModuleDelegations);
   }
 
   /**
@@ -2895,17 +2892,17 @@ export class PatternManager {
         ? Math.max(16, 2 * importEdges + 8)
         : 2 * importEdges + 8;
       let chunkDelegations: ModuleDelegationMap = new Map();
-      const { error } = await this.runtime.editWithRetry((tx) => {
+      const { error } = await this.#runtime.editWithRetry((tx) => {
         // Bookkeeping stamp, same §3d reason as writeBackSourceCache
         // above (the triage-confirmed second offender: this writeback
         // refused unstamped on the serving runtime).
-        this.runtime.stampServerRun(tx, {
+        this.#runtime.stampServerRun(tx, {
           actionId: `compile-cache/writeback/${entryIdentity}`,
           kind: "bookkeeping",
           ...this.#writebackDelegationFor(space, delegated),
         });
         chunkDelegations = writeSourceAndCompiledDocs(
-          this.runtime,
+          this.#runtime,
           space,
           chunk,
           entryIdentity,
@@ -2927,7 +2924,7 @@ export class PatternManager {
       }
     }
     logger.time(writebackStart, "compile-cache", "writeback");
-    this.runtime.registerModuleDelegations(space, committedModuleDelegations);
+    this.#runtime.registerModuleDelegations(space, committedModuleDelegations);
   }
 
   // Write-target pre-syncs carry the one-hop edge selector (CT-1848): a
@@ -2944,7 +2941,7 @@ export class PatternManager {
   ): Promise<void> {
     await Promise.all(
       modules.map((module) =>
-        this.runtime.getCell(
+        this.#runtime.getCell(
           space,
           sourceDocKey(module.identity),
           WRITE_TARGET_EDGE_SYNC_SCHEMA,
@@ -2960,12 +2957,12 @@ export class PatternManager {
   ): Promise<void> {
     await Promise.all(
       modules.flatMap((module) => [
-        this.runtime.getCell(
+        this.#runtime.getCell(
           space,
           sourceDocKey(module.identity),
           WRITE_TARGET_EDGE_SYNC_SCHEMA,
         ).sync(),
-        this.runtime.getCell(
+        this.#runtime.getCell(
           space,
           compiledDocKey(opts.runtimeVersion, module.identity),
           WRITE_TARGET_EDGE_SYNC_SCHEMA,
@@ -3120,11 +3117,11 @@ export class PatternManager {
       dataFiles?: string[];
     } | undefined
   > {
-    const readTx = this.runtime.edit();
+    const readTx = this.#runtime.edit();
     let sourceDocs;
     try {
       sourceDocs = await loadVerifiedSourceClosure(
-        this.runtime,
+        this.#runtime,
         space,
         entryIdentity,
         readTx,
@@ -3134,7 +3131,7 @@ export class PatternManager {
         destinationSpace !== space
       ) {
         for (const identity of sourceDocs.keys()) {
-          const sourceId = this.runtime.getCell(
+          const sourceId = this.#runtime.getCell(
             space,
             sourceDocKey(identity),
             undefined,
@@ -3208,14 +3205,14 @@ export class PatternManager {
     key: string,
     link: unknown,
   ): Promise<void> {
-    await this.runtime.editWithRetry((tx) => {
+    await this.#runtime.editWithRetry((tx) => {
       // Bookkeeping stamp, same §3d reason as the cache writebacks
       // above: fire-and-forget async write, no scheduler run around it.
-      this.runtime.stampServerRun(tx, {
+      this.#runtime.stampServerRun(tx, {
         actionId: `pattern-annotate/${entryIdentity}`,
         kind: "bookkeeping",
       });
-      const cell = this.runtime.getCell<
+      const cell = this.#runtime.getCell<
         { annotations?: Record<string, unknown> }
       >(
         space,
@@ -3230,5 +3227,19 @@ export class PatternManager {
       };
       cell.key("annotations").set(annotations);
     });
+  }
+
+  //
+  // Static members
+  //
+
+  /**
+   * Whether `identity` is a session-synthetic keyless pointer (minted by
+   * {@link ensureKeylessPatternIdentity}) rather than a durable
+   * content-addressed artifact identity. A fresh runtime can never load a
+   * keyless pointer, so such refs must never be written into durable state.
+   */
+  static isKeylessPatternIdentity(identity: string): boolean {
+    return isKeylessPatternIdentity(identity);
   }
 }

@@ -56,7 +56,7 @@ OFF arm, the runtime's own authenticated session
 | 4 | `data-updating.ts:110-114` — `seedMemoKey(link, identity)`; dedupes eager scoped-property seeding | `` `${space}/${scope_key}/${id}` `` | per instance — one instance's presence must not suppress another's seed; at fan-out one USER's presence must not suppress another's | `runtime.scopeKeyIdentity` at the call sites |
 | 5 | `traverse.ts:1944-1949` — coverage key passed to `schemaTrackerCoversSelector` (constructed via site 6's `getTrackerKey`; consulted only for links that DECLARE a scope — an unscoped link refuses coverage explicitly, see the OFF-ARM NEUTRALITY note at the site) | `` `${space}/${scope_key}/${id}` `` | per instance read: coverage proven for one instance is not coverage of another | `TraversalContext.scopeKeyIdentity` (the traversal's acting identity; the memory server's query path supplies the querying session's — `packages/memory/v2/query.ts`) |
 | 6 | `traverse.ts:2226-2254` — `getTrackerKey(address, identity)`, over the exported `schemaTrackerKey(space, id, scope, identity)` that `packages/memory/v2/query.ts`'s `toDocKey` also builds through (one construction for writer and query-side reader); the schema-tracker key | `` `${space}/${scope_key}/${id}` `` | same as 5 — one tracker entry per instance | `TraversalContext.scopeKeyIdentity` |
-| 7 | `storage/v2.ts:1366-1369` — `registerPendingLoad`, the `#pendingLoads` key (built with site 1's `entityKey`, which the scheduler cross-matches in `collectPendingLoadParkKeys`) | `` `${space}/${scope_key}/${id}` `` | per instance: two instances of one doc are two loads, and collapsing them makes one waiter observe another's failure | the manager's own `scopeKeyIdentity()` |
+| 7 | `StorageManager.#registerPendingLoad()` in `storage/v2.ts`, the `#pendingLoads` key (built with site 1's `entityKey`, which the scheduler cross-matches in `collectPendingLoadParkKeys`) | `` `${space}/${scope_key}/${id}` `` | per instance: two instances of one doc are two loads, and collapsing them makes one waiter observe another's failure | the manager's own `scopeKeyIdentity()` |
 | 8 | `storage/transaction/address.ts:17-20` — `toString(address, identity)`; notification-differential address identity (`storage/differential.ts`, whose `toKey` shares the vocabulary) | `` `/${scope_key}/${id}/${JSON.stringify(path)}` `` (no space — per-space by construction) | per instance within a batch: one batch may carry several instances of one doc (scopes.md §2), and they must not collapse to one change entry | the owning session's identity, threaded through `Differential.create/load/checkout` from the replica |
 | 9 | `scheduler/graph-snapshot.ts:257-264` — `formatAddress(address, identity)`; diagnostic graph-snapshot labels (site 1's `entityKey` at `:140`/`:151`/`:247`) | `` `${space}/${id}/${scope_key}/${path.join("/")}` `` | per instance — diagnostic only, but a per-instance graph renders N indistinguishable rows without it, which is how a fan-out bug hides | `SchedulerGraphSnapshotState.scopeKeyIdentity` |
 
@@ -363,7 +363,7 @@ per-run identities where run contexts carry them):
 **Instance-safe transients** (why each is fine as-is):
 
 - `pending:`/`confirmed:` dependency-dedupe keys
-  (`storage/v2.ts:707-713`) — per-commit-assembly lifetime; a key
+  (`storage/v2.ts`) — per-commit-assembly lifetime; a key
   never outlives the one identity building that commit.
 - `#pendingAsyncWork` owner keys (`runtime.ts:1206`, keys at
   `:1224-1227`) — conservative direction: a name-keyed owner match

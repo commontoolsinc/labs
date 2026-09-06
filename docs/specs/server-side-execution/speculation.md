@@ -540,7 +540,7 @@ served round trip, and unbounded for a never-served instance):
 
 - The structural existence/shape precondition — the nonRecursive read
   at the cell's parent (verification-coverage.md OW47's close;
-  `excludeSpeculativeLayers` in `buildReads`).
+  `excludeSpeculativeLayers` in `SpaceReplica.#buildReads()`).
 - CFC prepare's internal-verifier reads (OW47's second producer, the
   name-draft triage; RULED 2026-08-21 — arm (b) of the triage's §9
   fork): the verifier READS and VERIFIES the non-speculative state.
