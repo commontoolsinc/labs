@@ -196,11 +196,13 @@ describe("handleSlugResolve()", () => {
     // comes back sits at a hash of the slug's id rather than at the slug, and
     // it is neither the slug document nor the target the slug points at.
     //
-    // Everything follows from that. A watch there is a watch on a document
-    // nothing writes, so no write anywhere in this space reaches it, and
-    // `AppView`'s poll is the whole of how the shell notices a slug moving.
-    // The two cases above are about the slug document, which the shell never
-    // opens; neither is evidence about this.
+    // Everything follows from that. Neither of the two writes a slug
+    // reference turns on reaches such a cell — a write inside the target,
+    // and the slug being repointed — so `AppView` notices both by
+    // re-resolving on its interval and by nothing else. What a watch there
+    // would see instead is not measured, and this case claims nothing about
+    // it. The two cases above are about the slug document, which the shell
+    // never opens; neither is evidence about this.
     const shellCell = getCell(
       runtime,
       createCellRef(
@@ -221,35 +223,58 @@ describe("handleSlugResolve()", () => {
     expect(shellCell.getAsNormalizedFullLink().id).not.toBe(idOf(board));
 
     const other = await pieceDocument("board-2", { names: { "9": item2 } });
+
     let shellWoke = 0;
     const cancelShell = shellCell.sink(() => {
       shellWoke++;
     });
-    // A watch on the slug document, so that the repointing below is measured
-    // as a miss rather than as a write that never landed.
+    // Two controls, because the two writes below reach different watchers. A
+    // watch on the target catches a write inside it; a watch on the slug
+    // document catches the slug being repointed. Each is read at the write it
+    // controls and re-baselined afterwards, so no later write can satisfy an
+    // earlier control — which is the whole job of a control here, since every
+    // assertion about `shellCell` is that a count did NOT move and a write
+    // that never landed would satisfy all of them.
+    let targetWoke = 0;
+    const cancelTarget = board.key("names").sink(() => {
+      targetWoke++;
+    });
     let documentWoke = 0;
     const cancelDocument = slugDocument.sink(() => {
       documentWoke++;
     });
     await runtime.idle();
     const shellAtSubscribe = shellWoke;
-    const documentAtSubscribe = documentWoke;
+    let targetSince = targetWoke;
+    let documentSince = documentWoke;
 
-    // Repointing the slug, which is what `cf piece new --force` does.
-    await pointSlug("top", other.key("names"));
-    await runtime.idle();
-    // And a write inside the target the slug pointed at when the watch
-    // opened, which is the case the two above show a slug-document watch
-    // catching.
+    // The instrument is plugged in: a sink calls back once with the current
+    // value, so a count that never moves below is a watch that saw nothing
+    // rather than a sink that was never opened.
+    expect(shellAtSubscribe).toBeGreaterThan(0);
+
+    // A write inside the target the slug points at, which is what the two
+    // cases above show a watch on the slug document catching.
     await runtime.editWithRetry((tx) => {
       board.withTx(tx).key("names").key("3").set(item2);
     });
     await runtime.idle();
-    cancelShell();
-    cancelDocument();
-
-    expect(documentWoke).toBeGreaterThan(documentAtSubscribe);
+    expect(targetWoke).toBeGreaterThan(targetSince);
     expect(shellWoke).toBe(shellAtSubscribe);
+    targetSince = targetWoke;
+    documentSince = documentWoke;
+
+    // Repointing the slug, which is what `cf piece new --force` does. The
+    // slug document is the only thing this write touches, so the control for
+    // it is the watch on that document.
+    await pointSlug("top", other.key("names"));
+    await runtime.idle();
+    expect(documentWoke).toBeGreaterThan(documentSince);
+    expect(shellWoke).toBe(shellAtSubscribe);
+
+    cancelShell();
+    cancelTarget();
+    cancelDocument();
   });
 
   it("returns a refusal naming the member and the collection", async () => {
