@@ -405,11 +405,21 @@ export class XAppView extends BaseView {
             slug: app.view.pieceSlug,
             member,
           };
-          const landed = await rt.resolveSlug(
-            space,
-            app.view.pieceSlug,
-            member,
-          );
+          let landed: SlugReferenceTarget | SlugReferenceRefusal;
+          try {
+            landed = await rt.resolveSlug(space, app.view.pieceSlug, member);
+          } catch (error) {
+            // Around the resolution alone, for the reason the load below
+            // carries its own wrapper: the outer catch also takes the
+            // refusal's throw, and recording nothing there would undo the
+            // mark that refusal just made. A fault here is the one throw in
+            // the run that reaches no answer at all, and without the mark the
+            // piece the view was already showing stands as this reference's
+            // answer — so a later resolution reaching that same piece is no
+            // news, and the view never leaves the error it is on.
+            this.#markShown(reference, undefined, signal);
+            throw error;
+          }
           if (signal.aborted) return;
           if (landed.refusal) {
             // A refusal is the reference's answer, and the load-error surface
@@ -543,17 +553,21 @@ export class XAppView extends BaseView {
       await this.#refreshSlugTarget(watch);
       if (!this.#isCurrentSlugWatch(watch)) return;
 
-      // What this poll is for, measured in
-      // `packages/runtime-client/test/backends/slug-resolve.test.ts`. The
-      // subscription reaches further than the slug document: a member
-      // landing in the collection wakes it, a change inside a member wakes
-      // it, and so does a change at the end of a link chain a member is
-      // reached through. What it misses is a metadata write — a document
-      // gaining the pattern identity that MAKES it a piece — because the
-      // read set follows values. That is the one case slug resolution turns
-      // on, since a member whose target is not yet a piece is refused, so
-      // re-resolving is what notices it becoming one. Whoever makes that
-      // observable to a watch can retire this.
+      // Re-resolving is what notices anything at all, and the measurement
+      // is in `packages/runtime-client/test/backends/slug-resolve.test.ts`:
+      // the subscription below wakes for no write this view cares about, so
+      // every case the shell has to follow arrives on this interval. Two of
+      // those cases are separately real, and neither is closed by the other
+      // — a slug repointed at a different piece, and a member whose target
+      // gains the pattern identity that MAKES it a piece, which no watch on
+      // a value sees because the read set follows values.
+      //
+      // So the interval is unconditional. Bounding it to the states the
+      // subscription does not cover is bounding it to all of them.
+      //
+      // TODO(slug-watch-wake): Bound this to the refused states once a watch
+      // on a slug wakes when the slug is repointed and when a member's target
+      // becomes a piece.
       watch.pollInterval = globalThis.setInterval(() => {
         void this.#refreshSlugTarget(watch);
       }, 1000);

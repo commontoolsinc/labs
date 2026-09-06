@@ -1,5 +1,9 @@
 #!/usr/bin/env -S deno run --allow-read --allow-write --allow-run
 import * as path from "@std/path";
+import {
+  readUnlaunchedMembers,
+  writeUnlaunchedMembers,
+} from "./unlaunched-members.ts";
 
 // Taken from this file's own location rather than the working directory, which
 // the conversion inherits from its caller.
@@ -104,8 +108,8 @@ export function parseFilesWithNoSource(stderr: string): string[] {
 }
 
 // Which files the coverage-debt metric charges for, stated here rather than
-// imported from `coverage-metrics.ts` so this script's module graph stays at
-// `@std/path` alone: it runs in every test job under a permission envelope of
+// imported from `coverage-metrics.ts` so this script pulls in nothing heavier
+// than `@std/path`: it runs in every test job under a permission envelope of
 // `--allow-read --allow-write --allow-run`, and a wider graph has to keep
 // within that. `write-coverage-lcov.test.ts` fails if these stop agreeing with
 // `isTrackedSourcePath`, which is the metric's own answer to the same question.
@@ -203,6 +207,23 @@ async function writeEmptyLcov(
   console.warn(`${reason}; wrote empty LCOV report to ${outputPath}.`);
 }
 
+/**
+ * Copies the unlaunched-member record `profileDir` carries into the directory
+ * `outputPath` names, so that the record and the report it qualifies travel
+ * together as one artifact. A profile directory carrying no record clears any
+ * record already sitting beside the report, so that the two always describe
+ * the same run; where neither directory holds one, nothing is written.
+ */
+export async function copyUnlaunchedMembers(
+  profileDir: string,
+  outputPath: string,
+): Promise<void> {
+  await writeUnlaunchedMembers(
+    path.dirname(outputPath),
+    await readUnlaunchedMembers(profileDir),
+  );
+}
+
 async function main(): Promise<void> {
   const [profileDir, outputPath] = Deno.args;
   if (!profileDir || !outputPath) {
@@ -211,6 +232,11 @@ async function main(): Promise<void> {
     );
     Deno.exit(2);
   }
+
+  // Ahead of every path below, each of which returns or exits: the record says
+  // what the report does not cover, so a report written without it says more
+  // than the run measured.
+  await copyUnlaunchedMembers(profileDir, outputPath);
 
   const profileFiles = await collectCoverageProfileFiles(profileDir);
   if (profileFiles.length === 0) {

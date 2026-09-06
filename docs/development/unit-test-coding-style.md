@@ -423,3 +423,68 @@ says how a class shapes one, and what to do about the reaches it cannot
 cover. A stand-in the test hands the class declares itself as one where it is
 passed in, with an `as` on the argument or a small typed helper, never with a
 cast on the receiver.
+
+## What a claim ranges over
+
+A test exhibits instances. To exhibit an absence it has to exhaust the set the
+claim ranges over, so a quantified claim — every input does this, no input
+does that — is worth exactly as much as the enumeration behind it. Exhaust the
+set and the claim is settled. Leave it open and the case passes by failing to
+find a counterexample, which is also what it does when one exists in a
+spelling nobody tried.
+
+So before writing such a case, say what exhausts the set:
+
+- **An exhaustive projection over a type closes it.** A union does not close
+  it alone: `const cases: K[] = ["a", "b", "c"]` keeps compiling when `K`
+  gains a `"d"`, leaving a test that iterates `cases` quietly short. What
+  closes it is a shape the compiler checks against the type — a
+  `satisfies Record<K, …>` table, or a `never` branch that reds when a member
+  goes unhandled. Classifying a union's members is also not the same as
+  covering their values: `string | number | boolean` has three members and
+  unboundedly many values.
+- **An enumeration closes it** when the table the test iterates *is* the
+  domain, rather than a list the code also consults. Where production accepts
+  something the table omits — `commands.includes(name) || name === "legacy"` —
+  a test over the table is complete about the table and silent about the
+  claim.
+- **A search closes it** when the corpus is known complete and the pattern
+  cannot miss a member — a fact about the pattern, to be established rather
+  than assumed.
+- **Examples chosen while writing the test close nothing.**
+
+Where the set will not close, assert the bounded claim instead. Name the input
+that reaches the behavior rather than declaring that none does:
+
+```ts
+import { expect } from "@std/expect";
+
+/** The operands on a line: a bare `--` ends the options, and everything
+ * after that first one is an operand whatever it opens with. */
+function operandsOf(tokens: readonly string[]): string[] {
+  const end = tokens.indexOf("--");
+  const head = (end === -1 ? tokens : tokens.slice(0, end))
+    .filter((token) => !token.startsWith("-"));
+  return end === -1 ? head : [...head, ...tokens.slice(end + 1)];
+}
+
+// Vacuous for the claim "no line reaches an operand named `--`". It tries one
+// line, passes, and would pass identically if some other line reached one.
+expect(operandsOf(["--"])).toEqual([]);
+
+// Checkable, because it names the line rather than quantifying over all of
+// them. This one fails the moment the terminator stops being only the first.
+expect(operandsOf(["--", "--"])).toEqual(["--"]);
+```
+
+The same shape reaches prose, and the remedy there is not resignation. A
+comment or a design document can state a property that no case holds it to,
+and a sentence nothing holds drifts quietly away from the code it describes.
+What travels with the code is the case: a comment saying a function never
+returns 2 for a boolean input is contradicted by a case over both inputs the
+moment one of them returns 2, and after that the sentence and the case move
+together. So a claim worth writing down is usually worth the case that fails
+when it stops holding. Where the sentence goes in without one, write what a
+reader can check — the spelling that reaches the behavior, or the rule that
+decides — rather than the absence the sentence would have to survey to be
+true.

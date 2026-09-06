@@ -54,6 +54,7 @@ import {
   type Row,
   selectBaselines,
   selectMergedPRForCommit,
+  unscoredGroupsReport,
   validateBaselineRunsForMainHead,
   walkBaselineRuns,
   workflowRunsPathForBaseline,
@@ -61,6 +62,7 @@ import {
   writeCoverageDebtSuggestion,
   writeCoverageResolved,
 } from "./coverage-check.ts";
+import { writeUnlaunchedMembers } from "./unlaunched-members.ts";
 
 const SHA_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const SHA_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
@@ -135,7 +137,7 @@ Deno.test("copyCoverageArtifactFiles reads a pre-downloaded artifact in place", 
         lcovDir,
         artifactsDir,
       ),
-      { profileFiles: 1, lcovFiles: 2 },
+      { profileFiles: 1, lcovFiles: 2, unlaunchedMembers: [] },
     );
 
     const copiedLcov: string[] = [];
@@ -148,6 +150,47 @@ Deno.test("copyCoverageArtifactFiles reads a pre-downloaded artifact in place", 
       "profile",
     );
     assert((await Deno.stat(sourceDir)).isDirectory);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("copyCoverageArtifactFiles reads the artifact's unlaunched-member record", async () => {
+  const root = await Deno.makeTempDir({ prefix: "perf-coverage-unlaunched-" });
+  const artifact = makeArtifact(21, "coverage-profile-workspace-3");
+  const artifactsDir = path.join(root, "artifacts");
+  const sourceDir = path.join(artifactsDir, artifact.name);
+  const profileDir = path.join(root, "profiles");
+  const lcovDir = path.join(root, "lcov");
+
+  try {
+    await Promise.all([
+      Deno.mkdir(sourceDir, { recursive: true }),
+      Deno.mkdir(profileDir),
+      Deno.mkdir(lcovDir),
+    ]);
+    await Promise.all([
+      Deno.writeTextFile(path.join(sourceDir, "workspace-3.lcov"), "workspace"),
+      writeUnlaunchedMembers(sourceDir, ["./packages/shell", "./tasks"]),
+    ]);
+
+    assertEquals(
+      await copyCoverageArtifactFiles(
+        artifact,
+        profileDir,
+        lcovDir,
+        artifactsDir,
+      ),
+      {
+        profileFiles: 0,
+        lcovFiles: 1,
+        unlaunchedMembers: ["./packages/shell", "./tasks"],
+      },
+    );
+
+    // The record is read rather than copied: a file `deno coverage` cannot
+    // parse among the profiles would fail the whole conversion.
+    assertEquals([...Deno.readDirSync(profileDir)], []);
   } finally {
     await Deno.remove(root, { recursive: true });
   }
@@ -2557,6 +2600,54 @@ Deno.test("combinedLcovFromArtifacts joins every artifact's uploaded report", as
     assertStringIncludes(lcov, "packages/example/src/mod-0.ts");
     assertStringIncludes(lcov, "packages/example/src/mod-1.ts");
     assertEquals(sourceDescription, "2 LCOV report files");
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("unscoredGroupsReport names the members and the groups they cost", () => {
+  assertEquals(
+    unscoredGroupsReport(["./tasks", "./packages/shell"]),
+    "This run never launched ./packages/shell, ./tasks, so it carries no " +
+      "measurement of packages/shell, tasks and does not score them.",
+  );
+});
+
+Deno.test("unscoredGroupsReport says nothing for a run that launched everything", () => {
+  assertEquals(unscoredGroupsReport([]), undefined);
+});
+
+Deno.test("combinedLcovFromArtifacts unions the records its artifacts carry", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "coverage-unlaunched-union-" });
+  try {
+    const artifacts = [
+      { id: 31, name: "coverage-profile-workspace-2" },
+      { id: 32, name: "coverage-profile-workspace-5" },
+      { id: 33, name: "coverage-profile-workspace-6" },
+    ].map((artifact) => ({ ...artifact, size_in_bytes: 64, expired: false }));
+    const records = [["./packages/shell", "./tasks"], ["./packages/shell"], []];
+
+    for (const [index, artifact] of artifacts.entries()) {
+      const artifactDir = path.join(dir, artifact.name);
+      await Deno.mkdir(artifactDir, { recursive: true });
+      await Deno.writeTextFile(
+        path.join(artifactDir, `${artifact.name}.lcov`),
+        "",
+      );
+      await writeUnlaunchedMembers(artifactDir, records[index]);
+    }
+
+    const { unlaunchedMembers } = await combinedLcovFromArtifacts(
+      artifacts,
+      dir,
+    );
+
+    // Every member any artifact names, each of them once, and nothing from the
+    // artifact that carries no record.
+    assertEquals([...unlaunchedMembers].sort(), [
+      "./packages/shell",
+      "./tasks",
+    ]);
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

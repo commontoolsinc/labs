@@ -261,33 +261,67 @@ export const namesTable = lift(
 );
 
 /**
+ * Whether `value` is an object, which is what a position has to hold for a
+ * member to be there: a member is a document, and a document reads as an
+ * object whatever schema it arrived through — a materialized value, a query
+ * proxy, a cell.
+ *
+ * `Object(value) === value` is the whole test, and it is one expression on
+ * purpose: coercing a primitive yields a fresh wrapper that fails the
+ * comparison, coercing an object yields the object itself, and there is no
+ * arm to drop. A `typeof` test does not decide this, because `typeof null` is
+ * `object`. A function is an object here and a member never is one, which
+ * costs nothing: `FabricValue` holds no function, so no stored position can.
+ *
+ * The bound is that an object is not necessarily a member. An array passes,
+ * and so does any object a foreign writer left at a position; telling either
+ * apart from a member would mean reading through the member.
+ */
+const isObject = (value: unknown): boolean => Object(value) === value;
+
+/**
  * Names every member of `members` that has no name, in filing order, and
  * returns the names it wrote — exactly the keys it added to `names`, in the
- * order it added them. A member already named is skipped, whatever position
- * it holds, and a member listed at two positions is named once: membership
- * is asked of IDENTITY, never of position. Idempotent: a run over a fully
- * named list writes nothing and returns `[]`.
+ * order it added them. An entry records the member a position holds rather
+ * than the position, so it names that member still once the list has shifted
+ * under it; only a position holding an object is named, so `undefined`,
+ * `null` and every other primitive name nothing, while an object that is no
+ * member — an array, or whatever a foreign writer left there — is named as
+ * though it were one. A member already named is skipped, whatever position it
+ * holds, and a member listed at two positions is named once: membership is
+ * asked of IDENTITY, never of position. Idempotent: a run over a fully named
+ * list writes nothing and returns `[]`.
  *
  * Called from a verb body for the reason `assignName()` is: the keyset read
  * and the key writes are one transaction, so a create that lands while a
  * backfill runs serializes with it rather than colliding on a name.
  */
 export function backfillNames(
-  members: { get(): readonly unknown[]; key(index: number): object },
+  members: {
+    get(): readonly unknown[];
+    key(index: number): { resolveAsCell(): object };
+  },
   names: NamesMapCell,
 ): string[] {
   const map = names.get() ?? {};
   // The members with a name: those the map already holds, and — as the walk
   // goes — those this run names, so a member met again is not named again.
   const named = Object.values(map) as (object | undefined)[];
-  const count = members.get().length;
+  const listed = members.get();
   const written: string[] = [];
   let next = nextNameAmong(Object.keys(map));
-  for (let index = 0; index < count; index++) {
-    // The cell at the position rather than the value read out of it: a cell
-    // is an identity `equals` can match against the map's links, and it is
-    // what the map stores.
-    const member = members.key(index);
+  for (let index = 0; index < listed.length; index++) {
+    // Only a position holding an object can hold a member. At one holding
+    // `undefined`, `null`, or any other primitive there is no member link for
+    // `resolveAsCell()` to follow, so an entry written for it would address
+    // the position itself — the thing this walk exists to not do.
+    if (!isObject(listed[index])) continue;
+    // The member the position holds, pinned to its own document. An entry
+    // outlives its member's place in the list, so what the map records has to
+    // be the member; the cell at a position is an address in the list, which
+    // names whoever sits there when the entry is read. The pinned cell is
+    // also the identity `equals` matches against the map's links.
+    const member = members.key(index).resolveAsCell();
     if (named.some((other) => equals(member, other))) continue;
     names.key(next).set(member);
     written.push(next);

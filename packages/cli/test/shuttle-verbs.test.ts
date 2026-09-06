@@ -8,9 +8,12 @@
  * exception and drives the real derivation: which space a name denotes is a
  * fact two callers have to agree about, so that case asks both.
  *
- * The connection is a borrowed one throughout. No verb opens or closes one, so
- * which arm a case stands it up through decides nothing here, and the borrowed
- * arm is the one that needs no opener behind it.
+ * The connection is a borrowed one in every case but one. No verb opens or
+ * closes one, so which arm a case stands it up through decides nothing here,
+ * and the borrowed arm is the one that needs no opener behind it. The
+ * exception is `where` over a connection that will not open, which is the one
+ * question the arm decides: the borrowed arm has a controller already, so only
+ * an owned one can be asked what it answers when the opening fails.
  *
  * Two properties the file exists for run through it. A read never moves the
  * place, and a move never happens twice, so each of the two verbs that resolve
@@ -22,24 +25,24 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { LINK_MARKER_KEY } from "@commonfabric/cli/lib/cell-selection";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { PiecesController } from "@commonfabric/piece/ops";
+
+import { LINK_MARKER_KEY } from "../lib/cell-selection.ts";
 import type {
   GetCellValueOptions,
   PieceConfig,
   SpaceConfig,
-} from "@commonfabric/cli/lib/piece";
-import type { WishReadConfig } from "@commonfabric/cli/lib/wish";
-import type { MemorySpace } from "@commonfabric/memory/interface";
-import type { PiecesController } from "@commonfabric/piece/ops";
-
-import { HeldConnection } from "../src/connection.ts";
-import { CurrentPlace } from "../src/place.ts";
+} from "../lib/piece.ts";
+import { HeldConnection } from "../lib/shuttle/connection.ts";
+import { CurrentPlace, operandForChild } from "../lib/shuttle/place.ts";
 import {
   type Outcome,
   runLine,
   type Shuttle,
   type VerbDeps,
-} from "../src/verbs.ts";
+} from "../lib/shuttle/verbs.ts";
+import type { WishReadConfig } from "../lib/wish.ts";
 
 const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;
 const OTHER_SPACE = "did:key:z6MkHomeSpace" as MemorySpace;
@@ -156,12 +159,52 @@ function addressed(link: string): VerbDeps {
   return wishing({ [LINK_MARKER_KEY]: link });
 }
 
+/** Helper for the cases below, which is the text `outcome` composed. */
+function textOf(outcome: Outcome): string {
+  return outcome.kind === "text" ? outcome.text : `not text: ${outcome.kind}`;
+}
+
 /** Helper for the cases below, which is the reason `outcome` was refused. */
 function reasonOf(outcome: Outcome): string {
   return outcome.kind === "refused"
     ? outcome.reason
     : `not refused: ${outcome.kind}`;
 }
+
+/**
+ * Helper for the cases below, which is every verb the dispatch takes, in the
+ * order it lists them, with how many operands each one takes.
+ *
+ * It is written out rather than read off the table, so that a verb added
+ * without a page, or with an arity nobody meant, fails a case here instead of
+ * passing one that walks whatever it finds. What holds it to the table is the
+ * case asserting that `help` lists exactly these and nothing else.
+ */
+const VERB_ARITY: readonly (readonly [
+  string,
+  "none" | "optional" | "required",
+])[] = [
+  ["cd", "required"],
+  ["get", "optional"],
+  ["help", "optional"],
+  ["ls", "none"],
+  ["pwd", "none"],
+  ["where", "none"],
+  ["wish", "required"],
+];
+
+/**
+ * Helper for the cases below, which is what a verb needing an operand refuses
+ * a line naming none with. A verb absent from this either takes no operand at
+ * all or reads its own meaning into having none.
+ */
+const NEEDS_ONE: ReadonlyMap<string, string> = new Map([
+  ["cd", "`cd` takes a place to move to."],
+  ["wish", "`wish` takes the target to resolve, as in `wish #favorites`."],
+]);
+
+/** Helper for the cases below, which is every verb, in that same order. */
+const VERB_WORDS = VERB_ARITY.map(([word]) => word);
 
 describe("verbs", () => {
   describe("the dispatch", () => {
@@ -174,8 +217,8 @@ describe("verbs", () => {
     it("returns a refusal naming a word that is no verb, and listing the verbs", async () => {
       expect(await runLine("frob x", shuttleIn(), READS_NOTHING)).toEqual({
         kind: "refused",
-        reason: "`frob` is not a verb. The verbs are `cd`, `get`, `ls`, " +
-          "`pwd`, and `wish`.",
+        reason: "`frob` is not a verb. The verbs are `cd`, `get`, `help`, " +
+          "`ls`, `pwd`, `where`, and `wish`.",
       });
     });
 
@@ -201,7 +244,7 @@ describe("verbs", () => {
         expect(await runLine(word, shuttleIn(), READS_NOTHING)).toEqual({
           kind: "refused",
           reason: `\`${word}\` is not a verb. The verbs are \`cd\`, \`get\`, ` +
-            "`ls`, `pwd`, and `wish`.",
+            "`help`, `ls`, `pwd`, `where`, and `wish`.",
         });
       }
     });
@@ -210,13 +253,6 @@ describe("verbs", () => {
       expect(await runLine("get 'a", shuttleIn(), READS_NOTHING)).toEqual({
         kind: "refused",
         reason: "The `'` opened at column 5 is never closed.",
-      });
-    });
-
-    it("hands the tokens after the verb on as its operands", async () => {
-      expect(await runLine("pwd here", shuttleIn(), READS_NOTHING)).toEqual({
-        kind: "refused",
-        reason: "`pwd` takes no operand, and was given 1.",
       });
     });
 
@@ -246,7 +282,17 @@ describe("verbs", () => {
           listing: { listCellKeys: () => Promise.resolve(["title"]) },
         };
         const shuttle = atPiece();
-        for (const line of ["pwd", "ls", "get", "wish #favorites", "cd .."]) {
+        for (
+          const line of [
+            "pwd",
+            "where",
+            "ls",
+            "get",
+            "wish #favorites",
+            "cd ..",
+            "help",
+          ]
+        ) {
           await runLine(line, shuttle, answers);
         }
       } finally {
@@ -254,6 +300,169 @@ describe("verbs", () => {
         Deno.stderr.writeSync = stderr;
       }
       expect(written).toEqual([]);
+    });
+  });
+
+  describe("the option grammar", () => {
+    it("hands a token opening with `-` to no verb, and refuses it as an option nobody declared", async () => {
+      expect(reasonOf(await runLine("ls -x", shuttleIn(), READS_NOTHING)))
+        .toBe(
+          'Unknown option "-x". Did you mean option "-h"? `ls --help` says ' +
+            "what `ls` takes.",
+        );
+    });
+
+    it("hands `-` on its own to the verb as an operand, it being the previous place", async () => {
+      // The one token the rule turns on that a shipped verb already spends:
+      // read as an option it would refuse here as `-x` does, and the reason
+      // it gives instead is the place's own.
+
+      expect(reasonOf(await runLine("cd -", shuttleIn(), READS_NOTHING)))
+        .toBe("There is no previous place to return to.");
+    });
+
+    it("hands a token after a bare `--` on as an operand, though it opens with `-`", async () => {
+      expect(reasonOf(await runLine("cd -- -x", shuttleIn(), READS_NOTHING)))
+        .toBe(
+          "A space root lists facets, and `-x` names none. The facets are " +
+            "`slugs/` and `pieces/`.",
+        );
+    });
+
+    it("takes back the operand a listing offers for a key it would otherwise eat", async () => {
+      // The composed claim the rule puts at risk: a listing prints a name to
+      // be typed back, and a token opening with `-` never reaches a verb as an
+      // operand. What closes it is the reference, which opens with `/`.
+
+      const shuttle = atPiece();
+      const operand = operandForChild(shuttle.place.place, "-x");
+      expect(operand).toBeDefined();
+      await runLine(`cd ${operand}`, shuttle, READS_NOTHING);
+      expect(shuttle.place.place.position).toEqual({
+        kind: "piece",
+        space: SPACE,
+        piece: HANDLE,
+        path: ["-x"],
+      });
+    });
+
+    it("takes a key called `--` by the second one, only the first ending the options", async () => {
+      // The typed spelling and what a listing offers are two questions. The
+      // listing prints the reference for this key, `readsAsOption` taking the
+      // name; the line below is what a person can type for it either way.
+
+      const shuttle = atPiece();
+      await runLine("cd -- --", shuttle, READS_NOTHING);
+      expect(shuttle.place.place.position).toEqual({
+        kind: "piece",
+        space: SPACE,
+        piece: HANDLE,
+        path: ["--"],
+      });
+    });
+
+    it("counts the operands rather than the tokens, a bare `--` being neither", async () => {
+      const shuttle = shuttleIn();
+      expect(await runLine("cd -- slugs", shuttle, READS_NOTHING))
+        .toEqual({ kind: "moved", place: shuttle.place.place });
+    });
+  });
+
+  describe("`--help`", () => {
+    // One case per verb rather than one case walking them, because what is
+    // claimed is of each: the dispatch puts the option in front of whatever a
+    // verb declared, so a verb that stopped taking it names itself here.
+
+    for (const word of VERB_WORDS) {
+      it(`writes \`${word}\`'s page, which \`help ${word}\` writes too`, async () => {
+        const opening = `Usage: ${word}`;
+        const byOption = textOf(
+          await runLine(`${word} --help`, shuttleIn(), READS_NOTHING),
+        );
+        expect(byOption.slice(0, opening.length)).toBe(opening);
+        expect(
+          textOf(await runLine(`help ${word}`, shuttleIn(), READS_NOTHING)),
+        )
+          .toBe(byOption);
+      });
+    }
+
+    it("writes the page though an operand was written beside the option", async () => {
+      // The option takes the whole reading, so the operand beside it reaches
+      // no verb. What each case above shows is the other half: a verb that ran
+      // instead would answer with its own refusal for the operands it was not
+      // given, and none of these would be text at all.
+
+      expect(
+        textOf(await runLine("cd --help slugs", shuttleIn(), READS_NOTHING))
+          .split("\n")[0],
+      ).toBe("Usage: cd <ref>");
+    });
+  });
+
+  describe("arity", () => {
+    // How many operands a verb takes is the dispatch table's, and the dispatch
+    // is what holds a verb to it, so there is one case per verb here rather
+    // than one in each verb's own block. What a case turns on is the entry it
+    // reads, so a count changed there names the verb it was changed for.
+
+    for (const [word, arity] of VERB_ARITY) {
+      const given = arity === "none" ? 1 : 2;
+      it(`refuses ${given} operand${given === 1 ? "" : "s"}, one more than \`${word}\` takes`, async () => {
+        const line = [word, ...["a", "b"].slice(0, given)].join(" ");
+        expect(reasonOf(await runLine(line, shuttleIn(), READS_NOTHING)))
+          .toBe(
+            arity === "none"
+              ? `\`${word}\` takes no operand, and was given 1.`
+              : `\`${word}\` takes one operand, and was given 2.`,
+          );
+      });
+    }
+
+    for (const [word, arity] of VERB_ARITY) {
+      if (arity !== "required") continue;
+      it(`refuses a line naming no operand, \`${word}\` needing one`, async () => {
+        expect(reasonOf(await runLine(word, shuttleIn(), READS_NOTHING)))
+          .toBe(NEEDS_ONE.get(word));
+      });
+    }
+
+    for (const [word, arity] of VERB_ARITY) {
+      if (arity !== "optional") continue;
+      it(`runs \`${word}\` given no operand, which is a default and not too few`, async () => {
+        // The half a maximum alone cannot express. `get` reads where it stands
+        // and `help` lists the verbs, so neither is a line the dispatch may
+        // answer for, and a count refusing none would take both readings away.
+
+        const outcome = await runLine(word, atPiece(), cellValue("a value"));
+        expect(outcome.kind).not.toBe("refused");
+      });
+    }
+
+    it("counts the operands it was given rather than the count the verb takes", async () => {
+      expect(reasonOf(await runLine("pwd a b c", shuttleIn(), READS_NOTHING)))
+        .toBe("`pwd` takes no operand, and was given 3.");
+    });
+  });
+
+  describe("help", () => {
+    it("lists every verb, one to a row, and nothing else", async () => {
+      // The list and the dispatch read one table, so a verb the dispatch
+      // takes and this does not list is a verb a person has no way to find.
+      // The last two lines are the blank and the line naming the option.
+
+      const lines = textOf(await runLine("help", shuttleIn(), READS_NOTHING))
+        .split("\n");
+      expect(lines.slice(0, -2).map((row) => row.split(" ")[0]))
+        .toEqual(VERB_WORDS);
+    });
+
+    it("refuses a word that names no verb, in the sentence the dispatch refuses one in", async () => {
+      expect(reasonOf(await runLine("help frob", shuttleIn(), READS_NOTHING)))
+        .toBe(
+          "`frob` is not a verb. The verbs are `cd`, `get`, `help`, `ls`, " +
+            "`pwd`, `where`, and `wish`.",
+        );
     });
   });
 
@@ -280,16 +489,13 @@ describe("verbs", () => {
       expect(shuttle.place.place).toBe(before);
     });
 
-    it("returns the reason a place gave no operand at all", async () => {
-      expect(reasonOf(await runLine("cd", shuttleIn(), READS_NOTHING))).toBe(
-        "`cd` takes a place to move to.",
-      );
-    });
+    it("returns the place's own refusal for an operand that is the empty string", async () => {
+      // One operand, so the dispatch hands it on and `movePlace`'s guard is
+      // what answers — in the sentence the dispatch composes for a line naming
+      // no operand at all, so the two spellings read alike.
 
-    it("refuses two operands", async () => {
-      expect(
-        reasonOf(await runLine("cd a b", shuttleIn(), READS_NOTHING)),
-      ).toBe("`cd` takes one operand, and was given 2.");
+      expect(reasonOf(await runLine("cd ''", shuttleIn(), READS_NOTHING)))
+        .toBe("`cd` takes a place to move to.");
     });
 
     it("refuses an operand ending in `#argument`, a place being result-rooted", async () => {
@@ -608,13 +814,6 @@ describe("verbs", () => {
       expect(listed).toBe(1);
     });
 
-    it("refuses an operand", async () => {
-      expect(reasonOf(await runLine("ls title", atPiece(), READS_NOTHING)))
-        .toBe(
-          "`ls` takes no operand, and was given 1.",
-        );
-    });
-
     it("raises what a read that failed outright raised", async () => {
       await expect(runLine("ls", atPiece(), READS_NOTHING)).rejects.toThrow(
         "The cell was listed.",
@@ -629,11 +828,85 @@ describe("verbs", () => {
         text: `position  /@${SPACE}/${HANDLE}@space/title\nscope     @space`,
       });
     });
+  });
 
-    it("refuses an operand", async () => {
-      expect(reasonOf(await runLine("pwd /", shuttleIn(), READS_NOTHING))).toBe(
-        "`pwd` takes no operand, and was given 1.",
+  describe("where", () => {
+    it("returns every dimension of the ambient record, the connection's first", async () => {
+      expect(await runLine("where", atPiece("title"), READS_NOTHING)).toEqual({
+        kind: "text",
+        text: `api       ${CONFIG.apiUrl}\n` +
+          `identity  ${CONFIG.identity}\n` +
+          `space     ${SPACE}\n` +
+          `position  /@${SPACE}/${HANDLE}@space/title\n` +
+          "scope     @space",
+      });
+    });
+
+    it("returns the place's dimensions written exactly as `pwd` writes them", async () => {
+      // What makes the two one format rather than two that agree today: the
+      // dimensions `pwd` prints are the end of what `where` prints, character
+      // for character.
+
+      const shuttle = atPiece("title");
+      const whole = await runLine("where", shuttle, READS_NOTHING);
+      const place = await runLine("pwd", shuttle, READS_NOTHING);
+      expect(whole.kind === "text" && place.kind === "text").toBe(true);
+      expect(textOf(whole).endsWith(`\n${textOf(place)}`)).toBe(true);
+    });
+
+    it("returns the record over a connection that will not open", async () => {
+      // Nothing here reads, and this is what that is worth: a shuttle whose
+      // server has gone away can still say what it was connected as and where
+      // it stands.
+
+      const shuttle: Shuttle = {
+        config: CONFIG,
+        place: new CurrentPlace(SPACE),
+        connection: new HeldConnection({
+          kind: "owned",
+          record: CONFIG,
+          open: () => Promise.reject(new Error("The server refused.")),
+        }),
+      };
+      expect(textOf(await runLine("where", shuttle, READS_NOTHING)))
+        .toBe(
+          `api       ${CONFIG.apiUrl}\n` +
+            `identity  ${CONFIG.identity}\n` +
+            `space     ${SPACE}\n` +
+            `position  @${SPACE}/\n` +
+            "scope     @space",
+        );
+    });
+
+    it("returns the space the connection names beside the one the place settled on", async () => {
+      // The two dimensions carry different things and both are worth seeing:
+      // a person names a space and the fabric answers with a DID, and the
+      // record shows the naming as well as what it denotes.
+
+      const shuttle: Shuttle = {
+        config: { ...CONFIG, space: SPACE_NAME },
+        place: new CurrentPlace(SPACE),
+        connection: new HeldConnection({ kind: "borrowed", pieces: PIECES }),
+      };
+      expect(textOf(await runLine("where", shuttle, READS_NOTHING))).toContain(
+        `space     ${SPACE_NAME}\nposition  @${SPACE}/`,
       );
+    });
+
+    it("returns the connection's own values shown as a message is shown", async () => {
+      // The three arrive from a launch flag or the environment behind it, so
+      // no door has held them to the class a terminal acts on. They are prose
+      // somebody reads, which is the glyph rather than the JSON escape.
+
+      const shuttle: Shuttle = {
+        config: { ...CONFIG, space: "boa\u009brd", identity: "/k\u007fey" },
+        place: new CurrentPlace(SPACE),
+        connection: new HeldConnection({ kind: "borrowed", pieces: PIECES }),
+      };
+      const text = textOf(await runLine("where", shuttle, READS_NOTHING));
+      expect(text).toContain("space     boa␦rd");
+      expect(text).toContain("identity  /k␡ey");
+      expect(/\p{Cc}/u.test(text.replaceAll("\n", ""))).toBe(false);
     });
   });
 
@@ -903,12 +1176,6 @@ describe("verbs", () => {
         "A cell was read.",
       );
     });
-
-    it("refuses two operands", async () => {
-      expect(reasonOf(await runLine("get a b", atPiece(), READS_NOTHING))).toBe(
-        "`get` takes one operand, and was given 2.",
-      );
-    });
   });
 
   describe("wish", () => {
@@ -985,18 +1252,6 @@ describe("verbs", () => {
       expect(
         await runLine("wish #profile", shuttleIn(), wishing(null)),
       ).toEqual({ kind: "value", value: null });
-    });
-
-    it("refuses a line naming no target", async () => {
-      expect(reasonOf(await runLine("wish", shuttleIn(), READS_NOTHING))).toBe(
-        "`wish` takes the target to resolve, as in `wish #favorites`.",
-      );
-    });
-
-    it("refuses two operands", async () => {
-      expect(
-        reasonOf(await runLine("wish #a #b", shuttleIn(), READS_NOTHING)),
-      ).toBe("`wish` takes one operand, and was given 2.");
     });
   });
 });
