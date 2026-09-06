@@ -320,14 +320,22 @@ interface PiecePropRootInfo {
 
 /** What the bridge knows about an entity root it has not yet hydrated. */
 export interface UnhydratedEntityRootInfo {
+  /** The space the entity lives in. */
   state: SpaceState;
+
+  /** Name of that space, as its directory is named. */
   spaceName: string;
+
+  /** Id of the entity. */
   entityId: string;
 }
 
 /** The root an entity-projection lookup pin belongs to, and its pin count. */
 export interface EntityProjectionLookupOwner {
+  /** Inode of the projection root the pin holds. */
   rootIno: bigint;
+
+  /** How many pins the root holds through this owner. */
   count: bigint;
 }
 
@@ -3304,7 +3312,8 @@ export class CellBridge {
     try {
       await (piece.getCell() as Cell<unknown>).asSchema(nameSchema).sync();
     } catch {
-      // Name stays unavailable; `#addPieceToSpace()` falls back to the piece id.
+      // Name stays unavailable; `#addPieceToSpace()` falls back to the piece
+      // id.
     }
   }
 
@@ -4276,11 +4285,11 @@ export class CellBridge {
         setTimeout(() => {
           try {
             // Use the state captured at subscription time, NOT
-            // this.spaces.get(): during the initial `#buildSpaceTree()` the space
-            // isn't registered in this.spaces yet, so a lookup would silently
-            // drop every name event that fires while the tree is being built
-            // (and a static piece may never fire again). Only bail if the
-            // space has since been disconnected or replaced.
+            // this.spaces.get(): during the initial `#buildSpaceTree()` the
+            // space isn't registered in this.spaces yet, so a lookup would
+            // silently drop every name event that fires while the tree is
+            // being built (and a static piece may never fire again). Only bail
+            // if the space has since been disconnected or replaced.
             const registered = this.spaces.get(spaceName);
             if (registered !== undefined && registered !== state) return;
 
