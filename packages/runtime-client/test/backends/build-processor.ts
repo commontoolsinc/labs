@@ -13,7 +13,7 @@ import { Runtime, RuntimeTelemetry } from "@commonfabric/runner";
 import { RuntimeProcessor } from "@/backends/runtime-processor.ts";
 
 /** The signer a processor acts as when a test supplies no identity. */
-export const standInSigner = await Identity.fromPassphrase(
+const standInSigner = await Identity.fromPassphrase(
   "runtime-processor-stand-in",
 );
 
@@ -21,6 +21,11 @@ export const standInSigner = await Identity.fromPassphrase(
  * Builds a processor over `parts`. Each part is declared as what the class
  * holds where it is handed over; `cc` is the piece context of `space`, the
  * home space, which is where a handler naming that space finds it.
+ *
+ * The parts are `unknown` rather than `Partial<Runtime>` and the like: a
+ * stand-in here fakes one or two members with signatures of its own, which
+ * a `Partial` of the real type would refuse. The cost is that a stand-in
+ * drifting from the shape a handler reads is found by the handler, not here.
  */
 export function buildProcessor(parts: {
   runtime?: unknown;
@@ -30,14 +35,15 @@ export function buildProcessor(parts: {
   telemetry?: RuntimeTelemetry;
 } = {}): RuntimeProcessor {
   const space = parts.space ?? standInSigner.did();
+  const identity = (parts.identity ?? standInSigner) as Identity;
   return RuntimeProcessor.accessForTestingOnly.construct(
     (parts.runtime ?? {}) as Runtime,
     (parts.cc ?? {}) as PiecesController,
     space,
-    (parts.identity ?? standInSigner) as Identity,
+    identity,
     parts.telemetry ?? new RuntimeTelemetry(),
     {
-      identity: standInSigner.did(),
+      identity: identity.did(),
       apiUrl: "http://localhost/",
       spaceDid: space,
     },

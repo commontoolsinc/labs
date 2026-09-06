@@ -784,15 +784,15 @@ export class RuntimeProcessor {
   }
 
   /**
-   * The collaborators this processor was built over, the tables it keeps by
-   * client and by session, the render policy a mount inherits, and the
-   * per-space context step, which a test drives directly.
+   * The runtime and home context this processor was built over, the tables
+   * it keeps by space, by client, and by session, the disposed flag, the
+   * render ceiling a mount inherits, and the per-space context step, which a
+   * test drives directly.
    */
   get accessForTestingOnly(): {
     runtime: Runtime;
-    cc: PiecesController;
+    readonly cc: PiecesController;
     readonly spaces: Map<DID, PiecesController>;
-    identity: Identity;
     subscriptions: Map<string, Cancel>;
     operationSubscriptions: Map<
       string,
@@ -808,14 +808,11 @@ export class RuntimeProcessor {
       string,
       { token: string; prepared: PreparedPieceSourceChange }
     >;
-    telemetry: RuntimeTelemetry;
     isDisposed: boolean;
     vdomMounts: Map<
       string,
       { reconciler: WorkerReconciler; cancel: Cancel; client: WorkerClient }
     >;
-    vdomBatchIdCounter: number;
-    renderDeclassificationPolicy: RenderDeclassificationPolicy;
     renderConfidentialityCeiling: RenderConfidentialityCeiling | undefined;
     getSpaceCtx(space: DID): PiecesController;
   } {
@@ -828,19 +825,8 @@ export class RuntimeProcessor {
       set runtime(value) {
         outerThis.#runtime = value;
       },
-      get cc() {
-        return outerThis.#cc;
-      },
-      set cc(value) {
-        outerThis.#cc = value;
-      },
+      cc: this.#cc,
       spaces: this.#spaces,
-      get identity() {
-        return outerThis.#identity;
-      },
-      set identity(value) {
-        outerThis.#identity = value;
-      },
       get subscriptions() {
         return outerThis.#subscriptions;
       },
@@ -865,12 +851,6 @@ export class RuntimeProcessor {
       set pieceSourceConfirmations(value) {
         outerThis.#pieceSourceConfirmations = value;
       },
-      get telemetry() {
-        return outerThis.#telemetry;
-      },
-      set telemetry(value) {
-        outerThis.#telemetry = value;
-      },
       get isDisposed() {
         return outerThis.#isDisposed;
       },
@@ -882,18 +862,6 @@ export class RuntimeProcessor {
       },
       set vdomMounts(value) {
         outerThis.#vdomMounts = value;
-      },
-      get vdomBatchIdCounter() {
-        return outerThis.#vdomBatchIdCounter;
-      },
-      set vdomBatchIdCounter(value) {
-        outerThis.#vdomBatchIdCounter = value;
-      },
-      get renderDeclassificationPolicy() {
-        return outerThis.#renderDeclassificationPolicy;
-      },
-      set renderDeclassificationPolicy(value) {
-        outerThis.#renderDeclassificationPolicy = value;
       },
       get renderConfidentialityCeiling() {
         return outerThis.#renderConfidentialityCeiling;
@@ -1553,10 +1521,6 @@ export class RuntimeProcessor {
     }
     const cellKey = this.#operationSessionKey(cell);
     const sessionKey = operationSessionId;
-    // A few unit harnesses construct the processor from its prototype. Keep
-    // this lazy initialization in addition to the class field so those
-    // read-only protocol harnesses exercise the same session behavior.
-    this.#operationSessions ??= new Map();
     const existing = sessionKey === undefined
       ? undefined
       : this.#operationSessions.get(sessionKey);
@@ -1757,7 +1721,7 @@ export class RuntimeProcessor {
     subscription.cancelled = true;
     subscription.cancel?.();
     if (subscription.sessionKey !== undefined) {
-      const session = this.#operationSessions?.get(subscription.sessionKey);
+      const session = this.#operationSessions.get(subscription.sessionKey);
       session?.subscriptions.delete(request.subscriptionId);
       if (session?.subscriptions.size === 0) {
         this.#operationSessions.delete(subscription.sessionKey);
@@ -1770,7 +1734,7 @@ export class RuntimeProcessor {
     request: OperationSessionCloseRequest,
     client: WorkerClient = ownerClient,
   ): BooleanResponse {
-    const session = this.#operationSessions?.get(request.operationSessionId);
+    const session = this.#operationSessions.get(request.operationSessionId);
     if (session === undefined || session.clientId !== client.id) {
       return { value: false };
     }

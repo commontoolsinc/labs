@@ -30,7 +30,6 @@ import type { RuntimeProcessor } from "@/backends/runtime-processor.ts";
 import { createCellRef } from "@/backends/utils.ts";
 import { $conn, CellHandle, type RuntimeClient } from "@/mod.ts";
 import { RuntimeConnection } from "@/client/connection.ts";
-import { buildProcessor } from "./build-processor.ts";
 import { EventEmitter } from "@/client/emitter.ts";
 import type {
   RuntimeTransport,
@@ -47,6 +46,7 @@ import {
   fabricFromRealmValue,
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
+import { buildProcessor } from "./build-processor.ts";
 
 const signer = await Identity.fromPassphrase("cell-set-echo-race");
 const space = signer.did();

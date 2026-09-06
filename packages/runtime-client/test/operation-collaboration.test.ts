@@ -7,7 +7,6 @@ import { Identity } from "@commonfabric/identity";
 import type { OperationFieldSnapshot } from "@commonfabric/memory/v2";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { buildProcessor } from "./backends/build-processor.ts";
 import type { CellHandle } from "../src/cell-handle.ts";
 import { RuntimeClient } from "../src/runtime-client.ts";
 import {
@@ -15,6 +14,7 @@ import {
   NotificationType,
   RequestType,
 } from "../src/protocol/mod.ts";
+import { buildProcessor } from "./backends/build-processor.ts";
 
 const operationRuntime = (
   capability: Record<string, unknown>,
