@@ -1529,14 +1529,8 @@ const keywordValuesEqual = (
   if (
     SUBSCHEMA_LIST_KEYS.has(key) && Array.isArray(left) && Array.isArray(right)
   ) {
-    if (left.length !== right.length) return false;
-    for (let index = 0; index < left.length; index++) {
-      // A hole and a stored `undefined` are different values, the way
-      // `valueEqual` reads them.
-      if ((index in left) !== (index in right)) return false;
-      if (!schemaSubtreesEqual(left[index], right[index])) return false;
-    }
-    return true;
+    return left.length === right.length &&
+      left.every((entry, index) => schemaSubtreesEqual(entry, right[index]));
   }
   if (
     SUBSCHEMA_MAP_KEYS.has(key) && isPlainObject(left) && isPlainObject(right)

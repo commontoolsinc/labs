@@ -796,6 +796,42 @@ describe("piece schema compatibility", () => {
     ).toThrow(/bag: unevaluatedProperties changed/);
   });
 
+  it("still rejects a conjunct added beside a nested writer claim", () => {
+    // Reading the `ifc` inside an `allOf` means comparing the two lists, and
+    // a list that gains an entry has gained a constraint every value must now
+    // satisfy. The added conjunct is a narrowing whether or not the entry
+    // beside it carries a write authorization, so the lengths decide it before
+    // any entry is read.
+    const conjuncts = (extra: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        label: {
+          allOf: [
+            {
+              type: "string",
+              ifc: {
+                writeAuthorizedBy: { __ctWriterIdentityOf: baselineIdentity },
+              },
+            },
+            ...(extra ? [{ maxLength: 32 }] : []),
+          ],
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(conjuncts(false), { type: "object" }),
+        pattern(conjuncts(true), { type: "object" }),
+      )
+    ).toThrow(/label: allOf changed/);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(conjuncts(true), { type: "object" }),
+        pattern(conjuncts(false), { type: "object" }),
+      )
+    ).toThrow(/label: allOf changed/);
+  });
+
   it("still rejects a constraint change beside a nested writer claim", () => {
     // The reduction reaches the `ifc` and nothing else. A branch that narrows
     // what it accepts is still a narrowed contract, whether or not the same
