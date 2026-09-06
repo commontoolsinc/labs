@@ -296,10 +296,11 @@ Mike's call, after S4.
    accepted`. That refusal is not about `shortName`, and not about the
    property's spelling: adding `probeField?: string` to `TopicDemand` and
    nothing else produces the identical message at `topics.0.probeField`, and so
-   does `probeField?: unknown`. ANY new property on a per-member demand is
-   refused
-   over a board whose members do not publish it, because the schema recorded on
-   the retained link to each member is unconstrained at that path. The flag is
+   does `probeField?: unknown`. Three properties tried, three refused
+   identically, and the rule is on the stored side: the schema recorded on the
+   retained link to each member is unconstrained at any path the deployed
+   demand does not name, so expect this for a new per-member demand property
+   generally. The flag is
    held behind explicit team authorization by `skills/topics/SKILL.md`, so this
    step now carries a decision it did not carry before, and what the forced
    deploy leaves behind is itself unmeasured.

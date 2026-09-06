@@ -363,22 +363,26 @@ same way before the live run: `docs/development/space-clone-rehearsal.md`.
 
    That refusal is not about `shortName`. Adding `probeField?: string` — or
    `probeField?: unknown` — to `TopicDemand` and nothing else produces the same
-   message at `topics.0.probeField`. **Any** new property on a per-member demand
-   is refused over a board holding members that do not publish it, so the board
-   leg needs `--dangerously-allow-incompatible-schema` and therefore the team's
-   explicit authorization. The forced deploy itself is UNREHEARSED — the
-   rehearsal stopped at the refusal rather than waive a proof it had no
-   authorization to waive, so what the flag leaves behind on a real board is
-   still unmeasured. `deno task pattern-compat` and `deno task pattern-vintage`
-   do not see this: they judge a pattern against its own baselines and its own
-   stored documents, never against the schema recorded on a link into a sibling
-   piece. Run `setsrc --check` against the deployment itself and read what it
-   says before scheduling the window.
+   message at `topics.0.probeField`. Three properties were tried and all three
+   were refused identically, and the rule behind them is on the stored side: the
+   schema recorded on the retained link to each member is unconstrained at any
+   path the deployed demand does not name, and narrowing an unconstrained schema
+   is what `packages/piece/src/schema-compatibility.ts` refuses. So expect it
+   for a new per-member demand property generally, and the board leg needs
+   `--dangerously-allow-incompatible-schema` and therefore the team's explicit
+   authorization. The forced deploy itself is UNREHEARSED — the rehearsal
+   stopped at the refusal rather than waive a proof it had no authorization to
+   waive, so what the flag leaves behind on a real board is still unmeasured.
+   `deno task pattern-compat` and `deno task pattern-vintage` do not see this:
+   they judge a pattern against its own baselines and its own stored documents,
+   never against the schema recorded on a link into a sibling piece. Run
+   `setsrc --check` against the deployment itself and read what it says before
+   scheduling the window.
 
 2. **Then each Topic's source — and this step is BLOCKED as written.** Moving
    the board first clears the Topic leg's `mentionable[].shortName` refusal, and
    what is left underneath is #6968: a Topic wired to a board's `mentionable`
-   cannot be re-sourced at all, not even with the bytes it is already running.
+   was refused every source tried, the bytes it is already running included.
 
    ```
    piece source is incompatible with retained input: input link at mentionable
@@ -420,12 +424,15 @@ same way before the live run: `docs/development/space-clone-rehearsal.md`.
    - **It was not rehearsed.** No run in this procedure's evidence forced a
      Topic update. That the flag would succeed is read off its help text, not
      measured, and what a forced Topic update leaves behind is unknown.
-   - **It is permanent, not one-off.** The refusal is on the Topic's own bytes,
-     so `--check` will refuse every future Topic source update too, including
-     one that changes nothing. There is no version of this step that carries a
-     compatibility signal — the pre-flight is already gone, today, whether or
-     not anyone forces anything, and the 2026-08-28 record establishes that a
-     Topic source update is one-way once taken.
+   - **It reaches every Topic source update, not just this one — as the pattern
+     stands today.** The refusal is on the Topic's own bytes: a byte-identical
+     re-source is refused too, which is what was measured, so while
+     `mentionable` is declared `Writable` no Topic update carries a
+     compatibility signal and the pre-flight is already gone whether or not
+     anyone forces anything. That is a property of the pattern, not a permanent
+     one — a future source that resolves #6968 need not meet this proof at all,
+     and no such source was tested here. Meanwhile the 2026-08-28 record
+     establishes that a Topic source update is one-way once taken.
    - **It needs the same team authorization step 1 needs**, for an unrelated
      reason. Two separate decisions, not one.
 
