@@ -329,8 +329,10 @@ Mike's call, after S4.
    `setsrc --check` against the deployment itself.
 
    The board moves FIRST, which is what clears the topic leg's own
-   `mentionable[].shortName` refusal; the topic leg then meets an older blocker
-   that predates the graft, which the record names. The deploy also needs
+   `mentionable[].shortName` refusal; the topic leg then needs the flag once
+   itself, for the mention universe narrowing to a readable handle
+   (`../history/topics-mentionable-readonly-break.md`), and is proven on every
+   update after that one. The deploy also needs
    `--root` at or above `packages/patterns`, because the board imports the
    naming library from a sibling directory and the default program root is the
    entry's own.

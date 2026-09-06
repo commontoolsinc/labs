@@ -386,8 +386,17 @@ export interface TopicInput {
    * before the index as a one-time link-bind. A plain list of the pieces
    * themselves also satisfies the demand — a board not yet rewired, or a
    * composer without a board. Absent, the editor simply offers no
-   * completions. */
-  mentionable?: Writable<TopicMentionable[] | Default<[]>>;
+   * completions.
+   *
+   * Declared readable, which is what settles the retained link's proof. A
+   * writable handle adds a write-back leg to that proof, asking this
+   * three-field projection to accept every field the board's row publishes,
+   * and the row carries a required `piece` this projection deliberately omits
+   * — so a topic wired to a board is refused even the source it is running.
+   * The declaration is not a runtime gate: a write through the handle is
+   * refused by nothing, and where the universe is a plain list of pieces the
+   * editor's name write-back reaches a member's own title through it. */
+  mentionable?: ReadonlyCell<TopicMentionable[] | Default<[]>>;
 
   /** Where this topic's `[Label][key]` mentions point, keyed by the token that
    * appears in the body. The editor owns the contents; this pattern owns the
@@ -506,13 +515,16 @@ export interface TopicCrossrefRow {
  * own schema does not — and the board's name for the topic as `shortName`,
  * which is what a `#42` query matches.
  *
- * `shortName` is OPTIONAL rather than defaulted, and the spelling is what
- * keeps this demand applicable over a topic deployed before the namespace. A
- * defaulted property moves the demand's defaults below an array constraint the
- * compatibility proof cannot show stable under default insertion, and dropping
- * the default without making the property optional makes it a newly required
- * field. `TopicPiece` publishes it the same way, so a plain list of topics
- * satisfies this demand as the input documents it may.
+ * `shortName` is OPTIONAL rather than defaulted, which is a fact about the
+ * compatibility proof: a defaulted property moves the demand's defaults below
+ * an array constraint the proof cannot show stable under default insertion,
+ * and dropping the default without making the property optional makes it a
+ * newly required field. No spelling makes the demand applicable over a topic
+ * deployed before the namespace — a property added to a per-member demand is
+ * refused over members that do not publish it, for the reason
+ * `TopicDemand.shortName` in `./main.tsx` states. `TopicPiece` publishes it the
+ * same way, so a plain list of topics satisfies this demand as the input
+ * documents it may.
  *
  * `[NAME]` is not decoration here. `cf-code-editor` declares its entries as
  * `Mentionable`, whose schema carries `required: [NAME]`
@@ -595,11 +607,13 @@ export interface TopicPiece extends TopicSummary {
    * `packages/ui/src/v2/components/cf-code-editor/cf-code-editor.ts` reads an
    * absent name exactly as it reads a blank one).
    *
-   * Optional rather than defaulted, and the difference is the whole reason
-   * this projection still applies over a deployed board: this is what a
-   * board's stored list is validated against, and a defaulted property there
-   * moves the demand's defaults below an array constraint the compatibility
-   * proof cannot show stable under default insertion. */
+   * Optional rather than defaulted, and the difference is the compatibility
+   * proof's: this is what a board's stored list is validated against, and a
+   * defaulted property there moves the demand's defaults below an array
+   * constraint the proof cannot show stable under default insertion. It is not
+   * what lets the projection apply over a board whose members predate the
+   * property, and nothing is; `TopicDemand.shortName` in `./main.tsx` states
+   * why. */
   shortName?: string;
 
   /** The living document, verbatim Markdown. `setBody` replaces it whole. */
