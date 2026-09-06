@@ -3053,6 +3053,15 @@ export class CFPieceMenu extends BaseElement {
     const originView = revision.origin?.kind === "fabric-piece"
       ? fabricPieceNavigation(revision.origin.url, source.space)
       : undefined;
+    // The entry shows the string the piece recorded. A deployment-served
+    // origin is the only kind that resolves to a URL a browser can open, so
+    // only that kind offers the route beside the string, and only when the
+    // route is not already the string on show.
+    const recordedForm = revision.origin?.recorded ?? revision.origin?.url;
+    const openableRoute = revision.origin?.kind === "system" &&
+        recordedForm !== revision.origin.url
+      ? revision.origin.url
+      : undefined;
     return html`
       <article class="revision" test-id="piece-source-revision">
         <div class="revision-head">
@@ -3089,7 +3098,18 @@ export class CFPieceMenu extends BaseElement {
                 ><code>${revision.origin.url}</code></a>
               `
               : html`
-                — <code>${revision.origin.url}</code>
+                — <code>${recordedForm}</code>${openableRoute
+                  ? html`
+                    ·
+                    <a
+                      class="text-link"
+                      href="${openableRoute}"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      test-id="piece-source-origin-open-${revision.revisionId}"
+                    >open</a>
+                  `
+                  : nothing}
               `
             : nothing}
         </div>
