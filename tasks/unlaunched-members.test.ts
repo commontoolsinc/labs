@@ -1,3 +1,17 @@
+/**
+ * Tests for the record that carries one fact from the workspace test runner to
+ * the coverage-debt metric: which members a run never started. The metric's
+ * rule that a file with no coverage record owes every tracked line holds only
+ * where every package ran, and the record is what tells it when that is not
+ * the case.
+ *
+ * The cases here hold that signal in both directions, because the file's
+ * presence is the whole of it. A run that left something unmeasured leaves a
+ * record naming it, and a run that started everything leaves none — including
+ * in a directory an earlier run wrote a record into, where a survivor would
+ * suppress the groups this run measured.
+ */
+
 import { expect } from "@std/expect";
 import * as path from "@std/path";
 import { describe, it } from "@std/testing/bdd";
