@@ -99,7 +99,14 @@ describe("CFC: array shrink clears truncated slots' link labels", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. This list declares none,
+      // and the closing `length` assertion reads back the label that write
+      // persisted.
       cfcEnforcementMode: "observe",
+      // Persisting flow labels is what puts the per-slot link entries and the
+      // derived `length` entry in the document. Every assertion here reads
+      // one of them.
       cfcFlowLabels: "persist",
     });
 

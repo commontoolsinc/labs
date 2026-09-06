@@ -41,6 +41,8 @@ describe("prepare maxConfidentiality empty ceiling", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // The single assertion below is that the write is rejected with
+      // "maxConfidentiality failed", and only an enforcing rung aborts it.
       cfcEnforcementMode: "enforce-explicit",
     });
     try {

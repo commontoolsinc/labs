@@ -810,6 +810,10 @@ const dockerInfoResult = (
   exitCode: 0,
 });
 
+// An invocation context for the tests of the runsc registration probe. The
+// sandbox probes that registration only under an enforcing mode, so a bare
+// call here carries one. The test asserting that no probe runs passes
+// `observe`.
 const enforcingInvocationContext = (
   cfcEnforcementMode: "enforce-explicit" | "observe" = "enforce-explicit",
 ) =>

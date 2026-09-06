@@ -37,6 +37,8 @@ describe("the CFC posture record", () => {
     it("marks an observe rung as deciding nothing", () => {
       const record = cfcPostureReport({
         ...RUNTIME_CFC_DIAL_DEFAULTS,
+        // The assertions below read this rung back out of the record and
+        // check that it decides nothing.
         cfcPolicyEvaluation: "observe",
         cfcPolicySnapshot: undefined,
         cfcSinkMaxConfidentiality: {},
@@ -49,6 +51,8 @@ describe("the CFC posture record", () => {
     it("marks an enforcing rung as deciding on something", () => {
       const record = cfcPostureReport({
         ...RUNTIME_CFC_DIAL_DEFAULTS,
+        // The assertions below check that this rung decides on the rewritten
+        // label rather than only reporting.
         cfcPolicyEvaluation: "enforce",
         cfcPolicySnapshot: undefined,
         cfcSinkMaxConfidentiality: {},
@@ -215,6 +219,9 @@ describe("the CFC posture record", () => {
           experimental: {},
         })],
       [
+        // This case hands the preset an enforcement mode. The parity
+        // assertion then covers a caller-supplied rung reaching both the
+        // constructed Runtime and the projection.
         "remoteClient under max-enforcement, raised to strict",
         () =>
           runtimePresets.remoteClient({

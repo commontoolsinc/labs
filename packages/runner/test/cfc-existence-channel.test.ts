@@ -55,7 +55,15 @@ describe("CFC existence channel (SC-4, freeze-at-creation)", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // At this rung the gates record what they measure and refuse nothing.
+      // Every document here is assembled by hand through `writeOrThrow`,
+      // declaring neither a write policy nor a ceiling, and `writeTainted`
+      // then writes a labeled join onto it. Each assertion below reads back
+      // the label map those commits persisted.
       cfcEnforcementMode: "observe",
+      // Persisting flow labels is what puts the shape and value entries in
+      // the stored label map. `entriesOf` and `shapeEntriesAt` read those
+      // entries back in every test here.
       cfcFlowLabels: "persist",
     });
     return runtime;
@@ -1061,7 +1069,14 @@ describe("CFC slot-pointer channel (C3, SC-8 end-to-end)", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // At this rung the gates record what they measure and refuse nothing.
+      // `sp-holder` is assembled by hand through `writeOrThrow`, and `sp-out`
+      // is created by a write carrying the pointer label with no ceiling
+      // declared for it. The closing assertion reads back the entry that
+      // second commit persisted.
       cfcEnforcementMode: "observe",
+      // Persisting flow labels is what puts the derived entry carrying
+      // "pointer-label" into `sp-out`.
       cfcFlowLabels: "persist",
     });
     const seed = runtime.edit();
