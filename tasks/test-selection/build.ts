@@ -50,6 +50,7 @@ import {
   type ManifestEntry,
   type WithheldEntry,
 } from "./manifest.ts";
+import { ObservationSpool } from "./observation-spool.ts";
 import {
   COST_WINDOW_DAYS,
   FLAKE_EXCLUSION_RATE,
@@ -240,8 +241,9 @@ export interface ReadReport {
 
 /**
  * Reads one stored object. A report a decision must not read contributes
- * nothing: a fork run's records are authored by the fork, and a group
- * with no context cannot say where it came from.
+ * nothing: a fork run's records are authored by the fork, a group with no
+ * context cannot say where it came from, and a group whose start time is
+ * not a time has no place in the order the rules read along.
  */
 export function readReport(
   report: StoredReport,
@@ -252,7 +254,12 @@ export function readReport(
   const durations = new Map<string, Map<string, number[]>>();
   for (const group of report.reports) {
     const where = provenance(group.context, report.objectName);
-    if (where === undefined || group.context === undefined) continue;
+    if (
+      where === undefined || group.context === undefined ||
+      !Number.isFinite(Date.parse(group.context.startedAt))
+    ) {
+      continue;
+    }
     const day = dayOf(group.context.startedAt);
     for (const record of group.records) {
       const test = resolver.resolve(record.test, day);
@@ -620,31 +627,7 @@ export class Fold {
       for (const observation of read.observations) {
         observations.push(observation);
       }
-      for (const [key, surface] of read.surfaces) {
-        // A file names something a runner can be pointed at, and an
-        // identity's own name does not. A record with no file arriving in
-        // a later report must not replace one that had it.
-        const known = this.#surfaces.get(key);
-        if (known === undefined || isFileBacked(surface)) {
-          this.#surfaces.set(key, surface);
-        }
-      }
-      for (const [key, byDay] of read.durations) {
-        let known = this.#samples.get(key);
-        for (const [day, sampled] of byDay) {
-          // A day past the cost window is sealed and then dropped again
-          // by the same `finish` that sealed it, so sampling it buys
-          // nothing and a bootstrap holds sixty days of it at once.
-          if (daysBetween(day, this.#today) > COST_WINDOW_DAYS) continue;
-          if (known === undefined) {
-            known = new Map();
-            this.#samples.set(key, known);
-          }
-          const into = known.get(day) ?? emptySamples();
-          for (const durationMs of sampled) sampleDuration(into, durationMs);
-          known.set(day, into);
-        }
-      }
+      this.#remember(read);
       this.#folded.push(report.objectName);
       this.#foldedIndex.add(report.objectName);
     }
@@ -669,6 +652,37 @@ export class Fold {
     // through a bootstrap's whole read.
     const newest = observations.at(-1)?.day;
     if (newest !== undefined) trimContext(this.#context, newest);
+  }
+
+  /**
+   * Folds one logical batch from reports arriving in arbitrary order.
+   * Each run is spooled to disk, then replayed in time order for every
+   * evidence pass and the final classification pass.
+   */
+  async addUnordered(reports: AsyncIterable<StoredReport>): Promise<void> {
+    using observations = new ObservationSpool();
+    for await (const report of reports) {
+      for (const group of report.reports) {
+        const read = readReport({
+          objectName: report.objectName,
+          context: group.context,
+          records: group.records,
+          reports: [group],
+        }, this.#resolver);
+        observations.add(read.observations);
+        this.#remember(read);
+      }
+      this.#folded.push(report.objectName);
+      this.#foldedIndex.add(report.objectName);
+    }
+    this.#observations += observations.count;
+    foldObservations(observations, {
+      prior: this.#states,
+      context: this.#context,
+    });
+    if (observations.newestDay !== undefined) {
+      trimContext(this.#context, observations.newestDay);
+    }
   }
 
   /** Closes the fold, sealing each day's cost and aging the counters. */
@@ -699,6 +713,35 @@ export class Fold {
       surfaces: this.#surfaces,
       observations: this.#observations,
     };
+  }
+
+  /** Records invocation surfaces and bounded duration samples. */
+  #remember(read: ReadReport): void {
+    for (const [key, surface] of read.surfaces) {
+      // A file names something a runner can be pointed at, and an
+      // identity's own name does not. A record with no file arriving in
+      // a later report must not replace one that had it.
+      const known = this.#surfaces.get(key);
+      if (known === undefined || isFileBacked(surface)) {
+        this.#surfaces.set(key, surface);
+      }
+    }
+    for (const [key, byDay] of read.durations) {
+      let known = this.#samples.get(key);
+      for (const [day, sampled] of byDay) {
+        // A day past the cost window is sealed and then dropped again
+        // by the same `finish` that sealed it, so sampling it buys
+        // nothing and a bootstrap holds sixty days of it at once.
+        if (daysBetween(day, this.#today) > COST_WINDOW_DAYS) continue;
+        if (known === undefined) {
+          known = new Map();
+          this.#samples.set(key, known);
+        }
+        const into = known.get(day) ?? emptySamples();
+        for (const durationMs of sampled) sampleDuration(into, durationMs);
+        known.set(day, into);
+      }
+    }
   }
 }
 
