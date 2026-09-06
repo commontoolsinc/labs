@@ -1529,8 +1529,17 @@ const keywordValuesEqual = (
   if (
     SUBSCHEMA_LIST_KEYS.has(key) && Array.isArray(left) && Array.isArray(right)
   ) {
-    return left.length === right.length &&
-      left.every((entry, index) => schemaSubtreesEqual(entry, right[index]));
+    if (left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index++) {
+      // A hole and a stored `undefined` are different values, the way
+      // `valueEqual` reads them, and the array iteration methods skip a hole
+      // rather than report it. `validateSchemaDefinition` requires a dense
+      // array for the four list keywords it names, but this walk descends
+      // keywords it has no rule for, so a hole can still arrive here.
+      if ((index in left) !== (index in right)) return false;
+      if (!schemaSubtreesEqual(left[index], right[index])) return false;
+    }
+    return true;
   }
   if (
     SUBSCHEMA_MAP_KEYS.has(key) && isPlainObject(left) && isPlainObject(right)

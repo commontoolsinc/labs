@@ -796,12 +796,52 @@ describe("piece schema compatibility", () => {
     ).toThrow(/bag: unevaluatedProperties changed/);
   });
 
-  it("still rejects a conjunct added beside a nested writer claim", () => {
+  it("compares a sparse subschema list by index", () => {
+    // `validateSchemaDefinition` requires a dense array for the four list
+    // keywords it names, so a hole reaches this comparison only under a
+    // keyword it has no rule for. `unevaluatedProperties` is such a keyword,
+    // and the walk descends it. A hole and a stored `undefined` are different
+    // values, so a list whose missing entry the candidate fills carries a
+    // constraint the baseline did not, and the array iteration methods would
+    // step over exactly that difference.
+    const list = (holed: boolean): unknown[] => {
+      const entries: unknown[] = [];
+      if (!holed) entries[0] = { type: "string" };
+      entries[1] = { type: "string" };
+      return entries;
+    };
+    const bag = (holed: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        a: {
+          type: "object",
+          unevaluatedProperties: { allOf: list(holed) },
+        },
+      },
+    } as unknown as JSONSchema);
+    // Refused whichever side carries the hole, so the answer does not depend
+    // on which contract is named first.
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(bag(true), { type: "object" }),
+        pattern(bag(false), { type: "object" }),
+      )
+    ).toThrow(/a: unevaluatedProperties changed/);
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(bag(false), { type: "object" }),
+        pattern(bag(true), { type: "object" }),
+      )
+    ).toThrow(/a: unevaluatedProperties changed/);
+  });
+
+  it("still rejects a conjunct added or removed beside a nested writer claim", () => {
     // Reading the `ifc` inside an `allOf` means comparing the two lists, and
-    // a list that gains an entry has gained a constraint every value must now
-    // satisfy. The added conjunct is a narrowing whether or not the entry
-    // beside it carries a write authorization, so the lengths decide it before
-    // any entry is read.
+    // a list of a different length is a different list. Both directions are
+    // refused, because this comparison proves nothing about `allOf` either
+    // way: it decides the keyword by whether the two sides say the same thing,
+    // so a candidate that widens by dropping a conjunct is refused alongside
+    // one that narrows by adding one.
     const conjuncts = (extra: boolean): JSONSchema => ({
       type: "object",
       properties: {
