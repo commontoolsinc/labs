@@ -21,6 +21,12 @@ Every command quoted below was run. Message text is verbatim; JSON envelopes
 are trimmed to the fields that carry the finding, and long single-line messages
 are shown on one line inside their fence.
 
+One convention about mechanisms. This rehearsal measured behavior; it did not
+instrument causes. Where a passage below says WHY something happened, the
+reason is read from the named source file and cited there, and no run
+attributed an observation to it. Treat an uncited "because" as absent rather
+than as a finding.
+
 ## The headline
 
 The gap is real and the link-bind closes it. What the rehearsal did not expect
@@ -233,11 +239,12 @@ this build for either a space name or a DID.
   `["4","5"]`, and read `"5"` on the next identical command with no write
   between them. The first read after a backfill can report no name for a
   correctly wired Topic: **read twice before concluding a bind failed.**
-- **`/top/<n>` resolves without the bind.** Address resolution follows the
-  board's map, so a backfilled but unbound Topic answered
-  `cf cell get /top/3 title` with its title while its own `shortName` was still
-  absent. The bind is what makes the name *visible on the member*, not what
-  makes it addressable.
+- **`/top/<n>` resolves without the bind.** A backfilled but unbound Topic
+  answered `cf cell get /top/3 title` with its title while its own `shortName`
+  was still absent. So the bind is what makes the name visible ON THE MEMBER,
+  not what makes it addressable. Why resolution is unaffected was not
+  investigated here; the design has it follow the slug into the map and then
+  the link (`../../plans/collection-naming-topics.md`, decision 3).
 - **Partial failure is benign and resumable.** A board with some Topics bound
   and some not served all of them, named rows beside unnamed ones; the repair
   is to bind the rest, and nothing has to be undone. The audit is on the
@@ -277,12 +284,23 @@ commits    170 → 172
 revisions  758 → 776
 ```
 
-Nothing authored moved, and the 18 additions are the derived entities that come
-of starting the piece to compare its schemas. But the clone is no longer
-pristine, and `verify` now prints "After a schema migration this is the EXPECTED
-result" over a clone that had no migration. A flag named `--check`, documented
-as reporting "without updating the piece", is a trap for exactly the operator
-who is being careful.
+Nothing authored moved. What the run establishes is the size and nothing about
+where the writes came from: one refused check, 18 entities and two commits. The
+run did not attribute them.
+
+The mechanism is documented at the implementation, and it is not the piece
+being started. `PieceController.checkPattern()` in
+`packages/piece/src/ops/piece-controller.ts` says so in its own doc comment:
+compiling the candidate goes through `compileAndSavePattern`, "which writes the
+compiled module set and its source docs into the space's content-addressed
+store (CT-1623) — the same write the apply would do, idempotent, and attached
+to nothing", while what it does NOT do is touch the piece — "no pointer move,
+no argument re-stage, no source transition, no revision". So the behavior is
+intended and known where it is implemented; what is missing is any of it
+reaching the operator. The clone is no longer pristine, `verify` prints "After
+a schema migration this is the EXPECTED result" over a clone that had no
+migration, and a flag documented in its CLI help as reporting "without updating
+the piece" is a trap for exactly the operator who is being careful.
 
 **`--allow-non-existing` on `piece link` is a silent success that poisons the
 piece.** Binding a Topic whose pattern has no `boardNames` input — one whose
