@@ -532,28 +532,33 @@ export default pattern(() => {
       equals(map["2"] as object, shiftItems.key(0));
   });
 
-  // A position holding nothing names nothing. The list declares an empty
-  // position so the case needs no cast, and the library is called directly
-  // because no board demands that shape of its items. The member behind the
-  // hole takes the first name, so a run that named the position would show up
-  // in what it returned as well as in what it wrote.
-  const holeItems = new Writable<(ItemDemand | undefined)[] | Default<[]>>([]);
+  // A position holding nothing names nothing, `null` as much as `undefined`.
+  // Both sit ahead of the member so that skipping only one of them is visible:
+  // the member takes the first name, and a run that named either value would
+  // show up in what it returned as well as in what it wrote. The list declares
+  // the two so the case needs no cast, and the library is called directly
+  // because no board admits that shape — `Board` demands `ItemDemand` of every
+  // position, which neither value satisfies.
+  const holeItems = new Writable<
+    (ItemDemand | null | undefined)[] | Default<[]>
+  >([]);
   const holeNames = new Writable<NamesMap>({});
-  const action_file_behind_a_hole = action(() => {
+  const action_file_behind_two_empty_positions = action(() => {
     holeItems.set([
       undefined,
-      Item({ title: "Behind the hole", createdAt: 1 }),
+      null,
+      Item({ title: "Behind the empty positions", createdAt: 1 }),
     ]);
   });
-  const action_backfill_over_the_hole = action(() => {
+  const action_backfill_over_the_empty_positions = action(() => {
     assigned.set(backfillNames(holeItems, holeNames));
   });
-  const assert_a_hole_names_nothing = assert(() =>
+  const assert_an_empty_position_names_nothing = assert(() =>
     assigned.get().join(",") === "1" &&
     Object.keys((holeNames.get() ?? {}) as NamesMap).join(",") === "1" &&
     equals(
       ((holeNames.get() ?? {}) as NamesMap)["1"] as object,
-      holeItems.key(1),
+      holeItems.key(2),
     )
   );
 
@@ -699,9 +704,9 @@ export default pattern(() => {
       { assertion: assert_the_shifting_pair_is_named },
       { action: action_remove_the_first_that_shifts },
       { assertion: assert_a_backfilled_name_follows_its_member },
-      { action: action_file_behind_a_hole },
-      { action: action_backfill_over_the_hole },
-      { assertion: assert_a_hole_names_nothing },
+      { action: action_file_behind_two_empty_positions },
+      { action: action_backfill_over_the_empty_positions },
+      { assertion: assert_an_empty_position_names_nothing },
       { assertion: assert_bare_board_has_no_items },
       { assertion: assert_bare_board_names_read_empty },
       { action: action_bare_board_creates },
