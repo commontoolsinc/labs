@@ -21,11 +21,18 @@ Every command quoted below was run. Message text is verbatim; JSON envelopes
 are trimmed to the fields that carry the finding, and long single-line messages
 are shown on one line inside their fence.
 
-One convention about mechanisms. This rehearsal measured behavior; it did not
-instrument causes. Where a passage below says WHY something happened, the
-reason is read from the named source file and cited there, and no run
-attributed an observation to it. Treat an uncited "because" as absent rather
-than as a finding.
+One convention about mechanisms, and its limits. This rehearsal measured
+behavior; it did not instrument causes. Where a passage below says WHY
+something happened, the reason is read from the named source file and cited
+there, and no run attributed an observation to it — so an uncited reason is
+absent rather than a finding.
+
+Two rounds of review found five uncited reasons in this document, three of them
+after that convention was written, which says what the convention is worth: it
+tells a reader how to read a sentence, and it does not find the sentences. A
+reason can be stated without any connective to search for, so what found the
+last three was a person reading each claim and asking whether the runs reached
+it.
 
 ## The headline
 
@@ -104,12 +111,14 @@ was abandoned; the `Default<>` spelling's own incompatibility is recorded in
 
 **Why the gates said otherwise.** #6937 concluded "`pattern-compat` is clean
 against every recorded baseline, so this needs no accepted break and no schema
-flag to deploy." `deno task pattern-compat` judges a pattern's declared
-contract against the contracts it has declared before; `deno task
-pattern-vintage` replays the pattern's own stored documents under today's
-source. Neither examines the schema recorded on a link into a *sibling* piece,
-which is the check that fires here. Both being green is compatible with the
-deploy being refused, and was.
+flag to deploy." `tasks/pattern-vintage.ts` states what each of the
+two tiers proves: `deno task pattern-compat` "proves the contract a pattern
+declares is still compatible with every contract it has declared before", and
+pattern-vintage the stronger thing that a real document written by an older
+version is still materializable. Both are about the pattern's own contract and
+its own stored documents; neither reaches the schema recorded on a link into a
+*sibling* piece, which is the check that fires here. Both being green is
+compatible with the deploy being refused, and was.
 
 The forced deploy was **not** rehearsed.
 `--dangerously-allow-incompatible-schema` is held behind explicit team
@@ -251,8 +260,11 @@ this build for either a space name or a DID.
   durable argument, not the derived value:
   `cf cell get --cell "$TOPIC" boardNames --input --select name` returns the
   whole names table for a bound Topic and `[]` for an unbound one. The `keys`
-  of the input document say nothing, because a Topic deployed with the current
-  source materializes `boardNames` at its `Default<[]>` either way.
+  of the input document say nothing either way; the input declares
+  `boardNames?: ReadonlyCell<NamesTableRow[] | Default<[]>>`
+  (`packages/patterns/topics/topic.tsx`), which is where the empty value an
+  unbound Topic reads comes from, and no run here separated a defaulted key
+  from a written one.
 - **`addTopic` keeps wiring its own children afterwards.** A Topic filed after
   the operator step returned `"name": "6"`, carried the table, and read
   `"6"`. The step is one-time.
@@ -261,9 +273,11 @@ this build for either a space name or a DID.
   an ordinary `index` row with a title and no `shortName`, with all four rows
   present — the claim the property's optional spelling exists for, confirmed on
   a live board.
-- **Binding a piece the board does not hold** succeeds and produces no name:
-  the table addresses rows by member identity and holds no row for a
-  non-member.
+- **Binding a piece the board does not hold** succeeds and produces no name.
+  The lookup is by identity — `nameOf` finds the row whose `member` `equals`
+  the one asked about (`packages/patterns/collection-naming/naming.ts`) — so a
+  non-member has no row to find; the run observed the absent name, not the
+  lookup.
 
 ## Finding 6 — two tool behaviors that mislead
 

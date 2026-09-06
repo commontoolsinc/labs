@@ -366,11 +366,13 @@ that before deciding anything this procedure says needs deciding.
    per-member demand property generally; the record has the probes.
 
    `deno task pattern-compat` and `deno task pattern-vintage` do not see this.
-   They judge a pattern against its own baselines and its own stored documents,
-   never against the schema recorded on a link into a sibling piece, so both can
-   be green while the deploy is refused. Run `setsrc --check` against the
-   deployment itself before scheduling a window, and treat the flag as needing
-   team authorization under this skill's rule above.
+   `tasks/pattern-vintage.ts` says what each proves: a pattern's declared
+   contract against the contracts it declared before, and its own stored
+   documents under today's source. Neither reaches the schema recorded on a link
+   into a sibling piece, so both can be green while the deploy is refused. Run
+   `setsrc --check` against the deployment itself before scheduling a window,
+   and treat the flag as needing team authorization under this skill's rule
+   above.
 
 2. **Then each Topic's source — and this step is BLOCKED.** Moving the board
    first clears the Topic leg's own `mentionable[].shortName` refusal, and what
@@ -380,12 +382,13 @@ that before deciding anything this procedure says needs deciding.
    input link at mentionable[].piece: newly required argument field has no default
    ```
 
-   `mentionable` is declared `Writable` on the Topic, so the proof runs the
-   write-back direction too and demands that the Topic's projection accept
-   everything the board's row publishes. Every source tried was refused, the
-   bytes the Topic is already running included, so `--check` gives no signal on
-   any Topic update while that declaration stands. It is not downstream of step
-   1's schema question; clearing that does not clear this.
+   `mentionable` is declared `Writable` on the Topic, so
+   `provePreservedContracts` in `packages/piece/src/ops/piece-controller.ts`
+   runs the write-back direction too and demands that the Topic's projection
+   accept everything the board's row publishes. Every source tried was refused,
+   the bytes the Topic is already running included, so `--check` gives no signal
+   on any Topic update while that declaration stands. It is not downstream of
+   step 1's schema question; clearing that does not clear this.
 
    **Skipping it leaves a usable board.** A Topic still on pre-graft source is
    named by `backfillNames` like any other member, answers to
@@ -464,9 +467,10 @@ cf cell get --cell "$TOPIC" boardNames --input --select name
 ```
 
 A bound Topic returns the whole names table (`[{"name":"1"},…]`); an unbound one
-returns `[]`. The KEY is present either way, because a Topic deployed with the
-current source materializes `boardNames` at its `Default<[]>`, so `keys` says
-nothing.
+returns `[]`. Read the VALUE, not the keys: the input is declared
+`boardNames?: ReadonlyCell<NamesTableRow[] | Default<[]>>` in
+`packages/patterns/topics/topic.tsx`, so the key is there either way and its
+presence says nothing.
 
 Audit only Topics whose source has already been migrated. This read answers for
 the argument document, not for what the pattern can see, so a Topic that was
@@ -505,5 +509,6 @@ when it refuses and replaces nothing, so a rehearsal clone is spent after one
 and a second pass needs `cf space reset`. Nothing authored moves.
 
 **Binding a piece the board does not hold** does nothing wrong and nothing
-useful: it succeeds, and the Topic reads no name, because the table addresses
-its rows by member identity and holds no row for a non-member.
+useful: it succeeds, and the Topic reads no name. The lookup is by identity —
+`nameOf` in `packages/patterns/collection-naming/naming.ts` finds the row whose
+`member` `equals` the one asked about — so a non-member has no row to find.
