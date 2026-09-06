@@ -1,6 +1,5 @@
 import {
   appViewToUrlPath,
-  isAppViewEqual,
   NAVIGATE_EVENT,
   type NavigationCommand,
   preserveAppViewMode,
@@ -85,26 +84,25 @@ export class Navigation {
   #onNavigate = (e: Event) => {
     let command = (e as CustomEvent<NavigationCommand>).detail;
     logger.log("Navigate", command);
-    const currentView = this.#app.state().view;
     command = mapNavigationView(this.#app, command);
-    // A navigation that arrives at the view already showing adds no history
-    // entry: two entries for one destination make the first press of Back
-    // return to the page it was already on. Links inside a piece reach this
-    // case routinely, a cell reference naming its space by DID rather than by
-    // the name the address bar carries.
+    // A navigation to the address the page is already at rewrites the entry
+    // it is standing on rather than adding one. Two entries for one address
+    // make the first press of Back return to the page it was already on.
     //
-    // The comparison uses the mapped command, which is what `#push` stores:
-    // mapping rewrites a DID naming the running space as that space's name,
-    // and carries embed mode into a command that omits it.
-    //
-    // The application hears the command either way. `setView` closes the
-    // shell's piece list on the way to a piece, open or not.
-    if (!isAppViewEqual(currentView, command)) this.#push(command);
+    // The address decides, and it is settled after the mapping: a DID that
+    // names the running space is rewritten as that space's name, and embed
+    // mode is carried into a command that omits it, so the same destination
+    // reaches this comparison written one way. A view also holds `openPath`,
+    // which no address carries, and an entry rewritten from one that held it
+    // holds it no longer.
+    if (appViewToUrlPath(command) === globalThis.location.pathname) {
+      this.#replace(command);
+    } else {
+      this.#push(command);
+    }
     this.#apply(command);
   };
 
-  // Rewrites the entry the page is standing on rather than adding one, so a
-  // navigation to the view already showing leaves the history length alone.
   #onReplaceNavigate = (e: Event) => {
     let command = (e as CustomEvent<NavigationCommand>).detail;
     logger.log("ReplaceNavigate", command);

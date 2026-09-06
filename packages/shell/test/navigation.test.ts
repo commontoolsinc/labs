@@ -70,12 +70,26 @@ function withNavigation<T>(
   const views: AppView[] = [];
   let title = "";
 
-  setGlobal("location", { href });
+  // A history entry is an address as much as it is a state, and `Navigation`
+  // reads the address it is standing on to decide whether a command would add
+  // a second entry for it. Writing an entry moves the address here, as it does
+  // in a browser.
+  const location = { href, pathname: new URL(href).pathname };
+  const arriveAt = (url: string) => {
+    const arrived = new URL(url, href);
+    location.href = arrived.href;
+    location.pathname = arrived.pathname;
+  };
+  setGlobal("location", location);
   setGlobal("history", {
-    pushState: (state: unknown, _title: string, url: string) =>
-      push.push({ state, url }),
-    replaceState: (state: unknown, _title: string, url: string) =>
-      replace.push({ state, url }),
+    pushState: (state: unknown, _title: string, url: string) => {
+      push.push({ state, url });
+      arriveAt(url);
+    },
+    replaceState: (state: unknown, _title: string, url: string) => {
+      replace.push({ state, url });
+      arriveAt(url);
+    },
   });
   setGlobal("document", {
     set title(value: string) {
@@ -136,7 +150,7 @@ describe("navigation", () => {
     );
   });
 
-  it("adds no history entry for a navigation to the view already showing", () => {
+  it("adds no history entry for a navigation to the address already showing", () => {
     withNavigation(
       "http://common.test/my-space/fid1:abc",
       { view: { spaceName: "my-space", pieceId: "fid1:abc" } },
@@ -147,8 +161,29 @@ describe("navigation", () => {
           }),
         );
         expect(recorded.push).toEqual([]);
-        // The application still hears it: `setView` closes the shell's piece
-        // list on the way to a piece, open or not.
+        expect(recorded.replace.at(-1)).toEqual({
+          state: { spaceName: "my-space", pieceId: "fid1:abc" },
+          url: "/my-space/fid1:abc",
+        });
+      },
+    );
+  });
+
+  it("applies a navigation to the address already showing", () => {
+    // The application hears the command whether or not it adds an entry:
+    // `setView` closes the shell's piece list on the way to a piece, and the
+    // piece already open is reached the same way as any other.
+    withNavigation(
+      "http://common.test/my-space/fid1:abc",
+      { view: { spaceName: "my-space", pieceId: "fid1:abc" } },
+      (_navigation, recorded) => {
+        const applied = recorded.views.length;
+        globalThis.dispatchEvent(
+          new CustomEvent("cf-navigate", {
+            detail: { spaceName: "my-space", pieceId: "fid1:abc" },
+          }),
+        );
+        expect(recorded.views.length).toBe(applied + 1);
         expect(recorded.views.at(-1)).toEqual({
           spaceName: "my-space",
           pieceId: "fid1:abc",
@@ -175,7 +210,7 @@ describe("navigation", () => {
     );
   });
 
-  it("adds no history entry for a link to the collection member already open", () => {
+  it("adds no history entry for a DID link to the collection member already open", () => {
     withNavigation(
       "http://common.test/my-space/top/42",
       {
@@ -197,7 +232,7 @@ describe("navigation", () => {
     );
   });
 
-  it("adds no history entry when carried-over embed mode makes the destination the current view", () => {
+  it("adds no history entry when carried-over embed mode names the address already showing", () => {
     withNavigation(
       "http://common.test/.embed/my-space/fid1:abc",
       { view: { spaceName: "my-space", pieceId: "fid1:abc", mode: "embed" } },
@@ -208,6 +243,33 @@ describe("navigation", () => {
           }),
         );
         expect(recorded.push).toEqual([]);
+      },
+    );
+  });
+
+  it("drops a consumed deep link from the entry it rewrites", () => {
+    // `?path=` reaches the view at boot and stays there, and no address
+    // carries it, so the entry the page stands on holds a field the address
+    // it names does not. The rewrite is what takes it back out.
+    withNavigation(
+      "http://common.test/my-space/fid1:abc?path=People/Zora/about.md",
+      { view: { builtin: "home" } },
+      (_navigation, recorded) => {
+        expect(recorded.replace.at(-1)?.state).toEqual({
+          spaceName: "my-space",
+          pieceId: "fid1:abc",
+          openPath: "People/Zora/about.md",
+        });
+        globalThis.dispatchEvent(
+          new CustomEvent("cf-navigate", {
+            detail: { spaceName: "my-space", pieceId: "fid1:abc" },
+          }),
+        );
+        expect(recorded.push).toEqual([]);
+        expect(recorded.replace.at(-1)).toEqual({
+          state: { spaceName: "my-space", pieceId: "fid1:abc" },
+          url: "/my-space/fid1:abc",
+        });
       },
     );
   });
