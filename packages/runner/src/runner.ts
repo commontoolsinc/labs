@@ -2062,33 +2062,6 @@ export class Runner {
     this.#runtime.storageManager.subscribe(this.#storageSubscription);
   }
 
-  /** Registrations of running pieces, by space, scope, and document. */
-  get cancels(): Map<`${MemorySpace}/${ScopeKey}/${URI}`, PieceRegistration> {
-    return this.#cancels;
-  }
-
-  /**
-   * Served receipt writes skipped as write-once CAS losses: the handling's
-   * result cell already held a value when the serving run went to write it.
-   * Each skip also logs a warn line; this is the machine-readable half.
-   */
-  get servedReceiptCasLosses(): number {
-    return this.#servedReceiptCasLosses;
-  }
-  /**
-   * The SESSION-side pattern pointer for a keyless piece this runner set up,
-   * or undefined. The piece layer's read-through: a keyless piece carries no
-   * durable `patternIdentity` (the never-durable contract), so consumers
-   * that used to read the durable meta (`PiecesController.syncPattern`)
-   * consult this before concluding the piece has no pattern. Session-scoped
-   * by construction — a fresh runtime correctly finds nothing.
-   */
-  sessionPatternPointerFor(
-    resultCell: Cell<unknown>,
-  ): { identity: string; symbol: string } | undefined {
-    return this.#sessionPatternPointers.get(this.#getDocKey(resultCell));
-  }
-
   /**
    * The result and pointer tables, the deferred-start and start-attempt
    * sets, the setup, storage-subscription, commit-gated run, ownership,
@@ -2256,6 +2229,34 @@ export class Runner {
       invokeJavaScriptImplementation: (module, fn, argument) =>
         this.#invokeJavaScriptImplementation(module, fn, argument),
     };
+  }
+
+  /** Registrations of running pieces, by space, scope, and document. */
+  get cancels(): Map<`${MemorySpace}/${ScopeKey}/${URI}`, PieceRegistration> {
+    return this.#cancels;
+  }
+
+  /**
+   * Served receipt writes skipped as write-once CAS losses: the handling's
+   * result cell already held a value when the serving run went to write it.
+   * Each skip also logs a warn line; this is the machine-readable half.
+   */
+  get servedReceiptCasLosses(): number {
+    return this.#servedReceiptCasLosses;
+  }
+
+  /**
+   * The SESSION-side pattern pointer for a keyless piece this runner set up,
+   * or undefined. The piece layer's read-through: a keyless piece carries no
+   * durable `patternIdentity` (the never-durable contract), so consumers
+   * that used to read the durable meta (`PiecesController.syncPattern`)
+   * consult this before concluding the piece has no pattern. Session-scoped
+   * by construction — a fresh runtime correctly finds nothing.
+   */
+  sessionPatternPointerFor(
+    resultCell: Cell<unknown>,
+  ): { identity: string; symbol: string } | undefined {
+    return this.#sessionPatternPointers.get(this.#getDocKey(resultCell));
   }
 
   /**

@@ -2514,6 +2514,7 @@ export class StorageManager implements IStorageManager {
   // Static members
   //
 
+  /** Opens a manager over `options`, with a session factory for its host. */
   static open(options: Options) {
     const dynamicHosts = new Map<string, string>();
     const manager = new this(
@@ -3317,12 +3318,6 @@ export class SpaceReplica
   // ACCEPTED origins had no client-side wake. Guarded at the call
   // site — an observer throw must not corrupt accept settlement.
   speculationAckObserver: (() => void) | undefined = undefined;
-  // The overlay destination's retirement WAKE for authoritative ARRIVALS
-  // (ISpaceReplica.speculationArrivalObserver, stage C tuning T2 —
-  // speculation.md §4's owed arrival re-sweep): fired at the end of
-  // applySessionSync with the docs whose confirmed seq a frame moved
-  // forward. Guarded at the call site — an observer throw must not
-  // corrupt frame integration.
   #speculationArrivalObserver:
     | ((arrived: readonly { id: URI; scope?: CellScope }[]) => void)
     | undefined = undefined;
@@ -3429,10 +3424,12 @@ export class SpaceReplica
   }
 
   /**
-   * Observer of speculative arrivals, called at the end of applying a frame
+   * Observer of authoritative arrivals, called at the end of applying a frame
    * with the docs whose confirmed seq the frame moved forward; the overlay
-   * destination sets one while an owed arrival re-sweep is pending. Guarded
-   * at the call site, so an observer throw cannot corrupt frame integration.
+   * destination sets one as its retirement wake for the owed arrival
+   * re-sweep of speculation.md §4 (`ISpaceReplica.speculationArrivalObserver`).
+   * Guarded at the call site, so an observer throw cannot corrupt frame
+   * integration.
    */
   get speculationArrivalObserver():
     | ((arrived: readonly { id: URI; scope?: CellScope }[]) => void)

@@ -1098,8 +1098,8 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   the slot redirects — pre-existing OFF behavior, verified at OFF;
   the group-chat drafts avoid it because the client types first);
   (iii) two P2-F basis-key pins moved to the S4 truth (a demanded run
-  reading only space input keys `space`, its `user:<p>` stamp cleared
-  — the acting annotations still witness the supply); (iv) the
+  reading only space input keys `space`, its `user:<p>` stamp cleared —
+  the acting annotations still witness the supply); (iv) the
   wave-level fallback still runs a demanded piece before any
   identity-bearing demand exists and leaves the `user:<serviceDID>`
   garbage instance (stage B's B5 residual).
@@ -1141,10 +1141,9 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   memoized presence). (5) The individually-redundant seams have their
   own pins (served preflight/presync identity, `Cell.sync` identity,
   the traversal kick identity, `SpaceReplica.#buildReads()` identity,
-  `WatchView` key).
-  Residuals SHARPENED, still flagged: (i) effect completion — the
-  writeback tx is unstamped, so its hash-guard reads resolve the
-  service's instances while the seal is under the carriage identity;
+  `WatchView` key). Residuals SHARPENED, still flagged: (i) effect
+  completion — the writeback tx is unstamped, so its hash-guard reads resolve
+  the service's instances while the seal is under the carriage identity;
   `SpaceReplica.#buildReads()` then attests the CARRIAGE identity's records (a
   never-
   loaded record yields seq-0 confirmed reads); the engine does not
@@ -6027,7 +6026,7 @@ supply; OW29/OW32/OW34 closed):
     > In the stale-confirmed-read error arm of the deferred start,
     > treat the refusal as "the server won the race": wait for the
     > conflicting docs to arrive (the wire path already attaches
-    > `readyToRetry` = `SpaceReplica.#waitForCaughtUpLocalSeq()`,
+    > `readyToRetry` = `Client.#waitForCaughtUpLocalSeq()`,
     > packages/memory/v2/client.ts ~:1403), then START the runner
     > against the served docs, COMMITTING NOTHING. Not re-commit
     > (#6208's retry — census-proved non-convergent, closed), not
@@ -8474,9 +8473,8 @@ supply; OW29/OW32/OW34 closed):
     candidate.** The write dies at speculation.md §6's export refusal,
     synchronously, before the optimistic apply: a blind UI-input write
     (handleCellSet) emits ONE structural nonRecursive read at the
-    cell's parent, and `SpaceReplica.#buildReads()`'s `pushCommitRead` named
-    EVERY
-    pending layer of that doc — the client's own process-local
+    cell's parent, and `SpaceReplica.#buildReads()`'s `pushCommitRead`
+    named EVERY pending layer of that doc — the client's own process-local
     speculation layers included — so a standing handler echo on the
     doc turned the user's next input into a terminal refusal. The
     echo's standing window is a full served round trip at minimum (the

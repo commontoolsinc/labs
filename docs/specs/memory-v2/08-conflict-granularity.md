@@ -146,10 +146,10 @@ it reads **through** the cell in its body. Such reference-resolution reads are
 tagged `excludeReadFromConflict` at the traversal seam
 (`traverseObjectWithSchema`, gated on `hasAsCell(propSchema)`), and
 `SpaceReplica.#buildReads()` drops them from the conflict set when they are
-`nonRecursive`. They
-remain in the journal for reactivity. A **by-value** argument (`hasAsCell` false)
-is a genuine dependency and is never marked; the gate ensures by-value scalar
-reads — which are also recorded `nonRecursive` — keep their dependency.
+`nonRecursive`. They remain in the journal for reactivity. A **by-value**
+argument (`hasAsCell` false) is a genuine dependency and is never marked; the
+gate ensures by-value scalar reads — which are also recorded `nonRecursive` —
+keep their dependency.
 
 ## 4. Runtime-internal CFC metadata reads are not value dependencies
 

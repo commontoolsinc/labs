@@ -596,7 +596,10 @@ export class Scheduler {
     return this.#demandRootCounters;
   }
 
-  /** Size of the standing demanded-writer root set; empty off the serving posture. */
+  /**
+   * Size of the standing demanded-writer root set; empty off the serving
+   * posture.
+   */
   get demandedWriterCount(): number {
     return this.#nodes.demandedWriters.size;
   }
