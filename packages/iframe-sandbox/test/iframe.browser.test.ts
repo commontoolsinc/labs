@@ -207,7 +207,6 @@ set("c", 1);
 ${GUEST_EPILOG}`;
     const iframe = await render(body1, context);
     await waitForContextValue(context, iframe, "b", (value) => value === 1);
-    // @ts-ignore This is a lit property.
     iframe.src = body2;
     await waitForContextValue(context, iframe, "c", (value) => value === 1);
   } finally {
@@ -236,9 +235,7 @@ ${GUEST_EPILOG}`;
     // gets the port and writes its label, so the wait accepts either label
     // and the assertion names the right one, which fails a wrong document at
     // once rather than by the harness timeout.
-    // @ts-ignore This is a lit property.
     iframe.src = body("second");
-    // @ts-ignore This is a lit property.
     iframe.src = body("third");
     await waitForContextValue(
       context,
@@ -286,7 +283,6 @@ ${GUEST_EPILOG}`;
       "ready1",
       (value) => value === true,
     );
-    // @ts-ignore This is a lit property.
     iframe.src = body2;
     await waitForContextValue(
       context,
@@ -584,7 +580,6 @@ ${GUEST_EPILOG}`;
     // anywhere else. A window this element has not seen stands for the frame a
     // reattach would bring.
     const inner = iframe.accessForTestingOnly;
-    // @ts-ignore This is a lit property.
     iframe.src = "";
     inner.onOuterReady({} as Window);
     assertEquals(iframe.loadState, "");
@@ -616,7 +611,6 @@ ${GUEST_EPILOG}`;
     // bridge.
     const second = new ContextShim({}, ["second-ran"]);
     iframe.bridge = second.bridge;
-    // @ts-ignore This is a lit property.
     iframe.src = `${GUEST_PROLOG}
 set("second-ran", true);
 ${GUEST_EPILOG}`;

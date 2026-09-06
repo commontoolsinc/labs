@@ -574,14 +574,13 @@ Deno.test("memory v2 server: a failing timer-driven flush warns and leaves recov
   // on refreshLoop's requeue for recovery.
   const originalFlush = server.flushSessions.bind(server);
   let failed = false;
-  (server as unknown as { flushSessions: typeof originalFlush })
-    .flushSessions = () => {
-      if (!failed) {
-        failed = true;
-        return Promise.reject(new Error("synthetic scheduled-flush failure"));
-      }
-      return originalFlush();
-    };
+  server.flushSessions = () => {
+    if (!failed) {
+      failed = true;
+      return Promise.reject(new Error("synthetic scheduled-flush failure"));
+    }
+    return originalFlush();
+  };
   await server.accessForTestingOnly.flushScheduledSessions();
   assertEquals(committerMessages.length, 0);
 
