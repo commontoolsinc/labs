@@ -3143,6 +3143,44 @@ describe("source history actions", () => {
     expect(shows(menu)).toBe("");
   });
 
+  it("keeps a history origin as recorded and links to where it resolves", async () => {
+    const menu = openMenu(pieceCell(() =>
+      Promise.resolve({
+        ...historySource,
+        history: [{
+          revisionId: "system",
+          timestamp: 1,
+          pattern: SOURCE.pattern!,
+          origin: {
+            url: "https://toolshed.test/api/patterns/system/home.tsx",
+            kind: "system",
+            recorded: "system:system/home.tsx",
+          },
+          operation: "baseline",
+        }],
+      })
+    ));
+    await menu.showPanel("origin");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("<code>system:system/home.tsx</code>");
+    expect(rendered).toContain(
+      'href="https://toolshed.test/api/patterns/system/home.tsx"',
+    );
+    expect(rendered).toContain(">open</a>");
+  });
+
+  it("shows no open link when the origin needed no resolving", async () => {
+    const menu = openMenu(pieceCell(() => Promise.resolve(historySource)));
+    await menu.showPanel("origin");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain(
+      "<code>https://toolshed.test/api/patterns/recipe.tsx</code>",
+    );
+    expect(rendered).not.toContain(">open</a>");
+  });
+
   it("shows the exact retained source for a history entry", async () => {
     const requests: unknown[] = [];
     const menu = openMenu(pieceCell(

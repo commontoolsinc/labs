@@ -3091,7 +3091,18 @@ export class CFPieceMenu extends BaseElement {
                 ><code>${revision.origin.url}</code></a>
               `
               : html`
-                — <code>${revision.origin.url}</code>
+                — <code>${revision.origin.recorded ??
+                  revision.origin.url}</code>${revision.origin.recorded
+                  ? html`
+                    <a
+                      class="text-link"
+                      href="${revision.origin.url}"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      test-id="piece-source-origin-open-${revision.revisionId}"
+                    >open</a>
+                  `
+                  : nothing}
               `
             : nothing}
         </div>
