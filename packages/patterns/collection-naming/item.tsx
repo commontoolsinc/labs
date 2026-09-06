@@ -35,7 +35,11 @@ import { type NamesTableRow, ownName } from "./naming.ts";
  * compatibility proof accepts: a defaulted property moves the demand's
  * defaults below an array constraint the proof cannot show stable under
  * default insertion, and dropping the default without making the property
- * optional makes it a newly required field.
+ * optional makes it a newly required field. That is the bound on what the
+ * spelling buys, and it is about the READ: `cf piece setsrc` refuses a
+ * per-member demand that gains any property at all — optional included — over
+ * a universe whose stored entries do not publish it, because the schema
+ * recorded on the retained link is unconstrained at that path.
  *
  * These three are deliberately the WHOLE demand. A board's universe row
  * carries its item as a `piece` reference besides them, and leaving that out
@@ -160,12 +164,19 @@ export interface ItemOutput {
    * `packages/ui/src/v2/components/cf-code-editor/cf-code-editor.ts` reads an
    * absent name exactly as it reads a blank one).
    *
-   * Optional rather than defaulted, and it is the board's row demand that
-   * decides the spelling rather than this publication: a board's stored list
-   * is validated against that demand, a defaulted property there moves its
-   * defaults below an array constraint the compatibility proof cannot show
-   * stable under default insertion, and an optional demand is not satisfied
-   * by a required publication.
+   * Optional rather than defaulted, and two things settle that. The lookup
+   * produces no value for an item no board has named, so there is nothing to
+   * publish; and the board's row demand is optional, because a board's stored
+   * list is validated against that demand and a defaulted property there
+   * moves its defaults below an array constraint the compatibility proof
+   * cannot show stable under default insertion.
+   *
+   * The constraint between the two runs one way, which is what pairs their
+   * spellings. A required publication satisfies either demand, since it always
+   * provides a string. An optional one satisfies only an optional demand, so a
+   * required row is refused where an item meets it — `string | undefined` is
+   * not assignable to `string`, at the `addItem` result and the push into
+   * `items`.
    */
   shortName?: string;
 
