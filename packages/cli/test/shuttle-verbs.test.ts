@@ -26,6 +26,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import { SlugResolutionError } from "@commonfabric/piece";
 import type { PiecesController } from "@commonfabric/piece/ops";
 
 import { LINK_MARKER_KEY } from "../lib/cell-selection.ts";
@@ -36,6 +37,7 @@ import type {
 } from "../lib/piece.ts";
 import { HeldConnection } from "../lib/shuttle/connection.ts";
 import { CurrentPlace, operandForChild } from "../lib/shuttle/place.ts";
+import { moved } from "./shuttle-place-helpers.ts";
 import {
   type Outcome,
   runLine,
@@ -47,6 +49,9 @@ import type { WishReadConfig } from "../lib/wish.ts";
 const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;
 const OTHER_SPACE = "did:key:z6MkHomeSpace" as MemorySpace;
 const HANDLE = "of:fid1:abcdefghijklmnop";
+
+/** The handle the space's index points the slug `board` at. */
+const BOARD = "of:fid1:qrstuvwxyz012345";
 
 const CONFIG: SpaceConfig = {
   apiUrl: "https://toolshed.example/",
@@ -75,6 +80,26 @@ function controller(
     dispose: () => Promise.resolve(),
     getSpace: () => space,
     getSpaceName: () => name,
+    entityIdExists: () => Promise.resolve(true),
+  } as unknown as PiecesController;
+}
+
+/**
+ * Helper for the cases below, which is a controller whose space answers
+ * `holds` when a handle is looked up in it.
+ *
+ * The three answers are the lookup's own: `true` where the space holds the
+ * piece, `false` where it does not, and `undefined` where the server does not
+ * advertise the lookup and so says nothing either way. It takes no default for
+ * the reason {@link controller}'s `name` takes none — `undefined` is one of
+ * the answers rather than the absence of one.
+ */
+function lookingUp(holds: boolean | undefined): PiecesController {
+  return {
+    dispose: () => Promise.resolve(),
+    getSpace: () => SPACE,
+    getSpaceName: () => SPACE_NAME,
+    entityIdExists: () => Promise.resolve(holds),
   } as unknown as PiecesController;
 }
 
@@ -88,6 +113,9 @@ const READS_NOTHING: VerbDeps = {
   },
   readWish: () => {
     throw new Error("A wish was resolved.");
+  },
+  resolvePieceReference: () => {
+    throw new Error("A piece was resolved.");
   },
   listing: {
     listSpaceSlugs: () => {
@@ -117,14 +145,113 @@ function shuttleIn(pieces: PiecesController = PIECES): Shuttle {
 /** Helper for the cases below, which stands at a piece, at `path` inside it. */
 function atPiece(...path: string[]): Shuttle {
   const shuttle = shuttleIn();
-  shuttle.place.cd(`/${HANDLE}`);
-  for (const segment of path) shuttle.place.cd(segment);
+  moved(shuttle.place, `/${HANDLE}`);
+  for (const segment of path) moved(shuttle.place, segment);
   return shuttle;
 }
 
 /** Helper for the cases below, which stands `value` in for a cell's value. */
 function cellValue(value: unknown): VerbDeps {
   return { ...READS_NOTHING, getCellValue: () => Promise.resolve(value) };
+}
+
+/**
+ * Helper for the cases below, which stands in the two answers a `cd` onto a
+ * piece reads: the piece an address resolves to, and `value` for the cell the
+ * path is checked against.
+ *
+ * `resolves` names the pieces the index points a slug at, and a token it has
+ * no entry for resolves to itself — which is what the fabric does with a
+ * handle, and what makes a case that is not about the resolution read as it
+ * would have before there was one.
+ */
+function settling(
+  value: unknown,
+  resolves: Readonly<Record<string, string>> = {},
+): VerbDeps {
+  return {
+    ...READS_NOTHING,
+    resolvePieceReference: (_pieces, token, path) =>
+      Promise.resolve({
+        piece: resolves[token] ?? token,
+        pathAfter: [...path],
+      }),
+    getCellValue: () => Promise.resolve(value),
+  };
+}
+
+/**
+ * Helper for the cases below, which stands `value` in for the cell a `cd`
+ * checks its path against, and resolves no piece.
+ *
+ * The piece is left unresolved on purpose. A `cd` that spells the piece
+ * shuttle already stands on has none to resolve, so a case standing at one
+ * keeps `READS_NOTHING`'s resolution and fails if the settle reaches for it.
+ * A case that moves onto another piece wants {@link settling} instead.
+ */
+function holding(value: unknown): VerbDeps {
+  return { ...READS_NOTHING, getCellValue: () => Promise.resolve(value) };
+}
+
+/**
+ * Helper for the cases below, which serves a different document per scope and
+ * raises on a path it does not hold, the way a cell read does.
+ *
+ * The raise is the point: `getCellValue` throws where a path is not there
+ * (`resolveCellPath`, `packages/runner/src/piece-helpers.ts`), so a fixture
+ * that answered `undefined` instead would turn the failure a settle exists to
+ * prevent into a quiet refusal and hide it.
+ */
+function atScopes(documents: Record<string, unknown>): VerbDeps {
+  return {
+    ...READS_NOTHING,
+    resolvePieceReference: (_pieces, token, path) =>
+      Promise.resolve({ piece: token, pathAfter: [...path] }),
+    getCellValue: (config, path) => {
+      let at: unknown = documents[config.pieceScope ?? "space"];
+      for (const segment of path) {
+        const key = String(segment);
+        if (at === null || typeof at !== "object" || !(key in at)) {
+          throw new Error(
+            `Cannot access path "${path.join("/")}" - property "${key}" not ` +
+              `found`,
+          );
+        }
+        at = (at as Record<string, unknown>)[key];
+      }
+      return Promise.resolve(at);
+    },
+  };
+}
+
+/**
+ * Helper for the cases below, which resolves `slug` as a collection — its
+ * first path segment selecting the member — and answers a read by walking the
+ * value below, so a walk of more than one segment is answered as the fabric
+ * would answer it rather than by one stub value at every depth.
+ */
+function collectionAt(slug: string): VerbDeps {
+  const value: Record<string, unknown> = {
+    title: "a",
+    topics: { 0: "x" },
+    first: { title: "a" },
+  };
+  return {
+    ...READS_NOTHING,
+    resolvePieceReference: (_pieces, token, path) =>
+      Promise.resolve(
+        token === slug
+          ? { piece: BOARD, pathAfter: [...path].slice(1) }
+          : { piece: token, pathAfter: [...path] },
+      ),
+    getCellValue: (_config, path) => {
+      let at: unknown = value;
+      for (const segment of path) {
+        at = (at as Record<string, unknown> | undefined)?.[String(segment)];
+      }
+      return Promise.resolve(at);
+    },
+  };
 }
 
 /** Helper for the cases below, which stands `keys` in for a cell's keys. */
@@ -337,7 +464,7 @@ describe("verbs", () => {
       const shuttle = atPiece();
       const operand = operandForChild(shuttle.place.place, "-x");
       expect(operand).toBeDefined();
-      await runLine(`cd ${operand}`, shuttle, READS_NOTHING);
+      await runLine(`cd ${operand}`, shuttle, holding({ "-x": 1 }));
       expect(shuttle.place.place.position).toEqual({
         kind: "piece",
         space: SPACE,
@@ -352,7 +479,7 @@ describe("verbs", () => {
       // name; the line below is what a person can type for it either way.
 
       const shuttle = atPiece();
-      await runLine("cd -- --", shuttle, READS_NOTHING);
+      await runLine("cd -- --", shuttle, holding({ "--": 1 }));
       expect(shuttle.place.place.position).toEqual({
         kind: "piece",
         space: SPACE,
@@ -502,7 +629,7 @@ describe("verbs", () => {
       // The asymmetry `get`'s own door turns on: `cd` refuses the suffix in
       // every spelling that takes one, and `get` reads it.
       const shuttle = shuttleIn();
-      shuttle.place.cd("slugs");
+      moved(shuttle.place, "slugs");
       expect(
         reasonOf(await runLine("cd board#argument", shuttle, READS_NOTHING)),
       )
@@ -513,6 +640,743 @@ describe("verbs", () => {
             "addressed. Reach arguments per operand instead, as in " +
             "`get topics/3#argument`.",
         );
+    });
+
+    describe("the read that settles a move", () => {
+      // What makes `cd` a promise. A move onto a piece is asked of the fabric
+      // before the place is adopted — the piece resolved, and the path found —
+      // so the prompt after a `cd` names a place that is there, and a place
+      // that is not there is refused here rather than reported by whichever
+      // verb reads next.
+
+      /** Helper for the cases below, which is a second piece to move onto. */
+      const OTHER = "of:fid1:0123456789abcdef";
+
+      /**
+       * Helper for the cases below, which is where a settle read, and the
+       * piece it read through.
+       */
+      async function read(
+        shuttle: Shuttle,
+        line: string,
+        value: unknown,
+      ): Promise<{ config?: PieceConfig; path?: (string | number)[] }> {
+        const seen: { config?: PieceConfig; path?: (string | number)[] } = {};
+        await runLine(line, shuttle, {
+          ...settling(value),
+          getCellValue: (config, path) => {
+            seen.config = config;
+            seen.path = path;
+            return Promise.resolve(value);
+          },
+        });
+        return seen;
+      }
+
+      it("lands the handle the piece resolved to, with the slug as the name", async () => {
+        const shuttle = shuttleIn();
+        moved(shuttle.place, "slugs");
+        await runLine("cd board", shuttle, settling(null, { board: BOARD }));
+        expect(shuttle.place.place.position).toEqual({
+          kind: "piece",
+          space: SPACE,
+          piece: BOARD,
+          name: "board",
+          path: [],
+        });
+      });
+
+      it("hands the resolution the connection this process holds", async () => {
+        const shuttle = shuttleIn();
+        moved(shuttle.place, "slugs");
+        let asked: unknown;
+        await runLine("cd board", shuttle, {
+          ...READS_NOTHING,
+          resolvePieceReference: (pieces, token, path) => {
+            asked = pieces;
+            return Promise.resolve({ piece: token, pathAfter: [...path] });
+          },
+        });
+        expect(asked).toBe(PIECES);
+      });
+
+      it("refuses a slug the index names nothing for, and moves nowhere", async () => {
+        const shuttle = shuttleIn();
+        moved(shuttle.place, "slugs");
+        const before = shuttle.place.place;
+        const outcome = await runLine("cd todo", shuttle, {
+          ...READS_NOTHING,
+          resolvePieceReference: () => {
+            throw new SlugResolutionError('Slug "todo" not found.', "missing");
+          },
+        });
+        expect(reasonOf(outcome)).toBe(
+          '`todo` reaches no piece: Slug "todo" not found.',
+        );
+        expect(shuttle.place.place).toBe(before);
+      });
+
+      it("raises what a resolution that failed for another reason raised", async () => {
+        // A slug that names nothing is a fact about the line. A connection
+        // that went away is not, and the two have to stay told apart.
+
+        const shuttle = shuttleIn();
+        moved(shuttle.place, "slugs");
+        await expect(runLine("cd todo", shuttle, READS_NOTHING)).rejects
+          .toThrow("A piece was resolved.");
+      });
+
+      it("refuses a handle the space does not hold, and moves nowhere", async () => {
+        // A handle is a spelling and not a lookup, so the resolution hands one
+        // back unread. The space's own index is what tells a piece it holds
+        // from one it does not, where a value read cannot: an absent piece
+        // reads as nothing, and so does an empty one.
+
+        const shuttle = shuttleIn(lookingUp(false));
+        moved(shuttle.place, "pieces");
+        const before = shuttle.place.place;
+        expect(reasonOf(await runLine(`cd ${HANDLE}`, shuttle, settling(null))))
+          .toBe(
+            `\`${HANDLE}\` reaches no piece: this space holds none by the ` +
+              `handle \`${HANDLE}\`.`,
+          );
+        expect(shuttle.place.place).toBe(before);
+      });
+
+      it("lands a handle the space holds", async () => {
+        const shuttle = shuttleIn(lookingUp(true));
+        moved(shuttle.place, "pieces");
+        const outcome = await runLine(`cd ${HANDLE}`, shuttle, settling(null));
+        expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
+      });
+
+      it("lands a handle where the server does not answer the lookup", async () => {
+        // The lookup is a server capability, and `undefined` is what a server
+        // that does not advertise it says. Nothing was learned, so the move
+        // goes on — which is the one case left where a handle the space does
+        // not hold is adopted.
+
+        const shuttle = shuttleIn(lookingUp(undefined));
+        moved(shuttle.place, "pieces");
+        const outcome = await runLine(`cd ${HANDLE}`, shuttle, settling(null));
+        expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
+      });
+
+      it("looks up no handle for a slug, the index having reached the piece", async () => {
+        // A slug resolved through the index, which read the document to take
+        // its id, so the resolution is the existence proof and a second one
+        // would ask what is answered.
+
+        const shuttle = shuttleIn(lookingUp(false));
+        moved(shuttle.place, "slugs");
+        const outcome = await runLine(
+          "cd board",
+          shuttle,
+          settling(null, { board: BOARD }),
+        );
+        expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
+      });
+
+      it("looks up no handle for a key under the piece already stood at", async () => {
+        const shuttle: Shuttle = {
+          config: CONFIG,
+          place: new CurrentPlace(SPACE),
+          connection: new HeldConnection({
+            kind: "borrowed",
+            pieces: lookingUp(false),
+          }),
+        };
+        moved(shuttle.place, `/${HANDLE}`);
+        const outcome = await runLine(
+          "cd topics",
+          shuttle,
+          holding({ topics: [] }),
+        );
+        expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
+      });
+
+      it("lands the resolved piece in the route, not only on top of it", async () => {
+        // A trail is made of positions `..` walks back through, so a route
+        // entry holding an unresolved slug is a place shuttle returns to and
+        // reads through the index as it points then. The invariant is the
+        // route's as much as the destination's.
+
+        const shuttle = shuttleIn();
+        await runLine(
+          "cd /slugs/board/topics",
+          shuttle,
+          settling({ topics: [] }, { board: BOARD }),
+        );
+        await runLine("cd ..", shuttle, READS_NOTHING);
+        expect(shuttle.place.place.position).toEqual({
+          kind: "piece",
+          space: SPACE,
+          piece: BOARD,
+          name: "board",
+          path: [],
+        });
+      });
+
+      it("takes `./items@user` to that key though the piece holds one named `.`", async () => {
+        // The silent wrong landing the head reading ends. Read as a walk, the
+        // operand descends through a key called `.` — and where the piece
+        // holds one, that walk *succeeds*, so the settle confirms it and the
+        // place adopts a cell nobody named. The head is read first, so the
+        // cell reached is the one the operand names whatever the piece holds.
+
+        const shuttle = atPiece();
+        const outcome = await runLine(
+          "cd ./items@user",
+          shuttle,
+          settling({ ".": { "items@user": 99 }, "items@user": 1 }),
+        );
+        expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
+        expect(shuttle.place.place.position).toEqual({
+          kind: "piece",
+          space: SPACE,
+          piece: HANDLE,
+          path: ["items@user"],
+        });
+      });
+
+      it("offers the `.@` spelling where a bare scope word names no key", async () => {
+        // Inside a piece a bare `@session` is an ordinary key name, so this
+        // is the read finding no such key — and the operand looks enough like
+        // an attempt at the scope to say what would have moved it.
+
+        expect(
+          reasonOf(
+            await runLine("cd @session", atPiece(), settling({ topics: 1 })),
+          ),
+        ).toBe(
+          "`@session` reaches no cell: `@session` is no key of the cell " +
+            "above it, whose keys are `topics`. `.@session` is what moves " +
+            "the scope.",
+        );
+      });
+
+      it("reaches a key genuinely named `@session`, with no offer made", async () => {
+        // The condition the offer hangs on. A place that holds the key lands
+        // on it, and nothing is suggested, because nothing went wrong.
+
+        const shuttle = atPiece();
+        const outcome = await runLine(
+          "cd @session",
+          shuttle,
+          settling({ "@session": 1 }),
+        );
+        expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
+        expect(shuttle.place.place.position).toEqual({
+          kind: "piece",
+          space: SPACE,
+          piece: HANDLE,
+          path: ["@session"],
+        });
+        expect(shuttle.place.place.scope).toBe("space");
+      });
+
+      it("settles a scope on its own, reading the place at the scope it moves to", async () => {
+        // A scope selects which document a piece's id names, so the place a
+        // scope move reaches is one nothing has read. It settles like any
+        // other move onto a piece, and the read goes to the new scope.
+
+        const shuttle = shuttleIn();
+        await runLine(`cd /${HANDLE}/topics`, shuttle, settling({ topics: 1 }));
+        let scope: string | undefined;
+        const outcome = await runLine("cd .@session", shuttle, {
+          ...settling({ topics: 1 }),
+          getCellValue: (config) => {
+            scope = config.pieceScope;
+            return Promise.resolve({ topics: 1 });
+          },
+        });
+        expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
+        expect(scope).toBe("session");
+      });
+
+      it("refuses a scope whose document does not hold the path, and moves nowhere", async () => {
+        // The chain the settle exists for, in one line rather than two: the
+        // place at `@space` holds `topics`, the one at `@session` does not,
+        // and the move that would have adopted it is refused instead.
+
+        const shuttle = shuttleIn();
+        await runLine(`cd /${HANDLE}/topics`, shuttle, settling({ topics: 1 }));
+        const before = shuttle.place.place;
+        const outcome = await runLine("cd .@session", shuttle, settling({}));
+        expect(reasonOf(outcome)).toBe(
+          "`.@session` reaches no cell: `topics` is no key of the cell above " +
+            "it, which holds no keys at all.",
+        );
+        expect(shuttle.place.place).toBe(before);
+      });
+
+      it("descends after a refused scope move without meeting the runtime", async () => {
+        // The chain rather than the unit: settle at one scope, change scope,
+        // descend. The piece holds `topics/child` at `@space` and nothing at
+        // `@session`, so the scope move is refused and the descent runs from
+        // the place that was never left — reading a level that is there.
+        //
+        // A scope move that landed instead would leave the place at
+        // `@session/topics`, which no read confirmed, and the descent would
+        // read that parent and raise. So the third line is the assertion: it
+        // lands, rather than rejecting with the runtime's sentence.
+
+        const deps = atScopes({
+          space: { topics: { child: 1 } },
+          session: {},
+        });
+        const shuttle = shuttleIn();
+        await runLine(`cd /${HANDLE}/topics`, shuttle, deps);
+        expect(reasonOf(await runLine("cd .@session", shuttle, deps))).toBe(
+          "`.@session` reaches no cell: `topics` is no key of the cell above " +
+            "it, which holds no keys at all.",
+        );
+        const descended = await runLine("cd child", shuttle, deps);
+        expect(descended).toEqual({
+          kind: "moved",
+          place: shuttle.place.place,
+        });
+        expect(shuttle.place.place).toEqual({
+          position: {
+            kind: "piece",
+            space: SPACE,
+            piece: HANDLE,
+            path: ["topics", "child"],
+          },
+          scope: "space",
+        });
+      });
+
+      it("looks the handle up again where the move changes only the scope", async () => {
+        // The lookup's own skip, keyed the same way as the read's: one id at
+        // two scopes is two documents, so a move to the second has a piece
+        // nothing has asked about even though the id is one shuttle stands on.
+
+        // Standing is set through the place directly, which makes no lookup,
+        // so the one the case is about is the only one the controller sees.
+        const shuttle = shuttleIn(lookingUp(false));
+        moved(shuttle.place, `/${HANDLE}`);
+        const before = shuttle.place.place;
+        expect(reasonOf(
+          await runLine(`cd /${HANDLE}@session`, shuttle, settling(null)),
+        )).toBe(
+          `\`/${HANDLE}@session\` reaches no piece: this space holds none ` +
+            `by the handle \`${HANDLE}\`.`,
+        );
+        expect(shuttle.place.place).toBe(before);
+      });
+
+      it("looks the handle up once for the cell it already stands at", async () => {
+        // The other side of that key: same id, same scope, so the piece was
+        // settled when shuttle arrived and a move naming it again asks
+        // nothing. The controller refuses every lookup, so one being made
+        // would fail the case.
+
+        const shuttle = shuttleIn(lookingUp(false));
+        moved(shuttle.place, `/${HANDLE}`);
+        const outcome = await runLine(
+          `cd /${HANDLE}`,
+          shuttle,
+          settling(null),
+        );
+        expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
+      });
+
+      it("reads again where the move changes only the scope", async () => {
+        // One id at `@space` and the same id at `@session` are two documents,
+        // so a place confirmed at one is not confirmed at the other. A skip
+        // that compared the position alone would land here having read
+        // nothing.
+
+        const shuttle = shuttleIn();
+        await runLine(`cd /${HANDLE}/topics`, shuttle, settling({ topics: 1 }));
+        const outcome = await runLine(
+          `cd /${HANDLE}@session/topics`,
+          shuttle,
+          settling({ other: 1 }),
+        );
+        expect(reasonOf(outcome)).toBe(
+          "`/of:fid1:abcdefghijklmnop@session/topics` reaches no cell: " +
+            "`topics` is no key of the cell above it, whose keys are `other`.",
+        );
+      });
+
+      it("reads at the level stood at where only the path goes deeper", async () => {
+        // The other side of every boundary above: same piece, same scope, one
+        // key deeper. Where shuttle stands is a place a read already
+        // confirmed, so what the settle has to find is the segment past it
+        // rather than the whole piece.
+
+        const seen = await read(atPiece("topics"), "cd 0", ["a"]);
+        expect(seen.path).toEqual(["topics"]);
+      });
+
+      it("settles a slug that names a collection, as a read of it would", async () => {
+        // The canonical resolution spends leading segments reaching a
+        // collection's member, so `/tasks/first/title` names the member's
+        // piece with `title` left inside it. Settling the head as a bare piece
+        // would refuse a cell `get` reads, and two verbs disagreeing about
+        // whether a reference names anything is worse than either answer.
+
+        const shuttle = shuttleIn();
+        await runLine(`cd /tasks/first/title`, shuttle, {
+          ...READS_NOTHING,
+          resolvePieceReference: (_pieces, token, path) =>
+            Promise.resolve(
+              token === "tasks"
+                ? { piece: BOARD, pathAfter: [...path].slice(1) }
+                : { piece: token, pathAfter: [...path] },
+            ),
+          getCellValue: () => Promise.resolve({ title: "a" }),
+        });
+        expect(shuttle.place.place.position).toEqual({
+          kind: "piece",
+          space: SPACE,
+          piece: BOARD,
+          path: ["title"],
+        });
+      });
+
+      it("keeps the member's own levels in a route a collection resolved through", async () => {
+        // The resolution spends the levels that select the member, and those
+        // are levels of the collection rather than of what it held. The level
+        // the member itself sits at is the member's, and lands with the
+        // member's piece — so `..` reaches the member's root, not the facet
+        // two levels above it.
+
+        const shuttle = shuttleIn();
+        await runLine(
+          "cd slugs/tasks/first/title",
+          shuttle,
+          collectionAt("tasks"),
+        );
+        expect(shuttle.place.place.position).toEqual({
+          kind: "piece",
+          space: SPACE,
+          piece: BOARD,
+          path: ["title"],
+        });
+        await runLine("cd ..", shuttle, READS_NOTHING);
+        expect(shuttle.place.place.position).toEqual({
+          kind: "piece",
+          space: SPACE,
+          piece: BOARD,
+          path: [],
+        });
+        await runLine("cd ..", shuttle, READS_NOTHING);
+        expect(shuttle.place.place.position).toEqual({
+          kind: "facet",
+          space: SPACE,
+          facet: "slugs",
+        });
+      });
+
+      it("routes one walk the same whether it is typed whole or in steps", async () => {
+        // A route records how shuttle reached a place, and `cd a/b/c` and
+        // `cd a/b` then `cd c` are one walk written two ways. So they leave
+        // the same route, and `..` lands the same sequence from either — the
+        // property that catches a resolution spending segments and taking the
+        // levels below them with it.
+
+        /** Every `..` landing from `lines`, after where they end. */
+        const landings = async (lines: string[]): Promise<unknown[]> => {
+          const shuttle = shuttleIn();
+          for (const line of lines) {
+            await runLine(line, shuttle, collectionAt("tasks"));
+          }
+          const seen: unknown[] = [shuttle.place.place.position];
+          for (let step = 0; step < 3; step++) {
+            await runLine("cd ..", shuttle, READS_NOTHING);
+            seen.push(shuttle.place.place.position);
+          }
+          return seen;
+        };
+
+        expect(await landings(["cd slugs/tasks/first/title"]))
+          .toEqual(await landings(["cd slugs/tasks/first", "cd title"]));
+        expect(await landings(["cd slugs/board/topics"]))
+          .toEqual(await landings(["cd slugs/board", "cd topics"]));
+      });
+
+      it("takes the scope a narrowed link was reached through", async () => {
+        // A member held through a narrowed link is a different document from
+        // the one its id alone names, so the place has to read through the
+        // scope the resolution reached it at.
+
+        const shuttle = shuttleIn();
+        await runLine(`cd /tasks/first`, shuttle, {
+          ...READS_NOTHING,
+          resolvePieceReference: (_pieces, _token, path) =>
+            Promise.resolve({
+              piece: BOARD,
+              pathAfter: [...path].slice(1),
+              scope: "session",
+            }),
+        });
+        expect(shuttle.place.place.scope).toBe("session");
+      });
+
+      it("reads the path through the scope the resolution reached it at", async () => {
+        // The place's scope and the read's are the same scope, and the read
+        // has to use it: a member held through a narrowed link is a different
+        // document, so checking its path at the ambient scope would look for
+        // the key in a cell the place does not name.
+
+        const shuttle = shuttleIn();
+        let scope: string | undefined;
+        await runLine(`cd /tasks/first/title`, shuttle, {
+          ...READS_NOTHING,
+          resolvePieceReference: (_pieces, _token, path) =>
+            Promise.resolve({
+              piece: BOARD,
+              pathAfter: [...path].slice(1),
+              scope: "session",
+            }),
+          getCellValue: (config) => {
+            scope = config.pieceScope;
+            return Promise.resolve({ title: "a" });
+          },
+        });
+        expect(scope).toBe("session");
+        expect(shuttle.place.place.scope).toBe("session");
+      });
+
+      it("resolves a slug reached from inside another piece", async () => {
+        // Standing at a piece is not standing at *this* piece. The skip above
+        // is for the one the place already holds, and a move onto any other
+        // resolves — which is the whole of what keeps a repointed slug from
+        // walking the place onto a piece it did not name.
+
+        const shuttle = atPiece("topics");
+        await runLine(
+          "cd /slugs/board",
+          shuttle,
+          settling(null, { board: BOARD }),
+        );
+        expect(shuttle.place.place.position).toEqual({
+          kind: "piece",
+          space: SPACE,
+          piece: BOARD,
+          name: "board",
+          path: [],
+        });
+      });
+
+      it("resolves nothing for a key under the piece already stood at", async () => {
+        // The piece is the one shuttle stands on, which came through a settle
+        // of its own, so a descent has none left to ask about. `READS_NOTHING`
+        // resolves none, and the case fails if the settle reaches for one.
+
+        const shuttle = atPiece();
+        await runLine("cd topics", shuttle, holding({ topics: [] }));
+        expect(shuttle.place.place.position).toEqual({
+          kind: "piece",
+          space: SPACE,
+          piece: HANDLE,
+          path: ["topics"],
+        });
+      });
+
+      it("resolves nothing for a reference naming the piece already stood at", async () => {
+        const shuttle = atPiece("topics");
+        await runLine(
+          `cd /${HANDLE}/title`,
+          shuttle,
+          holding({ title: "a" }),
+        );
+        expect(shuttle.place.place.position).toEqual({
+          kind: "piece",
+          space: SPACE,
+          piece: HANDLE,
+          path: ["title"],
+        });
+      });
+
+      it("raises what the read that checks the path raised", async () => {
+        // The seam's own distinction, on the door this slice added. A slug
+        // the index names nothing for is a fact about the line and comes back
+        // refused; a read that failed is a server that went away, and it
+        // raises so a shell whose server is gone is still a shell. The
+        // message is asserted because both stubs in `READS_NOTHING` throw,
+        // and only one of them is the read.
+
+        await expect(runLine("cd title", atPiece(), READS_NOTHING)).rejects
+          .toThrow("A cell was read.");
+      });
+
+      it("refuses a segment that is no key, naming the keys that are", async () => {
+        const shuttle = atPiece();
+        const before = shuttle.place.place;
+        const outcome = await runLine(
+          "cd nosuchkey",
+          shuttle,
+          settling({ value: 0, increment: null, decrement: null }),
+        );
+        expect(reasonOf(outcome)).toBe(
+          "`nosuchkey` reaches no cell: `nosuchkey` is no key of the cell " +
+            "above it, whose keys are `value`, `increment`, and `decrement`.",
+        );
+        expect(shuttle.place.place).toBe(before);
+      });
+
+      it("refuses a segment where the cell above it holds no keys at all", async () => {
+        expect(
+          reasonOf(await runLine("cd title", atPiece(), settling(7))),
+        ).toBe(
+          "`title` reaches no cell: `title` is no key of the cell above it, " +
+            "which holds no keys at all.",
+        );
+      });
+
+      it("names the segment that is missing rather than the operand's last", async () => {
+        expect(
+          reasonOf(
+            await runLine(
+              "cd nosuchkey/title",
+              atPiece(),
+              settling({ topics: [] }),
+            ),
+          ),
+        ).toBe(
+          "`nosuchkey/title` reaches no cell: `nosuchkey` is no key of the " +
+            "cell above it, whose keys are `topics`.",
+        );
+      });
+
+      it("lands a key the read found", async () => {
+        const shuttle = atPiece();
+        const outcome = await runLine(
+          "cd topics",
+          shuttle,
+          settling({ topics: [] }),
+        );
+        expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
+        expect(shuttle.place.place.position).toEqual({
+          kind: "piece",
+          space: SPACE,
+          piece: HANDLE,
+          path: ["topics"],
+        });
+      });
+
+      it("reads an index a walk into an array reached", async () => {
+        const shuttle = atPiece("topics");
+        const outcome = await runLine(
+          "cd 3",
+          shuttle,
+          settling(["a", 1, 2, 3]),
+        );
+        expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
+      });
+
+      it("reads at the piece's root where the move went up before it came down", async () => {
+        const seen = await read(atPiece("topics"), "cd ../items", {
+          items: {},
+        });
+        expect(seen.path).toEqual([]);
+      });
+
+      it("reads at the piece's root for a move onto another piece", async () => {
+        // The path a move onto another piece extends is a path in that
+        // piece, so a standing that spells the same segments has confirmed
+        // nothing about it. The operand shares its first segment with where
+        // shuttle stands, which is what makes the piece the thing deciding.
+
+        const seen = await read(atPiece("topics"), `cd /${OTHER}/topics/3`, {
+          topics: ["a", "b", "c", "d"],
+        });
+        expect(seen.path).toEqual([]);
+        expect(seen.config?.piece).toBe(OTHER);
+      });
+
+      it("reads at the scope the move lands at, not the one it left", async () => {
+        // A reference carrying a suffix moves both halves of the place, and
+        // the cell the read has to find is the one that scope selects.
+
+        const seen = await read(
+          atPiece(),
+          `cd /${HANDLE}@session/title`,
+          { title: 1 },
+        );
+        expect(seen.config?.pieceScope).toBe("session");
+      });
+
+      it("reads nothing at all for a move onto a piece with no path", async () => {
+        // Nothing is left to find: the resolution answered for the piece, and
+        // there is no path under it for a read to look for.
+
+        const shuttle = shuttleIn();
+        moved(shuttle.place, "pieces");
+        const outcome = await runLine(`cd ${HANDLE}`, shuttle, {
+          ...READS_NOTHING,
+          resolvePieceReference: (_pieces, token, path) =>
+            Promise.resolve({ piece: token, pathAfter: [...path] }),
+        });
+        expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
+      });
+
+      it("reads through the piece the resolution handed back", async () => {
+        const shuttle = shuttleIn();
+        moved(shuttle.place, "slugs");
+        let piece: string | undefined;
+        await runLine("cd board/title", shuttle, {
+          ...settling({ title: 1 }, { board: BOARD }),
+          getCellValue: (config) => {
+            piece = config.piece;
+            return Promise.resolve({ title: 1 });
+          },
+        });
+        expect(piece).toBe(BOARD);
+      });
+
+      it("writes the name in the prompt and the handle in what `pwd` prints", async () => {
+        const shuttle = shuttleIn();
+        moved(shuttle.place, "slugs");
+        await runLine("cd board", shuttle, settling(null, { board: BOARD }));
+        expect(shuttle.place.label()).toBe("board @space");
+        expect(textOf(await runLine("pwd", shuttle, READS_NOTHING))).toBe(
+          `position  /@${SPACE}/${BOARD}@space\nscope     @space`,
+        );
+      });
+
+      it("settles a space written as a name before it settles the piece", async () => {
+        const shuttle = shuttleIn();
+        await runLine(
+          `cd /@${SPACE_NAME}/board/title`,
+          shuttle,
+          settling({ title: 1 }, { board: BOARD }),
+        );
+        expect(shuttle.place.place.position).toEqual({
+          kind: "piece",
+          space: SPACE,
+          piece: BOARD,
+          name: "board",
+          path: ["title"],
+        });
+      });
+
+      it("refuses an entry point resolving to an address naming its piece by slug", async () => {
+        expect(
+          reasonOf(
+            await runLine("cd #favorites", shuttleIn(), addressed("/board")),
+          ),
+        ).toBe(
+          "`#favorites` resolves to slug `board`, and a place holds the " +
+            "handle a name resolved to. An address the fabric wrote names " +
+            "its piece by handle.",
+        );
+      });
+
+      it("settles nothing for `get`, whose own read is what finds the cell", async () => {
+        // The asymmetry the two doors have. A `cd` waits because the prompt
+        // would go on promising the place; a read of a cell that is not there
+        // fails on its own account, so there is nothing for a check in front
+        // of it to add — and `READS_NOTHING` resolves no piece, which is what
+        // shows that none was asked for.
+
+        expect(await runLine("get title", atPiece(), cellValue("read")))
+          .toEqual({ kind: "value", value: "read" });
+      });
     });
 
     describe("a `#name` target", () => {
@@ -576,7 +1440,7 @@ describe("verbs", () => {
         expect(shuttle.place.place.position.kind).toBe("root");
       });
 
-      it("refuses a target whose address carries a scope suffix", async () => {
+      it("refuses a target whose address carries a scope qualifier", async () => {
         const outcome = await runLine(
           "cd #favorites",
           shuttleIn(),
@@ -584,7 +1448,8 @@ describe("verbs", () => {
         );
         expect(reasonOf(outcome)).toBe(
           "`#favorites` resolved to an address carrying an `@session` " +
-            "suffix, which a place reached through a target does not keep: a " +
+            "qualifier, which a place reached through a target does not " +
+            "keep: a " +
             "place holds one scope and roots at a result. Reach that cell by " +
             `its own reference, \`/${HANDLE}@session/title\`.`,
         );
@@ -673,7 +1538,7 @@ describe("verbs", () => {
         const outcome = await runLine(
           `cd /@${SPACE_NAME}/${HANDLE}/title`,
           shuttle,
-          READS_NOTHING,
+          settling({ title: "t" }),
         );
         expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
         expect(shuttle.place.place.position).toEqual({
@@ -742,7 +1607,7 @@ describe("verbs", () => {
         const outcome = await runLine(
           `cd /@east~1west/${HANDLE}`,
           shuttle,
-          READS_NOTHING,
+          settling(null),
         );
         expect(outcome).toEqual({ kind: "moved", place: shuttle.place.place });
       });
@@ -799,7 +1664,7 @@ describe("verbs", () => {
 
     it("lists where shuttle stands rather than where it started", async () => {
       const shuttle = shuttleIn();
-      shuttle.place.cd("pieces");
+      moved(shuttle.place, "pieces");
       let listed = 0;
       await runLine("ls", shuttle, {
         ...READS_NOTHING,
@@ -923,8 +1788,8 @@ describe("verbs", () => {
       // slug — the same thing a listing hands on, and what makes a name typed
       // back off one reach the piece it names.
       const shuttle = shuttleIn();
-      shuttle.place.cd("slugs");
-      shuttle.place.cd("board");
+      moved(shuttle.place, "slugs");
+      moved(shuttle.place, "board");
       let config: PieceConfig | undefined;
       await runLine("get", shuttle, {
         ...READS_NOTHING,
@@ -938,7 +1803,7 @@ describe("verbs", () => {
 
     it("reads at the scope the place reads through", async () => {
       const shuttle = atPiece();
-      shuttle.place.cd("@session");
+      moved(shuttle.place, ".@session");
       let config: PieceConfig | undefined;
       await runLine("get", shuttle, {
         ...READS_NOTHING,
@@ -1009,8 +1874,8 @@ describe("verbs", () => {
       // two agree.
 
       const shuttle = shuttleIn();
-      shuttle.place.cd("slugs");
-      shuttle.place.cd("board");
+      moved(shuttle.place, "slugs");
+      moved(shuttle.place, "board");
       const refused = await runLine("get ..", shuttle, READS_NOTHING);
       expect(reasonOf(refused)).toBe(
         "`slugs/` is a list of what stands inside it rather than a cell, so " +
@@ -1043,7 +1908,7 @@ describe("verbs", () => {
 
     it("refuses a facet, naming it", async () => {
       const shuttle = shuttleIn();
-      shuttle.place.cd("pieces");
+      moved(shuttle.place, "pieces");
       expect(reasonOf(await runLine("get", shuttle, READS_NOTHING))).toBe(
         "`pieces/` is a list of what stands inside it rather than a cell, so " +
           "it holds no value. `ls` lists it.",
@@ -1130,7 +1995,7 @@ describe("verbs", () => {
 
       it("reads the arguments cell a bare piece designation selects", async () => {
         const shuttle = shuttleIn();
-        shuttle.place.cd("slugs");
+        moved(shuttle.place, "slugs");
         const seen = await reads(shuttle, "get board#argument");
         expect(seen.config?.piece).toBe("board");
         expect(seen.path).toEqual([]);

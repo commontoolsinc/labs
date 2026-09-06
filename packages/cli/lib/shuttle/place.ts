@@ -7,11 +7,19 @@
  * nothing read. The address grammar belongs to the fabric
  * (`normalizeLLMFriendlyRef` over the runner's `parseReferenceParts`) and this
  * module consumes it; what it adds is the navigation spellings that grammar
- * has no room for — `..`, `-`, `/`, and a scope-only `@scope` — the refusals a
+ * has no room for — `..`, `-`, `/`, `.` for the position, and the `./` and
+ * `.@` heads a relative reference takes a member or a qualifier on — the
+ * facet
+ * names a rooted operand reserves for the walk from the root, the refusals a
  * place is subject to, the operand that reaches a child, which is those same
  * readings asked in the other direction, and the one reading that differs
  * between moving somewhere and reading it: a place cannot stand in an
  * arguments cell, and an operand may still name one.
+ *
+ * Where a value stops is the moves that reach a piece. Whether the fabric
+ * holds one, and what a slug names, are reads, so those come back pending and
+ * `verbs.ts` settles them: `cd` is the one verb whose success is a promise
+ * that the place is there, so the read happens before the place is adopted.
  */
 
 import type { CellScope } from "@commonfabric/api";
@@ -23,6 +31,7 @@ import {
   linkPathSegmentToCellPathSegment,
   parseScopedIdSegment,
 } from "@commonfabric/runner/shared";
+import { isSlugAddress } from "@commonfabric/runner/slugs";
 
 import {
   type NormalizedLLMFriendlyRef,
@@ -37,9 +46,19 @@ export type PathSegment = string | number;
 
 /**
  * The facets a space root lists. A populated space is too large for a flat
- * root, so the root offers these and never pieces directly, and these names
- * are reserved at the root alone — inside a piece a facet name is an
- * ordinary data key.
+ * root, so the root offers these and never pieces directly.
+ *
+ * These names are reserved wherever a walk from the root begins: as a segment
+ * at the root, and as the first segment of a rooted reference, so that
+ * `/slugs/board` is the walk `cd /` and `cd slugs/board` make. Inside a piece
+ * no name is reserved at all and a facet name is an ordinary data key.
+ *
+ * The second half of that is a divergence from the canonical grammar and
+ * `docs/plans/shuttle/grammar.md` says so. A rooted reference is the runner's
+ * `parseReferenceParts` form rather than shuttle's, and `packages/cli` resolves
+ * its piece segment by slug, so shuttle reads `/slugs/x` and `/pieces/x`
+ * differently from the way `cf` reads them — at these two values and no
+ * others. Issue #6992 retires it by refusing them as slugs at `set-slug`.
  */
 export const FACETS = ["slugs", "pieces"] as const;
 
@@ -75,8 +94,31 @@ export interface PiecePosition {
   /** The space, which one connection fixes for a shuttle's whole run. */
   readonly space: MemorySpace;
 
-  /** The piece as the operand named it: a handle or a slug. */
+  /**
+   * The piece, by the handle a read resolved it to.
+   *
+   * A slug is a redirect, so a place holding one would follow the index to
+   * another piece without moving, and the write a later verb makes would land
+   * where the index points now. {@link CurrentPlace.confirm} is where the
+   * resolution lands, and every position shuttle stands at came through it.
+   * The exception is a position that says where an operand *points* rather
+   * than where shuttle stands ({@link CurrentPlace.aim}): nothing resolved
+   * that one, so it carries the operand's own spelling and the read it feeds
+   * resolves it the way `--cell` does.
+   */
   readonly piece: string;
+
+  /**
+   * The name the index confirmed for {@link PiecePosition.piece}, absent
+   * where the operand named the piece by handle.
+   *
+   * It is what the prompt shows and what nothing addresses: decision 13
+   * (`docs/plans/shuttle/README.md`) shows a slug an index confirms, and the
+   * handle beside it is what `pwd` prints and what every read goes to. A
+   * piece named by handle keeps no name here even where the space has a slug
+   * for it — a name is shown because a read confirmed it, and no read asked.
+   */
+  readonly name?: string;
 
   /**
    * Path inside the piece's result; empty while standing at the piece.
@@ -101,8 +143,11 @@ export type Position = SpaceRootPosition | FacetPosition | PiecePosition;
 
 /**
  * The cwd pair: the position shuttle reads from, and the scope it reads
- * through. A scope is a way of seeing every position rather than a location of
- * its own, which is why it sits beside the position instead of inside it.
+ * through. A scope applies at every position rather than nesting inside one,
+ * which is why it sits beside the position instead of among its levels — and
+ * the pair is what names a cell, each half deciding which: one id read at
+ * `@space` and at `@session` is two documents, so a move that changes either
+ * half reaches a cell of its own.
  */
 export interface Place {
   /** Where shuttle stands. */
@@ -110,6 +155,88 @@ export interface Place {
 
   /** The overlay every read goes through while this place holds. */
   readonly scope: CellScope;
+}
+
+/**
+ * A place standing on a piece, which is what a move a read has still to
+ * confirm lands on: a root and a facet are decided by the value readings
+ * alone, and only a piece and a path inside one are things the fabric may not
+ * hold.
+ */
+export interface PiecePlace {
+  /** Where shuttle would stand. */
+  readonly position: PiecePosition;
+
+  /** The overlay every read goes through while this place holds. */
+  readonly scope: CellScope;
+}
+
+/**
+ * The levels walked through to reach a place, outermost first, each the
+ * position one descent came from.
+ *
+ * `..` walks back out through it, which is what lets `cd slugs`, `cd board`,
+ * `cd ..` return to `slugs/` while the piece itself stays one position however
+ * it was reached. Three moves replace it wholesale rather than pushing: a
+ * reference and a resolved target carry no route, and `-` restores the route
+ * that came with the place it returns to.
+ */
+export type Trail = readonly Position[];
+
+/**
+ * A move that reached a piece the fabric has still to be asked about: what a
+ * slug names, whether the space holds the piece, and whether a path inside it
+ * is there. Reading that and handing this back to
+ * {@link CurrentPlace.confirm} with the {@link ResolvedPlace} it resolved to
+ * is what lands it.
+ *
+ * It carries the route as well as the place, which a landed move does not. A
+ * trail is how shuttle reached where it stands, so it stops at
+ * {@link CurrentPlace} for a move that is over; this one is a step still being
+ * taken, and dropping the route would land `cd slugs/board` with no way back
+ * to `slugs/`.
+ */
+export interface PendingMove {
+  /** Names this arm of {@link Move}. */
+  readonly kind: "pending";
+
+  /** Where the move lands, with the piece as the operand spelled it. */
+  readonly place: PiecePlace;
+
+  /** The operand that named it, which a refusal quotes. */
+  readonly operand: string;
+
+  /** The levels walked to reach it, which `confirm` lands beside the place. */
+  readonly route: Trail;
+}
+
+/**
+ * What a read resolved a {@link PendingMove} to, which
+ * {@link CurrentPlace.confirm} lands.
+ *
+ * The path is the resolution's own and not the move's, because a slug naming a
+ * collection spends leading segments reaching its member: `/tasks/first/title`
+ * resolves to the member's piece with `title` left inside it. That is the
+ * resolution every read here already makes (`resolvePieceReference`,
+ * `packages/piece/src/slugs.ts`), so a place lands on the cell a read of the
+ * same reference reaches, and `cd` and `get` cannot disagree about whether a
+ * reference names anything.
+ */
+export interface ResolvedPlace {
+  /** The piece, by the handle it resolved to. */
+  readonly piece: string;
+
+  /** The path left inside that piece once the resolution spent what it spent. */
+  readonly path: readonly PathSegment[];
+
+  /**
+   * The scope the piece was reached through, where that narrows the place's.
+   *
+   * A member held through a narrowed link is a different document from the one
+   * its id alone names, so a place keeping the ambient scope would denote a
+   * cell the read does not.
+   */
+  readonly scope?: CellScope;
 }
 
 /**
@@ -130,6 +257,9 @@ export interface SpaceNamedMove {
   /** The space name the reference carried. */
   readonly name: string;
 
+  /** The reference that named it, which a refusal quotes. */
+  readonly operand: string;
+
   /** The piece as the reference spelled it: a handle or a slug. */
   readonly piece: string;
 
@@ -146,17 +276,29 @@ type Unlanded =
   | { readonly kind: "refused"; readonly reason: string }
   /** The operand is a wish target, which the connected space resolves. */
   | { readonly kind: "wish"; readonly target: string }
-  | SpaceNamedMove;
+  | SpaceNamedMove
+  | PendingMove;
 
 /**
  * What a move did. It either lands, is refused, or names something only the
- * connection can settle: a wish target to resolve, or a space written as a
- * name.
+ * connection can settle: a wish target to resolve, a space written as a name,
+ * or a piece and a path the fabric has still to be asked about.
  */
 export type Move =
   /** The move landed, and `place` is where shuttle now stands. */
   | { readonly kind: "moved"; readonly place: Place }
   | Unlanded;
+
+/**
+ * What an operand named for a door that says where it points rather than
+ * going there: every arm of a {@link Move} but the pending one.
+ *
+ * A pending move is where the operand points already. What the read behind it
+ * settles is whether the fabric holds anything there, and that is a question
+ * about standing somewhere rather than about reading it — a read of a cell
+ * that is not there fails on its own account, and says so in its own words.
+ */
+export type Aimed = Exclude<Move, PendingMove>;
 
 /**
  * What an operand named when it was read rather than moved to: where it
@@ -173,7 +315,7 @@ export interface Aim {
   readonly input: boolean;
 
   /** Where the operand points, with any `#argument` suffix off it. */
-  readonly move: Move;
+  readonly move: Aimed;
 }
 
 /** What resolving a named entry point against the fabric produced. */
@@ -291,6 +433,11 @@ export function placeAtSpaceRoot(space: MemorySpace): Place {
  * token opening with `-` reaches a verb as an option and never as an operand
  * (`readsAsOption`, `options.ts`), so a candidate the option grammar takes is
  * not offered and the reference is what names such a child.
+ *
+ * A move a read would confirm counts as reaching the child. What that read
+ * decides is whether the fabric holds anything there, and a listing is asking
+ * about a row it has just read: the question here is which spelling names the
+ * row, not whether the row is one.
  */
 export function operandForChild(
   place: Place,
@@ -302,10 +449,8 @@ export function operandForChild(
   const from: Standing = { place, trail: [] };
   for (const candidate of [child, renderPosition(goal)]) {
     if (readsAsOption(candidate)) continue;
-    const step = movePlace(from, candidate);
-    if (step.kind === "moved" && samePlace(step.to.place, goal)) {
-      return candidate;
-    }
+    const reach = reached(movePlace(from, candidate));
+    if (reach !== undefined && samePlace(reach.place, goal)) return candidate;
   }
   return undefined;
 }
@@ -330,14 +475,14 @@ export function operandForChild(
  *
  * The scope is written on the piece even when it is the base, which is what
  * makes "read from anywhere" true rather than nearly so. Scope is part of a
- * cell's identity, and an omitted suffix is filled from wherever the reader
+ * cell's identity, and an omitted qualifier is filled from wherever the reader
  * stands, so a rendering without one denotes whatever cell the reader's own
  * scope selects. Writing it absolutely and reading it ambiently is the
  * asymmetry a shell has between what `pwd` prints and what a relative path
  * means. The reference serializer omits a base scope for the opposite
- * convention, that an omitted suffix means the base, so this writes the
- * suffix itself. The split that reads it back takes the last `@`, and this
- * writes one after the piece, so the suffix it reads is always the one this
+ * convention, that an omitted qualifier means the base, so this writes the
+ * qualifier itself. The split that reads it back takes the last `@`, and this
+ * writes one after the piece, so the qualifier it reads is always the one this
  * wrote — whatever the piece holds, and independently of any rule about
  * what a piece may hold.
  */
@@ -392,6 +537,16 @@ export class CurrentPlace {
    * Moves as `operand` says, and returns what that did. The place changes only
    * where the move lands, so a refusal and an unsettled operand both leave
    * shuttle where it was.
+   *
+   * An operand that reaches a piece comes back pending rather than landed,
+   * because whether the fabric holds that place is what no value knows. What
+   * `cd` promises is that the place it moved to is there, so the read that
+   * says so has to happen before the move is adopted and not on the next
+   * line; {@link CurrentPlace.confirm} is where it lands. A scope on its own
+   * is such an operand: it reaches a place at a scope nothing read, the same
+   * id under two scopes being two cells. What lands here is a move that
+   * reaches a container, and one that returns to a place already stood at —
+   * `..`, `-`, and `/` — nothing about either being a read's to decide.
    */
   cd(operand: string): Move {
     return this.#commit(movePlace(this.#here, operand, this.#previous));
@@ -413,15 +568,21 @@ export class CurrentPlace {
    * actually stands rather than from a standing built for the occasion. That
    * is what makes the two agree about `..`, which walks the trail shuttle
    * took and not the levels a position happens to name.
+   *
+   * There is a third way it differs and it follows from the first: nothing
+   * comes back pending. A `cd` waits on a read because standing somewhere the
+   * fabric does not hold is a promise the prompt would go on making; a read
+   * aimed at such a cell fails on its own account, in the read's own words,
+   * and there is nothing left for a check in front of it to add.
    */
   aim(operand: string): Aim {
     if (operand === ARGUMENT_SUFFIX) {
-      return { input: false, move: outcomeOf(refuse(SUFFIX_NAMES_NO_TARGET)) };
+      return { input: false, move: pointing(refuse(SUFFIX_NAMES_NO_TARGET)) };
     }
     const stripped = argumentSuffixOff(operand);
     return {
       input: stripped !== undefined,
-      move: outcomeOf(
+      move: pointing(
         movePlace(this.#here, stripped ?? operand, this.#previous),
       ),
     };
@@ -437,13 +598,19 @@ export class CurrentPlace {
   }
 
   /**
-   * Lands a {@link SpaceNamedMove}, `confirmed` being the space its name
+   * Settles a {@link SpaceNamedMove}, `confirmed` being the space its name
    * resolved to. A name that resolved to any space but the connected one is
    * refused here, so the comparison the reference deferred is made where the
    * place would be adopted rather than left to the caller. The place is built
    * from the connected space and the move's own piece, path and scope, which
-   * is what carries an `@scope` suffix through a reference that named its
-   * space by name.
+   * is what carries a qualifier through a reference that named its space by
+   * name.
+   *
+   * What comes back is a {@link PendingMove} rather than a landing: the place
+   * it names stands on a piece, which is a place a read has still to confirm
+   * like any other, so {@link CurrentPlace.confirm} is where it lands. The
+   * name being settled and the place being settled are two questions, and this
+   * answers the first.
    */
   settle(move: SpaceNamedMove, confirmed: MemorySpace): Move {
     return this.#commit(this.#settled(move, confirmed));
@@ -452,9 +619,42 @@ export class CurrentPlace {
   /**
    * Like {@link CurrentPlace.settle}, except that it moves nothing: what comes
    * back is where the settled move names, and shuttle stays where it stood.
+   *
+   * Nothing comes back pending, for {@link CurrentPlace.aim}'s reason: this is
+   * the door a read goes through, and where a read points is not a thing
+   * another read decides.
    */
-  resolveNamedSpace(move: SpaceNamedMove, confirmed: MemorySpace): Move {
-    return outcomeOf(this.#settled(move, confirmed));
+  resolveNamedSpace(move: SpaceNamedMove, confirmed: MemorySpace): Aimed {
+    return pointing(this.#settled(move, confirmed));
+  }
+
+  /**
+   * Lands a {@link PendingMove} a read confirmed, `resolved` being what the
+   * read resolved it to.
+   *
+   * The handle is what the place adopts and the operand's own spelling stays
+   * beside it as the name, where the two differ — which is what makes the
+   * prompt show a slug an index confirmed while every read goes to the piece
+   * that index pointed at, and not to whichever piece it points at next.
+   *
+   * The route is landed with the same piece, not only the place on top of it.
+   * A trail is made of positions `..` walks back through and `-` restores, so
+   * every one of them is a place shuttle can stand at, and a position holding
+   * an unresolved slug is one a later read would follow to wherever the index
+   * points then. Resolving the destination alone would put the invariant one
+   * level deep.
+   *
+   * The handle came from the fabric rather than from an operand, so it is held
+   * to the rules a piece is held to at every other door: a name no rendering
+   * would give back, and a name in neither vocabulary, are refused here as
+   * they are on the way in. It is not held to being a handle, where
+   * {@link CurrentPlace.enter} holds a target's piece to one, and the
+   * difference is what each is handed. A target's piece comes out of a parse
+   * of an address, a grammar that reads a slug as readily as a handle; this
+   * one comes out of a resolution, whose answer is a piece's own id.
+   */
+  confirm(move: PendingMove, resolved: ResolvedPlace): Move {
+    return this.#commit(confirmed(move, resolved));
   }
 
   /**
@@ -503,10 +703,14 @@ export class CurrentPlace {
 
   /**
    * Helper for {@link CurrentPlace.settle} and
-   * {@link CurrentPlace.resolveNamedSpace}, which is where `move` lands once
+   * {@link CurrentPlace.resolveNamedSpace}, which is where `move` reaches once
    * `confirmed` is known. The comparison the reference deferred is made here
    * rather than left to the caller, so a name that resolved to any space but
    * the connected one is refused whichever of the two asked.
+   *
+   * What it reaches is a piece, so the step comes back pending: `settle` hands
+   * that on for a read, and `resolveNamedSpace` reads it as where the operand
+   * points, neither of which is a landing this makes.
    */
   #settled(move: SpaceNamedMove, confirmed: MemorySpace): Step {
     const connected = this.#here.place.position.space;
@@ -526,38 +730,30 @@ export class CurrentPlace {
     }
     const outside = outsideVocabulary(move.piece);
     if (outside !== undefined) return outside;
-    return land({
-      position: {
-        kind: "piece",
-        space: connected,
-        piece: move.piece,
-        // Normalized the way every other door normalizes, so that a
-        // position names its cell the same however it was reached, which is
-        // what {@link Position} promises. A move `cd` minted carries a path
-        // the reference grammar already converted; one a caller built does
-        // not, and this is a public door.
-        path: move.path.map((segment) =>
-          typeof segment === "number"
-            ? segment
-            : linkPathSegmentToCellPathSegment(segment)
-        ),
+    return pend(
+      {
+        position: {
+          kind: "piece",
+          space: connected,
+          piece: move.piece,
+          // Normalized the way every other door normalizes, so that a
+          // position names its cell the same however it was reached, which is
+          // what {@link Position} promises. A move `cd` minted carries a path
+          // the reference grammar already converted; one a caller built does
+          // not, and this is a public door.
+          path: move.path.map((segment) =>
+            typeof segment === "number"
+              ? segment
+              : linkPathSegmentToCellPathSegment(segment)
+          ),
+        },
+        scope: move.scope,
       },
-      scope: move.scope,
-    }, []);
+      [],
+      move.operand,
+    );
   }
 }
-
-/**
- * The levels walked through to reach where shuttle stands, outermost first,
- * each the position one descent came from.
- *
- * `..` walks back out through it, which is what lets `cd slugs`, `cd board`,
- * `cd ..` return to `slugs/` while the piece itself stays one position however
- * it was reached. Three moves replace it wholesale rather than pushing: a
- * reference and a resolved target carry no route, and `-` restores the route
- * that came with the place it returns to.
- */
-type Trail = readonly Position[];
 
 /** Where shuttle stands, and the trail it walked to get there. */
 interface Standing {
@@ -568,7 +764,13 @@ interface Standing {
   readonly trail: Trail;
 }
 
-/** A move as the movers pass it around, a landing carrying its trail. */
+/**
+ * A move as the movers pass it around, a landing carrying its trail.
+ *
+ * A pending move carries one too, in the fields {@link PendingMove} declares,
+ * so a walk composes a pending step with the steps around it the way it
+ * composes a landed one.
+ */
 type Step =
   /** The move landed on `to`. */
   | { readonly kind: "moved"; readonly to: Standing }
@@ -579,9 +781,10 @@ type Step =
  * to.
  *
  * The operand is read in the order the spellings can be told apart: `-`, a
- * scope-only `@scope`, and `/` are shuttle's own navigation syntax, any other
- * string starting with `/` is a reference for the fabric's grammar to parse,
- * whichever rung of it, a leading
+ * `.` and its `./` and `.@` heads, and `/` are shuttle's own, a rooted
+ * string whose first segment names a facet is a walk from the space root, any
+ * other string starting with `/` is a reference for the fabric's grammar to
+ * parse, whichever rung of it, a leading
  * `#` is a wish target, and anything else is a relative walk from where
  * shuttle stands.
  *
@@ -605,17 +808,40 @@ function movePlace(
       ? refuse("There is no previous place to return to.")
       : land(previous.place, previous.trail);
   }
-  if (operand.startsWith("@")) return moveScope(from, operand.slice(1));
+  // `.` is the context's own cell, and the head a relative reference takes a
+  // member or a qualifier on. The head is read before the walk splits the
+  // operand, so it governs what follows it rather than standing as a segment:
+  // `./items@user` is the key `items@user` and never a walk through a key
+  // called `.`. What that costs is the bare spelling of such a key, the trade
+  // `..`, `-` and `/` already make here — `./.` and the reference a listing
+  // prints both reach it.
+  if (operand === RELATIVE_HEAD) return land(place, from.trail);
+  if (operand.startsWith(SCOPE_HEAD)) return moveScope(from, operand);
+  if (operand.startsWith(MEMBER_HEAD)) {
+    return moveBySegments(from, operand.slice(MEMBER_HEAD.length), operand);
+  }
 
   // A leading `/` roots a reference, and `/` alone roots one and names
   // nothing further: the space's own root, which the grammar has no id
   // segment to spell.
-  if (operand === "/") {
-    return land(
-      { ...place, position: { kind: "root", space: place.position.space } },
-      [],
-    );
-  }
+  const root: Standing = {
+    place: {
+      ...place,
+      position: { kind: "root", space: place.position.space },
+    },
+    trail: [],
+  };
+  if (operand === "/") return land(root.place, root.trail);
+
+  // Before the parse, because the parse would read the facet name as a piece
+  // and the walk is what the segment means. A rooted operand and a walk from
+  // the root split on the same separator here, so `/slugs/board` is what `cd
+  // /` and `cd slugs/board` are together, down to the trail it leaves.
+  const walk = rootedFacetWalk(operand);
+  if (walk !== undefined) return moveBySegments(root, walk, operand);
+
+  const edged = rootedOnlyByTrim(operand);
+  if (edged !== undefined) return edged;
 
   let reference;
   try {
@@ -630,28 +856,108 @@ function movePlace(
   }
 
   if (operand.startsWith("#")) return { kind: "wish", target: operand };
-  return moveBySegments(from, operand);
+  return moveBySegments(from, operand, operand);
 }
 
 /**
- * Where a `@scope` operand moves `from` to. `word` is the suffix without its
- * `@`, and the scopes it may name are the canonical grammar's own, so no
- * reference can carry a scope this refuses. The position does not move, so the
- * trail comes through untouched.
+ * Helper for {@link movePlace}, which is the walk a rooted operand stands for
+ * where its first segment names a facet, and nothing where it names none.
+ *
+ * The rooted form only. A complete reference carries its own space and is the
+ * canonical grammar's outright, so `/@did:key:…/slugs/board` still names a
+ * piece slugged `slugs` — which is what leaves such a piece reachable by name
+ * at all while one can exist, the rooted spelling being the walk
+ * ({@link FACETS} carries what that costs and what retires it).
+ *
+ * The operand is matched as it was written, as every reading here is, so an
+ * operand that would be rooted only once trimmed is not one this reads.
+ * {@link rootedOnlyByTrim} refuses that operand rather than letting it fall
+ * to a reading of its own.
  */
-function moveScope(from: Standing, word: string): Step {
-  if (word.includes("/")) {
-    return refuse(
-      `\`@${word}\` names no scope: a scope word holds no \`/\`. What ` +
-        `\`pwd\` prints for a space root or a facet is spelled this way and ` +
-        `names no cell — reach one by its facet or its piece.`,
-    );
-  }
-  if (!CELL_SCOPE_VALUES.has(word)) return refuseUnknownScope(word);
-  return land({ ...from.place, scope: word as CellScope }, from.trail);
+function rootedFacetWalk(operand: string): string | undefined {
+  if (!operand.startsWith("/")) return undefined;
+  const walk = operand.slice(1);
+  return isFacet(walk.split("/", 1)[0]) ? walk : undefined;
 }
 
-/** Helper for the movers, which refuses `@word` for naming no scope. */
+/**
+ * Helper for {@link movePlace}, which refuses an operand that is rooted only
+ * once its leading whitespace comes off, and returns nothing for any other.
+ *
+ * Such an operand has two readings that name different cells. Every reading
+ * here matches the operand as written, so as written this one is a relative
+ * walk whose first segment is whitespace; the reference grammar trims what it
+ * is given (`isReference`, `packages/cli/lib/llm-friendly-ref.ts`), so to that
+ * grammar it is rooted. Left to fall through, the rooted reading takes it —
+ * and the facet names a rooted spelling reserves ({@link FACETS}) are not
+ * reserved in that one, so `cd " /slugs/todo"` would reach a piece slugged
+ * `slugs`. Reaching it is not the point; reaching it *silently* is. A wrong
+ * place a `cd` adopts is a promise the prompt goes on making, which is what
+ * decision 11 ends, and a refusal cannot make it.
+ *
+ * The rule is exactly as wide as that and no wider. Leading whitespace costs a
+ * name nothing anywhere else — `cd " foo"` reaches the key `" foo"` — so only
+ * an operand that trimming would *root* is refused, and an operand trimming
+ * leaves relative is read as it is written.
+ *
+ * The trim here is a test and never a strip, which is the distinction a search
+ * for one in this module wants: no reading consumes what it produces. An
+ * operand this returns nothing for goes on to every later reading as it was
+ * written, and the trimmed spelling leaves only inside the refusal, as the
+ * thing to type instead.
+ */
+function rootedOnlyByTrim(operand: string): Step | undefined {
+  const trimmed = operand.trim();
+  if (operand.startsWith("/") || !trimmed.startsWith("/")) return undefined;
+  return refuse(
+    `\`${operand}\` is rooted only with its leading whitespace taken off, ` +
+      `and the two readings name different cells. \`${trimmed}\` is the one ` +
+      `that reaches the place it names.`,
+  );
+}
+
+/**
+ * Where a `.@scope` operand moves `from` to. `operand` is the whole of it, and
+ * the scopes it may name are the canonical grammar's own, so no reference can
+ * carry a scope this refuses. The position does not move, so the trail comes
+ * through untouched.
+ *
+ * The head is {@link SCOPE_HEAD}: `.` is the context's own cell and the
+ * qualifier hangs off it, which is the relative spelling of a qualifier the
+ * reference grammar gives
+ * ([#6814](https://github.com/commontoolsinc/labs/issues/6814)). A qualifier
+ * on a piece segment — `board@session` — is the same `@` on a different head,
+ * and is read where that segment is.
+ *
+ * It comes back pending from a piece, like any other move onto one. A scope
+ * selects which document a piece's id names, so the same id at `@space` and at
+ * `@session` are two cells and a path found in one is not a path in the other:
+ * the place a scope move reaches is one nothing has read. From a root or a
+ * facet it lands, a container being a list of names rather than a cell for an
+ * overlay to select within.
+ */
+function moveScope(from: Standing, operand: string): Step {
+  const word = operand.slice(SCOPE_HEAD.length);
+  if (!CELL_SCOPE_VALUES.has(word)) {
+    return refuse(
+      `\`${operand}\` names no scope. The scopes are \`.@space\`, ` +
+        `\`.@user\`, and \`.@session\`.`,
+    );
+  }
+  const place = { ...from.place, scope: word as CellScope };
+  const position = place.position;
+  return position.kind === "piece"
+    ? pend({ ...place, position }, from.trail, operand)
+    : land(place, from.trail);
+}
+
+/**
+ * Helper for the movers, which refuses `@word` riding a piece id for naming no
+ * scope. The spellings it offers are the piece qualifier's, which is where
+ * this fires:
+ * `board@session` qualifies the piece, and {@link SCOPE_HEAD} is the head a
+ * qualifier takes with no piece in front of it.
+ */
 function refuseUnknownScope(word: string): Step {
   return refuse(
     `\`@${word}\` names no scope. The scopes are \`@space\`, \`@user\`, ` +
@@ -664,7 +970,7 @@ function refuseUnknownScope(word: string): Step {
  *
  * A rooted reference fixes the piece and the path and takes both its space
  * and its scope from the place; a `@did:key:…` prefix supplies the space, and
- * an `@scope` suffix the scope. The parse refuses a
+ * an `@scope` qualifier the scope. The parse refuses a
  * space whose DID differs from the place's, and hands one written as a name
  * back for a session to settle, since deriving a DID from a name needs one.
  */
@@ -685,20 +991,25 @@ function moveByReference(
     return {
       kind: "space-by-name",
       name: reference.embeddedSpace,
+      operand,
       piece: reference.pieceId,
       path: reference.path,
       scope,
     };
   }
-  return land({
-    position: {
-      kind: "piece",
-      space: place.position.space,
-      piece: reference.pieceId,
-      path: reference.path,
+  return pend(
+    {
+      position: {
+        kind: "piece",
+        space: place.position.space,
+        piece: reference.pieceId,
+        path: reference.path,
+      },
+      scope,
     },
-    scope,
-  }, []);
+    [],
+    operand,
+  );
 }
 
 /**
@@ -706,19 +1017,39 @@ function moveByReference(
  * segment is read against the level the one before it landed on, so `..` and a
  * descent compose in one operand.
  *
- * The operand's own edges are the outer edges of the first and last segments,
- * the operand reaching here as it was written: `cd " a"` reaches the key
- * `" a"`, and `cd "a "` is refused, a part ending in whitespace being
- * refused wherever it sits. Between those edges a segment is taken literally —
- * the reference grammar's `~1` escaping belongs to a reference, which a
- * relative operand is not, so `~1` here is two characters of a key and a key
- * holding the separator has no relative spelling at all.
+ * `walk` is the segments to take and `operand` is what was written, which a
+ * refusal quotes. The two are one string for a relative operand and differ for
+ * a rooted one read as a walk from the root, the walk there being the operand
+ * without the separator that rooted it.
+ *
+ * The walk's own edges are the outer edges of the first and last segments, it
+ * reaching here as it was written: `cd " a"` reaches the key `" a"`, and
+ * `cd "a "` is refused, a part ending in whitespace being refused wherever it
+ * sits. Between those edges a segment is taken literally — the reference
+ * grammar's `~1` escaping belongs to a reference, which a relative operand is
+ * not, so `~1` here is two characters of a key and a key holding the separator
+ * has no relative spelling at all.
+ *
+ * The walk is one move and comes back pending once, not per segment: a
+ * descent inside the operand is a level nothing has read, so the whole walk
+ * waits on the read the last of them needs. Sticky rather than last-step,
+ * because a walk can climb back out of what it descended into and still end
+ * somewhere unread — `a/b/..` ends at `a`, which nothing looked at.
+ *
+ * Two walks land all the same. One that climbed back out of the piece has no
+ * piece left to ask about, and one that ends exactly where it started reaches
+ * a place already stood at, settled when shuttle arrived there.
  */
-function moveBySegments(from: Standing, operand: string): Step {
-  const segments = operand.split("/");
+function moveBySegments(
+  from: Standing,
+  walk: string,
+  operand: string,
+): Step {
+  const segments = walk.split("/");
   if (segments[segments.length - 1] === "") segments.pop();
 
   let moved = from;
+  let descended = false;
   for (const segment of segments) {
     // No fault check here: which rule a segment answers to depends on what it
     // is about to become, and only `moveDown` knows that. A segment naming a
@@ -727,10 +1058,16 @@ function moveBySegments(from: Standing, operand: string): Step {
     const step = segment === ".."
       ? moveUp(moved)
       : moveDown(moved, segment, operand);
-    if (step.kind !== "moved") return step;
-    moved = step.to;
+    const reach = reached(step);
+    if (reach === undefined) return step;
+    moved = reach;
+    descended ||= step.kind === "pending";
   }
-  return land(moved.place, moved.trail);
+  const position = moved.place.position;
+  return descended && position.kind === "piece" &&
+      !samePlace(moved.place, from.place)
+    ? pend({ ...moved.place, position }, moved.trail, operand)
+    : land(moved.place, moved.trail);
 }
 
 /**
@@ -760,6 +1097,10 @@ function enclosing(position: Position): Position {
  * Where one relative segment moves `from` to: a facet at a space root, a piece
  * inside a facet, and a data key or index inside a piece. A descent pushes the
  * level it left onto the trail, which is what `..` walks back out.
+ *
+ * A facet is a closed set and lands; the other two reach the fabric and come
+ * back pending, a piece having still to resolve and a key having still to be
+ * found.
  */
 function moveDown(from: Standing, segment: string, operand: string): Step {
   const place = from.place;
@@ -774,28 +1115,33 @@ function moveDown(from: Standing, segment: string, operand: string): Step {
         }, trail)
         : refuse(
           `A space root lists facets, and \`${segment}\` names none. The ` +
-            `facets are \`slugs/\` and \`pieces/\`.`,
+            `facets are \`slugs/\` and \`pieces/\`.` +
+            scopeMoveHint(operand),
         );
     case "facet":
       return moveIntoPiece(place, position, segment, trail, operand);
     case "piece": {
       const fault = unnameableSegment(segment);
       if (fault !== undefined) return refuseUnnameable(operand, fault);
-      return land({
-        ...place,
-        position: {
-          ...position,
-          path: [...position.path, linkPathSegmentToCellPathSegment(segment)],
+      return pend(
+        {
+          ...place,
+          position: {
+            ...position,
+            path: [...position.path, linkPathSegmentToCellPathSegment(segment)],
+          },
         },
-      }, trail);
+        trail,
+        operand,
+      );
     }
   }
 }
 
 /**
  * Where a segment naming a piece inside `facet` moves `place` to. The segment
- * is the one a scope suffix may ride, since that is where the canonical
- * grammar carries it, and a suffix here moves the scope half of the place.
+ * is the one a scope qualifier may ride, since that is where the canonical
+ * grammar carries it, and a qualifier here moves the scope half of the place.
  *
  * A `#` is refused rather than taken as part of the id, for one of two
  * reasons. `#argument` is refused for the reason it is refused on a
@@ -823,15 +1169,15 @@ function moveIntoPiece(
   }
   if (segment.startsWith("@")) {
     return refuse(
-      `\`${segment}\` names no piece. A scope suffix rides a piece id, and ` +
-        `a scope on its own is a whole operand rather than a segment.`,
+      `\`${segment}\` names no piece. A qualifier rides a piece id, and a ` +
+        `facet holds pieces rather than keys.` + scopeMoveHint(operand),
     );
   }
   let scoped;
   try {
     scoped = parseScopedIdSegment(segment);
   } catch {
-    // The one throw left: the suffix names no scope, `@` with no piece in
+    // The one throw left: the qualifier names no scope, `@` with no piece in
     // front of it having been refused above.
     return refuseUnknownScope(segment.slice(segment.lastIndexOf("@") + 1));
   }
@@ -839,15 +1185,19 @@ function moveIntoPiece(
   if (fault !== undefined) return refuseUnnameable(operand, fault);
   const outside = outsideVocabulary(scoped.id);
   if (outside !== undefined) return outside;
-  return land({
-    position: {
-      kind: "piece",
-      space: facet.space,
-      piece: scoped.id,
-      path: [],
+  return pend(
+    {
+      position: {
+        kind: "piece",
+        space: facet.space,
+        piece: scoped.id,
+        path: [],
+      },
+      scope: scoped.scope ?? place.scope,
     },
-    scope: scoped.scope ?? place.scope,
-  }, trail);
+    trail,
+    operand,
+  );
 }
 
 /**
@@ -859,6 +1209,13 @@ function moveIntoPiece(
  * The path is normalized the way a reference's and a relative walk's are, so
  * that a position names its cell the same however it was reached, which is
  * what {@link Position} promises.
+ *
+ * It lands rather than coming back for a read, alone among the doors that
+ * reach a piece: the fabric resolved this target, so the piece and the path
+ * are what a read would have gone and asked it. A piece named by slug is
+ * refused for the same reason — a place holds the handle a name resolved to,
+ * and an address the fabric wrote carries one — which is what keeps that
+ * true of a position reached this way as well as of one `confirm` landed.
  */
 function enterTarget(
   place: Place,
@@ -886,6 +1243,13 @@ function enterTarget(
   }
   const outside = outsideVocabulary(target.piece);
   if (outside !== undefined) return outside;
+  if (isSlugAddress(target.piece)) {
+    return refuse(
+      `\`${operand}\` resolves to slug \`${target.piece}\`, and a place holds ` +
+        `the handle a name resolved to. An address the fabric wrote names ` +
+        `its piece by handle.`,
+    );
+  }
   return land({
     ...place,
     position: {
@@ -951,6 +1315,10 @@ function samePlace(one: Place, other: Place): boolean {
  * space for a shuttle's whole run and every door refuses a position outside
  * it, so the pair this is handed carries one space and a comparison of it
  * could only ever hold.
+ *
+ * The name is not among them either, and for the opposite reason: it is not a
+ * level. A piece reached by slug and the same piece reached by handle are one
+ * cell, which is exactly what resolving the piece before adopting it is for.
  */
 function samePosition(one: Position, other: Position): boolean {
   switch (one.kind) {
@@ -963,6 +1331,40 @@ function samePosition(one: Position, other: Position): boolean {
         one.path.length === other.path.length &&
         one.path.every((segment, index) => segment === other.path[index]);
   }
+}
+
+/**
+ * The head of a relative reference: `.` is the context's own cell, and `.` at
+ * the head is where the reference takes a member or a qualifier
+ * ([#6814](https://github.com/commontoolsinc/labs/issues/6814)).
+ *
+ * It is a head and not a whole operand, so `./items` reaches the member and
+ * `./items@user` the key `items@user` — the `@` there sits on `items` rather
+ * than on the head, and `@` is a qualifier only on the head. That is the whole
+ * of what makes `@` one meaning: everywhere else it is an ordinary character,
+ * so `cd @session` reaches a key called `@session`.
+ */
+const RELATIVE_HEAD = ".";
+
+/** {@link RELATIVE_HEAD} with the member separator after it. */
+const MEMBER_HEAD = `${RELATIVE_HEAD}/`;
+
+/** {@link RELATIVE_HEAD} with a qualifier after it, which moves the scope. */
+const SCOPE_HEAD = `${RELATIVE_HEAD}@`;
+
+/**
+ * The sentence a refusal adds where `operand` is a scope word written with no
+ * head, and nothing for every other operand.
+ *
+ * It is a hint on a refusal rather than a reading of its own, and the
+ * difference is the point: `@session` is an ordinary key name, so a place that
+ * holds one reaches it and never sees this. What the hint answers is the
+ * operand that named no key *and* looks like an attempt at the scope.
+ */
+export function scopeMoveHint(operand: string): string {
+  return operand.startsWith("@") && CELL_SCOPE_VALUES.has(operand.slice(1))
+    ? ` \`${SCOPE_HEAD}${operand.slice(1)}\` is what moves the scope.`
+    : "";
 }
 
 /**
@@ -1270,12 +1672,119 @@ function land(place: Place, trail: Trail): Step {
 }
 
 /**
+ * Helper for the movers, which builds a step that reached `place` and waits on
+ * the read that says the fabric holds it, `operand` being what named it.
+ */
+function pend(place: PiecePlace, trail: Trail, operand: string): Step {
+  return { kind: "pending", place, operand, route: trail };
+}
+
+/**
+ * Helper for the movers, which is where `step` reached, and nothing where it
+ * reached nowhere. A step that landed and one waiting on a read have both
+ * reached somewhere; what divides them is whether anything may yet turn them
+ * down.
+ */
+function reached(step: Step): Standing | undefined {
+  switch (step.kind) {
+    case "moved":
+      return step.to;
+    case "pending":
+      return { place: step.place, trail: step.route };
+    default:
+      return undefined;
+  }
+}
+
+/**
  * Helper for the movers, which is what a caller sees of `step`. The trail is
  * navigation history rather than part of a place, so it stops here whether or
  * not the step was adopted.
  */
 function outcomeOf(step: Step): Move {
   return step.kind === "moved" ? { kind: "moved", place: step.to.place } : step;
+}
+
+/**
+ * Helper for the doors that say where an operand points rather than going
+ * there, which is what a caller of one sees of `step`.
+ *
+ * It is {@link outcomeOf} with the one difference those doors have: a step
+ * waiting on a read has already said where the operand points, so it comes
+ * back as the answer it is rather than as a question for the caller to
+ * settle.
+ */
+function pointing(step: Step): Aimed {
+  if (step.kind === "pending") return { kind: "moved", place: step.place };
+  return step.kind === "moved" ? { kind: "moved", place: step.to.place } : step;
+}
+
+/**
+ * Helper for {@link CurrentPlace.confirm}, which is where `move` lands once
+ * `piece` is known: the handle in the position, and the operand's own
+ * spelling beside it as the name where the two differ.
+ *
+ * The two differ exactly when the operand named the piece by slug, a handle
+ * resolving to itself. So the name is a name a read confirmed and never one
+ * this made up, and there is no vocabulary test here for a rule the
+ * resolution already answered.
+ */
+function confirmed(move: PendingMove, resolved: ResolvedPlace): Step {
+  const fault = unnameablePiece(resolved.piece) ??
+    firstUnnameableSegment(resolved.path);
+  if (fault !== undefined) {
+    return refuse(
+      `\`${move.operand}\` resolves to ${fault.what}, so ${fault.so}.`,
+    );
+  }
+  const outside = outsideVocabulary(resolved.piece);
+  if (outside !== undefined) return outside;
+  const spelled = move.place.position.piece;
+  // A resolution that spent path segments walked through something else to
+  // find the piece — a slug naming a collection reaching its member — so the
+  // operand's own name is not this piece's name, and the levels the walk
+  // recorded are the way into the collection rather than into what it held.
+  // A move that carries no route already behaves this way, and a reference is
+  // where such a resolution mostly arrives.
+  // How many leading segments the resolution spent reaching the piece. A slug
+  // naming a collection spends the ones that select its member; every other
+  // resolution spends none, and then the arithmetic below is the identity.
+  const spent = move.place.position.path.length - resolved.path.length;
+  const named = spelled === resolved.piece || spent > 0
+    ? {}
+    : { name: spelled };
+  const landed = (position: PiecePosition): PiecePosition => ({
+    ...position,
+    ...named,
+    piece: resolved.piece,
+  });
+  return land(
+    {
+      position: landed({
+        ...move.place.position,
+        path: resolved.path.map((segment) =>
+          typeof segment === "number"
+            ? segment
+            : linkPathSegmentToCellPathSegment(segment)
+        ),
+      }),
+      scope: resolved.scope ?? move.place.scope,
+    },
+    // A route entry the resolution walked *through* is a level of the
+    // collection rather than of what it held, and goes; one at or below the
+    // member is a level of the member, and lands with the member's own piece
+    // and the spent segments off its path. The levels above the piece — the
+    // root, the facet — are how shuttle reached the collection at all, and
+    // are nobody's to drop.
+    move.route.flatMap((position) => {
+      if (position.kind !== "piece" || position.piece !== spelled) {
+        return [position];
+      }
+      return position.path.length < spent
+        ? []
+        : [landed({ ...position, path: position.path.slice(spent) })];
+    }),
+  );
 }
 
 /**
@@ -1333,6 +1842,12 @@ function renderPosition(place: Place): string {
  * Helper for {@link CurrentPlace.label}, which writes the position half of the
  * short form: everything the position holds except the space.
  *
+ * A piece is written by the name the index confirmed for it, and by its handle
+ * where no name was confirmed. That is decision 13
+ * (`docs/plans/shuttle/README.md`) read as a rendering: a name is shown
+ * because a read said the space knows the piece by it, and the alternative is
+ * the id itself rather than a guess.
+ *
  * The separator is escaped in every segment, as it is in the rendering `pwd`
  * prints, so a key holding one is one segment here too. What differs is the
  * leading separator: it marks a cell in a place's rendering and marks nothing
@@ -1347,7 +1862,7 @@ function labelPosition(position: Position): string {
       return encodeJsonPointer(["", position.facet, ""]);
     case "piece":
       return encodeJsonPointer([
-        position.piece,
+        position.name ?? position.piece,
         ...position.path.map(String),
       ]);
   }

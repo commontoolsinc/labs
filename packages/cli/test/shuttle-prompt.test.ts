@@ -21,6 +21,7 @@ import type { SpaceConfig } from "../lib/piece.ts";
 import { safeStringify } from "../lib/render.ts";
 import { HeldConnection } from "../lib/shuttle/connection.ts";
 import { CurrentPlace } from "../lib/shuttle/place.ts";
+import { moved } from "./shuttle-place-helpers.ts";
 import { type PromptTerminal, runPrompt } from "../lib/shuttle/prompt.ts";
 import type { Shuttle, VerbDeps } from "../lib/shuttle/verbs.ts";
 import type { Key } from "../lib/view/keys.ts";
@@ -63,7 +64,7 @@ function shuttleIn(): Shuttle {
 /** Helper for the cases below, which stands a shuttle at a piece. */
 function atPiece(): Shuttle {
   const shuttle = shuttleIn();
-  shuttle.place.cd(`/${HANDLE}`);
+  moved(shuttle.place, `/${HANDLE}`);
   return shuttle;
 }
 
