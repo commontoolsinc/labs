@@ -263,31 +263,41 @@ export const namesTable = lift(
 /**
  * Names every member of `members` that has no name, in filing order, and
  * returns the names it wrote — exactly the keys it added to `names`, in the
- * order it added them. A member already named is skipped, whatever position
- * it holds, and a member listed at two positions is named once: membership
- * is asked of IDENTITY, never of position. Idempotent: a run over a fully
- * named list writes nothing and returns `[]`.
+ * order it added them. An entry records the member a position holds rather
+ * than the position, so it names that member still once the list has shifted
+ * under it; a position holding nothing is skipped and names nothing. A member
+ * already named is skipped, whatever position it holds, and a member listed at
+ * two positions is named once: membership is asked of IDENTITY, never of
+ * position. Idempotent: a run over a fully named list writes nothing and
+ * returns `[]`.
  *
  * Called from a verb body for the reason `assignName()` is: the keyset read
  * and the key writes are one transaction, so a create that lands while a
  * backfill runs serializes with it rather than colliding on a name.
  */
 export function backfillNames(
-  members: { get(): readonly unknown[]; key(index: number): object },
+  members: {
+    get(): readonly unknown[];
+    key(index: number): { resolveAsCell(): object };
+  },
   names: NamesMapCell,
 ): string[] {
   const map = names.get() ?? {};
   // The members with a name: those the map already holds, and — as the walk
   // goes — those this run names, so a member met again is not named again.
   const named = Object.values(map) as (object | undefined)[];
-  const count = members.get().length;
+  const listed = members.get();
   const written: string[] = [];
   let next = nextNameAmong(Object.keys(map));
-  for (let index = 0; index < count; index++) {
-    // The cell at the position rather than the value read out of it: a cell
-    // is an identity `equals` can match against the map's links, and it is
-    // what the map stores.
-    const member = members.key(index);
+  for (let index = 0; index < listed.length; index++) {
+    // A position holding nothing has no member to name.
+    if (listed[index] === undefined) continue;
+    // The member the position holds, pinned to its own document. An entry
+    // outlives its member's place in the list, so what the map records has to
+    // be the member; the cell at a position is an address in the list, which
+    // names whoever sits there when the entry is read. The pinned cell is
+    // also the identity `equals` matches against the map's links.
+    const member = members.key(index).resolveAsCell();
     if (named.some((other) => equals(member, other))) continue;
     names.key(next).set(member);
     written.push(next);

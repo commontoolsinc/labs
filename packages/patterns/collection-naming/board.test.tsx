@@ -1,13 +1,15 @@
 /**
  * Pattern tests for the exemplar board and its item: allocation on create,
  * density, a name never reused, a name kept whatever happens to its item, the
- * backfill and its idempotence, index rows that are the members and the
- * default an unnamed member's `shortName` reads as, the mention universe and
- * the name each of its rows carries, the item reading its own name out of the
- * board's table, the declaration, the bound on what a read of the namespace or
- * the universe expands, and the rejections. Every rejection here is a thrown
- * verb, so the runtime errors are required, and the count is exact: a guard
- * quietly reverting to a silent return fails the suite.
+ * backfill, its idempotence, a backfilled name following its member when the
+ * list shifts under it and an empty position naming nothing, index rows that
+ * are the members and the default an unnamed member's `shortName` reads as,
+ * the mention universe and the name each of its rows carries, the item reading
+ * its own name out of the board's table, the declaration, the bound on what a
+ * read of the namespace or the universe expands, and the rejections. Every
+ * rejection here is a thrown verb, so the runtime errors are required, and the
+ * count is exact: a guard quietly reverting to a silent return fails the
+ * suite.
  *
  * A property worth knowing before adding another guard test here: a guard that
  * PREVENTS a write can only be caught where the value it would have written
@@ -479,6 +481,82 @@ export default pattern(() => {
     twinBoard.index?.[1]?.shortName === "1"
   );
 
+  // A backfilled name records the member, not the place it sat. Removing the
+  // first of two shifts the second into position 0, so a name recorded as a
+  // position would retarget there: `1` would follow the shift onto the member
+  // that arrived, and `2` would point at a slot the list no longer has.
+  const shiftItems = new Writable<ItemDemand[] | Default<[]>>([]);
+  const shiftNames = new Writable<NamesMap>({});
+  const shiftBoard = Board({ items: shiftItems, names: shiftNames });
+  // A handle on the first member that outlives its place in the list, which is
+  // what lets the assertion below name it once it has left. Held in a map for
+  // the reason the namespace is one: an `unknown` value is stored as a link
+  // and read back as one, so the handle expands no member.
+  const departed = new Writable<NamesMap>({});
+  const action_file_two_that_shift = action(() => {
+    const first = Item({
+      title: "Shifting one",
+      createdAt: 1,
+      boardNames: shiftBoard.namesTable,
+    });
+    departed.key("first").set(first);
+    shiftItems.push(first);
+    shiftItems.push(
+      Item({
+        title: "Shifting two",
+        createdAt: 2,
+        boardNames: shiftBoard.namesTable,
+      }),
+    );
+  });
+  const action_backfill_the_shifting_pair = action(() => {
+    assigned.set(backfillNames(shiftItems, shiftNames));
+  });
+  const assert_the_shifting_pair_is_named = assert(() =>
+    assigned.get().join(",") === "1,2" &&
+    shiftBoard.index?.[0]?.shortName === "1" &&
+    shiftBoard.index?.[1]?.shortName === "2"
+  );
+  const action_remove_the_first_that_shifts = action(() => {
+    shiftItems.removeByValue(shiftItems.key(0));
+  });
+  const assert_a_backfilled_name_follows_its_member = assert(() => {
+    const map = (shiftBoard.names ?? {}) as NamesMap;
+    return shiftBoard.itemCount === 1 &&
+      shiftBoard.index?.[0]?.title === "Shifting two" &&
+      equals(
+        map["1"] as object,
+        ((departed.get() ?? {}) as NamesMap)["first"] as object,
+      ) &&
+      !equals(map["1"] as object, shiftItems.key(0)) &&
+      equals(map["2"] as object, shiftItems.key(0));
+  });
+
+  // A position holding nothing names nothing. The list declares an empty
+  // position so the case needs no cast, and the library is called directly
+  // because no board demands that shape of its items. The member behind the
+  // hole takes the first name, so a run that named the position would show up
+  // in what it returned as well as in what it wrote.
+  const holeItems = new Writable<(ItemDemand | undefined)[] | Default<[]>>([]);
+  const holeNames = new Writable<NamesMap>({});
+  const action_file_behind_a_hole = action(() => {
+    holeItems.set([
+      undefined,
+      Item({ title: "Behind the hole", createdAt: 1 }),
+    ]);
+  });
+  const action_backfill_over_the_hole = action(() => {
+    assigned.set(backfillNames(holeItems, holeNames));
+  });
+  const assert_a_hole_names_nothing = assert(() =>
+    assigned.get().join(",") === "1" &&
+    Object.keys((holeNames.get() ?? {}) as NamesMap).join(",") === "1" &&
+    equals(
+      ((holeNames.get() ?? {}) as NamesMap)["1"] as object,
+      holeItems.key(1),
+    )
+  );
+
   // A board given no namespace at all — the shape of one deployed before it
   // numbered anything — reads as having no names, and its first create
   // materializes the map with the first name.
@@ -616,6 +694,14 @@ export default pattern(() => {
       { action: action_list_one_item_twice },
       { action: action_backfill_the_twins },
       { assertion: assert_twin_is_named_once },
+      { action: action_file_two_that_shift },
+      { action: action_backfill_the_shifting_pair },
+      { assertion: assert_the_shifting_pair_is_named },
+      { action: action_remove_the_first_that_shifts },
+      { assertion: assert_a_backfilled_name_follows_its_member },
+      { action: action_file_behind_a_hole },
+      { action: action_backfill_over_the_hole },
+      { assertion: assert_a_hole_names_nothing },
       { assertion: assert_bare_board_has_no_items },
       { assertion: assert_bare_board_names_read_empty },
       { action: action_bare_board_creates },
