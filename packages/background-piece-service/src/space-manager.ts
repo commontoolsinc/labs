@@ -97,45 +97,6 @@ export class SpaceManager {
     };
   }
 
-  #pushTask(
-    pieceId: string,
-    entry: Cell<BGPieceEntry>,
-    whenInMs?: number,
-  ) {
-    const when = whenInMs ?? this.#rerunIntervalMs;
-    const timestamp = Date.now() + when;
-    this.#pendingTasks.push({
-      pieceId,
-      timestamp,
-      entry,
-    });
-
-    this.#pendingTasks.sort((a, b) => a.timestamp - b.timestamp);
-  }
-
-  #updatePieceStatus(b: BGPieceEntry, c: Cell<BGPieceEntry>) {
-    const pieceId = b.pieceId;
-    const enabled = !b.disabledAt;
-    const currentlyScheduled = this.#enabledPieces.has(pieceId) ||
-      this.#activePiece?.get().pieceId === pieceId;
-
-    if (enabled) {
-      // if we aren't already scheduling this piece, add it to the list
-      if (!currentlyScheduled) {
-        this.#enabledPieces.set(pieceId, c);
-        this.#pushTask(pieceId, c, 0);
-      }
-    } else {
-      // if we are disabling a piece, remove it from the list
-      if (currentlyScheduled) {
-        this.#enabledPieces.delete(pieceId);
-        this.#pendingTasks = this.#pendingTasks.filter((r) =>
-          r.pieceId !== pieceId
-        );
-      }
-    }
-  }
-
   // Update the list of pieces to watch (removing any pieces that are no longer in the list)
   watch(entries: Cell<BGPieceEntry>[]): Cancel {
     const [cancel, addCancel] = useCancelGroup();
@@ -249,6 +210,45 @@ export class SpaceManager {
     this.#activePiece = null;
   }
 
+  #pushTask(
+    pieceId: string,
+    entry: Cell<BGPieceEntry>,
+    whenInMs?: number,
+  ) {
+    const when = whenInMs ?? this.#rerunIntervalMs;
+    const timestamp = Date.now() + when;
+    this.#pendingTasks.push({
+      pieceId,
+      timestamp,
+      entry,
+    });
+
+    this.#pendingTasks.sort((a, b) => a.timestamp - b.timestamp);
+  }
+
+  #updatePieceStatus(b: BGPieceEntry, c: Cell<BGPieceEntry>) {
+    const pieceId = b.pieceId;
+    const enabled = !b.disabledAt;
+    const currentlyScheduled = this.#enabledPieces.has(pieceId) ||
+      this.#activePiece?.get().pieceId === pieceId;
+
+    if (enabled) {
+      // if we aren't already scheduling this piece, add it to the list
+      if (!currentlyScheduled) {
+        this.#enabledPieces.set(pieceId, c);
+        this.#pushTask(pieceId, c, 0);
+      }
+    } else {
+      // if we are disabling a piece, remove it from the list
+      if (currentlyScheduled) {
+        this.#enabledPieces.delete(pieceId);
+        this.#pendingTasks = this.#pendingTasks.filter((r) =>
+          r.pieceId !== pieceId
+        );
+      }
+    }
+  }
+
   #onProcessSuccess(pieceId: string, entry: Cell<BGPieceEntry>) {
     // If previous runs have failed, clear out the counter
     if (this.#failureTracking.has(pieceId)) {
@@ -335,7 +335,10 @@ export class SpaceManager {
   //
   // Attempt to recreate the worker environment, which should only occur once per
   // space-wide disabling.
-  #onTerminalError = (event: WorkerControllerErrorEvent) => {
+  #onTerminalError = (event: Event) => {
+    // The controller dispatches nothing else under `error`; the narrowing is
+    // what lets the listener be typed as the target wants it.
+    if (!(event instanceof WorkerControllerErrorEvent)) return;
     console.error(
       `${this.#did} Terminal error received: ${event.error?.message}`,
     );
