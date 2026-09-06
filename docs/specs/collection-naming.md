@@ -633,12 +633,15 @@ resolves deterministically through the scope chain. Both spell themselves with
 
 They do not meet today, and the difference is not that one is typed and the
 other is not — both reach a reader from a person. `cf wish '#profile'` takes
-its query as a command argument, and the omnibox passes a user-facing tool's
-`query` straight through. What separates them is that **each input surface has
-exactly one interpretation**: text handed to `cf wish` or to the omnibox is a
-wish query because of where it was entered, and the editor's `#` trigger is a
-citation for the same reason. No surface asks which of the two a token is, so
-neither spelling is currently ambiguous to any code.
+its query as a command argument, and a model calling `wishAndNavigate` supplies
+one from a conversation. What separates them is that **nothing routes a token
+on the strength of its `#`**: a query reaches `wish` because a command was
+invoked or a tool was called with it, and the editor's trigger produces a
+citation because of where it was typed. Omnibox text is not itself a wish —
+it is a message to a dialog whose tools include one, so `#42` entered there is
+a string in a conversation until a model chooses to pass it somewhere. No
+reader today takes a `#` token and asks which of the two it is, so neither
+spelling is ambiguous to any code.
 
 What is open is therefore a reservation rather than a conflict: `#` is spent
 twice, and the collision arrives with a surface that accepts both. **Step 5 is
