@@ -20,6 +20,10 @@ import {
   testPackage,
 } from "./workspace-tests.ts";
 import { WORKSPACE_TEST_WEIGHTS } from "./test-timing-weights.ts";
+import {
+  readUnlaunchedMembers,
+  UNLAUNCHED_MEMBERS_FILE,
+} from "./unlaunched-members.ts";
 
 const WORKSPACE_SHARDS = 8;
 const AGENTS_HOST_SHARDS = 5;
@@ -316,6 +320,27 @@ async function withTestConcurrency<T>(
   }
 }
 
+// Run `fn` with DENO_COVERAGE_DIR pointing at a fresh directory under `dir`,
+// then restore the caller's value, and hand `fn` the directory so it can read
+// what the run left there.
+async function withCoverageDir<T>(
+  dir: string,
+  fn: (coverageDir: string) => T | Promise<T>,
+): Promise<T> {
+  const coverageDir = `${dir}/coverage/raw`;
+  const saved = Deno.env.get("DENO_COVERAGE_DIR");
+  Deno.env.set("DENO_COVERAGE_DIR", coverageDir);
+  try {
+    return await fn(coverageDir);
+  } finally {
+    if (saved === undefined) {
+      Deno.env.delete("DENO_COVERAGE_DIR");
+    } else {
+      Deno.env.set("DENO_COVERAGE_DIR", saved);
+    }
+  }
+}
+
 Deno.test("testConcurrency parses the override and defaults to half the cores", async () => {
   assertEquals(testConcurrency("3"), 3);
   await withTestConcurrency(undefined, () => {
@@ -385,6 +410,71 @@ Deno.test("runTests reports a failure and stops scheduling packages", async () =
     assertEquals(downloadErrorIndex >= 0, true);
     assertEquals(summaryIndex >= 0, true);
     assertEquals(downloadErrorIndex < summaryIndex, true);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("runTests records the packages it selected and never started", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-unlaunched-" });
+  try {
+    await makeWorkspace(dir, ["a", "b", "c"]);
+    await Deno.writeTextFile(
+      `${dir}/packages/a/deno.jsonc`,
+      JSON.stringify({
+        tasks: { test: "echo started > ran.txt && exit 1" },
+      }),
+    );
+
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...values: unknown[]) => {
+      errors.push(values.map(String).join(" "));
+    };
+    let unlaunched: string[];
+    try {
+      unlaunched = await withCoverageDir(
+        dir,
+        (coverageDir) =>
+          withTestConcurrency("1", async () => {
+            await runTests([], undefined, dir);
+            return await readUnlaunchedMembers(coverageDir);
+          }),
+      );
+    } finally {
+      console.error = originalError;
+    }
+
+    // `a` is the only package that started, so `b` and `c` are the ones the
+    // run has nothing to say about.
+    assertEquals(await ranPackages(dir, ["a", "b", "c"]), ["a"]);
+    assertEquals(unlaunched, ["./packages/b", "./packages/c"]);
+    assertEquals(
+      errors.filter((message) => message === "- ./packages/b").length,
+      1,
+    );
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
+Deno.test("runTests writes no record when every package it selected started", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-all-launched-" });
+  try {
+    await makeWorkspace(dir, ["a", "b", "c"]);
+    const recordPath = await withCoverageDir(
+      dir,
+      (coverageDir) =>
+        withTestConcurrency("1", async () => {
+          assertEquals(await runTests([], undefined, dir), true);
+          return `${coverageDir}/${UNLAUNCHED_MEMBERS_FILE}`;
+        }),
+    );
+
+    // The file's absence is the signal, not an empty file: a reader of the
+    // coverage profile takes any record it finds as a run that left something
+    // unmeasured.
+    await assertRejects(() => Deno.stat(recordPath), Deno.errors.NotFound);
   } finally {
     await Deno.remove(dir, { recursive: true });
   }

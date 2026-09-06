@@ -197,8 +197,9 @@ covered a line.
 
 One detail of the gate's accounting is worth knowing when reasoning about
 pattern coverage. A file with no LCOV record has every tracked line counted as
-uncovered, unless it compiles to no code at all — see the next subsection. A
-file with a record is scored against the lines that record names.
+uncovered, unless it compiles to no code at all, opts out of coverage, or sits
+in a package the run never started — see the subsections below. A file with a
+record is scored against the lines that record names.
 For a file measured by Deno's V8 coverage that is every executable line; pattern
 instrumentation names only the statements it could instrument, so a pattern
 file's first record both covers real lines and drops the never-named lines out of
@@ -267,6 +268,45 @@ inlined into a document a frame loads: no Deno-run test can load it, so no
 test could pay its debt down, and the browser tests that do drive it report
 into nothing this metric reads. A file a Deno test could load is not such a
 file, and the ratchet is what holds it to its tests.
+
+### A package a run never started is not scored at all
+
+`deno task test` stops handing packages to its workers as soon as one of them
+fails, and the packages already running finish. What a failing run measured is
+therefore whatever was in flight rather than a prefix anyone chose, and the
+packages it never started have unknown coverage rather than none. Charging
+those the way a file no test loaded is charged reports a collapse of thousands
+of lines in packages the change under test never touched, in numbers that are
+otherwise well formed and that nothing downstream could tell from a real
+measurement.
+
+So the runner records the members it selected and never started, writing
+`unlaunched-members.txt` into the run's coverage profile directory
+([`tasks/unlaunched-members.ts`](../../tasks/unlaunched-members.ts) owns the
+file). `tasks/write-coverage-lcov.ts` copies that record beside the LCOV report
+it writes, the workspace test job uploads the two together as one artifact, and
+`tasks/coverage-check.ts` reads the union of the records every artifact
+carries. One job selects each member, so a member any record names is one that
+nothing in the run measured against its own tests.
+
+A metric group holding such a member is left out of the run's metrics
+altogether, and so is the workspace total, which no longer totals the
+workspace. The gate builds one row per metric the run produced, so a group with
+no metric is one the run does not speak for: it is neither gated nor reported,
+and the job's log names it. An `ACCEPT_COVERAGE_DEBT` line naming such a group
+fails the check, the same as one naming any group the run measured no coverage
+for.
+
+Two bounds are worth stating. The record names a member that never started, and
+not one whose tests started and then failed — that member is measured as far as
+its tests got, and the run's own failure report is what names it. And the whole
+group goes unscored rather than the unlaunched member's files alone: one member
+going unmeasured leaves the group's count short by whatever that member's tests
+would have covered, with nothing in the report to say by how much, so the
+members that did run are no more scorable than the one that did not. That
+reaches a package measured by more than one job — `packages/shell` is covered
+by both the workspace unit run and its own integration job — where the
+workspace run skipping it is enough on its own to leave the group unscored.
 
 ## Coverage must not depend on the execution environment
 
