@@ -214,7 +214,7 @@ that package's own `AGENTS.md`.
 
 #### Adding New Packages
 
-A new workspace package needs two edits, and the second one bites hard when it
+A new workspace package needs three edits, and the second one bites hard when it
 is missed:
 
 1. Its path added to the `"workspace"` array in the root `deno.jsonc`.
@@ -226,6 +226,12 @@ is missed:
    runs any of their test tasks, and refuses to start when one has no `"test"`
    entry, so what a missing entry costs is a message naming the member rather
    than a CI timeout. `packages/utils/deno.jsonc` is a correct example.
+3. A checked path in `tasks/typecheck.ts`, usually a single directory entry, so
+   `deno task check` opens the package at all. Naming the package in the
+   `workspace` array is what puts it under the type check's coverage claim, so a
+   package added there and left out here fails `tasks/typecheck.test.ts` with
+   its unchecked files named — unless it earns an `UNCHECKED_TREES` entry
+   recording why it has no path.
 
 When the package needs a dependency, follow `docs/development/DEPENDENCIES.md`.
 
@@ -248,14 +254,55 @@ difficulties getting coverage checks to pass, consider the information in
 
 `deno task check` type-checks a hand-maintained list of paths in
 `tasks/typecheck.ts` (`tasks/check.sh` owns the Deno version gate and delegates
-there), and that list now names every workspace package. Most are covered in
-full; a few are partial by design. The `*.input.ts` transformer fixtures under
-`schema-generator` and `ts-transformers` name ambient wrappers the transformer
-supplies, so they do not compile on their own and are left out. The declaration
-bundles under `packages/static/assets/types` are left out for the same reason:
-they are the ambient types handed to the in-memory pattern compiler, so they
-redeclare what `packages/html` declares and use ambient-context forms that do
-not compile beside the tree they describe.
+there). The list is written by hand; its completeness is not left to hand.
+`UNCHECKED_TREES` beside it records every tree the list leaves out together with
+the reason, and `tasks/typecheck.test.ts` walks the workspace that `deno.jsonc`
+declares and fails — naming the files — on any module that is neither checked
+nor covered by one of those entries. That population is every extension the
+checker opens, JavaScript included: `deno check` type-checks a `.js` file
+carrying `// @ts-check`, so a claim stated over TypeScript alone would be
+narrower than the gate it describes. A directory left out on purpose and one
+left out by accident look identical in a list of paths, so the record is what
+separates them: a tree nobody decided about fails the test rather than passing
+in silence. Adding an exemption means adding an entry that says why.
+
+Four trees are recorded as unchecked. `packages/schema-generator/test/fixtures`
+and `packages/ts-transformers/test/fixtures` are fixture corpora — the inputs
+those tests feed their transformer, and the outputs they compare against — and
+`packages/static/assets/types` is the ambient environment a pattern compiles
+against, handed to the in-memory compiler. What earns all three the exemption is
+holding data rather than modules this repository builds; neither corpus compiles
+as a unit, though files within one may well compile alone. The fourth is
+`packages/patterns`, which the next paragraph covers.
+
+An exemption's reason is held to being true of every file it matches, which is
+what decides how wide the entry may be. Two entries divide `packages/patterns`,
+because two different things happen to the files there. The one pointing at
+`deno task cfcheck` may excuse only files the collector in
+`tasks/pattern-files.ts` hands that gate, and no single entry may span both
+sides of that line; a test cross-checks both against the collector itself. The
+other covers pattern tests, which the lane that runs them also type-checks —
+`deno test` for a `.test.ts`, since `packages/patterns` runs without
+`--no-check`, and `cf test` for a `.test.tsx`, whose harness reports a type
+error as a failed test. That entry is scoped to what those two lanes take, not
+to the test suffix in general. A test module under another extension has no
+lane; a `.browser.test.ts` is kept out of the `deno test` pass and bundled to
+its browser by a step that transpiles without checking; and a nested
+`integration` tree is excluded from that pass by the package's test config while
+the `integration` task names its top-level paths explicitly. Each falls through
+and is reported unless a checked path names it. An entry claiming coverage is
+the one that can mislead most quietly, since a file it wrongly matches is one
+every later reader believes is checked — and where these keep going wrong is a
+predicate matching by a file's shape while the reason beside it names a lane,
+the two agreeing in the middle and parting at the edges.
+
+The reasons that do not name another gate say what a tree _is_ rather than
+asserting a property of each file in it. That is why the three above are
+described as corpora and as an ambient environment: none is a set of modules the
+repository builds, which is what earns the exemption. Individual files in them
+may well compile alone, so a reason claiming that none of them does would be
+false the moment one did — a universal quantifier over a corpus is the shape to
+avoid when writing one of these.
 
 Patterns are the exception `deno task check` does not own. It lists some pattern
 directories and checks them through the automatic-JSX environment the rest of

@@ -32,11 +32,18 @@ counts for nothing.
 
 `packages/utils/deno.jsonc` is a correct minimal example.
 
-## A new package is two edits
+## A new package is three edits
 
 Adding the directory is not enough. The package path also goes into the
 `"workspace"` array in the root `deno.jsonc`, or nothing in the repository
 knows it exists.
+
+The third edit is a checked path in `tasks/typecheck.ts`, so `deno task check`
+opens the package at all. `tasks/typecheck.test.ts` walks the members that root
+manifest declares, so the workspace edit is also what puts the package under
+the type check's coverage claim: with no path naming it, and no
+`UNCHECKED_TREES` entry saying why it has none, that test fails and names the
+files. Most packages take a single directory entry.
 
 ## Declare dependencies at the narrowest scope
 
