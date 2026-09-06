@@ -381,4 +381,86 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "this one update forced and is proven again on every update after it.",
     record: "docs/history/topics-mentionable-readonly-break.md",
   },
+  {
+    // A SECOND entry for this pattern, and no baseline here appears above:
+    // the pairs stay disjoint so that the older ones, which predate
+    // `shortName` entirely, keep the tight bound the entry above gave them.
+    //
+    // The exemplar's `shortName` takes the spelling Topics ships,
+    // `shortName?: string`. One property in two roles here, because a row IS
+    // the item: the board's demand of a stored item, and the row the board
+    // publishes.
+    pattern: "collection-naming/board.tsx",
+    baselines: [
+      "20260904T051612Z-5rtP1U2c-e31PtKt",
+      "20260904T063417Z-pWfbKiYw-7bd7xpC",
+      "20260905T003604Z-uX940wR7R4lVwuOt",
+    ],
+    // The one spelling seen from the two roles a contract has: an optional
+    // property carries no default, so the demand's defaults move, and the
+    // published row stops requiring the name.
+    paths: [
+      "argument.items[]",
+      "result.index[].shortName",
+    ],
+    reason:
+      "The exemplar exists to prove a contract before it is grafted onto " +
+      "Topics, and on this property it proved a spelling Topics does not " +
+      "ship. Aligning it makes the demand's defaults move and drops the " +
+      "published row's requirement, neither of which any shape of the board " +
+      "avoids while the property is optional. The exemplar has no " +
+      "deployment, so no piece holds the contract this replaces.",
+    record: "docs/history/collection-naming-shortname-spelling-break.md",
+  },
+  {
+    // The member's side of the same alignment: an item publishes its name the
+    // way a topic does, and demands it of a universe entry the same way.
+    pattern: "collection-naming/item.tsx",
+    baselines: [
+      "20260904T001531Z-z0Gy14PpefRML1fx",
+      "20260904T022635Z-GMG883UMGFeAnh-r",
+    ],
+    // These two baselines predate the item's mention universe, so the
+    // published name is the whole of what they blame.
+    paths: ["result.shortName"],
+    reason:
+      "An item publishes `shortName` as `shortName?: string`, the spelling " +
+      "Topics ships, where it published a required property whose type " +
+      "admitted `undefined`. The published property stops being required, " +
+      "which no shape of the item avoids while it is optional. The exemplar " +
+      "has no deployment, so no piece holds the contract this replaces.",
+    record: "docs/history/collection-naming-shortname-spelling-break.md",
+  },
+  {
+    // A second entry for the item, keeping its pairs disjoint from the two
+    // above for the reason the board's pair of entries states.
+    //
+    // Carried here: the `shortName` alignment recorded in the entry above,
+    // and the mention universe becoming a readable binding — the two
+    // breaks land on the same baselines, which is what puts them in one
+    // entry.
+    pattern: "collection-naming/item.tsx",
+    baselines: [
+      "20260904T082808Z-1fwb7SfgxGYK3VR0",
+      "20260905T003605Z-gslMTuThImQHhkVQ",
+    ],
+    // These two carry the mention universe, which is what makes them the
+    // pairs both breaks blame. `asCell` is compared for exact equality, so
+    // the readable binding is reported at the whole property rather than at
+    // an element of it, and it is reported ahead of the defaults the
+    // optional `shortName` moves.
+    paths: [
+      "argument.mentionable",
+      "result.shortName",
+    ],
+    reason:
+      "Two accepted breaks on one pattern. An item publishes `shortName` as " +
+      "`shortName?: string`, the spelling Topics ships, and demands it of a " +
+      "universe entry the same way " +
+      "(docs/history/collection-naming-shortname-spelling-break.md). And " +
+      "the universe binding became readable, recorded below. Neither has a " +
+      "shape of the item that avoids the break, and the exemplar has no " +
+      "deployment, so no piece holds the contract they replace.",
+    record: "docs/history/collection-naming-mentionable-readonly-break.md",
+  },
 ];
