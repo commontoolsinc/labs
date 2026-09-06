@@ -2,7 +2,10 @@ import type { FavoriteEntry } from "@commonfabric/home-schemas";
 import { type DID, KeyStore } from "@commonfabric/identity";
 import { navigate } from "@commonfabric/navigation";
 import { hasEntityUriScheme } from "@commonfabric/runner/entity-kind";
-import { type CellHandle } from "@commonfabric/runtime-client";
+import {
+  type CellHandle,
+  type FavoritePieceAddress,
+} from "@commonfabric/runtime-client";
 import { Task } from "@lit/task";
 import { css, html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
@@ -33,6 +36,18 @@ type ConnectionStatus =
   | "disconnected"
   | "error"
   | "conflict";
+
+/**
+ * Whether two addresses name the same document. Compared by value rather than
+ * by identity, an address arriving as a fresh object on each update, so that
+ * two objects standing for one document are the ordinary case.
+ */
+function samePieceAddress(
+  a: FavoritePieceAddress,
+  b: FavoritePieceAddress,
+): boolean {
+  return a.space === b.space && a.pieceId === b.pieceId && a.scope === b.scope;
+}
 
 export class XHeaderView extends BaseView {
   static override styles = css`
@@ -502,6 +517,17 @@ export class XHeaderView extends BaseView {
   accessor pieceId: string | undefined = undefined;
 
   /**
+   * The whole address of the piece on screen: its space, its id there, and the
+   * scope that id resolves in. This is what a favorite is taken at and matched
+   * against, `pieceId` alone naming a different document in each scope.
+   *
+   * Undefined until the piece resolves, which is when its scope is known, so
+   * the favorite row appears with the address rather than with the id.
+   */
+  @property({ attribute: false })
+  accessor pieceAddress: FavoritePieceAddress | undefined = undefined;
+
+  /**
    * How this piece is cited from anywhere, when it is a member of a named
    * collection: `/@<space>/<collection>/<member>`. Undefined for a piece
    * reached any other way, whose identity is already portable.
@@ -540,8 +566,17 @@ export class XHeaderView extends BaseView {
   @state()
   private accessor _serverFavorites: readonly FavoriteEntry[] = [];
 
+  /**
+   * What a click just asserted about a favorite, and the address it asserted
+   * it at. The value means nothing apart from that address, answering for a
+   * different document under any other one, so the two travel together and a
+   * read under a different address takes the server's answer instead.
+   */
   @state()
-  private accessor _localIsFavorite: boolean | undefined = undefined;
+  private accessor _localFavorite: {
+    readonly address: FavoritePieceAddress;
+    readonly isFavorite: boolean;
+  } | undefined = undefined;
 
   #unsubscribeFavorites: (() => void) | undefined;
 
@@ -556,7 +591,7 @@ export class XHeaderView extends BaseView {
       .favorites()
       .subscribeFavorites((favorites) => {
         this._serverFavorites = favorites;
-        this._localIsFavorite = undefined;
+        this._localFavorite = undefined;
         this.requestUpdate();
       });
   }
@@ -588,33 +623,43 @@ export class XHeaderView extends BaseView {
   }
 
   /**
-   * Derive whether the current piece is favorited. Prefers optimistic
-   * local state (set immediately on click) over server state.
+   * Derive whether the piece on screen is favorited. An optimistic value a
+   * click set wins over server state, but only where that click was about
+   * this same address.
    */
   #isFavorite(): boolean {
-    if (this._localIsFavorite !== undefined) {
-      return this._localIsFavorite;
+    const address = this.pieceAddress;
+    if (!address) return false;
+    const local = this._localFavorite;
+    if (local && samePieceAddress(local.address, address)) {
+      return local.isFavorite;
     }
-    if (!this.pieceId) return false;
     // CellHandle.id() is the full schemed id; the routing pieceId is bare
     // (piece roots are always of:). Normalize the bare side for equality.
-    const pieceUri = hasEntityUriScheme(this.pieceId)
-      ? this.pieceId
-      : `of:${this.pieceId}`;
-    return this._serverFavorites.some(
-      (f) => (f.cell as unknown as CellHandle<unknown>).id() === pieceUri,
-    );
+    const pieceUri = hasEntityUriScheme(address.pieceId)
+      ? address.pieceId
+      : `of:${address.pieceId}`;
+    // The whole address decides. Favorites are one list across every space, and
+    // one id names a different document in each space and in each scope, so a
+    // match on the id alone reports another piece's favorite as this one's.
+    return this._serverFavorites.some((f) => {
+      const ref = (f.cell as unknown as CellHandle<unknown>).ref();
+      return ref.id === pieceUri && ref.space === address.space &&
+        ref.scope === address.scope;
+    });
   }
 
   #resizeTimer?: ReturnType<typeof setTimeout>;
 
   /**
-   * The favorites subscription step, the favorite-toggle guard, and the three
-   * click handlers, which a test drives directly.
+   * The favorites subscription step, the favorite-toggle guard, the
+   * favorited-piece test, and the three click handlers, which a test drives
+   * directly.
    */
   get accessForTestingOnly(): {
     readonly isFavoriteLoading: boolean;
     ensureFavoritesSubscription(): void;
+    isFavorite(): boolean;
     handleLogoClick(e: Event): void;
     handleToggleFavorite(e: Event): Promise<void>;
     copyReference(e: Event): Promise<void>;
@@ -626,6 +671,7 @@ export class XHeaderView extends BaseView {
         return outerThis.#isFavoriteLoading;
       },
       ensureFavoritesSubscription: () => this.#ensureFavoritesSubscription(),
+      isFavorite: () => this.#isFavorite(),
       handleLogoClick: (e) => this.#handleLogoClick(e),
       handleToggleFavorite: (e) => this.#handleToggleFavorite(e),
       copyReference: (e) => this.#handleCopyReference(e),
@@ -682,7 +728,9 @@ export class XHeaderView extends BaseView {
   protected override willUpdate(changedProperties: PropertyValues): void {
     if (changedProperties.has("rt")) {
       this._serverFavorites = [];
-      this._localIsFavorite = undefined;
+      // The write this value records went to a runtime that is gone, and the
+      // server list it would stand in front of has been dropped with it.
+      this._localFavorite = undefined;
       this.#piecesCache = undefined;
       this.#cleanupFavoritesSubscription();
       // If the menu is already open when a runtime arrives, the favorites
@@ -694,9 +742,6 @@ export class XHeaderView extends BaseView {
     // space itself.
     if (changedProperties.has("space")) {
       this.#piecesCache = undefined;
-    }
-    if (changedProperties.has("pieceId")) {
-      this._localIsFavorite = undefined;
     }
   }
 
@@ -960,13 +1005,13 @@ export class XHeaderView extends BaseView {
   async #handleToggleFavorite(e: Event) {
     e.preventDefault();
     e.stopPropagation();
-    const space = this.space;
-    if (!this.rt || !space || !this.pieceId || this.#isFavoriteLoading) {
+    const piece = this.pieceAddress;
+    if (!this.rt || !piece || this.#isFavoriteLoading) {
       return;
     }
 
     const currentlyFavorite = this.#isFavorite();
-    this._localIsFavorite = !currentlyFavorite;
+    this._localFavorite = { address: piece, isFavorite: !currentlyFavorite };
     this.#isFavoriteLoading = true;
     // Favoriting touches the home pattern anyway; start reflecting server
     // state from here on if the menu was never opened.
@@ -974,18 +1019,18 @@ export class XHeaderView extends BaseView {
 
     try {
       if (currentlyFavorite) {
-        await this.rt.favorites().removeFavorite(space, this.pieceId);
+        await this.rt.favorites().removeFavorite(piece);
       } else {
         await this.rt
           .favorites()
-          .addFavorite(space, this.pieceId, undefined, this.spaceName);
+          .addFavorite(piece, undefined, this.spaceName);
       }
     } catch (err) {
       // A disposal race (logout, runtime swap) cancels the write; that is not
       // a toggle failure to surface.
       if (this.rt?.signal.aborted) return;
       console.error("[HeaderView] Error toggling favorite:", err);
-      this._localIsFavorite = undefined;
+      this._localFavorite = undefined;
     } finally {
       this.#isFavoriteLoading = false;
     }
@@ -1134,7 +1179,7 @@ export class XHeaderView extends BaseView {
 
               <div class="divider"><div class="divider-line"></div></div>
 
-              ${this.pieceId
+              ${this.pieceAddress
                 ? html`
                   <button
                     class="menu-item"
