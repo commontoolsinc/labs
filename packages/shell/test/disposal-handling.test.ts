@@ -1,6 +1,6 @@
 /**
  * Shell components log when a runtime operation fails. When the failure is a
- * disposal race (logout, runtime swap) the operation was cancelled, not a
+ * disposal race (logout, runtime swap) the operation was canceled, not a
  * genuine failure, so the log is suppressed via `this.rt?.signal.aborted`.
  * These tests drive the debugger view's handlers against both cases.
  */

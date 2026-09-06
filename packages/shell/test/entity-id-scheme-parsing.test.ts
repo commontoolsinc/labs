@@ -12,7 +12,7 @@ import { expect } from "@std/expect";
 import { normalizeEntityId } from "../src/lib/debug-utils.ts";
 import { XSchedulerGraph } from "../src/views/SchedulerGraphView.ts";
 
-describe("entity id scheme parsing", () => {
+describe("entity-id-scheme-parsing", () => {
   describe("normalizeEntityId()", () => {
     it("prefixes bare ids and passes schemed ids through", () => {
       // Bare id (typed or copied from a URL path): of: is the convenience.
@@ -31,29 +31,34 @@ describe("entity id scheme parsing", () => {
   });
 
   describe("XSchedulerGraph", () => {
-    it("preserves entity URI schemes when parsing action ids", () => {
-      const helpers = XSchedulerGraph.accessForTestingOnly;
+    describe("static members", () => {
+      describe("accessForTestingOnly", () => {
+        it("extractEntityId() keeps the scheme in the entity id", () => {
+          const helpers = XSchedulerGraph.accessForTestingOnly;
 
-      // extractEntityId: the scheme precedes the entity id and remains part of its
-      // identity.
-      expect(helpers.extractEntityId("sink:did:key:z6Mkabc/of:fid1:AAA/path"))
-        .toBe("of:fid1:AAA");
-      expect(helpers.extractEntityId(
-        "action:pattern:did:key:z6Mkabc/computed:fid1:BBB/value",
-      )).toBe("computed:fid1:BBB");
+          expect(
+            helpers.extractEntityId("sink:did:key:z6Mkabc/of:fid1:AAA/path"),
+          ).toBe("of:fid1:AAA");
+          expect(helpers.extractEntityId(
+            "action:pattern:did:key:z6Mkabc/computed:fid1:BBB/value",
+          )).toBe("computed:fid1:BBB");
+        });
 
-      // truncateLabel: schemed segments are recognized so the label keeps the
-      // entity tail and path instead of blind truncation.
-      const ofLabel = helpers.truncateLabel(
-        "sink:did:key:z6MkabcdefghijkLMNOP/of:fid1:AAAABBBBCCCCDDDD/value",
-      );
-      expect(ofLabel.includes("DDDD")).toBe(true);
-      expect(ofLabel.includes("value")).toBe(true);
-      const computedLabel = helpers.truncateLabel(
-        "sink:did:key:z6MkabcdefghijkLMNOP/computed:fid1:EEEEFFFFGGGGHHHH/count",
-      );
-      expect(computedLabel.includes("HHHH")).toBe(true);
-      expect(computedLabel.includes("count")).toBe(true);
+        it("truncateLabel() keeps a schemed segment's entity tail and path", () => {
+          const helpers = XSchedulerGraph.accessForTestingOnly;
+
+          const ofLabel = helpers.truncateLabel(
+            "sink:did:key:z6MkabcdefghijkLMNOP/of:fid1:AAAABBBBCCCCDDDD/value",
+          );
+          expect(ofLabel).toContain("DDDD");
+          expect(ofLabel).toContain("value");
+          const computedLabel = helpers.truncateLabel(
+            "sink:did:key:z6MkabcdefghijkLMNOP/computed:fid1:EEEEFFFFGGGGHHHH/count",
+          );
+          expect(computedLabel).toContain("HHHH");
+          expect(computedLabel).toContain("count");
+        });
+      });
     });
   });
 });

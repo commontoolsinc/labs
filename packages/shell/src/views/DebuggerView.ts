@@ -813,7 +813,6 @@ export class XDebuggerView extends LitElement {
   @state()
   private accessor activeSubtopics = new Set<string>();
 
-  // Logger stats tracking
   @state()
   private accessor loggerBaseline:
     | Record<string, LoggerBreakdown | number>
