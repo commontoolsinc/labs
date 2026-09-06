@@ -40,7 +40,15 @@ ruled. A later reversal is a decision recorded here, not a discovery.
    deferred.** A board-owned namespace never writes the piece's single `slug`
    metadata entry, so that restructure gates URL rewriting rather than
    naming. Nothing here rewrites an identity URL to the member form, and no
-   personal binding is built.
+   personal binding is built. What the deferral accepts: a space-level name
+   whose path selects a member stamps that member's root —
+   `cf piece set-slug two /top/2`, which
+   `packages/cli/test/setPieceSlug.test.ts` covers as "names the member a
+   slug's path selects, and stamps that member with the name" — so a member
+   answers to `<space>/two` and `<space>/top/2` at once, and a visit by
+   identity is rewritten to the first. The spec's step 1 records the same
+   acceptance and is deferred with this decision rather than held as a
+   prerequisite over it.
 3. **The namespace is a map cell on the board**, `names: { "42": <link> }`,
    and the collection's slug points at that cell. Forward resolution is a path
    read: `parseFabricUrl` already returns the slug and a one-segment path, and
@@ -131,7 +139,11 @@ Scope: `packages/patterns/collection-naming/` (new): `naming.ts`, `board.tsx`,
    wired at creation the way Topics wires `boardCrossrefs`; an item without
    the wiring shows no name and does not fail.
 8. The board publishes `naming`: `{ name?, policy: { unique, permanent,
-   reuse, allocator }, compact }`.
+   reuse, allocator }, compact }`. `compact` is reserved: it declares that the
+   member names hold no hyphen, and no renderer offers the compact spelling.
+   Nothing reads the declaration at all —
+   [#6986](https://github.com/commontoolsinc/labs/issues/6986) is making one
+   consumer real.
 9. Allocation reads the namespace's keys without expanding any member: the
    declared schema holds the values as unread references.
 10. The Topics-shape rehearsal passes: a test-only board over the unmodified
