@@ -631,28 +631,22 @@ mentionables, profile elements — and may return several candidates and a picke
 resolves deterministically through the scope chain. Both spell themselves with
 `#`.
 
-They do not meet today, and the difference is not that one is typed and the
-other is not — both reach a reader from a person. `cf wish '#profile'` takes
-its query as a command argument, and a model calling `wishAndNavigate` supplies
-one from a conversation. What separates them is that **nothing routes a token
-on the strength of its `#`**: a query reaches `wish` because a command was
-invoked or a tool was called with it, and the editor's trigger produces a
-citation because of where it was typed. Omnibox text is not itself a wish —
-it is a message to a dialog whose tools include one, so `#42` entered there is
-a string in a conversation until a model chooses to pass it somewhere. No
-reader today takes a `#` token and asks which of the two it is, so neither
-spelling is ambiguous to any code.
+One surface already routes on the mark alone: Shuttle's `cd` classifies an
+operand beginning `#` as a wish and resolves it as one (`place.ts`,
+`verbs.ts`), so `cd #favorites` is a wish query without the `wish` verb being
+named. Nothing routes a `#` token to a citation the same way — the editor's
+trigger produces one while a person types, and decides what is a reference by
+membership in its map rather than by the token's shape.
 
-What is open is therefore a reservation rather than a conflict: `#` is spent
-twice, and the collision arrives with a surface that accepts both. **Step 5 is
-that surface**, which is why it is blocked here and not merely awaiting an
-answer: sigil parsing reads `#` out of prose generally, rather than taking a
-token from a place that already fixes its meaning, so a tag and a citation
-become candidates for the same token with nothing to separate them. Answer it before that step, not during. At that point
-either they are one system, in which case a tag search is the
-outermost rung of the same scope chain and the well-known targets that resolve
-by recency need reconciling with the rule that nothing hidden decides what a
-name means; or they are two systems and one of them needs a different sigil.
+So the mark is already load-bearing in one direction and not the other, and
+what is unsettled is what a surface should do when it must choose. **Step 5 is
+where that arises**, which is why it is blocked here rather than merely
+awaiting an answer: sigil parsing reads `#` out of prose generally, and a
+reader that resolves both kinds has to decide which a token is. Until then
+either they are one system, in which case a tag search is the outermost rung
+of the same scope chain and the well-known targets that resolve by recency
+need reconciling with the rule that nothing hidden decides what a name means;
+or they are two systems and one of them needs a different sigil.
 
 The cost that exists now is a reader's rather than a parser's: the same mark
 means "search a kind, perhaps pick from several" in one place and "this exact
