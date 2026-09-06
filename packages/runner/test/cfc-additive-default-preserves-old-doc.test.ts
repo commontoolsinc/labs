@@ -19,9 +19,11 @@ import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 // provenance: setup rewrites the complete generated result, while ordinary
 // document paths must still preserve older values.
 //
-// These tests run with CFC enforcement ON (the runtime default,
-// "enforce-explicit"); the piece cold-start harness runs with enforcement
-// disabled, which is why #4926/#4933's tests were blind to this layer.
+// These tests take the CFC enforcement rung the runtime carries. The
+// additive-required guard runs inside schema merge, which every enforcing rung
+// reaches before its own checks, so the setup commit's fate is the same across
+// them. The piece cold-start harness runs with enforcement disabled, which is
+// why #4926/#4933's tests were blind to this layer.
 
 const alice = await Identity.fromPassphrase(
   "cfc-additive-default-preserves-old-doc-alice",
@@ -148,7 +150,6 @@ describe("CFC additive-required default preserves old documents", () => {
       //    favorites and the handlers.
       {
         const tx = runtime.edit();
-        tx.setCfcEnforcementMode("enforce-explicit");
         tx.setCfcTrustSnapshot({
           id: `trust-${space}`,
           actingPrincipal: space,
@@ -185,8 +186,7 @@ describe("CFC additive-required default preserves old documents", () => {
         expect(res.ok).toBeDefined();
       }
 
-      // 2. Materialize the real home pattern over the SAME root cell
-      //    (enforce-explicit is the runtime default).
+      // 2. Materialize the real home pattern over the SAME root cell.
       const homePattern = await compileHomePattern(runtime, space);
       const resultCell = runtime.getCell(space, ROOT);
       const home = await runtime.runSynced(resultCell, homePattern, {});
@@ -224,7 +224,6 @@ describe("CFC additive-required default preserves old documents", () => {
     const space = alice.did();
     const ROOT = "legacy-home-root-reject";
     const seedMeta = (tx: ReturnType<typeof runtime.edit>) => {
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot({ id: `trust-${space}`, actingPrincipal: space });
       tx.setCfcImplementationIdentity({
         kind: "builtin",
