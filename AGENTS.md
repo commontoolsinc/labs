@@ -315,8 +315,9 @@ pattern type-check. Run `deno task test` in every package you touched.
 Each of these gates fails CI on its own, and none of them run as part of
 `deno task check`:
 
-- `deno task check-no-waitfor` — a test that polls instead of waiting on a real
-  event
+- `deno task check-no-waitfor` — an integration test that imports the polling
+  `waitFor`. It reads only `integration/` directories under `packages/`, so its
+  green says nothing about a poll in a unit test
 - `deno task check-docs` — a TypeScript block under `docs/` that stopped
   compiling
 - `deno task check-docs-history-index` — an entry in `docs/history/INDEX.md`
