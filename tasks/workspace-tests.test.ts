@@ -480,6 +480,45 @@ Deno.test("runTests writes no record when every package it selected started", as
   }
 });
 
+Deno.test("runTests clears the record an earlier run left in the same coverage directory", async () => {
+  const dir = await Deno.makeTempDir({ prefix: "ws-stale-record-" });
+  try {
+    await makeWorkspace(dir, ["a", "b", "c"]);
+    await Deno.writeTextFile(
+      `${dir}/packages/a/deno.jsonc`,
+      JSON.stringify({ tasks: { test: "exit 1" } }),
+    );
+
+    const originalError = console.error;
+    console.error = () => {};
+    let records: string[][];
+    try {
+      records = await withCoverageDir(
+        dir,
+        (coverageDir) =>
+          withTestConcurrency("1", async () => {
+            await runTests([], undefined, dir);
+            const stopped = await readUnlaunchedMembers(coverageDir);
+            await Deno.writeTextFile(
+              `${dir}/packages/a/deno.jsonc`,
+              JSON.stringify({ tasks: { test: "echo ok > ran.txt" } }),
+            );
+            assertEquals(await runTests([], undefined, dir), true);
+            return [stopped, await readUnlaunchedMembers(coverageDir)];
+          }),
+      );
+    } finally {
+      console.error = originalError;
+    }
+
+    // The second run started every package it selected, so nothing left in the
+    // directory may still say otherwise.
+    assertEquals(records, [["./packages/b", "./packages/c"], []]);
+  } finally {
+    await Deno.remove(dir, { recursive: true });
+  }
+});
+
 Deno.test("runTests runs every enabled package's test task", async () => {
   const dir = await Deno.makeTempDir({ prefix: "ws-run-" });
   try {

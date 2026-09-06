@@ -7,9 +7,9 @@
  * The record travels with the coverage report it qualifies: the runner writes
  * it into the run's coverage profile directory, the LCOV conversion copies it
  * beside the report that directory converts into, and whatever scores that
- * report reads it back. A run that launched everything it selected writes no
- * record, so the file's presence is itself the statement that something went
- * unmeasured.
+ * report reads it back. A run that launched everything it selected leaves no
+ * record behind, so the file's presence is itself the statement that something
+ * went unmeasured.
  *
  * The record names members rather than source files, and it says only that a
  * member never started. A member whose test process started and then failed is
@@ -39,17 +39,30 @@ export function parseUnlaunchedMembers(content: string): string[] {
 
 /**
  * Writes the record naming `members` into `dir`, creating the directory when
- * it is absent. Writes nothing at all when `members` is empty, which is what
- * keeps the file's presence meaningful.
+ * it is absent.
+ *
+ * An empty `members` removes whatever record `dir` already holds rather than
+ * leaving it. The file's presence is what says a run left something
+ * unmeasured, so a run that launched everything has to be able to say that in
+ * a directory an earlier run wrote to. A directory holding no record, or none
+ * at all, is left as it is.
  */
 export async function writeUnlaunchedMembers(
   dir: string,
   members: readonly string[],
 ): Promise<void> {
-  if (members.length === 0) return;
+  const recordPath = path.join(dir, UNLAUNCHED_MEMBERS_FILE);
+  if (members.length === 0) {
+    try {
+      await Deno.remove(recordPath);
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
+    }
+    return;
+  }
   await Deno.mkdir(dir, { recursive: true });
   await Deno.writeTextFile(
-    path.join(dir, UNLAUNCHED_MEMBERS_FILE),
+    recordPath,
     members.map((member) => `${member}\n`).join(""),
   );
 }

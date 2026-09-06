@@ -137,12 +137,30 @@ Deno.test("copyUnlaunchedMembers writes nothing for a profile directory carrying
 
     await copyUnlaunchedMembers(profileDir, join(root, "lcov", "out.lcov"));
 
-    // A record beside the report says the run left something unmeasured, so a
-    // run that measured everything leaves the report directory alone.
+    // With no record on either side there is nothing to say, and the report
+    // directory is not created for the sake of saying it.
     await assertRejects(
       () => Deno.stat(join(root, "lcov")),
       Deno.errors.NotFound,
     );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("copyUnlaunchedMembers clears a record an earlier run left beside the report", async () => {
+  const root = await Deno.makeTempDir({ prefix: "write-lcov-" });
+  try {
+    const profileDir = join(root, "raw");
+    const lcovDir = join(root, "lcov");
+    await Deno.mkdir(profileDir);
+    await writeUnlaunchedMembers(lcovDir, ["./packages/shell"]);
+
+    await copyUnlaunchedMembers(profileDir, join(lcovDir, "out.lcov"));
+
+    // The report and the record are uploaded together and read together, so a
+    // record describing an earlier run would qualify this run's report.
+    assertEquals([...Deno.readDirSync(lcovDir)], []);
   } finally {
     await Deno.remove(root, { recursive: true });
   }

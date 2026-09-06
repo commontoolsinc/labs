@@ -306,6 +306,19 @@ Deno.test("collectCoverageDebtMetrics reads the profile directory's own record",
     await writeUnlaunchedMembers(coverageProfileDir, ["./packages/example"]);
     expect(await collectCoverageDebtMetrics({ rootDir, coverageProfileDir }))
       .toEqual([]);
+
+    // A later run of the same directory that started everything clears the
+    // record, and every group is scored again. Without that, one early-stopped
+    // run would go on suppressing groups that later runs measured.
+    await writeUnlaunchedMembers(coverageProfileDir, []);
+    expect(
+      (await collectCoverageDebtMetrics({ rootDir, coverageProfileDir })).map(
+        (metric) => metric.name,
+      ),
+    ).toEqual([
+      "coverage-debt: workspace uncovered lines",
+      "coverage-debt: packages/example uncovered lines",
+    ]);
   } finally {
     await Deno.remove(rootDir, { recursive: true });
   }

@@ -54,6 +54,25 @@ describe("unlaunched-members", () => {
         ).toBe("./packages/shell\n");
       });
     });
+
+    it("removes a record an earlier write left when there are no members", async () => {
+      await withTempDir(async (dir) => {
+        await writeUnlaunchedMembers(dir, ["./packages/shell"]);
+        await writeUnlaunchedMembers(dir, []);
+        expect([...Deno.readDirSync(dir)]).toEqual([]);
+      });
+    });
+
+    it("reports a removal failure that is not a missing record", async () => {
+      await withTempDir(async (dir) => {
+        // A non-empty directory where the record should be is not an absent
+        // record, and removing it fails with something other than `NotFound`.
+        const occupied = path.join(dir, UNLAUNCHED_MEMBERS_FILE);
+        await Deno.mkdir(occupied);
+        await Deno.writeTextFile(path.join(occupied, "entry"), "");
+        await expect(writeUnlaunchedMembers(dir, [])).rejects.toThrow();
+      });
+    });
   });
 
   describe("readUnlaunchedMembers()", () => {

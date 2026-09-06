@@ -208,10 +208,11 @@ async function writeEmptyLcov(
 }
 
 /**
- * Copies the unlaunched-member record `profileDir` carries, where it carries
- * one, into the directory `outputPath` names, so that the record and the report
- * it qualifies travel together as one artifact. A profile directory holding no
- * record leaves the output directory as it was.
+ * Copies the unlaunched-member record `profileDir` carries into the directory
+ * `outputPath` names, so that the record and the report it qualifies travel
+ * together as one artifact. A profile directory carrying no record clears any
+ * record already sitting beside the report, so that the two always describe
+ * the same run; where neither directory holds one, nothing is written.
  */
 export async function copyUnlaunchedMembers(
   profileDir: string,

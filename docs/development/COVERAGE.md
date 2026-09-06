@@ -289,6 +289,14 @@ it writes, the workspace test job uploads the two together as one artifact, and
 carries. One job selects each member, so a member any record names is one that
 nothing in the run measured against its own tests.
 
+A run that started everything it selected removes any record it finds rather
+than leaving one, in the profile directory and beside the report alike, so that
+the record and the report always describe the same run. CI never reuses either
+directory — every job runs on a fresh runner, and nothing restores a
+`coverage/` path — but a local run that reuses one would otherwise go on
+suppressing groups that an earlier run stopped short of and this one measured,
+which is the same silent failure arriving from the other side.
+
 A metric group holding such a member is left out of the run's metrics
 altogether, and so is the workspace total, which no longer totals the
 workspace. The gate builds one row per metric the run produced, so a group with
