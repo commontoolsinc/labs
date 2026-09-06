@@ -21,7 +21,11 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { quoteToken, RESERVED_CHARACTERS, splitLine } from "../src/line.ts";
+import {
+  quoteToken,
+  RESERVED_CHARACTERS,
+  splitLine,
+} from "../lib/shuttle/line.ts";
 
 describe("line", () => {
   describe("RESERVED_CHARACTERS", () => {

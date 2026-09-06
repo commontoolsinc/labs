@@ -54,6 +54,20 @@ async function withCapturedErrors(
 }
 
 describe("main command", () => {
+  it("mounts the interactive shell at `sh`, and at no name spelling `shell`", async () => {
+    // Two claims, and the second is the reason for the first: `shell` names
+    // the web frontend, and the shuttle design commits to adding no second
+    // meaning to a word that already carries one
+    // (`docs/plans/shuttle/README.md`, decision 19).
+
+    const { main } = await import("../commands/main.ts?shell-mount-test");
+    const names = main.getCommands(true).map((command: { getName(): string }) =>
+      command.getName()
+    );
+    expect(names).toContain("sh");
+    expect(names).not.toContain("shell");
+  });
+
   it("keeps command usage aligned with accepted positional syntax", async () => {
     const { main } = await import(
       "../commands/main.ts?main-command-usage-test"

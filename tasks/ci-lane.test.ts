@@ -1282,6 +1282,13 @@ describe("the lane's own housekeeping", () => {
         dryRun: false,
         laneCount: false,
         root,
+      }, {
+        // What this pins is the path with nothing in it, so the store's
+        // manifest is held out: with one, even a lane this far down the
+        // count draws a few unmeasured tests, and the lane then opens
+        // their capabilities and runs them.
+        manifest: (at) =>
+          Promise.resolve({ absent: `no manifest at ${at}: held out here` }),
       });
     } finally {
       console.log = log;

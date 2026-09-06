@@ -22,8 +22,10 @@ import {
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import { RuntimeProcessor } from "@/backends/runtime-processor.ts";
+import { buildProcessor } from "./build-processor.ts";
 import { RequestType } from "@/protocol/mod.ts";
+import { createCellRef, getCell } from "@/backends/utils.ts";
+import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
 
 const signer = await Identity.fromPassphrase("runtime-client slug resolve");
 const space = signer.did();
@@ -67,20 +69,13 @@ describe("handleSlugResolve()", () => {
   }
 
   /** Call the handler over a processor that is nothing but this space. */
-  function resolve(
-    slug: string,
-    member?: string,
-  ): Promise<{ piece: { cell: unknown } }> {
-    const processor = {
-      getSpaceCtx: () => ({ getSpace: () => space }),
+  function resolve(slug: string, member?: string) {
+    const processor = buildProcessor({
+      cc: { getSpace: () => space },
+      space,
       runtime,
-    };
-    return (RuntimeProcessor.prototype as unknown as {
-      handleSlugResolve(
-        this: unknown,
-        request: unknown,
-      ): Promise<{ piece: { cell: unknown } }>;
-    }).handleSlugResolve.call(processor, {
+    });
+    return processor.handleSlugResolve({
       type: RequestType.SlugResolve,
       space,
       slug,
@@ -187,6 +182,94 @@ describe("handleSlugResolve()", () => {
     expect(woke).toBe(atSubscribe);
   });
 
+  it("opens a cell for the shell that no write to the slug or its target wakes", async () => {
+    // What `getSlugCell` in `packages/lib-shell/src/runtime.ts` opens, built
+    // the way it builds it: the slug's id is handed to `getCell` as a CAUSE,
+    // and `Runtime.getCell` hashes a cause to make an id. So the cell that
+    // comes back sits at a hash of the slug's id rather than at the slug, and
+    // it is neither the slug document nor the target the slug points at.
+    //
+    // Everything follows from that. Neither of the two writes a slug
+    // reference turns on reaches such a cell — a write inside the target,
+    // and the slug being repointed — so `AppView` notices both by
+    // re-resolving on its interval and by nothing else. What a watch there
+    // would see instead is not measured, and this case claims nothing about
+    // it. The two cases above are about the slug document, which the shell
+    // never opens; neither is evidence about this.
+    const shellCell = getCell(
+      runtime,
+      createCellRef(
+        runtime.getCell(
+          space,
+          entityRefFromString(slugIdForSpace(space, "top")),
+        ),
+        undefined,
+      ),
+    );
+    const slugDocument = runtime.getCellFromEntityId(
+      space,
+      entityIdFrom(slugIdForSpace(space, "top")),
+    );
+    expect(shellCell.getAsNormalizedFullLink().id).not.toBe(
+      slugDocument.getAsNormalizedFullLink().id,
+    );
+    expect(shellCell.getAsNormalizedFullLink().id).not.toBe(idOf(board));
+
+    const other = await pieceDocument("board-2", { names: { "9": item2 } });
+
+    let shellWoke = 0;
+    const cancelShell = shellCell.sink(() => {
+      shellWoke++;
+    });
+    // Two controls, because the two writes below reach different watchers. A
+    // watch on the target catches a write inside it; a watch on the slug
+    // document catches the slug being repointed. Each is read at the write it
+    // controls and re-baselined afterwards, so no later write can satisfy an
+    // earlier control — which is the whole job of a control here, since every
+    // assertion about `shellCell` is that a count did NOT move and a write
+    // that never landed would satisfy all of them.
+    let targetWoke = 0;
+    const cancelTarget = board.key("names").sink(() => {
+      targetWoke++;
+    });
+    let documentWoke = 0;
+    const cancelDocument = slugDocument.sink(() => {
+      documentWoke++;
+    });
+    await runtime.idle();
+    const shellAtSubscribe = shellWoke;
+    let targetSince = targetWoke;
+    let documentSince = documentWoke;
+
+    // The instrument is plugged in: a sink calls back once with the current
+    // value, so a count that never moves below is a watch that saw nothing
+    // rather than a sink that was never opened.
+    expect(shellAtSubscribe).toBeGreaterThan(0);
+
+    // A write inside the target the slug points at, which is what the two
+    // cases above show a watch on the slug document catching.
+    await runtime.editWithRetry((tx) => {
+      board.withTx(tx).key("names").key("3").set(item2);
+    });
+    await runtime.idle();
+    expect(targetWoke).toBeGreaterThan(targetSince);
+    expect(shellWoke).toBe(shellAtSubscribe);
+    targetSince = targetWoke;
+    documentSince = documentWoke;
+
+    // Repointing the slug, which is what `cf piece new --force` does. The
+    // slug document is the only thing this write touches, so the control for
+    // it is the watch on that document.
+    await pointSlug("top", other.key("names"));
+    await runtime.idle();
+    expect(documentWoke).toBeGreaterThan(documentSince);
+    expect(shellWoke).toBe(shellAtSubscribe);
+
+    cancelShell();
+    cancelTarget();
+    cancelDocument();
+  });
+
   it("returns a refusal naming the member and the collection", async () => {
     // Data, not a throw: the error channel belongs to faults in asking, and
     // a caller has to tell "this name is not bound" from "ask again".
@@ -200,18 +283,17 @@ describe("handleSlugResolve()", () => {
     // or a document that will not decode says nothing about whether the name
     // is bound, and folding it into a refusal would tell a reader "no such
     // member" about a collection nobody managed to read.
-    const processor = {
-      getSpaceCtx: () => ({ getSpace: () => space }),
+    const processor = buildProcessor({
+      cc: { getSpace: () => space },
+      space,
       runtime: {
         getCellFromEntityId: () => {
           throw new Error("the socket went away");
         },
       },
-    };
+    });
     await expect(
-      (RuntimeProcessor.prototype as unknown as {
-        handleSlugResolve(this: unknown, request: unknown): Promise<unknown>;
-      }).handleSlugResolve.call(processor, {
+      processor.handleSlugResolve({
         type: RequestType.SlugResolve,
         space,
         slug: "top",
@@ -225,21 +307,12 @@ describe("handleSlugResolve()", () => {
     // map, and every one of those can be right while the dispatch switch has
     // no arm for it — in which case the worker answers nothing and the shell
     // waits forever. Only driving the dispatcher proves the wiring.
-    const processor = {
-      getSpaceCtx: () => ({ getSpace: () => space }),
+    const processor = buildProcessor({
+      cc: { getSpace: () => space },
+      space,
       runtime,
-      // The dispatch calls the handler through `this`, so the stub carries
-      // the real one: what is under test is which method the arm reaches.
-      handleSlugResolve: (RuntimeProcessor.prototype as unknown as {
-        handleSlugResolve: unknown;
-      }).handleSlugResolve,
-    };
-    const response = await (RuntimeProcessor.prototype as unknown as {
-      handleRequest(
-        this: unknown,
-        request: unknown,
-      ): Promise<{ piece: { cell: unknown }; pathAfter: string[] }>;
-    }).handleRequest.call(processor, {
+    });
+    const response = await processor.handleRequest({
       type: RequestType.SlugResolve,
       space,
       slug: "top",
@@ -253,12 +326,14 @@ describe("handleSlugResolve()", () => {
   });
 
   it("wakes a watch on the slug when the collection gains a member", async () => {
-    // The shell watches a collection reference by subscribing to the slug
-    // cell, and polls beside that subscription. This pair of tests measures
-    // how far that subscription reaches, because what it covers decides what
-    // the poll is for; neither states a bound the other has not measured.
-    // Here: the read set follows the redirect into the map, so a key landing
-    // there wakes the watch with no write to the slug document at all.
+    // A sink on the slug document, which is what a caller opening the slug by
+    // its id gets. The read set follows the redirect into the map, so a key
+    // landing there wakes the watch with no write to the slug document at
+    // all.
+    //
+    // This measures the slug document and nothing else. The cell the shell's
+    // watch opens is a different cell, and the case below measures that one
+    // separately — a reach shown here is not a reach the shell has.
     //
     // Every write the setup needs happens BEFORE the sink, so that the one
     // write after it is the collection update. A member document created
@@ -288,11 +363,11 @@ describe("handleSlugResolve()", () => {
   });
 
   it("wakes a watch on the slug when a member it holds changes", async () => {
-    // And it does not stop at the map: a member the map holds is read
-    // through it, so a change inside one wakes the watch just as a key
-    // landing in the map does. Where it does stop is not measured, so
-    // neither test claims it — and `AppView`'s poll says the same, that what
-    // it adds over the subscription is unknown rather than small.
+    // And a sink on the slug document does not stop at the map: a member the
+    // map holds is read through it, so a change inside one wakes the watch
+    // just as a key landing in the map does. Where it does stop is not
+    // measured, so neither case claims it — and the same bound on the claim
+    // holds: this is the slug document, not the cell the shell opens.
     const item3 = await pieceDocument("item-3", { title: "Kiln log" });
     await runtime.editWithRetry((tx) => {
       board.withTx(tx).key("names").key("3").set(item3);

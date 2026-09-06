@@ -461,7 +461,14 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage-profile-workspace-${{ matrix.shard }}
-          path: coverage/lcov/workspace-${{ matrix.shard }}.lcov
+          # The second path is the record of the packages this shard selected
+          # and never started, which the coverage gate reads to decide which
+          # groups this run can speak for. A shard that started everything it
+          # selected writes no such file; both paths sit in one directory, so
+          # the artifact's layout is the same either way.
+          path: |
+            coverage/lcov/workspace-${{ matrix.shard }}.lcov
+            coverage/lcov/unlaunched-members.txt
           retention-days: 90
           if-no-files-found: error
 

@@ -248,13 +248,8 @@ const labelForEntriesAtPath = (
   if (matches.size === 0) {
     return undefined;
   }
-  let joined: IFCLabel | undefined;
-  for (const match of matches.values()) {
-    joined = joined === undefined
-      ? match.label
-      : mergeLabels(joined, match.label);
-  }
-  return joined;
+  const labels = Array.from(matches.values(), (match) => match.label);
+  return labels.length === 1 ? labels[0] : joinLabels(labels);
 };
 
 // The §4.6.4 redundant-entry collapse, applied to the per-value components
@@ -553,13 +548,13 @@ const effectiveReadLabel = (
   if (read.nonRecursive === true || view === undefined) {
     return base;
   }
-  let joined = base;
+  const parts: (IFCLabel | undefined)[] = [base];
   for (const entry of view.labelMap.entries) {
     if (entry.path.length <= path.length) continue;
     if (!isPrefix(path, entry.path)) continue;
-    joined = mergeLabels(joined, entry.label);
+    parts.push(entry.label);
   }
-  return joined;
+  return parts.length === 1 ? base : joinLabels(parts);
 };
 
 // Read-like shape (space/id/scope/path + a recursive read profile) for the
@@ -595,18 +590,31 @@ const triggerReadSources = (
   }));
 };
 
-const mergeLabelValues = (
-  ...sources: Array<readonly unknown[] | undefined>
+const joinLabelValues = (
+  sources: Iterable<readonly unknown[] | undefined>,
 ) => {
   // Structural dedup via `uniqueCfcAtoms()` rather than reference dedup
   // via `new Set()`. Atoms can be fabric-converted clones (each
   // `cloneIfNecessary()` produces a fresh frozen object), so two
   // logically-identical caveats may not share a JS reference.
-  const merged = uniqueCfcAtoms(
-    sources.flatMap((source) => source ? [...source] : []),
-  );
+  //
+  // Every source is collected before the dedup runs, so a join over any number
+  // of sources deduplicates once.
+  const atoms: unknown[] = [];
+  for (const source of sources) {
+    if (source !== undefined) {
+      for (const atom of source) {
+        atoms.push(atom);
+      }
+    }
+  }
+  const merged = uniqueCfcAtoms(atoms);
   return merged.length > 0 ? merged : undefined;
 };
+
+const mergeLabelValues = (
+  ...sources: Array<readonly unknown[] | undefined>
+) => joinLabelValues(sources);
 
 const hasLabelValues = (label: IFCLabel): boolean =>
   (label.confidentiality?.length ?? 0) > 0 ||
@@ -4710,16 +4718,21 @@ const persistedLabelFromSchemaAtPath = (
   );
 };
 
+// Join a series of labels in one pass: each channel collects its atoms from
+// every part and deduplicates them once.
+const joinLabels = (
+  parts: readonly (IFCLabel | undefined)[],
+): IFCLabel => ({
+  confidentiality: joinLabelValues(
+    parts.map((part) => part?.confidentiality),
+  ),
+  integrity: joinLabelValues(parts.map((part) => part?.integrity)),
+});
+
 const mergeLabels = (
   left: IFCLabel | undefined,
   right: IFCLabel | undefined,
-): IFCLabel => ({
-  confidentiality: mergeLabelValues(
-    left?.confidentiality,
-    right?.confidentiality,
-  ),
-  integrity: mergeLabelValues(left?.integrity, right?.integrity),
-});
+): IFCLabel => joinLabels([left, right]);
 
 const linkReferenceIntegrity = (input: LinkWritePolicyInput): unknown => ({
   type: CFC_ATOM_TYPE.LinkReference,

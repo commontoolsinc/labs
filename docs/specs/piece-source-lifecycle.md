@@ -1256,11 +1256,13 @@ The piece menu, opened by right-clicking a rendered piece, belongs to
 `cf-piece-menu` in the component package rather than to the shell. Every host
 that renders pieces through `cf-render`, including Loom, therefore receives the
 same lifecycle controls. It names the origin kind and shows the canonical origin
-URL alongside the recorded string when normalization changed it. It says a
-piece is detached when it records no origin. It shows the current pattern
-identity and export symbol, the identity whose setup state was installed, and
-the pattern identity an origin update displaced. It lists the retained
-authored source files.
+URL for the active origin, alongside the recorded string when normalization
+changed it. A history entry instead shows the string that revision recorded,
+with a link to the route it resolves to whenever that route is one a browser can
+address. It says a piece is detached when it records no origin. It shows the
+current pattern identity and export symbol, the identity whose setup state was
+installed, and the pattern identity an origin update displaced. It lists the
+retained authored source files.
 
 The menu's **Clone fresh piece into new space** action creates a copy with
 default input data in a unique named space owned by the current user. **Clone

@@ -31,6 +31,16 @@ import { type NamesTableRow, ownName } from "./naming.ts";
  * display name it lists and matches on, the title, and the board's name for
  * the member as `shortName`, which is what a `#42` query matches.
  *
+ * `shortName` is OPTIONAL rather than defaulted, which is what the
+ * compatibility proof accepts: a defaulted property moves the demand's
+ * defaults below an array constraint the proof cannot show stable under
+ * default insertion, and dropping the default without making the property
+ * optional makes it a newly required field. That is the bound on what the
+ * spelling buys, and it is about the READ: `cf piece setsrc` refuses a
+ * per-member demand that gains any property at all — optional included — over
+ * a universe whose stored entries do not publish it, because the schema
+ * recorded on the retained link is unconstrained at that path.
+ *
  * These three are deliberately the WHOLE demand. A board's universe row
  * carries its item as a `piece` reference besides them, and leaving that out
  * of this projection is what keeps every walk under an item's argument out of
@@ -42,7 +52,7 @@ import { type NamesTableRow, ownName } from "./naming.ts";
 export interface ItemMentionable {
   [NAME]: string | Default<""> | undefined;
   title: string | Default<"">;
-  shortName: string | Default<"">;
+  shortName?: string;
 }
 
 /**
@@ -91,8 +101,19 @@ export interface ItemInput {
    * Wired at creation to the board's mention index, one derived document of
    * rows (`MentionableRow` in `mentionable.ts`). Absent, the editor simply
    * offers no completions.
+   *
+   * Readable, not writable, for the reason `boardNames` above states, and
+   * with a cost a writable handle carries besides: a writable binding puts
+   * the board's whole published row inside the retained link's proof, and
+   * this demand names three of that row's fields, so the write-back leg
+   * fails on a field the demand does not declare and the item can no longer
+   * be re-sourced at all. The editor writes nothing here — the one write it
+   * makes through this handle, the name write-back in `_updatePieceName`
+   * (`packages/ui/src/v2/components/cf-code-editor/cf-code-editor.ts`),
+   * lands on the piece a row stands for rather than on the row, because
+   * every row this board publishes carries `piece`.
    */
-  mentionable?: Writable<ItemMentionable[] | Default<[]>>;
+  mentionable?: ReadonlyCell<ItemMentionable[] | Default<[]>>;
 
   /**
    * Where this item's `[Label][key]` mentions point, keyed by the token that
@@ -128,15 +149,38 @@ export interface ItemOutput {
 
   /**
    * The name the board calls this item by, read out of the board's names
-   * table; `undefined` for an item no board has named, or one wired to no
-   * board.
+   * table.
    *
    * Published under the name a mention pill reads it by
    * (`Mentionable.shortName` in `packages/ui/src/v2/core/mentionable.ts`), so
    * a mention of this item elsewhere gains the number as soon as the board
    * names it.
+   *
+   * Absent for an item no board has named, or one wired to no board: the
+   * lookup produces nothing and the property is simply not there. Every
+   * consumer treats that as no name — the badge renders nothing, a universe
+   * row matches no `#42` query, and a mention pill shows no number
+   * (`_trackRefShortName` in
+   * `packages/ui/src/v2/components/cf-code-editor/cf-code-editor.ts` reads an
+   * absent name exactly as it reads a blank one).
+   *
+   * Optional rather than defaulted, and the derivation settles half of it:
+   * `ownName` produces no value for an item no board has named, so whatever
+   * stands here has to admit that absence. Two spellings do, and this takes
+   * the one `TopicPiece` ships. The other — a required property whose type
+   * admits `undefined` — keeps the property in the schema's `required` list,
+   * so a member with no name reads as present-and-undefined rather than as
+   * absent.
+   *
+   * The board's row demand is optional for a reason of its own, and the
+   * constraint between the two does NOT pair their spellings. A required
+   * publication satisfies either demand, since it always provides a string,
+   * so the demand could be optional with this one left as it was. What the
+   * compiler refuses is the other pairing: an optional publication satisfies
+   * only an optional demand, so a required ROW is refused where an item meets
+   * it, at the `addItem` result and the push into `items`.
    */
-  shortName: string | undefined;
+  shortName?: string;
 
   /**
    * Where this item's mentions point, keyed by the token in the body. Written

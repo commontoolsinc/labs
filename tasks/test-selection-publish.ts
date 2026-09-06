@@ -150,6 +150,12 @@ const BOOTSTRAP_DAYS = 60;
 /** Objects read and folded before the next batch is fetched. */
 const CHUNK = 200;
 
+/**
+ * Rollup shards read and spooled before the next batch is fetched.
+ * Each shard targets eight mebibytes compressed.
+ */
+export const SHARD_CHUNK = 4;
+
 /** What the command line asked for. */
 export interface Options {
   days: number;
@@ -468,29 +474,37 @@ export async function publish(
     }
   }
 
+  /** Reads and consumes each batch before fetching the next shards. */
+  async function* readRollup(shards: readonly string[], concurrency: number) {
+    for (let at = 0; at < shards.length; at += SHARD_CHUNK) {
+      const reports = await mapConcurrent(
+        shards.slice(at, at + SHARD_CHUNK),
+        concurrency,
+        (objectName) => store.read(objectName),
+      );
+      for (const report of reports) {
+        noteReport(report);
+        yield report;
+      }
+    }
+  }
+
   let settled = 0;
   for (const [date, shards] of rollups) {
     try {
-      // A pair is folded whole or not at all: a shard that failed to read
-      // would leave it partly folded, and writing its receipt would then
-      // hide the rest of it from every later run.
-      const reports = await mapConcurrent(
-        shards,
-        options.concurrency,
-        (objectName) => store.read(objectName),
-      );
-      for (const report of reports) noteReport(report);
-      fold.add(reports);
-      fold.markSettled(CI_SOURCE, date);
-      settled++;
+      await fold.addUnordered(readRollup(shards, options.concurrency));
     } catch (error) {
       console.warn(
         `test selection: reading the rollup of ${date} failed: ${error}`,
       );
-      // No receipt was written, so the pair still owes what it owed, and
-      // the raw path is what is left to read it by.
-      ciDays.push(date);
+      console.warn(
+        "test selection: refusing to publish from part of the window. " +
+          "The previous manifest is still the newest one.",
+      );
+      return 1;
     }
+    fold.markSettled(CI_SOURCE, date);
+    settled++;
   }
   if (rollups.size > 0) {
     console.log(

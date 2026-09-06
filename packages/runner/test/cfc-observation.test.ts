@@ -18,6 +18,29 @@ describe("CFC observation helpers", () => {
       .toEqual([atom, "public"]);
   });
 
+  it("deduplicates the same atoms whether or not the kept set is grouped", () => {
+    // `uniqueCfcAtoms` compares a candidate against everything kept while the
+    // kept set is short, and against one group of it past a limit. A list long
+    // enough to cross that limit has to produce the same result as the same
+    // atoms in a list that does not, or a label's atoms would depend on how
+    // many other atoms happened to arrive with them.
+
+    const atom = (index: number) => ({
+      type: "cf:link-reference",
+      source: { id: "of:document", path: ["field", String(index)] },
+    });
+    const distinct = Array.from({ length: 40 }, (_, index) => atom(index));
+    // Each atom a second time, sharing no object with the first, so that
+    // nothing in the comparison that drops the repeat reduces to `Object.is`.
+    const repeated = Array.from({ length: 40 }, (_, index) => atom(index));
+
+    expect(uniqueCfcAtoms([...distinct, ...repeated])).toEqual(distinct);
+    for (const size of [1, 8, 17, 40]) {
+      const prefix = distinct.slice(0, size);
+      expect(uniqueCfcAtoms([...prefix, ...prefix])).toEqual(prefix);
+    }
+  });
+
   it("checks whether observed confidentiality fits an observation ceiling", () => {
     const secret = { type: "secret" };
 

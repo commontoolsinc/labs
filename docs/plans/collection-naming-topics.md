@@ -19,7 +19,7 @@ This block is LIVE: the change that moves a stage updates it here.
 | S2b — assignment refuses by default | on main (#6898) |
 | S3 — the shell opens `/<space>/top/42` | on main (#6896) |
 | S4 — `#42` in text | on main (#6887) |
-| S6 — graft onto Topics | items 1, 2, 3, 5 built; item 4 is Mike's call |
+| S6 — graft onto Topics | items 1, 2, 3, 5 on main (#6937); item 4 rehearsed 2026-09-05, and now needs a schema-flag ruling |
 | S5 — deferred, not scheduled | — |
 
 ## Decisions, ruled 2026-09-03
@@ -40,7 +40,15 @@ ruled. A later reversal is a decision recorded here, not a discovery.
    deferred.** A board-owned namespace never writes the piece's single `slug`
    metadata entry, so that restructure gates URL rewriting rather than
    naming. Nothing here rewrites an identity URL to the member form, and no
-   personal binding is built.
+   personal binding is built. What the deferral accepts: a space-level name
+   whose path selects a member stamps that member's root —
+   `cf piece set-slug two /top/2`, which
+   `packages/cli/test/setPieceSlug.test.ts` covers as "names the member a
+   slug's path selects, and stamps that member with the name" — so a member
+   answers to `<space>/two` and `<space>/top/2` at once, and a visit by
+   identity is rewritten to the first. The spec's step 1 records the same
+   acceptance and is deferred with this decision rather than held as a
+   prerequisite over it.
 3. **The namespace is a map cell on the board**, `names: { "42": <link> }`,
    and the collection's slug points at that cell. Forward resolution is a path
    read: `parseFabricUrl` already returns the slug and a one-segment path, and
@@ -131,7 +139,11 @@ Scope: `packages/patterns/collection-naming/` (new): `naming.ts`, `board.tsx`,
    wired at creation the way Topics wires `boardCrossrefs`; an item without
    the wiring shows no name and does not fail.
 8. The board publishes `naming`: `{ name?, policy: { unique, permanent,
-   reuse, allocator }, compact }`.
+   reuse, allocator }, compact }`. `compact` is reserved: it declares that the
+   member names hold no hyphen, and no renderer offers the compact spelling.
+   Nothing reads the declaration at all —
+   [#6986](https://github.com/commontoolsinc/labs/issues/6986) is making one
+   consumer real.
 9. Allocation reads the namespace's keys without expanding any member: the
    declared schema holds the values as unread references.
 10. The Topics-shape rehearsal passes: a test-only board over the unmodified
@@ -278,16 +290,52 @@ Mike's call, after S4.
    strings off each one.
 4. The production backfill is rehearsed on a clone per
    `../development/space-clone-rehearsal.md`; the deployed vintage includes
-   #6827 before the backfill runs. Not started, and one decision items 1-3
-   could not make for it stands: a topic filed before the namespace reads its
-   name only once `namesTable` is link-bound onto it, and nothing in a pattern
-   can reach a member's argument to do that.
+   #6827 before the backfill runs. One decision items 1-3 could not make for it
+   stands: a topic filed before the namespace reads its name only once
+   `namesTable` is link-bound onto it, and nothing in a pattern can reach a
+   member's argument to do that. The rehearsal of 2026-09-05 measured that step
+   end to end and is recorded at
+   `../history/plans/collection-naming-s6-backfill-rehearsal-2026-09-05.md`:
+   `backfillNames` writes the name into the board's map, the topic goes on
+   reading none, and one `cf piece link` per topic closes it. The operator
+   procedure is the "Naming the Topics that predate the namespace" section of
+   `skills/topics/SKILL.md`.
 
-   The graft's own contract IS applicable over the deployed one — every row
-   demand declares `shortName` optional rather than defaulted, which is what
-   keeps it so — so the update needs no schema flag. It does need `--root` at
-   or above `packages/patterns`, because the board imports the naming library
-   from a sibling directory and the default program root is the entry's own.
+   **The board leg of the deploy needs
+   `--dangerously-allow-incompatible-schema`.** `setsrc --check` refuses it over
+   a board holding topics filed before the namespace, with
+   `input link at topics.0.shortName: an unconstrained schema is no longer
+   accepted`. That refusal is not about `shortName`, and not about the
+   property's spelling: two probes, each the pre-graft board with one property
+   added to `TopicDemand` and nothing else changed, were both refused with the
+   identical message at `topics.0.probeField` — `probeField?: string` and
+   `probeField?: unknown` alike. The rule is on the STORED side: the schema
+   recorded on a member's retained link is unconstrained at every path that
+   recorded schema does not name, so a property only the candidate demand names
+   is a narrowing of `true`, which is what
+   `packages/piece/src/schema-compatibility.ts` refuses. Expect it for a new
+   per-member demand property generally. The flag is
+   held behind explicit team authorization by `skills/topics/SKILL.md`, so this
+   step now carries a decision it did not carry before, and what the forced
+   deploy leaves behind is itself unmeasured.
+
+   **Why the gates said otherwise.** `deno task pattern-compat` and
+   `deno task pattern-vintage` are both clean and neither can see this: the
+   first judges a pattern's declared contract against the contracts it has
+   declared before, the second replays the pattern's own stored documents, and
+   neither examines the schema recorded on a link into a SIBLING piece — which
+   is the check that fires. A gate passing is not the claim; the claim is what
+   the gate examines, and the only instrument that examines this one is
+   `setsrc --check` against the deployment itself.
+
+   The board moves FIRST, which is what clears the topic leg's own
+   `mentionable[].shortName` refusal; the topic leg then needs the flag once
+   itself, for the mention universe narrowing to a readable handle
+   (`../history/topics-mentionable-readonly-break.md`), and is proven on every
+   update after that one. The deploy also needs
+   `--root` at or above `packages/patterns`, because the board imports the
+   naming library from a sibling directory and the default program root is the
+   entry's own.
 5. `skills/topics/SKILL.md` describes `top/42` addressing.
 
 ### S5 — Deferred, not scheduled

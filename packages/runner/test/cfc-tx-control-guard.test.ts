@@ -4,6 +4,10 @@ import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import {
+  CFC_ENFORCEMENT_MODES,
+  type CfcEnforcementMode,
+} from "../src/cfc/mod.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-tx-control-guard");
 
@@ -41,6 +45,29 @@ describe("CFC transaction control guard", () => {
 
       // ...and cannot then be lowered back to a weaker enforcing level.
       expect(() => tx.setCfcEnforcementMode("enforce-explicit")).toThrow();
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("refuses a mode that is not on the ladder", async () => {
+    // A name the strictness ranking cannot rank passes the floor comparison
+    // whatever the floor is, so the anti-downgrade pin would not hold against
+    // it.
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL("https://example.com"),
+      storageManager,
+      cfcEnforcementMode: "enforce-strict",
+    });
+    try {
+      const tx = runtime.edit();
+      const offLadder = "enforce-strictly" as CfcEnforcementMode;
+      expect(() => tx.setCfcEnforcementMode(offLadder)).toThrow(
+        CFC_ENFORCEMENT_MODES.join(", "),
+      );
+      expect(tx.getCfcState().enforcementMode).toBe("enforce-strict");
     } finally {
       await runtime.dispose();
       await storageManager.close();
