@@ -52,6 +52,7 @@ import {
   SINK_UNGATED_RATIONALES,
   type SinkMaxConfidentiality,
 } from "./sink-inventory.ts";
+import { CFC_ENFORCEMENT_MODES, isCfcEnforcementMode } from "./types.ts";
 import type {
   CfcDeclaredMonotonicityMode,
   CfcDecomposedEnvelopes,
@@ -291,16 +292,6 @@ export interface ResolvedCfcDials {
 }
 
 /**
- * The dial values a runtime constructed with `options` runs at.
- *
- * The `Runtime` constructor resolves its own fields through this, so a host
- * that has not built its runtime yet — a console printing its posture at
- * startup, a harness recording the posture a lazily-built session will run
- * at — projects the same values rather than restating the default table in
- * its own words. One table: a default moved here moves everywhere at once,
- * and a host cannot fall behind it silently.
- */
-/**
  * What each dial resolves to when a construction leaves it unset.
  *
  * The Runtime's defaults, in one place, rather than eight `??` arms inside a
@@ -328,27 +319,49 @@ export const RUNTIME_CFC_DIAL_DEFAULTS: ResolvedCfcDials = Object.freeze({
  * at — projects the same values rather than restating the default table in
  * its own words. One table: a default moved here moves everywhere at once,
  * and a host cannot fall behind it silently.
+ *
+ * `cfcEnforcementMode` is a closed set. A stated one must be a member of
+ * `CFC_ENFORCEMENT_MODES`; any other name is refused rather than resolved, so
+ * no runtime holds a mode `cfcEnforcementStrictness` cannot rank. The type
+ * says this too, and the check is what holds it for a name that reached the
+ * options as plain data — a worker's initialization message crosses
+ * `postMessage` untyped.
+ *
+ * @throws Error when `options.cfcEnforcementMode` is stated and is not a
+ * member of `CFC_ENFORCEMENT_MODES`.
  */
 export const resolveCfcDials = (
   options: CfcDialOptions,
-): ResolvedCfcDials => ({
-  cfcEnforcementMode: options.cfcEnforcementMode ??
-    RUNTIME_CFC_DIAL_DEFAULTS.cfcEnforcementMode,
-  cfcFlowLabels: options.cfcFlowLabels ??
-    RUNTIME_CFC_DIAL_DEFAULTS.cfcFlowLabels,
-  cfcWriteFloor: options.cfcWriteFloor ??
-    RUNTIME_CFC_DIAL_DEFAULTS.cfcWriteFloor,
-  cfcTriggerReadGating: options.cfcTriggerReadGating ??
-    RUNTIME_CFC_DIAL_DEFAULTS.cfcTriggerReadGating,
-  cfcDecomposedEnvelopes: options.cfcDecomposedEnvelopes ??
-    RUNTIME_CFC_DIAL_DEFAULTS.cfcDecomposedEnvelopes,
-  cfcPolicyEvaluation: options.cfcPolicyEvaluation ??
-    RUNTIME_CFC_DIAL_DEFAULTS.cfcPolicyEvaluation,
-  cfcLabelMetadataProtection: options.cfcLabelMetadataProtection ??
-    RUNTIME_CFC_DIAL_DEFAULTS.cfcLabelMetadataProtection,
-  cfcDeclaredMonotonicity: options.cfcDeclaredMonotonicity ??
-    RUNTIME_CFC_DIAL_DEFAULTS.cfcDeclaredMonotonicity,
-});
+): ResolvedCfcDials => {
+  if (
+    options.cfcEnforcementMode !== undefined &&
+    !isCfcEnforcementMode(options.cfcEnforcementMode)
+  ) {
+    throw new Error(
+      `Runtime \`cfcEnforcementMode\` is ` +
+        `${String(options.cfcEnforcementMode)}, not one of ` +
+        CFC_ENFORCEMENT_MODES.join(", "),
+    );
+  }
+  return {
+    cfcEnforcementMode: options.cfcEnforcementMode ??
+      RUNTIME_CFC_DIAL_DEFAULTS.cfcEnforcementMode,
+    cfcFlowLabels: options.cfcFlowLabels ??
+      RUNTIME_CFC_DIAL_DEFAULTS.cfcFlowLabels,
+    cfcWriteFloor: options.cfcWriteFloor ??
+      RUNTIME_CFC_DIAL_DEFAULTS.cfcWriteFloor,
+    cfcTriggerReadGating: options.cfcTriggerReadGating ??
+      RUNTIME_CFC_DIAL_DEFAULTS.cfcTriggerReadGating,
+    cfcDecomposedEnvelopes: options.cfcDecomposedEnvelopes ??
+      RUNTIME_CFC_DIAL_DEFAULTS.cfcDecomposedEnvelopes,
+    cfcPolicyEvaluation: options.cfcPolicyEvaluation ??
+      RUNTIME_CFC_DIAL_DEFAULTS.cfcPolicyEvaluation,
+    cfcLabelMetadataProtection: options.cfcLabelMetadataProtection ??
+      RUNTIME_CFC_DIAL_DEFAULTS.cfcLabelMetadataProtection,
+    cfcDeclaredMonotonicity: options.cfcDeclaredMonotonicity ??
+      RUNTIME_CFC_DIAL_DEFAULTS.cfcDeclaredMonotonicity,
+  };
+};
 
 /** The values of a record, whichever way its provenance was arrived at. */
 const buildReport = (

@@ -54,6 +54,7 @@ import type { CellScope } from "../builder/types.ts";
 import {
   type AttemptedWrite,
   canonicalizeLogicalPath,
+  CFC_ENFORCEMENT_MODES,
   CFC_ENFORCING_STRICTNESS,
   CFC_GRANT_ID_PREFIX,
   type CfcAddress,
@@ -91,6 +92,7 @@ import {
   flowReadExcluded,
   gatedSinkRequestExists,
   type ImplementationIdentity,
+  isCfcEnforcementMode,
   type OrderedWriteAttempt,
   type PolicySnapshot,
   type PostCommitSideEffect,
@@ -648,6 +650,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   }
 
   setCfcEnforcementMode(mode: CfcEnforcementMode): void {
+    // The floor below is a comparison of ranks, and `cfcEnforcementStrictness`
+    // ranks the members of `CFC_ENFORCEMENT_MODES` and nothing else. A name it
+    // cannot rank is refused here, so the comparison always has two ranks to
+    // compare. The surface is public and cell.tx is reachable, so the argument
+    // arrives from code the type checker may never have seen.
+    if (!isCfcEnforcementMode(mode)) {
+      throw new Error(
+        `CFC enforcement mode ${String(mode)} is not one of ` +
+          CFC_ENFORCEMENT_MODES.join(", "),
+      );
+    }
     // Enforcement may be raised but never weakened below the highest enforcing
     // level set on this transaction (audit S3). The control surface is on the
     // public transaction interface and cell.tx is reachable, so this prevents
