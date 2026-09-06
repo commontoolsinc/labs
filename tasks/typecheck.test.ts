@@ -86,19 +86,20 @@ async function excludedByManifest(
     if (text === undefined) continue;
     const manifest = parseJsonc(text) as { exclude?: string[] };
     for (const pattern of manifest.exclude ?? []) {
+      const stripped = pattern.replace(/^\.\//, "");
       // Deno reads a leading `!` as un-excluding what a broader entry took,
       // and `globToRegExp` reads it as a literal character. The mismatch is
       // silent and lands on the shrinking side: the entry never matches, the
       // broader exclusion goes on firing, and a file the checker opens is
-      // counted as excused. Refusing it fails this file instead.
-      if (pattern.startsWith("!")) {
+      // counted as excused. Refusing it fails this file instead. Read after
+      // the prefix strip, so that `./!build/` is refused as `!build/` is.
+      if (stripped.startsWith("!")) {
         throw new Error(
           `${join(directory, "deno.json(c)")} un-excludes ${pattern}, which ` +
             `this check cannot read; teach it the negation or the census is ` +
             `short by whatever the entry restores.`,
         );
       }
-      const stripped = pattern.replace(/^\.\//, "");
       const scoped = directory === "" ? stripped : `${directory}/${stripped}`;
       patterns.push(
         globToRegExp(scoped.endsWith("/") ? `${scoped}**` : scoped, {
@@ -569,6 +570,18 @@ describe("typecheck", () => {
         await Deno.writeTextFile(
           join(root, "deno.jsonc"),
           `{ "workspace": [], "exclude": ["**/build/", "!build/keep.ts"] }`,
+        );
+
+        await expect(excludedByManifest(root, [])).rejects.toThrow(
+          /un-excludes/,
+        );
+
+        // The same entry written with the `./` prefix the loop strips. Read
+        // before the strip, this spelling passes the guard and reaches
+        // `globToRegExp` as a literal.
+        await Deno.writeTextFile(
+          join(root, "deno.jsonc"),
+          `{ "workspace": [], "exclude": ["**/build/", "./!build/keep.ts"] }`,
         );
 
         await expect(excludedByManifest(root, [])).rejects.toThrow(
