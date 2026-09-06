@@ -294,13 +294,15 @@ Mike's call, after S4.
    a board holding topics filed before the namespace, with
    `input link at topics.0.shortName: an unconstrained schema is no longer
    accepted`. That refusal is not about `shortName`, and not about the
-   property's spelling: adding `probeField?: string` to `TopicDemand` and
-   nothing else produces the identical message at `topics.0.probeField`, and so
-   does `probeField?: unknown`. Three properties tried, three refused
-   identically, and the rule is on the stored side: the schema recorded on the
-   retained link to each member is unconstrained at any path the deployed
-   demand does not name, so expect this for a new per-member demand property
-   generally. The flag is
+   property's spelling: two probes, each the pre-graft board with one property
+   added to `TopicDemand` and nothing else changed, were both refused with the
+   identical message at `topics.0.probeField` — `probeField?: string` and
+   `probeField?: unknown` alike. The rule is on the STORED side: the schema
+   recorded on a member's retained link is unconstrained at every path that
+   recorded schema does not name, so a property only the candidate demand names
+   is a narrowing of `true`, which is what
+   `packages/piece/src/schema-compatibility.ts` refuses. Expect it for a new
+   per-member demand property generally. The flag is
    held behind explicit team authorization by `skills/topics/SKILL.md`, so this
    step now carries a decision it did not carry before, and what the forced
    deploy leaves behind is itself unmeasured.

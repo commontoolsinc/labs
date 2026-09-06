@@ -343,105 +343,82 @@ A parent writes its member's result and never its member's argument, so
 while that Topic goes on reading no name. No pattern can close that gap. One
 `cf piece link` per Topic can, and this is that procedure.
 
-Everything below was run against local stores — a `cf space clone` of a board
-whose Topics were filed by the pre-graft pattern, and a second store holding the
-grafted board beside Topics `addTopic` never wired — and the quoted output is
-what came back, with long single-line messages wrapped to fit. Rehearse it the
-same way before the live run: `docs/development/space-clone-rehearsal.md`.
+It was established by a clone rehearsal, and the evidence — every command, its
+output, and the counts and timings behind the claims here — is
+`docs/history/plans/collection-naming-s6-backfill-rehearsal-2026-09-05.md`. Read
+that before deciding anything this procedure says needs deciding.
 
-### The order, and why it is not free
+### The order
 
-1. **The board's source first.** Over a board whose Topics predate the
-   namespace, `setsrc --check` refuses BOTH legs, so the checker does not pick
-   the order for you — the board's refusal is the one the graft can clear:
-
-   ```
-   piece source is incompatible with retained input: input link at topics.0
-   schema is not compatible: input link at topics.0.shortName: an
-   unconstrained schema is no longer accepted
-   ```
-
-   That refusal is not about `shortName`. Adding `probeField?: string` — or
-   `probeField?: unknown` — to `TopicDemand` and nothing else produces the same
-   message at `topics.0.probeField`. Three properties were tried and all three
-   were refused identically, and the rule behind them is on the stored side: the
-   schema recorded on the retained link to each member is unconstrained at any
-   path the deployed demand does not name, and narrowing an unconstrained schema
-   is what `packages/piece/src/schema-compatibility.ts` refuses. So expect it
-   for a new per-member demand property generally, and the board leg needs
-   `--dangerously-allow-incompatible-schema` and therefore the team's explicit
-   authorization. The forced deploy itself is UNREHEARSED — the rehearsal
-   stopped at the refusal rather than waive a proof it had no authorization to
-   waive, so what the flag leaves behind on a real board is still unmeasured.
-   `deno task pattern-compat` and `deno task pattern-vintage` do not see this:
-   they judge a pattern against its own baselines and its own stored documents,
-   never against the schema recorded on a link into a sibling piece. Run
-   `setsrc --check` against the deployment itself and read what it says before
-   scheduling the window.
-
-2. **Then each Topic's source — and this step is BLOCKED as written.** Moving
-   the board first clears the Topic leg's `mentionable[].shortName` refusal, and
-   what is left underneath is #6968: a Topic wired to a board's `mentionable`
-   was refused every source tried, the bytes it is already running included.
+1. **The board's source first**, and it needs
+   `--dangerously-allow-incompatible-schema`. `setsrc --check` refuses it over a
+   board holding Topics filed before the namespace:
 
    ```
-   piece source is incompatible with retained input: input link at mentionable
-   schema is not compatible: input link at mentionable[].piece: newly required
-   argument field has no default
+   input link at topics.0.shortName: an unconstrained schema is no longer accepted
+   ```
+
+   That is not about `shortName` and not about the property's spelling. The
+   schema recorded on a member's retained link is unconstrained at every path
+   that recorded schema does not name, so a property only the CANDIDATE demand
+   names is a narrowing of `true` — which is what
+   `packages/piece/src/schema-compatibility.ts` refuses. Expect it for a new
+   per-member demand property generally; the record has the probes.
+
+   `deno task pattern-compat` and `deno task pattern-vintage` do not see this.
+   They judge a pattern against its own baselines and its own stored documents,
+   never against the schema recorded on a link into a sibling piece, so both can
+   be green while the deploy is refused. Run `setsrc --check` against the
+   deployment itself before scheduling a window, and treat the flag as needing
+   team authorization under this skill's rule above.
+
+2. **Then each Topic's source — and this step is BLOCKED.** Moving the board
+   first clears the Topic leg's own `mentionable[].shortName` refusal, and what
+   is left underneath is #6968:
+
+   ```
+   input link at mentionable[].piece: newly required argument field has no default
    ```
 
    `mentionable` is declared `Writable` on the Topic, so the proof runs the
    write-back direction too and demands that the Topic's projection accept
-   everything the board's row publishes. Measured identically on a clean control
-   piece that was never touched, so it is a property of the wiring, not of any
-   one migration — and it is not downstream of step 1's schema question.
-   Clearing that one does not clear this.
+   everything the board's row publishes. Every source tried was refused, the
+   bytes the Topic is already running included, so `--check` gives no signal on
+   any Topic update while that declaration stands. It is not downstream of step
+   1's schema question; clearing that does not clear this.
 
-   **What you lose by skipping it, measured.** Less than the step's position
-   suggests. A Topic still running pre-graft source, sitting on a grafted board:
-
-   - is named by `backfillNames` like any other member;
-   - answers to `cf cell get /top/4 title` with its own title, so the number
-     works as a citation;
-   - reads back as an ordinary `index` row, with its title and no `shortName`,
-     and does not empty the array around it.
-
-   What it does not have is `shortName` — no badge on the Topic, no number on
-   its index row, and `cf cell get --cell "$TOPIC" shortName` reports the
-   property does not exist rather than failing to materialize. **So step 2 buys
-   the number's visibility on the member, and nothing else.** A board that stops
-   after step 3 is a coherent end state, not a half-migration, and step 4's
-   refusal on such a Topic (first trap below) is that state being enforced
+   **Skipping it leaves a usable board.** A Topic still on pre-graft source is
+   named by `backfillNames` like any other member, answers to
+   `cf cell get /top/<n> title`, and reads back as an ordinary `index` row with
+   no `shortName` and no damage to the array around it. So naming, `/top/<n>`
+   addressing and index membership all survive the step being skipped, and
+   `shortName` — the badge, and the number on the index row — is what is absent.
+   That bounds what skipping costs from BELOW, not from above: no run forced a
+   Topic update, so what else a completed one would change is not known, and the
+   record says so. Step 4's refusal on such a Topic is this state being enforced
    rather than an error.
 
-   **If you must have it anyway**, the only exit the CLI offers is
-   `--dangerously-allow-incompatible-schema`, whose help covers exactly this
-   proof: "Replace the source even when pattern or retained-link schema
+   **If you need the badge anyway**, the only exit the CLI offers is
+   `--dangerously-allow-incompatible-schema`, whose `setsrc` help covers exactly
+   this proof: "Replace the source even when pattern or retained-link schema
    compatibility cannot be proven, or when the current pattern cannot be loaded
-   at all." Three things before taking it, and the first is the one this
-   document cannot answer for you:
+   at all." It is a second authorization decision, separate from step 1's and
+   for an unrelated reason, and two things bear on it. No run in the record
+   forced a Topic update, so that the flag succeeds is read off help text rather
+   than measured. And a source that resolves #6968 — declaring `mentionable`
+   read-only, if nothing writes through it — need not meet this proof at all, so
+   the block is a property of the pattern as it stands rather than a permanent
+   one.
 
-   - **It was not rehearsed.** No run in this procedure's evidence forced a
-     Topic update. That the flag would succeed is read off its help text, not
-     measured, and what a forced Topic update leaves behind is unknown.
-   - **It reaches every Topic source update, not just this one — as the pattern
-     stands today.** The refusal is on the Topic's own bytes: a byte-identical
-     re-source is refused too, which is what was measured, so while
-     `mentionable` is declared `Writable` no Topic update carries a
-     compatibility signal and the pre-flight is already gone whether or not
-     anyone forces anything. That is a property of the pattern, not a permanent
-     one — a future source that resolves #6968 need not meet this proof at all,
-     and no such source was tested here. Meanwhile the 2026-08-28 record
-     establishes that a Topic source update is one-way once taken.
-   - **It needs the same team authorization step 1 needs**, for an unrelated
-     reason. Two separate decisions, not one.
+3. **`backfillNames` once**, through the board. It returns the names it wrote,
+   in filing order, and is idempotent: a second run writes nothing and returns
+   an empty list.
 
-3. **`backfillNames` once**, through the board.
 4. **`cf piece link` once per Topic that `addTopic` did not wire** — that is,
    per Topic that took step 2. A Topic that skipped it has no `boardNames` input
    to bind, and the bind says so.
 
-### The two commands, and what they return
+### The two commands
 
 ```bash
 cf piece call --cell "$TOPICS_BOARD" --invocation '<id>' backfillNames \
@@ -449,43 +426,34 @@ cf piece call --cell "$TOPICS_BOARD" --invocation '<id>' backfillNames \
 cf piece link "$TOPICS_BOARD/namesTable" "$TOPIC/boardNames"
 ```
 
-```
-{
-  "invocation": "backfill-1",
-  "status": "settled",
-  "receipt": "/of:fid1:jN3t1AzX5Uq_R2Tj-j2zlchglDmyIak4PTytJ9YBGNw",
-  "result": {
-    "assigned": [
-      "2",
-      "3"
-    ]
-  }
-}
-Linked fid1:PsEKqxGfhAaFgHbDMukzSr7_8qF3wISOsKPL0BSsoXs/namesTable to fid1:0SpKr2JWj939XCwSEX4H6uyXA8fzx5HILsNBCPLiiFQ/boardNames
-```
-
-After the backfill and before the bind, the board's map holds the name and the
-Topic does not — this is the whole gap, in one read each:
+Between them is the gap this procedure exists for: the board's `names` map and
+`namesTable` hold the name, and the Topic does not.
 
 ```
-$ cf cell get --cell "$TOPICS_BOARD" names --step
-{
-  "1": {},
-  "2": {},
-  "3": {}
-}
 $ cf cell get --cell "$TOPIC" shortName --step
 Cannot read piece result at "shortName": stored data is present, but its schema
 could not resolve all required values. The piece was stepped, but the required
 value still did not materialize.
 ```
 
-After the bind the same read answers `"2"`, the board's `index` row for that
-Topic carries `"shortName": "2"`, and `cf cell get /top/2 title` returns its
-title. A Topic left unbound in the same board keeps reporting the message above,
-which is how a half-finished run reads: the board serves every Topic either way,
-named ones beside unnamed ones, and the repair is to bind the rest. Nothing has
-to be undone.
+After the bind that read answers with the number, the board's `index` row for
+that Topic carries it as `shortName`, and `cf cell get /top/<n> title` returns
+its title. A Topic left unbound keeps reporting the message above, which is what
+a half-finished run looks like: the board serves every Topic either way, named
+beside unnamed, and the repair is to bind the rest. Nothing has to be undone.
+
+The bind is idempotent — repeating it with the same two endpoints changes
+nothing and commits nothing. Note that `wrote to space` prints either way, so it
+is not evidence that anything was written.
+
+**Read twice before concluding a bind failed.** The first read after a backfill
+can report no name for a correctly wired Topic, and the next identical command
+answers with the number, with no write in between.
+
+**Cost is one command per Topic**, serially. On a board the size of the Estuary
+one that is the bulk-CLI shape
+`docs/history/topics-board-migration-2026-08-28.md` found unreliable from a
+laptop; run it from somewhere that record vindicates.
 
 ### Audit which Topics still need it
 
@@ -504,39 +472,10 @@ Audit only Topics whose source has already been migrated. This read answers for
 the argument document, not for what the pattern can see, so a Topic that was
 force-bound before its source moved — see the first trap below — reads as bound
 here while its name never appears anywhere. On a board migrated in the order
-above that case cannot arise; if the order slipped, the honest check is that the
-Topic publishes `shortName` at all.
+above that case cannot arise; if the order slipped, the honest check is whether
+the Topic publishes `shortName` at all.
 
-### What the rehearsal measured
-
-- **Idempotent, twice over.** A second `backfillNames` returns
-  `{"assigned": []}` and writes no key. A second `cf piece link` with the same
-  two endpoints prints `Linked …` and commits nothing — measured with
-  `cf inspect churn --bucket 5` over the window, which reported
-  `no timed commits in window`. `wrote to space` is not evidence of a commit.
-- **Cost is one commit and one revision per Topic**, on the same measurement,
-  plus a CLI process per Topic. For a board of ~125 that is ~125 sequential
-  invocations, which is the shape the 2026-08-28 run found unreliable from a
-  laptop — see `docs/history/topics-board-migration-2026-08-28.md`.
-- **Binding before the backfill works**, but the first read afterwards can still
-  report no name. A Topic bound before it was named read the failure message
-  above immediately after `backfillNames` returned `["4","5"]`, and read `"5"`
-  on the next identical command with no write in between. Read twice before
-  concluding a bind failed.
-- **`/top/<n>` resolves without the bind.** Address resolution follows the
-  board's map, so a backfilled Topic answers to `cf cell get /top/3 title` while
-  its own `shortName` is still absent. `/top/999` answers
-  `no member 999 in top`.
-- **`addTopic` keeps wiring its own children afterwards.** A Topic filed after
-  the operator step came back with `"name": "6"` and its own table; the step is
-  one-time, not a recurring chore.
-- **`setsrc --check` is not read-only against the store** (#6964). Isolated on a
-  reset clone: serving it and stopping again leaves `content unchanged`, and
-  then ONE `--check` — one that was refused, replacing no source — verifies
-  `removed 0 · changed 0 · added 18`, `commits 170 → 172`. Nothing authored
-  moved, but the clone is spent and a second pass needs `cf space reset`.
-
-### Two traps
+### Traps
 
 **Never pass `--allow-non-existing` to the bind** (#6965). On a Topic whose
 pattern has no `boardNames` input — one that has not taken step 2, whether
@@ -544,7 +483,8 @@ because the order slipped or because step 2 was deliberately skipped — the bin
 refuses, and that refusal is the guard that keeps step 4 behind step 2:
 
 ```
-Target path "boardNames" does not exist on piece fid1:6hFfedg…
+Target path "boardNames" does not exist on piece fid1:…
+
 Use --allow-non-existing to link anyway.
 ```
 
@@ -560,6 +500,10 @@ match type array`
 that a clean control piece does not produce. The forced bind poisons the Topic
 against its own migration.
 
-**Binding a piece the board does not hold does nothing wrong and nothing
-useful.** It succeeds, and the Topic reads no name, because the table addresses
+**`setsrc --check` is not read-only against the store** (#6964). It writes, even
+when it refuses and replaces nothing, so a rehearsal clone is spent after one
+and a second pass needs `cf space reset`. Nothing authored moves.
+
+**Binding a piece the board does not hold** does nothing wrong and nothing
+useful: it succeeds, and the Topic reads no name, because the table addresses
 its rows by member identity and holds no row for a non-member.
