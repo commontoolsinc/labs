@@ -96,11 +96,18 @@ export interface TopicDemand extends TopicSummary {
    * it into the topic's universe row, so `#42` matches without expanding a
    * topic.
    *
-   * OPTIONAL rather than defaulted, and the spelling is what keeps this demand
-   * applicable over a board deployed before the namespace: a defaulted
-   * property moves the demand's defaults below an array constraint the
-   * compatibility proof cannot show stable under default insertion, while an
-   * optional one simply tolerates a topic that publishes none. A topic whose
+   * OPTIONAL rather than defaulted, which is a fact about the compatibility
+   * proof: a defaulted property moves the demand's defaults below an array
+   * constraint the proof cannot show stable under default insertion, while an
+   * optional one simply tolerates a topic that publishes none.
+   *
+   * The spelling is not what makes the demand deployable, and no spelling is.
+   * Adding any property to a per-member demand is refused over a board holding
+   * members that do not publish it, because the schema recorded on the link to
+   * each member is unconstrained at every path that schema does not name, and
+   * narrowing an unconstrained schema is what
+   * `packages/piece/src/schema-compatibility.ts` refuses. That bound belongs to
+   * the checker rather than to this property. A topic whose
    * lookup has produced no value — one filed a moment ago, or one from before
    * the board numbered anything — is absent here rather than blank, and every
    * consumer treats the two the same. */
@@ -197,8 +204,7 @@ export interface TopicIndexRow {
   lastActivityAt: number | Default<0> | undefined;
 
   /** The board's name for the topic. Optional rather than defaulted, unlike
-   * the two above, for the reason `TopicDemand.shortName` states: a default
-   * here is what makes the row demand inapplicable over a deployed board. */
+   * the two above, for the reason `TopicDemand.shortName` states. */
   shortName?: string;
 }
 
@@ -467,15 +473,17 @@ export const submitProfileTopic = handler<void, {
 
   /** The mention universe, declared at the child's own demand — the three
    * strings a universe entry carries — so the board's index rows and a plain
-   * list of pieces both satisfy it. `Writable` for the factory-boundary
-   * reason `boardCrossrefs` states, and nothing here writes an entry. */
+   * list of pieces both satisfy it. `Writable` for the handler-state reason
+   * `boardCrossrefs` states, and nothing here writes an entry. */
   mentionable: Writable<TopicMentionable[] | Default<[]>>;
 
-  /** `Writable` only because that is what the factory boundary accepts: the
-   * input this is handed straight to declares `ReadonlyCell`, and a
-   * `ReadonlyCell` held in handler state is not assignable to it — handler
-   * state keeps a cell whole while `StripCell` unwraps the input's. Nothing
-   * here writes a row. */
+  /** `Writable` because a `Cell` is what survives handler state: `HandlerState`
+   * passes one through whole and recursively maps everything else, and a
+   * `ReadonlyCell` is not a `Cell`, so it arrives as a plain readonly object
+   * that no longer satisfies the input this is handed straight to. The input
+   * is not what refuses it — it declares `ReadonlyCell`, and an intact
+   * `ReadonlyCell` and the plain rows `StripCell` unwraps it to both fit.
+   * Nothing here writes a row. */
   boardCrossrefs: Writable<TopicCrossrefRow[] | Default<[]>>;
 
   /** The names table, handed to the composed topic for the same reason and on

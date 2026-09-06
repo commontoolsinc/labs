@@ -365,6 +365,7 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20260831T204059Z-2Fi9qBnr1mK4_p2J",
       "20260901T191235Z-4uo6zrdZRahgZ98O",
       "20260905T021503Z-Y-lXQUSup41JBSeM",
+      "20260906T050633Z-d6Et9xqrHqjlhlzA",
     ],
     // One path, and only in the argument role: the element type is untouched,
     // so `asCell` at the mention universe's own node is the whole break.

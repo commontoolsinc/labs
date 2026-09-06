@@ -42,25 +42,36 @@ argument field has no default
 ```
 
 Declaring the narrower cell drops the write-back leg and leaves the ordinary
-one-direction check, which passes. It is also the honest declaration: the index
-is the board's derivation, and the survey behind this decision found no write
-landing on it. What that survey covered, so a later reader knows its bound:
+one-direction check, which passes.
 
-- `topic.tsx` holds no `.set`, `.push` or `.update` on `mentionable`. Its one
-  consumer is the `$mentionable` binding on `cf-code-editor`.
-- Every use of the handle inside `cf-code-editor` is a read — `get`, `key`,
-  `id`, `resolveAsCell`, `subscribe`. The one write in that component,
-  `pieceCell.key("title").set(...)` under `_updatePieceName`, reaches the piece
-  through a cell the row's `piece` address resolved to; for an index row the
-  raw sub-cell is withheld and the lookup answers "not found" instead.
-- The `mentionable.push(...)` that some other patterns run is driven by an
-  `onbacklink-create` binding, and a topic binds no such event.
+## What the declaration does not do
 
-The survey does not bound the runtime: neither the client handle nor the
-runner's `set()` gates on the cell's capability, so the marker documents the
-ownership rather than enforcing it. Where it does bite is a piece operation
-traversing the path — a whole-document apply and a terminal link-bind both
-return before that check, so the operator's `cf piece link` rewire is unaffected.
+It does not stop a write, and the decision rests on that being measured rather
+than assumed. Two holder patterns differing in nothing but `Writable` against
+`ReadonlyCell` were deployed over one list of member pieces — the "plain list
+of the pieces themselves" shape — each rendering a `cf-code-editor` bound to
+that list. In a real browser against a real store, the write
+`cf-code-editor._updatePieceName` performs was run through each editor's own
+handle, by both routes the component takes: the raw sub-cell
+(`handle.key(i).key("title").set(...)`) and the cell `resolveAsCell()` follows
+the entry's link to. All four attempts threw nothing, re-rendered the member's
+title, and committed — the store read back the written titles afterwards. The
+two declarations were indistinguishable.
+
+So the marker states the contract and documents ownership; it is not a runtime
+gate, and the editor's name write-back keeps working for a board whose universe
+is the raw member list. Where the marker does bite is a piece operation
+traversing the path; a whole-document apply and a terminal link-bind both return
+before that check, so the operator's `cf piece link` rewire is unaffected.
+
+What no write reaches, in any shape, is the index's own contents. `topic.tsx`
+holds no `.set`, `.push` or `.update` on `mentionable`; its one consumer is the
+`$mentionable` binding. The editor's write lands in a member's document, not in
+the array of links. Where the universe IS the derived index, the raw sub-cell is
+withheld — `findPieceById` answers "not found" for a row it has not resolved —
+so the write reaches the topic behind the row. And the `mentionable.push(...)`
+some other patterns run is driven by an `onbacklink-create` binding, which a
+topic does not bind.
 
 The alternative was to declare `piece` on the topic's projection, at the cost of
 a demand naming a field the topic never reads, which is the cost the narrow
