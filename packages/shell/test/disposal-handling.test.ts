@@ -1,12 +1,15 @@
+/**
+ * Shell components log when a runtime operation fails. When the failure is a
+ * disposal race (logout, runtime swap) the operation was canceled, not a
+ * genuine failure, so the log is suppressed via `this.rt?.signal.aborted`.
+ * These tests drive the debugger view's handlers against both cases.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import type { DebuggerController } from "../src/lib/debugger-controller.ts";
 import { XDebuggerView } from "../src/views/DebuggerView.ts";
-
-// Shell components log when a runtime operation fails. When the failure is a
-// disposal race (logout, runtime swap) the operation was cancelled, not a
-// genuine failure, so the log is suppressed via `this.rt?.signal.aborted`.
 
 function captureConsoleError(): { calls: unknown[][]; restore(): void } {
   const calls: unknown[][] = [];
