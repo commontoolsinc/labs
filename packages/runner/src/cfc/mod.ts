@@ -34,6 +34,7 @@ export {
   cfcLabelViewForDereferenceTraces,
   cfcLabelViewForResolvedCellWithStatus,
   cfcLabelViewFromMetadata,
+  cfcLabelViewSymbol,
   cloneCfcLabelView,
   getCarriedCfcLabelView,
   mergeCfcLabelViews,

@@ -15,9 +15,11 @@ import { assertEquals } from "@std/assert";
 import { Identity } from "@commonfabric/identity";
 import { Runtime, UI } from "@commonfabric/runner";
 import type { Cell } from "@commonfabric/runner";
-import type { CfcLabelView } from "@commonfabric/runner/cfc";
+import {
+  type CfcLabelView,
+  cfcLabelViewSymbol,
+} from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { cfcLabelViewSymbol } from "../../runner/src/cfc/label-view-state.ts";
 
 import type { VDomOp } from "../src/vdom-ops.ts";
 import { WorkerReconciler } from "../src/worker/reconciler.ts";
@@ -97,9 +99,10 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
 
   // Define MockCell extending CellImpl
   class MockCell extends (CellImplConstructor as any) {
+    value: any;
     #subscribers = new Set<(value: any) => void>();
 
-    constructor(public value: any) {
+    constructor(value: any) {
       // Pass dummy args to super to satisfy it
       // CellImpl(runtime, tx, link, synced, causeContainer, kind)
       super(runtime, undefined, undefined, false, undefined, "cell");
@@ -126,6 +129,12 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
 
     isStream() {
       return false;
+    }
+
+    // A mock carries no metadata, and the inherited read throws on a
+    // link-less cell.
+    getMetaRaw(): undefined {
+      return undefined;
     }
 
     // A mock names no link, so it resolves to itself; a step that needs
@@ -2132,8 +2141,6 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         path: [],
         scope: "space",
       });
-      uiShapedDataCell.resolveAsCell = () => uiShapedDataCell;
-      uiShapedDataCell.getMetaRaw = () => undefined;
       const rootCell = new MockCell({
         type: "vnode",
         name: "div",
