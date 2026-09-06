@@ -21,31 +21,29 @@
  * exactly there.
  */
 
-import {
-  LINK_MARKER_KEY,
-  parseCellSelectionOptions,
-} from "@commonfabric/cli/lib/cell-selection";
-import { normalizeLLMFriendlyRef } from "@commonfabric/cli/lib/llm-friendly-ref";
-import {
-  getCellValue,
-  type PieceConfig,
-  type SpaceConfig,
-} from "@commonfabric/cli/lib/piece";
-import { projectWishValue, readWish } from "@commonfabric/cli/lib/wish";
 import { isDID } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 
-import type { HeldConnection } from "./connection.ts";
+import {
+  LINK_MARKER_KEY,
+  parseCellSelectionOptions,
+} from "../cell-selection.ts";
+import { normalizeLLMFriendlyRef } from "../llm-friendly-ref.ts";
+import { getCellValue, type PieceConfig, type SpaceConfig } from "../piece.ts";
+import { projectWishValue, readWish } from "../wish.ts";
+import { connectionEntries, type HeldConnection } from "./connection.ts";
 import { splitLine } from "./line.ts";
 import { type ListingDeps, listPlace, renderListing } from "./listing.ts";
 import {
   CurrentPlace,
   type FacetPosition,
+  messageOf,
   type Move,
   type Place,
   type ResolvedTarget,
   type SpaceRootPosition,
 } from "./place.ts";
+import { renderRecord } from "./record.ts";
 
 /**
  * What `--select` writes to ask a read for the address of what it resolved,
@@ -185,10 +183,10 @@ async function get(
     return await read(shuttle, shuttle.place.place, false, deps);
   }
   const aim = shuttle.place.aim(operand);
-  const where = await reading(shuttle, aim.move, deps);
-  return where.kind === "refused"
-    ? where
-    : await read(shuttle, where.place, aim.input, deps);
+  const at = await reading(shuttle, aim.move, deps);
+  return at.kind === "refused"
+    ? at
+    : await read(shuttle, at.place, aim.input, deps);
 }
 
 /** Lists what stands where shuttle stands. */
@@ -250,6 +248,30 @@ async function wish(
 }
 
 /**
+ * Returns the whole ambient record: what this process connects as, and where
+ * it stands.
+ *
+ * It prints the record `pwd` prints, so the two share one format
+ * (`record.ts`) and `pwd` is this minus the connection's dimensions. A
+ * milestone that adds a dimension to the record adds it here.
+ *
+ * Nothing here reads. Every dimension is a value this process is already
+ * holding, so a shuttle whose connection will not open still says what it was
+ * launched as and where it stands — which is what a verb for saying where you
+ * are should do.
+ */
+function where(shuttle: Shuttle, operands: readonly string[]): Outcome {
+  const tooMany = takesNothing("where", operands);
+  return tooMany ?? {
+    kind: "text",
+    text: renderRecord([
+      ...connectionEntries(shuttle.config),
+      ...shuttle.place.entries(),
+    ]),
+  };
+}
+
+/**
  * The verbs, by the word that names one. It is the one record of what a line
  * may say, so the refusal listing them lists exactly what the dispatch takes.
  *
@@ -265,6 +287,7 @@ const VERBS: ReadonlyMap<string, Verb> = new Map<string, Verb>([
   ["get", get],
   ["ls", ls],
   ["pwd", pwd],
+  ["where", where],
   ["wish", wish],
 ]);
 
@@ -531,20 +554,21 @@ async function connectedSpace(
   name: string,
 ): Promise<Named> {
   const pieces = await shuttle.connection.pieces();
-  const connected = pieces.getSpaceName();
-  if (connected === undefined) {
+  const connected = pieces.getSpaceName() ?? "";
+  const asked = name;
+  if (pieces.getSpaceName() === undefined) {
     return refuse(
       `This shuttle names its space by DID, so it cannot say whether ` +
-        `\`${name}\` is that space. One connection serves one space, and a ` +
-        `shuttle started against \`${name}\` by name is what reaches that ` +
+        `\`${asked}\` is that space. One connection serves one space, and a ` +
+        `shuttle started against \`${asked}\` by name is what reaches that ` +
         `cell.`,
     );
   }
-  if (connected !== name) {
+  if (pieces.getSpaceName() !== name) {
     return refuse(
-      `\`${name}\` is not the space this shuttle is connected to, which is ` +
+      `\`${asked}\` is not the space this shuttle is connected to, which is ` +
         `\`${connected}\`. One connection serves one space, so reaching ` +
-        `that cell means a shuttle started against \`${name}\`.`,
+        `that cell means a shuttle started against \`${asked}\`.`,
     );
   }
   return { kind: "connected", space: pieces.getSpace() };
@@ -594,12 +618,16 @@ function listed(words: readonly string[]): string {
   return marked.length === 0 ? `${last}` : `${marked.join(", ")}, and ${last}`;
 }
 
-/** Helper for the verbs, which builds a refusal carrying `reason`. */
+/**
+ * Helper for the verbs, which builds a refusal carrying `reason`.
+ *
+ * A reason is free to hold text the fabric wrote — a wish's error, an address
+ * a target resolved to, the space that address named — none of which passed a
+ * door. Holding it to the class a terminal acts on is the prompt's, at the one
+ * point a reason becomes a line (`report`, `prompt.ts`), because a refusal
+ * built as a literal rather than through here is still a refusal and reaches
+ * the same place.
+ */
 function refuse(reason: string): Refusal {
   return { kind: "refused", reason };
-}
-
-/** Helper for the verbs, which reads the message off a thrown value. */
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
