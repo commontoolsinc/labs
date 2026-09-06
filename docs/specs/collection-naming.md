@@ -347,9 +347,10 @@ name in its segments, so nothing is lost between them.
 ### The bare form
 
 `#42` names no collection. It is relative, and what it is relative *to* is the
-rendering context — the collection a reader is reading through. It is not a
-property of the item the text sits in: an item may be a member of several
-collections at once, so the item cannot settle the question and does not try.
+rendering context — the collection a reader is reading through. The item the
+text sits in does not settle it: an item may be a member of several collections
+at once, so its own membership says nothing about which collection a bare form
+addresses.
 
 A context reading through exactly one collection gives the bare form its
 meaning. A context that does not — a view holding several collections, or any
@@ -384,7 +385,11 @@ choosing is not a hidden rule, and nothing is at risk in the asking, because
 canonicalizing on write means an ambiguous input never becomes a stored
 reference.
 
-A renderer may prefer the compact form for a collection that offers one.
+A renderer may prefer the compact form for a collection that offers one. None
+offers it yet, so the flag a collection declares eligibility with — `compact` —
+is reserved: setting it states that this collection's member names hold no
+hyphen, and nothing reads the statement
+([#6986](https://github.com/commontoolsinc/labs/issues/6986)).
 
 ## Rendering
 
@@ -418,6 +423,28 @@ the collection that holds the member, which is the one context where it is also
 the shortest spelling that round trips. What keeps a reference safe once it
 leaves that context is the portable mode below, not a restriction on how short
 an in-place spelling may be.
+
+### The name a member publishes
+
+A member may publish a name of its own, so that a consumer holding the member
+has one without a lookup. It publishes **at most one**, and it is the name of
+the collection that created it. A member that several collections name carries
+nothing from the others, and a consumer wanting what one of those calls it asks
+that collection's reverse resolution instead of reading the member.
+
+A published name is a spelling and not a resolution. It says what one collection
+calls the member; it settles nothing about which collection a reference
+addresses, which stays the reading context's question.
+
+A renderer that shows a published name in place of a round trip takes that limit
+on, and one does. The editor's mention pill shows whatever name a mention's
+destination publishes — whichever collection assigned it, and whatever
+collection the reader is reading through — so a destination named by another
+collection contributes a number that reads as this one's
+([#6985](https://github.com/commontoolsinc/labs/issues/6985)). The round trip
+above is what removes it: take the name from the destination's row in the
+collection the reader is reading through, found by identity, and show none when
+there is no such row.
 
 ### Two modes, chosen by destination
 
@@ -481,28 +508,42 @@ one impossible by accident and detectable when deliberate.
 - The binding naming a collection is the one name still exposed, and it fails
   loudly:
   every reference through it breaks at once, and one write repairs it.
-- A collection stores the name it declares, so a resolver can verify that the
-  binding and the target agree and report a mismatch.
+
+A binding repointed to a target that resolves too is the case that does not fail
+loudly, and nothing here detects it. A collection declaring the name it answers
+to is what would, and that is open below rather than built.
 
 ## Implementation road
 
-Each step is usable on its own, and the order is load-bearing.
+Each step is usable on its own, and where one rests on another the step says so.
 
 **1. Restructure the reverse map.** A piece carries one single-valued `slug`
 entry in its metadata, written by `setSlugLink` (`packages/piece/src/slugs.ts`)
 and read by `handlePieceGetSlug`
-(`packages/runtime-client/backends/runtime-processor.ts`); the shell rewrites a
-visited identity URL to that name. One slot cannot hold both a member name and a
-space-level name, so the canonical URL becomes whichever was written last. Two
-further gaps were to close here, and one of them has closed ahead of this
-step: an assignment clears the `slug` entry from the holder it takes a name
-from, in the transaction that writes the new redirect, so a retarget no longer
-leaves a document claiming a name it has lost (step 2). The other remains —
-`setPieceSlug` writes target metadata only for piece roots, so a
-collection-targeted name has no reverse entry at all. The map needs a
-structured form that distinguishes the two and designates one as canonical.
-**This is a prerequisite: giving collections member names before it lands makes
-URL rewriting nondeterministic.**
+(`packages/runtime-client/src/backends/runtime-processor.ts`); the shell
+rewrites a visited identity URL to that name. One slot cannot hold both a member
+name and a space-level name, so a map carrying both would make the canonical URL
+whichever was written last. Two further gaps were to close here, and one of them
+has closed ahead of this step: an assignment clears the `slug` entry from the
+holder it takes a name from, in the transaction that writes the new redirect, so
+a retarget no longer leaves a document claiming a name it has lost (step 2). The
+other remains — `setPieceSlug` writes target metadata only for piece roots, so a
+collection-targeted name has no reverse entry at all. The map needs a structured
+form that distinguishes the two and designates one as canonical.
+
+**This step is deferred, and what the deferral accepts is stated here rather
+than left to be found.** A collection's own member names write nothing into the
+entry: a namespace the collection owns lives in a cell of the collection, and
+naming a member stamps no metadata on any piece. What still reaches the entry is
+a space-level name whose path selects a member — `cf piece set-slug two /top/2`
+resolves member `2` and stamps that member's root with `two`
+(`packages/cli/test/setPieceSlug.test.ts`, "names the member a slug's path
+selects, and stamps that member with the name"). Such a member answers to
+`<space>/two` and to `<space>/top/2` at once, and a visit by identity is
+rewritten to the first, because that single entry is the whole of the reverse
+map and nothing writes a member form into it. So a member may carry one
+space-level name, and the shell prefers it over the member form, until the map
+distinguishes the two kinds of name and designates one as canonical.
 
 **2. Make name assignment refuse by default.** Two halves, and only the first
 has landed.
@@ -678,6 +719,18 @@ publishes one — `NamingDeclaration` in
 `packages/patterns/collection-naming/naming.ts`, ruled 2026-09-03 in
 `docs/plans/collection-naming-topics.md` (decision 7) — and whether that shape
 becomes the standard every collection declares is what remains open.
+
+**Whether a collection's declaration is checked against the name it is reached
+through.** A declaration carries a slot for the collection's own name — `name`
+in `NamingDeclaration` (`packages/patterns/collection-naming/naming.ts`) — and a
+resolver reading it could verify that a binding and its target agree and report
+a mismatch. Nothing reads the declaration: no collection sets `name`, no
+resolver compares one, and member resolution
+(`packages/runner/src/slug-resolution.ts`) is a map lookup that consults neither
+the declared grammar nor the policy. Making one consumer real is
+[#6986](https://github.com/commontoolsinc/labs/issues/6986), whose natural first
+consumer is that check, with a name assigned onto a collection written into the
+declaration.
 
 **Whether a collection accepting names from people** reuses the space-level
 claim path or needs its own.

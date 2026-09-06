@@ -1,13 +1,15 @@
 /**
  * Pattern tests for the exemplar board and its item: allocation on create,
  * density, a name never reused, a name kept whatever happens to its item, the
- * backfill and its idempotence, index rows that are the members and the
- * default an unnamed member's `shortName` reads as, the mention universe and
- * the name each of its rows carries, the item reading its own name out of the
- * board's table, the declaration, the bound on what a read of the namespace or
- * the universe expands, and the rejections. Every rejection here is a thrown
- * verb, so the runtime errors are required, and the count is exact: a guard
- * quietly reverting to a silent return fails the suite.
+ * backfill, its idempotence, a backfilled name following its member when the
+ * list shifts under it and only a member taking a name, index rows that
+ * are the members and the absence an unnamed member's `shortName` reads as,
+ * the mention universe and the name each of its rows carries, the item reading
+ * its own name out of the board's table, the declaration, the bound on what a
+ * read of the namespace or the universe expands, and the rejections. Every
+ * rejection here is a thrown verb, so the runtime errors are required, and the
+ * count is exact: a guard quietly reverting to a silent return fails the
+ * suite.
  *
  * A property worth knowing before adding another guard test here: a guard that
  * PREVENTS a write can only be caught where the value it would have written
@@ -358,18 +360,22 @@ export default pattern(() => {
       Item({ title: "Older two", createdAt: 2, boardNames: legacy.namesTable }),
     );
   });
-  // An unnamed member's row reads its name as the default, so the board
-  // reads whole before anything names it.
-  const assert_unnamed_rows_read_the_default = assert(() =>
+  // An unnamed member's row carries no name at all, and the row beside it
+  // still reads its title, which is the property the optional spelling is
+  // for: one absent name does not take the array down with it.
+  const assert_unnamed_rows_carry_no_name = assert(() =>
     legacy.itemCount === 2 &&
     (legacy.index ?? []).length === 2 &&
-    legacy.index?.[0]?.shortName === "" &&
-    legacy.index?.[1]?.shortName === "" &&
+    legacy.index?.[0]?.shortName === undefined &&
+    legacy.index?.[1]?.shortName === undefined &&
     legacy.index?.[1]?.title === "Older two" &&
     (legacy.namesTable ?? []).length === 0
   );
-  // A universe row for a member the board has not named carries the empty
-  // name, which is a row no `#42` query matches.
+  // A universe row for the same member carries the EMPTY name rather than
+  // no name, and the difference is not an inconsistency: a universe row is a
+  // copy `mentionableRowsOf` coalesces as it builds, while an index row IS
+  // the member and simply has whatever the member published. Either way it
+  // is a row no `#42` query matches.
   const assert_unnamed_universe_rows_have_no_name = assert(() =>
     (legacy.mentionable ?? []).length === 2 &&
     legacy.mentionable?.[0]?.[NAME] === "Older one" &&
@@ -423,8 +429,8 @@ export default pattern(() => {
     legacy.addItem.send({ title: "Named by create", agentName: "Sol" });
   });
   // And one that stands for a member the link-bind never reached. Its row
-  // keeps reading the default however the map names it — the cost the README
-  // states — while the name itself is real, and `namesTable` is where it is.
+  // carries no name however the map names it — the cost the README states —
+  // while the name itself is real, and `namesTable` is where it is.
   const action_file_a_late_unnamed = action(() => {
     legacyItems.push(Item({ title: "Older three", createdAt: 3 }));
   });
@@ -435,15 +441,18 @@ export default pattern(() => {
     legacy.itemCount === 4 &&
     legacy.index?.[2]?.shortName === "3" &&
     legacy.index?.[2]?.title === "Named by create" &&
-    legacy.index?.[3]?.shortName === "" &&
+    legacy.index?.[3]?.shortName === undefined &&
     legacy.index?.[3]?.title === "Older three" &&
     nameOf(legacyItems.key(3), legacy.namesTable ?? []) === "4" &&
     Object.keys((legacy.names ?? {}) as NamesMap).join(",") === "1,2,3,4"
   );
-  // The universe reads an unwired member the way its index row does: blank,
-  // however the namespace names it. Both take the member's own `shortName`,
-  // so one derivation gives one answer, and a caller that needs to tell a
-  // missing bind from a missing name reads the namespace for both.
+  // The universe reads an unwired member as unnamed the way its index row
+  // does, however the namespace names it: both take the member's own
+  // `shortName`, so one derivation gives one answer, and a caller that needs
+  // to tell a missing bind from a missing name reads the namespace for both.
+  // The two spell "unnamed" differently — the empty string in a coalesced
+  // universe copy, an absent property in a row that is the member — and no
+  // consumer separates them.
   const assert_universe_follows_the_wiring = assert(() =>
     legacy.mentionable?.[2]?.shortName === "3" &&
     legacy.mentionable?.[3]?.[NAME] === "Older three" &&
@@ -477,6 +486,92 @@ export default pattern(() => {
     (twinBoard.namesTable ?? []).length === 1 &&
     twinBoard.index?.[0]?.shortName === "1" &&
     twinBoard.index?.[1]?.shortName === "1"
+  );
+
+  // A backfilled name records the member, not the place it sat. Removing the
+  // first of two shifts the second into position 0, so a name recorded as a
+  // position would retarget there: `1` would follow the shift onto the member
+  // that arrived, and `2` would point at a slot the list no longer has.
+  const shiftItems = new Writable<ItemDemand[] | Default<[]>>([]);
+  const shiftNames = new Writable<NamesMap>({});
+  const shiftBoard = Board({ items: shiftItems, names: shiftNames });
+  // A handle on the first member that outlives its place in the list, which is
+  // what lets the assertion below name it once it has left. Held in a map for
+  // the reason the namespace is one: an `unknown` value is stored as a link
+  // and read back as one, so the handle expands no member.
+  const departed = new Writable<NamesMap>({});
+  const action_file_two_that_shift = action(() => {
+    const first = Item({
+      title: "Shifting one",
+      createdAt: 1,
+      boardNames: shiftBoard.namesTable,
+    });
+    departed.key("first").set(first);
+    shiftItems.push(first);
+    shiftItems.push(
+      Item({
+        title: "Shifting two",
+        createdAt: 2,
+        boardNames: shiftBoard.namesTable,
+      }),
+    );
+  });
+  const action_backfill_the_shifting_pair = action(() => {
+    assigned.set(backfillNames(shiftItems, shiftNames));
+  });
+  const assert_the_shifting_pair_is_named = assert(() =>
+    assigned.get().join(",") === "1,2" &&
+    shiftBoard.index?.[0]?.shortName === "1" &&
+    shiftBoard.index?.[1]?.shortName === "2"
+  );
+  const action_remove_the_first_that_shifts = action(() => {
+    shiftItems.removeByValue(shiftItems.key(0));
+  });
+  const assert_a_backfilled_name_follows_its_member = assert(() => {
+    const map = (shiftBoard.names ?? {}) as NamesMap;
+    return shiftBoard.itemCount === 1 &&
+      shiftBoard.index?.[0]?.title === "Shifting two" &&
+      equals(
+        map["1"] as object,
+        ((departed.get() ?? {}) as NamesMap)["first"] as object,
+      ) &&
+      !equals(map["1"] as object, shiftItems.key(0)) &&
+      equals(map["2"] as object, shiftItems.key(0));
+  });
+
+  // Only a position holding a member takes a name. Four values that are not
+  // one sit ahead of the member, one per way the guard could be narrowed:
+  // `undefined` and `null` for the two halves of "holds nothing", and a
+  // truthy number and a truthy string so that a truthiness test is no
+  // substitute either. The member behind them takes the FIRST name, so any
+  // value named ahead of it shows up in what the run returned as much as in
+  // what it wrote. The list declares the four so the case needs no cast, and
+  // the library is called directly because no board admits that shape —
+  // `Board` demands `ItemDemand` of every position, which none of them
+  // satisfies.
+  const nonMemberItems = new Writable<
+    (ItemDemand | null | undefined | number | string)[] | Default<[]>
+  >([]);
+  const nonMemberNames = new Writable<NamesMap>({});
+  const action_file_behind_non_members = action(() => {
+    nonMemberItems.set([
+      undefined,
+      null,
+      42,
+      "not a member",
+      Item({ title: "Behind the non-members", createdAt: 1 }),
+    ]);
+  });
+  const action_backfill_over_non_members = action(() => {
+    assigned.set(backfillNames(nonMemberItems, nonMemberNames));
+  });
+  const assert_only_a_member_takes_a_name = assert(() =>
+    assigned.get().join(",") === "1" &&
+    Object.keys((nonMemberNames.get() ?? {}) as NamesMap).join(",") === "1" &&
+    equals(
+      ((nonMemberNames.get() ?? {}) as NamesMap)["1"] as object,
+      nonMemberItems.key(4),
+    )
   );
 
   // A board given no namespace at all — the shape of one deployed before it
@@ -601,7 +696,7 @@ export default pattern(() => {
       { assertion: assert_solo_item_renders_no_badge },
       { assertion: assert_untitled_item_has_a_display_name },
       { action: action_file_two_unnamed },
-      { assertion: assert_unnamed_rows_read_the_default },
+      { assertion: assert_unnamed_rows_carry_no_name },
       { assertion: assert_unnamed_universe_rows_have_no_name },
       { action: action_backfill_directly },
       { assertion: assert_backfill_named_in_filing_order },
@@ -616,6 +711,14 @@ export default pattern(() => {
       { action: action_list_one_item_twice },
       { action: action_backfill_the_twins },
       { assertion: assert_twin_is_named_once },
+      { action: action_file_two_that_shift },
+      { action: action_backfill_the_shifting_pair },
+      { assertion: assert_the_shifting_pair_is_named },
+      { action: action_remove_the_first_that_shifts },
+      { assertion: assert_a_backfilled_name_follows_its_member },
+      { action: action_file_behind_non_members },
+      { action: action_backfill_over_non_members },
+      { assertion: assert_only_a_member_takes_a_name },
       { assertion: assert_bare_board_has_no_items },
       { assertion: assert_bare_board_names_read_empty },
       { action: action_bare_board_creates },

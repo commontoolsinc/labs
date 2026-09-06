@@ -55,12 +55,26 @@ export interface ItemIndexRow {
 
   /**
    * The board's name for the item, as the item reads it out of the board's
-   * names table. Coalesced to the empty string for an item whose lookup has
-   * produced no value — one created a moment ago, or one from before the
-   * board numbered anything — so the row itself never carries the
-   * mixed-version undefined.
+   * names table.
+   *
+   * OPTIONAL rather than defaulted, which is what the compatibility proof
+   * accepts: a defaulted property moves the demand's defaults below an array
+   * constraint the proof cannot show stable under default insertion, while an
+   * optional one carries no default to move. `ItemOutput` publishes it the
+   * same way, which is alignment rather than a constraint this type imposes:
+   * a required publication would satisfy this demand too. What the compiler
+   * refuses is the other pairing, a required row against an optional
+   * publication; `ItemOutput.shortName` in `item.tsx` states it in full.
+   *
+   * An item whose lookup has produced no value — one created a moment ago, or
+   * one from before the board numbered anything — is absent here rather than
+   * blank, and the array reads whole around it. That is the bound on what the
+   * spelling buys: it is about the READ. `cf piece setsrc` refuses a member
+   * demand that gains any property at all — optional included — over a board
+   * whose stored members do not publish it, because the schema recorded on
+   * the retained link to each member is unconstrained at that path.
    */
-  shortName: string | Default<""> | undefined;
+  shortName?: string;
 }
 
 /** What the board reads of a stored item: exactly the row it publishes. */

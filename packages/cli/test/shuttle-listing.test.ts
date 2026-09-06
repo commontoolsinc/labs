@@ -23,21 +23,22 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import type { SlugSummary, SpaceConfig } from "@commonfabric/cli/lib/piece";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { PiecesController } from "@commonfabric/piece/ops";
 import { linkPathSegmentToCellPathSegment } from "@commonfabric/runner/shared";
 
-import { HeldConnection } from "../src/connection.ts";
-import { splitLine } from "../src/line.ts";
+import type { SlugSummary, SpaceConfig } from "../lib/piece.ts";
+import { HeldConnection } from "../lib/shuttle/connection.ts";
+import { splitLine } from "../lib/shuttle/line.ts";
+import { readsAsOption } from "../lib/shuttle/options.ts";
 import {
   type Listing,
   type ListingDeps,
   type ListingRow,
   listPlace,
   renderListing,
-} from "../src/listing.ts";
-import { CurrentPlace, type Facet, type Place } from "../src/place.ts";
+} from "../lib/shuttle/listing.ts";
+import { CurrentPlace, type Facet, type Place } from "../lib/shuttle/place.ts";
 
 const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;
 const HANDLE = "of:fid1:abcdefghijklmnop";
@@ -410,6 +411,63 @@ describe("listing", () => {
       );
     });
 
+    it("returns a row's error with each acted-on character shown as its glyph", () => {
+      // A message is read rather than typed back, so it arrives whole and
+      // merely inert: nothing is dropped and nothing is described away. This
+      // is the live one — an error is the fabric's text, not shuttle's.
+
+      const line = renderListing({
+        rows: [{
+          name: "board",
+          operand: "board",
+          error: "gone\u001b[31m: \u007f and \u009b too",
+        }],
+      });
+      expect(line).toBe("board <error: gone␛[31m: ␡ and ␦ too>");
+      expect(/\p{Cc}/u.test(line)).toBe(false);
+    });
+
+    it("returns a bound with one shown the same way", () => {
+      // No bound the module builds can hold one — `SLUG_INDEX_BOUND` is a
+      // constant — so this case is constructed rather than found. What it
+      // guards is `renderListing`'s contract, which takes any listing a caller
+      // hands it, rather than the one call the module makes.
+
+      const line = renderListing({ rows: [], bound: "412 items\u001b[31m" });
+      expect(line).toBe("<412 items␛[31m>");
+    });
+
+    it("returns an error's angle brackets as they stand", () => {
+      // Escaping the acted-on class is not the marker's own decision, which
+      // is that brackets delimit for a reader and not for a parser. A payload
+      // may hold one, and this stays true beside the escaping.
+
+      expect(renderListing({
+        rows: [{ name: "board", operand: "board", error: "<gone>" }],
+      })).toBe("board <error: <gone>>");
+    });
+
+    it("returns a message holding a line break with it written as a space", () => {
+      // The other rewrite, and a different decision: a break becomes a space
+      // so a message stays one row, where the rest become glyphs so a message
+      // cannot instruct the terminal.
+
+      expect(renderListing({
+        rows: [{ name: "board", operand: "board", error: "two\nlines" }],
+      })).toBe("board <error: two lines>");
+    });
+
+    it("returns a marker that writes no name where the name holds a control character", () => {
+      // The doors refuse such a name, so no operand reaches the row — and the
+      // marker is then the one place left where it would still be written.
+      // Writing it there would put back on the screen exactly what refusing
+      // the name kept off it.
+
+      const line = renderListing({ rows: [{ name: "ti\u001b[31mtle" }] });
+      expect(line).toBe("<no operand: a name holding a control character>");
+      expect(line.includes("\u001b")).toBe(false);
+    });
+
     it("returns a row's error after its name", () => {
       expect(renderListing({
         rows: [{ name: "board", operand: "board", error: "No piece there." }],
@@ -464,6 +522,13 @@ describe("listing", () => {
     // line opens with the name, that the name is one token `cd` takes back to
     // the row, and that anything after it is separated from it — which is what
     // "copied off the front" means and all it can mean.
+    //
+    // A name is read twice on the way back, and both readings are asked. The
+    // option grammar reads it first — a token opening with `-` reaches a verb
+    // as a flag and never as an operand — and the place reads what is left. A
+    // name the first reading takes therefore fails the property however well
+    // it moves, which is why the operand is held against `readsAsOption`
+    // beside being moved with.
     //
     // What varies is as load-bearing as the property. Both kinds of row a
     // listing can name vary — the piece a facet lists and the key a piece
@@ -612,6 +677,7 @@ describe("listing", () => {
         expect(split.kind).toBe("split");
         const tokens = split.kind === "split" ? split.tokens : [];
         expect(tokens.length).toBe(1);
+        expect(readsAsOption(tokens[0])).toBe(false);
         expect(standing.cd(tokens[0]).kind).toBe("moved");
         expect(standing.place).toEqual(childOf(from, row.name));
         named++;

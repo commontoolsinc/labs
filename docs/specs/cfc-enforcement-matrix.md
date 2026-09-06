@@ -67,6 +67,20 @@ conforming, and the conforming ones are reachable only along a partial order.
   future checks that want a persist-and-flag grace under explicit put their
   reject here, same shape.
 
+The ladder is closed, and both places a mode is installed refuse a name off it
+rather than land on no rung. `resolveCfcDials`
+([posture-report.ts](../../packages/runner/src/cfc/posture-report.ts)) is where
+every `Runtime` resolves its dials, and it throws when `cfcEnforcementMode` is
+stated and is not one of the four names above; `setCfcEnforcementMode`
+([extended-storage-transaction.ts](../../packages/runner/src/storage/extended-storage-transaction.ts))
+throws the same way for the mid-transaction lever, which is on the public
+transaction interface and so reachable from pattern code. A transaction holding
+any other name would be on no rung: `cfcEnforcementStrictness` has no answer for
+such a name and returns `undefined`, so every floor comparison against it reads
+false — including the audit-S3 anti-downgrade floor, which therefore never
+rises — while the commit gate, which asks only whether the name is one of
+`disabled` and `observe`, reads the same name as enforcing.
+
 ## 2. Rollout ordering (the partial order)
 
 Two hard ordering constraints (SC-13), plus one that D3 adds and one that H5

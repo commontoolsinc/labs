@@ -2839,6 +2839,7 @@
       },
       "packages/cli": {
         "dependencies": [
+          "jsr:@cliffy/flags@1.0.0-rc.8",
           "jsr:@cliffy/table@1.0.0-rc.8",
           "jsr:@db/sqlite@0.13.0",
           "jsr:@std/fmt@~1.0.2",

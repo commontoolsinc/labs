@@ -89,8 +89,8 @@ pattern to follow rather than import — shuttle views hold different state.
 shuttle wants; `mod.ts` and `loadinput.ts` own the rest of `cf view`'s
 stdio — probing whether stdout and stdin are terminals, writing plain
 output, reading a piped document — which is one-shot-command concern a
-shell drives for itself. Each of these modules brings its export entry with
-the milestone that first calls it
+shell drives for itself. Each is reached by a relative path: the shell is
+this package's own code, so calling one of them costs no export entry
 ([`build-sequence.md`](build-sequence.md)).
 
 One adaptation to verify early in B3: `cf view` pages a static document,

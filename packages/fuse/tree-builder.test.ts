@@ -1374,22 +1374,13 @@ Deno.test("CellBridge.loadPieceTree materializes callable dirs from sparse resul
     };
   }
 
-  type LoadPieceTree = (
-    piece: SparsePiece,
-    parentIno: bigint,
-    name: string,
-    spaceName: string,
-  ) => Promise<bigint>;
-  type HydratePieceProp = (
-    pieceIno: bigint,
-    propName: "input" | "result",
-  ) => Promise<boolean>;
-
-  const pieceIno = await (bridge as unknown as {
-    loadPieceTree: LoadPieceTree;
-  }).loadPieceTree(piece, tree.rootIno, "Sparse Fixture", "home");
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
-    .hydratePieceProp.call(bridge, pieceIno, "result");
+  const pieceIno = await bridge.accessForTestingOnly.loadPieceTree(
+    piece as never,
+    tree.rootIno,
+    "Sparse Fixture",
+    "home",
+  );
+  await bridge.accessForTestingOnly.hydratePieceProp(pieceIno, "result");
 
   const resultIno = tree.lookup(pieceIno, "result");
   assertEquals(resultIno !== undefined, true);
@@ -1499,22 +1490,13 @@ Deno.test("CellBridge.loadPieceTree keeps schema-backed callables beside populat
     };
   }
 
-  type LoadPieceTree = (
-    piece: MixedPiece,
-    parentIno: bigint,
-    name: string,
-    spaceName: string,
-  ) => Promise<bigint>;
-  type HydratePieceProp = (
-    pieceIno: bigint,
-    propName: "input" | "result",
-  ) => Promise<boolean>;
-
-  const pieceIno = await (bridge as unknown as {
-    loadPieceTree: LoadPieceTree;
-  }).loadPieceTree(piece, tree.rootIno, "Mixed Fixture", "home");
-  await (bridge as unknown as { hydratePieceProp: HydratePieceProp })
-    .hydratePieceProp.call(bridge, pieceIno, "result");
+  const pieceIno = await bridge.accessForTestingOnly.loadPieceTree(
+    piece as never,
+    tree.rootIno,
+    "Mixed Fixture",
+    "home",
+  );
+  await bridge.accessForTestingOnly.hydratePieceProp(pieceIno, "result");
 
   const resultIno = tree.lookup(pieceIno, "result");
   assertEquals(resultIno !== undefined, true);
@@ -1661,15 +1643,9 @@ Deno.test("parseSymlinkTarget - unknown cross-space uses name as fallback", () =
   assertEquals(result, { id: "abc", space: "unknown" });
 });
 
-type MakeLinkResolver = (
-  spaceName: string,
-) => (value: unknown, depth: number) => string | null;
-
 Deno.test("makeLinkResolver encodes unsafe link components", () => {
   const bridge = new CellBridge(new FsTree());
-  const resolveLink =
-    (bridge as unknown as { makeLinkResolver: MakeLinkResolver })
-      .makeLinkResolver("home");
+  const resolveLink = bridge.accessForTestingOnly.makeLinkResolver("home");
 
   assertEquals(
     resolveLink({
@@ -1687,9 +1663,7 @@ Deno.test("makeLinkResolver encodes unsafe link components", () => {
 
 Deno.test("makeLinkResolver leaves malformed link paths inert", () => {
   const bridge = new CellBridge(new FsTree());
-  const resolveLink =
-    (bridge as unknown as { makeLinkResolver: MakeLinkResolver })
-      .makeLinkResolver("home");
+  const resolveLink = bridge.accessForTestingOnly.makeLinkResolver("home");
 
   assertEquals(
     resolveLink({

@@ -236,6 +236,27 @@ describe("score", () => {
     });
   });
 
+  describe("the batch it is handed", () => {
+    it("refuses an iterator, which replays nothing after the first pass", () => {
+      function* once(): Generator<Observation> {
+        yield saw("fail", { commit: "c1" });
+      }
+      expect(() => foldObservations(once())).toThrow(
+        "needs an iterable that replays",
+      );
+    });
+
+    it("takes an iterable that hands out a fresh iterator each time", () => {
+      const batch = [saw("fail", { commit: "c1" })];
+      expect(foldObservations({
+        *[Symbol.iterator]() {
+          yield* batch;
+        },
+      }))
+        .toEqual(foldObservations(batch));
+    });
+  });
+
   describe("what counts as a catch", () => {
     it("counts a failure on a branch where main was green", () => {
       const state = stateFrom([

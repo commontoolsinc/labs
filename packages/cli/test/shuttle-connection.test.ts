@@ -27,15 +27,16 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import type { SpaceConfig } from "@commonfabric/cli/lib/piece";
 import type { PiecesController } from "@commonfabric/piece/ops";
 
+import type { SpaceConfig } from "../lib/piece.ts";
 import {
+  connectionEntries,
   type ConnectionOpener,
   type ConnectionRecord,
   type ConnectionSource,
   HeldConnection,
-} from "../src/connection.ts";
+} from "../lib/shuttle/connection.ts";
 
 const RECORD: ConnectionRecord = {
   apiUrl: "https://toolshed.example/",
@@ -84,6 +85,21 @@ function owning(open: ConnectionOpener): ConnectionSource {
 }
 
 describe("connection", () => {
+  describe("connectionEntries()", () => {
+    it("returns one entry per dimension, in the order `where` prints them", () => {
+      expect(connectionEntries(RECORD)).toEqual([
+        { label: "api", value: "https://toolshed.example/" },
+        { label: "identity", value: "/keys/shuttle.pkcs8" },
+        { label: "space", value: "did:key:z6MkConnectedSpace" },
+      ]);
+    });
+
+    it("returns the space as the record holds it, a name staying a name", () => {
+      expect(connectionEntries({ ...RECORD, space: "board" }).at(-1))
+        .toEqual({ label: "space", value: "board" });
+    });
+  });
+
   describe("HeldConnection", () => {
     describe("constructor()", () => {
       it("opens nothing until a connection is asked for", () => {

@@ -8,17 +8,24 @@ import {
   parseArgs,
   partitionOf,
   publish,
+  SHARD_CHUNK,
   type StoreAccess,
   writeToken,
 } from "./test-selection-publish.ts";
 import {
+  AliasResolver,
   buildObjectBody,
   gunzipToText,
   parseManifest,
   type RunContext,
   type TestRecord,
 } from "@commonfabric/test-support/records";
-import { reportFromText } from "./test-selection/build.ts";
+import {
+  emptyAggregate,
+  Fold,
+  parseAggregate,
+  reportFromText,
+} from "./test-selection/build.ts";
 import type { Suite } from "./test-topology/suite.ts";
 import { join } from "@std/path";
 
@@ -216,6 +223,7 @@ function object(
   commit: string,
   outcome: TestRecord["outcome"],
   at: string,
+  branch = "main",
 ): string {
   const context: RunContext = {
     schema: 1,
@@ -224,14 +232,14 @@ function object(
     repo: "commontoolsinc/labs",
     commit,
     dirty: false,
-    branch: "main",
+    branch,
     env: "ci",
     ci: {
       workflowRunId: commit,
       runAttempt: 1,
       workflow: "deno.yml",
       job: "Test (1/8)",
-      event: "push",
+      event: branch === "main" ? "push" : "pull_request",
     },
     os: "linux",
     arch: "x86_64",
@@ -661,32 +669,122 @@ describe("publish() over a day that has been compacted", () => {
     expect(read).toContain(local);
   });
 
-  it("leaves a day open when a shard of its rollup will not read", async () => {
-    // Folded half, the day would be marked compacted and the rest of it
-    // would be hidden from every later run.
-    const objects = {
-      ...seed(),
-      [ROLLUP]: object("c3", "fail", "2026-08-20T03:00:00.000Z"),
-    };
+  it("ends the run when a shard of its rollup will not read", async () => {
+    const shards = Array.from(
+      { length: SHARD_CHUNK + 1 },
+      (_, index) =>
+        `labs/test-records/aggregated/v1/${DAY}/shard-${index}.ndjson`,
+    );
+    const objects = Object.fromEntries(shards.map((shard) => [
+      shard,
+      object("c3", "fail", "2026-08-20T03:00:00.000Z"),
+    ]));
     const { store, created } = fakeStore(objects, {
-      [DAY]: [ROLLUP, `labs/test-records/aggregated/v1/${DAY}/shard-1.ndjson`],
+      [DAY]: shards,
     });
-    const read: string[] = [];
     const broken: StoreAccess = {
       ...store,
-      read: (name) => {
-        read.push(name);
-        return name.endsWith("shard-1.ndjson")
+      read: (name) =>
+        name === shards.at(-1)
           ? Promise.reject(new Error("that shard is gone"))
-          : store.read(name);
-      },
+          : store.read(name),
     };
     expect(await publish(["--bootstrap", "--days", "1"], broken, NOW, suites))
+      .toBe(1);
+    expect(created.size).toBe(0);
+  });
+
+  for (
+    const { name, first, last } of [
+      {
+        name: "orders main runs across shard batches",
+        first: object("c2", "pass", "2026-08-20T02:00:00.000Z"),
+        last: object("c1", "fail", "2026-08-20T01:00:00.000Z"),
+      },
+      {
+        name:
+          "classifies same-commit disagreement across shard batches as a flake",
+        first: object("c1", "fail", "2026-08-20T01:00:00.000Z", "feature"),
+        last: object("c1", "pass", "2026-08-20T02:00:00.000Z", "feature"),
+      },
+    ]
+  ) {
+    it(name, async () => {
+      const shards = Array.from(
+        { length: SHARD_CHUNK + 1 },
+        (_, index) =>
+          `labs/test-records/aggregated/v1/${DAY}/shard-${index}.ndjson`,
+      );
+      const objects = Object.fromEntries(shards.map((shard, index) => [
+        shard,
+        index === 0
+          ? first
+          : index === SHARD_CHUNK
+          ? last
+          : object(`skip-${index}`, "skip", "2026-08-20T01:30:00.000Z"),
+      ]));
+      const whole = new Fold(
+        emptyAggregate("2026-08-20"),
+        new AliasResolver([]),
+        "2026-08-20",
+      );
+      whole.add(shards.map((shard) => reportFromText(shard, objects[shard]!)));
+      const { store, created } = fakeStore(objects, { [DAY]: shards });
+      expect(await publish(["--bootstrap", "--days", "1"], store, NOW, suites))
+        .toBe(0);
+      const stateName = [...created.keys()].find((name) =>
+        name.includes("/state/")
+      )!;
+      const state = parseAggregate(await gunzipToText(created.get(stateName)!));
+      expect(state?.states).toEqual(whole.finish().aggregate.states);
+      expect(state?.folded).toEqual(shards);
+      expect(state?.compacted).toEqual([`ci\t${DAY}`]);
+    });
+  }
+
+  it("consumes each batch before requesting the next shards", async () => {
+    const shards = Array.from(
+      { length: SHARD_CHUNK * 2 + 1 },
+      (_, index) =>
+        `labs/test-records/aggregated/v1/${DAY}/shard-${index}.ndjson`,
+    );
+    const objects: Record<string, string> = { ...seed() };
+    for (const shard of shards) {
+      objects[shard] = object("c3", "fail", "2026-08-20T03:00:00.000Z");
+    }
+    const { store } = fakeStore(objects, { [DAY]: shards });
+    const read: string[] = [];
+    let live = 0;
+    let peak = 0;
+    const consumed = new Set<string>();
+    const watched: StoreAccess = {
+      ...store,
+      read: async (name) => {
+        expect(read.length - consumed.size).toBeLessThan(SHARD_CHUNK);
+        read.push(name);
+        live++;
+        peak = Math.max(peak, live);
+        try {
+          const report = await store.read(name);
+          return {
+            ...report,
+            reports: report.reports.map((group) => ({
+              ...group,
+              get records() {
+                consumed.add(name);
+                return group.records;
+              },
+            })),
+          };
+        } finally {
+          live--;
+        }
+      },
+    };
+    expect(await publish(["--bootstrap", "--days", "1"], watched, NOW, suites))
       .toBe(0);
-    // The run carried on and folded the day's raw objects instead.
-    expect(read).toContain(CI(DAY, "1"));
-    expect(read).toContain(CI(DAY, "2"));
-    expect(created.size).toBeGreaterThan(0);
+    expect(read).toEqual(shards);
+    expect(peak).toBeLessThanOrEqual(SHARD_CHUNK);
   });
 });
 
