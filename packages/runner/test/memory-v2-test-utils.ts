@@ -61,6 +61,7 @@ export const newSharedServer = (options?: {
   subscriptionRefreshDelayMs?: number | "manual";
   store?: URL;
   sessionTtlMs?: number;
+  sessions?: MemoryV2Server.SessionRegistry;
 }): MemoryV2Server.Server =>
   newLoopbackServer({
     ...options,

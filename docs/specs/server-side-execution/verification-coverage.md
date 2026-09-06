@@ -1579,21 +1579,16 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   The obligation's substance landed as: the OW26 pin test racing
   authored inputs into the failure window and asserting
   charged/settled/W-advances directly; the three refusal tests'
-  bounded 300 ms drains RETIRED for deterministic kick-and-await-W
-  barriers with authored-seq targets (`settleAnotherWaveFamily` +
-  `authoredSeqOf` in `executor-effect-channel.test.ts` — the
-  reverted barriers' safety, restored by correct arithmetic, is the
-  discharge's acceptance evidence). Standing lesson, binding on test
-  authors: a settled-contract barrier targets the AUTHORED seq of
-  its own kick — never a server seq, which derived echoes inflate
-  (protocol §4's client-use sentence was always the contract; the
-  helper enforces it). The lesson is also PINNED in-suite
-  (2026-08-15, from the Phase-6 independent review): every barrier
-  waits for the trailing derived echo to land BEFORE reading its
-  target, because pre-echo a `serverSeq`-degraded target is correct
-  by accident and the whole suite stayed green under that
-  degradation; post-echo the degraded arithmetic times out at every
-  barrier (mutation-verified red at all four sites, green restored).
+  bounded 300 ms drains RETIRED for an await-W barrier with an
+  authored-seq target. Standing lesson, binding on test authors: a
+  settled-contract barrier targets an AUTHORED seq — never a server
+  seq, which derived echoes inflate (protocol §4's client-use
+  sentence was always the contract). The barrier is `settleServing`
+  in `executor-effect-channel.test.ts`: it drains the client, flushes
+  its manager, reads `highestAuthoredSeq` — `MAX(seq)` over commits
+  whose class is `authored`, so the class the lesson forbids cannot
+  be named — and hands that seq to `waitForSettled`, which sleeps on
+  the watermark doc's own subscription rather than polling for it.
 
 - OW27 — LANDED with Phase 7 (2026-08-15; RULED (a) by the owner
   2026-08-15 — "client-side send pacing in the flag-gated append path,
@@ -2224,7 +2219,9 @@ Delta 2026-08-11 — Phase 4 (the client-effect channel; the phase PR):
   to land times out at 1-min load ≈ 5 (the fan-out-B base tip 2/20,
   the trio's tip 2/16, ≈10 %); a sweep should read a red here as the
   wait budget, not the divert, until the budget or the wake is
-  addressed;
+  addressed — CLEARED 2026-09-15, the file's polling helper having
+  been replaced by event-driven waits with no budget in them, so a red
+  here reads as the divert again;
   (MINOR-4) the `locallyPresent` suppression gate deleted — see
   (vii) above;
   (MINOR-5) same-principal two-session isolation pinned BOTH
@@ -2583,7 +2580,10 @@ Delta 2026-08-15 — Phase 6 independent-review fixes (same PR):
   kick-and-await-W barrier in `executor-effect-channel.test.ts` reads
   its target after the trailing echo, so the `serverSeq` regression
   class is deterministically red (mutation-verified at all four
-  barrier sites).
+  barrier sites). (Superseded 2026-09-15: that suite's polling waits
+  are gone, and with them the echo reads that armed this pin. The
+  class the lesson forbids is now unnameable — see the OW26 row's
+  standing lesson for the barrier that replaced them.)
 - serving-loop §5's env-knob sentence gained +1 binding clause: the
   outstanding-effect cap's env parse is FAIL-CLOSED (literal `0` is
   the only opt-out; garbage/negative → default 16, warned). Pin:
@@ -5799,7 +5799,14 @@ supply; OW29/OW32/OW34 closed):
   worktree, 1/7), so NOT a fix-round regression and NOT the
   receipt-race pin `78959c26c` fixed (different step, different wait);
   left un-fixed here (out of the round's scope), flagged for its own
-  red-first pass.
+  red-first pass. (FIXED 2026-09-15, in two parts. The step's client
+  was opened with a navigations array, which is what gives a client an
+  enactment surface: it enacted the intent, acked the nonce, and the
+  next wave retired the entry, so the wait was racing a state the
+  system is built to clear. That client is headless now
+  (`de5baca1a5`). The wait itself is event-driven: the file's local
+  polling helper — a 20-second deadline over a 20-millisecond poll —
+  is gone, so the step has no deadline left to exceed.)
 
 - **First ON-lane CI gate delta (2026-08-21) — the stack's first-ever
   CI execution of the ON pattern lanes (land-off PR #6096, run

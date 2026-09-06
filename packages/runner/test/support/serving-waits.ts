@@ -170,7 +170,8 @@ export const awaitAdmitted = (
  * installs on. */
 export interface NotifyingManager {
   subscribe(subscription: IStorageNotification): void;
-  unsubscribe(subscription: IStorageNotification): void;
+  /** Optional on `IStorageManager`; the edge detaches when it is there. */
+  unsubscribe?(subscription: IStorageNotification): void;
 }
 
 /**
@@ -187,7 +188,7 @@ export const replicaChanges = (manager: NotifyingManager): Edge => (wake) => {
     },
   };
   manager.subscribe(subscription);
-  return () => manager.unsubscribe(subscription);
+  return () => manager.unsubscribe?.(subscription);
 };
 
 /**

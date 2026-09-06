@@ -34,6 +34,12 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
+import {
+  ArrivalLog,
+  awaitAdmitted,
+  awaitEach,
+  settleServing,
+} from "./support/serving-waits.ts";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import {
   decodeMemoryBoundary,
@@ -47,7 +53,6 @@ import { scopedArgumentInitializationTargets } from "../src/data-updating.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
-import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("fan-out stage B");
 const space = spaceSigner.did() as MemorySpace;
@@ -201,6 +206,36 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
   let managers: EmulatedStorageManager[];
   let runtimes: Runtime[];
   let servingRuntime: Runtime | undefined;
+  let activations: ArrivalLog<{ space: string; outcome: string }>;
+  /** Each wave cycle as it ends — the loop suspends on its input wait
+   * synchronously after one, so this is the edge a wait for that
+   * suspension re-reads on. */
+  let cycles: ArrivalLog<MemorySpace>;
+
+  /** Resolves once `activatedSpace` has an ACTIVE tenure — activation
+   * finishes on no admission or session edge of its own. */
+  const activated = (activatedSpace: MemorySpace): Promise<unknown> =>
+    activations.matching((entry) =>
+      entry.space === activatedSpace && entry.outcome === "active"
+    );
+
+  /** Commit an authored poke and wait for the loop to cover it — one
+   * wave cycle, ordered after anything the loop was going to run. */
+  let pokes = 0;
+  const settleACycle = async (engine: Engine.Engine): Promise<void> => {
+    pokes += 1;
+    const poker = openClient(aliceSigner);
+    const poke = poker.getCell<{ n: number }>(
+      space,
+      `fan-out-cycle-poke-${pokes}`,
+      undefined,
+    );
+    await poke.sync();
+    const tx = poker.edit();
+    poke.withTx(tx).set({ n: pokes });
+    expect((await tx.commit()).error).toBeUndefined();
+    await settleServing(engine, poker, space);
+  };
 
   const newHost = (
     policy: ConstructorParameters<typeof ExecutorHost>[0]["policy"] = {},
@@ -232,10 +267,16 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
         };
       },
       policy: { flushDeadlineMs: 5_000, idleParkMs: 600_000, ...policy },
+      onActivationSettled: (activatedSpace, outcome) =>
+        activations.record({ space: activatedSpace, outcome }),
+      onWaveCycle: cycles.record,
     });
 
   beforeEach(() => {
     server = newSharedServer({ subscriptionRefreshDelayMs: 0 });
+    activations = new ArrivalLog();
+    cycles = new ArrivalLog();
+    pokes = 0;
     managers = [];
     runtimes = [];
     servingRuntime = undefined;
@@ -337,25 +378,15 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       return runtime;
     };
     for (const signer of options.clients) await watchRoot(signer);
-    await waitUntil(
-      () => host!.spaceServer(space)?.active === true,
-      "space activation",
-    );
-    await waitUntil(
-      () => {
-        const demanded = host!.spaceServer(space)?.demandedIdentitiesOf(
-          resultId,
-        ) ?? [];
-        return options.clients.every((signer) =>
-          demanded.some((i) => i.principal === signer.did())
-        );
-      },
-      () =>
-        "the registry to carry every root watcher (has " +
-        JSON.stringify(
-          host!.spaceServer(space)?.demandedIdentitiesOf(resultId),
-        ) + ")",
-    );
+    await activated(space);
+    await awaitAdmitted(server, () => {
+      const demanded = host!.spaceServer(space)?.demandedIdentitiesOf(
+        resultId,
+      ) ?? [];
+      return options.clients.every((signer) =>
+        demanded.some((i) => i.principal === signer.did())
+      );
+    });
 
     const typedArg = (runtime: Runtime) =>
       runtime.getCell<{ draft: string; note: string; n: number }>(
@@ -464,14 +495,11 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     // ITS OWN input's echo — with nothing but the space root demanded.
     // At the stage-A tip the space root registered no identity, so the
     // node ran once as the service and wrote `user:<serviceDID>` only.
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () =>
         instanceHolds(engine, aliceKey, '"echo:A"') &&
         instanceHolds(engine, bobKey, '"echo:B"'),
-      () =>
-        `each instance's echo of its own draft (alice: ${
-          instanceHolds(engine, aliceKey, '"echo:A"')
-        }, bob: ${instanceHolds(engine, bobKey, '"echo:B"')})`,
     );
     expect(instanceHolds(engine, aliceKey, '"echo:B"')).toBe(false);
     expect(instanceHolds(engine, bobKey, '"echo:A"')).toBe(false);
@@ -483,13 +511,13 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     expect(basisKeys(engine).has(bobKey)).toBe(true);
     // Attribution (design §F, RULED 2026-08-16): a user-scoped instance
     // run acts as the USER — no session on its writes; never the service.
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () =>
         actingAnnotations(engine).some((a) =>
           a.actingUser === aliceSigner.did()
         ) &&
         actingAnnotations(engine).some((a) => a.actingUser === bobSigner.did()),
-      "both users' acting annotations",
     );
     const annotations = actingAnnotations(engine);
     expect(annotations.every((a) => a.actingSession === undefined)).toBe(
@@ -525,14 +553,13 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     const aliceKey = setup.userKey(aliceSigner);
     const bobKey = setup.userKey(bobSigner);
     await setup.writeDraft(alice, "A");
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () => instanceHolds(engine, aliceKey, '"echo:A"'),
-      "alice's instance (the node narrowed for her)",
     );
     // Quiesce (Alice's own walk re-fires on her echo landing) before the
     // trace baseline.
-    await servingRuntime!.idle();
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await settleACycle(engine);
     await servingRuntime!.idle();
     const arrivalsBefore = host!.stats().demandArrivals;
     const traceBefore = servingRuntime!.scheduler.getActionRunTrace().length;
@@ -543,9 +570,9 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     // never re-runs for a demander that did not exist when it last ran,
     // so Bob's instance would never materialize.
     const bob = await setup.watchRoot(bobSigner);
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () => instanceHolds(engine, bobKey, '"echo:"'),
-      "bob's instance to materialize on arrival (empty draft → 'echo:')",
     );
     expect(host!.stats().demandArrivals).toBeGreaterThan(arrivalsBefore);
     // Alice's DERIVATION instances did not re-run for Bob's arrival (B7:
@@ -561,9 +588,9 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     ).toEqual([]);
     // And once Bob types, his instance follows his input.
     await setup.writeDraft(bob, "B");
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () => instanceHolds(engine, bobKey, '"echo:B"'),
-      "bob's instance to re-derive from his draft",
     );
     expect(instanceHolds(engine, aliceKey, '"echo:B"')).toBe(false);
     setup.cancel();
@@ -596,17 +623,13 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     await setup.writeNote(bob, "N");
     expect(noteScope(alice)).toBe("user");
     expect(noteScope(bob)).toBe("session");
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () => instanceHolds(engine, aliceKey, '"echo:A"'),
-      "alice's user instance of echo",
     );
     // Bob's note echo lands under his SESSION instance.
-    const bobSessions = engine.database.prepare(
-      `SELECT DISTINCT scope_key FROM head WHERE scope_key LIKE :prefix AND op != 'delete'`,
-    ).all({
-      prefix: `session:${encodeURIComponent(bobSigner.did())}:%`,
-    }) as Array<{ scope_key: string }>;
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () =>
         (engine.database.prepare(
           `SELECT DISTINCT scope_key FROM head WHERE scope_key LIKE :prefix AND op != 'delete'`,
@@ -615,10 +638,6 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
         }) as Array<{ scope_key: string }>).some((row) =>
           instanceHolds(engine, row.scope_key, '"note:N"')
         ),
-      () =>
-        `bob's session instance of noteEcho (session keys: ${
-          JSON.stringify(bobSessions)
-        })`,
     );
     // Neither user's value crossed.
     expect(instanceHolds(engine, bobKey, '"echo:A"')).toBe(false);
@@ -626,12 +645,12 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     // rows under his SESSION key; the space-only label under `space`;
     // NO session-keyed basis row for Alice's echo — the ragged S4 pin:
     // a session-deep sibling never over-keys a user-scoped principal.
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () =>
         [...basisKeys(engine)].some((key) =>
           key.startsWith(`session:${encodeURIComponent(bobSigner.did())}:`)
         ),
-      () => `bob's session basis key (keys: ${[...basisKeys(engine)]})`,
     );
     const keys = basisKeys(engine);
     expect(keys.has(aliceKey)).toBe(true);
@@ -688,19 +707,16 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       >).some((row) => instanceHolds(engine, row.scope_key, value));
     await setup.writeDraft(alice, "A");
     await setup.writeNote(bob, "N");
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () => instanceHolds(engine, aliceKey, '"echo:A"'),
-      "alice's user instance of echo",
     );
-    await waitUntil(
-      () => bobSessionHolds('"note:N"'),
-      "bob's session instance of noteEcho",
-    );
+    await awaitAdmitted(server, () => bobSessionHolds('"note:N"'));
     expect(instanceHolds(engine, bobKey, '"echo:A"')).toBe(false);
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () =>
         [...basisKeys(engine)].some((key) => key.startsWith(bobSessionPrefix)),
-      "bob's session basis key",
     );
     const keys = basisKeys(engine);
     expect(keys.has(aliceKey)).toBe(true);
@@ -712,10 +728,7 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     // refreshes his held session instance, and the node re-runs for
     // him under his session key.
     await setup.writeNote(bob, "N2");
-    await waitUntil(
-      () => bobSessionHolds('"note:N2"'),
-      "bob's session instance to re-derive from his second note",
-    );
+    await awaitAdmitted(server, () => bobSessionHolds('"note:N2"'));
     setup.expectExplicitUserNote();
     const trace = servingRuntime!.scheduler.getActionRunTrace();
     const sessionRuns = trace.filter((entry) =>
@@ -744,9 +757,9 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       setup.compiled.resultSchema,
     );
     await aliceResult.sync();
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () => instanceHolds(engine, "space", '"label:1"'),
-      "the label derivation to land",
     );
     // Change the space input: the label node re-runs.
     const traceBefore = servingRuntime!.scheduler.getActionRunTrace().length;
@@ -757,12 +770,13 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       arg.key("n").withTx(tx).set(2);
       expect((await tx.commit()).error).toBeUndefined();
     }
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () => instanceHolds(engine, "space", '"label:2"'),
-      "the label derivation to re-derive",
     );
-    // Give the loop a moment to run anything else it would.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    // Anything else the loop was going to run rides a cycle, and this
+    // barrier is ordered after one.
+    await settleACycle(engine);
     const since = servingRuntime!.scheduler.getActionRunTrace().slice(
       traceBefore,
     );
@@ -826,11 +840,9 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     // single service run (the pre-stage-B sink) stopped at the first
     // redirect: `view` for the service is 'off', and the guarded
     // subtree was live for nobody.
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () => instanceHolds(engine, aliceKey, '"guarded:A"'),
-      () =>
-        "alice's guarded value under her instance (rows: " +
-        JSON.stringify([...rowsUnder(engine, aliceKey).values()]) + ")",
     );
     // (2) The WALK itself runs per demander (design §B4: an effect node
     // whose demand root is the watched root, fanned out by the ordinary
@@ -849,9 +861,9 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     // observe: her instance re-runs keyed even if the flag cascade's
     // re-run raced the wait above.
     await setup.writeDraft(alice, "A2");
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () => instanceHolds(engine, aliceKey, '"guarded:A2"'),
-      "alice's second draft under her instance",
     );
     // W0 (d′) SCRATCH — the second half is RETIRED with the walk: there
     // is no `demand-walk:*` node under (d′) (design §2.7; T9′'s
@@ -947,11 +959,11 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       ).toBe(false);
       // The pair is TRANSIENT: gone once the event dispatched.
       await servingRuntime!.idle();
-      await waitUntil(
+      await awaitAdmitted(
+        server,
         () =>
           !(servingRuntime!.serverRunDemandersFor([setup.resultId]) ?? [])
             .some(isCarol),
-        "carol's transient demand to retire with the dispatch",
       );
     } finally {
       cancel();
@@ -978,19 +990,22 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
         arg: `fo-k-${variant}-arg`,
         result: `fo-k-${variant}-result`,
       };
-      // The creator's session must PRUNE so Alice is not a demander.
+      // The creator's session must be GONE so Alice is not a demander.
+      // Detaching only starts the resume window and a lingering
+      // session's watches are still demand, so the registry is the
+      // test's own and the session is removed outright.
+      const sessions = new MemoryV2Server.SessionRegistry({ ttlMs: 250 });
       server = await (async () => {
         await server.close();
         return newSharedServer({
           subscriptionRefreshDelayMs: 0,
-          sessionTtlMs: 250,
+          sessions,
         });
       })();
       const engine = await server.engineForSpace(space);
       let compiled: Awaited<
         ReturnType<Runtime["patternManager"]["compilePattern"]>
       >;
-      let argId: string;
       let resultId: string;
       {
         const manager = EmulatedStorageManager.connectTo(server, {
@@ -1029,7 +1044,6 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
         }
         await creator.idle();
         await creator.storageManager.synced();
-        argId = arg.getAsNormalizedFullLink().id;
         resultId = result.getAsNormalizedFullLink().id;
         // Narrow the declared-scope slots THROUGH the argument schema (the
         // R7 idiom, `executor-instance-keyed-replica.test.ts`; the
@@ -1054,20 +1068,20 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
           expect((await tx.commit()).error).toBeUndefined();
           await creator.storageManager.synced();
         }
+        const creatorSession = manager.id;
         await creator.dispose();
         await manager.close();
+        sessions.remove(space, creatorSession);
       }
       const aliceKey = resolveScopeKey("user", {
         principal: aliceSigner.did(),
       });
       const bobKey = resolveScopeKey("user", { principal: bobSigner.did() });
-      await waitUntil(
-        () =>
-          !server.watchedRootsForSpace(space, {
-            excludePrincipal: serviceSigner.did(),
-          }).some((root) => root.identity?.principal === aliceSigner.did()),
-        "alice's ephemeral session to prune",
-      );
+      expect(
+        server.watchedRootsForSpace(space, {
+          excludePrincipal: serviceSigner.did(),
+        }).some((root) => root.identity?.principal === aliceSigner.did()),
+      ).toBe(false);
       host = newHost();
       // Bob watches the root — the piece is served, echo narrows for Bob.
       const bob = openClient(bobSigner);
@@ -1078,13 +1092,10 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       );
       await bobResult.sync();
       const cancel = bobResult.sink(() => {});
-      await waitUntil(
-        () => host!.spaceServer(space)?.active === true,
-        "activation",
-      );
-      await waitUntil(
+      await activated(space);
+      await awaitAdmitted(
+        server,
         () => instanceHolds(engine, bobKey, '"echo:"'),
-        "bob's echo instance",
       );
       // Alice is NOT a demander of the piece.
       expect(
@@ -1141,19 +1152,19 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
         // The type dispatches and its wave settles before the save is
         // even appended: whatever the type dirtied has been recomputed
         // (for the watchers) with nothing queued for Alice.
-        await waitUntil(
+        await awaitAdmitted(
+          server,
           () => instanceHolds(engine, aliceKey, '"A"'),
-          "alice's typed draft under her instance",
         );
-        await waitUntil(allConsequenced, "type consequenced");
-        await new Promise((resolve) => setTimeout(resolve, 600));
+        await awaitAdmitted(server, allConsequenced);
+        await settleACycle(engine);
       }
       if (variant === "dirty-input") {
         // Bob types right before Alice's save: the save's preflight meets
         // a node that is invalid at the NODE level too — the ruled
         // "dirty at preflight" shape — with Alice a transient demander.
-        await waitUntil(allConsequenced, "type consequenced");
-        await new Promise((resolve) => setTimeout(resolve, 600));
+        await awaitAdmitted(server, allConsequenced);
+        await settleACycle(engine);
         const bobTyped = bob.getCell<{ draft: string }>(
           space,
           names.arg,
@@ -1165,29 +1176,14 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
         expect((await tx.commit()).error).toBeUndefined();
       }
       await append("save", {});
-      await waitUntil(allConsequenced, "both events consequenced", 20_000);
+      await awaitAdmitted(server, allConsequenced);
       // THE consequence: Alice's save read HER echo instance and wrote
       // HER saved slot — before the fix the handler was refused ("action
       // argument is undefined … not running"), the entry consequenced
       // with no error, and nothing landed.
-      const diag = () =>
-        `alice row=${JSON.stringify(rowsUnder(engine, aliceKey).get(argId))}` +
-        ` entries=${JSON.stringify(sidecarEntries())}` +
-        ` echoFanOut=${
-          JSON.stringify(
-            servingRuntime!.scheduler.getActionRunTrace()
-              .filter((entry) => entry.instanceKey !== undefined)
-              .map((entry) =>
-                servingRuntime!.scheduler.fanOutStateOf(entry.actionId)
-              )
-              .filter((state) => state !== undefined)
-              .slice(-3),
-          )
-        }`;
-      await waitUntil(
+      await awaitAdmitted(
+        server,
         () => instanceHolds(engine, aliceKey, '"saved:echo:A"'),
-        () => `the saved consequence to land under alice — ${diag()}`,
-        8_000,
       );
       // Consequenced CLEAN: no error on any entry.
       expect(sidecarEntries().every((entry) => entry.error === undefined))
@@ -1212,7 +1208,8 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     for (const [index, signer] of users.entries()) {
       await setup.writeDraft(clients.get(signer.did())!, `v${index}`);
     }
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () =>
         users.every((signer, index) =>
           Array.from({ length: M }, (_, i) =>
@@ -1222,8 +1219,6 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
               `"e${i}:v${index}"`,
             )).every(Boolean)
         ),
-      "every user's M instances",
-      30_000,
     );
     // The DERIVATION nodes (the demand WALKS are effect nodes, one per
     // demand key — a client syncing a new doc adds a key, never an
@@ -1234,10 +1229,11 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       ).length;
     const nodesBefore = derivationNodeCount();
     // Quiesce, then ONE user's change.
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await settleACycle(engine);
     const traceBefore = servingRuntime!.scheduler.getActionRunTrace().length;
     await setup.writeDraft(clients.get(bobSigner.did())!, "v1b");
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () =>
         Array.from(
           { length: M },
@@ -1245,9 +1241,8 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
             instanceHolds(engine, setup.userKey(bobSigner), `"e${i}:v1b"`),
         )
           .every(Boolean),
-      "bob's M instances to re-derive",
     );
-    await new Promise((resolve) => setTimeout(resolve, 300));
+    await settleACycle(engine);
     const since = servingRuntime!.scheduler.getActionRunTrace().slice(
       traceBefore,
     );
@@ -1303,11 +1298,11 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
     const bobKey = setup.userKey(bobSigner);
     await setup.writeDraft(alice, "a0");
     await setup.writeDraft(bob, "b0");
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () =>
         instanceHolds(engine, aliceKey, '"echo:a0"') &&
         instanceHolds(engine, bobKey, '"echo:b0"'),
-      "both instances derived once",
     );
     const wavesBefore = host!.stats().waves;
     const EDITS = 20;
@@ -1323,59 +1318,47 @@ describe("fan-out stage B: the per-demander run supply (E2E)", () => {
       await setup.writeDraft(bob, `b${i}`);
       noteLoopBusy();
     }
-    await waitUntil(
+    await awaitAdmitted(
+      server,
       () =>
         instanceHolds(engine, aliceKey, `"echo:a${EDITS}"`) &&
         instanceHolds(engine, bobKey, `"echo:b${EDITS}"`),
-      "both instances to converge on the last edit",
-      30_000,
     );
-    // Quiescence, observed rather than waited out (waiting-in-tests.md's
-    // "Proving a negative"): the loop suspends on its input wait and the
-    // serving runtime's scheduler settles. The storm this step pins is a
-    // loop whose cycles keep finding work of their own, and such a loop
-    // never suspends — `#hasWork()` holds at the end of each cycle and
-    // the next begins — so the suspension IS the settling, with no
-    // interval to size. Its companion covers the other producer: a run a
-    // wave re-armed leaves the scheduler unsettled until it has run.
+    // Quiescence, observed rather than waited out: the loop suspends on
+    // its input wait and the serving runtime's scheduler settles. The
+    // storm this step pins is a loop whose cycles keep finding work of
+    // their own, and such a loop never suspends — it has work at the end
+    // of each cycle and the next begins — so the suspension IS the
+    // settling, with no interval to size. Its companion covers the other
+    // producer: a run a wave re-armed leaves the scheduler unsettled
+    // until it has run.
     //
-    // The interval this replaced was the wrong instrument as well as the
-    // expensive one, and the difference is reproducible: hold
-    // `#hasWork()` true and the wait below fails by name, while three
-    // seconds of interval pass. The 4,427-wave storm ran at the
-    // production flush deadline, tens of milliseconds; this host's is
-    // five seconds, so a storm of exactly that shape commits nothing at
-    // all inside a window a test could afford to wait out.
-    //
-    // The settles run INSIDE the predicate, between two readings of the
-    // suspension: a frame the memory server still held, or a run the
-    // scheduler still owed, un-suspends the loop before the second
-    // reading rather than landing after the wait returns. The fan-out is
-    // drained on both sides of the runtime settle, because that settle
-    // can run work that commits, whose fan-out a drain finishing ahead of
-    // it never carried. What stays out of reach is a wake from work no
-    // settle covers — a structure load completing is the one this
-    // pattern could produce, having no external effects of its own.
-    // Nothing the test can post is ordered after such a wake, so the
-    // claim is the settled state and the bound below, never the absence
-    // of every later wave.
+    // The reading is taken again on each wave cycle, because the loop
+    // arms its input wait synchronously after one. The settles run
+    // INSIDE the predicate, between two readings of the suspension: a
+    // frame the memory server still held, or a run the scheduler still
+    // owed, un-suspends the loop before the second reading rather than
+    // landing after the wait returns. The fan-out is drained on both
+    // sides of the runtime settle, because that settle can run work that
+    // commits, whose fan-out a drain finishing ahead of it never
+    // carried. What stays out of reach is a wake from work no settle
+    // covers — a structure load completing is the one this pattern could
+    // produce, having no external effects of its own. Nothing the test
+    // can post is ordered after such a wake, so the claim is the settled
+    // state and the bound below, never the absence of every later wave.
     const spaceServer = host!.spaceServer(space)!;
-    await waitUntil(
-      async () => {
-        if (!spaceServer.suspendedOnInput) return false;
-        await server.idle();
-        await servingRuntime!.idle();
-        await server.idle();
-        return spaceServer.suspendedOnInput;
-      },
-      "the serving loop to suspend on its input wait with the server's " +
-        "fan-out drained and its runtime settled",
-    );
+    await awaitEach(cycles, async () => {
+      if (!spaceServer.suspendedOnInput) return false;
+      await server.idle();
+      await servingRuntime!.idle();
+      await server.idle();
+      return spaceServer.suspendedOnInput;
+    });
     const wavesAtQuiescence = host!.stats().waves;
     // The control for that wait, and the reason it is not vacuous: the
     // same reading, taken while the edits above were being covered, went
     // false. A reading pinned true would satisfy the wait on its first
-    // poll and leave every claim resting on it unasserted.
+    // attempt and leave every claim resting on it unasserted.
     expect(sawLoopBusy).toBe(true);
     // Bounded by the inputs plus a small constant (one wave may carry
     // several inputs; a discovery re-arm runs inside its wave).

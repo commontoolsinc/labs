@@ -65,7 +65,7 @@ import type { MemorySpace, URI } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { ACLManager } from "../src/index.ts";
 import { TEST_SESSION_OPEN_AUDIENCE } from "./memory-v2-test-utils.ts";
-import { waitUntil } from "./support/wait-until.ts";
+import { ArrivalLog } from "./support/serving-waits.ts";
 
 const serviceSigner = await Identity.fromPassphrase("session remount service");
 const homeSigner = await Identity.fromPassphrase("session remount home");
@@ -91,16 +91,19 @@ describe("the session remount (profile-starvation fifth face)", () => {
   let server: MemoryV2Server.Server;
   let cleanups: Array<() => Promise<void>>;
   let storeSeq = 0;
-
-  /** `session.open` attempts by the SERVING identity — the observable for
-   * "did this remount actually mint a new session?". Scoped to the service
-   * principal because the ACL-setting client runtimes open sessions of
-   * their own on the same server. */
-  let sessionOpens: number;
+  /** Every `session.open` attempt, by issuing principal — the observable
+   * for "did this remount actually mint a new session?", and the event a
+   * test waits on when it has to act after one. The ACL-setting client
+   * runtimes open sessions of their own on the same server, which is why
+   * the counts below name a principal. */
+  let sessionOpens: ArrivalLog<string>;
+  /** How many the SERVING identity has minted. */
+  const servingOpens = (): number =>
+    sessionOpens.count((iss) => iss === serviceSigner.did());
 
   beforeEach(() => {
     storeSeq += 1;
-    sessionOpens = 0;
+    sessionOpens = new ArrivalLog<string>();
     server = new MemoryV2Server.Server({
       store: new URL(`memory://session-remount-${storeSeq}`),
       subscriptionRefreshDelayMs: 0,
@@ -109,11 +112,14 @@ describe("the session remount (profile-starvation fifth face)", () => {
       // `authorization.principal`.
       authorizeSessionOpen: (message) => {
         const iss = (message.invocation as { iss?: unknown } | undefined)?.iss;
-        if (iss === serviceSigner.did()) sessionOpens += 1;
-        if (typeof iss === "string") return iss;
+        if (typeof iss === "string") {
+          sessionOpens.record(iss);
+          return iss;
+        }
         const principal =
           (message.authorization as { principal?: unknown } | undefined)
             ?.principal;
+        if (typeof principal === "string") sessionOpens.record(principal);
         return typeof principal === "string" ? principal : undefined;
       },
       sessionOpenAuth: { audience: TEST_SESSION_OPEN_AUDIENCE },
@@ -388,12 +394,13 @@ describe("the session remount (profile-starvation fifth face)", () => {
     // a fix that simply never remounts.
     await setAcl(homeSigner, homeSpace, { [strangerSigner.did()]: "READ" });
     (stranger as AclChangeNotifier).noteSpaceAclChanged?.(homeSpace);
-    await waitUntil(
-      async () =>
-        (await probeRead(stranger, homeSpace, mintProbeId(minter, homeSpace)))
-          .error === undefined,
+    // The remount is lazy — the next load opens the fresh session — so
+    // one load is the whole observation.
+    expect(
+      (await probeRead(stranger, homeSpace, mintProbeId(minter, homeSpace)))
+        .error,
       "the ACL grant admits the remounted session",
-    );
+    ).toBeUndefined();
   });
 
   it("an ownership CHANGE re-binds the new owner rather than reading on under a stale identity — the outcome the revocation sweep's own comment asks for", async () => {
@@ -420,22 +427,22 @@ describe("the session remount (profile-starvation fifth face)", () => {
       [strangerSigner.did()]: "OWNER",
       [homeSigner.did()]: "READ",
     });
-    await waitUntil(
-      async () =>
-        (await probeRead(serving, homeSpace, mintProbeId(minter, homeSpace)))
-          .error !== undefined,
+    // `setAcl` flushed the commit, and the sweep that revokes runs with
+    // the ACL's own admission, so the next load already sees the verdict.
+    expect(
+      (await probeRead(serving, homeSpace, mintProbeId(minter, homeSpace)))
+        .error,
       "the ownership change revoked the bound session",
-    );
+    ).toBeDefined();
 
     // The remount re-resolves the binding from the landed ACL and serves
     // as the NEW owner.
     (serving as AclChangeNotifier).noteSpaceAclChanged?.(homeSpace);
-    await waitUntil(
-      async () =>
-        (await probeRead(serving, homeSpace, mintProbeId(minter, homeSpace)))
-          .error === undefined,
+    expect(
+      (await probeRead(serving, homeSpace, mintProbeId(minter, homeSpace)))
+        .error,
       "the remount re-bound the new owner",
-    );
+    ).toBeUndefined();
   });
 
   it("a doc watched on the DEAD session is refetched after the remount, not answered stale from the watch tracker", async () => {
@@ -490,14 +497,14 @@ describe("the session remount (profile-starvation fifth face)", () => {
     // A silent stale answer is the worst shape this could take, which is
     // why the assertion is on the materialized value and not on the
     // pull's verdict.
-    await waitUntil(
-      async () => {
-        const result = await probeRead(stranger, homeSpace, docId);
-        return result.error === undefined &&
-          materialized(stranger, homeSpace, docId) === "v2";
-      },
-      "the remounted session refetched the doc it had been watching",
-    );
+    expect(
+      (await probeRead(stranger, homeSpace, docId)).error,
+      "the remounted session read the doc it had been watching",
+    ).toBeUndefined();
+    expect(
+      materialized(stranger, homeSpace, docId),
+      "the refetch replaced the stale materialization",
+    ).toBe("v2");
   });
 
   it("a HEALTHY session is never churned: an ACL commit that did not terminate it mints no new session.open", async () => {
@@ -519,7 +526,7 @@ describe("the session remount (profile-starvation fifth face)", () => {
         .error,
     ).toBeUndefined();
 
-    const before = sessionOpens;
+    const before = servingOpens();
     // An ACL commit that changes nothing about this session's standing.
     await setAcl(homeSigner, homeSpace, { [servingSigner.did()]: "READ" });
     (serving as AclChangeNotifier).noteSpaceAclChanged?.(homeSpace);
@@ -528,7 +535,7 @@ describe("the session remount (profile-starvation fifth face)", () => {
         .error,
     ).toBeUndefined();
     expect(
-      sessionOpens - before,
+      servingOpens() - before,
       "a live session must survive an ACL commit untouched",
     ).toBe(0);
   });
@@ -540,7 +547,9 @@ describe("the session remount (profile-starvation fifth face)", () => {
     // is a client committing the genesis ACL: the host's own
     // `commitAdmitted` observer has to carry it to the serving
     // runtime's storage manager.
-    let servingManagerRef: LoopbackStorageManager | undefined;
+    // The construction hook is the event that says the host activated a
+    // serving runtime.
+    const servingUp = new ArrivalLog<LoopbackStorageManager>();
     const host = new ExecutorHost({
       server,
       serviceIdentity: serviceSigner.did(),
@@ -552,7 +561,7 @@ describe("the session remount (profile-starvation fifth face)", () => {
           as: serviceSigner,
           servingHomeSpace: space,
         });
-        servingManagerRef = manager;
+        servingUp.record(manager);
         const runtime = new Runtime({
           apiUrl: new URL("http://toolshed.test"),
           storageManager: manager,
@@ -580,11 +589,7 @@ describe("the session remount (profile-starvation fifth face)", () => {
       `of:${servingSpace}` as URI,
       { path: [], schema: false },
     );
-    await waitUntil(
-      () => servingManagerRef !== undefined,
-      "the host activated a serving runtime",
-    );
-    const serving = servingManagerRef!;
+    const serving = await servingUp.matching(() => true);
 
     // Activation before genesis, on the FOREIGN home space.
     await serving.ensureSpaceInitialized(homeSpace);
@@ -593,10 +598,12 @@ describe("the session remount (profile-starvation fifth face)", () => {
     await setAcl(homeSigner, homeSpace, { [homeSigner.did()]: "OWNER" });
     const docId = await seedDoc(homeSigner, homeSpace, "host-glue", "v1");
 
-    await waitUntil(
-      async () =>
-        (await probeRead(serving, homeSpace, docId)).error === undefined,
+    // The host's observer runs with the ACL commit's own admission, which
+    // `setAcl` flushed, so the heal is already owed by the time the load
+    // below opens its session.
+    expect(
+      (await probeRead(serving, homeSpace, docId)).error,
       "the host's ACL admission healed the foreign session",
-    );
+    ).toBeUndefined();
   });
 });

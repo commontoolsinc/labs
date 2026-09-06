@@ -22,6 +22,11 @@ export const newLoopbackServer = (options?: {
    * closed connection's sessions — and their watches, i.e. their DEMAND
    * — linger before pruning. Default 30 s (the server's resume window). */
   sessionTtlMs?: number;
+
+  /** A registry the caller owns (tests): pruning is lazy and clocked off
+   * the TTL above, so a test that has to observe a session GONE removes
+   * it rather than waiting the window out. Wins over `sessionTtlMs`. */
+  sessions?: MemoryV2Server.SessionRegistry;
 }): MemoryV2Server.Server =>
   new MemoryV2Server.Server({
     authorizeSessionOpen(message) {
@@ -36,7 +41,9 @@ export const newLoopbackServer = (options?: {
       ? { subscriptionRefreshDelayMs: options.subscriptionRefreshDelayMs }
       : {}),
     ...(options?.store !== undefined ? { store: options.store } : {}),
-    ...(options?.sessionTtlMs !== undefined
+    ...(options?.sessions !== undefined
+      ? { sessions: options.sessions }
+      : options?.sessionTtlMs !== undefined
       ? {
         sessions: new MemoryV2Server.SessionRegistry({
           ttlMs: options.sessionTtlMs,
