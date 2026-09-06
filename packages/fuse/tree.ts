@@ -1,16 +1,14 @@
-// tree.ts — In-memory filesystem tree with inode management
-//
-// Reference documentation:
-// - docs/specs/fuse-filesystem/README.md — index of the filesystem spec
-// - docs/specs/fuse-filesystem/4-read-write.md — stat, read and write
-//   semantics, inode assignment, and the cell-error-to-errno mapping
-// - docs/specs/fuse-filesystem/6-reactivity.md — how a cell change rebuilds a
-//   subtree and invalidates kernel caches, and the kernel cache timeouts that
-//   bound how long a client can hold a stale entry
-// - docs/specs/fuse-filesystem/10-cfc-filesystem-api-semantics.md — the errno
-//   decision table
-// - RELIABILITY_DESIGN.md — which module owns which state
-// - README.md — mount options and client-side cache tuning
+/**
+ * The in-memory filesystem tree the FUSE mount serves, with its inode
+ * management. The filesystem spec under `docs/specs/fuse-filesystem/` decides
+ * the behavior here: `4-read-write.md` for stat, read, and write semantics,
+ * inode assignment, and the cell-error-to-errno mapping; `6-reactivity.md`
+ * for how a cell change rebuilds a subtree and invalidates kernel caches, and
+ * the cache timeouts that bound how long a client can hold a stale entry;
+ * `10-cfc-filesystem-api-semantics.md` for the errno decision table.
+ * `RELIABILITY_DESIGN.md` says which module owns which state, and `README.md`
+ * covers mount options and client-side cache tuning.
+ */
 
 import type { CallableKind } from "./callables.ts";
 import {
@@ -61,9 +59,9 @@ function ownedRender(render: () => Uint8Array | string): Uint8Array {
 }
 
 export class FsTree {
-  inodes: Map<bigint, FsNode> = new Map();
-  parents: Map<bigint, bigint> = new Map();
-  paths: Map<string, bigint> = new Map();
+  #inodes: Map<bigint, FsNode> = new Map();
+  #parents: Map<bigint, bigint> = new Map();
+  #paths: Map<string, bigint> = new Map();
 
   /** Reverse map: inode → path string (O(1) lookup). */
   #inoPaths: Map<bigint, string> = new Map();
@@ -85,12 +83,12 @@ export class FsTree {
   constructor(now: () => number = () => Date.now()) {
     this.#now = now;
     // Create root directory (inode 1)
-    this.inodes.set(ROOT_INO, {
+    this.#inodes.set(ROOT_INO, {
       kind: "dir",
       children: new Map(),
       mtime: this.#now(),
     });
-    this.paths.set("/", ROOT_INO);
+    this.#paths.set("/", ROOT_INO);
     this.#inoPaths.set(ROOT_INO, "/");
   }
 
@@ -106,10 +104,27 @@ export class FsTree {
     };
   }
 
+  /** Nodes by inode. */
+  get inodes(): Map<bigint, FsNode> {
+    return this.#inodes;
+  }
+
+  /** Parent inode by child inode. */
+  get parents(): Map<bigint, bigint> {
+    return this.#parents;
+  }
+
+  /** Inode by absolute path. */
+  get paths(): Map<string, bigint> {
+    return this.#paths;
+  }
+
+  /** Inode of the root directory. */
   get rootIno(): bigint {
     return ROOT_INO;
   }
 
+  /** Allocates the next unused inode number. */
   allocInode(): bigint {
     return this.#nextIno++;
   }
@@ -122,7 +137,7 @@ export class FsTree {
 
   #trackPath(ino: bigint, parentIno: bigint, name: string): void {
     const path = this.childPath(parentIno, name);
-    this.paths.set(path, ino);
+    this.#paths.set(path, ino);
     this.#inoPaths.set(ino, path);
     this.#inoNames.set(ino, name);
   }
@@ -130,8 +145,8 @@ export class FsTree {
   #untrackPath(ino: bigint): void {
     const path = this.#inoPaths.get(ino);
     if (path !== undefined) {
-      if (this.paths.get(path) === ino) {
-        this.paths.delete(path);
+      if (this.#paths.get(path) === ino) {
+        this.#paths.delete(path);
       }
       this.#inoPaths.delete(ino);
       this.#inoNames.delete(ino);
@@ -139,9 +154,9 @@ export class FsTree {
   }
 
   #unlinkFromParent(ino: bigint): void {
-    const parentIno = this.parents.get(ino);
+    const parentIno = this.#parents.get(ino);
     if (parentIno === undefined) return;
-    const parent = this.inodes.get(parentIno);
+    const parent = this.#inodes.get(parentIno);
     if (!parent || parent.kind !== "dir") return;
     for (const [name, childIno] of parent.children) {
       if (childIno === ino) {
@@ -157,7 +172,7 @@ export class FsTree {
     name: string,
     jsonType?: "object" | "array",
   ): bigint {
-    const parent = this.inodes.get(parentIno);
+    const parent = this.#inodes.get(parentIno);
     if (!parent || parent.kind !== "dir") {
       throw new Error(`Parent inode ${parentIno} is not a directory`);
     }
@@ -169,9 +184,9 @@ export class FsTree {
       jsonType,
       mtime: this.#now(),
     };
-    this.inodes.set(ino, node);
+    this.#inodes.set(ino, node);
     parent.children.set(name, ino);
-    this.parents.set(ino, parentIno);
+    this.#parents.set(ino, parentIno);
     this.#trackPath(ino, parentIno, name);
 
     return ino;
@@ -183,7 +198,7 @@ export class FsTree {
     content: Uint8Array | string,
     jsonType: "string" | "number" | "boolean" | "null" | "object" | "array",
   ): bigint {
-    const parent = this.inodes.get(parentIno);
+    const parent = this.#inodes.get(parentIno);
     if (!parent || parent.kind !== "dir") {
       throw new Error(`Parent inode ${parentIno} is not a directory`);
     }
@@ -198,9 +213,9 @@ export class FsTree {
       jsonType,
       mtime: this.#now(),
     };
-    this.inodes.set(ino, node);
+    this.#inodes.set(ino, node);
     parent.children.set(name, ino);
-    this.parents.set(ino, parentIno);
+    this.#parents.set(ino, parentIno);
     this.#trackPath(ino, parentIno, name);
 
     return ino;
@@ -240,7 +255,7 @@ export class FsTree {
   refreshGenerated(ino: bigint): Uint8Array | undefined {
     const render = this.#generated.get(ino);
     if (render === undefined) return undefined;
-    const node = this.inodes.get(ino);
+    const node = this.#inodes.get(ino);
     if (!node || node.kind !== "file") return undefined;
     const bytes = ownedRender(render);
     if (bytesEqual(node.content, bytes)) return node.content;
@@ -262,7 +277,7 @@ export class FsTree {
     cellProp: "input" | "result",
     script: Uint8Array,
   ): bigint {
-    const parent = this.inodes.get(parentIno);
+    const parent = this.#inodes.get(parentIno);
     if (!parent || parent.kind !== "dir") {
       throw new Error(`Parent inode ${parentIno} is not a directory`);
     }
@@ -276,38 +291,38 @@ export class FsTree {
       script,
       mtime: this.#now(),
     };
-    this.inodes.set(ino, node);
+    this.#inodes.set(ino, node);
     parent.children.set(name, ino);
-    this.parents.set(ino, parentIno);
+    this.#parents.set(ino, parentIno);
     this.#trackPath(ino, parentIno, name);
 
     return ino;
   }
 
   addSymlink(parentIno: bigint, name: string, target: string): bigint {
-    const parent = this.inodes.get(parentIno);
+    const parent = this.#inodes.get(parentIno);
     if (!parent || parent.kind !== "dir") {
       throw new Error(`Parent inode ${parentIno} is not a directory`);
     }
 
     const ino = this.allocInode();
     const node: FsNode = { kind: "symlink", target, mtime: this.#now() };
-    this.inodes.set(ino, node);
+    this.#inodes.set(ino, node);
     parent.children.set(name, ino);
-    this.parents.set(ino, parentIno);
+    this.#parents.set(ino, parentIno);
     this.#trackPath(ino, parentIno, name);
 
     return ino;
   }
 
   lookup(parentIno: bigint, name: string): bigint | undefined {
-    const parent = this.inodes.get(parentIno);
+    const parent = this.#inodes.get(parentIno);
     if (!parent || parent.kind !== "dir") return undefined;
     return parent.children.get(name);
   }
 
   getNode(ino: bigint): FsNode | undefined {
-    return this.inodes.get(ino);
+    return this.#inodes.get(ino);
   }
 
   /**
@@ -317,12 +332,12 @@ export class FsTree {
    * transplant-reconciled entry changes advance mtime on their own.
    */
   touch(ino: bigint): void {
-    const node = this.inodes.get(ino);
+    const node = this.#inodes.get(ino);
     if (node) this.#bumpMtime(node);
   }
 
   setCfcAnnotation(ino: bigint, annotation: CfcNodeAnnotation): void {
-    const node = this.inodes.get(ino);
+    const node = this.#inodes.get(ino);
     if (!node) {
       throw new Error(`Inode ${ino} does not exist`);
     }
@@ -332,7 +347,7 @@ export class FsTree {
 
   getCfcAnnotation(ino: bigint): CfcNodeAnnotation | undefined {
     this.#sortCfcEntries(ino);
-    return this.inodes.get(ino)?.cfc;
+    return this.#inodes.get(ino)?.cfc;
   }
 
   #rebuildCfcEntryIndex(
@@ -365,7 +380,7 @@ export class FsTree {
 
   #sortCfcEntries(ino: bigint): void {
     if (!this.#unsortedCfcEntryDirectories.delete(ino)) return;
-    const node = this.inodes.get(ino);
+    const node = this.#inodes.get(ino);
     if (!node || node.kind !== "dir" || !node.cfc?.entries) return;
     node.cfc.entries.entries.sort((left, right) =>
       left.nameDigest.localeCompare(right.nameDigest)
@@ -378,7 +393,7 @@ export class FsTree {
     name: string,
     entry: CfcDirectoryEntryAnnotation,
   ): void {
-    const parent = this.inodes.get(parentIno);
+    const parent = this.#inodes.get(parentIno);
     if (!parent || parent.kind !== "dir" || !parent.cfc?.entries) return;
     const entries = parent.cfc.entries.entries;
     const index = this.#cfcEntryIndex(parentIno, entries);
@@ -393,7 +408,7 @@ export class FsTree {
   }
 
   #removeCfcEntryAnnotation(parentIno: bigint, name: string): void {
-    const parent = this.inodes.get(parentIno);
+    const parent = this.#inodes.get(parentIno);
     if (!parent || parent.kind !== "dir" || !parent.cfc?.entries) return;
     const entries = parent.cfc.entries.entries;
     const index = this.#cfcEntryIndex(parentIno, entries);
@@ -414,7 +429,7 @@ export class FsTree {
     parentIno: bigint,
     name: string,
   ): CfcDirectoryEntryAnnotation | undefined {
-    const parent = this.inodes.get(parentIno);
+    const parent = this.#inodes.get(parentIno);
     if (!parent || parent.kind !== "dir" || !parent.cfc?.entries) {
       return undefined;
     }
@@ -424,7 +439,7 @@ export class FsTree {
   }
 
   getChildren(ino: bigint): [string, bigint][] {
-    const node = this.inodes.get(ino);
+    const node = this.#inodes.get(ino);
     if (!node || node.kind !== "dir") return [];
     return [...node.children.entries()];
   }
@@ -445,7 +460,7 @@ export class FsTree {
     content: Uint8Array | string,
     jsonType?: "string" | "number" | "boolean" | "null" | "object" | "array",
   ): void {
-    const node = this.inodes.get(ino);
+    const node = this.#inodes.get(ino);
     if (!node || node.kind !== "file") {
       throw new Error(`Inode ${ino} is not a file`);
     }
@@ -466,7 +481,7 @@ export class FsTree {
 
   /** Remove a child entry from parent's children map and clear the subtree. */
   removeChild(parentIno: bigint, name: string): bigint | undefined {
-    const parent = this.inodes.get(parentIno);
+    const parent = this.#inodes.get(parentIno);
     if (!parent || parent.kind !== "dir") return undefined;
     const childIno = parent.children.get(name);
     if (childIno === undefined) return undefined;
@@ -485,7 +500,7 @@ export class FsTree {
    * lookup and open references.
    */
   detachChild(parentIno: bigint, name: string): bigint | undefined {
-    const parent = this.inodes.get(parentIno);
+    const parent = this.#inodes.get(parentIno);
     if (!parent || parent.kind !== "dir") return undefined;
     const childIno = parent.children.get(name);
     if (childIno === undefined) return undefined;
@@ -496,15 +511,15 @@ export class FsTree {
 
   /** Recursively remove an inode and all its descendants from tracking maps. */
   #clearSubtree(ino: bigint): void {
-    const node = this.inodes.get(ino);
+    const node = this.#inodes.get(ino);
     if (!node) return;
     if (node.kind === "dir") {
       for (const [, childIno] of node.children) {
         this.#clearSubtree(childIno);
       }
     }
-    this.inodes.delete(ino);
-    this.parents.delete(ino);
+    this.#inodes.delete(ino);
+    this.#parents.delete(ino);
     this.#generated.delete(ino);
     this.#cfcEntryIndexes.delete(ino);
     this.#unsortedCfcEntryDirectories.delete(ino);
@@ -518,7 +533,7 @@ export class FsTree {
     newParentIno: bigint,
     newName: string,
   ): void {
-    const oldParent = this.inodes.get(oldParentIno);
+    const oldParent = this.#inodes.get(oldParentIno);
     if (!oldParent || oldParent.kind !== "dir") {
       throw new Error(`Old parent ${oldParentIno} is not a directory`);
     }
@@ -527,7 +542,7 @@ export class FsTree {
       throw new Error(`Child "${oldName}" not found in parent ${oldParentIno}`);
     }
 
-    const newParent = this.inodes.get(newParentIno);
+    const newParent = this.#inodes.get(newParentIno);
     if (!newParent || newParent.kind !== "dir") {
       throw new Error(`New parent ${newParentIno} is not a directory`);
     }
@@ -544,8 +559,8 @@ export class FsTree {
     oldParent.children.delete(oldName);
     this.#removeCfcEntryAnnotation(oldParentIno, oldName);
     newParent.children.set(newName, childIno);
-    this.parents.set(childIno, newParentIno);
-    const child = this.inodes.get(childIno);
+    this.#parents.set(childIno, newParentIno);
+    const child = this.#inodes.get(childIno);
     const childAnnotation = this.getCfcAnnotation(childIno);
     if (movedCfcEntry && child) {
       this.setCfcEntryAnnotation(newParentIno, newName, {
@@ -571,7 +586,7 @@ export class FsTree {
   ): void {
     this.#untrackPath(ino);
     this.#trackPath(ino, parentIno, name);
-    const node = this.inodes.get(ino);
+    const node = this.#inodes.get(ino);
     if (node?.kind === "dir") {
       for (const [childName, childIno] of node.children) {
         this.#retrackSubtree(childIno, ino, childName);
@@ -604,8 +619,8 @@ export class FsTree {
    * Returns the kernel caches that went stale; see {@link TransplantChanges}.
    */
   transplantSubtree(oldIno: bigint, newIno: bigint): TransplantChanges {
-    const oldNode = this.inodes.get(oldIno);
-    const newNode = this.inodes.get(newIno);
+    const oldNode = this.#inodes.get(oldIno);
+    const newNode = this.#inodes.get(newIno);
     if (!oldNode || !newNode) {
       throw new Error(`Transplant root ${oldIno} or ${newIno} does not exist`);
     }
@@ -633,8 +648,8 @@ export class FsTree {
     newIno: bigint,
     changes: TransplantChanges,
   ): void {
-    const oldNode = this.inodes.get(oldIno)!;
-    const newNode = this.inodes.get(newIno)!;
+    const oldNode = this.#inodes.get(oldIno)!;
+    const newNode = this.#inodes.get(newIno)!;
 
     // Move the replacement's annotation onto the surviving node and clear it
     // from the replacement so discarding the replacement's children can't
@@ -661,10 +676,10 @@ export class FsTree {
 
     for (const [name, newChildIno] of newChildren) {
       const oldChildIno = oldByName.get(name);
-      const newChildNode = this.inodes.get(newChildIno)!;
+      const newChildNode = this.#inodes.get(newChildIno)!;
       if (
         oldChildIno !== undefined &&
-        this.inodes.get(oldChildIno)!.kind === newChildNode.kind
+        this.#inodes.get(oldChildIno)!.kind === newChildNode.kind
       ) {
         // Same path, same kind: the existing inode survives.
         this.#transplantNode(oldChildIno, newChildIno, changes);
@@ -677,7 +692,7 @@ export class FsTree {
           this.#clearSubtree(oldChildIno);
         }
         oldNode.children.set(name, newChildIno);
-        this.parents.set(newChildIno, oldIno);
+        this.#parents.set(newChildIno, oldIno);
         this.#retrackSubtree(newChildIno, oldIno, name);
         this.#recordEntryChange(changes, oldIno, name);
         entriesChanged = true;
@@ -768,8 +783,8 @@ export class FsTree {
    */
   #discardNodeShallow(ino: bigint): void {
     this.#unlinkFromParent(ino);
-    this.inodes.delete(ino);
-    this.parents.delete(ino);
+    this.#inodes.delete(ino);
+    this.#parents.delete(ino);
     this.#generated.delete(ino);
     this.#cfcEntryIndexes.delete(ino);
     this.#unsortedCfcEntryDirectories.delete(ino);
@@ -778,7 +793,7 @@ export class FsTree {
 
   /** Remove a subtree rooted at `ino`, including the node itself. */
   clear(ino: bigint): void {
-    const node = this.inodes.get(ino);
+    const node = this.#inodes.get(ino);
     if (!node) return;
 
     this.#unlinkFromParent(ino);
