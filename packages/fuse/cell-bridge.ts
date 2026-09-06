@@ -734,7 +734,8 @@ export class CellBridge {
 
   /**
    * Probes every connected space's backend, and clears the disconnected
-   * state when all of them answer; otherwise schedules the next attempt.
+   * state when there is at least one and all of them answer; otherwise
+   * schedules the next attempt.
    */
   async #attemptReconnect(): Promise<void> {
     const spaces = [...this.#spaces];
@@ -2323,8 +2324,9 @@ export class CellBridge {
 
   /**
    * Materializes a piece's `input` or `result` subtree on demand, once per
-   * prop, sharing an in-flight hydration with concurrent callers. Resolves
-   * to whether the prop is hydrated.
+   * prop, sharing an in-flight hydration with concurrent callers. A hydration
+   * whose epoch moved or whose prop was cleared mid-flight is retried up to
+   * `#MAX_HYDRATION_RETRIES` times. Resolves to whether the prop is hydrated.
    */
   #hydratePieceProp(
     pieceIno: bigint,
@@ -2815,9 +2817,7 @@ export class CellBridge {
     );
   }
 
-  /**
-   * Creates a space's directory structure and the state that tracks it.
-   */
+  /** Creates a space's directory structure and the state that tracks it. */
   #buildSpaceTree(
     spaceName: string,
     pieces: PiecesController,
@@ -3673,9 +3673,8 @@ export class CellBridge {
    * is invalidated: a projection leaving the piece root (the result becomes
    * null or switches back to the normal result tree) must drop the client's
    * cached `index.md` and sibling dentries, or they resolve to freed inodes.
-   * The
-   * `.fs.pending` staging container is internal and never has a cached entry,
-   * so it is cleared but not recorded.
+   * The `.fs.pending` staging container is internal and never has a cached
+   * entry, so it is cleared but not recorded.
    */
   #clearFsProjectionEntries(
     pieceIno: bigint,
@@ -4573,8 +4572,9 @@ export class CellBridge {
   }
 
   /**
-   * Creates a piece's directory under `parentIno`, with its metadata file
-   * and unhydrated `input` and `result` stubs, and returns its inode.
+   * Creates a piece's directory under `parentIno`, or fills in `existingIno`
+   * as that directory, with its metadata file and unhydrated `input` and
+   * `result` stubs, and returns its inode.
    */
   async #loadPieceTree(
     piece: PieceController,
