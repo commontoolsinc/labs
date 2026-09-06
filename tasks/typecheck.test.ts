@@ -86,6 +86,18 @@ async function excludedByManifest(
     if (text === undefined) continue;
     const manifest = parseJsonc(text) as { exclude?: string[] };
     for (const pattern of manifest.exclude ?? []) {
+      // Deno reads a leading `!` as un-excluding what a broader entry took,
+      // and `globToRegExp` reads it as a literal character. The mismatch is
+      // silent and lands on the shrinking side: the entry never matches, the
+      // broader exclusion goes on firing, and a file the checker opens is
+      // counted as excused. Refusing it fails this file instead.
+      if (pattern.startsWith("!")) {
+        throw new Error(
+          `${join(directory, "deno.json(c)")} un-excludes ${pattern}, which ` +
+            `this check cannot read; teach it the negation or the census is ` +
+            `short by whatever the entry restores.`,
+        );
+      }
       const stripped = pattern.replace(/^\.\//, "");
       const scoped = directory === "" ? stripped : `${directory}/${stripped}`;
       patterns.push(
@@ -346,6 +358,7 @@ describe("typecheck", () => {
             ["iframe-board/nested-canvas", "guest.tsx"],
             ["iframe-board", "contract.ts"],
             ["plain-name", "guest.ts"],
+            ["plain-name", "guest.tsx"],
             ["plain-name", "contract.ts"],
           ]
         ) {
@@ -369,6 +382,9 @@ describe("typecheck", () => {
           "packages/patterns/iframe-board/contract.ts",
         );
         expect(patterns).not.toContain("packages/patterns/plain-name/guest.ts");
+        expect(patterns).not.toContain(
+          "packages/patterns/plain-name/guest.tsx",
+        );
         expect(patterns).not.toContain(
           "packages/patterns/plain-name/contract.ts",
         );
@@ -541,6 +557,26 @@ describe("typecheck", () => {
       expect(matches("packages/js-compiler/test/fixtures/program.ts")).toBe(
         false,
       );
+    });
+
+    it("refuses an un-exclusion rather than reading it as a literal", async () => {
+      // The failure this guards is silent and one-directional: the negated
+      // entry matches nothing, the broader one it was written to cancel goes
+      // on firing, and the census comes back short a file the checker opens.
+
+      const root = await Deno.makeTempDir({ prefix: "typecheck-unexclude-" });
+      try {
+        await Deno.writeTextFile(
+          join(root, "deno.jsonc"),
+          `{ "workspace": [], "exclude": ["**/build/", "!build/keep.ts"] }`,
+        );
+
+        await expect(excludedByManifest(root, [])).rejects.toThrow(
+          /un-excludes/,
+        );
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
     });
 
     it("reads a member's own exclude, resolved against that member", async () => {
