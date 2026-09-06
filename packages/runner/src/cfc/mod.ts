@@ -41,6 +41,7 @@ export {
   redactCaveatSourcesForDisplay,
 } from "./label-view.ts";
 export { cfcLabelViewFromSchema } from "./schema-label-view.ts";
+export { cfcLabelViewSymbol } from "./label-view-state.ts";
 export type {
   AttemptedWrite,
   CfcAddress,
