@@ -750,19 +750,19 @@ export class RuntimeProcessor {
   >();
   #vdomBatchIdCounter = 0;
   // Render-boundary declassification policy applied to every mount's
-  // reconciler. Set from InitializationData; "allow" preserves prior behavior.
+  // reconciler, from the initialization data; `allow` when it names none.
   #renderDeclassificationPolicy: RenderDeclassificationPolicy = "allow";
   // Host-supplied default render ceiling applied to every mount's
-  // reconciler. Undefined preserves prior behavior (no ceiling).
+  // reconciler; undefined when the host set none.
   #renderConfidentialityCeiling?: RenderConfidentialityCeiling;
-  // Runner-side display-boundary resolver (Epic H3b) built once from the
-  // runtime's trust config + acting principal when a ceiling is in force.
-  // Rewrites a cell's label through the exchange rules so `Space(...)`-via-
-  // `HasRole` principal forms resolve before the reconciler's ceiling fit.
+  // Runner-side display-boundary resolver, built once from the runtime's
+  // trust config and acting principal when a ceiling is in force. Rewrites a
+  // cell's label through the exchange rules so `Space(...)`-via-`HasRole`
+  // principal forms resolve before the reconciler's ceiling fit.
   #renderConfidentialityResolver?: RenderConfidentialityResolver;
-  // §4.9.3 Stage 2: the membership provider shared with the resolver above and
-  // handed to every mount's reconciler, so a `Space(X)`-labeled cell blocked
-  // before X's ACL synced re-renders once the ACL grants READ. Undefined when
+  // The membership provider shared with the resolver above and handed to
+  // every mount's reconciler, so a `Space(X)`-labeled cell blocked before X's
+  // ACL synced re-renders once the ACL grants READ (§4.9.3). Undefined when
   // no ceiling is in force.
   #renderMembershipProvider?: SpaceMembershipProvider;
 
@@ -871,193 +871,6 @@ export class RuntimeProcessor {
       },
       getSpaceCtx: (space) => this.#getSpaceCtx(space),
     };
-  }
-
-  /**
-   * The constructor, which `initialize()` otherwise keeps to itself, so that
-   * a test builds a real instance over the collaborators it supplies.
-   */
-  static get accessForTestingOnly(): {
-    construct(
-      runtime: Runtime,
-      cc: PiecesController,
-      initSpace: DID,
-      identity: Identity,
-      telemetry: RuntimeTelemetry,
-      securityContext: RuntimeSecurityContext,
-    ): RuntimeProcessor;
-  } {
-    return {
-      construct: (
-        runtime,
-        cc,
-        initSpace,
-        identity,
-        telemetry,
-        securityContext,
-      ) =>
-        new RuntimeProcessor(
-          runtime,
-          cc,
-          initSpace,
-          identity,
-          telemetry,
-          securityContext,
-        ),
-    };
-  }
-
-  static async initialize(data: InitializationData): Promise<RuntimeProcessor> {
-    const apiUrlObj = new URL(data.apiUrl);
-    const identity = await Identity.fromKeyPair(
-      data.identity,
-    );
-    const spaceIdentity = data.spaceIdentity
-      ? await Identity.fromKeyPair(
-        data.spaceIdentity,
-      )
-      : undefined;
-    const space = data.spaceDid;
-    const telemetry = new RuntimeTelemetry();
-
-    setLLMUrl(data.apiUrl);
-    setPatternEnvironment({ apiUrl: apiUrlObj });
-
-    const session = {
-      spaceIdentity,
-      as: identity,
-      space: data.spaceDid,
-      spaceName: data.spaceName,
-    };
-
-    const storageManager = StorageManager.open({
-      as: identity,
-      spaceIdentity: spaceIdentity,
-      memoryHost: apiUrlObj,
-      spaceHostMap: data.spaceHostMap,
-      // Host dogfood toggle (commonfabric.concurrentWatchRefresh): overlap
-      // watch-refresh round trips up to a bounded window. Off unless the host
-      // set it; the default is strict single-flight.
-      settings: {
-        experimentalConcurrentWatchRefresh:
-          data.concurrentWatchRefresh === true,
-      },
-    });
-
-    // Mirror the durability barrier to the page: `pending` is true while any
-    // issued commit is still unconfirmed. The shell keeps the latest value and
-    // consults it from its beforeunload handler, so a reload with unconfirmed
-    // writes prompts the user instead of silently dropping them.
-    storageManager.subscribePendingCommits((pending) => {
-      postToClient({
-        type: NotificationType.PendingWritesChanged,
-        pending,
-      });
-    });
-
-    let homePieces: PiecesController | undefined = undefined;
-    let processor: RuntimeProcessor | undefined = undefined;
-    // Everything below goes through the browserWorker preset (CT-1814):
-    // host-decided data via the params mapper, plus this worker's declared
-    // deltas (the postMessage bridges for console/navigate/piece/errors).
-    const runtime = new Runtime(runtimePresets.browserWorker({
-      ...browserWorkerParamsFromInitializationData(
-        data,
-        storageManager,
-        telemetry,
-      ),
-      consoleHandler: ({ metadata, method, args }) => {
-        postToClient({
-          type: NotificationType.ConsoleMessage,
-          metadata,
-          method,
-          args: args.map((arg) => toConsoleDebugValue(arg)),
-        });
-        return args;
-      },
-
-      navigateCallback: (target) => {
-        const link = parseLink(target.getAsLink()) as NormalizedFullLink;
-        postToClient({
-          type: NotificationType.NavigateRequest,
-          targetCellRef: link,
-        });
-      },
-
-      pieceCreatedCallback: (piece) => {
-        const writeContext = runtime.getWriteDebugContext();
-        // Register the piece in ITS space's list: a piece created by a
-        // running foreign-space pattern routes to that space's controller
-        // (the context exists — it started the pattern). Fallback to
-        // the home controller, the sole pre-multi-space behavior.
-        const pieces = (piece.space && processor?.piecesFor(piece.space)) ??
-          homePieces;
-        if (!pieces) return;
-        void runtime.withWriteDebugContext(
-          writeContext,
-          () => pieces.add([piece]),
-        ).catch((e: unknown) => {
-          console.error(
-            "[RuntimeProcessor] Failed to add created piece:",
-            {
-              error: e instanceof Error ? e.message : e,
-            },
-          );
-        });
-      },
-
-      errorHandlers: [postContextualRuntimeError],
-    }));
-
-    // Fail LOUD on a worker/host flag divergence (review 2026-08-11
-    // m7) — see assertServerExecutionPostureAgreement.
-    assertServerExecutionPostureAgreement(data.experimental, runtime);
-
-    if (!await runtime.healthCheck()) {
-      throw new Error(`Could not connect to "${data.apiUrl}"`);
-    }
-
-    // Allow the worker to acknowledge initialization immediately. Consumers
-    // that need storage/piece convergence should call `synced()`.
-    homePieces = new PiecesController(session, runtime);
-
-    processor = new RuntimeProcessor(
-      runtime,
-      homePieces,
-      space,
-      identity,
-      telemetry,
-      securityContextFrom(data, identity.did()),
-    );
-    // InitializationData crosses postMessage with no runtime validation, so a
-    // typo'd host config or version-skewed peer must fail CLOSED, not open:
-    // any present-but-unknown value becomes "deny"; absent stays "allow".
-    processor.#renderDeclassificationPolicy =
-      normalizeRenderDeclassificationPolicy(data.renderDeclassificationPolicy);
-    processor.#renderConfidentialityCeiling =
-      normalizeRenderConfidentialityCeiling(data.renderConfidentialityCeiling);
-    processor.#renderMembershipProvider = renderMembershipProviderFor(
-      runtime,
-      identity,
-      processor.#renderConfidentialityCeiling,
-    );
-    processor.#renderConfidentialityResolver = renderConfidentialityResolverFor(
-      runtime,
-      identity,
-      processor.#renderConfidentialityCeiling,
-      space,
-      processor.#renderMembershipProvider,
-    );
-    processor.#intentOutcomeCancel = subscribeEventAttentionNotifications(
-      runtime,
-    );
-    // Site-table v0: the home space carries space-to-host hints; the
-    // runtime reads them as its live host lookup (2026-06-09 federation
-    // session — "move the lookup into the runtime itself"). A seeded route or
-    // earlier hint can reject an entry. A default-host provider is provisional.
-    // Failures here must not block worker boot.
-    processor.watchSiteTable();
-    return processor;
   }
 
   #siteTableCancel: Cancel | undefined;
@@ -2286,8 +2099,8 @@ export class RuntimeProcessor {
   // These are one walk with two implementations, and this is the copy to
   // retire.
   //
-  // TODO(runtime-worker-refactor): Can this fail? What if the cell
-  // is not a piece cell?
+  // TODO(danfuzz): Refuse a cell that is not a piece cell in the surviving
+  // walk, once `parseSlugRedirect` is the one copy.
   async handlePieceGet(
     request: PieceGetRequest,
   ): Promise<PieceResponse> {
@@ -2434,8 +2247,10 @@ export class RuntimeProcessor {
   ): Promise<BooleanResponse> {
     const cc = this.#getSpaceCtx(request.space);
     await cc.startPiece(request.pieceId, request.scope);
-    // @TODO(runtime-worker-refactor): Return status based on if
-    // pattern was actually found and stopped
+    // A missing piece throws in `startPiece()`, so `true` here means the
+    // piece started.
+    // TODO(danfuzz): Report whether it was already running, once
+    // `startPiece()` says so.
     return { value: true };
   }
 
@@ -2444,8 +2259,10 @@ export class RuntimeProcessor {
   ): Promise<BooleanResponse> {
     const cc = this.#getSpaceCtx(request.space);
     await cc.stopPiece(request.pieceId, request.scope);
-    // @TODO(runtime-worker-refactor): Return status based on if
-    // pattern was actually found and stopped
+    // A missing piece throws in `stopPiece()`, so `true` here means the
+    // piece is stopped, whether or not it was running.
+    // TODO(danfuzz): Report whether it was running, once `stopPiece()`
+    // says so.
     return { value: true };
   }
 
@@ -3214,5 +3031,196 @@ export class RuntimeProcessor {
       return;
     }
     mount.reconciler.acknowledgeBatchApplied(request.batchId);
+  }
+
+  //
+  // Static members
+  //
+
+  /**
+   * The constructor, which `initialize()` otherwise keeps to itself, so that
+   * a test builds a real instance over the collaborators it supplies.
+   */
+  static get accessForTestingOnly(): {
+    construct(
+      runtime: Runtime,
+      cc: PiecesController,
+      initSpace: DID,
+      identity: Identity,
+      telemetry: RuntimeTelemetry,
+      securityContext: RuntimeSecurityContext,
+    ): RuntimeProcessor;
+  } {
+    return {
+      construct: (
+        runtime,
+        cc,
+        initSpace,
+        identity,
+        telemetry,
+        securityContext,
+      ) =>
+        new RuntimeProcessor(
+          runtime,
+          cc,
+          initSpace,
+          identity,
+          telemetry,
+          securityContext,
+        ),
+    };
+  }
+
+  static async initialize(data: InitializationData): Promise<RuntimeProcessor> {
+    const apiUrlObj = new URL(data.apiUrl);
+    const identity = await Identity.fromKeyPair(
+      data.identity,
+    );
+    const spaceIdentity = data.spaceIdentity
+      ? await Identity.fromKeyPair(
+        data.spaceIdentity,
+      )
+      : undefined;
+    const space = data.spaceDid;
+    const telemetry = new RuntimeTelemetry();
+
+    setLLMUrl(data.apiUrl);
+    setPatternEnvironment({ apiUrl: apiUrlObj });
+
+    const session = {
+      spaceIdentity,
+      as: identity,
+      space: data.spaceDid,
+      spaceName: data.spaceName,
+    };
+
+    const storageManager = StorageManager.open({
+      as: identity,
+      spaceIdentity: spaceIdentity,
+      memoryHost: apiUrlObj,
+      spaceHostMap: data.spaceHostMap,
+      // Host dogfood toggle (commonfabric.concurrentWatchRefresh): overlap
+      // watch-refresh round trips up to a bounded window. Off unless the host
+      // set it; the default is strict single-flight.
+      settings: {
+        experimentalConcurrentWatchRefresh:
+          data.concurrentWatchRefresh === true,
+      },
+    });
+
+    // Mirror the durability barrier to the page: `pending` is true while any
+    // issued commit is still unconfirmed. The shell keeps the latest value and
+    // consults it from its beforeunload handler, so a reload with unconfirmed
+    // writes prompts the user instead of silently dropping them.
+    storageManager.subscribePendingCommits((pending) => {
+      postToClient({
+        type: NotificationType.PendingWritesChanged,
+        pending,
+      });
+    });
+
+    let homePieces: PiecesController | undefined = undefined;
+    let processor: RuntimeProcessor | undefined = undefined;
+    // Everything below goes through the browserWorker preset (CT-1814):
+    // host-decided data via the params mapper, plus this worker's declared
+    // deltas (the postMessage bridges for console/navigate/piece/errors).
+    const runtime = new Runtime(runtimePresets.browserWorker({
+      ...browserWorkerParamsFromInitializationData(
+        data,
+        storageManager,
+        telemetry,
+      ),
+      consoleHandler: ({ metadata, method, args }) => {
+        postToClient({
+          type: NotificationType.ConsoleMessage,
+          metadata,
+          method,
+          args: args.map((arg) => toConsoleDebugValue(arg)),
+        });
+        return args;
+      },
+
+      navigateCallback: (target) => {
+        const link = parseLink(target.getAsLink()) as NormalizedFullLink;
+        postToClient({
+          type: NotificationType.NavigateRequest,
+          targetCellRef: link,
+        });
+      },
+
+      pieceCreatedCallback: (piece) => {
+        const writeContext = runtime.getWriteDebugContext();
+        // Register the piece in ITS space's list: a piece created by a
+        // running foreign-space pattern routes to that space's controller
+        // (the context exists — it started the pattern). Fallback to
+        // the home controller, the sole pre-multi-space behavior.
+        const pieces = (piece.space && processor?.piecesFor(piece.space)) ??
+          homePieces;
+        if (!pieces) return;
+        void runtime.withWriteDebugContext(
+          writeContext,
+          () => pieces.add([piece]),
+        ).catch((e: unknown) => {
+          console.error(
+            "[RuntimeProcessor] Failed to add created piece:",
+            {
+              error: e instanceof Error ? e.message : e,
+            },
+          );
+        });
+      },
+
+      errorHandlers: [postContextualRuntimeError],
+    }));
+
+    // Fail LOUD on a worker/host flag divergence (review 2026-08-11
+    // m7) — see assertServerExecutionPostureAgreement.
+    assertServerExecutionPostureAgreement(data.experimental, runtime);
+
+    if (!await runtime.healthCheck()) {
+      throw new Error(`Could not connect to "${data.apiUrl}"`);
+    }
+
+    // Allow the worker to acknowledge initialization immediately. Consumers
+    // that need storage/piece convergence should call `synced()`.
+    homePieces = new PiecesController(session, runtime);
+
+    processor = new RuntimeProcessor(
+      runtime,
+      homePieces,
+      space,
+      identity,
+      telemetry,
+      securityContextFrom(data, identity.did()),
+    );
+    // InitializationData crosses postMessage with no runtime validation, so a
+    // typo'd host config or version-skewed peer must fail CLOSED, not open:
+    // any present-but-unknown value becomes "deny"; absent stays "allow".
+    processor.#renderDeclassificationPolicy =
+      normalizeRenderDeclassificationPolicy(data.renderDeclassificationPolicy);
+    processor.#renderConfidentialityCeiling =
+      normalizeRenderConfidentialityCeiling(data.renderConfidentialityCeiling);
+    processor.#renderMembershipProvider = renderMembershipProviderFor(
+      runtime,
+      identity,
+      processor.#renderConfidentialityCeiling,
+    );
+    processor.#renderConfidentialityResolver = renderConfidentialityResolverFor(
+      runtime,
+      identity,
+      processor.#renderConfidentialityCeiling,
+      space,
+      processor.#renderMembershipProvider,
+    );
+    processor.#intentOutcomeCancel = subscribeEventAttentionNotifications(
+      runtime,
+    );
+    // Site-table v0: the home space carries space-to-host hints; the
+    // runtime reads them as its live host lookup (2026-06-09 federation
+    // session — "move the lookup into the runtime itself"). A seeded route or
+    // earlier hint can reject an entry. A default-host provider is provisional.
+    // Failures here must not block worker boot.
+    processor.watchSiteTable();
+    return processor;
   }
 }
