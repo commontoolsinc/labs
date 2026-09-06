@@ -184,14 +184,12 @@ interface Reported {
 
 /**
  * A runtime that answers resolutions from a value the test controls, over a
- * slug cell whose poll and whose subscription the test fires by hand.
+ * slug cell whose poll the test fires by hand.
  *
  * The interval is captured rather than scheduled. A wait on wall-clock time
  * would decide nothing these tests are about, and the callback is the subject:
  * firing it is how a test says "the reference was re-resolved" without
- * standing still for a second to let it happen. `clearInterval` drops the
- * captured callback, so a poll the watch has stopped fires nothing here — the
- * only way a test can tell a live interval from a cleared one.
+ * standing still for a second to let it happen.
  */
 interface StubRuntime {
   /** Stands in for `RuntimeInternals`. */
@@ -206,17 +204,11 @@ interface StubRuntime {
   /** How many times the slug subscription has been cancelled. */
   cancels: number;
 
-  /** Whether an interval is scheduled on the watch right now. */
-  readonly polling: boolean;
-
   /** Answer every resolution from here on with `next`. */
   answer(next: Resolved | Refused | Error): void;
 
   /** Fire the watch's poll once, and let what it starts settle. */
   poll(): Promise<void>;
-
-  /** Wake the watch's subscription once, and let what it starts settle. */
-  wake(): Promise<void>;
 
   /** Let the subscription's own opening settle, without firing the poll. */
   settle(): Promise<void>;
@@ -251,24 +243,16 @@ function stubRuntime(
   const started: unknown[][] = [];
   let answer = first;
   let poll: (() => void) | undefined;
-  let wake: (() => void) | undefined;
   const stub: StubRuntime = {
     resolved,
     started,
     cancels: 0,
-    get polling() {
-      return poll !== undefined;
-    },
     answer: (next) => {
       answer = next;
     },
     poll: async () => {
       poll?.();
       // A resolution and the reload it may start are each a microtask hop.
-      for (let hop = 0; hop < 4; hop++) await Promise.resolve();
-    },
-    wake: async () => {
-      wake?.();
       for (let hop = 0; hop < 4; hop++) await Promise.resolve();
     },
     settle: async () => {
@@ -361,16 +345,8 @@ function stubRuntime(
     }),
     getSlugCell: () =>
       Promise.resolve({
-        subscribe: (callback: () => void) => {
-          // A real subscription calls back at once with the current value,
-          // and the watch swallows that first call. Calling it here is what
-          // leaves `wake()` firing the wakes a test means.
-          wake = callback;
-          callback();
-          return () => {
-            wake = undefined;
-            stub.cancels++;
-          };
+        subscribe: () => () => {
+          stub.cancels++;
         },
       }),
     invalidatePattern: () => {},
@@ -389,9 +365,7 @@ function stubRuntime(
   Object.defineProperty(globalThis, "clearInterval", {
     configurable: true,
     writable: true,
-    value: () => {
-      poll = undefined;
-    },
+    value: () => {},
   });
   return stub;
 }
@@ -670,191 +644,6 @@ describe("AppView collection members", () => {
     }
   });
 
-  it("re-resolves the reference on an interval while it is refused", async () => {
-    const restore = installBrowserGlobals();
-    try {
-      const { XAppView } = await import("../src/views/AppView.ts");
-      const stub = stubRuntime({
-        refusal: { code: "missing-member", message: "no member 42 in top" },
-      });
-      const view = appViewOver(
-        XAppView as never,
-        stub,
-        viewOf({ pieceSlug: "top", pieceMember: "42" }),
-      );
-
-      view.updated(new Map([["app", undefined]]));
-      await stub.settle();
-      view._selectedPattern.run();
-      await view._selectedPattern.taskComplete.catch(() => {});
-
-      // A refusal is what the view has come to show, and the write that would
-      // end it — the member's target gaining the pattern identity that makes
-      // it a piece — wakes no subscription. Asking again is the only thing
-      // that notices, so the interval runs and each tick asks.
-      expect(stub.polling).toBe(true);
-      const asked = stub.resolved.length;
-      await stub.poll();
-      expect(stub.resolved.length).toBeGreaterThan(asked);
-    } finally {
-      restore();
-    }
-  });
-
-  it("stops the interval once the piece the reference names is on screen", async () => {
-    const restore = installBrowserGlobals();
-    try {
-      const { XAppView } = await import("../src/views/AppView.ts");
-      const stub = stubRuntime({
-        refusal: { code: "missing-member", message: "no member 42 in top" },
-      });
-      const view = appViewOver(
-        XAppView as never,
-        stub,
-        viewOf({ pieceSlug: "top", pieceMember: "42" }),
-      );
-
-      view.updated(new Map([["app", undefined]]));
-      await stub.settle();
-      view._selectedPattern.run();
-      await view._selectedPattern.taskComplete.catch(() => {});
-      expect(stub.polling).toBe(true);
-
-      // The member arrives, an interval tick notices, and the reload goes and
-      // gets the piece.
-      stub.answer({ pieceId: "fid1:member-42", pathAfter: [] });
-      await pollAndSettle(view, stub);
-      expect(stub.started.map((call) => call[1])).toContain("fid1:member-42");
-
-      // What the interval was for is over. The subscription reports what a
-      // piece on screen reaches, so a timer asking the same question every
-      // second for as long as the page is open buys nothing, and each tick
-      // of it costs a resolution.
-      expect(stub.polling).toBe(false);
-      const asked = stub.resolved.length;
-      await stub.poll();
-      expect(stub.resolved.length).toBe(asked);
-    } finally {
-      restore();
-    }
-  });
-
-  it("runs the interval again once the reference stops reaching a piece", async () => {
-    const restore = installBrowserGlobals();
-    try {
-      const { XAppView } = await import("../src/views/AppView.ts");
-      const stub = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
-      const view = appViewOver(
-        XAppView as never,
-        stub,
-        viewOf({ pieceSlug: "top", pieceMember: "42" }),
-      );
-
-      view.updated(new Map([["app", undefined]]));
-      await stub.settle();
-      view._selectedPattern.run();
-      await view._selectedPattern.taskComplete;
-      expect(stub.polling).toBe(false);
-
-      // The member is taken out of the collection, which is a write to the
-      // collection and so wakes the subscription. What the view comes to show
-      // is a refusal, and the next thing to notice the member returning is an
-      // interval tick — so the bound is on what is on screen, not on what was
-      // once reached.
-      const before = view.accessForTestingOnly.slugRevision;
-      stub.answer({
-        refusal: { code: "missing-member", message: "no member 42 in top" },
-      });
-      await stub.wake();
-      expect(view.accessForTestingOnly.slugRevision).toBeGreaterThan(before);
-      view._selectedPattern.run();
-      await view._selectedPattern.taskComplete.catch(() => {});
-
-      expect(stub.polling).toBe(true);
-    } finally {
-      restore();
-    }
-  });
-
-  it("runs the interval again when a resolution throws after a piece was shown", async () => {
-    const restore = installBrowserGlobals();
-    const errors = captureErrors();
-    try {
-      const { XAppView } = await import("../src/views/AppView.ts");
-      const stub = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
-      const view = appViewOver(
-        XAppView as never,
-        stub,
-        viewOf({ pieceSlug: "top", pieceMember: "42" }),
-      );
-
-      view.updated(new Map([["app", undefined]]));
-      await stub.settle();
-      view._selectedPattern.run();
-      await view._selectedPattern.taskComplete;
-      expect(stub.polling).toBe(false);
-
-      // The reference moves, the subscription reports it, and the rerun it
-      // asks for stops in the resolution — a dropped transport, which is a
-      // fault in asking and not an answer. So the run reaches nothing to
-      // show, and the piece still on screen is one the reference has already
-      // left.
-      stub.answer({ pieceId: "fid1:member-43", pathAfter: [] });
-      await stub.wake();
-      stub.answer(new Error("the socket went away"));
-      view._selectedPattern.run();
-      await view._selectedPattern.taskComplete.catch(() => {});
-      expect(errors.lines).toEqual([
-        "[AppView] Failed to load selected piece: Error: the socket went away",
-      ]);
-
-      // Nothing writes to the collection again, so the subscription has
-      // nothing to report and the interval is the only thing that would
-      // notice the transport coming back.
-      expect(stub.polling).toBe(true);
-      stub.answer({ pieceId: "fid1:member-43", pathAfter: [] });
-      await pollAndSettle(view, stub);
-      expect(stub.started.map((call) => call[1])).toContain("fid1:member-43");
-    } finally {
-      errors.restore();
-      restore();
-    }
-  });
-
-  it("shows a refusal in the words it was refused in", async () => {
-    const restore = installBrowserGlobals();
-    const errors = captureErrors();
-    try {
-      const { XAppView } = await import("../src/views/AppView.ts");
-      const stub = stubRuntime({
-        refusal: { code: "missing-member", message: "no member 42 in top" },
-      });
-      const view = appViewOver(
-        XAppView as never,
-        stub,
-        viewOf({ pieceSlug: "top", pieceMember: "42" }),
-      );
-
-      view.updated(new Map([["app", undefined]]));
-      await stub.settle();
-      view._selectedPattern.run();
-      await view._selectedPattern.taskComplete.catch(() => {});
-
-      // A refusal is an answer, and the load-error surface tells a reader
-      // what it said. The words travel as the error the run throws rather
-      // than through what it records as shown, so nothing about the recorded
-      // answer decides them and this is the only place they are checked.
-      const [loadError] = templateBindings(view.render(), "loadError") as [
-        { kind: string; error: Error },
-      ];
-      expect(loadError.kind).toBe("piece");
-      expect(loadError.error.message).toBe("no member 42 in top");
-    } finally {
-      errors.restore();
-      restore();
-    }
-  });
-
   it("stops citing a member once the collection stops holding one", async () => {
     const restore = installBrowserGlobals();
     const replaced: AppView[] = [];
@@ -874,7 +663,7 @@ describe("AppView collection members", () => {
       view._selectedPattern.run();
       await view._selectedPattern.taskComplete;
       view.updated(new Map([["app", undefined]]));
-      await stub.settle();
+      await stub.poll();
       expect(templateText(view.render())).toContain("/@naming-demo/top/42");
 
       // `top` is repointed at that very piece's own root. The reference now
@@ -882,13 +671,9 @@ describe("AppView collection members", () => {
       // only the piece calls this no change — and everything derived from the
       // member standing would go on standing under an address that no longer
       // names one.
-      //
-      // The repointing is a write to the collection, which is what the
-      // subscription reaches; a piece is on screen, so it is the only thing
-      // asking here.
       const before = view.accessForTestingOnly.slugRevision;
       stub.answer({ pieceId: "fid1:member-42", pathAfter: ["42"] });
-      await stub.wake();
+      await stub.poll();
 
       // The watch has to see this as a new answer. It is the only thing that
       // reruns the selection, and everything below is what the rerun settles.
@@ -1073,7 +858,7 @@ describe("AppView collection members", () => {
     }
   });
 
-  it("applies an answer that took longer than the requests issued behind it", async () => {
+  it("applies an answer that took longer than the poll interval", async () => {
     const restore = installBrowserGlobals();
     try {
       const { XAppView } = await import("../src/views/AppView.ts");
@@ -1091,12 +876,12 @@ describe("AppView collection members", () => {
       const before = view.accessForTestingOnly.slugRevision;
 
       // A slow resolution finds the reference somewhere new. Under a guard
-      // that asks "am I the newest ISSUED", the wakes behind it would each
+      // that asks "am I the newest ISSUED", the polls behind it would each
       // supersede it and the view would never learn anything at all.
       stub.hold();
       stub.answer({ pieceId: "fid1:moved", pathAfter: [] });
-      await stub.wake();
-      await stub.wake();
+      await stub.poll();
+      await stub.poll();
       await stub.releaseNewestFirst();
 
       expect(view.accessForTestingOnly.slugRevision).toBeGreaterThan(before);
@@ -1135,8 +920,7 @@ describe("AppView collection members", () => {
 
       // So a resolution finding B is still news, and the view goes and gets
       // it rather than taking an early return on a claim that it already has.
-      // A is on screen by now, so the subscription is what asks.
-      await stub.wake();
+      await stub.poll();
       expect(view.accessForTestingOnly.slugRevision).toBeGreaterThan(afterA);
     } finally {
       restore();
@@ -1172,6 +956,82 @@ describe("AppView collection members", () => {
 
       expect(view.accessForTestingOnly.slugRevision).toBeGreaterThan(before);
     } finally {
+      restore();
+    }
+  });
+
+  it("clears the load error when a faulted resolution comes back to the piece already shown", async () => {
+    const restore = installBrowserGlobals();
+    const errors = captureErrors();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({ pieceId: "fid1:member-42", pathAfter: [] });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view.updated(new Map([["app", undefined]]));
+      await stub.settle();
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete;
+
+      // The selection runs again and stops in the resolution — a dropped
+      // transport, which says nothing about where the reference points. The
+      // view is on the error, and the reference has not moved.
+      stub.answer(new Error("the socket went away"));
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete.catch(() => {});
+      expect(errors.lines).toEqual([
+        "[AppView] Failed to load selected piece: Error: the socket went away",
+      ]);
+
+      // The transport comes back and the reference resolves as it did before.
+      // Recovery has to come from the faulted run having reported that it
+      // reached nothing: an answer left standing would make this one no news,
+      // and the view would sit on the error with the piece it names one
+      // resolution away.
+      stub.answer({ pieceId: "fid1:member-42", pathAfter: [] });
+      await pollAndSettle(view, stub);
+
+      expect(templateBindings(view.render(), "loadError")).toEqual([undefined]);
+    } finally {
+      errors.restore();
+      restore();
+    }
+  });
+
+  it("shows a refusal in the words it was refused in", async () => {
+    const restore = installBrowserGlobals();
+    const errors = captureErrors();
+    try {
+      const { XAppView } = await import("../src/views/AppView.ts");
+      const stub = stubRuntime({
+        refusal: { code: "missing-member", message: "no member 42 in top" },
+      });
+      const view = appViewOver(
+        XAppView as never,
+        stub,
+        viewOf({ pieceSlug: "top", pieceMember: "42" }),
+      );
+
+      view.updated(new Map([["app", undefined]]));
+      await stub.settle();
+      view._selectedPattern.run();
+      await view._selectedPattern.taskComplete.catch(() => {});
+
+      // A refusal is an answer, and the load-error surface tells a reader
+      // what it said. The words travel as the error the run throws rather
+      // than through what it records as shown, so nothing about the recorded
+      // answer decides them and this is the only place they are checked.
+      const [loadError] = templateBindings(view.render(), "loadError") as [
+        { kind: string; error: Error },
+      ];
+      expect(loadError.kind).toBe("piece");
+      expect(loadError.error.message).toBe("no member 42 in top");
+    } finally {
+      errors.restore();
       restore();
     }
   });

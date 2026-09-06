@@ -134,14 +134,11 @@ function sameSlugReference(a: SlugReference, b: SlugReference): boolean {
   return a.space === b.space && a.slug === b.slug && a.member === b.member;
 }
 
-/** How often a watch that has reached no piece re-resolves its reference. */
-const SLUG_POLL_INTERVAL_MS = 1000;
-
 /**
  * One live watch on a slug reference: the reference, the runtime it is read
  * through, and everything whose lifetime is this watch's — the subscription
- * it opens, the poll it runs while the view is on no piece, and the pair of
- * flags that keep its re-resolutions to one at a time.
+ * it opens, the poll it schedules, and the pair of flags that keep its
+ * re-resolutions to one at a time.
  *
  * The reference and the runtime are every input the watch is built from, so
  * comparing them is what decides whether a running watch already covers what
@@ -163,7 +160,7 @@ class SlugWatch {
   /** Cancels the subscription on the slug document, once it is open. */
   cancel: Cancel | undefined = undefined;
 
-  /** The re-resolution poll, while one is scheduled. */
+  /** The re-resolution poll, once it is scheduled. */
   pollInterval: ReturnType<typeof setInterval> | undefined = undefined;
 
   /** Whether a re-resolution is running; a watch runs one at a time. */
@@ -182,23 +179,10 @@ class SlugWatch {
   stop(): void {
     this.cancel?.();
     this.cancel = undefined;
-    this.stopPolling();
-  }
-
-  /**
-   * Schedules this watch's poll to run `resolve`, and leaves a poll already
-   * scheduled as it is, so that a decision reached twice schedules once.
-   */
-  startPolling(resolve: () => void): void {
-    if (this.pollInterval !== undefined) return;
-    this.pollInterval = globalThis.setInterval(resolve, SLUG_POLL_INTERVAL_MS);
-  }
-
-  /** Clears this watch's poll, where one is scheduled. */
-  stopPolling(): void {
-    if (this.pollInterval === undefined) return;
-    globalThis.clearInterval(this.pollInterval);
-    this.pollInterval = undefined;
+    if (this.pollInterval !== undefined) {
+      globalThis.clearInterval(this.pollInterval);
+      this.pollInterval = undefined;
+    }
   }
 }
 
@@ -429,9 +413,10 @@ export class XAppView extends BaseView {
             // carries its own wrapper: the outer catch also takes the
             // refusal's throw, and recording nothing there would undo the
             // mark that refusal just made. A fault here is the one throw in
-            // the run that reaches no answer at all, so without the mark the
+            // the run that reaches no answer at all, and without the mark the
             // piece the view was already showing stands as this reference's
-            // answer, and nothing asks again.
+            // answer — so a later resolution reaching that same piece is no
+            // news, and the view never leaves the error it is on.
             this.#markShown(reference, undefined, signal);
             throw error;
           }
@@ -568,6 +553,25 @@ export class XAppView extends BaseView {
       await this.#refreshSlugTarget(watch);
       if (!this.#isCurrentSlugWatch(watch)) return;
 
+      // Re-resolving is what notices anything at all, and the measurement
+      // is in `packages/runtime-client/test/backends/slug-resolve.test.ts`:
+      // the subscription below wakes for no write this view cares about, so
+      // every case the shell has to follow arrives on this interval. Two of
+      // those cases are separately real, and neither is closed by the other
+      // — a slug repointed at a different piece, and a member whose target
+      // gains the pattern identity that MAKES it a piece, which no watch on
+      // a value sees because the read set follows values.
+      //
+      // So the interval is unconditional. Bounding it to the states the
+      // subscription does not cover is bounding it to all of them.
+      //
+      // TODO(slug-watch-wake): Bound this to the refused states once a watch
+      // on a slug wakes when the slug is repointed and when a member's target
+      // becomes a piece.
+      watch.pollInterval = globalThis.setInterval(() => {
+        void this.#refreshSlugTarget(watch);
+      }, 1000);
+
       let sawInitialCallback = false;
       watch.cancel = cell.subscribe(() => {
         if (!sawInitialCallback) {
@@ -576,11 +580,6 @@ export class XAppView extends BaseView {
         }
         void this.#refreshSlugTarget(watch);
       });
-      // After the subscription and not before it: the poll covers what the
-      // subscription does not reach, and a watch with no subscription open
-      // would be polling as the whole of its coverage rather than as the
-      // remainder of it.
-      this.#syncSlugPoll(watch);
     }).catch((error) => {
       if (!this.#isCurrentSlugWatch(watch)) return;
       if (rt.signal.aborted) {
@@ -639,10 +638,6 @@ export class XAppView extends BaseView {
    * lets one comparison stand for all of them: an outcome that wrote nothing
    * would leave the answer before it standing as though it were still what
    * the view had settled on.
-   *
-   * Being the only writer is also what makes this the one place the poll's
-   * bound is decided again: what {@link XAppView.#syncSlugPoll} reads changes
-   * here and nowhere else.
    */
   #markShown(
     reference: SlugReference,
@@ -651,8 +646,6 @@ export class XAppView extends BaseView {
   ): void {
     if (signal.aborted) return;
     this.#shownResolution = { reference, answer };
-    const watch = this.#slugWatch;
-    if (watch) this.#syncSlugPoll(watch);
   }
 
   /**
@@ -675,50 +668,6 @@ export class XAppView extends BaseView {
   /** Whether `watch` is still the watch this view is running. */
   #isCurrentSlugWatch(watch: SlugWatch): boolean {
     return this.#slugWatch === watch;
-  }
-
-  /**
-   * Schedule or clear `watch`'s poll, according to whether the view has come
-   * to show a piece for the reference it follows.
-   *
-   * The poll runs only while the view is on something that is not a piece —
-   * a refusal, or a run that could not finish its resolution or its load —
-   * and stops the moment a piece is on screen. A piece already shown is re-resolved by the subscription: a
-   * member landing in the collection wakes it, and so does a change inside a
-   * member, both measured in
-   * `packages/runtime-client/test/backends/slug-resolve.test.ts`. Beside
-   * that, an unbounded poll asks a question already answered, once a second,
-   * for as long as the page is open.
-   *
-   * What the poll covers is the write that same file measures the
-   * subscription missing: `isPieceRoot` reads `patternIdentity` and a read
-   * set follows values, so a document gaining the pattern identity that MAKES
-   * it a piece moves nothing the watch reads. A member whose target is not
-   * yet a piece is refused for exactly that reason, which is why re-asking is
-   * what notices it becoming one. A run that could not finish is the other
-   * unshown state: a fault in asking or in loading writes nothing anywhere a
-   * subscription watches, so re-asking is likewise the only thing that
-   * retries it.
-   *
-   * TODO(slug-watch-wake): Drop the poll once a document gaining the pattern
-   * identity wakes a watch on the slug that reaches it.
-   */
-  #syncSlugPoll(watch: SlugWatch): void {
-    // The poll completes the subscription rather than standing in for it, so
-    // a watch whose subscription is not open schedules none; the path that
-    // opens one asks again.
-    if (!this.#isCurrentSlugWatch(watch) || watch.cancel === undefined) return;
-    const shown = this.#shownResolution;
-    const showsPiece = shown !== undefined &&
-      sameSlugReference(shown.reference, watch.reference) &&
-      shown.answer !== undefined && !shown.answer.refusal;
-    if (showsPiece) {
-      watch.stopPolling();
-      return;
-    }
-    watch.startPolling(() => {
-      void this.#refreshSlugTarget(watch);
-    });
   }
 
   /**

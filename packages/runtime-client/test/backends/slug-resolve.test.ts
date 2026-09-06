@@ -24,6 +24,8 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { RuntimeProcessor } from "@/backends/runtime-processor.ts";
 import { RequestType } from "@/protocol/mod.ts";
+import { createCellRef, getCell } from "@/backends/utils.ts";
+import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
 
 const signer = await Identity.fromPassphrase("runtime-client slug resolve");
 const space = signer.did();
@@ -187,6 +189,69 @@ describe("handleSlugResolve()", () => {
     expect(woke).toBe(atSubscribe);
   });
 
+  it("opens a cell for the shell that no write to the slug or its target wakes", async () => {
+    // What `getSlugCell` in `packages/lib-shell/src/runtime.ts` opens, built
+    // the way it builds it: the slug's id is handed to `getCell` as a CAUSE,
+    // and `Runtime.getCell` hashes a cause to make an id. So the cell that
+    // comes back sits at a hash of the slug's id rather than at the slug, and
+    // it is neither the slug document nor the target the slug points at.
+    //
+    // Everything follows from that. A watch there is a watch on a document
+    // nothing writes, so no write anywhere in this space reaches it, and
+    // `AppView`'s poll is the whole of how the shell notices a slug moving.
+    // The two cases above are about the slug document, which the shell never
+    // opens; neither is evidence about this.
+    const shellCell = getCell(
+      runtime,
+      createCellRef(
+        runtime.getCell(
+          space,
+          entityRefFromString(slugIdForSpace(space, "top")),
+        ),
+        undefined,
+      ),
+    );
+    const slugDocument = runtime.getCellFromEntityId(
+      space,
+      entityIdFrom(slugIdForSpace(space, "top")),
+    );
+    expect(shellCell.getAsNormalizedFullLink().id).not.toBe(
+      slugDocument.getAsNormalizedFullLink().id,
+    );
+    expect(shellCell.getAsNormalizedFullLink().id).not.toBe(idOf(board));
+
+    const other = await pieceDocument("board-2", { names: { "9": item2 } });
+    let shellWoke = 0;
+    const cancelShell = shellCell.sink(() => {
+      shellWoke++;
+    });
+    // A watch on the slug document, so that the repointing below is measured
+    // as a miss rather than as a write that never landed.
+    let documentWoke = 0;
+    const cancelDocument = slugDocument.sink(() => {
+      documentWoke++;
+    });
+    await runtime.idle();
+    const shellAtSubscribe = shellWoke;
+    const documentAtSubscribe = documentWoke;
+
+    // Repointing the slug, which is what `cf piece new --force` does.
+    await pointSlug("top", other.key("names"));
+    await runtime.idle();
+    // And a write inside the target the slug pointed at when the watch
+    // opened, which is the case the two above show a slug-document watch
+    // catching.
+    await runtime.editWithRetry((tx) => {
+      board.withTx(tx).key("names").key("3").set(item2);
+    });
+    await runtime.idle();
+    cancelShell();
+    cancelDocument();
+
+    expect(documentWoke).toBeGreaterThan(documentAtSubscribe);
+    expect(shellWoke).toBe(shellAtSubscribe);
+  });
+
   it("returns a refusal naming the member and the collection", async () => {
     // Data, not a throw: the error channel belongs to faults in asking, and
     // a caller has to tell "this name is not bound" from "ask again".
@@ -253,12 +318,14 @@ describe("handleSlugResolve()", () => {
   });
 
   it("wakes a watch on the slug when the collection gains a member", async () => {
-    // The shell watches a collection reference by subscribing to the slug
-    // cell, and polls beside that subscription. This pair of tests measures
-    // how far that subscription reaches, because what it covers decides what
-    // the poll is for; neither states a bound the other has not measured.
-    // Here: the read set follows the redirect into the map, so a key landing
-    // there wakes the watch with no write to the slug document at all.
+    // A sink on the slug document, which is what a caller opening the slug by
+    // its id gets. The read set follows the redirect into the map, so a key
+    // landing there wakes the watch with no write to the slug document at
+    // all.
+    //
+    // This measures the slug document and nothing else. The cell the shell's
+    // watch opens is a different cell, and the case below measures that one
+    // separately — a reach shown here is not a reach the shell has.
     //
     // Every write the setup needs happens BEFORE the sink, so that the one
     // write after it is the collection update. A member document created
@@ -288,11 +355,11 @@ describe("handleSlugResolve()", () => {
   });
 
   it("wakes a watch on the slug when a member it holds changes", async () => {
-    // And it does not stop at the map: a member the map holds is read
-    // through it, so a change inside one wakes the watch just as a key
-    // landing in the map does. Where it does stop is not measured, so
-    // neither test claims it — and `AppView`'s poll says the same, that what
-    // it adds over the subscription is unknown rather than small.
+    // And a sink on the slug document does not stop at the map: a member the
+    // map holds is read through it, so a change inside one wakes the watch
+    // just as a key landing in the map does. Where it does stop is not
+    // measured, so neither case claims it — and the same bound on the claim
+    // holds: this is the slug document, not the cell the shell opens.
     const item3 = await pieceDocument("item-3", { title: "Kiln log" });
     await runtime.editWithRetry((tx) => {
       board.withTx(tx).key("names").key("3").set(item3);
