@@ -408,15 +408,14 @@ export class CurrentPlace {
    * took and not the levels a position happens to name.
    */
   aim(operand: string): Aim {
-    const trimmed = operand.trim();
-    if (trimmed === ARGUMENT_SUFFIX) {
+    if (operand === ARGUMENT_SUFFIX) {
       return { input: false, move: outcomeOf(refuse(SUFFIX_NAMES_NO_TARGET)) };
     }
-    const stripped = argumentSuffixOff(trimmed);
+    const stripped = argumentSuffixOff(operand);
     return {
       input: stripped !== undefined,
       move: outcomeOf(
-        movePlace(this.#here, stripped ?? trimmed, this.#previous),
+        movePlace(this.#here, stripped ?? operand, this.#previous),
       ),
     };
   }
@@ -578,6 +577,14 @@ type Step =
  * whichever rung of it, a leading
  * `#` is a wish target, and anything else is a relative walk from where
  * shuttle stands.
+ *
+ * Each reading is matched against the operand as it was written, edges
+ * included, so none of them reads a string that merely resembles the
+ * spelling: `cd " -"` walks to the key `" -"` rather than returning to the
+ * previous place. Whitespace reaches an edge only through a quote, the split
+ * that produced the operand separating on it (`line.ts`), so it is a
+ * character of the part it sits in and the part is held to the rule that part
+ * answers to.
  */
 function movePlace(
   from: Standing,
@@ -585,19 +592,18 @@ function movePlace(
   previous?: Standing,
 ): Step {
   const place = from.place;
-  const trimmed = operand.trim();
-  if (trimmed === "") return refuse("`cd` takes a place to move to.");
-  if (trimmed === "-") {
+  if (operand === "") return refuse("`cd` takes a place to move to.");
+  if (operand === "-") {
     return previous === undefined
       ? refuse("There is no previous place to return to.")
       : land(previous.place, previous.trail);
   }
-  if (trimmed.startsWith("@")) return moveScope(from, trimmed.slice(1));
+  if (operand.startsWith("@")) return moveScope(from, operand.slice(1));
 
   // A leading `/` roots a reference, and `/` alone roots one and names
   // nothing further: the space's own root, which the grammar has no id
   // segment to spell.
-  if (trimmed === "/") {
+  if (operand === "/") {
     return land(
       { ...place, position: { kind: "root", space: place.position.space } },
       [],
@@ -606,18 +612,18 @@ function movePlace(
 
   let reference;
   try {
-    reference = normalizeLLMFriendlyRef(trimmed, {
+    reference = normalizeLLMFriendlyRef(operand, {
       space: place.position.space,
     });
   } catch (error) {
     return refuse(messageOf(error));
   }
   if (reference !== undefined) {
-    return moveByReference(place, reference, trimmed);
+    return moveByReference(place, reference, operand);
   }
 
-  if (trimmed.startsWith("#")) return { kind: "wish", target: trimmed };
-  return moveBySegments(from, trimmed);
+  if (operand.startsWith("#")) return { kind: "wish", target: operand };
+  return moveBySegments(from, operand);
 }
 
 /**
@@ -693,13 +699,13 @@ function moveByReference(
  * segment is read against the level the one before it landed on, so `..` and a
  * descent compose in one operand.
  *
- * The operand is trimmed before it is split, so the outer edges of the first
- * and last segments are lost here where a reference keeps them: `cd " a"`
- * reaches the key `a`, and a key actually named `" a"` has no relative
- * spelling, only a rooted one. Between those edges a segment is taken
- * literally — the reference grammar's `~1` escaping belongs to a reference,
- * which a relative operand is not, so `~1` here is two characters of a key
- * and a key holding the separator has no relative spelling at all.
+ * The operand's own edges are the outer edges of the first and last segments,
+ * the operand reaching here as it was written: `cd " a"` reaches the key
+ * `" a"`, and `cd "a "` is refused, a part ending in whitespace being
+ * refused wherever it sits. Between those edges a segment is taken literally —
+ * the reference grammar's `~1` escaping belongs to a reference, which a
+ * relative operand is not, so `~1` here is two characters of a key and a key
+ * holding the separator has no relative spelling at all.
  */
 function moveBySegments(from: Standing, operand: string): Step {
   const segments = operand.split("/");
