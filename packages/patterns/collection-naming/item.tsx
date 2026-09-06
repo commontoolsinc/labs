@@ -31,6 +31,12 @@ import { type NamesTableRow, ownName } from "./naming.ts";
  * display name it lists and matches on, the title, and the board's name for
  * the member as `shortName`, which is what a `#42` query matches.
  *
+ * `shortName` is OPTIONAL rather than defaulted, which is what the
+ * compatibility proof accepts: a defaulted property moves the demand's
+ * defaults below an array constraint the proof cannot show stable under
+ * default insertion, and dropping the default without making the property
+ * optional makes it a newly required field.
+ *
  * These three are deliberately the WHOLE demand. A board's universe row
  * carries its item as a `piece` reference besides them, and leaving that out
  * of this projection is what keeps every walk under an item's argument out of
@@ -42,7 +48,7 @@ import { type NamesTableRow, ownName } from "./naming.ts";
 export interface ItemMentionable {
   [NAME]: string | Default<""> | undefined;
   title: string | Default<"">;
-  shortName: string | Default<"">;
+  shortName?: string;
 }
 
 /**
@@ -91,8 +97,19 @@ export interface ItemInput {
    * Wired at creation to the board's mention index, one derived document of
    * rows (`MentionableRow` in `mentionable.ts`). Absent, the editor simply
    * offers no completions.
+   *
+   * Readable, not writable, for the reason `boardNames` above states, and
+   * with a cost a writable handle carries besides: a writable binding puts
+   * the board's whole published row inside the retained link's proof, and
+   * this demand names three of that row's fields, so the write-back leg
+   * fails on a field the demand does not declare and the item can no longer
+   * be re-sourced at all. The editor writes nothing here — the one write it
+   * makes through this handle, the name write-back in `_updatePieceName`
+   * (`packages/ui/src/v2/components/cf-code-editor/cf-code-editor.ts`),
+   * lands on the piece a row stands for rather than on the row, because
+   * every row this board publishes carries `piece`.
    */
-  mentionable?: Writable<ItemMentionable[] | Default<[]>>;
+  mentionable?: ReadonlyCell<ItemMentionable[] | Default<[]>>;
 
   /**
    * Where this item's `[Label][key]` mentions point, keyed by the token that
@@ -128,15 +145,29 @@ export interface ItemOutput {
 
   /**
    * The name the board calls this item by, read out of the board's names
-   * table; `undefined` for an item no board has named, or one wired to no
-   * board.
+   * table.
    *
    * Published under the name a mention pill reads it by
    * (`Mentionable.shortName` in `packages/ui/src/v2/core/mentionable.ts`), so
    * a mention of this item elsewhere gains the number as soon as the board
    * names it.
+   *
+   * Absent for an item no board has named, or one wired to no board: the
+   * lookup produces nothing and the property is simply not there. Every
+   * consumer treats that as no name — the badge renders nothing, a universe
+   * row matches no `#42` query, and a mention pill shows no number
+   * (`_trackRefShortName` in
+   * `packages/ui/src/v2/components/cf-code-editor/cf-code-editor.ts` reads an
+   * absent name exactly as it reads a blank one).
+   *
+   * Optional rather than defaulted, and it is the board's row demand that
+   * decides the spelling rather than this publication: a board's stored list
+   * is validated against that demand, a defaulted property there moves its
+   * defaults below an array constraint the compatibility proof cannot show
+   * stable under default insertion, and an optional demand is not satisfied
+   * by a required publication.
    */
-  shortName: string | undefined;
+  shortName?: string;
 
   /**
    * Where this item's mentions point, keyed by the token in the body. Written
