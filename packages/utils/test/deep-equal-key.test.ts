@@ -187,6 +187,18 @@ describe("deepEqualKey()", () => {
       // Two to the eighteenth leaves, were every path walked.
       expect(deepEqualKey(shared).length).toBeLessThan(20_000);
     });
+
+    it("returns a bounded key for a value carrying a great many properties", () => {
+      // Wide rather than deep. A budget checked only where a value is entered
+      // bounds nesting and lets a record's own property list run to any
+      // length, which is the shape that says whether it is checked per
+      // property as well.
+
+      const wide = Object.fromEntries(
+        Array.from({ length: 50_000 }, (_, index) => [`k${index}`, index]),
+      );
+      expect(deepEqualKey(wide).length).toBeLessThan(20_000);
+    });
   });
 
   describe("values it keeps apart", () => {

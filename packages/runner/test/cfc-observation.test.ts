@@ -30,9 +30,9 @@ describe("CFC observation helpers", () => {
       source: { id: "of:document", path: ["field", String(index)] },
     });
     const distinct = Array.from({ length: 40 }, (_, index) => atom(index));
-    // Each atom a second time, in a fresh object, so the identity that drops
-    // the repeat is structural rather than by reference.
-    const repeated = distinct.map((kept) => ({ ...kept, source: kept.source }));
+    // Each atom a second time, sharing no object with the first, so that
+    // nothing in the comparison that drops the repeat reduces to `Object.is`.
+    const repeated = Array.from({ length: 40 }, (_, index) => atom(index));
 
     expect(uniqueCfcAtoms([...distinct, ...repeated])).toEqual(distinct);
     for (const size of [1, 8, 17, 40]) {

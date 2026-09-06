@@ -129,9 +129,14 @@ const prepareOnce = (
   runtime.getCell(signer.did(), `${sourceName}-derived`, TARGET_SCHEMA, tx)
     .set({ copied: width });
   timer.start();
-  tx.prepareCfc();
-  timer.end();
-  tx.abort();
+  try {
+    tx.prepareCfc();
+    timer.end();
+  } finally {
+    // A prepare that throws would otherwise leave the transaction open, and
+    // every later iteration would measure a runtime holding it.
+    tx.abort();
+  }
 };
 
 const teardown = async ({ runtime, storageManager }: Fixture) => {

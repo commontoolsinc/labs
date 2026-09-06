@@ -161,10 +161,11 @@ function checkSpecificProps(
 /**
  * How many tokens one key carries at most. A key groups values so that a
  * comparison can settle them, so stopping the walk here costs a comparison and
- * nothing else, and it is what makes the function total: a value that refers
- * to itself, or that reaches one subtree along many paths, otherwise builds a
- * key that is unbounded or exponentially larger than the value. Room for a few
- * hundred properties, which is past anything a key is asked for.
+ * nothing else, and it is what makes the function total. Three shapes need it:
+ * a value that refers to itself, one that reaches a subtree along many paths,
+ * and one carrying a great many properties. Each would otherwise build a key
+ * out of all proportion to what a group needs — the first without end. Room
+ * for a few hundred properties, which is past anything a key is asked for.
  */
 const DEEP_EQUAL_KEY_TOKENS = 1024;
 
@@ -225,6 +226,9 @@ function appendDeepEqualKey(value: unknown, parts: string[]): void {
   const keys = Object.keys(value).sort();
   parts.push(Array.isArray(value) ? `[${value.length}` : "{");
   for (const key of keys) {
+    if (parts.length >= DEEP_EQUAL_KEY_TOKENS) {
+      return;
+    }
     parts.push(`.${key}`);
     appendDeepEqualKey(value[key], parts);
   }
