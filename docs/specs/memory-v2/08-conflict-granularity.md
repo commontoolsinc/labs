@@ -145,7 +145,8 @@ That read does not consume a value — the holder depends on the referent only w
 it reads **through** the cell in its body. Such reference-resolution reads are
 tagged `excludeReadFromConflict` at the traversal seam
 (`traverseObjectWithSchema`, gated on `hasAsCell(propSchema)`), and
-`buildReads` drops them from the conflict set when they are `nonRecursive`. They
+`SpaceReplica.#buildReads()` drops them from the conflict set when they are
+`nonRecursive`. They
 remain in the journal for reactivity. A **by-value** argument (`hasAsCell` false)
 is a genuine dependency and is never marked; the gate ensures by-value scalar
 reads — which are also recorded `nonRecursive` — keep their dependency.
@@ -153,7 +154,8 @@ reads — which are also recorded `nonRecursive` — keep their dependency.
 ## 4. Runtime-internal CFC metadata reads are not value dependencies
 
 Resolving a label reads the document's `["cfc"]` envelope. The runtime issues
-that read itself, marked `internalVerifierRead`, and `buildReads` drops it from
+that read itself, marked `internalVerifierRead`, and
+`SpaceReplica.#buildReads()` drops it from
 the conflict set. It stays in the journal, so reactivity still re-runs when the
 envelope changes.
 

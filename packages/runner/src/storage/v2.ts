@@ -1014,6 +1014,50 @@ export class StorageManager implements IStorageManager {
   /** Late-bound marker sink (the Runtime's telemetry bus); see setTelemetry. */
   #telemetry?: TelemetrySink;
 
+  // In-flight document loads keyed `space/scope_key/id` (the scheduler's
+  // entityKey format — one entry per scope INSTANCE, key-vocabulary.md §1
+  // site 7: two instances of one doc are two loads, and collapsing them
+  // would make one waiter observe another's failure). Keys are BUILT with
+  // entityKey so the strings cross-match the scheduler's
+  // (collectPendingLoadParkKeys correlates the two maps); both sides
+  // resolve against this manager's own session identity.
+  // Refcounted: concurrent syncCell calls for the same
+  // document share one entry. Waiters resolve when the count returns to zero
+  // — whether the load produced a value or found the document absent.
+  #pendingLoads = new Map<string, {
+    count: number;
+    generation: number;
+    address: {
+      space: MemorySpace;
+      scope: CellScope;
+      id: URI;
+      scopeKey?: ScopeKey;
+    };
+    failure: unknown;
+    waiters: Set<(failure: unknown) => void>;
+  }>();
+  // A positive recovery signal is key-specific: successful settlement of a
+  // new generation for one doc names that doc's stable failed boundary. Only a
+  // durable checkpoint carrying the same boundary wakes, so unrelated loads
+  // remain inert. The boundary is stable across manager recreation; the
+  // replacement epoch remains unique.
+  #nextPendingLoadGeneration = 1;
+  readonly #loadRecoveryIdentity = crypto.randomUUID();
+  #loadRecoveryObserver:
+    | ((recovery: {
+      failedEpoch: string;
+      recoveryEpoch: string;
+    }) => void)
+    | undefined = undefined;
+  // Sync failures already logged, keyed by (space, error identity). A denied
+  // space repeats the identical failure for every doc pulled from it; one line
+  // per distinct failure keeps the surfacing readable. Bounded: at the cap the
+  // set resets, trading a repeated line for an unbounded set.
+  #loggedSyncFailures = new Set<string>();
+  // The syncer a test supplies in place of the CFC schema document sync;
+  // undefined means the manager's own.
+  #cfcSchemaDocumentSyncer: CfcSchemaDocumentSyncer | undefined = undefined;
+
   /**
    * Attach the runtime's telemetry bus so replicas can emit the
    * `storage.push/pull.*` markers. Late-bound and optional: the manager is
@@ -1027,23 +1071,6 @@ export class StorageManager implements IStorageManager {
   /** Changes memory-message compression for live and later remote sessions. */
   async setMessageCompressionEnabled(enabled: boolean): Promise<void> {
     await this.#sessionFactory.setMessageCompressionEnabled?.(enabled);
-  }
-
-  static open(options: Options) {
-    const dynamicHosts = new Map<string, string>();
-    const manager = new this(
-      options,
-      new RemoteSessionFactory(
-        createStorageAddressResolver(
-          options.memoryHost,
-          options.spaceHostMap,
-          dynamicHosts,
-        ),
-        options.as,
-      ),
-    );
-    manager.#dynamicHosts = dynamicHosts;
-    return manager;
   }
 
   protected constructor(
@@ -1110,6 +1137,24 @@ export class StorageManager implements IStorageManager {
       collectLinkedCellSyncs: (value, base, schema, promises, seen) =>
         this.#collectLinkedCellSyncs(value, base, schema, promises, seen),
     };
+  }
+
+  /**
+   * Observer of a pending load's recovery, called with the failed and the
+   * recovering epochs; the space server sets one while it serves.
+   */
+  get loadRecoveryObserver():
+    | ((recovery: { failedEpoch: string; recoveryEpoch: string }) => void)
+    | undefined {
+    return this.#loadRecoveryObserver;
+  }
+
+  set loadRecoveryObserver(
+    value:
+      | ((recovery: { failedEpoch: string; recoveryEpoch: string }) => void)
+      | undefined,
+  ) {
+    this.#loadRecoveryObserver = value;
   }
 
   /**
@@ -1984,50 +2029,6 @@ export class StorageManager implements IStorageManager {
     this.#crossSpacePromises.delete(promise);
   }
 
-  // In-flight document loads keyed `space/scope_key/id` (the scheduler's
-  // entityKey format — one entry per scope INSTANCE, key-vocabulary.md §1
-  // site 7: two instances of one doc are two loads, and collapsing them
-  // would make one waiter observe another's failure). Keys are BUILT with
-  // entityKey so the strings cross-match the scheduler's
-  // (collectPendingLoadParkKeys correlates the two maps); both sides
-  // resolve against this manager's own session identity.
-  // Refcounted: concurrent syncCell calls for the same
-  // document share one entry. Waiters resolve when the count returns to zero
-  // — whether the load produced a value or found the document absent.
-  #pendingLoads = new Map<string, {
-    count: number;
-    generation: number;
-    address: {
-      space: MemorySpace;
-      scope: CellScope;
-      id: URI;
-      scopeKey?: ScopeKey;
-    };
-    failure: unknown;
-    waiters: Set<(failure: unknown) => void>;
-  }>();
-  // A positive recovery signal is key-specific: successful settlement of a
-  // new generation for one doc names that doc's stable failed boundary. Only a
-  // durable checkpoint carrying the same boundary wakes, so unrelated loads
-  // remain inert. The boundary is stable across manager recreation; the
-  // replacement epoch remains unique.
-  #nextPendingLoadGeneration = 1;
-  readonly #loadRecoveryIdentity = crypto.randomUUID();
-  loadRecoveryObserver:
-    | ((recovery: {
-      failedEpoch: string;
-      recoveryEpoch: string;
-    }) => void)
-    | undefined = undefined;
-  // Sync failures already logged, keyed by (space, error identity). A denied
-  // space repeats the identical failure for every doc pulled from it; one line
-  // per distinct failure keeps the surfacing readable. Bounded: at the cap the
-  // set resets, trading a repeated line for an unbounded set.
-  #loggedSyncFailures = new Set<string>();
-  // The syncer a test supplies in place of the CFC schema document sync;
-  // undefined means the manager's own.
-  #cfcSchemaDocumentSyncer: CfcSchemaDocumentSyncer | undefined = undefined;
-
   /**
    * Registers one pending load of `address` and returns its release step,
    * which takes the load's failure if it had one. The release that brings
@@ -2066,7 +2067,7 @@ export class StorageManager implements IStorageManager {
       if (entry.count > 0) return;
       this.#pendingLoads.delete(key);
       if (entry.failure === undefined) {
-        this.loadRecoveryObserver?.({
+        this.#loadRecoveryObserver?.({
           failedEpoch: this.#loadFailureEpoch(key),
           recoveryEpoch: this.#loadEpoch(entry.generation),
         });
@@ -2507,6 +2508,27 @@ export class StorageManager implements IStorageManager {
         );
       }
     }
+  }
+
+  //
+  // Static members
+  //
+
+  static open(options: Options) {
+    const dynamicHosts = new Map<string, string>();
+    const manager = new this(
+      options,
+      new RemoteSessionFactory(
+        createStorageAddressResolver(
+          options.memoryHost,
+          options.spaceHostMap,
+          dynamicHosts,
+        ),
+        options.as,
+      ),
+    );
+    manager.#dynamicHosts = dynamicHosts;
+    return manager;
   }
 }
 
@@ -3301,7 +3323,7 @@ export class SpaceReplica
   // applySessionSync with the docs whose confirmed seq a frame moved
   // forward. Guarded at the call site — an observer throw must not
   // corrupt frame integration.
-  speculationArrivalObserver:
+  #speculationArrivalObserver:
     | ((arrived: readonly { id: URI; scope?: CellScope }[]) => void)
     | undefined = undefined;
   #caughtUpLocalSeqWaiters: {
@@ -3398,23 +3420,32 @@ export class SpaceReplica
       consumeUpdates: (iterator) => this.#consumeUpdates(iterator),
       // The next three forward to TypeScript-private members so that a test
       // which replaces one by assignment is honored here too.
-      // TODO(danfuzz): Make `refreshWatchSet()` a `#` method, which needs
-      // `test/memory-v2-watch-remove-coverage.test.ts` to make a refresh fail
-      // some other way than by replacing the method: a transport whose watch
-      // call rejects.
       refreshWatchSet: (entries, type, watchBranch) =>
         this.refreshWatchSet(entries, type, watchBranch),
-      // TODO(danfuzz): Make `applySessionSync()` a `#` method, which needs the
-      // three tests that wrap it to observe or fail a frame's apply some other
-      // way: a hook the replica offers around applying a frame.
       applySessionSync: (sync, type) => this.applySessionSync(sync, type),
-      // TODO(danfuzz): Make `waitForConflictReadRepair()` a `#` method, which
-      // needs `test/memory-v2-subscription.test.ts` to learn that a repair
-      // started some other way than by wrapping the method: a hook the replica
-      // offers, or the telemetry it emits.
       waitForConflictReadRepair: (rejection) =>
         this.waitForConflictReadRepair(rejection),
     };
+  }
+
+  /**
+   * Observer of speculative arrivals, called at the end of applying a frame
+   * with the docs whose confirmed seq the frame moved forward; the overlay
+   * destination sets one while an owed arrival re-sweep is pending. Guarded
+   * at the call site, so an observer throw cannot corrupt frame integration.
+   */
+  get speculationArrivalObserver():
+    | ((arrived: readonly { id: URI; scope?: CellScope }[]) => void)
+    | undefined {
+    return this.#speculationArrivalObserver;
+  }
+
+  set speculationArrivalObserver(
+    value:
+      | ((arrived: readonly { id: URI; scope?: CellScope }[]) => void)
+      | undefined,
+  ) {
+    this.#speculationArrivalObserver = value;
   }
 
   did(): MemorySpace {
@@ -6869,7 +6900,7 @@ export class SpaceReplica
     // observer is installed (a client overlay's), so every other replica
     // pays one undefined check.
     const arrived: LocalDocAddress[] | undefined =
-      this.speculationArrivalObserver !== undefined ? [] : undefined;
+      this.#speculationArrivalObserver !== undefined ? [] : undefined;
     for (const upsert of sync.upserts) {
       const record = this.#record(
         upsert.id as URI,
@@ -7030,10 +7061,10 @@ export class SpaceReplica
     // integration above. Same containment posture as the ack observer.
     if (
       arrived !== undefined && arrived.length > 0 &&
-      this.speculationArrivalObserver !== undefined
+      this.#speculationArrivalObserver !== undefined
     ) {
       try {
-        this.speculationArrivalObserver(arrived);
+        this.#speculationArrivalObserver(arrived);
       } catch (error) {
         logger.error("speculation-arrival-observer-error", () => [
           "speculationArrivalObserver threw during frame integration",

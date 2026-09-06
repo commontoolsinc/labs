@@ -1867,10 +1867,11 @@ function dedupeNormalizedLinks(
 type PieceRegistration = Cancel & { graphIsInstalled: () => boolean };
 
 export class Runner {
+  #runtime: Runtime;
   // A member below declared `private` rather than `#` is one the runner suites
   // reach and drive directly; a `#` name would put it out of their reach.
 
-  readonly cancels = new Map<
+  readonly #cancels = new Map<
     `${MemorySpace}/${ScopeKey}/${URI}`,
     PieceRegistration
   >();
@@ -1932,7 +1933,7 @@ export class Runner {
   // (handleJavaScriptHandlerResult's ruled serving-side write,
   // events.md §4 "Result carriage"). Each skip also logs a warn line;
   // this is the machine-readable half.
-  servedReceiptCasLosses = 0;
+  #servedReceiptCasLosses = 0;
   // Results started in their own right rather than as part of an enclosing
   // pattern, which is what navigating to a nested result does. An enclosing
   // pattern releasing such a result leaves it running; only stopping it
@@ -1987,20 +1988,6 @@ export class Runner {
     onEvict: (key, pointer) =>
       this.#evictedSessionPatternPointers.set(key, pointer),
   });
-
-  /**
-   * The SESSION-side pattern pointer for a keyless piece this runner set up,
-   * or undefined. The piece layer's read-through: a keyless piece carries no
-   * durable `patternIdentity` (the never-durable contract), so consumers
-   * that used to read the durable meta (`PiecesController.syncPattern`)
-   * consult this before concluding the piece has no pattern. Session-scoped
-   * by construction — a fresh runtime correctly finds nothing.
-   */
-  sessionPatternPointerFor(
-    resultCell: Cell<unknown>,
-  ): { identity: string; symbol: string } | undefined {
-    return this.#sessionPatternPointers.get(this.#getDocKey(resultCell));
-  }
 
   // SESSION-side pattern-swap channel for RUNNING pieces, the third stamp
   // stand-in: a re-derived child (a lift returning a pattern) used to reach
@@ -2068,9 +2055,38 @@ export class Runner {
    * will ever be — building one inline leaves it unreachable. */
   readonly #storageSubscription: IStorageSubscription;
 
-  constructor(readonly runtime: Runtime) {
+  /** Constructs an instance running pieces for `runtime`. */
+  constructor(runtime: Runtime) {
+    this.#runtime = runtime;
     this.#storageSubscription = this.#createStorageSubscription();
-    this.runtime.storageManager.subscribe(this.#storageSubscription);
+    this.#runtime.storageManager.subscribe(this.#storageSubscription);
+  }
+
+  /** Registrations of running pieces, by space, scope, and document. */
+  get cancels(): Map<`${MemorySpace}/${ScopeKey}/${URI}`, PieceRegistration> {
+    return this.#cancels;
+  }
+
+  /**
+   * Served receipt writes skipped as write-once CAS losses: the handling's
+   * result cell already held a value when the serving run went to write it.
+   * Each skip also logs a warn line; this is the machine-readable half.
+   */
+  get servedReceiptCasLosses(): number {
+    return this.#servedReceiptCasLosses;
+  }
+  /**
+   * The SESSION-side pattern pointer for a keyless piece this runner set up,
+   * or undefined. The piece layer's read-through: a keyless piece carries no
+   * durable `patternIdentity` (the never-durable contract), so consumers
+   * that used to read the durable meta (`PiecesController.syncPattern`)
+   * consult this before concluding the piece has no pattern. Session-scoped
+   * by construction — a fresh runtime correctly finds nothing.
+   */
+  sessionPatternPointerFor(
+    resultCell: Cell<unknown>,
+  ): { identity: string; symbol: string } | undefined {
+    return this.#sessionPatternPointers.get(this.#getDocKey(resultCell));
   }
 
   /**
@@ -2256,7 +2272,7 @@ export class Runner {
    * implement it is left as it was rather than crashing a disposal.
    */
   dispose(): void {
-    this.runtime.storageManager.unsubscribe?.(this.#storageSubscription);
+    this.#runtime.storageManager.unsubscribe?.(this.#storageSubscription);
   }
 
   /**
@@ -2346,7 +2362,7 @@ export class Runner {
       // to what would have happened if the write succeeded and was immediately
       // overwritten. Still surface real callback failures from setupInternal so
       // callers don't silently continue after a broken setup.
-      return this.runtime.editWithRetry((tx) => {
+      return this.#runtime.editWithRetry((tx) => {
         this.setupInternal(tx, patternOrModule, argument, resultCell, options);
       }).then(({ error }) => {
         if (error) {
@@ -2399,7 +2415,7 @@ export class Runner {
     // live this session — the reload path loaded it before reaching here).
     if (!resolvedPatternOrModule) {
       if (!previousIdentityRef) return undefined;
-      const resolved = this.runtime.patternManager.artifactFromIdentitySync(
+      const resolved = this.#runtime.patternManager.artifactFromIdentitySync(
         previousIdentityRef.identity,
         previousIdentityRef.symbol,
       ) as Pattern | undefined;
@@ -2432,13 +2448,13 @@ export class Runner {
   #entryRefForPattern(
     pattern: Pattern,
   ): { identity: string; symbol: string } {
-    const real = this.runtime.patternManager.getArtifactEntryRef(pattern);
+    const real = this.#runtime.patternManager.getArtifactEntryRef(pattern);
     if (real) {
       // Artifact refs are process-global metadata on the pattern object, while
       // the addressable artifact index is runtime-local. Re-associate a pattern
       // handed to this runtime so a subsequent start-by-durable-identity can
       // resolve it even when another runtime minted the ref first.
-      this.runtime.patternManager.associatePatternIdentity(
+      this.#runtime.patternManager.associatePatternIdentity(
         resolveOriginal(pattern) as Pattern,
         real,
       );
@@ -2446,7 +2462,7 @@ export class Runner {
     }
     // Keyless: a content-hash session pointer (structurally-identical patterns
     // share it — no churn). See PatternManager.ensureKeylessPatternIdentity.
-    return this.runtime.patternManager.ensureKeylessPatternIdentity(pattern);
+    return this.#runtime.patternManager.ensureKeylessPatternIdentity(pattern);
   }
 
   #updateArgument<T>(
@@ -2456,7 +2472,7 @@ export class Runner {
     argumentSchema: JSONSchema | undefined,
     projection: unknown = argument,
   ): void {
-    const argumentCell = this.runtime.getCellFromLink(
+    const argumentCell = this.#runtime.getCellFromLink(
       argumentLink,
       undefined,
       tx,
@@ -2487,13 +2503,13 @@ export class Runner {
     // establishes rather than the ones the document already held.
     recordSetupProjectionPolicyInputs(
       tx,
-      this.runtime,
+      this.#runtime,
       argumentCell,
       argumentSchema,
       projection,
     );
     diffAndUpdate(
-      this.runtime,
+      this.#runtime,
       tx,
       argumentLink,
       storable,
@@ -2530,7 +2546,7 @@ export class Runner {
     argumentSchema: JSONSchema,
     defaults: FabricValue,
   ): void {
-    const argumentCell = this.runtime.getCellFromLink(
+    const argumentCell = this.#runtime.getCellFromLink(
       argumentLink,
       undefined,
       tx,
@@ -2620,7 +2636,7 @@ export class Runner {
   ): void {
     const argumentLink = getMetaLink(resultCell, "argument");
     if (argumentLink === undefined) return;
-    const stored = this.runtime.getCellFromLink(argumentLink, undefined, tx)
+    const stored = this.#runtime.getCellFromLink(argumentLink, undefined, tx)
       .getRaw({ meta: ignoreReadForScheduling });
     if (stored === undefined) return;
     const defaults = extractDefaultValues(pattern.argumentSchema);
@@ -2676,7 +2692,7 @@ export class Runner {
     setupState: SetupStateReuse,
   ): SetupResult<R> | undefined {
     const key = this.#getDocKey(resultCell);
-    if (!this.cancels.has(key)) return undefined;
+    if (!this.#cancels.has(key)) return undefined;
 
     // Record the result schema for BOTH reuse branches below, on the one
     // condition that makes it safe: the setup marker names THIS pattern, so the
@@ -2779,7 +2795,7 @@ export class Runner {
     if (!valueEqual(fabricResult, previousResult)) {
       recordSetupProjectionPolicyInputs(
         tx,
-        this.runtime,
+        this.#runtime,
         resultCell,
         pattern.resultSchema,
         result,
@@ -2879,7 +2895,7 @@ export class Runner {
     argument: T,
   ): T {
     if (argument === undefined) return argument;
-    const stored = this.runtime
+    const stored = this.#runtime
       .getCellFromLink(argumentLink, undefined, tx)
       .getRaw({ meta: ignoreReadForScheduling });
     return foldStoredArgumentSlots(argument, stored);
@@ -2972,7 +2988,7 @@ export class Runner {
       suppliedProjection = argument;
       nextArgument = this.#argumentOverStoredSlots(tx, argumentLink, argument);
     } else {
-      const previousArgumentCell = this.runtime.getCellFromLink(
+      const previousArgumentCell = this.#runtime.getCellFromLink(
         argumentLink,
         undefined,
         tx,
@@ -3090,7 +3106,7 @@ export class Runner {
     // update key; the recorders match on the cell hash and treat the
     // identity as evidence.
     if (entryRef) {
-      this.runtime.onPatternInstantiated?.({
+      this.#runtime.onPatternInstantiated?.({
         identity: entryRef.identity,
         symbol: entryRef.symbol,
         // The source path stamped at module-index time is the reliable one: a
@@ -3220,7 +3236,7 @@ export class Runner {
     resultCell: Cell<R>,
     validationOptions: SetupValidationOptions = {},
   ): SetupResult<R> {
-    const tx = providedTx ?? this.runtime.edit();
+    const tx = providedTx ?? this.#runtime.edit();
 
     logger.debug("cell-info", () => [
       `resultCell: ${resultCell.getAsNormalizedFullLink().id}`,
@@ -3338,7 +3354,7 @@ export class Runner {
         throw new Error("piece missing its current argument");
       }
       validationOptions.validateCurrentArgument(
-        this.runtime.getCellFromLink(
+        this.#runtime.getCellFromLink(
           currentArgumentLink,
           undefined,
           tx,
@@ -3355,7 +3371,7 @@ export class Runner {
     }
     if (validationOptions.initializePieceSourceHistory === true) {
       initializePieceSourceHistory(
-        this.runtime,
+        this.#runtime,
         resultCell,
         tx,
         entryRef,
@@ -3364,7 +3380,7 @@ export class Runner {
     }
     if (validationOptions.pieceSourceTransition !== undefined) {
       applyPieceSourceTransition(
-        this.runtime,
+        this.#runtime,
         resultCell,
         tx,
         entryRef,
@@ -3406,7 +3422,7 @@ export class Runner {
       // applySetupState() either installs this link or throws.
       const argumentLink = getMetaLink(resultCell.withTx(tx), "argument")!;
       validationOptions.validateArgumentLinks(
-        this.runtime.getCellFromLink(argumentLink, undefined, tx),
+        this.#runtime.getCellFromLink(argumentLink, undefined, tx),
         pattern.argumentSchema,
       );
     }
@@ -3500,7 +3516,7 @@ export class Runner {
           const target = attempt.targetKey;
           const stillRunning = started && target !== undefined &&
             this.#isStartAttemptCurrentFor(attempt, target) &&
-            this.cancels.has(target);
+            this.#cancels.has(target);
           if (stillRunning) {
             this.#independentlyStartedResults.add(target);
           }
@@ -3528,7 +3544,7 @@ export class Runner {
     installedCancel: Cancel | undefined,
   ): void {
     const key = this.#getDocKey(resultCell);
-    const registration = this.cancels.get(key);
+    const registration = this.#cancels.get(key);
     if (installedCancel !== undefined && registration !== installedCancel) {
       return;
     }
@@ -3572,7 +3588,7 @@ export class Runner {
    */
   #isSpaceDefaultPattern(resultCell: Cell<unknown>): boolean {
     try {
-      const defaultPatternCell = this.runtime
+      const defaultPatternCell = this.#runtime
         .getSpaceCell(resultCell.space)
         .key("defaultPattern")
         .get() as Cell<unknown> | undefined;
@@ -3686,7 +3702,7 @@ export class Runner {
       // recovery each tear that group down and re-instantiate, so the
       // enrollment would survive only while every such site happened to cancel
       // before instantiating.
-      this.runtime.releaseRuntimeOwnedStores(
+      this.#runtime.releaseRuntimeOwnedStores(
         resultCell.getAsNormalizedFullLink(),
         runtimeWritePolicyAuthorization,
       );
@@ -3695,12 +3711,12 @@ export class Runner {
     // between the retirement a refused instantiation commit performs and the
     // instantiation that replaces it.
     cancel.graphIsInstalled = () => cancelNodes !== undefined;
-    this.cancels.set(key, cancel);
+    this.#cancels.set(key, cancel);
     this.#allCancels.add(cancel);
 
     // Helper to clean up on error
     const cleanup = () => {
-      this.cancels.delete(key);
+      this.#cancels.delete(key);
       this.#allCancels.delete(cancel);
       cancel();
     };
@@ -3739,7 +3755,7 @@ export class Runner {
       addCancel(nodeCancel);
 
       // Instantiate nodes
-      const actualTx = useTx ?? this.runtime.edit();
+      const actualTx = useTx ?? this.#runtime.edit();
       enrollPieceOwnedStores(actualTx, resultCell, pattern);
       const shouldCommit = !useTx;
       if (shouldCommit) {
@@ -3750,7 +3766,7 @@ export class Runner {
         // 2026-08-05) like the sibling setup write in swapToPattern
         // below. A PROVIDED tx keeps its caller's stamp — never
         // restamped here. No-op off the serving posture.
-        this.runtime.stampServerRun(actualTx, {
+        this.#runtime.stampServerRun(actualTx, {
           actionId: `piece-instantiate/${resultCell.sourceURI}`,
           kind: "bookkeeping",
         });
@@ -3793,7 +3809,7 @@ export class Runner {
         }
       } finally {
         if (shouldCommit) {
-          this.runtime.prepareTxForCommit(actualTx);
+          this.#runtime.prepareTxForCommit(actualTx);
           // Fire-and-forget by design (start() resolves before the
           // commit settles), but NEVER swallowed (stage P2-F, the F1
           // fold-in — RULED 2026-08-13): a refused or failed
@@ -3804,14 +3820,14 @@ export class Runner {
             `piece-instantiate/${resultCell.sourceURI}`;
           const patternKeyAtInstantiation = currentPatternKey;
           const teardownRegistrationIfCurrent = () => {
-            if (this.cancels.get(key) !== cancel) return;
-            this.cancels.delete(key);
+            if (this.#cancels.get(key) !== cancel) return;
+            this.#cancels.delete(key);
             this.#allCancels.delete(cancel);
             cancel();
           };
           const exactNodesAreCurrent = () =>
             active && startLifecycleEpoch === this.#lifecycleEpoch &&
-            this.cancels.get(key) === cancel && cancelNodes === nodeCancel &&
+            this.#cancels.get(key) === cancel && cancelNodes === nodeCancel &&
             currentPatternKey === patternKeyAtInstantiation;
           const recoverInstantiationOnce = async (
             error: unknown,
@@ -3855,7 +3871,7 @@ export class Runner {
             // cancellation handle.
             nodeCancel();
             if (cancelNodes === nodeCancel) cancelNodes = undefined;
-            await this.runtime.awaitCommitRetryReadiness(
+            await this.#runtime.awaitCommitRetryReadiness(
               error,
               retryReadinessTeardown.signal,
             );
@@ -3867,7 +3883,7 @@ export class Runner {
             if (
               retryReadinessTeardown.signal.aborted || !active ||
               startLifecycleEpoch !== this.#lifecycleEpoch ||
-              this.cancels.get(key) !== cancel ||
+              this.#cancels.get(key) !== cancel ||
               currentPatternKey !== patternKeyAtInstantiation ||
               cancelNodes !== undefined
             ) {
@@ -3886,7 +3902,7 @@ export class Runner {
           const commitWork = actualTx.commit().then(async ({ error }) => {
             if (error !== undefined) {
               if (
-                this.runtime.experimental.serverExecution === true &&
+                this.#runtime.experimental.serverExecution === true &&
                 isStaleReadConflict(error)
               ) {
                 await recoverInstantiationOnce(error);
@@ -3971,7 +3987,7 @@ export class Runner {
           runningRef = newRef;
           return;
         }
-        const setupTx = this.runtime.edit();
+        const setupTx = this.#runtime.edit();
         // Server-execution v2 stage F (serving-loop.md §3d): under an
         // installed seal destination every commit path declares its run
         // context; the swap's setup write is runtime-internal
@@ -3983,7 +3999,7 @@ export class Runner {
         // consecutive swaps of ONE piece overwrite — bounded, exactly
         // the S4-friendly shape.
         const pieceLink = resultCell.getAsNormalizedFullLink();
-        this.runtime.stampServerRun(setupTx, {
+        this.#runtime.stampServerRun(setupTx, {
           actionId: `pattern-swap/${pieceLink.space}/${
             pieceLink.scope ?? "space"
           }/${pieceLink.id}`,
@@ -3995,7 +4011,7 @@ export class Runner {
           runningRef = newRef;
           runningPattern = pattern;
         };
-        if (!this.runtime.sealDestinationInstalled) {
+        if (!this.#runtime.sealDestinationInstalled) {
           // The OFF arm (and ON-arm client speculation): today's
           // behavior, byte for byte — setup commits to the store and the
           // swap proceeds synchronously.
@@ -4012,7 +4028,7 @@ export class Runner {
               undefined,
               resultCell,
             );
-            this.runtime.prepareTxForCommit(setupTx);
+            this.#runtime.prepareTxForCommit(setupTx);
             setupTx.commit();
           } catch (error) {
             logger.error(
@@ -4048,7 +4064,7 @@ export class Runner {
               undefined,
               resultCell,
             );
-            this.runtime.prepareTxForCommit(setupTx);
+            this.#runtime.prepareTxForCommit(setupTx);
             const committed = await setupTx.commit();
             if (committed.error !== undefined) {
               logger.error(
@@ -4118,7 +4134,7 @@ export class Runner {
           currentPatternKey = newKey;
 
           // In-memory fast path: the module is usually live this session.
-          const live = this.runtime.patternManager.artifactFromIdentitySync(
+          const live = this.#runtime.patternManager.artifactFromIdentitySync(
             newRef.identity,
             newRef.symbol,
           ) as Pattern | undefined;
@@ -4132,7 +4148,7 @@ export class Runner {
           // tracked so dispose() — and deterministic tests — can settle it
           // without wall-clock waits (the runner suite runs under a frozen
           // clock).
-          const watcherLoad = this.runtime.patternManager
+          const watcherLoad = this.#runtime.patternManager
             .loadPatternByIdentity(
               newRef.identity,
               newRef.symbol,
@@ -4200,7 +4216,7 @@ export class Runner {
                   ? resolveProducerEntryRef(runningPattern)
                   : undefined;
                 if (
-                  this.runtime.cfcEnforcementMode !== "disabled" &&
+                  this.#runtime.cfcEnforcementMode !== "disabled" &&
                   revertTarget === undefined &&
                   runningPattern !== undefined
                 ) {
@@ -4212,16 +4228,16 @@ export class Runner {
                   ]);
                 }
                 if (
-                  this.runtime.cfcEnforcementMode !== "disabled" &&
+                  this.#runtime.cfcEnforcementMode !== "disabled" &&
                   revertTarget !== undefined &&
                   patternIdentityKey(revertTarget) !== newKey
                 ) {
                   const revertRef = revertTarget;
-                  const rollForward = this.runtime.editWithRetry((tx) => {
+                  const rollForward = this.#runtime.editWithRetry((tx) => {
                     // Async pointer repair from the meta watcher's load
                     // promise — no scheduler run stamps it; bookkeeping
                     // per serving-loop.md §3d.
-                    this.runtime.stampServerRun(tx, {
+                    this.#runtime.stampServerRun(tx, {
                       actionId:
                         `pattern-pointer-rollforward/${resultCell.sourceURI}`,
                       kind: "bookkeeping",
@@ -4349,11 +4365,11 @@ export class Runner {
         // races it. EVERY step sits inside the try: any failure (including the
         // precondition read or prepare throwing) aborts the tx and rethrows the
         // ORIGINAL instantiate error, so the piece is left exactly as it was.
-        const repairTx = this.runtime.edit();
+        const repairTx = this.#runtime.edit();
         // Self-minted repair tx inside startCore — piece machinery with
         // no scheduler run around it; bookkeeping per serving-loop.md
         // §3d (reachable server-side via the demand loader's start).
-        this.runtime.stampServerRun(repairTx, {
+        this.#runtime.stampServerRun(repairTx, {
           actionId: `piece-start-repair/${resultCell.sourceURI}`,
           kind: "bookkeeping",
         });
@@ -4396,7 +4412,7 @@ export class Runner {
           // Instantiate into the SAME tx: it reads the just-staged setup writes,
           // so the once-missing markers resolve and node wiring succeeds.
           instantiatePattern(pattern, repairTx);
-          this.runtime.prepareTxForCommit(repairTx);
+          this.#runtime.prepareTxForCommit(repairTx);
         } catch {
           repairTx.abort();
           throw instantiateError;
@@ -4411,12 +4427,12 @@ export class Runner {
         //
         // Scope-safe teardown: unregister ONLY this start's own `cancel`. A
         // stop+restart during the pending commit installs a NEWER cancel under
-        // the same key; deleting `this.cancels[key]` unconditionally (as
+        // the same key; deleting `this.#cancels[key]` unconditionally (as
         // cleanup() does) would clobber that live registration and orphan its
         // graph. Delete the key only while it still holds our cancel — the same
         // guard createDeferredStartOwnership uses — and always drop/invoke ours.
         const teardownAfterFailedCommit = () => {
-          if (this.cancels.get(key) === cancel) this.cancels.delete(key);
+          if (this.#cancels.get(key) === cancel) this.#cancels.delete(key);
           this.#allCancels.delete(cancel);
           cancel();
         };
@@ -4454,7 +4470,7 @@ export class Runner {
         // would write a pointer no fresh runtime can load. The VALUE is kept
         // regardless: the roll-forward's keyless arm converges through its
         // derivation chain to a module-addressed producer when one exists.
-        const givenRef = this.runtime.patternManager.getArtifactEntryRef(
+        const givenRef = this.#runtime.patternManager.getArtifactEntryRef(
           givenPattern,
         );
         runningRef = givenRef !== undefined &&
@@ -4463,7 +4479,7 @@ export class Runner {
           : undefined;
         runningPattern = givenPattern;
       } catch (error) {
-        // Without cleanup the piece stays registered in `this.cancels`, so
+        // Without cleanup the piece stays registered in `this.#cancels`, so
         // every later start() reports "already running" for a piece that has
         // no nodes or event handlers — events sent to it are then dropped.
         //
@@ -4497,7 +4513,7 @@ export class Runner {
     }
 
     // Sync lookup by identity (the module is live this session).
-    const initialResolved = this.runtime.patternManager
+    const initialResolved = this.#runtime.patternManager
       .artifactFromIdentitySync(
         initialRef.identity,
         initialRef.symbol,
@@ -4548,13 +4564,13 @@ export class Runner {
     // Step 1: For subpath cells, resolve to root cell
     const link = resultCell.getAsNormalizedFullLink();
     const rootCell = link.path.length > 0
-      ? this.runtime.getCellFromLink({ ...link, path: [] })
+      ? this.#runtime.getCellFromLink({ ...link, path: [] })
       : resultCell;
 
     const key = this.#getDocKey(rootCell);
     attempt.targetKey = key;
     // Step 2: Already started? Return success
-    if (this.cancels.has(key)) return Promise.resolve(true);
+    if (this.#cancels.has(key)) return Promise.resolve(true);
 
     // Step 3: Not synced yet? Sync and retry
     // Once getRaw() has a value, all properties including source are synced.
@@ -4580,7 +4596,7 @@ export class Runner {
       // We may have a slug instead of a resultCell, so try the link.
       const maybeLink = parseLink(rootCell.getRaw(), rootCell);
       if (maybeLink) {
-        const nextCell = this.runtime.getCellFromLink(maybeLink);
+        const nextCell = this.#runtime.getCellFromLink(maybeLink);
         if (seenCells.has(nextCell)) {
           return Promise.reject(new Error("Circular link detected"));
         }
@@ -4632,7 +4648,7 @@ export class Runner {
     if (!this.#isStartAttemptCurrent(attempt)) {
       return Promise.resolve(false);
     }
-    const pm = this.runtime.patternManager;
+    const pm = this.#runtime.patternManager;
     const pattern = pm.artifactFromIdentitySync(
       identityRef.identity,
       identityRef.symbol,
@@ -4743,7 +4759,7 @@ export class Runner {
       // get here, so the remaining writers of this race are an identity-change
       // restart within this same attempt and an attempt that entered through a
       // different doc whose links resolve to this piece.
-      if (this.cancels.has(this.#getDocKey(rootCell))) {
+      if (this.#cancels.has(this.#getDocKey(rootCell))) {
         return true;
       }
 
@@ -4786,7 +4802,7 @@ export class Runner {
     options: RunnerRunOptions = {},
   ): Cancel | undefined {
     const key = this.#getDocKey(resultCell);
-    if (this.cancels.has(key)) return undefined;
+    if (this.#cancels.has(key)) return undefined;
 
     return this.startCore(resultCell, {
       tx,
@@ -4805,7 +4821,7 @@ export class Runner {
       // A result key can be stopped and restarted while deferred startup is
       // re-entering runner code. Only stop if this attempt's exact cancel
       // registration is still current; a later replacement owns itself.
-      if (this.cancels.get(key) !== installedCancel) return;
+      if (this.#cancels.get(key) !== installedCancel) return;
       this.stop(resultCell);
     });
     // Ownership of a commit-gated start begins when the start is scheduled,
@@ -4870,7 +4886,7 @@ export class Runner {
       }
       if (ownership.isCancelled()) return;
 
-      const startTx = this.runtime.edit();
+      const startTx = this.#runtime.edit();
       // Minted inside a commit callback — by definition outside any
       // scheduler run; the deferred start's node wiring is piece
       // machinery, stamped bookkeeping per serving-loop.md §3d. A
@@ -4885,7 +4901,7 @@ export class Runner {
       // internal writes at the wave seal destination, which this
       // client-side start tx never reaches. The serving side and the
       // OFF arm keep bookkeeping.
-      this.runtime.stampServerRun(startTx, {
+      this.#runtime.stampServerRun(startTx, {
         actionId: `piece-start/${resultLink.id}`,
         ...(speculativeConsequence !== undefined
           ? {
@@ -4904,7 +4920,7 @@ export class Runner {
       if (navigateContext !== undefined) {
         setNavigateEventContext(startTx, navigateContext);
       }
-      const committedResultCell = this.runtime.getCellFromLink<T>(
+      const committedResultCell = this.#runtime.getCellFromLink<T>(
         resultLink,
         undefined,
         startTx,
@@ -4920,7 +4936,7 @@ export class Runner {
           startTx.abort("Deferred runner start was cancelled");
           return;
         }
-        this.runtime.prepareTxForCommit(startTx);
+        this.#runtime.prepareTxForCommit(startTx);
         startTx.commit().then(({ error }) => {
           if (error) {
             if (
@@ -5072,7 +5088,7 @@ export class Runner {
     ownership: DeferredCancelOwnership,
     installedRegistration: Cancel | undefined,
   ): boolean {
-    if (this.runtime.experimental.serverExecution !== true) return false;
+    if (this.#runtime.experimental.serverExecution !== true) return false;
     if (!isStaleReadConflict(error)) return false;
     if (scheduledLifecycleEpoch !== this.#lifecycleEpoch) return false;
     if (ownership.isCancelled()) return false;
@@ -5086,7 +5102,7 @@ export class Runner {
     // registration exactly like today).
     if (
       installedRegistration === undefined ||
-      this.cancels.get(key) !== installedRegistration
+      this.#cancels.get(key) !== installedRegistration
     ) {
       return false;
     }
@@ -5122,7 +5138,7 @@ export class Runner {
       this.#pendingDeferredStarts.set(key, pending);
     }
     pending.add(ownership);
-    const recovery = this.runtime.awaitCommitRetryReadiness(error)
+    const recovery = this.#runtime.awaitCommitRetryReadiness(error)
       .then(async () => {
         // Paired guards, each the other's backstop (the mutation pins kill
         // them jointly): the token covers a stop or a stopAll that ran
@@ -5136,7 +5152,7 @@ export class Runner {
         ) {
           return;
         }
-        if (this.cancels.has(key)) {
+        if (this.#cancels.has(key)) {
           // Another start took the key while the recovery waited — the
           // same yield startWithTx makes on an owned key. The piece HAS a
           // context under someone else's authority; the recovery's purpose
@@ -5163,7 +5179,7 @@ export class Runner {
           if (started) {
             if (pullOnceAfterStart && !ownership.isCancelled()) {
               this.#pullCellOnceInPullMode(
-                this.runtime.getCellFromLink<T>(
+                this.#runtime.getCellFromLink<T>(
                   resultCell.getAsNormalizedFullLink(),
                 ),
               );
@@ -5243,9 +5259,9 @@ export class Runner {
           const target = attempt.targetKey;
           const stillRunning = started && target !== undefined &&
             this.#isStartAttemptCurrentFor(attempt, target) &&
-            this.cancels.has(target);
+            this.#cancels.has(target);
           if (stillRunning && ownership !== undefined) {
-            const current = this.cancels.get(target!);
+            const current = this.#cancels.get(target!);
             if (
               attempt.installedRegistration === undefined ||
               current !== attempt.installedRegistration
@@ -5304,14 +5320,14 @@ export class Runner {
       }
       if (ownership.isCancelled()) return;
 
-      const startTx = this.runtime.edit();
+      const startTx = this.#runtime.edit();
       // Minted inside a commit callback — outside any scheduler run;
       // bookkeeping per serving-loop.md §3d, like the deferred start
       // above (and with the same §3d-RULED speculative-consequence
       // stamp, 2026-08-13: a flag-ON client's navigate-deferred start
       // is a speculative handler CONSEQUENCE and diverts to the
       // overlay instead of racing the serving side's receipt create).
-      this.runtime.stampServerRun(startTx, {
+      this.#runtime.stampServerRun(startTx, {
         actionId: `piece-start/${resultLink.id}`,
         ...(speculativeConsequence !== undefined
           ? {
@@ -5329,7 +5345,7 @@ export class Runner {
       if (navigateContext !== undefined) {
         setNavigateEventContext(startTx, navigateContext);
       }
-      const committedResultCell = this.runtime.getCellFromLink<T>(
+      const committedResultCell = this.#runtime.getCellFromLink<T>(
         resultLink,
         pattern.resultSchema,
         startTx,
@@ -5350,7 +5366,7 @@ export class Runner {
             committedResultCell.getAsNormalizedFullLink(),
           );
         }
-        this.runtime.prepareTxForCommit(startTx);
+        this.#runtime.prepareTxForCommit(startTx);
         startTx.commit().then(({ error }) => {
           if (error) {
             if (
@@ -5467,13 +5483,13 @@ export class Runner {
     resultCell: Cell<R>,
     options: RunnerRunOptions = {},
   ): RunResult<R> {
-    const tx = providedTx ?? this.runtime.edit();
+    const tx = providedTx ?? this.#runtime.edit();
     if (providedTx === undefined) {
       // Self-minted fallback arm (reached e.g. from wish's async
       // suggestion-pattern fetch continuation): setup + start writes
       // with no scheduler run around them; bookkeeping per
       // serving-loop.md §3d. A provided tx keeps its caller's stamp.
-      this.runtime.stampServerRun(tx, {
+      this.#runtime.stampServerRun(tx, {
         actionId: `piece-run/${resultCell.sourceURI}`,
         kind: "bookkeeping",
       });
@@ -5554,7 +5570,7 @@ export class Runner {
     }
 
     if (!providedTx) {
-      this.runtime.prepareTxForCommit(tx);
+      this.#runtime.prepareTxForCommit(tx);
       tx.commit();
     }
 
@@ -5636,7 +5652,7 @@ export class Runner {
     // which is where it decides anything: a destination installed while the
     // synchronization below is in flight would pass this check and still seal
     // the transaction the receipt would describe.
-    if (this.runtime.sealDestinationInstalled) {
+    if (this.#runtime.sealDestinationInstalled) {
       throw new Error(SEALING_RECEIPT_REFUSAL);
     }
     if (options.pieceSourceTransition === undefined) {
@@ -5739,14 +5755,14 @@ export class Runner {
         },
       );
     } else {
-      const outcome = await this.runtime.editWithRetry((tx) => {
+      const outcome = await this.#runtime.editWithRetry((tx) => {
         // Asked here rather than only at the entry point, because a seal
         // destination can be installed while the synchronization above is in
         // flight, and because `editWithRetry` builds a fresh transaction per
         // retry. The receipt describes THIS transaction, so the condition
         // that decides whether it can describe one has to hold for the
         // transaction, not for the moment the call started.
-        if (requireCommit && this.runtime.sealDestinationInstalled) {
+        if (requireCommit && this.#runtime.sealDestinationInstalled) {
           throw new Error(SEALING_RECEIPT_REFUSAL);
         }
         // runSynced's own setup tx (async surface, e.g. compileAndRun's
@@ -5759,7 +5775,7 @@ export class Runner {
         // that a later withdrawal can undo; bookkeeping commits to storage.
         // A receipt minted from an overlay seal would claim durability it
         // does not have, so re-stamping this one is not a naming change.
-        this.runtime.stampServerRun(tx, {
+        this.#runtime.stampServerRun(tx, {
           actionId: `piece-run-synced/${resultCell.sourceURI}`,
           kind: "bookkeeping",
         });
@@ -5849,7 +5865,7 @@ export class Runner {
       let currentRef = getPatternIdentityRef(resultCell);
       while (currentRef !== undefined) {
         const loadedRef = currentRef;
-        const currentPattern = await this.runtime.patternManager
+        const currentPattern = await this.#runtime.patternManager
           .loadPatternByIdentity(
             loadedRef.identity,
             loadedRef.symbol,
@@ -5896,7 +5912,7 @@ export class Runner {
   #getDocKey(cell: Cell<any>): `${MemorySpace}/${ScopeKey}/${URI}` {
     const { space, id, scope } = cell.getAsNormalizedFullLink();
     return `${space}/${
-      resolveScopeKey(scope, this.runtime.scopeKeyIdentity)
+      resolveScopeKey(scope, this.#runtime.scopeKeyIdentity)
     }/${id}`;
   }
 
@@ -5930,7 +5946,7 @@ export class Runner {
       error,
     ]);
     try {
-      this.runtime.pieceStartCommitFailureObserver?.({ actionId, error });
+      this.#runtime.pieceStartCommitFailureObserver?.({ actionId, error });
     } catch (observerError) {
       logger.warn("piece-start-commit-observer-failed", () => [
         "pieceStartCommitFailureObserver threw",
@@ -5975,7 +5991,9 @@ export class Runner {
     const { space, id, scope } = resultCell.getAsNormalizedFullLink();
     const demandRootIds = this.#demandRootChainFor(id, parentPieceRootId);
     return {
-      pieceId: `${resolveScopeKey(scope, this.runtime.scopeKeyIdentity)}:${id}`,
+      pieceId: `${
+        resolveScopeKey(scope, this.#runtime.scopeKeyIdentity)
+      }:${id}`,
       ownerSpace: space,
       // The RAW root doc id, un-prefixed, for the per-(action × instance)
       // run supply (server-execution v2 stage P2-F): the scheduler
@@ -6016,7 +6034,7 @@ export class Runner {
       return (candidate) => getMetaLink(candidate, "argument") === undefined;
     }
 
-    const argumentCell = this.runtime.getCellFromLink(argumentLink);
+    const argumentCell = this.#runtime.getCellFromLink(argumentLink);
     await argumentCell.sync();
     const argumentValue = argumentCell.getRawUntyped();
     // No declared schema here: the setup path scans the stored argument in
@@ -6034,7 +6052,7 @@ export class Runner {
       ) {
         return false;
       }
-      const candidateArgument = this.runtime.getCellFromLink(
+      const candidateArgument = this.#runtime.getCellFromLink(
         candidateLink,
         undefined,
         candidate.tx,
@@ -6086,7 +6104,7 @@ export class Runner {
       const link = parseLink(value, resultCell);
 
       if (link) {
-        promises.add(this.runtime.getCellFromLink(link).sync());
+        promises.add(this.#runtime.getCellFromLink(link).sync());
       } else if (isObjectOrArray(value)) {
         // TODO(danfuzz): `isObjectOrArray` admits a `FabricSpecialObject`, and
         // `for..in` sees none of its state, so a link nested in a
@@ -6169,20 +6187,20 @@ export class Runner {
         }
 
         [...inputs, ...outputs].forEach((link) => {
-          cells.push(this.runtime.getCellFromLink(link));
+          cells.push(this.#runtime.getCellFromLink(link));
         });
         // Each input link carries the schema its binding declared, which is
         // the read surface the node's first run holds to — the bound the
         // link-target scan follows.
         inputs.forEach((link) => {
           argumentRoots.push({
-            cell: this.runtime.getCellFromLink(link),
+            cell: this.#runtime.getCellFromLink(link),
             schema: link.schema,
           });
         });
       }
       argumentRoots.push({
-        cell: this.runtime.getCellFromLink(argumentMetaLink),
+        cell: this.#runtime.getCellFromLink(argumentMetaLink),
         schema: pattern.argumentSchema,
       });
     }
@@ -6199,7 +6217,7 @@ export class Runner {
     // Resolving each sub-pattern node's output redirect chain needs a
     // transaction (resolveLink reads link metadata). The walk only reads, so the
     // transaction is discarded afterward.
-    const resolveTx = this.runtime.edit();
+    const resolveTx = this.#runtime.edit();
     const instances: ResumePatternInstance[] = [];
     this.#collectResumeOwnedCells(
       pattern,
@@ -6337,7 +6355,7 @@ export class Runner {
         hopsLeft: number,
       ) => {
         const docKey = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
-        const target = this.runtime.getCellFromLink(link);
+        const target = this.#runtime.getCellFromLink(link);
         if (!syncedDocs.has(docKey)) {
           syncedDocs.add(docKey);
           const targetSyncStart = performance.now();
@@ -6476,7 +6494,7 @@ export class Runner {
     for (let round = 0;; round++) {
       const fresh: Cell<any>[] = [];
       const moving = new Set<string>();
-      const planTx = this.runtime.edit();
+      const planTx = this.#runtime.edit();
       try {
         for (const { pattern, resultCell } of instances) {
           if (getMetaLink(resultCell, "argument") === undefined) continue;
@@ -6491,7 +6509,7 @@ export class Runner {
             if (op !== "map" && op !== "filter" && op !== "flatMap") continue;
             let links: NormalizedFullLink[];
             try {
-              const resolved = this.runtime.moduleRegistry.getModule(
+              const resolved = this.#runtime.moduleRegistry.getModule(
                 op,
                 module.defaultScope,
               );
@@ -6505,7 +6523,7 @@ export class Runner {
                 op,
               );
               const { listCell, rawList, slots } = listSlotResolutions(
-                this.runtime,
+                this.#runtime,
                 planTx,
                 inputsCell,
               );
@@ -6523,7 +6541,7 @@ export class Runner {
               const key = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
               if (synced.has(key)) continue;
               synced.add(key);
-              fresh.push(this.runtime.getCellFromLink(link));
+              fresh.push(this.#runtime.getCellFromLink(link));
               moving.add(`${instanceKey}#${nodeIndex}`);
             }
           }
@@ -6610,7 +6628,7 @@ export class Runner {
       const unsettled = await this.#syncListSlotResolutions(frontier);
       const next: ResumePatternInstance[] = [];
       const promises: Promise<unknown>[] = [];
-      const planTx = this.runtime.edit();
+      const planTx = this.#runtime.edit();
       try {
         for (const { pattern, resultCell } of frontier) {
           // A fresh first run has no argument meta yet; nothing durable is
@@ -6631,7 +6649,7 @@ export class Runner {
             let children: Cell<any>[];
             let opPattern: Pattern;
             try {
-              const resolved = this.runtime.moduleRegistry.getModule(
+              const resolved = this.#runtime.moduleRegistry.getModule(
                 op,
                 module.defaultScope,
               );
@@ -6645,7 +6663,7 @@ export class Runner {
                 op,
               );
               const plan = listCoordinatorPlan(
-                this.runtime,
+                this.#runtime,
                 planTx,
                 op,
                 inputsCell,
@@ -6656,7 +6674,7 @@ export class Runner {
               opPattern = plan.opPattern;
               children = [...plan.elementKeys.values()].map((elementKey) =>
                 listElementResultCell(
-                  this.runtime,
+                  this.#runtime,
                   planTx,
                   op,
                   plan.container,
@@ -6677,7 +6695,7 @@ export class Runner {
               named.add(key);
               // Unbound from the derivation transaction: the sync and the
               // next round outlive it.
-              const unbound = this.runtime.getCellFromLink(link);
+              const unbound = this.#runtime.getCellFromLink(link);
               const syncStart = performance.now();
               promises.push(
                 Promise.resolve(documentBoundedResumeCell(unbound).sync())
@@ -6819,7 +6837,7 @@ export class Runner {
         // The same cause-only skip instantiatePatternNode's spot
         // derivation applies, so the two derive identical coordinates.
         spotLink = firstResolvedOutputRedirect(
-          this.runtime,
+          this.#runtime,
           tx,
           unwrappedOutputs,
           resultCell,
@@ -6868,7 +6886,7 @@ export class Runner {
       }
       const childScope = patternDefaultScope(boundChildPattern) ??
         module.defaultScope;
-      let childResultCell = this.runtime.getCell(
+      let childResultCell = this.#runtime.getCell(
         targetSpace,
         {
           resultFor: {
@@ -6881,7 +6899,7 @@ export class Runner {
       );
       if (childScope !== undefined && childScope !== "space") {
         const childLink = childResultCell.getAsNormalizedFullLink();
-        childResultCell = this.runtime.getCellFromLink({
+        childResultCell = this.#runtime.getCellFromLink({
           ...childLink,
           scope: childScope,
         });
@@ -6911,7 +6929,8 @@ export class Runner {
    * @param resultCell - The result doc or cell of the piece to ask about.
    */
   pieceGraphIsInstalled<T>(resultCell: Cell<T>): boolean {
-    return this.cancels.get(this.#getDocKey(resultCell))?.graphIsInstalled() ===
+    return this.#cancels.get(this.#getDocKey(resultCell))
+      ?.graphIsInstalled() ===
       true;
   }
 
@@ -6944,7 +6963,7 @@ export class Runner {
   }
 
   #stopResult<T>(resultCell: Cell<T>): void {
-    this.runtime.sourceReconciler.unwatch(resultCell);
+    this.#runtime.sourceReconciler.unwatch(resultCell);
     const key = this.#getDocKey(resultCell);
     this.#independentlyStartedResults.delete(key);
     // TODO(hixie): This reaches every pending commit-gated start for the result,
@@ -6963,11 +6982,11 @@ export class Runner {
       // retaining one entry per stopped piece for the runtime's lifetime.
       this.#startGenerationByDoc.delete(key);
     }
-    const cancel = this.cancels.get(key);
+    const cancel = this.#cancels.get(key);
     try {
       cancel?.();
     } finally {
-      this.cancels.delete(key);
+      this.#cancels.delete(key);
       this.#locallyCommittedHandlerResultStarts.delete(key);
       if (cancel !== undefined) {
         this.#allCancels.delete(cancel);
@@ -7138,7 +7157,7 @@ export class Runner {
       }
     }
     this.#allCancels.clear();
-    this.cancels.clear();
+    this.#cancels.clear();
     // Clear the result pattern cache as well, since the actions have been
     // canceled
     this.#resultPatternCache.clear();
@@ -7175,7 +7194,7 @@ export class Runner {
           // dropped and the node falls back to "space". The registry owns
           // applying it, because the copy it takes to do so must also carry
           // the module's `debugName` (its policy identity) across.
-          const resolved = this.runtime.moduleRegistry.getModule(
+          const resolved = this.#runtime.moduleRegistry.getModule(
             refName,
             module.defaultScope,
           );
@@ -7307,7 +7326,7 @@ export class Runner {
         if (output.overwrite !== "redirect") continue;
         try {
           const { overwrite: _overwrite, ...target } = resolveLink(
-            this.runtime,
+            this.#runtime,
             tx,
             output,
             "writeRedirect",
@@ -7342,7 +7361,7 @@ export class Runner {
       for (const input of inputCells) {
         try {
           const { overwrite: _overwrite, ...target } = resolveLink(
-            this.runtime,
+            this.#runtime,
             tx,
             input,
             "value",
@@ -7380,7 +7399,7 @@ export class Runner {
       if (read.overwrite === "redirect") {
         try {
           const { overwrite: _overwrite, ...resolved } = resolveLink(
-            this.runtime,
+            this.#runtime,
             depTx,
             read,
             "writeRedirect",
@@ -7396,7 +7415,7 @@ export class Runner {
           ]);
         }
       }
-      this.runtime.getCellFromLink(target, target.schema, depTx)?.get();
+      this.#runtime.getCellFromLink(target, target.schema, depTx)?.get();
     }
   }
 
@@ -7425,7 +7444,7 @@ export class Runner {
       ...(argumentSchema.definitions !== undefined &&
         { definitions: argumentSchema.definitions }),
     };
-    const inputsCell = this.runtime.getImmutableCell(
+    const inputsCell = this.#runtime.getImmutableCell(
       resultCell.space,
       { $event: event },
       undefined,
@@ -7726,7 +7745,7 @@ export class Runner {
     const liveTrusted = typeof module.implementation === "function" &&
         (getVerifiedProvenance(module.implementation) !== undefined ||
           (liveEntryRef !== undefined &&
-            this.runtime.harness.getVerifiedImplementation?.(
+            this.#runtime.harness.getVerifiedImplementation?.(
                 liveEntryRef.identity,
                 liveEntryRef.symbol,
               ) === module.implementation))
@@ -7773,7 +7792,7 @@ export class Runner {
     if (!ref) {
       return undefined;
     }
-    const artifact = this.runtime.patternManager.artifactFromIdentitySync(
+    const artifact = this.#runtime.patternManager.artifactFromIdentitySync(
       ref.identity,
       ref.symbol,
     );
@@ -7793,7 +7812,7 @@ export class Runner {
     // engine without passing through the pattern manager's registration
     // (a standalone-Engine compile), and a post-flip graph that carries no
     // legacy ref and no body.
-    return this.runtime.harness.getVerifiedImplementation?.(
+    return this.#runtime.harness.getVerifiedImplementation?.(
       ref.identity,
       ref.symbol,
     ) as ((...args: any[]) => any) | undefined;
@@ -7857,7 +7876,7 @@ export class Runner {
     let lastLink: NormalizedFullLink | undefined;
     while (isWriteRedirectLink(value)) {
       lastLink = resolveLink(
-        this.runtime,
+        this.#runtime,
         tx,
         parseLink(value, base),
         "writeRedirect",
@@ -7893,7 +7912,7 @@ export class Runner {
       // than through event dispatch (a test, an internal call) has no dispatched
       // time, so capture the clock once here; it stays frozen for that run.
       ...(inHandler ? { eventTime: tx.dispatchedEventTime ?? Date.now() } : {}),
-      runtime: this.runtime,
+      runtime: this.#runtime,
       space: resultCell.space,
       tx,
       ...(implementationIdentity ? { implementationIdentity } : {}),
@@ -8008,21 +8027,21 @@ export class Runner {
     addCancel: AddCancel,
     cause: Record<string, any>,
   ): any {
-    const receiptCell = this.runtime.getCell(
+    const receiptCell = this.#runtime.getCell(
       patternResultCell.space,
       { resultFor: cause },
       undefined,
       tx,
     );
     const receiptsEnabled =
-      this.runtime.experimental.commitPreconditions === true &&
+      this.#runtime.experimental.commitPreconditions === true &&
       // Events-down (server-execution v2 Phase 3; runtime-mapping N26):
       // receipt create-only exactly-once is SUBSUMED by the stream's
       // `eventWatermark` (events.md §4), and the two mechanisms must not
       // be active for the same event — client handler runs divert to the
       // overlay anyway, and a serving run's create-only mark would ride
       // the WAVE commit as a precondition the watermark already covers.
-      this.runtime.experimental.serverExecution !== true;
+      this.#runtime.experimental.serverExecution !== true;
     // The serving-side receipt/result write (owner-ruled 2026-08-29;
     // events.md §4 "Result carriage"): N26's subsumption retired the
     // receipt's EXACTLY-ONCE role, not its RESULT-CARRIAGE role. Under
@@ -8037,7 +8056,7 @@ export class Runner {
     // `dispatchedHandlerNotRun`); the client's write stays disabled
     // (`receiptsEnabled` above), so the serving run is the ONE writer.
     const servedReceiptWrite =
-      this.runtime.experimental.serverExecution === true &&
+      this.#runtime.experimental.serverExecution === true &&
       waveRunContextOf(tx)?.kind === "event-handler" &&
       tx.dispatchedHandlerNotRun === undefined;
     // Expose the handling's receipt address on the transaction, where the
@@ -8061,7 +8080,9 @@ export class Runner {
     // durable-ack coupling (cell.ts) settles that caller's callback only
     // after the handling CONSEQUENCED — the serving wave, receipt
     // included, committed before the address is ever dereferenced.
-    if (receiptsEnabled || this.runtime.experimental.serverExecution === true) {
+    if (
+      receiptsEnabled || this.#runtime.experimental.serverExecution === true
+    ) {
       tx.handlingReceiptLink = receiptCell.getAsNormalizedFullLink();
     }
     if (!resultHasReactives && frame.reactives.size === 0) {
@@ -8084,7 +8105,7 @@ export class Runner {
         // value with an uncloneable-live-object storage error instead of
         // recording what was returned.
         const receiptValue =
-          this.runtime.experimental.plainResultReceipts === true &&
+          this.#runtime.experimental.plainResultReceipts === true &&
             result !== undefined
             ? result
             : {};
@@ -8123,7 +8144,7 @@ export class Runner {
         // same no-op arm).
         const existing = receiptCell.getRaw({ meta: ignoreReadForScheduling });
         if (existing !== undefined) {
-          this.servedReceiptCasLosses += 1;
+          this.#servedReceiptCasLosses += 1;
           logger.warn("served-receipt", () => [
             "served receipt write skipped (write-once CAS loss): the " +
             "handling's result cell already holds a value — a prior " +
@@ -8136,7 +8157,7 @@ export class Runner {
           ]);
         } else {
           const receiptValue =
-            this.runtime.experimental.plainResultReceipts === true &&
+            this.#runtime.experimental.plainResultReceipts === true &&
               result !== undefined
               ? result
               : {};
@@ -8155,7 +8176,7 @@ export class Runner {
     if (
       receiptsEnabled &&
       this.#locallyCommittedHandlerResultStarts.has(receiptKey) &&
-      this.cancels.has(receiptKey) &&
+      this.#cancels.has(receiptKey) &&
       receiptCell.getRaw({ meta: ignoreReadForScheduling }) !== undefined
     ) {
       // Local sequential-redelivery fast path. The winner's result wrapper is
@@ -8219,7 +8240,7 @@ export class Runner {
         speculativeConsequence,
       );
       addCancel(cancelDeferredStart);
-      this.runtime.scheduler.lineage.recordPieceStop(
+      this.#runtime.scheduler.lineage.recordPieceStop(
         tx,
         cancelDeferredStart,
       );
@@ -8276,7 +8297,7 @@ export class Runner {
         // scheduling onward: cancellation before commit tombstones the start;
         // cancellation after installation stops only this attempt's child.
         addCancel(cancelDeferredStart);
-        this.runtime.scheduler.lineage.recordPieceStop(
+        this.#runtime.scheduler.lineage.recordPieceStop(
           tx,
           cancelDeferredStart,
         );
@@ -8293,20 +8314,20 @@ export class Runner {
         if (cancelled) return;
         cancelled = true;
         const key = this.#getDocKey(resultCell);
-        if (this.cancels.get(key) !== installedCancel) return;
+        if (this.#cancels.get(key) !== installedCancel) return;
         this.stop(resultCell);
       });
       addCancel(cancelOwnedStart);
       // Spec scheduler-v2 §7.6 rule 2: the launch is speculative; if this
       // handler's transaction ultimately fails, stop the piece (data writes
       // roll back with the transaction; registrations do not).
-      this.runtime.scheduler.lineage.recordPieceStop(
+      this.#runtime.scheduler.lineage.recordPieceStop(
         tx,
         cancelOwnedStart,
       );
       if (receiptsEnabled) {
         tx.addCommitCallback((_committedTx, commitResult) => {
-          if (!commitResult.error && this.cancels.has(receiptKey)) {
+          if (!commitResult.error && this.#cancels.has(receiptKey)) {
             this.#locallyCommittedHandlerResultStarts.add(receiptKey);
           }
         });
@@ -8347,12 +8368,12 @@ export class Runner {
   ): Promise<never> {
     const names = [...(frame.pendingSpaceNames ?? [])];
     let owner: DID | undefined;
-    if (this.runtime.servingPosture && tx !== undefined) {
+    if (this.#runtime.servingPosture && tx !== undefined) {
       owner = waveRunContextOf(tx)?.acting?.user as DID | undefined;
     }
     await Promise.all(
       names.map((name) =>
-        this.runtime.resolveSpaceName(
+        this.#runtime.resolveSpaceName(
           name,
           owner !== undefined ? { owner } : undefined,
         )
@@ -8379,7 +8400,7 @@ export class Runner {
     markCreateOnlyResult = false,
     speculativeConsequence?: { eventId: string },
   ): DeferredStartResult<any> {
-    const resultCell = this.runtime.getCell(
+    const resultCell = this.#runtime.getCell(
       resultSpace,
       { resultFor: cause },
       undefined,
@@ -8433,7 +8454,9 @@ export class Runner {
       if (result.error) {
         return;
       }
-      this.#pullCellOnceInPullMode(this.runtime.getCellFromLink<T>(resultLink));
+      this.#pullCellOnceInPullMode(
+        this.#runtime.getCellFromLink<T>(resultLink),
+      );
     });
   }
 
@@ -8467,7 +8490,7 @@ export class Runner {
     if (!resultHasReactives && frame.reactives.size === 0) {
       recordOutputSchemaPolicyInputs(
         tx,
-        this.runtime,
+        this.#runtime,
         resultCell,
         outputs,
         resultSchema,
@@ -8498,13 +8521,13 @@ export class Runner {
     // one — M1's per-run threading, server-execution v2 Phase 2).
     const effectiveOutputScopeKey = resolveScopeKey(
       effectiveOutputScope,
-      waveRunContextOf(tx)?.scopeKeyIdentity ?? this.runtime.scopeKeyIdentity,
+      waveRunContextOf(tx)?.scopeKeyIdentity ?? this.#runtime.scopeKeyIdentity,
     );
     const previousScopedResultCell = previousResultCellRef.byScope.get(
       effectiveOutputScopeKey,
     );
     if (previousScopedResultCell === undefined) {
-      const baseResultCell = this.runtime.getCell(
+      const baseResultCell = this.#runtime.getCell(
         resultCell.space,
         _resultFor,
         undefined,
@@ -8513,7 +8536,7 @@ export class Runner {
       const newResultCell = effectiveOutputScope === "space"
         ? baseResultCell
         : createCell(
-          this.runtime,
+          this.#runtime,
           {
             ...baseResultCell.getAsNormalizedFullLink(),
             scope: effectiveOutputScope,
@@ -8600,7 +8623,7 @@ export class Runner {
       resultCell.schema;
     recordOutputSchemaPolicyInputs(
       tx,
-      this.runtime,
+      this.#runtime,
       resultCell,
       outputs,
       effectiveResultSchema,
@@ -8685,7 +8708,7 @@ export class Runner {
 
       let popFrameAfterReturn = true;
       try {
-        const inputsCell = this.runtime.getImmutableCell(
+        const inputsCell = this.#runtime.getImmutableCell(
           resultCell.space,
           eventInputs,
           undefined,
@@ -8829,7 +8852,7 @@ export class Runner {
           ...(inputs as Record<string, any>),
           $event: event,
         };
-        const inputsCell = this.runtime.getImmutableCell(
+        const inputsCell = this.#runtime.getImmutableCell(
           resultCell.space,
           eventInputs,
           undefined,
@@ -8846,7 +8869,7 @@ export class Runner {
                 // A served event's presync loads the ACTOR's instances of
                 // the handler's scoped inputs (stage A — the runner's
                 // explicit-instance read; see EventHandler.presyncInputs).
-                : this.runtime.storageManager.syncCell(value, {
+                : this.#runtime.storageManager.syncCell(value, {
                   scopeKeyIdentity: identity,
                 }),
             );
@@ -8888,7 +8911,7 @@ export class Runner {
         // Per scope INSTANCE, matching schedulerObservationIdentity above
         // (key-vocabulary.md §5's stage-F list).
         pieceId: `${
-          resolveScopeKey(instanceLink.scope, this.runtime.scopeKeyIdentity)
+          resolveScopeKey(instanceLink.scope, this.#runtime.scopeKeyIdentity)
         }:${instanceLink.id}`,
         ownerSpace: instanceLink.space,
         // Raw root id for the per-(action × instance) run supply
@@ -8922,7 +8945,7 @@ export class Runner {
           ...(inputs as Record<string, any>),
           $event: event,
         };
-        const inputsCell = this.runtime.getImmutableCell(
+        const inputsCell = this.#runtime.getImmutableCell(
           resultCell.space,
           eventInputs,
           undefined,
@@ -8935,7 +8958,7 @@ export class Runner {
       : undefined;
 
     addCancel(
-      this.runtime.scheduler.addEventHandler(
+      this.#runtime.scheduler.addEventHandler(
         wrappedHandler,
         streamLink,
         populateDependencies,
@@ -8965,7 +8988,7 @@ export class Runner {
       );
     }
 
-    const inputsCell = this.runtime.getImmutableCell(
+    const inputsCell = this.#runtime.getImmutableCell(
       resultCell.space,
       inputs,
       undefined,
@@ -9046,7 +9069,7 @@ export class Runner {
         // go lazily: the body materializes the paths it touches and nothing
         // else. Turned off again before the result is written, so diffing and
         // the scheduler's own reads keep eager semantics.
-        if (this.runtime.experimental.lazyMaterialization) {
+        if (this.#runtime.experimental.lazyMaterialization) {
           tx.markLazyMaterialize(true);
         }
         const { argument, isValidArgument } = (() => {
@@ -9317,7 +9340,7 @@ export class Runner {
     });
 
     addCancel(
-      this.runtime.scheduler.subscribe(wrappedAction, {
+      this.#runtime.scheduler.subscribe(wrappedAction, {
         ...schedulerRehydration,
       }),
     );
@@ -9419,12 +9442,12 @@ export class Runner {
       ]);
     }
     if (typeof module.implementation === "function") {
-      return this.runtime.harness.getInvocation(
+      return this.#runtime.harness.getInvocation(
         Function.prototype.toString.call(module.implementation),
       ) as (...args: any[]) => any;
     }
     if (typeof module.implementation === "string") {
-      return this.runtime.harness.getInvocation(module.implementation) as (
+      return this.#runtime.harness.getInvocation(module.implementation) as (
         ...args: any[]
       ) => any;
     }
@@ -9534,7 +9557,7 @@ export class Runner {
     if (!isObjectOrArray(inputBindings)) return undefined;
     const op = (inputBindings as Record<string, unknown>).op;
     if (!isObjectOrArray(op)) return undefined;
-    const ref = this.runtime.patternManager.getArtifactEntryRef(
+    const ref = this.#runtime.patternManager.getArtifactEntryRef(
       op as unknown as object,
     );
     if (ref && !PatternManager.isKeylessPatternIdentity(ref.identity)) {
@@ -9547,7 +9570,7 @@ export class Runner {
     if (isTrustedBuilderArtifact(original) && isPattern(original)) {
       // Keyless: session mint only — never substituted into the (durable)
       // bindings; the caller registers the in-session hint.
-      return this.runtime.patternManager.ensureKeylessPatternIdentity(
+      return this.#runtime.patternManager.ensureKeylessPatternIdentity(
         original as unknown as Pattern,
       );
     }
@@ -9635,7 +9658,7 @@ export class Runner {
     // alongside the `op` substitution above is what keeps it clear of
     // `findAllWriteRedirectCells`, which walks the same bindings for a
     // different purpose and must see them as bound.
-    const inputsCell = this.runtime.getImmutableCell(
+    const inputsCell = this.#runtime.getImmutableCell(
       resultCell.space,
       mappedInputBindings,
       undefined,
@@ -9647,7 +9670,7 @@ export class Runner {
       // this immutable doc and resolves the pristine minted artifact through
       // this registration instead (CT-1812 stays sealed in-session, with
       // nothing keyless durable).
-      this.runtime.patternManager.registerKeylessOpResolution(
+      this.#runtime.patternManager.registerKeylessOpResolution(
         opInputsDocKey(inputsCell),
         keylessOpRef,
       );
@@ -9659,7 +9682,7 @@ export class Runner {
     // (map/flatmap/filter) key it on this instead of the serialized op /
     // inputs cell (both of which drag in the session-varying `program`).
     const resolvedOutputSpot = firstResolvedOutputRedirect(
-      this.runtime,
+      this.#runtime,
       tx,
       mappedOutputBindings,
       resultCell,
@@ -9730,7 +9753,7 @@ export class Runner {
 
     const builtinFrame = builtinIdentity
       ? pushFrameFromCause(undefined, {
-        runtime: this.runtime,
+        runtime: this.#runtime,
         tx,
         space: resultCell.space,
         implementationIdentity: builtinIdentity,
@@ -9743,13 +9766,13 @@ export class Runner {
         (tx: IExtendedStorageTransaction, result: any) => {
           const outputBindingSchema = schemaForRawBuiltinRootOutputBinding(
             tx,
-            this.runtime,
+            this.#runtime,
             resultCell,
             mappedOutputBindings,
           );
           recordRawBuiltinBindingSchemaPolicyInputs(
             tx,
-            this.runtime,
+            this.#runtime,
             resultCell,
             mappedOutputBindings,
           );
@@ -9785,7 +9808,7 @@ export class Runner {
             : {}),
         },
         resultCell,
-        this.runtime,
+        this.#runtime,
         outputBinding,
         // The resumed-from-synced-state flag is passed out-of-band (a behavioral
         // param, like `outputBinding`) instead of folded into the identity
@@ -9924,12 +9947,12 @@ export class Runner {
 
     addCancel(
       schedulerDependencies
-        ? this.runtime.scheduler.subscribe(
+        ? this.#runtime.scheduler.subscribe(
           action,
           schedulerDependencies,
           schedulerOptions,
         )
-        : this.runtime.scheduler.subscribe(action, schedulerOptions),
+        : this.#runtime.scheduler.subscribe(action, schedulerOptions),
     );
     // The scheduler is keyed by the wrapper's identity, so hand the builtin
     // the wrapper — its own `action` cannot address the subscription.
@@ -10024,7 +10047,7 @@ export class Runner {
     let sendToBindings: boolean;
     let childResultCell: Cell<any>;
     if (isSigilLink(outputs) && !isWriteRedirectLink(outputs)) {
-      childResultCell = this.runtime.getCellFromLink(
+      childResultCell = this.#runtime.getCellFromLink(
         parseLink(outputs, resultCell),
         patternImpl.resultSchema,
         tx,
@@ -10083,7 +10106,7 @@ export class Runner {
       // doc pull nothing can satisfy), so the scan is told to take those
       // coordinates as they stand.
       const outputRedirect = firstResolvedOutputRedirect(
-        this.runtime,
+        this.#runtime,
         tx,
         mappedOutputBindings,
         resultCell,
@@ -10095,7 +10118,7 @@ export class Runner {
             "output binding to anchor a reload-stable identity",
         );
       }
-      const baseResultCell = this.runtime.getCell(
+      const baseResultCell = this.#runtime.getCell(
         targetSpace,
         {
           resultFor: {
@@ -10114,7 +10137,7 @@ export class Runner {
         resultCellLink = { ...resultCellLink, scope: resultScope };
         // The result cell's scope isn't "space", so we may have just created
         // this cell. If so, create the corresponding argument/internal cells.
-        childResultCell = createCell(this.runtime, resultCellLink, tx);
+        childResultCell = createCell(this.#runtime, resultCellLink, tx);
       }
       sendToBindings = true;
     }
@@ -10148,7 +10171,7 @@ export class Runner {
       // without it the wave's accept gate refuses the crossing and the
       // child space's program never materializes (the render-stall class).
       const runContext = waveRunContextOf(tx);
-      this.runtime.patternManager.replicatePatternToSpace(
+      this.#runtime.patternManager.replicatePatternToSpace(
         patternImpl,
         childResultCell.space,
         parentResultCell.space,

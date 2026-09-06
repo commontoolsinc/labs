@@ -1140,11 +1140,13 @@ nod, 2026-08-07; recorded in the plan's stage list):**
   seed-memo re-key is pinned (Bob's default seeded after Alice's run
   memoized presence). (5) The individually-redundant seams have their
   own pins (served preflight/presync identity, `Cell.sync` identity,
-  the traversal kick identity, `buildReads` identity, `WatchView` key).
+  the traversal kick identity, `SpaceReplica.#buildReads()` identity,
+  `WatchView` key).
   Residuals SHARPENED, still flagged: (i) effect completion — the
   writeback tx is unstamped, so its hash-guard reads resolve the
   service's instances while the seal is under the carriage identity;
-  `buildReads` then attests the CARRIAGE identity's records (a never-
+  `SpaceReplica.#buildReads()` then attests the CARRIAGE identity's records (a
+  never-
   loaded record yields seq-0 confirmed reads); the engine does not
   reject a mis-attested basis on derived commits today, so the
   consequence is confined to local cascade/hash-guard tracking — but
@@ -3587,7 +3589,8 @@ serving replica + wire; the client arrival gate):
 - Danger-zone note (storage/v2.ts near the wedge machinery): the
   re-key touched `sealNative`/`sealOperations`, `settleSealedCommit`,
   `confirmPending`, `finalizeRejection`, `finalizeSupersededSpeculation`,
-  `applySessionSync`, `buildReads`, `record`/`visibleVersion` and the
+  `SpaceReplica.applySessionSync()`, `SpaceReplica.#buildReads()`,
+  `record`/`visibleVersion` and the
   sink/notify paths — ONLY to thread the instance key/identity into
   the doc-key resolution and the touched-doc entries; no ordering,
   parking, marker, or shadow-floor logic moved. The wedge pins
@@ -3599,7 +3602,8 @@ serving replica + wire; the client arrival gate):
   review found untested each carry a discriminating pin — the true-R7
   no-load shape (`executor-instance-keyed-replica.test.ts`), the A3
   seed memo, the served preflight/presync identity, `Cell.sync`, the
-  traversal kick, `buildReads`, and the OFF-arm serialized-form witness
+  traversal kick, `SpaceReplica.#buildReads()`, and the OFF-arm serialized-form
+  witness
   (`storage-instance-keying.test.ts`), `WatchView` keying
   (`v2-client-watch.test.ts`); speculation.md §4 states the arrival
   gate's frame-coupling assumption; the two-browsers gate's ON-skip
@@ -4789,7 +4793,8 @@ supply; OW29/OW32/OW34 closed):
     `intent-error-notice`, `intent-refused`, `intent-echo-retired-by-
     backstop` (an intent-origin ENTRY retired by the W sweep instead —
     it counts ECHO entries swept by W, NOT missed marks: the arrival
-    sweep runs synchronously inside `applySessionSync` and can retire
+    sweep runs synchronously inside `SpaceReplica.applySessionSync()` and can
+    retire
     the echo before the mark's microtask check runs, so a non-zero
     count coexists with every fire resolved by its mark — the chat
     witness below reads 2 beside 25/25), `intent-listener-installed` /
@@ -6022,7 +6027,7 @@ supply; OW29/OW32/OW34 closed):
     > In the stale-confirmed-read error arm of the deferred start,
     > treat the refusal as "the server won the race": wait for the
     > conflicting docs to arrive (the wire path already attaches
-    > `readyToRetry` = `waitForCaughtUpLocalSeq`,
+    > `readyToRetry` = `SpaceReplica.#waitForCaughtUpLocalSeq()`,
     > packages/memory/v2/client.ts ~:1403), then START the runner
     > against the served docs, COMMITTING NOTHING. Not re-commit
     > (#6208's retry — census-proved non-convergent, closed), not
@@ -8469,7 +8474,8 @@ supply; OW29/OW32/OW34 closed):
     candidate.** The write dies at speculation.md §6's export refusal,
     synchronously, before the optimistic apply: a blind UI-input write
     (handleCellSet) emits ONE structural nonRecursive read at the
-    cell's parent, and `buildReads`' `pushCommitRead` named EVERY
+    cell's parent, and `SpaceReplica.#buildReads()`'s `pushCommitRead` named
+    EVERY
     pending layer of that doc — the client's own process-local
     speculation layers included — so a standing handler echo on the
     doc turned the user's next input into a terminal refusal. The
@@ -8486,7 +8492,7 @@ supply; OW29/OW32/OW34 closed):
     `patch /value/profileDraft`. Fix (landed with this row): the
     structural read of a blind write bases on the doc's
     NON-speculative stack (`excludeSpeculativeLayers` in
-    `storage/v2.ts` `buildReads`) — the blind write consumes no
+    `SpaceReplica.#buildReads()`) — the blind write consumes no
     overlay value, the excluded layers never reach the wire as
     commits, basisSeq stays the true confirmed basis, durable
     in-flight layers stay named, and the §6 refusal is untouched for
@@ -8533,7 +8539,8 @@ supply; OW29/OW32/OW34 closed):
     base on the doc's NON-speculative stack — the VALUE they consume
     (`ISpaceReplica.getNonSpeculativeDocument`, served by the
     transaction read path) and the basis they contribute
-    (`excludeSpeculativeLayers` in `buildReads`) — so the verifier
+    (`excludeSpeculativeLayers` in `SpaceReplica.#buildReads()`) — so the
+    verifier
     verifies exactly the durable policy state the server will enforce
     against, and verify-durable + name-durable travel together. Four
     completions the live gates forced (each caught live — the
@@ -8609,7 +8616,7 @@ supply; OW29/OW32/OW34 closed):
     derivation-carriage close; this was the last). **The #6192
     adversarial review round (LANDABLE-WITH-FIXES) hardened four
     edges:** (i) cid: reads are dropped from the commit CONFLICT SET
-    entirely (`buildReads`) — the resolution fallbacks leave the
+    entirely (`SpaceReplica.#buildReads()`) — the resolution fallbacks leave the
     replica's confirmed basis for a registry-/overlay-resolved schema
     doc at 0 while the doc's first install is a real revision row, so
     the exported `confirmed {seq: 0}` died server-side as
@@ -9513,7 +9520,8 @@ supply; OW29/OW32/OW34 closed):
     (`cid:…`) is "not delivered and verified in this replica",
     `SpaceReplica.#validateArrivedSchemaDocuments`
     (`packages/runner/src/storage/v2.ts`) THROWS on the background
-    consume path (`applySessionSync` → `consumeUpdates`) — uncaught,
+    consume path (`SpaceReplica.applySessionSync()` →
+    `SpaceReplica.#consumeUpdates()`) — uncaught,
     outside any caller's try, killing the consuming worker/test file
     wholesale. Evidence: CI run 32742547103 at `7d97a80aa` — 13
     file-level failures sharing exactly this class across the runner,
@@ -9597,7 +9605,7 @@ supply; OW29/OW32/OW34 closed):
     with the next FULL evaluation (watch.set/reconnect ship the
     whole assembled closure — under the elision design an unchanged
     quarantined doc is rightly never re-delivered mid-session);
-    `consumeUpdates` additionally catches any residual per-frame
+    `SpaceReplica.#consumeUpdates()` additionally catches any residual per-frame
     apply failure. In the race window the computed doc now
     quarantines-with-loud-log instead of killing the worker; the
     correctness fix lands from the investigation session. Also kept:

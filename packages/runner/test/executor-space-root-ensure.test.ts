@@ -61,6 +61,8 @@ import {
 } from "../src/index.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 import { waitUntil } from "./support/wait-until.ts";
+import type { SessionSync } from "@commonfabric/memory/v2";
+import type { SpaceReplica } from "../src/storage/v2.ts";
 
 const spaceSigner = await Identity.fromPassphrase("space root ensure space");
 const space = spaceSigner.did() as MemorySpace;
@@ -370,14 +372,16 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     // seam).
     const replica = (reader.storageManager.open(space) as unknown as {
       replica: {
-        applySessionSync(sync: unknown, type: string): void;
+        applySessionSync: SpaceReplica["accessForTestingOnly"][
+          "applySessionSync"
+        ];
         getDocument(uri: string): unknown;
       };
     }).replica;
     let droppedCids = 0;
     const computedSeen = new Set<string>();
     const originalApply = replica.applySessionSync.bind(replica);
-    replica.applySessionSync = (sync: unknown, type: string) => {
+    replica.applySessionSync = (sync, type) => {
       const frame = sync as { upserts?: Array<{ id?: unknown }> };
       const upserts = Array.isArray(frame?.upserts) ? frame.upserts : [];
       const kept = upserts.filter((upsert) => {
@@ -392,7 +396,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
       return originalApply(
         kept.length === upserts.length
           ? sync
-          : { ...(sync as object), upserts: kept },
+          : { ...sync, upserts: kept } as SessionSync,
         type,
       );
     };
