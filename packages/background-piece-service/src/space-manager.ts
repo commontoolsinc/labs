@@ -336,9 +336,16 @@ export class SpaceManager {
   // Attempt to recreate the worker environment, which should only occur once per
   // space-wide disabling.
   #onTerminalError = (event: Event) => {
-    // The controller dispatches nothing else under `error`; the narrowing is
-    // what lets the listener be typed as the target wants it.
-    if (!(event instanceof WorkerControllerErrorEvent)) return;
+    // `addEventListener` types its listener over `Event`; the narrowing
+    // recovers the controller's own event type, and anything else here is a
+    // bug worth hearing about rather than a space left running on a dead
+    // worker.
+    if (!(event instanceof WorkerControllerErrorEvent)) {
+      console.error(
+        `${this.#did} Terminal error listener got a \`${event.type}\` event that is not a \`WorkerControllerErrorEvent\``,
+      );
+      return;
+    }
     console.error(
       `${this.#did} Terminal error received: ${event.error?.message}`,
     );

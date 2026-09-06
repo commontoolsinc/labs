@@ -40,7 +40,7 @@ export class WorkerControllerErrorEvent extends Event {
     this.#error = cause;
   }
 
-  /** The worker's own error event, when one was reported. */
+  /** The worker's own error event, if the worker reported one. */
   get error(): ErrorEvent | undefined {
     return this.#error;
   }
@@ -112,7 +112,7 @@ export class WorkerController extends EventTarget {
     };
   }
 
-  /** Settles when the worker is fully initialized, or has failed to be. */
+  /** Promise that settles when the worker is initialized or has failed to. */
   get initializeResolve(): Promise<void> {
     return this.#initializeDeferred.promise;
   }
