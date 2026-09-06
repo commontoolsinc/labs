@@ -23,6 +23,7 @@ export {
   cfcLabelViewForDereference,
   cfcLabelViewForDereferenceTraces,
   cfcLabelViewFromMetadata,
+  cfcLabelViewSymbol,
   cloneCfcLabelView,
   getCarriedCfcLabelView,
   mergeCfcLabelViews,

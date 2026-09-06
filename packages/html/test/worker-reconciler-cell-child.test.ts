@@ -131,7 +131,7 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       return false;
     }
 
-    // A mock carries no metadata, where the inherited read would throw on a
+    // A mock carries no metadata, and the inherited read throws on a
     // link-less cell.
     getMetaRaw(): undefined {
       return undefined;
@@ -2141,7 +2141,6 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
         path: [],
         scope: "space",
       });
-      uiShapedDataCell.resolveAsCell = () => uiShapedDataCell;
       const rootCell = new MockCell({
         type: "vnode",
         name: "div",
