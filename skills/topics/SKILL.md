@@ -374,21 +374,27 @@ that before deciding anything this procedure says needs deciding.
    and treat the flag as needing team authorization under this skill's rule
    above.
 
-2. **Then each Topic's source — and this step is BLOCKED.** Moving the board
+2. **Then each Topic's source**, and it needs
+   `--dangerously-allow-incompatible-schema` once per Topic. Moving the board
    first clears the Topic leg's own `mentionable[].shortName` refusal, and what
-   is left underneath is #6968:
+   `setsrc --check` reports underneath is the Topic's mention universe narrowing
+   from a writable handle to a readable one:
 
    ```
-   input link at mentionable[].piece: newly required argument field has no default
+   Pattern schemas are not backward compatible:
+   - argument.mentionable: asCell changed
    ```
 
-   `mentionable` is declared `Writable` on the Topic, so
-   `provePreservedContracts` in `packages/piece/src/ops/piece-controller.ts`
-   runs the write-back direction too and demands that the Topic's projection
-   accept everything the board's row publishes. Every source tried was refused,
-   the bytes the Topic is already running included, so `--check` gives no signal
-   on any Topic update while that declaration stands. It is not downstream of
-   step 1's schema question; clearing that does not clear this.
+   `asCell` is compared for exact equality by
+   `packages/piece/src/schema-compatibility.ts`, so a narrowed cell reads as a
+   break however narrow the narrowing is; the decision and what it costs are
+   `docs/history/topics-mentionable-readonly-break.md`. The cost is one forced
+   update per Topic and no more: a readable handle drops the write-back leg of
+   the retained-link proof that a writable one carries — the leg that would
+   demand the Topic's three-string projection accept the `piece` the board's row
+   publishes — so `setsrc --check` proves every update after this one. Like step
+   1's, the flag is a team-authorization decision under this skill's rule above,
+   and a separate one, for an unrelated reason.
 
    **Skipping it leaves a usable board.** A Topic still on pre-graft source is
    named by `backfillNames` like any other member, answers to
@@ -396,22 +402,10 @@ that before deciding anything this procedure says needs deciding.
    no `shortName` and no damage to the array around it. So naming, `/top/<n>`
    addressing and index membership all survive the step being skipped, and
    `shortName` — the badge, and the number on the index row — is what is absent.
-   That bounds what skipping costs from BELOW, not from above: no run forced a
-   Topic update, so what else a completed one would change is not known, and the
-   record says so. Step 4's refusal on such a Topic is this state being enforced
-   rather than an error.
-
-   **If you need the badge anyway**, the only exit the CLI offers is
-   `--dangerously-allow-incompatible-schema`, whose `setsrc` help covers exactly
-   this proof: "Replace the source even when pattern or retained-link schema
-   compatibility cannot be proven, or when the current pattern cannot be loaded
-   at all." It is a second authorization decision, separate from step 1's and
-   for an unrelated reason, and two things bear on it. No run in the record
-   forced a Topic update, so that the flag succeeds is read off help text rather
-   than measured. And a source that resolves #6968 — declaring `mentionable`
-   read-only, if nothing writes through it — need not meet this proof at all, so
-   the block is a property of the pattern as it stands rather than a permanent
-   one.
+   That bounds what skipping costs from BELOW, not from above: no run against a
+   populated board has forced a Topic update, so what else a completed one would
+   change there is not known, and the record says so. Step 4's refusal on such a
+   Topic is this state being enforced rather than an error.
 
 3. **`backfillNames` once**, through the board. It returns the names it wrote,
    in filing order, and is idempotent: a second run writes nothing and returns

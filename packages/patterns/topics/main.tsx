@@ -465,9 +465,10 @@ export interface TopicsOutput {
 export const submitProfileTopic = handler<void, {
   topics: Writable<TopicDemand[] | Default<[]>>;
 
-  /** Declared at the child's own demand — the three strings a universe
-   * entry carries — so the board's index rows and a plain list of pieces
-   * both satisfy it. */
+  /** The mention universe, declared at the child's own demand — the three
+   * strings a universe entry carries — so the board's index rows and a plain
+   * list of pieces both satisfy it. `Writable` for the factory-boundary
+   * reason `boardCrossrefs` states, and nothing here writes an entry. */
   mentionable: Writable<TopicMentionable[] | Default<[]>>;
 
   /** `Writable` only because that is what the factory boundary accepts: the

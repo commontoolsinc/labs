@@ -350,4 +350,34 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "throwaway local demo, so no piece held the contract this replaces.",
     record: "docs/history/collection-naming-index-rows-break.md",
   },
+  {
+    // A second entry for this pattern, with baselines disjoint from the other
+    // one's, which is what keeps the bound tight: forgiving this path on the
+    // older baselines too would let the proof's one-issue-per-role limit hide
+    // an unintended break behind pairs this break never produced a finding
+    // against. Those older baselines report `bodyUpdatedBy.kind` or
+    // `boardCrossrefs` for the argument role, so `mentionable` is not the
+    // reported issue there.
+    pattern: "topics/topic.tsx",
+    baselines: [
+      "20260826T221814Z-RZiIzB74VkCoXYty",
+      "20260831T181712Z-hoTDhhCHJzB2Umnc",
+      "20260831T204059Z-2Fi9qBnr1mK4_p2J",
+      "20260901T191235Z-4uo6zrdZRahgZ98O",
+      "20260905T021503Z-Y-lXQUSup41JBSeM",
+    ],
+    // One path, and only in the argument role: the element type is untouched,
+    // so `asCell` at the mention universe's own node is the whole break.
+    paths: ["argument.mentionable"],
+    reason:
+      "The board's mention universe reaches a topic as a readable cell rather " +
+      "than a writable one, so the retained link's proof drops the write-back " +
+      "leg that refused a topic its own bytes. `asCell` is compared for exact " +
+      "equality, so narrowing a cell reads as a break however narrow the " +
+      "narrowing is. The one shape that keeps the writable handle instead " +
+      "declares the board's `piece` on the topic's projection, which is the " +
+      "wide demand the narrow one was adopted to avoid. A deployed topic takes " +
+      "this one update forced and is proven again on every update after it.",
+    record: "docs/history/topics-mentionable-readonly-break.md",
+  },
 ];

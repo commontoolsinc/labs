@@ -386,8 +386,14 @@ export interface TopicInput {
    * before the index as a one-time link-bind. A plain list of the pieces
    * themselves also satisfies the demand — a board not yet rewired, or a
    * composer without a board. Absent, the editor simply offers no
-   * completions. */
-  mentionable?: Writable<TopicMentionable[] | Default<[]>>;
+   * completions.
+   *
+   * Readable, not writable, for the reason `boardCrossrefs` states: the index
+   * is the board's derivation, and a topic has no business writing into it.
+   * The narrower cell is also what keeps a wired topic re-sourceable: a
+   * writable handle puts the board's whole published row inside the retained
+   * link's proof, and this demand names three fields of it. */
+  mentionable?: ReadonlyCell<TopicMentionable[] | Default<[]>>;
 
   /** Where this topic's `[Label][key]` mentions point, keyed by the token that
    * appears in the body. The editor owns the contents; this pattern owns the
