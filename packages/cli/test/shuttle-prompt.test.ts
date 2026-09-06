@@ -142,8 +142,8 @@ describe("prompt", () => {
         { kind: "edit", text: `${AT_ROOT}pw`, column: 20 },
         {
           kind: "finish",
-          text: "`pw` is not a verb. The verbs are `cd`, `get`, `ls`, `pwd`, " +
-            "`where`, and `wish`.",
+          text: "`pw` is not a verb. The verbs are `cd`, `get`, `help`, " +
+            "`ls`, `pwd`, `where`, and `wish`.",
         },
         { kind: "edit", text: AT_ROOT, column: 18 },
         { kind: "finish", text: "" },

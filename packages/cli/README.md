@@ -122,20 +122,29 @@ shuttle serves one space for its whole run, and shortens nothing else. `pwd` is
 the complete address — every level, the scope written even when it is the base —
 which is what to copy.
 
-| Verb           | What it does                                                                                                                                      |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cd <ref>`     | Moves the place. Takes relative segments, `..`, `-`, `/`, a scope-only `@scope`, rooted and complete references, slugs, and `#name` entry points. |
-| `ls`           | Lists what stands where you are: a space root's facets, the slugs the index records, the space's pieces, or the keys under a cell.                |
-| `pwd`          | The complete address of the place, both dimensions.                                                                                               |
-| `get [<ref>]`  | Reads the value at a cell, defaulting to where you stand. A trailing `#argument` reads the piece's arguments cell.                                |
-| `wish <#name>` | Resolves a named entry point, exactly as `cf wish` does.                                                                                          |
-| `where`        | The whole ambient record: the connection, and the place `pwd` prints.                                                                             |
+| Verb            | What it does                                                                                                                                      |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cd <ref>`      | Moves the place. Takes relative segments, `..`, `-`, `/`, a scope-only `@scope`, rooted and complete references, slugs, and `#name` entry points. |
+| `ls`            | Lists what stands where you are: a space root's facets, the slugs the index records, the space's pieces, or the keys under a cell.                |
+| `pwd`           | The complete address of the place, both dimensions.                                                                                               |
+| `get [<ref>]`   | Reads the value at a cell, defaulting to where you stand. A trailing `#argument` reads the piece's arguments cell.                                |
+| `wish <#name>`  | Resolves a named entry point, exactly as `cf wish` does.                                                                                          |
+| `where`         | The whole ambient record: the connection, and the place `pwd` prints.                                                                             |
+| `help [<verb>]` | Lists the verbs, or writes one verb's page. `<verb> --help` writes the same page.                                                                 |
 
 A line is split POSIX-style — whitespace separates, quotes group — so a value
 holding a space is one operand when it is quoted, and anything shuttle prints as
 an operand is quoted where it has to be. Every refusal carries its reason. A
 read that failed is different: it is reported and the prompt reads the next
 line, since a shell whose server went away is still a shell.
+
+After the split, a token opening with `-` is an option up to a bare `--`, and
+every other token is an operand. `-` on its own stays an operand, being the
+previous place and the stdin sentinel, and a bare `--` ends the options, so a
+key called `-x` is reached by `cd -- -x` or by the reference a listing prints
+for it. The parse is `cf`'s own — the one a `cf` command reads its flags through
+— so a flag is spelled and refused here as it is on a `cf` command line, and
+`--help` is the option every verb takes.
 
 The line editor is `lib/view`'s `EditBuffer` over its own key decoder, bound to
 Emacs keys: `ctrl-a`/`ctrl-e` and `home`/`end` for the ends of the line,
@@ -148,9 +157,11 @@ line, and `ctrl-d` on an empty line to end the session.
 The code is `lib/shuttle/`: `run.ts` composes a session, `place.ts` holds the
 place and what `cd` refuses, `connection.ts` the one `PiecesController` a
 process holds, `line.ts` the split and the printing that inverts it,
-`listing.ts` what `ls` reads, `verbs.ts` the dispatch — which writes nothing —
-`prompt.ts` the loop that does, `record.ts` the form `where` and `pwd` share,
-and `paint.ts` and `terminal.ts` the escape sequences and the raw mode under it.
+`options.ts` the option grammar over the tokens after a verb, `listing.ts` what
+`ls` reads, `verbs.ts` the dispatch — which writes nothing — `help.ts` the form
+a verb's account of itself prints in, `prompt.ts` the loop that writes,
+`record.ts` the form `where` and `pwd` share, and `paint.ts` and `terminal.ts`
+the escape sequences and the raw mode under it.
 
 ## Cell references
 

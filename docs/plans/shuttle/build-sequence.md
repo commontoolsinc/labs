@@ -299,6 +299,43 @@ Landed:
   own code. `bin/cfsh` forwards to `cf sh` and carries no checkout logic
   of its own.
 
+- **B1d — the option grammar, and `help`**
+  (`packages/cli/lib/shuttle/options.ts`). What a token after the verb is for.
+  The split says where a token ends; this says whether it is an option or an
+  operand, and the rule is POSIX's: a token opening with `-` is an option up to
+  a bare `--`, `-` on its own is an operand — the previous place and the stdin
+  sentinel — and every token after the `--` is an operand whatever it opens
+  with. The parse is `cf`'s own: `parseFlags` is what `Command` reads a `cf`
+  line's flags through and it takes a bare token array, so a verb mirroring a
+  `cf` command spells and refuses a flag as that command does rather than in a
+  second dialect that has to be kept in step with one — with the two section
+  commands as the bound, `cf piece call` and `cf exec` declaring `stopEarly()`,
+  so a verb mirroring either carries the call section
+  ([`grammar.md`](grammar.md)) rather than this rule. Arity is the same
+  reading's: an entry declares both bounds, and the noun phrase its refusal
+  calls a missing operand by, so the count is applied in one place while each
+  verb keeps its own sentence. A verb that reads a meaning into having no
+  operand declares that instead — `get` reads where it stands and `help` lists
+  the verbs — which is what tells a default apart from too few.
+
+  `--help` is the option the reading puts in front of whatever a verb declared,
+  so no verb can be without one, and it carries the declaration `cf` gives its
+  own — standalone, so a verb whose required options a line has not supplied
+  still answers what it takes. `help` is the verb beside it. The list and the
+  page read the same strings, which sit in the dispatch table beside what
+  running each verb does, so a verb added is a verb `help` lists. Decision 3
+  names help as part of what serves the audience it puts second, and a shell
+  whose only account of itself is the refusal a mistyped word gets serves
+  nobody who does not already know it.
+
+  What the rule costs is one shape, recorded in [`grammar.md`](grammar.md)
+  beside the readings it joins: a key whose name opens with `-` is not reached
+  by that name standing alone, so a listing prints the reference that names it,
+  exactly as it does for a key called `..`. The typed spelling stays open —
+  `cd -- -x` reaches such a key — and what a listing owes is the name rather
+  than the route. `operandForChild` asks the option grammar rather than making
+  the move, that reading being one layer above a place.
+
 Still to come:
 
 - **Liveness, in two halves.** Recovery of an *established* connection needs

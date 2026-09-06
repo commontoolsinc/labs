@@ -107,6 +107,69 @@ start carrying which parts of a token were quoted, which grows the value it
 returns rather than adding a layer over it, and every reading that consults
 quoting reads that value.
 
+## Options and operands
+
+The split says where a token ends; what a token is *for* is the second
+reading, and it is POSIX's too. After the verb, **a token opening with `-` is
+an option up to a bare `--`, and every other token is an operand**, the options
+being the table that verb declares. Two tokens the rule turns on are the two
+this grammar already spends the character on:
+
+- **`-` on its own is an operand** — `cd`'s previous place and `set`'s stdin
+  sentinel — so the one reading that would make it a flag is the one it does
+  not get.
+- **A bare `--` ends the options.** Every token after the first one is an
+  operand whatever it opens with, and that first `--` is neither an option nor
+  an operand. So a key called `-x` is reached by `cd -- -x`, and one called
+  `--` by `cd -- --`.
+
+Options may sit anywhere among the operands, which is what a `cf` command
+reads unless it declares a section: `cf piece call` and `cf exec` are
+`stopEarly()`, and everything past their first operand belongs to the callable.
+So the line shape at the top of this document says where options usually go
+rather than where they must, and a shuttle verb mirroring either of those two
+carries the call section below rather than this rule.
+
+How many operands a verb takes is part of the same table. A verb declares both
+bounds, and the noun phrase its refusal calls a missing operand by, and the
+reading that divides the line enforces them: the count is applied in one place
+while the wording stays each verb's own — `cd` says it takes a place to move
+to where `wish` says it takes the target to resolve. A verb that takes an
+operand it can do without declares that too, since what it does with none is a
+reading of its own rather than a line for the dispatch to answer: `get` reads
+where it stands, and `help` lists the verbs.
+
+The parse is `cf`'s own: `parseFlags` (`@cliffy/flags`) is what `Command`
+reads a `cf` line's flags through, and it reads a bare token array, so a flag
+is spelled, defaulted and refused here exactly as the same flag is on a `cf`
+command line. That is what keeps decision 7's "data verbs are exactly the
+`cf` ones" true of the flags as well as of the words — `--select` here is
+`--select` there, and a misspelling gets the sentence `cf` gives it, with one
+naming the verb's own page after it.
+
+**`--help` is an option every verb takes**, put in front of whatever a verb
+declares rather than declared by each, so a verb has no way to be without one;
+a line carrying it writes that verb's page instead of running the verb. It
+carries the declaration `cf` gives its own, standalone included, so a verb
+whose required options a line has not supplied still answers what it takes —
+and `--help` written beside another option is refused rather than answered,
+exactly as on a `cf` line. `help`
+is the verb beside it: `help` lists every verb with its one-line summary, and
+`help <verb>` writes the page `<verb> --help` writes. Decision 3 puts
+teammates second and names help as part of what serves them, and a shell whose
+only account of itself is the refusal a mistyped word gets serves nobody who
+does not already know it.
+
+The option reading costs a listing one shape, and it is the shape the quoting
+ruling above already costs one of. Every name a listing prints is one `cd`
+takes back, and a name opening with `-` is read as an option when it stands as
+a token of its own, so such a key is offered as the reference that names it
+rather than as itself — the answer a key called `..` gets, for the same reason
+one layer up. What a listing offers and what can be typed are two questions:
+`cd -- -x` reaches that key and `cd -- --` reaches one called `--`, a bare `--`
+ending the options, and what a listing prints is the name rather than the
+route.
+
 ## Place resolution
 
 A reference on the line resolves against the place, right-anchored, exactly
@@ -320,9 +383,9 @@ that implied completeness would be false.
 it has no name for prints none at all. Most rows print their own name,
 written as a token by the rule above — a slug, a handle and an ordinary key
 each print as themselves. A row whose name's own characters are readings —
-a key called `..` or `-`, one holding the separator, one beginning with `@` —
-prints the reference that names it instead, which reads none of them and
-unescapes `~1`.
+a key called `..` or `-`, one holding the separator, one beginning with `@` or
+with `-` — prints the reference that names it instead, which reads none of
+them and unescapes `~1`.
 
 The name is the first thing on its line, and the whole of it where the row
 has nothing else to report. What a reader copies off the front is therefore

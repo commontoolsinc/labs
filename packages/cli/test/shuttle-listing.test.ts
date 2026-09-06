@@ -30,6 +30,7 @@ import { linkPathSegmentToCellPathSegment } from "@commonfabric/runner/shared";
 import type { SlugSummary, SpaceConfig } from "../lib/piece.ts";
 import { HeldConnection } from "../lib/shuttle/connection.ts";
 import { splitLine } from "../lib/shuttle/line.ts";
+import { readsAsOption } from "../lib/shuttle/options.ts";
 import {
   type Listing,
   type ListingDeps,
@@ -522,6 +523,13 @@ describe("listing", () => {
     // the row, and that anything after it is separated from it — which is what
     // "copied off the front" means and all it can mean.
     //
+    // A name is read twice on the way back, and both readings are asked. The
+    // option grammar reads it first — a token opening with `-` reaches a verb
+    // as a flag and never as an operand — and the place reads what is left. A
+    // name the first reading takes therefore fails the property however well
+    // it moves, which is why the operand is held against `readsAsOption`
+    // beside being moved with.
+    //
     // What varies is as load-bearing as the property. Both kinds of row a
     // listing can name vary — the piece a facet lists and the key a piece
     // holds — and each candidate is driven through the read that produces that
@@ -669,6 +677,7 @@ describe("listing", () => {
         expect(split.kind).toBe("split");
         const tokens = split.kind === "split" ? split.tokens : [];
         expect(tokens.length).toBe(1);
+        expect(readsAsOption(tokens[0])).toBe(false);
         expect(standing.cd(tokens[0]).kind).toBe("moved");
         expect(standing.place).toEqual(childOf(from, row.name));
         named++;

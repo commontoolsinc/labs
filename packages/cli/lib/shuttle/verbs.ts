@@ -32,8 +32,10 @@ import { normalizeLLMFriendlyRef } from "../llm-friendly-ref.ts";
 import { getCellValue, type PieceConfig, type SpaceConfig } from "../piece.ts";
 import { projectWishValue, readWish } from "../wish.ts";
 import { connectionEntries, type HeldConnection } from "./connection.ts";
+import { renderVerbList, renderVerbPage, type VerbHelp } from "./help.ts";
 import { splitLine } from "./line.ts";
 import { type ListingDeps, listPlace, renderListing } from "./listing.ts";
+import { readOptions } from "./options.ts";
 import {
   CurrentPlace,
   type FacetPosition,
@@ -99,16 +101,24 @@ export interface VerbDeps {
 /**
  * Runs `line` against `shuttle` and returns what that did.
  *
- * The line splits by `splitLine`, its first token names a verb, and the rest
- * are that verb's operands. A line with no token at all did nothing; one whose
- * first token names no verb is refused, and the refusal names it and lists
- * what would have been taken.
+ * The line splits by `splitLine`, its first token names a verb, and the tokens
+ * after it are divided by `readOptions`: one opening with `-` is an option up
+ * to a bare `--`, and every other one is an operand the verb reads. A line
+ * with no token at all did nothing; one whose first token names no verb is
+ * refused, and the refusal names it and lists what would have been taken.
  *
- * A refusal is a fact about the line — a verb nobody defined, an operand a
- * place will not take, a target that resolves elsewhere — and every one
- * carries the reason. A read that failed is a different fact and is not one
- * of these: it raises, so that a server that cannot be reached is told apart
- * from a line that was wrong.
+ * `--help` is an option every verb takes, and a line carrying it writes that
+ * verb's page instead of running it, which is the same page `help <verb>`
+ * writes.
+ *
+ * How many operands a verb takes is the table's too, so the count is held
+ * here and no verb states one of its own.
+ *
+ * A refusal is a fact about the line — a verb nobody defined, an option nobody
+ * declared, an operand a place will not take, a target that resolves elsewhere
+ * — and every one carries the reason. A read that failed is a different fact
+ * and is not one of these: it raises, so that a server that cannot be reached
+ * is told apart from a line that was wrong.
  *
  * @throws Whatever a read throws — an unreachable server, an identity that
  * will not load, a path the piece refuses.
@@ -120,16 +130,44 @@ export async function runLine(
 ): Promise<Outcome> {
   const split = splitLine(line);
   if (split.kind === "refused") return refuse(split.reason);
-  const [word, ...operands] = split.tokens;
+  const [word, ...tokens] = split.tokens;
   if (word === undefined) return { kind: "nothing" };
-  const verb = VERBS.get(word);
-  if (verb === undefined) {
-    return refuse(
-      `\`${word}\` is not a verb. The verbs are ${listed([...VERBS.keys()])}.`,
-    );
+  const entry = VERBS.get(word);
+  if (entry === undefined) return refuse(notAVerb(word));
+  const reading = readOptions(word, tokens);
+  switch (reading.kind) {
+    case "refused":
+      return reading;
+    case "help":
+      return { kind: "text", text: renderVerbPage(entry) };
+    case "read": {
+      const wrong = wrongOperandCount(word, entry.arity, reading.operands);
+      return wrong ?? await entry.run(shuttle, reading.operands, deps);
+    }
   }
-  return await verb(shuttle, operands, deps);
 }
+
+/**
+ * How many operands a verb takes, and what one that needs an operand calls the
+ * one it needs.
+ *
+ * The noun phrase rides the arity because the refusal for a missing operand is
+ * the verb's own sentence and the count is the dispatch's rule: declaring them
+ * together is what lets one reader enforce every verb's arity without every
+ * verb's refusal collapsing into one wording.
+ *
+ * Taking no operand and taking an optional one are told apart by what a verb
+ * does with none, which is why `optional` is an arm rather than the absence of
+ * one: `get` reads where it stands and `help` lists the verbs, and neither is
+ * a verb that was given too few.
+ */
+type Arity =
+  /** No operand at all, so any is too many. */
+  | { readonly operands: "none" }
+  /** One at most, and what no operand means is the verb's own. */
+  | { readonly operands: "optional" }
+  /** One, needed, `names` being what the refusal for none calls it. */
+  | { readonly operands: "required"; readonly names: string };
 
 /** What a verb does with the operands written after its name. */
 type Verb = (
@@ -137,6 +175,22 @@ type Verb = (
   operands: readonly string[],
   deps: VerbDeps,
 ) => Outcome | Promise<Outcome>;
+
+/**
+ * One verb: what running it does, how many operands it takes, and what `help`
+ * says about it.
+ */
+interface VerbEntry extends VerbHelp {
+  /** Runs the verb over the operands its line carried. */
+  readonly run: Verb;
+
+  /**
+   * How many operands the verb takes, which the dispatch holds it to before
+   * running it. A verb declares this and counts nothing itself, so one added
+   * to the table is one whose operands are already counted at both ends.
+   */
+  readonly arity: Arity;
+}
 
 /**
  * Moves the place as `operands` say, and returns where shuttle now stands.
@@ -151,12 +205,11 @@ async function cd(
   operands: readonly string[],
   deps: VerbDeps,
 ): Promise<Outcome> {
-  const tooMany = takesAtMostOne("cd", operands);
-  if (tooMany !== undefined) return tooMany;
-  // The empty operand rather than a refusal of this module's own: `cd` with
-  // nothing after it and `cd ''` are one operand by the time a place reads
-  // them, and the place says what it takes.
-  return await landing(shuttle, shuttle.place.cd(operands[0] ?? ""), deps);
+  // `cd ''` is one operand, so the dispatch passes it on and the place is what
+  // answers it — in the sentence the dispatch composes for no operand at all,
+  // so the two spellings read alike. That guard is `movePlace`'s own and
+  // stands for the callers this one is not.
+  return await landing(shuttle, shuttle.place.cd(operands[0]), deps);
 }
 
 /**
@@ -176,8 +229,6 @@ async function get(
   operands: readonly string[],
   deps: VerbDeps,
 ): Promise<Outcome> {
-  const tooMany = takesAtMostOne("get", operands);
-  if (tooMany !== undefined) return tooMany;
   const operand = operands[0];
   if (operand === undefined) {
     return await read(shuttle, shuttle.place.place, false, deps);
@@ -189,14 +240,32 @@ async function get(
     : await read(shuttle, at.place, aim.input, deps);
 }
 
+/**
+ * Lists the verbs, or writes the page of the one `operands` names.
+ *
+ * The list and the page read the same strings — each verb's own, held beside
+ * what it does — so a verb's one-line summary is one string wherever it is
+ * shown. A word that names no verb is refused in the sentence the dispatch
+ * refuses one in: `help` is where a person goes when they are unsure what the
+ * words are, so it is the door most likely to be given one that is not.
+ */
+function help(_shuttle: Shuttle, operands: readonly string[]): Outcome {
+  const word = operands[0];
+  if (word === undefined) {
+    return { kind: "text", text: renderVerbList([...VERBS.values()]) };
+  }
+  const entry = VERBS.get(word);
+  return entry === undefined
+    ? refuse(notAVerb(word))
+    : { kind: "text", text: renderVerbPage(entry) };
+}
+
 /** Lists what stands where shuttle stands. */
 async function ls(
   shuttle: Shuttle,
-  operands: readonly string[],
+  _operands: readonly string[],
   deps: VerbDeps,
 ): Promise<Outcome> {
-  const tooMany = takesNothing("ls", operands);
-  if (tooMany !== undefined) return tooMany;
   const listing = await listPlace(
     shuttle.config,
     shuttle.place.place,
@@ -207,9 +276,8 @@ async function ls(
 }
 
 /** Returns where shuttle stands, both halves of the pair. */
-function pwd(shuttle: Shuttle, operands: readonly string[]): Outcome {
-  const tooMany = takesNothing("pwd", operands);
-  return tooMany ?? { kind: "text", text: shuttle.place.render() };
+function pwd(shuttle: Shuttle): Outcome {
+  return { kind: "text", text: shuttle.place.render() };
 }
 
 /**
@@ -225,14 +293,7 @@ async function wish(
   operands: readonly string[],
   deps: VerbDeps,
 ): Promise<Outcome> {
-  const tooMany = takesAtMostOne("wish", operands);
-  if (tooMany !== undefined) return tooMany;
   const target = operands[0];
-  if (target === undefined) {
-    return refuse(
-      "`wish` takes the target to resolve, as in `wish #favorites`.",
-    );
-  }
   const { result, error } = await (deps.readWish ?? readWish)({
     ...shuttle.config,
     query: target,
@@ -260,9 +321,8 @@ async function wish(
  * launched as and where it stands — which is what a verb for saying where you
  * are should do.
  */
-function where(shuttle: Shuttle, operands: readonly string[]): Outcome {
-  const tooMany = takesNothing("where", operands);
-  return tooMany ?? {
+function where(shuttle: Shuttle): Outcome {
+  return {
     kind: "text",
     text: renderRecord([
       ...connectionEntries(shuttle.config),
@@ -273,7 +333,14 @@ function where(shuttle: Shuttle, operands: readonly string[]): Outcome {
 
 /**
  * The verbs, by the word that names one. It is the one record of what a line
- * may say, so the refusal listing them lists exactly what the dispatch takes.
+ * may say, so the refusal listing them lists exactly what the dispatch takes,
+ * and `help` lists exactly the same set from the same entries.
+ *
+ * Each entry carries how many operands the verb takes, and what `help` says
+ * about it, beside what running it does. So the three cannot drift: a verb
+ * added here is a verb `help` lists and a verb the dispatch already refuses
+ * too many operands for, and one whose behavior changes has its account of
+ * itself in the same place.
  *
  * A `Map` rather than an object, because an object answers for every key
  * `Object.prototype` carries as well as for its own: `toString` and
@@ -282,13 +349,85 @@ function where(shuttle: Shuttle, operands: readonly string[]): Outcome {
  * holds what was put in it and nothing else, so the word that names no verb
  * has no answer to give rather than one that has to be guarded against.
  */
-const VERBS: ReadonlyMap<string, Verb> = new Map<string, Verb>([
-  ["cd", cd],
-  ["get", get],
-  ["ls", ls],
-  ["pwd", pwd],
-  ["where", where],
-  ["wish", wish],
+const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
+  ["cd", {
+    run: cd,
+    arity: { operands: "required", names: "a place to move to" },
+    usage: "cd <ref>",
+    summary: "Moves the place, which fills in what a reference omits.",
+    detail:
+      "The operand is a relative segment, `..` for one level up, `-` for " +
+      "the\nprevious place, `/` for the space root, a scope-only `@scope`, " +
+      "a rooted\nor complete reference, a slug, or a `#name` entry " +
+      "point.\n\nA target carrying `#argument` is refused: a place roots at " +
+      "a result, and\n`get <ref>#argument` is how an operand reads a " +
+      "piece's arguments cell.",
+  }],
+  ["get", {
+    run: get,
+    arity: { operands: "optional" },
+    usage: "get [<ref>]",
+    summary: "Reads the value at a cell, defaulting to where you stand.",
+    detail: "The operand takes everything `cd` takes, plus the `#argument` " +
+      "suffix\n`cd` turns down, which reads the piece's arguments cell " +
+      "rather than its\nresult. A `#name` entry point is the one spelling " +
+      "it does not take,\n`wish` being the verb that reads one.\n\nA space " +
+      "root and a facet hold no value of their own and are refused;\n`ls` " +
+      "lists what stands inside them.",
+  }],
+  ["help", {
+    run: help,
+    arity: { operands: "optional" },
+    usage: "help [<verb>]",
+    summary: "Lists the verbs, or writes the page of the one named.",
+    detail: "`<verb> --help` writes the same page, and every verb takes that " +
+      "option.",
+  }],
+  ["ls", {
+    run: ls,
+    arity: { operands: "none" },
+    usage: "ls",
+    summary: "Lists what stands where shuttle stands.",
+    detail: "A space root lists its facets, `slugs/` the names the space's " +
+      "index\nrecords, `pieces/` the space's pieces, and a cell the keys " +
+      "directly\nunder it. A row that failed on its own account is still a " +
+      "row and\ncarries what went wrong, where a read that failed outright " +
+      "is no\nlisting at all and is reported as the failure it is.",
+  }],
+  ["pwd", {
+    run: pwd,
+    arity: { operands: "none" },
+    usage: "pwd",
+    summary: "Writes the complete address of the place, both dimensions.",
+    detail:
+      "It writes the scope even where it is the base, so what it prints " +
+      "denotes\none cell wherever it is read. The prompt is the short " +
+      "surface, and this\nis what to copy.",
+  }],
+  ["where", {
+    run: where,
+    arity: { operands: "none" },
+    usage: "where",
+    summary: "Writes the whole ambient record: connection and place.",
+    detail:
+      "Every dimension this process holds prints, one to a line: what it " +
+      "connects\nas, and the two halves of the place `pwd` prints. Nothing " +
+      "here reads, so\na shuttle whose connection will not open still says " +
+      "what it was launched\nas and where it stands.",
+  }],
+  ["wish", {
+    run: wish,
+    arity: {
+      operands: "required",
+      names: "the target to resolve, as in `wish #favorites`",
+    },
+    usage: "wish <#name>",
+    summary: "Resolves a named entry point, as `cf wish` does.",
+    detail: "The resolution is the fabric's own, so a target this answers is " +
+      "one\n`cf wish` answers. A target that resolved in another space is " +
+      "answered\nrather than refused: reading across spaces costs nothing, " +
+      "where\nstanding in one is what a single connection cannot do.",
+  }],
 ]);
 
 /**
@@ -583,33 +722,60 @@ function container(position: SpaceRootPosition | FacetPosition): string {
 }
 
 /**
- * Helper for the verbs, which refuses `operands` where `verb` takes none, and
- * returns nothing where it takes what it was given.
+ * Helper for {@link runLine}, which refuses `operands` where a verb called
+ * `verb` was given a number of them its `arity` does not take, and returns
+ * nothing where it was given a number it does.
+ *
+ * The arms are written out one each and closed by a `never`, so an arm added
+ * to {@link Arity} reds the type checker here rather than falling through to
+ * a sentence written for a different one.
  */
-function takesNothing(
+function wrongOperandCount(
   verb: string,
+  arity: Arity,
   operands: readonly string[],
 ): Outcome | undefined {
-  return operands.length === 0 ? undefined : refuse(
-    `\`${verb}\` takes no operand, and was given ${operands.length}.`,
-  );
+  const given = operands.length;
+  switch (arity.operands) {
+    case "none":
+      return given === 0 ? undefined : tooMany(verb, "no operand", given);
+    case "optional":
+      return given <= 1 ? undefined : tooMany(verb, "one operand", given);
+    case "required":
+      if (given === 1) return undefined;
+      return given === 0
+        ? refuse(`\`${verb}\` takes ${arity.names}.`)
+        : tooMany(verb, "one operand", given);
+    default: {
+      const unreached: never = arity;
+      return unreached;
+    }
+  }
 }
 
 /**
- * Helper for the verbs, which refuses `operands` where `verb` takes at most
- * one, and returns nothing where it takes what it was given.
+ * Helper for {@link wrongOperandCount}, which refuses `given` operands for a
+ * verb called `verb` that takes what `takes` names.
  */
-function takesAtMostOne(
-  verb: string,
-  operands: readonly string[],
-): Outcome | undefined {
-  return operands.length <= 1 ? undefined : refuse(
-    `\`${verb}\` takes one operand, and was given ${operands.length}.`,
-  );
+function tooMany(verb: string, takes: string, given: number): Outcome {
+  return refuse(`\`${verb}\` takes ${takes}, and was given ${given}.`);
 }
 
 /**
- * Helper for {@link runLine}, which writes `words` as the English list a
+ * Helper for {@link runLine} and {@link help}, which is the reason `word`
+ * names no verb, listing the words that do.
+ *
+ * One sentence for both doors, because they ask one question of a word: the
+ * dispatch reads the first token of a line and `help` reads its operand, and
+ * what is wrong with a word that names no verb is the same either way.
+ */
+function notAVerb(word: string): string {
+  return `\`${word}\` is not a verb. The verbs are ` +
+    `${listed([...VERBS.keys()])}.`;
+}
+
+/**
+ * Helper for {@link notAVerb}, which writes `words` as the English list a
  * refusal reads them in.
  */
 function listed(words: readonly string[]): string {
