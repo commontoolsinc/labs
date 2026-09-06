@@ -332,3 +332,183 @@ Do not substitute `piece ls` for the board index: handler-created Topics need
 not appear in the registry. If a deployed field or verb differs from this map,
 trust `piece describe`, `piece verbs`, and verb help, then update this skill in
 the same change that updates the deployment contract.
+
+## Naming the Topics that predate the namespace
+
+A Topic reads its own name by looking itself up in the board's names table,
+which reaches it as its `boardNames` ARGUMENT — `addTopic` wires it at create,
+and `ownName` in `packages/patterns/collection-naming/naming.ts` is the lookup.
+A parent writes its member's result and never its member's argument, so
+`backfillNames` names a Topic filed before the namespace in the board's map
+while that Topic goes on reading no name. No pattern can close that gap. One
+`cf piece link` per Topic can, and this is that procedure.
+
+It was established by a clone rehearsal, and the evidence — every command, its
+output, and the counts and timings behind the claims here — is
+`docs/history/plans/collection-naming-s6-backfill-rehearsal-2026-09-05.md`. Read
+that before deciding anything this procedure says needs deciding.
+
+### The order
+
+1. **The board's source first**, and it needs
+   `--dangerously-allow-incompatible-schema`. `setsrc --check` refuses it over a
+   board holding Topics filed before the namespace:
+
+   ```
+   input link at topics.0.shortName: an unconstrained schema is no longer accepted
+   ```
+
+   That is not about `shortName` and not about the property's spelling. The
+   schema recorded on a member's retained link is unconstrained at every path
+   that recorded schema does not name, so a property only the CANDIDATE demand
+   names is a narrowing of `true` — which is what
+   `packages/piece/src/schema-compatibility.ts` refuses. Expect it for a new
+   per-member demand property generally; the record has the probes.
+
+   `deno task pattern-compat` and `deno task pattern-vintage` do not see this.
+   `tasks/pattern-vintage.ts` says what each proves: a pattern's declared
+   contract against the contracts it declared before, and its own stored
+   documents under today's source. Neither reaches the schema recorded on a link
+   into a sibling piece, so both can be green while the deploy is refused. Run
+   `setsrc --check` against the deployment itself before scheduling a window,
+   and treat the flag as needing team authorization under this skill's rule
+   above.
+
+2. **Then each Topic's source — and this step is BLOCKED.** Moving the board
+   first clears the Topic leg's own `mentionable[].shortName` refusal, and what
+   is left underneath is #6968:
+
+   ```
+   input link at mentionable[].piece: newly required argument field has no default
+   ```
+
+   `mentionable` is declared `Writable` on the Topic, so
+   `provePreservedContracts` in `packages/piece/src/ops/piece-controller.ts`
+   runs the write-back direction too and demands that the Topic's projection
+   accept everything the board's row publishes. Every source tried was refused,
+   the bytes the Topic is already running included, so `--check` gives no signal
+   on any Topic update while that declaration stands. It is not downstream of
+   step 1's schema question; clearing that does not clear this.
+
+   **Skipping it leaves a usable board.** A Topic still on pre-graft source is
+   named by `backfillNames` like any other member, answers to
+   `cf cell get /top/<n> title`, and reads back as an ordinary `index` row with
+   no `shortName` and no damage to the array around it. So naming, `/top/<n>`
+   addressing and index membership all survive the step being skipped, and
+   `shortName` — the badge, and the number on the index row — is what is absent.
+   That bounds what skipping costs from BELOW, not from above: no run forced a
+   Topic update, so what else a completed one would change is not known, and the
+   record says so. Step 4's refusal on such a Topic is this state being enforced
+   rather than an error.
+
+   **If you need the badge anyway**, the only exit the CLI offers is
+   `--dangerously-allow-incompatible-schema`, whose `setsrc` help covers exactly
+   this proof: "Replace the source even when pattern or retained-link schema
+   compatibility cannot be proven, or when the current pattern cannot be loaded
+   at all." It is a second authorization decision, separate from step 1's and
+   for an unrelated reason, and two things bear on it. No run in the record
+   forced a Topic update, so that the flag succeeds is read off help text rather
+   than measured. And a source that resolves #6968 — declaring `mentionable`
+   read-only, if nothing writes through it — need not meet this proof at all, so
+   the block is a property of the pattern as it stands rather than a permanent
+   one.
+
+3. **`backfillNames` once**, through the board. It returns the names it wrote,
+   in filing order, and is idempotent: a second run writes nothing and returns
+   an empty list.
+
+4. **`cf piece link` once per Topic that `addTopic` did not wire** — that is,
+   per Topic that took step 2. A Topic that skipped it has no `boardNames` input
+   to bind, and the bind says so.
+
+### The two commands
+
+```bash
+cf piece call --cell "$TOPICS_BOARD" --invocation '<id>' backfillNames \
+  '{"agentName":"Sol"}'
+cf piece link "$TOPICS_BOARD/namesTable" "$TOPIC/boardNames"
+```
+
+Between them is the gap this procedure exists for: the board's `names` map and
+`namesTable` hold the name, and the Topic does not.
+
+```
+$ cf cell get --cell "$TOPIC" shortName --step
+Cannot read piece result at "shortName": stored data is present, but its schema
+could not resolve all required values. The piece was stepped, but the required
+value still did not materialize.
+```
+
+After the bind that read answers with the number, the board's `index` row for
+that Topic carries it as `shortName`, and `cf cell get /top/<n> title` returns
+its title. A Topic left unbound keeps reporting the message above, which is what
+a half-finished run looks like: the board serves every Topic either way, named
+beside unnamed, and the repair is to bind the rest. Nothing has to be undone.
+
+The bind is idempotent — repeating it with the same two endpoints changes
+nothing and commits nothing. Note that `wrote to space` prints either way, so it
+is not evidence that anything was written.
+
+**Read twice before concluding a bind failed.** The first read after a backfill
+can report no name for a correctly wired Topic, and the next identical command
+answers with the number, with no write in between.
+
+**Cost is one command per Topic**, serially. On a board the size of the Estuary
+one that is the bulk-CLI shape
+`docs/history/topics-board-migration-2026-08-28.md` found unreliable from a
+laptop; run it from somewhere that record vindicates.
+
+### Audit which Topics still need it
+
+The derived `shortName` is the wrong thing to audit — read the durable argument:
+
+```bash
+cf cell get --cell "$TOPIC" boardNames --input --select name
+```
+
+A bound Topic returns the whole names table (`[{"name":"1"},…]`); an unbound one
+returns `[]`. Read the VALUE, not the keys: the input is declared
+`boardNames?: ReadonlyCell<NamesTableRow[] | Default<[]>>` in
+`packages/patterns/topics/topic.tsx`, so the key is there either way and its
+presence says nothing.
+
+Audit only Topics whose source has already been migrated. This read answers for
+the argument document, not for what the pattern can see, so a Topic that was
+force-bound before its source moved — see the first trap below — reads as bound
+here while its name never appears anywhere. On a board migrated in the order
+above that case cannot arise; if the order slipped, the honest check is whether
+the Topic publishes `shortName` at all.
+
+### Traps
+
+**Never pass `--allow-non-existing` to the bind** (#6965). On a Topic whose
+pattern has no `boardNames` input — one that has not taken step 2, whether
+because the order slipped or because step 2 was deliberately skipped — the bind
+refuses, and that refusal is the guard that keeps step 4 behind step 2:
+
+```
+Target path "boardNames" does not exist on piece fid1:…
+
+Use --allow-non-existing to link anyway.
+```
+
+Taking that suggestion prints `Linked …` and buys nothing: the Topic's input map
+does not gain the key — neither `cf cell get --cell "$TOPIC" --input` nor
+`cf piece inspect`'s Source (Inputs) shows it — and its name never appears. What
+it does do is write the link into the argument document, where the pattern
+cannot reach it but `cf cell get --cell "$TOPIC" boardNames --input` can, which
+is what makes the audit above read it as bound. The next `setsrc` of that Topic
+then fails with an extra
+`updated arguments do not match the candidate schema: boardNames: value does not
+match type array`
+that a clean control piece does not produce. The forced bind poisons the Topic
+against its own migration.
+
+**`setsrc --check` is not read-only against the store** (#6964). It writes, even
+when it refuses and replaces nothing, so a rehearsal clone is spent after one
+and a second pass needs `cf space reset`. Nothing authored moves.
+
+**Binding a piece the board does not hold** does nothing wrong and nothing
+useful: it succeeds, and the Topic reads no name. The lookup is by identity —
+`nameOf` in `packages/patterns/collection-naming/naming.ts` finds the row whose
+`member` `equals` the one asked about — so a non-member has no row to find.
