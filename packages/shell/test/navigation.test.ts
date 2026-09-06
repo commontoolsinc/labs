@@ -136,6 +136,100 @@ describe("navigation", () => {
     );
   });
 
+  it("adds no history entry for a navigation to the view already showing", () => {
+    withNavigation(
+      "http://common.test/my-space/fid1:abc",
+      { view: { spaceName: "my-space", pieceId: "fid1:abc" } },
+      (_navigation, recorded) => {
+        globalThis.dispatchEvent(
+          new CustomEvent("cf-navigate", {
+            detail: { spaceName: "my-space", pieceId: "fid1:abc" },
+          }),
+        );
+        expect(recorded.push).toEqual([]);
+        // The application still hears it: `setView` closes the shell's piece
+        // list on the way to a piece, open or not.
+        expect(recorded.views.at(-1)).toEqual({
+          spaceName: "my-space",
+          pieceId: "fid1:abc",
+        });
+      },
+    );
+  });
+
+  it("adds no history entry for a DID link to the piece already open", () => {
+    withNavigation(
+      "http://common.test/my-space/fid1:abc",
+      {
+        view: { spaceName: "my-space", pieceId: "fid1:abc" },
+        runtimeSpace: SPACE_DID as DID,
+      },
+      (_navigation, recorded) => {
+        globalThis.dispatchEvent(
+          new CustomEvent("cf-navigate", {
+            detail: { spaceDid: SPACE_DID, pieceId: "fid1:abc" },
+          }),
+        );
+        expect(recorded.push).toEqual([]);
+      },
+    );
+  });
+
+  it("adds no history entry for a link to the collection member already open", () => {
+    withNavigation(
+      "http://common.test/my-space/top/42",
+      {
+        view: { spaceName: "my-space", pieceSlug: "top", pieceMember: "42" },
+        runtimeSpace: SPACE_DID as DID,
+      },
+      (_navigation, recorded) => {
+        globalThis.dispatchEvent(
+          new CustomEvent("cf-navigate", {
+            detail: {
+              spaceDid: SPACE_DID,
+              pieceSlug: "top",
+              pieceMember: "42",
+            },
+          }),
+        );
+        expect(recorded.push).toEqual([]);
+      },
+    );
+  });
+
+  it("adds no history entry when carried-over embed mode makes the destination the current view", () => {
+    withNavigation(
+      "http://common.test/.embed/my-space/fid1:abc",
+      { view: { spaceName: "my-space", pieceId: "fid1:abc", mode: "embed" } },
+      (_navigation, recorded) => {
+        globalThis.dispatchEvent(
+          new CustomEvent("cf-navigate", {
+            detail: { spaceName: "my-space", pieceId: "fid1:abc" },
+          }),
+        );
+        expect(recorded.push).toEqual([]);
+      },
+    );
+  });
+
+  it("adds a history entry for a navigation to a different piece", () => {
+    withNavigation(
+      "http://common.test/my-space/fid1:abc",
+      { view: { spaceName: "my-space", pieceId: "fid1:abc" } },
+      (_navigation, recorded) => {
+        globalThis.dispatchEvent(
+          new CustomEvent("cf-navigate", {
+            detail: { spaceName: "my-space", pieceId: "fid1:def" },
+          }),
+        );
+        expect(recorded.push).toEqual([{
+          state: { spaceName: "my-space", pieceId: "fid1:def" },
+          url: "/my-space/fid1:def",
+        }]);
+      },
+    );
+  });
+
   it("replaces the current entry for a cf-replace-navigation event", () => {
     withNavigation(
       "http://common.test/",
