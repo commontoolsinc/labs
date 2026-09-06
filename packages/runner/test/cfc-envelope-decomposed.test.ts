@@ -16,12 +16,17 @@ const space = signer.did();
 
 // A declared schema whose `$defs` member gives the decomposition something
 // to split: version-2 envelopes store the root and the definition as
-// separate content-addressed documents.
+// separate content-addressed documents. The inline `note` member declares
+// the same confidentiality, so rewriting the whole record puts the atoms it
+// read back onto a path that accepts them.
 const DECLARED_SCHEMA = {
   type: "object",
   properties: {
     secret: { $ref: "#/$defs/Classified" },
-    note: { type: "string" },
+    note: {
+      type: "string",
+      ifc: { confidentiality: ["decomposed-secret"] },
+    },
   },
   required: ["secret"],
   $defs: {
@@ -38,7 +43,8 @@ const makeRuntime = (
   new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    cfcEnforcementMode: "enforce-explicit",
+    // The stored-form assertions below read the decomposed spelling: the
+    // root and its `$defs` member as separate content-addressed documents.
     cfcDecomposedEnvelopes: true,
   });
 
@@ -52,7 +58,7 @@ const declaredWrite = async (
 ): Promise<{ cidWrites: string[]; stored: CfcMetadata | undefined }> => {
   const tx = runtime.edit();
   const cell = runtime.getCell(space, name, DECLARED_SCHEMA, tx);
-  cell.set({ secret: "classified", note: "plain" });
+  cell.set({ secret: "classified", note: "detail" });
   tx.prepareCfc();
   const cidWrites = [...tx.getWriteDetails?.(space) ?? []]
     .map((detail) => detail.address.id)
@@ -209,12 +215,11 @@ describe("CFC decomposed envelopes", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const tx = runtime.edit();
       const cell = runtime.getCell(space, "inline-target", DECLARED_SCHEMA, tx);
-      cell.set({ secret: "classified", note: "plain" });
+      cell.set({ secret: "classified", note: "detail" });
       tx.prepareCfc();
       expect((await tx.commit()).ok).toBeDefined();
       const targetId = cell.getAsNormalizedFullLink().id;

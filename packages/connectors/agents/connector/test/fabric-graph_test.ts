@@ -436,6 +436,10 @@ Deno.test("stable graph field writes preserve document metadata", async () => {
       },
       { preserved: true },
     );
+    // A manual test tx goes through the same preparation the runtime's own
+    // commit paths do: a document-root write is CFC-relevant, and an
+    // enforcing rung refuses a relevant transaction that arrives unprepared.
+    runtime.prepareTxForCommit(metadataTx);
     const metadataCommit = await metadataTx.commit();
     if (metadataCommit.error) throw metadataCommit.error;
 

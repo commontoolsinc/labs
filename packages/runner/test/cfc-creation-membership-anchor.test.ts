@@ -70,6 +70,7 @@ describe("CFC: creation anchors membership at the canonical container path", () 
         },
       },
     });
+    rt.prepareTxForCommit(seed);
     expect((await seed.commit()).ok).toBeDefined();
     return id;
   };
@@ -88,7 +89,8 @@ describe("CFC: creation anchors membership at the canonical container path", () 
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // `entriesOf` reads the label map the replica stores, and flow labels
+      // reach storage at "persist".
       cfcFlowLabels: "persist",
     });
 
@@ -108,6 +110,7 @@ describe("CFC: creation anchors membership at the canonical container path", () 
     el0.get();
     const listCell = runtime.getCell(space, "anchor-list", listSchema, setup);
     listCell.set([el0, el1]);
+    runtime.prepareTxForCommit(setup);
     expect((await setup.commit()).ok).toBeDefined();
     return listCell.getAsNormalizedFullLink().id;
   };
@@ -138,6 +141,15 @@ describe("CFC: creation anchors membership at the canonical container path", () 
   it("a shape read at the canonical container path consumes the creating join", async () => {
     const listId = await createList();
 
+    // The reader's output document declares the confidentiality it is about
+    // to receive, so the stamped write fits the ceiling its label map states.
+    await seedLabeledDoc(
+      runtime!,
+      "anchor-out",
+      { copied: false },
+      "alice-secret",
+    );
+
     // A nonRecursive (shape) read at the container observes membership and
     // existence: the creating join must arrive in the reader's flow join
     // and stamp its output. (During the mis-anchored window this held only
@@ -153,6 +165,7 @@ describe("CFC: creation anchors membership at the canonical container path", () 
     }, { nonRecursive: true });
     const out = runtime!.getCell(space, "anchor-out", undefined, readTx);
     out.set({ copied: true });
+    runtime!.prepareTxForCommit(readTx);
     expect((await readTx.commit()).ok).toBeDefined();
 
     const outDerived = entriesOf(out.getAsNormalizedFullLink().id).find((e) =>

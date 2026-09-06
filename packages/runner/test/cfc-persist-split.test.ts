@@ -3,7 +3,9 @@ import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/data-model";
 import { Identity } from "@commonfabric/identity";
 import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { internSchema } from "@commonfabric/data-model-schema";
 import {
+  SEED_ENVELOPE_SCHEMA,
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
@@ -14,6 +16,7 @@ import type { LabelMapEntry } from "../src/cfc/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-persist-split");
 const space = signer.did();
+const seedEnvelope = internSchema(SEED_ENVELOPE_SCHEMA, true);
 
 type StoredEntry = {
   path: string[];
@@ -50,7 +53,8 @@ describe("CFC observation classes (C2 persist split)", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // Persisting flow labels is what puts the split value/shape entries in
+      // the document. Every assertion here reads one of them.
       cfcFlowLabels: "persist",
     });
     return runtime;
@@ -76,6 +80,31 @@ describe("CFC observation classes (C2 persist split)", () => {
     });
     expect((await seed.commit()).ok).toBeDefined();
     return id;
+  };
+
+  // Declares the confidentiality a destination document holds, so the
+  // writer-fit gate admits a write carrying that confidentiality onto it.
+  const declareStore = (
+    rt: Runtime,
+    cause: string,
+    confidentiality: string[],
+  ): Promise<string> =>
+    seedDoc(rt, cause, {}, [{ path: [], label: { confidentiality } }]);
+
+  // Records the write-policy input for a raw write, naming the schema the
+  // document's seeded envelope points at. A cell write on the same document
+  // resolves that same schema out of the stored envelope and records it.
+  const recordSeedSchemaInput = (
+    tx: ReturnType<Runtime["edit"]>,
+    id: string,
+    path: string[],
+  ): void => {
+    tx.recordCfcWritePolicyInput({
+      kind: "schema",
+      target: { space, scope: "space", id: id as `${string}:${string}`, path },
+      schemaHash: seedEnvelope.taggedHashString,
+      schema: seedEnvelope.schema,
+    });
   };
 
   const rawDocOf = (
@@ -131,6 +160,8 @@ describe("CFC observation classes (C2 persist split)", () => {
       },
     ]);
 
+    await declareStore(rt, "ps-out", ["secret"]);
+
     // Read-free output write so the hereditary meet keeps the certification
     // and the value entry demonstrably carries integrity.
     const tx = rt.edit();
@@ -141,6 +172,7 @@ describe("CFC observation classes (C2 persist split)", () => {
       { space, scope: "space", id: outId, path: ["value"] },
       { copied: true },
     );
+    recordSeedSchemaInput(tx, outId, ["value"]);
     tx.prepareCfc();
     expect((await tx.commit()).ok).toBeDefined();
 
@@ -215,6 +247,7 @@ describe("CFC observation classes (C2 persist split)", () => {
     const sourceId = await seedDoc(rt, "ps-idem-source", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret"] } },
     ]);
+    await declareStore(rt, "ps-idem-out", ["secret"]);
     const first = await launder(rt, sourceId, "ps-idem-out");
     const before = JSON.stringify(rawDocOf(first.id)?.cfc);
 
@@ -242,6 +275,8 @@ describe("CFC observation classes (C2 persist split)", () => {
     const sourceId = await seedDoc(rt, "ps-parity-source", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret"] } },
     ]);
+    await declareStore(rt, "ps-parity-mid", ["secret"]);
+    await declareStore(rt, "ps-parity-out", ["secret"]);
     const first = await launder(rt, sourceId, "ps-parity-mid");
     // Second hop reads the split-labeled doc and copies onward.
     const second = await launder(rt, first.id, "ps-parity-out");
@@ -267,6 +302,8 @@ describe("CFC observation classes (C2 persist split)", () => {
         label: { confidentiality: ["secret"], integrity: [certified] },
       },
     ]);
+    await declareStore(rt, "ps-shape-mid", ["secret"]);
+    await declareStore(rt, "ps-shape-out", ["secret"]);
     const first = await launder(rt, sourceId, "ps-shape-mid");
 
     const tx = rt.edit();
@@ -277,6 +314,7 @@ describe("CFC observation classes (C2 persist split)", () => {
       { space, scope: "space", id: outId, path: ["value"] },
       { counted: true },
     );
+    recordSeedSchemaInput(tx, outId, ["value"]);
     tx.prepareCfc();
     expect((await tx.commit()).ok).toBeDefined();
 
@@ -303,29 +341,42 @@ describe("CFC observation classes (C2 persist split)", () => {
     const publicId = await seedDoc(rt, "ps-ow-public", { n: 2 }, [
       { path: [], label: { confidentiality: ["public-ish"] } },
     ]);
-    const first = await launder(rt, secretId, "ps-ow-out");
+    // The store holds both audiences in turn, so it declares both. Each hop
+    // writes the whole value without reading the store back, which keeps the
+    // declared clauses out of the hop's own flow join.
+    const outId = await declareStore(rt, "ps-ow-out", [
+      "old-secret",
+      "public-ish",
+    ]);
+    const overwrite = async (sourceId: string, value: FabricValue) => {
+      const tx = rt.edit();
+      tx.readOrThrow(readAddress(sourceId, []));
+      tx.writeOrThrow(
+        {
+          space,
+          scope: "space",
+          id: outId as `${string}:${string}`,
+          path: ["value"],
+        },
+        value,
+      );
+      recordSeedSchemaInput(tx, outId, ["value"]);
+      tx.prepareCfc();
+      expect((await tx.commit()).ok).toBeDefined();
+    };
+
+    await overwrite(secretId, { copied: true });
     expect(
-      first.entries.find((e) => e.observes === "value")?.label.confidentiality,
+      entriesOf(outId).find((e) => e.observes === "value")?.label
+        .confidentiality,
     ).toEqual(["old-secret"]);
 
     // A ROOT overwrite (whole-value write at the stamped path) — a leaf
     // write below the stamp must NOT clear it, so `out.set({...})`'s
     // leaf-diffing would not exercise replace-on-overwrite.
-    const tx = rt.edit();
-    tx.readOrThrow(readAddress(publicId, []));
-    tx.writeOrThrow(
-      {
-        space,
-        scope: "space",
-        id: first.id as `${string}:${string}`,
-        path: ["value"],
-      },
-      { copied: false },
-    );
-    tx.prepareCfc();
-    expect((await tx.commit()).ok).toBeDefined();
+    await overwrite(publicId, { copied: false });
 
-    const valueEntry = entriesOf(first.id).find((e) =>
+    const valueEntry = entriesOf(outId).find((e) =>
       e.origin === "derived" && e.observes === "value"
     );
     expect(valueEntry?.label.confidentiality).toEqual(["public-ish"]);
@@ -347,6 +398,7 @@ describe("CFC observation classes (C2 persist split)", () => {
         label: { confidentiality: ["secret"], integrity: [certified] },
       },
     ]);
+    await declareStore(rt, "ps-compat-out", ["secret"]);
     const tx = rt.edit();
     tx.readOrThrow(readAddress(sourceId, []));
     const out = rt.getCell(space, "ps-compat-out", undefined, tx);
@@ -355,6 +407,7 @@ describe("CFC observation classes (C2 persist split)", () => {
       { space, scope: "space", id: outId, path: ["value"] },
       { copied: true },
     );
+    recordSeedSchemaInput(tx, outId, ["value"]);
     tx.prepareCfc();
     expect((await tx.commit()).ok).toBeDefined();
 
@@ -377,6 +430,7 @@ describe("CFC observation classes (C2 persist split)", () => {
     const sourceId = await seedDoc(rt, "ps-probe-source", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret"] } },
     ]);
+    await declareStore(rt, "ps-probe-mid", ["secret"]);
     const first = await launder(rt, sourceId, "ps-probe-mid");
 
     const tx = rt.edit();

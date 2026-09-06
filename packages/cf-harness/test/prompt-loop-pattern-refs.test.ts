@@ -24,10 +24,15 @@ import {
   chatViewOfRequest,
   responsesBodyFromChatFixture,
 } from "./support/responses-fixture.ts";
+import { directPromptSlotBindingFor } from "./support/prompt-slot-binding.ts";
 
 const signer = await Identity.fromPassphrase(
   "cf-harness prompt-loop pattern refs",
 );
+
+// Marks each prompt below as one a person typed. `search_patterns` and
+// `delegate_task` dispatch under that authorization.
+const directPromptSlotBinding = directPromptSlotBindingFor("pattern-refs");
 
 const SEARCH_HIT = {
   patternId: "pat-expenses",
@@ -185,7 +190,6 @@ const runDelegation = async (
     sandboxRuntime: new FakeSandboxRuntime(),
     runId: `run-pattern-refs-${crypto.randomUUID()}`,
     model: "gpt-5.4",
-    cfcEnforcementMode: "disabled",
     patternIndexClientFactory: () =>
       Promise.resolve(
         new PatternIndexClient({
@@ -203,7 +207,10 @@ const runDelegation = async (
     fetchFn,
   });
 
-  const result = await loop.runPrompt({ prompt: "Search, then delegate." });
+  const result = await loop.runPrompt({
+    prompt: "Search, then delegate.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
   const delegateMessage = result.transcript.find((message) =>
     message.role === "tool" && message.toolName === "delegate_task"
   );
@@ -250,7 +257,6 @@ const runResumedDelegation = async (
     sandboxRuntime: new FakeSandboxRuntime(),
     runId: `run-pattern-refs-resume-${crypto.randomUUID()}`,
     model: "gpt-5.4",
-    cfcEnforcementMode: "disabled",
     patternIndexClientFactory: () =>
       Promise.resolve(
         new PatternIndexClient({
@@ -267,7 +273,10 @@ const runResumedDelegation = async (
     allowedSubagentProfiles: ["default"],
     fetchFn: firstFetch,
   });
-  const firstResult = await firstLoop.runPrompt({ prompt: "Search first." });
+  const firstResult = await firstLoop.runPrompt({
+    prompt: "Search first.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
 
   const resumedRequests: unknown[] = [];
   const resumedTurns = [
@@ -310,6 +319,7 @@ const runResumedDelegation = async (
         : []),
       { role: "user", content: "Delegate using the earlier search." },
     ],
+    promptSlotBinding: directPromptSlotBinding,
   });
   const delegateMessage = result.transcript.findLast((message) =>
     message.role === "tool" && message.toolName === "delegate_task"

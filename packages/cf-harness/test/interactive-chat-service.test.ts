@@ -4,6 +4,7 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
+import { join } from "@std/path";
 import {
   createPatternSkillsFixture,
   PATTERN_SKILL_FIXTURE_RESOURCE_PATH,
@@ -19,6 +20,10 @@ import {
   type HarnessChatRequestEnvelope,
   type HarnessChatTurnRecord,
 } from "../src/contracts/interactive-chat.ts";
+import {
+  CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+  type PromptSlotBinding,
+} from "../src/contracts/prompt-slot.ts";
 import { PATTERN_AUTHOR_SUBAGENT_SKILL_NAMES } from "../src/contracts/subagent.ts";
 import {
   HarnessInteractiveChatService,
@@ -1880,9 +1885,38 @@ Deno.test("a normalization whose write fails leaves the record on the stored his
   );
 });
 
+/**
+ * The two sidecar directories a runsc sandbox exchanges CFC invocation
+ * contexts and CFC results through. A run that mediates observations refuses
+ * to start unless both are named.
+ */
+const makeCfcTransportDirs = async (): Promise<{
+  cfcInvocationContextDir: string;
+  cfcResultDir: string;
+}> => {
+  const root = await Deno.makeTempDir();
+  const cfcInvocationContextDir = join(root, "cfc-invocation-context");
+  const cfcResultDir = join(root, "cfc-result");
+  await Deno.mkdir(cfcInvocationContextDir);
+  await Deno.mkdir(cfcResultDir);
+  return { cfcInvocationContextDir, cfcResultDir };
+};
+
+/** The console binds a person's typed prompt as the turn's direct command. */
+const directPromptSlotBinding: PromptSlotBinding = {
+  type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
+  source: { type: "test.prompt-slot", subject: "interactive-chat" },
+  role: "direct-command",
+  kernelName: "cf-harness",
+  surface: "test",
+  subject: "interactive-chat",
+  eventId: "event-interactive-chat",
+};
+
 Deno.test("an interactive turn scans its configured skills root into the run and a pattern-author child inherits it", async () => {
   await using fixture = await createPatternSkillsFixture();
   const skillsRoot = fixture.skillsRoot;
+  const cfcTransport = await makeCfcTransportDirs();
   const loopOptions: CreateHarnessPromptLoopOptions[] = [];
   const requestBodies: unknown[] = [];
   const service = new HarnessInteractiveChatService({
@@ -1890,7 +1924,7 @@ Deno.test("an interactive turn scans its configured skills root into the run and
       apiKey: "test-key",
       skillsRoot,
       runId: "run-interactive-skills",
-      cfcEnforcementMode: "observe",
+      ...cfcTransport,
       fetchFn: (_input, init) => {
         const body = JSON.parse(String(init?.body));
         requestBodies.push(body);
@@ -1987,6 +2021,7 @@ Deno.test("an interactive turn scans its configured skills root into the run and
         toolMode: "workspace-write",
         allowedToolIds: ["delegate_task"],
         allowedSubagentProfiles: ["pattern-author"],
+        promptSlot: directPromptSlotBinding,
       },
     },
   });
@@ -2078,7 +2113,6 @@ Deno.test("an interactive turn scans a skills root carried on an injected engine
     basePromptLoopOptions: {
       apiKey: "test-key",
       engine,
-      cfcEnforcementMode: "observe",
       fetchFn: (_input, init) =>
         Promise.resolve(
           new Response(

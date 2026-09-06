@@ -189,7 +189,6 @@ Deno.test("CfHarnessPromptLoop rejects known provider/client mismatches", () => 
         engine: new CfHarnessEngine({
           sandboxRuntime: new FakeSandboxRuntime(),
           modelProvider: "openai-compatible-gateway",
-          cfcEnforcementMode: "disabled",
         }),
         modelClient: {
           providerId: "openai-codex",
@@ -234,7 +233,6 @@ Deno.test("CfHarnessPromptLoop requires an exact Codex credential owner binding"
           },
         }
         : {}),
-      cfcEnforcementMode: "disabled",
     });
 
   assertThrows(
@@ -383,7 +381,6 @@ Deno.test("CfHarnessPromptLoop persists a fresh Codex model selection before the
       modelProvider: "openai-codex",
       model: "gpt-configured-default",
       credentialOwnerKey: "local",
-      cfcEnforcementMode: "disabled",
     }),
     modelClient: {
       providerId: "openai-codex",
@@ -474,6 +471,8 @@ Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through
       sandboxRuntime: sandbox,
       runId: "run-model-client",
       model: "test-model",
+      // Strict enforcement denies the injected read_file call, and
+      // `result.runState.policyEvents[0]?.severity` reads that denial back.
       cfcEnforcementMode: "enforce-strict",
     }),
   });
@@ -514,7 +513,6 @@ Deno.test("CfHarnessPromptLoop preserves the public gatewayClient compatibility 
       runId: "run-gateway-client-compat",
       model: "gpt-5.4",
       gatewayAuthMode: "none",
-      cfcEnforcementMode: "disabled",
     }),
   });
 
@@ -624,11 +622,13 @@ Deno.test("Codex parent and child loops share one serialized credential refresh"
       },
       modelAuthSource: "cf-harness-local-store",
       harnessHomeIdentity: "sha256:opaque-home",
-      cfcEnforcementMode: "disabled",
     }),
   });
 
-  const result = await loop.runPrompt({ prompt: "Delegate this." });
+  const result = await loop.runPrompt({
+    prompt: "Delegate this.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
 
   assertEquals(result.finalAssistantText, "Parent done.");
   assertEquals(refreshes, 1);
@@ -702,11 +702,13 @@ Deno.test("Codex profile model overrides fail the child without aborting the par
       model: "gpt-5.4",
       modelProvider: "openai-codex",
       credentialOwnerKey: "local",
-      cfcEnforcementMode: "disabled",
     }),
   });
 
-  const result = await loop.runPrompt({ prompt: "Delegate and continue." });
+  const result = await loop.runPrompt({
+    prompt: "Delegate and continue.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
   const toolMessage = result.transcript.at(-2);
   if (toolMessage?.role !== "tool") {
     throw new Error("expected delegate_task tool message");
@@ -781,11 +783,13 @@ Deno.test("CfHarnessPromptLoop keeps provider controls off profile-overridden ch
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-child-cache-mode",
       model: "gpt-5.6-terra",
-      cfcEnforcementMode: "disabled",
     }),
   });
 
-  const result = await loop.runPrompt({ prompt: "Delegate and continue." });
+  const result = await loop.runPrompt({
+    prompt: "Delegate and continue.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
   const toolMessage = result.transcript.at(-2);
   if (toolMessage?.role !== "tool") {
     throw new Error("expected delegate_task tool message");
@@ -853,11 +857,13 @@ Deno.test("CfHarnessPromptLoop propagates provider controls to model-inheriting 
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-inherited-provider-controls",
       model: "gpt-5.6-terra",
-      cfcEnforcementMode: "disabled",
     }),
   });
 
-  const result = await loop.runPrompt({ prompt: "Delegate and continue." });
+  const result = await loop.runPrompt({
+    prompt: "Delegate and continue.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
 
   assertEquals(result.finalAssistantText, "parent done");
   assertEquals(turns, 3);
@@ -1027,12 +1033,15 @@ Deno.test("CfHarnessPromptLoop retains child usage when delegate output persiste
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-delegate-usage-failure",
         model: "test-model",
-        cfcEnforcementMode: "disabled",
       }),
     });
 
     await assertRejects(
-      () => loop.runPrompt({ prompt: "Delegate this." }),
+      () =>
+        loop.runPrompt({
+          prompt: "Delegate this.",
+          promptSlotBinding: directPromptSlotBinding,
+        }),
       Error,
       "delegate output persist boom",
     );
@@ -1093,6 +1102,18 @@ const observedCfcResult = (
   },
 });
 
+/**
+ * The model-facing fields of a tool result, without the CFC mediation
+ * descriptor the loop attaches beside them.
+ */
+const toolResultFields = (content: string): Record<string, unknown> => {
+  const { cfc: _cfc, ...fields } = JSON.parse(content) as Record<
+    string,
+    unknown
+  >;
+  return fields;
+};
+
 Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant response", async () => {
   await using fixture = await createPatternSkillsFixture();
   const fetchCalls: RequestInit[] = [];
@@ -1100,11 +1121,15 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
     apiKey: "test-key",
     engine: new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime([
-        { stdout: "hello from file", stderr: "", exitCode: 0 },
+        {
+          stdout: "hello from file",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("hello from file"),
+        },
       ]),
       runId: "run-loop",
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
       skillsRoot: fixture.skillsRoot,
       now: (() => {
         const timestamps = [
@@ -1156,6 +1181,7 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
   });
 
   const result = await loop.runPrompt({
+    promptSlotBinding: directPromptSlotBinding,
     systemPrompt: "You are a test harness.",
     prompt: "Read the todo file and summarize it.",
   });
@@ -1167,42 +1193,49 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
   assertEquals(result.modelTurns, 2);
   assertEquals(result.runState.endedAt, "2026-04-15T20:00:06.000Z");
   assertEquals(result.runState.terminalReason, "assistant_completed");
-  assertEquals(result.transcript, [
-    { role: "system", content: "You are a test harness." },
-    { role: "user", content: "Read the todo file and summarize it." },
-    {
-      role: "assistant",
-      content: "",
-      toolCalls: [{
-        id: "call-1",
-        type: "function",
-        function: {
-          name: "read_file",
-          arguments: JSON.stringify({ path: "notes/todo.txt" }),
-        },
-      }],
-    },
-    {
-      role: "tool",
-      toolCallId: "call-1",
-      toolName: "read_file",
-      content: JSON.stringify({
-        outputId: createToolOutputId("run-loop", "read_file", 1),
-        path: "/workspace/notes/todo.txt",
-        content: "hello from file",
-      }),
-      resultRef: {
-        type: "cf-harness.tool-result-ref",
-        outputId: createToolOutputId("run-loop", "read_file", 1),
-        toolId: "read_file",
-        runId: "run-loop",
+  assertEquals(
+    result.transcript.map((message) =>
+      message.role === "tool"
+        ? { ...message, content: toolResultFields(message.content) }
+        : message
+    ),
+    [
+      { role: "system", content: "You are a test harness." },
+      { role: "user", content: "Read the todo file and summarize it." },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [{
+          id: "call-1",
+          type: "function",
+          function: {
+            name: "read_file",
+            arguments: JSON.stringify({ path: "notes/todo.txt" }),
+          },
+        }],
       },
-    },
-    {
-      role: "assistant",
-      content: "The todo file says hello from file.",
-    },
-  ]);
+      {
+        role: "tool",
+        toolCallId: "call-1",
+        toolName: "read_file",
+        content: {
+          outputId: createToolOutputId("run-loop", "read_file", 1),
+          path: "/workspace/notes/todo.txt",
+          content: "hello from file",
+        },
+        resultRef: {
+          type: "cf-harness.tool-result-ref",
+          outputId: createToolOutputId("run-loop", "read_file", 1),
+          toolId: "read_file",
+          runId: "run-loop",
+        },
+      },
+      {
+        role: "assistant",
+        content: "The todo file says hello from file.",
+      },
+    ],
+  );
   assertEquals(result.runState.status, "completed");
   assertEquals(result.runState.policyEvents, []);
 
@@ -1227,18 +1260,14 @@ Deno.test("CfHarnessPromptLoop runs a tool call and returns the final assistant 
       "query_docs",
     ],
   );
-  assertEquals(
-    chatViewOfRequest(secondRequest).messages.at(-1),
-    {
-      role: "tool",
-      tool_call_id: "call-1",
-      content: JSON.stringify({
-        outputId: createToolOutputId("run-loop", "read_file", 1),
-        path: "/workspace/notes/todo.txt",
-        content: "hello from file",
-      }),
-    },
-  );
+  const lastSentMessage = chatViewOfRequest(secondRequest).messages.at(-1);
+  assertEquals(lastSentMessage?.role, "tool");
+  assertEquals(lastSentMessage?.tool_call_id, "call-1");
+  assertEquals(toolResultFields(lastSentMessage!.content), {
+    outputId: createToolOutputId("run-loop", "read_file", 1),
+    path: "/workspace/notes/todo.txt",
+    content: "hello from file",
+  });
 });
 
 // A sandbox whose resolvePath throws for anything outside /workspace, so we can
@@ -1307,6 +1336,9 @@ Deno.test("CfHarnessPromptLoop: a command timeout is a recoverable bash result, 
       ),
       runId: "run-tool-timeout",
       model: "gpt-5.4",
+      // With enforcement off the recoverable bash result reaches the model as
+      // the tool wrote it. The assertions below read the timeout message and
+      // the exit code out of that tool message.
       cfcEnforcementMode: "disabled",
     }),
     fetchFn: twoTurnBashFetch(
@@ -1341,6 +1373,9 @@ Deno.test("CfHarnessPromptLoop: a cwd outside the sandbox is a recoverable bash 
       sandboxRuntime: new CwdEscapeSandboxRuntime(),
       runId: "run-tool-cwd-escape",
       model: "gpt-5.4",
+      // With enforcement off the recoverable bash result reaches the model as
+      // the tool wrote it. The assertion below reads the cwd message out of
+      // that tool message.
       cfcEnforcementMode: "disabled",
     }),
     fetchFn: twoTurnBashFetch(
@@ -1376,7 +1411,6 @@ Deno.test("CfHarnessPromptLoop: a non-recoverable tool failure stays fatal and n
     ),
     runId: "run-tool-fatal",
     model: "gpt-5.4",
-    cfcEnforcementMode: "disabled",
   });
   const loop = new CfHarnessPromptLoop({
     apiKey: "test-key",
@@ -1384,7 +1418,12 @@ Deno.test("CfHarnessPromptLoop: a non-recoverable tool failure stays fatal and n
     fetchFn: twoTurnBashFetch(fetchCalls, { command: "ls" }, "unreachable"),
   });
 
-  await assertRejects(() => loop.runPrompt({ prompt: "List files." }));
+  await assertRejects(() =>
+    loop.runPrompt({
+      prompt: "List files.",
+      promptSlotBinding: directPromptSlotBinding,
+    })
+  );
   // The run is terminal-failed, and the model never got a second turn — the
   // host detail could not have leaked into a model-facing tool result.
   assertEquals(engine.getRunState().status, "failed");
@@ -1400,7 +1439,6 @@ Deno.test("CfHarnessPromptLoop forwards abort signals to gateway requests", asyn
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-loop-signal",
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     }),
     fetchFn: (_input, init) => {
       seenSignal = init?.signal;
@@ -1462,7 +1500,6 @@ Deno.test("CfHarnessPromptLoop preserves custom abort reasons for local gateway 
         credentialOwner,
         harnessHomeIdentity: "sha256:opaque-home",
       },
-      cfcEnforcementMode: "disabled",
     }),
   });
 
@@ -1484,7 +1521,6 @@ Deno.test("CfHarnessPromptLoop forwards abort signals to delegate_task child loo
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-loop-delegate-signal",
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     }),
     fetchFn: (_input, init) => {
       seenSignals.push(init?.signal);
@@ -1536,6 +1572,7 @@ Deno.test("CfHarnessPromptLoop forwards abort signals to delegate_task child loo
   });
 
   const result = await loop.runPrompt({
+    promptSlotBinding: directPromptSlotBinding,
     prompt: "Delegate a task.",
     signal: controller.signal,
   });
@@ -1549,7 +1586,12 @@ Deno.test("CfHarnessPromptLoop forwards abort signals to delegate_task child loo
 
 Deno.test("CfHarnessPromptLoop strips trusted-only CFC input labels from model tool args", async () => {
   const sandbox = new FakeSandboxRuntime([
-    { stdout: "ok\n", stderr: "", exitCode: 0 },
+    {
+      stdout: "ok\n",
+      stderr: "",
+      exitCode: 0,
+      cfcResult: observedCfcResult("ok\n"),
+    },
   ]);
   let fetchCount = 0;
   const loop = new CfHarnessPromptLoop({
@@ -1557,7 +1599,6 @@ Deno.test("CfHarnessPromptLoop strips trusted-only CFC input labels from model t
     engine: new CfHarnessEngine({
       sandboxRuntime: sandbox,
       runId: "run-strip-cfc-input-labels",
-      cfcEnforcementMode: "disabled",
       model: "gpt-5.4",
     }),
     fetchFn: () => {
@@ -1612,6 +1653,7 @@ Deno.test("CfHarnessPromptLoop strips trusted-only CFC input labels from model t
   });
 
   const result = await loop.runPrompt({
+    promptSlotBinding: directPromptSlotBinding,
     prompt: "Run a command.",
   });
 
@@ -1619,10 +1661,18 @@ Deno.test("CfHarnessPromptLoop strips trusted-only CFC input labels from model t
     !request.command.includes(CAPABILITY_PROBE_SENTINEL)
   );
   assert(toolRequest !== undefined);
-  assertEquals(toolRequest.cfcInvocationContext?.cfcInputLabels, undefined);
+  // The loop labels the command from the prompt slot it was given. The entry
+  // the model wrote reaches neither the sandbox nor the recorded context.
+  const sandboxLabels = toolRequest.cfcInvocationContext?.cfcInputLabels;
+  assertEquals(sandboxLabels?.entries.map((entry) => entry.path), [[
+    "command",
+  ]]);
+  assertEquals(JSON.stringify(sandboxLabels).includes("did:key:forged"), false);
   assertEquals(
-    result.runState.cfcInvocationContexts?.[0]?.cfcInputLabels,
-    undefined,
+    JSON.stringify(
+      result.runState.cfcInvocationContexts?.[0]?.cfcInputLabels ?? null,
+    ).includes("did:key:forged"),
+    false,
   );
 });
 
@@ -1678,6 +1728,7 @@ Deno.test("CfHarnessPromptLoop attaches images loaded by view_image on the next 
   const result = await loop.runPrompt({
     systemPrompt: "You are a test harness.",
     prompt: "Inspect the image if needed.",
+    promptSlotBinding: directPromptSlotBinding,
   });
 
   assertEquals(
@@ -1870,6 +1921,9 @@ Deno.test("CfHarnessPromptLoop surfaces recoverable file-tool failures to the mo
       ]),
       runId: "run-recoverable-file-error",
       model: "gpt-5.4",
+      // With enforcement off the structured read_file error reaches the model
+      // as the tool wrote it. The transcript and second-request assertions
+      // compare against `recoverableOutput`.
       cfcEnforcementMode: "disabled",
       now: (() => {
         const timestamps = [
@@ -2622,7 +2676,6 @@ Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summa
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-delegate",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
       skillsRoot: fixture.skillsRoot,
     }),
     fetchFn: (_input, init) => {
@@ -2834,7 +2887,6 @@ Deno.test("CfHarnessPromptLoop validates structured subagent returns and linkifi
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-structured-return",
         model: "gpt-5.4",
-        cfcEnforcementMode: "enforce-explicit",
         artifactStore,
       }),
       fetchFn: (_input, init) => {
@@ -3027,7 +3079,6 @@ Deno.test("CfHarnessPromptLoop fails structured subagent returns without exposin
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-structured-return-invalid",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -3138,7 +3189,6 @@ Deno.test("CfHarnessPromptLoop keeps child-supplied schema mismatch details out 
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-structured-return-mismatch",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -3251,7 +3301,6 @@ Deno.test("CfHarnessPromptLoop lets an explicit subagent profile expand child to
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-delegate-explicit-profile",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -3389,7 +3438,6 @@ Deno.test("CfHarnessPromptLoop applies the web_search profile model override and
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-delegate-web-search",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -3520,7 +3568,6 @@ Deno.test("CfHarnessPromptLoop keeps browser unavailable to the parent by defaul
       workspaceHostPath: "/tmp/project",
       runId: "run-parent-host-tool-denied",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
       skillsRoot: fixture.skillsRoot,
     }),
     fetchFn: (_input, init) => {
@@ -3610,7 +3657,6 @@ Deno.test("CfHarnessPromptLoop gives the browser tool only to the authorized bro
       workspaceHostPath: "/tmp/project",
       runId: "run-delegate-browser-profile",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
       skillsRoot: fixture.skillsRoot,
     }),
     fetchFn: (_input, init) => {
@@ -3789,7 +3835,6 @@ Deno.test("CfHarnessPromptLoop activates browser subagent skills and host skill 
       skillsRoot,
       runId: "run-browser-subagent-skills",
       model: "gpt-5.4",
-      cfcEnforcementMode: "observe",
     });
     await engine.persistSkillRegistry(registry);
 
@@ -4029,7 +4074,6 @@ Deno.test("CfHarnessPromptLoop briefs browser subagents on the lease without exp
       workspaceHostPath: "/tmp/project",
       runId: "run-delegate-browser-lease",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -4125,7 +4169,6 @@ Deno.test("CfHarnessPromptLoop gives web_fetch only to the authorized web_fetch 
       workspaceHostPath: "/tmp/project",
       runId: "run-delegate-web-fetch-profile",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -4277,7 +4320,6 @@ Deno.test("CfHarnessPromptLoop keeps browser subagent observations behind struct
         workspaceHostPath,
         runId: "run-browser-structured-return",
         model: "gpt-5.4",
-        cfcEnforcementMode: "enforce-explicit",
         skillsRoot: fixture.skillsRoot,
       }),
       fetchFn: (_input, init) => {
@@ -4500,7 +4542,6 @@ Deno.test("CfHarnessPromptLoop does not authorize the browser profile by default
       workspaceHostPath: "/tmp/project",
       runId: "run-browser-profile-default-denied",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
@@ -4586,7 +4627,6 @@ Deno.test("CfHarnessPromptLoop reports child run failures through delegate_task 
       ]),
       runId: "run-delegate-child-failure",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -4985,6 +5025,8 @@ Deno.test("CfHarnessPromptLoop denies delegate_task without direct-command autho
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-delegate-denied",
       model: "gpt-5.4",
+      // The expected policy event names this mode in its `mode` field and in
+      // both of its denial details.
       cfcEnforcementMode: "enforce-explicit",
       now: (() => {
         const timestamps = [
@@ -5089,7 +5131,6 @@ Deno.test("CfHarnessPromptLoop denies delegate_task when the profile is not auth
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-delegate-profile-denied",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -5228,11 +5269,15 @@ Deno.test("CfHarnessPromptLoop fails when the model exceeds the configured turn 
     apiKey: "test-key",
     engine: new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime([
-        { stdout: "hello", stderr: "", exitCode: 0 },
+        {
+          stdout: "hello",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult("hello"),
+        },
       ]),
       runId: "run-max-turns",
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     }),
     maxModelTurns: 1,
     fetchFn: () =>
@@ -5261,7 +5306,11 @@ Deno.test("CfHarnessPromptLoop fails when the model exceeds the configured turn 
   });
 
   await assertRejects(
-    () => loop.runPrompt({ prompt: "Loop forever." }),
+    () =>
+      loop.runPrompt({
+        prompt: "Loop forever.",
+        promptSlotBinding: directPromptSlotBinding,
+      }),
     Error,
     "prompt loop exceeded max model turns (1)",
   );
@@ -5381,6 +5430,8 @@ Deno.test("CfHarnessPromptLoop records observe-mode warnings and still executes 
       ]),
       runId: "run-observe-warning",
       model: "gpt-5.4",
+      // The expected policy event names this mode in its warning detail, and
+      // the tool message carries the sandbox's own stdout.
       cfcEnforcementMode: "observe",
       now: (() => {
         const timestamps = [
@@ -5501,6 +5552,8 @@ Deno.test("CfHarnessPromptLoop truncates large model-facing bash output in obser
       ]),
       runId: "run-large-bash-output",
       model: "gpt-5.4",
+      // The tool message carries the sandbox's own stdout, which is what the
+      // truncation assertions measure.
       cfcEnforcementMode: "observe",
     }),
     fetchFn: (_input, init) => {
@@ -5581,13 +5634,22 @@ Deno.test("CfHarnessPromptLoop retains omission records across provider compacti
       apiKey: "test-key",
       engine: new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime([
-          { stdout: hugeStdout, stderr: "", exitCode: 0 },
-          { stdout: "second\n", stderr: "", exitCode: 0 },
+          {
+            stdout: hugeStdout,
+            stderr: "",
+            exitCode: 0,
+            cfcResult: observedCfcResult(hugeStdout),
+          },
+          {
+            stdout: "second\n",
+            stderr: "",
+            exitCode: 0,
+            cfcResult: observedCfcResult("second\n"),
+          },
         ]),
         artifactStore,
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
       }),
       fetchFn: (_input, init) => {
         turns += 1;
@@ -5680,11 +5742,15 @@ Deno.test("CfHarnessPromptLoop bounds a large model-facing read_file result more
     apiKey: "test-key",
     engine: new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime([
-        { stdout: document, stderr: "", exitCode: 0 },
+        {
+          stdout: document,
+          stderr: "",
+          exitCode: 0,
+          cfcResult: observedCfcResult(document),
+        },
       ]),
       runId: "run-large-read-file",
       model: "gpt-5.4",
-      cfcEnforcementMode: "observe",
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
@@ -5757,6 +5823,9 @@ Deno.test("CfHarnessPromptLoop denies bash output without CFC metadata in enforc
       ]),
       runId: "run-missing-cfc-result",
       model: "gpt-5.4",
+      // An enforcing run denies bash output that carries no mediation
+      // metadata. The tool message is compared against that
+      // observation-denied envelope.
       cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
@@ -5871,6 +5940,8 @@ Deno.test({
         ]),
         runId: "run-missing-cfc-script-result",
         model: "gpt-5.4",
+        // An enforcing run denies run_skill_script output that carries no
+        // mediation metadata. The tool message is compared against that denial.
         cfcEnforcementMode: "enforce-explicit",
         skillsRoot: root,
         allowedSkillScripts: [{
@@ -6016,7 +6087,6 @@ Deno.test({
         ]),
         runId: "run-mediated-skill-script",
         model: "gpt-5.4",
-        cfcEnforcementMode: "enforce-explicit",
         skillsRoot: root,
         allowedSkillScripts: [{
           skill: "deno-memory-profiler",
@@ -6138,6 +6208,8 @@ Deno.test("CfHarnessPromptLoop exposes mediated bash output instead of raw stdou
       ]),
       runId: "run-mediated-cfc-result",
       model: "gpt-5.4",
+      // An enforcing run hands the model the mediated stream. The assertions
+      // read `content.cfc.stdout.policy` and `content.cfc.stderr.policy` back.
       cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
@@ -6221,7 +6293,6 @@ Deno.test("CfHarnessPromptLoop records CFC-side stream truncation as a model omi
         }]),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "enforce-explicit",
       }),
       fetchFn: () => {
         turn += 1;
@@ -6309,6 +6380,8 @@ Deno.test("CfHarnessPromptLoop denies read_file content without CFC metadata in 
       ]),
       runId: "run-read-file-missing-cfc-result",
       model: "gpt-5.4",
+      // An enforcing run denies read_file content that carries no mediation
+      // metadata. The tool message is compared against that denial.
       cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (() => {
@@ -6386,6 +6459,9 @@ Deno.test("CfHarnessPromptLoop redacts read_file filesystem-status failures in e
       ]),
       runId: "run-read-file-status-redacted",
       model: "gpt-5.4",
+      // An enforcing run redacts the filesystem-status failure, and the
+      // assertions compare the model-facing path and error against their
+      // redacted forms.
       cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (() => {
@@ -6476,6 +6552,8 @@ Deno.test("CfHarnessPromptLoop warns but exposes read_file filesystem-status fai
       ]),
       runId: "run-read-file-status-observe",
       model: "gpt-5.4",
+      // An observing run exposes the filesystem-status failure and records a
+      // warning. The assertions read both the warning and the exposed error.
       cfcEnforcementMode: "observe",
     }),
     fetchFn: (() => {
@@ -6556,7 +6634,6 @@ Deno.test("CfHarnessPromptLoop exposes mediated read_file content and tracks mod
       ]),
       runId: "run-read-file-cfc-model-context",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
@@ -6670,7 +6747,6 @@ Deno.test("CfHarnessPromptLoop carries observed CFC labels into later write_file
       ]),
       runId: "run-write-file-cfc-model-context",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
@@ -6794,7 +6870,6 @@ Deno.test("CfHarnessPromptLoop carries observed CFC labels into edit_file write 
       ]),
       runId: "run-edit-file-cfc-model-context",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
@@ -6968,6 +7043,9 @@ Deno.test("CfHarnessPromptLoop denies edit_file success when an internal read la
       ]),
       runId: "run-edit-file-missing-cfc-result",
       model: "gpt-5.4",
+      // An enforcing run denies the edit_file result whose internal read
+      // carried no mediation metadata. The assertions read that denial and
+      // its handle.
       cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
@@ -7058,6 +7136,9 @@ Deno.test("CfHarnessPromptLoop redacts recoverable edit_file errors in enforce m
       ]),
       runId: "run-edit-file-error-redaction",
       model: "gpt-5.4",
+      // An enforcing run redacts the recoverable edit_file error, and the
+      // assertions compare the model-facing path and error against
+      // `[redacted]`.
       cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
@@ -7169,7 +7250,6 @@ Deno.test("CfHarnessPromptLoop accumulates observed CFC labels for the next mode
       ]),
       runId: "run-cfc-model-context",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
@@ -7284,7 +7364,6 @@ Deno.test("CfHarnessPromptLoop does not taint sibling tool calls from one assist
       ]),
       runId: "run-cfc-model-context-siblings",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
@@ -7405,7 +7484,6 @@ Deno.test("CfHarnessPromptLoop ignores opaque and denied CFC observations for mo
       ]),
       runId: "run-cfc-model-context-opaque",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       fetchCalls.push(init ?? {});
@@ -7488,6 +7566,8 @@ Deno.test("CfHarnessPromptLoop returns observation-denied tool content in enforc
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-enforce-explicit",
       model: "gpt-5.4",
+      // The expected policy event and the model-facing tool message both name
+      // this mode in their denial detail.
       cfcEnforcementMode: "enforce-explicit",
       now: (() => {
         const timestamps = [
@@ -7606,6 +7686,7 @@ Deno.test("CfHarnessPromptLoop denies tool calls outside the configured allowlis
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-tool-allowlist-denied",
       model: "gpt-5.4",
+      // The expected policy event carries this mode in its `mode` field.
       cfcEnforcementMode: "disabled",
       now: (() => {
         const timestamps = [
@@ -7708,6 +7789,8 @@ Deno.test("CfHarnessPromptLoop includes read_file input summaries on strict-mode
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-read-file-strict",
       model: "gpt-5.4",
+      // Strict enforcement denies the read, and the assertions read the input
+      // summary that denial carried.
       cfcEnforcementMode: "enforce-strict",
     }),
     fetchFn: (_input, init) => {
@@ -7776,6 +7859,7 @@ Deno.test("CfHarnessPromptLoop includes prompt slot context on policy events", a
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-policy-context",
       model: "gpt-5.4",
+      // The expected policy event names this mode in its denial detail.
       cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
@@ -7891,7 +7975,6 @@ Deno.test("CfHarnessPromptLoop applies the compaction threshold to delegated wor
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `run-child-compaction-${threshold}`,
         model: "gpt-5.6-terra",
-        cfcEnforcementMode: "disabled",
       }),
     });
 
@@ -7962,11 +8045,13 @@ Deno.test("CfHarnessPromptLoop keeps a positive threshold off profile-overridden
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `run-override-compaction-${threshold}`,
         model: "gpt-5.6-terra",
-        cfcEnforcementMode: "disabled",
       }),
     });
 
-    await loop.runPrompt({ prompt: "Delegate and continue." });
+    await loop.runPrompt({
+      prompt: "Delegate and continue.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     assert(childSeen.length >= 1, "expected at least one child turn");
     assertEquals(
@@ -7999,7 +8084,6 @@ Deno.test("CfHarnessPromptLoop grounds host-command children in the workspace, n
       cwd: "/file-cabinet",
       runId: "run-delegate-browser-cwd",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {
@@ -8081,7 +8165,6 @@ Deno.test("CfHarnessPromptLoop surfaces a child's ok:false return as a coded fai
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-structured-return-child-failure",
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
     }),
     fetchFn: (_input, init) => {
       const body = JSON.parse(String(init?.body)) as {

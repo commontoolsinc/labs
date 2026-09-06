@@ -12,11 +12,13 @@ import {
 } from "./cfc-seed-envelope.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { canonicalizeCfcMetadata } from "../src/cfc/canonical.ts";
+import type { CfcConfClause } from "../src/cfc/clause.ts";
 import {
   commitCfcFieldValue,
   containsCfcFieldCommitment,
 } from "../src/cfc/label-representation.ts";
 import type { IFCLabel } from "../src/cfc/mod.ts";
+import { deriveFlowJoin } from "../src/cfc/prepare.ts";
 import type { LabelMapEntry } from "../src/cfc/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -69,7 +71,8 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // Persisting the flow labels is what mints the `*`-child templates
+      // every `entriesOf` assertion below counts and reads.
       cfcFlowLabels: "persist",
     });
     return runtime;
@@ -105,11 +108,6 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     };
     return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
   };
-
-  const derivedConfidentiality = (id: string): unknown[] =>
-    entriesOf(id)
-      .filter((e) => e.origin === "derived")
-      .flatMap((e) => e.label.confidentiality ?? []);
 
   const readAddress = (id: string, path: string[]) => ({
     space,
@@ -158,20 +156,18 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     return listId;
   };
 
-  // Runs `observe` in a fresh tx that also writes an out doc, commits, and
-  // returns the out doc's derived flow confidentiality.
+  // Runs `observe` in a fresh tx and returns the confidentiality of the join
+  // those reads accumulated, straight off the transaction.
   const flowJoinOf = async (
     rt: Runtime,
-    outCause: string,
     observe: (tx: ReturnType<Runtime["edit"]>) => void,
-  ): Promise<unknown[]> => {
+  ): Promise<CfcConfClause[]> => {
     const tx = rt.edit();
     observe(tx);
-    const out = rt.getCell(space, outCause, undefined, tx);
-    out.set({ observed: true });
+    const join = deriveFlowJoin(tx).confidentiality;
     tx.prepareCfc();
     expect((await tx.commit()).ok).toBeDefined();
-    return derivedConfidentiality(out.getAsNormalizedFullLink().id);
+    return join;
   };
 
   it("per-child existence probe consumes the membership J (SC-8 residual №1)", async () => {
@@ -190,7 +186,7 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     ]);
     const listId = await buildList(rt, "tp-list-a", criteriaId, ["tp-el-a"]);
 
-    const join = await flowJoinOf(rt, "tp-probe-a-out", (tx) => {
+    const join = await flowJoinOf(rt, (tx) => {
       tx.readOrThrow(readAddress(listId, ["0"]), { nonRecursive: true });
     });
     expect(join).toContainEqual("memb-secret");
@@ -217,7 +213,7 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     ]);
     const listId = await buildList(rt, "tp-list-b", criteriaId, ["tp-el-b"]);
 
-    const join = await flowJoinOf(rt, "tp-probe-b-out", (tx) => {
+    const join = await flowJoinOf(rt, (tx) => {
       tx.read(readAddress(listId, ["0"]), { meta: linkResolutionProbe });
     });
     expect(join).toContainEqual("memb-secret");
@@ -238,7 +234,7 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     ]);
     const listId = await buildList(rt, "tp-list-c", criteriaId, ["tp-el-c"]);
 
-    const join = await flowJoinOf(rt, "tp-probe-c-out", (tx) => {
+    const join = await flowJoinOf(rt, (tx) => {
       tx.readOrThrow(readAddress(listId, ["0"]));
     });
     expect(join).toContainEqual("memb-secret");
@@ -385,6 +381,18 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     // never pool, so tmpl-only-atom vanishes entirely — while the frozen
     // existence entry (creation-atom) survives the overwrite in place.
     const cover = rt.edit();
+    // The schema write-policy input a cell write records for this target.
+    // The raw write below leaves the transaction read-free.
+    const listSchema = internSchema(
+      { type: "array", items: { asCell: ["cell"] } } as JSONSchema,
+      true,
+    );
+    cover.recordCfcWritePolicyInput({
+      kind: "schema",
+      target: { space, scope: "space", id: uri(listId), path: [] },
+      schemaHash: listSchema.taggedHashString,
+      schema: listSchema.schema,
+    });
     cover.writeOrThrow(
       { space, scope: "space", id: uri(listId), path: ["value"] },
       { replaced: true },
@@ -413,7 +421,7 @@ describe("CFC template population (Stage A): the two under-taints", () => {
 
     const rt = makeRuntime();
     await seedDoc(rt, "tp-el-sw", { n: 1 }, []);
-    const otherId = await seedDoc(rt, "tp-el-sw-2", { n: 2 }, []);
+    await seedDoc(rt, "tp-el-sw-2", { n: 2 }, []);
     const criteriaId = await seedDoc(rt, "tp-criteria-sw", { keep: true }, [
       { path: [], label: { confidentiality: ["memb-secret"] } },
     ]);
@@ -422,9 +430,11 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     // Clean tx replaces slot 0 with a link to another doc — no declaration,
     // no covering write.
     const slotWrite = rt.edit();
-    slotWrite.writeOrThrow(
-      { space, scope: "space", id: uri(listId), path: ["value", "0"] },
-      { "/": { "link@1": { id: otherId, path: [] } } },
+    rt.getCell(space, "tp-list-sw", {
+      type: "array",
+      items: { asCell: ["cell"] },
+    }, slotWrite).key(0).set(
+      rt.getCell(space, "tp-el-sw-2", undefined, slotWrite) as never,
     );
     slotWrite.prepareCfc();
     expect((await slotWrite.commit()).ok).toBeDefined();
@@ -527,7 +537,7 @@ describe("CFC template population (Stage A): the two under-taints", () => {
     ]);
     const listId = await buildList(rt, "tp-list-tc", criteriaId, ["tp-el-tc"]);
 
-    const join = await flowJoinOf(rt, "tp-probe-tc-out", (tx) => {
+    const join = await flowJoinOf(rt, (tx) => {
       tx.readOrThrow(readAddress(listId, ["0"]));
       tx.recordCfcDereferenceTrace({
         source: { space, id: listId, scope: "space", path: ["0"] },
@@ -568,7 +578,8 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // Persisting the flow labels is what mints the `*`-child templates
+      // every `entriesOf` assertion below counts and reads.
       cfcFlowLabels: "persist",
     });
     return runtime;
@@ -605,11 +616,6 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
     return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
   };
 
-  const derivedConfidentiality = (id: string): unknown[] =>
-    entriesOf(id)
-      .filter((e) => e.origin === "derived")
-      .flatMap((e) => e.label.confidentiality ?? []);
-
   const readAddress = (id: string, path: string[]) => ({
     space,
     scope: "space" as const,
@@ -643,18 +649,18 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
     return list.getAsNormalizedFullLink().id;
   };
 
+  // Runs `observe` in a fresh tx and returns the confidentiality of the join
+  // those reads accumulated, straight off the transaction.
   const flowJoinOf = async (
     rt: Runtime,
-    outCause: string,
     observe: (tx: ReturnType<Runtime["edit"]>) => void,
-  ): Promise<unknown[]> => {
+  ): Promise<CfcConfClause[]> => {
     const tx = rt.edit();
     observe(tx);
-    const out = rt.getCell(space, outCause, undefined, tx);
-    out.set({ observed: true });
+    const join = deriveFlowJoin(tx).confidentiality;
     tx.prepareCfc();
     expect((await tx.commit()).ok).toBeDefined();
-    return derivedConfidentiality(out.getAsNormalizedFullLink().id);
+    return join;
   };
 
   it("hand-built pure-link container mints the three `*`-child class templates", async () => {
@@ -703,7 +709,7 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
       "gp-el-a",
     ]);
 
-    const join = await flowJoinOf(rt, "gp-probe-a-out", (tx) => {
+    const join = await flowJoinOf(rt, (tx) => {
       tx.readOrThrow(readAddress(listId, ["0"]), { nonRecursive: true });
     });
     expect(join).toContainEqual("memb-secret");
@@ -725,7 +731,7 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
       "gp-el-b",
     ]);
 
-    const join = await flowJoinOf(rt, "gp-probe-b-out", (tx) => {
+    const join = await flowJoinOf(rt, (tx) => {
       tx.read(readAddress(listId, ["0"]), { meta: linkResolutionProbe });
     });
     expect(join).toContainEqual("memb-secret");
@@ -757,14 +763,14 @@ describe("CFC template population (SC-8 remainder): generic pure-link containers
       tx.readOrThrow(readAddress(listId, ["length"]));
     };
 
-    const marked = await flowJoinOf(rt, "gp-mach-out", (tx) => {
+    const marked = await flowJoinOf(rt, (tx) => {
       tx.runWithAmbientReadMeta(machineryRead, () => wiringReads(tx));
     });
     // Consumed-set equality with a read-free transaction: the marked wiring
     // reads contribute NOTHING to the join.
     expect(marked).toEqual([]);
 
-    const unmarked = await flowJoinOf(rt, "gp-app-out", (tx) => {
+    const unmarked = await flowJoinOf(rt, (tx) => {
       wiringReads(tx);
     });
     expect(unmarked).toContainEqual("memb-secret");
@@ -791,8 +797,6 @@ describe("CFC template population (Stage A): class-split resolution", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
-      cfcFlowLabels: "persist",
     });
     return runtime;
   };
@@ -828,11 +832,6 @@ describe("CFC template population (Stage A): class-split resolution", () => {
     return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
   };
 
-  const derivedConfidentiality = (id: string): unknown[] =>
-    entriesOf(id)
-      .filter((e) => e.origin === "derived")
-      .flatMap((e) => e.label.confidentiality ?? []);
-
   const readAddress = (id: string, path: string[]) => ({
     space,
     scope: "space" as const,
@@ -841,18 +840,18 @@ describe("CFC template population (Stage A): class-split resolution", () => {
     path: ["value", ...path],
   });
 
+  // Runs `observe` in a fresh tx and returns the confidentiality of the join
+  // those reads accumulated, straight off the transaction.
   const flowJoinOf = async (
     rt: Runtime,
-    outCause: string,
     observe: (tx: ReturnType<Runtime["edit"]>) => void,
-  ): Promise<unknown[]> => {
+  ): Promise<CfcConfClause[]> => {
     const tx = rt.edit();
     observe(tx);
-    const out = rt.getCell(space, outCause, undefined, tx);
-    out.set({ observed: true });
+    const join = deriveFlowJoin(tx).confidentiality;
     tx.prepareCfc();
     expect((await tx.commit()).ok).toBeDefined();
-    return derivedConfidentiality(out.getAsNormalizedFullLink().id);
+    return join;
   };
 
   // One doc, every class distinct: a covering root entry, the three
@@ -897,7 +896,7 @@ describe("CFC template population (Stage A): class-split resolution", () => {
 
     const rt = makeRuntime();
     const id = await seedSplitDoc(rt, "tp-split-ref");
-    const join = await flowJoinOf(rt, "tp-split-ref-out", (tx) => {
+    const join = await flowJoinOf(rt, (tx) => {
       tx.read(readAddress(id, ["items", "0"]), { meta: linkResolutionProbe });
     });
     expect(join).toContainEqual("memb-ref");
@@ -913,7 +912,7 @@ describe("CFC template population (Stage A): class-split resolution", () => {
 
     const rt = makeRuntime();
     const id = await seedSplitDoc(rt, "tp-split-shape");
-    const join = await flowJoinOf(rt, "tp-split-shape-out", (tx) => {
+    const join = await flowJoinOf(rt, (tx) => {
       tx.readOrThrow(readAddress(id, ["items", "0"]), { nonRecursive: true });
     });
     expect(join).toContainEqual("memb-shape");
@@ -929,7 +928,7 @@ describe("CFC template population (Stage A): class-split resolution", () => {
 
     const rt = makeRuntime();
     const id = await seedSplitDoc(rt, "tp-split-value");
-    const join = await flowJoinOf(rt, "tp-split-value-out", (tx) => {
+    const join = await flowJoinOf(rt, (tx) => {
       tx.readOrThrow(readAddress(id, ["items", "0"]));
     });
     expect(join).toContainEqual("memb-value");
@@ -955,7 +954,7 @@ describe("CFC template population (Stage A): class-split resolution", () => {
         observes: "value",
       },
     ]);
-    const join = await flowJoinOf(rt, "tp-split-deep-out", (tx) => {
+    const join = await flowJoinOf(rt, (tx) => {
       tx.readOrThrow(readAddress(id, ["items", "0", "name"]));
     });
     expect(join).toContainEqual("memb-value");
@@ -995,12 +994,12 @@ describe("CFC template population (Stage A): class-split resolution", () => {
         observes: "shape",
       },
     ]);
-    const joinSame = await flowJoinOf(rt, "tp-join-same-out", (tx) => {
+    const joinSame = await flowJoinOf(rt, (tx) => {
       tx.readOrThrow(readAddress(id, ["items", "0"]), { nonRecursive: true });
     });
     expect(joinSame).toContainEqual("memb-current");
     expect(joinSame).toContainEqual("frozen-structure");
-    const joinCross = await flowJoinOf(rt, "tp-join-cross-out", (tx) => {
+    const joinCross = await flowJoinOf(rt, (tx) => {
       tx.readOrThrow(readAddress(id, ["items", "1"]), { nonRecursive: true });
     });
     expect(joinCross).toContainEqual("memb-current");
@@ -1042,7 +1041,7 @@ describe("CFC template population (Stage A): class-split resolution", () => {
       origin: "declared",
     }]);
 
-    const join = await flowJoinOf(rt, "tp-declared-star-out", (tx2) => {
+    const join = await flowJoinOf(rt, (tx2) => {
       tx2.readOrThrow(readAddress(id, ["items", "0"]));
     });
     expect(join).toContainEqual("declared-member");
@@ -1070,8 +1069,6 @@ describe("CFC template population (Stage A): record-only additionalProperties wa
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
-      cfcFlowLabels: "persist",
     });
     return runtime;
   };
@@ -1193,8 +1190,11 @@ describe("CFC template population (Stage A): cross-space label protection", () =
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // Persisting the flow labels is what mints the template entries this
+      // test reads back out of the envelope.
       cfcFlowLabels: "persist",
+      // `containsCfcFieldCommitment` below reads the commitment form this
+      // rung transforms a cross-space membership join into.
       cfcLabelMetadataProtection: "enforce",
     });
     try {

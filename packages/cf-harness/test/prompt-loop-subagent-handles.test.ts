@@ -37,6 +37,11 @@ import type {
   SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
+import { directPromptSlotBindingFor } from "./support/prompt-slot-binding.ts";
+
+// Marks each prompt below as one a person typed. `delegate_task` and the
+// child's own `bash` dispatch under that authorization.
+const directPromptSlotBinding = directPromptSlotBindingFor("subagent-handles");
 
 const HASH_A = "A".repeat(43);
 const HASH_B = "B".repeat(43);
@@ -44,6 +49,30 @@ const HASH_C = "C".repeat(43);
 const URI_A = `of:fid1:${HASH_A}`;
 const URI_B = `of:fid1:${HASH_B}`;
 const URI_C = `of:fid1:${HASH_C}`;
+
+/**
+ * The mediation record a CFC sandbox attaches to a command result: each
+ * stream observed at public confidentiality, carrying the text the command
+ * produced.
+ */
+const mediated = (result: SandboxCommandResult): SandboxCommandResult => {
+  const label = { confidentiality: ["public"] };
+  const stream = (channel: "stdout" | "stderr", text: string) => ({
+    channel,
+    policy: "observed" as const,
+    label,
+    segments: [{ text, label }],
+  });
+  return {
+    ...result,
+    cfcResult: {
+      version: 1,
+      stdout: stream("stdout", result.stdout),
+      stderr: stream("stderr", result.stderr),
+      exitCode: { policy: "observed", label, value: result.exitCode },
+    },
+  };
+};
 
 class FakeSandboxRuntime implements SandboxRuntime {
   readonly shellRequests: SandboxShellRequest[] = [];
@@ -79,20 +108,24 @@ class FakeSandboxRuntime implements SandboxRuntime {
   }
 
   run(_request: SandboxCommandRequest): Promise<SandboxCommandResult> {
-    return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
+    return Promise.resolve(
+      mediated({ stdout: "", stderr: "", exitCode: 0 }),
+    );
   }
 
   runShell(request: SandboxShellRequest): Promise<SandboxCommandResult> {
     this.shellRequests.push(request);
     if (request.command.includes(CAPABILITY_PROBE_SENTINEL)) {
-      return Promise.resolve({
+      return Promise.resolve(mediated({
         stdout: "bash\tpresent\t/bin/bash\tGNU bash, version 5.2.26(1)-release",
         stderr: "",
         exitCode: 0,
-      });
+      }));
     }
     return Promise.resolve(
-      this.#shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+      mediated(
+        this.#shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+      ),
     );
   }
 }
@@ -209,7 +242,6 @@ describe("prompt-loop cross-agent address handles", () => {
       sandboxRuntime: sandbox,
       runId,
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     });
     await engine.recordHandleTable(table);
     const loop = new CfHarnessPromptLoop({
@@ -225,7 +257,10 @@ describe("prompt-loop cross-agent address handles", () => {
       ]),
     });
 
-    await loop.runPrompt({ prompt: "Delegate the inspection." });
+    await loop.runPrompt({
+      prompt: "Delegate the inspection.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     const command = dispatchedCommand(sandbox, "cf cell get ");
     expect(command).toContain(`cf cell get ${table.entries[0]!.ref}`);
@@ -242,7 +277,6 @@ describe("prompt-loop cross-agent address handles", () => {
       sandboxRuntime: sandbox,
       runId,
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     });
     await engine.recordHandleTable(table);
     const loop = new CfHarnessPromptLoop({
@@ -263,7 +297,10 @@ describe("prompt-loop cross-agent address handles", () => {
       ]),
     });
 
-    await loop.runPrompt({ prompt: "Delegate the inspection." });
+    await loop.runPrompt({
+      prompt: "Delegate the inspection.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     const command = dispatchedCommand(sandbox, "cf cell get ");
     expect(command).toContain(table.entries[0]!.ref);
@@ -280,7 +317,6 @@ describe("prompt-loop cross-agent address handles", () => {
       sandboxRuntime: sandbox,
       runId,
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     });
     await engine.recordHandleTable(table);
     const loop = new CfHarnessPromptLoop({
@@ -299,7 +335,10 @@ describe("prompt-loop cross-agent address handles", () => {
       ]),
     });
 
-    await loop.runPrompt({ prompt: "Delegate the summary." });
+    await loop.runPrompt({
+      prompt: "Delegate the summary.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     // A token the child guessed at names nothing in the child, so it reaches
     // the sandbox as the inert text it is rather than as an address.
@@ -316,7 +355,6 @@ describe("prompt-loop cross-agent address handles", () => {
       sandboxRuntime: new FakeSandboxRuntime(),
       runId,
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     });
     await engine.recordHandleTable(table);
     const requestBodies: unknown[] = [];
@@ -333,7 +371,10 @@ describe("prompt-loop cross-agent address handles", () => {
       ], requestBodies),
     });
 
-    await loop.runPrompt({ prompt: "Delegate the summary." });
+    await loop.runPrompt({
+      prompt: "Delegate the summary.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     const childMessages = chatViewOfRequest(requestBodies[1]).messages
       .map((message) => message.content ?? "")
@@ -388,12 +429,14 @@ describe("prompt-loop cross-agent address handles", () => {
         sandboxRuntime: sandbox,
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
       }),
       fetchFn,
     });
 
-    const result = await loop.runPrompt({ prompt: "Delegate the lookup." });
+    const result = await loop.runPrompt({
+      prompt: "Delegate the lookup.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     const delegateOutput = chatViewOfRequest(requestBodies[3]).messages
       .filter((message) => message.role === "tool")
@@ -454,12 +497,14 @@ describe("prompt-loop cross-agent address handles", () => {
         sandboxRuntime: sandbox,
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
       }),
       fetchFn,
     });
 
-    const result = await loop.runPrompt({ prompt: "Delegate the lookup." });
+    const result = await loop.runPrompt({
+      prompt: "Delegate the lookup.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     // The child's token resolves to its reference in the same scan that
     // scrubs the unresolvable ones, so the path segment inside that
@@ -486,7 +531,6 @@ describe("prompt-loop cross-agent address handles", () => {
       sandboxRuntime: sandbox,
       runId,
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     });
     await engine.recordHandleTable(table);
     const requestBodies: unknown[] = [];
@@ -525,7 +569,10 @@ describe("prompt-loop cross-agent address handles", () => {
       fetchFn,
     });
 
-    await loop.runPrompt({ prompt: "Delegate the inspection." });
+    await loop.runPrompt({
+      prompt: "Delegate the inspection.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     const delegateOutput = chatViewOfRequest(requestBodies[2]).messages
       .filter((message) => message.role === "tool")
@@ -546,7 +593,6 @@ describe("prompt-loop cross-agent address handles", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-subagent-handles-no-session",
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
       }),
       fetchFn: scriptedFetch([
         delegateCallTurn("call-delegate", { goal: "Do the task." }),
@@ -555,7 +601,10 @@ describe("prompt-loop cross-agent address handles", () => {
       ], requestBodies),
     });
 
-    const result = await loop.runPrompt({ prompt: "Delegate the task." });
+    const result = await loop.runPrompt({
+      prompt: "Delegate the task.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     expect(chatViewOfRequest(requestBodies[1]).tools).toEqual([
       "bash",
@@ -575,7 +624,6 @@ describe("prompt-loop cross-agent address handles", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-subagent-pattern-author-denied",
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
       }),
       allowedSubagentProfiles: ["default"],
       fetchFn: scriptedFetch([
@@ -587,7 +635,10 @@ describe("prompt-loop cross-agent address handles", () => {
       ]),
     });
 
-    const result = await loop.runPrompt({ prompt: "Delegate the authoring." });
+    const result = await loop.runPrompt({
+      prompt: "Delegate the authoring.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     expect(result.runState.subagentRuns ?? []).toEqual([]);
     expect(
@@ -607,7 +658,6 @@ describe("prompt-loop cross-agent address handles", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-subagent-pattern-author-no-session",
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         skillsRoot: fixture.skillsRoot,
       }),
       allowedSubagentProfiles: ["pattern-author"],
@@ -621,7 +671,10 @@ describe("prompt-loop cross-agent address handles", () => {
       ], requestBodies),
     });
 
-    const result = await loop.runPrompt({ prompt: "Delegate the authoring." });
+    const result = await loop.runPrompt({
+      prompt: "Delegate the authoring.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     expect(chatViewOfRequest(requestBodies[1]).tools).toEqual([
       "bash",
@@ -642,7 +695,6 @@ describe("prompt-loop cross-agent address handles", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-subagent-pattern-author-prompt",
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
       }),
       allowedSubagentProfiles: ["pattern-author"],
       fetchFn: scriptedFetch([
@@ -655,7 +707,10 @@ describe("prompt-loop cross-agent address handles", () => {
       ], requestBodies),
     });
 
-    await loop.runPrompt({ prompt: "Delegate the authoring." });
+    await loop.runPrompt({
+      prompt: "Delegate the authoring.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     const childSystemPrompt =
       chatViewOfRequest(requestBodies[1]).messages[0]!.content ?? "";
@@ -696,7 +751,6 @@ describe("prompt-loop cross-agent address handles", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-subagent-pattern-author-budget",
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
       }),
       allowedSubagentProfiles: ["pattern-author"],
       fetchFn: scriptedFetch([
@@ -709,7 +763,10 @@ describe("prompt-loop cross-agent address handles", () => {
       ]),
     });
 
-    const result = await loop.runPrompt({ prompt: "Delegate the authoring." });
+    const result = await loop.runPrompt({
+      prompt: "Delegate the authoring.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     const runRef = result.runState.subagentRuns?.[0];
     expect(runRef?.manifest.maxModelTurns).toBe(
@@ -728,7 +785,6 @@ describe("prompt-loop cross-agent address handles", () => {
       sandboxRuntime: new FakeSandboxRuntime(),
       runId,
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     });
     await engine.recordHandleTable(table);
     const loop = new CfHarnessPromptLoop({
@@ -759,7 +815,10 @@ describe("prompt-loop cross-agent address handles", () => {
       ]),
     });
 
-    const result = await loop.runPrompt({ prompt: "Delegate the authoring." });
+    const result = await loop.runPrompt({
+      prompt: "Delegate the authoring.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     const returnedValue = (index: number): Record<string, unknown> =>
       (result.runState.subagentRuns?.[index] as
@@ -781,7 +840,6 @@ describe("prompt-loop cross-agent address handles", () => {
       sandboxRuntime: new FakeSandboxRuntime(),
       runId,
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     });
     const loop = new CfHarnessPromptLoop({
       apiKey: "test-key",
@@ -799,7 +857,10 @@ describe("prompt-loop cross-agent address handles", () => {
       ]),
     });
 
-    const result = await loop.runPrompt({ prompt: "Delegate the authoring." });
+    const result = await loop.runPrompt({
+      prompt: "Delegate the authoring.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     const subagentRun = result.runState.subagentRuns?.[0] as {
       summary?: string;
@@ -899,13 +960,15 @@ describe("prompt-loop cross-agent address handles", () => {
           sandboxRuntime: new FakeSandboxRuntime(),
           runId,
           model: "gpt-5.4",
-          cfcEnforcementMode: "disabled",
           fabricSessionFactory: () => Promise.resolve({ pieces }),
         }),
         fetchFn,
       });
 
-      await loop.runPrompt({ prompt: "Delegate the pattern run." });
+      await loop.runPrompt({
+        prompt: "Delegate the pattern run.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       expect(chatViewOfRequest(requestBodies[1]).tools).toContain(
         "run_pattern",
@@ -1039,14 +1102,16 @@ describe("prompt-loop cross-agent address handles", () => {
           sandboxRuntime: new FakeSandboxRuntime(),
           runId,
           model: "gpt-5.4",
-          cfcEnforcementMode: "disabled",
           fabricSessionFactory: () => Promise.resolve({ pieces }),
         }),
         allowedSubagentProfiles: ["pattern-author"],
         fetchFn,
       });
 
-      await loop.runPrompt({ prompt: "Delegate the copy." });
+      await loop.runPrompt({
+        prompt: "Delegate the copy.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       expect(chatViewOfRequest(requestBodies[2]).tools).toContain(
         "run_pattern",

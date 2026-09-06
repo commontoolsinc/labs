@@ -217,17 +217,6 @@ function fakeRuntime(piecesCell: FakePiecesCell) {
   };
 }
 
-function createUncachedCompileRuntime(url: string, identity: Identity) {
-  return new Runtime({
-    apiUrl: new URL(url),
-    storageManager: StorageManager.open({
-      as: identity,
-      memoryHost: new URL(url),
-    }),
-    cfcEnforcementMode: "disabled",
-  });
-}
-
 class MockWorker extends EventTarget {
   static instances: MockWorker[] = [];
   static sendReady = true;
@@ -1433,11 +1422,16 @@ describe("cast admin entry point", () => {
 
   it("compiles the actual admin pattern source", async () => {
     const identity = await Identity.generate({ implementation: "noble" });
-    const runtime = createUncachedCompileRuntime(
-      TEST_API_URL,
-      identity,
-    );
+    // A compile writes its content-addressed cache back through a transaction.
+    // The emulated memory server answers that write.
+    let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
+    let runtime: Runtime | undefined;
     try {
+      storageManager = StorageManager.emulate({ as: identity });
+      runtime = new Runtime({
+        apiUrl: new URL(TEST_API_URL),
+        storageManager,
+      });
       const source = await Deno.readTextFile(
         new URL("../bgAdmin.tsx", import.meta.url),
       );
@@ -1449,7 +1443,9 @@ describe("cast admin entry point", () => {
         );
       assert(pattern);
     } finally {
-      await runtime.dispose();
+      // `dispose()` closes the storage manager it owns.
+      if (runtime !== undefined) await runtime.dispose();
+      else await storageManager?.close();
     }
   });
 

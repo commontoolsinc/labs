@@ -20,6 +20,7 @@ import type {
   SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
+import { directPromptSlotBindingFor } from "./support/prompt-slot-binding.ts";
 
 class FakeSandboxRuntime implements SandboxRuntime {
   describe(): SandboxRuntimeDescription {
@@ -104,6 +105,14 @@ const scriptedFetch = (payloads: readonly unknown[]): typeof fetch => {
 const GOAL = "Inspect the workspace and report.";
 
 /**
+ * The prompt that starts the run, bound as a direct command. A tool call made
+ * under this binding is authorized at every enforcement rung.
+ */
+const directPromptSlotBinding = directPromptSlotBindingFor(
+  "subagent-transcript-events",
+);
+
+/**
  * Runs a parent that delegates once, and returns every transcript event the
  * parent's handler saw, in order.
  */
@@ -112,7 +121,6 @@ const eventsFromDelegatingRun = async (): Promise<HarnessTranscriptEvent[]> => {
     sandboxRuntime: new FakeSandboxRuntime(),
     runId: "run-subagent-transcript-events",
     model: "gpt-5.4",
-    cfcEnforcementMode: "disabled",
   });
   const loop = new CfHarnessPromptLoop({
     apiKey: "test-key",
@@ -134,6 +142,7 @@ const eventsFromDelegatingRun = async (): Promise<HarnessTranscriptEvent[]> => {
 
   await loop.runPrompt({
     prompt: "Delegate the inspection.",
+    promptSlotBinding: directPromptSlotBinding,
     onTranscriptEvent: (event) => {
       events.push(event);
     },

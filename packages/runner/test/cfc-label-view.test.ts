@@ -231,7 +231,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -268,8 +267,15 @@ describe("CFC label view helpers", () => {
         undefined,
         tx,
       );
-      target.set(source);
-      await tx.commit();
+      const targetLink = parseLink(target.getAsLink());
+      tx.writeOrThrow({
+        space: signer.did(),
+        id: targetLink.id!,
+        type: "application/json",
+        path: [],
+      }, { value: source.getAsLink() });
+      runtime.prepareTxForCommit(tx);
+      expect((await tx.commit()).ok).toBeDefined();
 
       expect(cfcLabelViewForCell(target)).toBeUndefined();
     } finally {
@@ -286,7 +292,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -353,6 +358,7 @@ describe("CFC label view helpers", () => {
           },
         },
       });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       expect(cfcLabelViewForCell(target.key("detail"))).toEqual({
@@ -395,7 +401,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -412,25 +417,29 @@ describe("CFC label view helpers", () => {
         undefined,
         tx,
       );
-      target.set({ inner: source } as never);
       const targetLink = parseLink(target.getAsLink());
       writeSeedEnvelopeDoc(tx, signer.did());
+      // The link and its label map are seeded in one whole-envelope write.
       tx.writeOrThrow({
         space: signer.did(),
         id: targetLink.id!,
         type: "application/json",
-        path: ["cfc"],
+        path: [],
       }, {
-        version: 1,
-        schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
-        labelMap: {
+        value: { inner: source.getAsLink() },
+        cfc: {
           version: 1,
-          entries: [{
-            path: ["inner"],
-            label: { confidentiality: ["link-slot-only"] },
-          }],
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["inner"],
+              label: { confidentiality: ["link-slot-only"] },
+            }],
+          },
         },
       });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       // Both resolutions run on ONE transaction, so the second is the repeat.
@@ -468,7 +477,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const view = {
@@ -504,7 +512,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -572,6 +579,7 @@ describe("CFC label view helpers", () => {
           },
         },
       });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       const storedLinkField = cfcLabelViewFromMetadata(
@@ -674,7 +682,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -733,6 +740,7 @@ describe("CFC label view helpers", () => {
           },
         },
       });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       const value = target.get();
@@ -763,7 +771,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -826,6 +833,7 @@ describe("CFC label view helpers", () => {
           },
         },
       });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       const recovered = target.get();
@@ -855,7 +863,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -902,7 +909,14 @@ describe("CFC label view helpers", () => {
         },
         tx,
       );
-      target.set(source);
+      const targetLink = parseLink(target.getAsLink());
+      tx.writeOrThrow({
+        space: signer.did(),
+        id: targetLink.id!,
+        type: "application/json",
+        path: [],
+      }, { value: source.getAsLink() });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       const recovered = target.get() as { a: unknown; b: unknown };
@@ -934,7 +948,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -1003,6 +1016,7 @@ describe("CFC label view helpers", () => {
           },
         },
       });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       const recovered = target.get() as { item: unknown };
@@ -1032,7 +1046,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -1108,6 +1121,7 @@ describe("CFC label view helpers", () => {
           },
         },
       });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       const recovered = (list.get() as unknown[]).map((item) =>
@@ -1151,7 +1165,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const tx = runtime.edit();
@@ -1213,6 +1226,7 @@ describe("CFC label view helpers", () => {
           },
         },
       });
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       const recovered = (list.get() as unknown[]).map((item) =>
@@ -1259,21 +1273,22 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
-      const tx = runtime.edit();
+      // The items are seeded in their own transaction, committed before the
+      // pattern runs.
+      const seedTx = runtime.edit();
       const first = runtime.getCell(
         signer.did(),
         "cfc-label-view-pattern-first",
         undefined,
-        tx,
+        seedTx,
       );
       const second = runtime.getCell(
         signer.did(),
         "cfc-label-view-pattern-second",
         undefined,
-        tx,
+        seedTx,
       );
       for (
         const [cell, value, integrity] of [
@@ -1282,8 +1297,8 @@ describe("CFC label view helpers", () => {
         ] as const
       ) {
         const link = parseLink(cell.getAsLink());
-        writeSeedEnvelopeDoc(tx, signer.did());
-        tx.writeOrThrow({
+        writeSeedEnvelopeDoc(seedTx, signer.did());
+        seedTx.writeOrThrow({
           space: signer.did(),
           id: link.id!,
           type: "application/json",
@@ -1303,7 +1318,10 @@ describe("CFC label view helpers", () => {
           },
         });
       }
+      runtime.prepareTxForCommit(seedTx);
+      await seedTx.commit();
 
+      const tx = runtime.edit();
       const { commonfabric } = createTrustedBuilder(runtime);
       const { pattern } = commonfabric;
       const renderLabels = pattern<{ items: unknown[] }>(({ items }) => {
@@ -1332,9 +1350,10 @@ describe("CFC label view helpers", () => {
       const result = runtime.run(
         tx,
         renderLabels,
-        { items: [first, second] },
+        { items: [first.withTx(tx), second.withTx(tx)] },
         resultCell,
       );
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
       await result.pull();
 
@@ -1353,20 +1372,24 @@ describe("CFC label view helpers", () => {
         .key("value")
         .resolveAsCell();
 
-      expect(cfcLabelViewForCell(firstValue)).toEqual({
-        version: 1,
-        entries: [{
-          path: [],
-          label: { integrity: ["item-integrity-first"] },
-        }],
-      });
-      expect(cfcLabelViewForCell(secondValue)).toEqual({
-        version: 1,
-        entries: [{
-          path: [],
-          label: { integrity: ["item-integrity-second"] },
-        }],
-      });
+      // The view of a mapped output carries a second entry describing the
+      // link the slot holds, and that entry's atoms name the reference. The
+      // set below holds every named integrity atom at the root path, so it
+      // covers the item's own label and any other item's that reached it.
+      const rootIntegrityAtoms = (cell: unknown) =>
+        new Set(
+          (cfcLabelViewForCell(cell)?.entries ?? [])
+            .filter((entry) => entry.path.length === 0)
+            .flatMap((entry) => entry.label.integrity ?? [])
+            .filter((atom) => typeof atom === "string"),
+        );
+
+      expect(rootIntegrityAtoms(firstValue)).toEqual(
+        new Set(["item-integrity-first"]),
+      );
+      expect(rootIntegrityAtoms(secondValue)).toEqual(
+        new Set(["item-integrity-second"]),
+      );
     } finally {
       await runtime.dispose();
       await storageManager.close();
@@ -1418,6 +1441,7 @@ describe("CFC label view helpers", () => {
         tx,
       );
       target.setRawUntyped([source.getAsLink()]);
+      runtime.prepareTxForCommit(tx);
       await tx.commit();
 
       const schemaLessEntry = runtime.getCellFromLink({
@@ -1503,7 +1527,6 @@ describe("CFC label view helpers", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     try {
       const cell = runtime.getCell<{ body: string }>(
@@ -1531,6 +1554,7 @@ describe("CFC label view helpers", () => {
             },
           },
         });
+        runtime.prepareTxForCommit(tx);
         return tx.commit();
       };
 

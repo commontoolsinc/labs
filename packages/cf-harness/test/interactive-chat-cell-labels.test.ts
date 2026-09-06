@@ -14,7 +14,11 @@ import { normalize } from "@std/path/posix";
 import { readHarnessRunState } from "../src/artifacts.ts";
 import type { HarnessCellLabels } from "../src/contracts/cell-labels.ts";
 import { HANDLE_TOKEN_PATTERN } from "../src/contracts/handle-table.ts";
-import type { HarnessChatEventEnvelope } from "../src/contracts/interactive-chat.ts";
+import {
+  DEFAULT_HARNESS_CHAT_POLICY,
+  type HarnessChatEventEnvelope,
+  type HarnessChatPolicy,
+} from "../src/contracts/interactive-chat.ts";
 import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { HarnessInteractiveChatService } from "../src/interactive-chat-service.ts";
@@ -34,6 +38,7 @@ import {
   seedSpaceDb,
   SPACE_DB_DID,
 } from "./support/space-db.ts";
+import { directPromptSlotBindingFor } from "./support/prompt-slot-binding.ts";
 
 /** A sandbox that answers the capability probe and nothing else. */
 class FakeSandboxRuntime implements SandboxRuntime {
@@ -143,6 +148,15 @@ const readCellLabels = async (runRoot: string): Promise<HarnessCellLabels> =>
     await Deno.readTextFile(join(runRoot, "cell-labels.json")),
   ) as HarnessCellLabels;
 
+/** The console binds a person's typed prompt as the turn's direct command. */
+const directPromptSlotBinding = directPromptSlotBindingFor("cell-labels");
+
+/** The default console policy, with the turn carried as a direct command. */
+const directCommandPolicy: HarnessChatPolicy = {
+  ...DEFAULT_HARNESS_CHAT_POLICY,
+  promptSlot: directPromptSlotBinding,
+};
+
 describe("interactive chat cell labels", () => {
   it("ends a turn that minted an input cell with `cell-labels.json` read from the space under its run and under its child's", async () => {
     const directory = await Deno.makeTempDir({
@@ -158,7 +172,6 @@ describe("interactive chat cell labels", () => {
           sandboxRuntime: new FakeSandboxRuntime(),
           artifactRoot,
           model: "test-model",
-          cfcEnforcementMode: "disabled",
           fabricSession: {
             apiUrl: "http://fabric.test",
             identityKeyPath: join(directory, "key.pkcs8"),
@@ -198,6 +211,7 @@ describe("interactive chat cell labels", () => {
       const turn = await service.startTurn("request-2", {
         sessionId: started.result.sessionId,
         input: { text: "Have a subagent inspect the secret." },
+        policy: directCommandPolicy,
         inputCells: [{
           name: "secret",
           ref: `/${LABELED_CELL_ID}/value/secret`,

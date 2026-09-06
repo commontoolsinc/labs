@@ -56,17 +56,22 @@ const newRuntime = (
   new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager,
-    // The shipped shell posture (enforcement-matrix §3): explicit + flow
-    // persist. Individual transactions escalate to `enforce-strict` per-tx,
-    // which is exactly the seam H4 differentiates.
+    // The tests naming `enforce-explicit` assert that a writer-fit misfit
+    // lands as a persist-and-flag diagnostic and lets the commit through.
+    // The tests that want the misfit to reject raise the mode on their own
+    // transaction, so both halves run over one fixture.
     cfcEnforcementMode: "enforce-explicit",
+    // Writer-fit assertions read the flow join back out of the replica's
+    // stored labelMap, which needs the labels persisted.
     cfcFlowLabels: "persist",
   });
 
 /**
- * A runtime at the strictness where a writer-fit misfit rejects. The blocks
- * below pin it rather than inheriting the file's `enforce-explicit` default,
- * because that is where the exemptions they cover are observable.
+ * A runtime where a writer-fit misfit rejects the commit. The blocks that
+ * reach for it assert a commit fails with "writer-fit confidentiality
+ * misfit", or that an exemption lets the same join through; both need the
+ * misfit to reject. Its flow labels persist so the join reaches the
+ * replica's stored labelMap, where those blocks read it back.
  */
 const strictRuntime = (
   storageManager: ReturnType<typeof StorageManager.emulate>,
@@ -3104,12 +3109,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
       // a labeled transaction writes both.
 
       const storageManager = StorageManager.emulate({ as: signer });
-      const runtime = new Runtime({
-        apiUrl: new URL("https://example.com"),
-        storageManager,
-        cfcEnforcementMode: "enforce-strict",
-        cfcFlowLabels: "persist",
-      });
+      const runtime = strictRuntime(storageManager);
       try {
         await seedSecretSource(runtime, "writer-fit-seam-both-source");
 
@@ -3166,12 +3166,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
       // ceiling.
 
       const storageManager = StorageManager.emulate({ as: signer });
-      const runtime = new Runtime({
-        apiUrl: new URL("https://example.com"),
-        storageManager,
-        cfcEnforcementMode: "enforce-strict",
-        cfcFlowLabels: "persist",
-      });
+      const runtime = strictRuntime(storageManager);
       try {
         await seedSecretSource(runtime, "writer-fit-seam-aimed-source");
 
@@ -3241,12 +3236,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
       // nothing, which a create-only route would refuse.
 
       const storageManager = StorageManager.emulate({ as: signer });
-      const runtime = new Runtime({
-        apiUrl: new URL("https://example.com"),
-        storageManager,
-        cfcEnforcementMode: "enforce-strict",
-        cfcFlowLabels: "persist",
-      });
+      const runtime = strictRuntime(storageManager);
       try {
         await seedSecretSource(runtime, "writer-fit-seam-piece-source");
 

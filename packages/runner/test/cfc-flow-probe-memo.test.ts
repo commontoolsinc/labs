@@ -32,6 +32,7 @@ import {
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
 
@@ -42,7 +43,8 @@ const newRuntime = (options: { serverExecution?: boolean } = {}) => {
   const runtime = new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager,
-    cfcEnforcementMode: "enforce-explicit",
+    // The probe runs only while the flow dial is on. Every count assertion
+    // below reads the counters that probe increments.
     cfcFlowLabels: "persist",
     ...(options.serverExecution
       ? { experimental: { serverExecution: true } }
@@ -148,7 +150,9 @@ describe("CFC flow-label probe memo (stage C tuning T1)", () => {
   it("the memo never hides a positive verdict: a labeled read marks the tx relevant on the first ask and the second ask does not probe", async () => {
     const { runtime, storageManager } = newRuntime();
     try {
-      // Doc A: labeled secret (the S16 laundering seed).
+      // Doc A: a labeled source (the S16 laundering seed). Its atom is the
+      // audience of the space every document here lives in, so the copy
+      // below lands inside the audience it came from.
       const seed = runtime.edit();
       const sourceId = runtime.getCell(
         signer.did(),
@@ -170,7 +174,7 @@ describe("CFC flow-label probe memo (stage C tuning T1)", () => {
             version: 1,
             entries: [{
               path: ["secret"],
-              label: { confidentiality: ["secret"] },
+              label: { confidentiality: [cfcAtom.space(signer.did())] },
             }],
           },
         },
@@ -202,6 +206,65 @@ describe("CFC flow-label probe memo (stage C tuning T1)", () => {
       // probed again by anyone.
       expect(after.computed - before.computed).toBe(1);
       expect(after.memo - before.memo).toBe(0);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
+  });
+
+  it("a write over a labeled path marks the tx relevant with no labeled read", async () => {
+    // The probe answers on the write side too: a transaction that reads
+    // nothing labeled, but overwrites a path in a document that carries
+    // stored label entries, still has flow-label work to do. Reaching that
+    // check means walking past the read side with nothing to report.
+    const { runtime, storageManager } = newRuntime();
+    try {
+      const seed = runtime.edit();
+      const targetId = runtime.getCell(
+        signer.did(),
+        "probe-memo-write-target",
+        undefined,
+      ).getAsNormalizedFullLink().id;
+      writeSeedEnvelopeDoc(seed, signer.did());
+      seed.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: targetId,
+        path: [],
+      }, {
+        value: { secret: "s3cr3t" },
+        cfc: {
+          version: 1,
+          schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+          labelMap: {
+            version: 1,
+            entries: [{
+              path: ["secret"],
+              label: { confidentiality: [cfcAtom.space(signer.did())] },
+            }],
+          },
+        },
+      });
+      expect((await seed.commit()).ok).toBeDefined();
+
+      const tx = runtime.edit();
+      tx.writeOrThrow({
+        space: signer.did(),
+        scope: "space",
+        id: targetId,
+        path: ["value", "note"],
+      }, "a sibling the label map does not name");
+      // Committed without `prepareTxForCommit`, so the commit chokepoint is
+      // the first to ask. The probe answers yes and marks the transaction
+      // relevant there, which leaves it relevant and unprepared, and an
+      // enforcing rung refuses that.
+      const before = probeCounts(runtime);
+      expect(tx.getCfcState().relevant).toBe(false);
+      const result = await tx.commit();
+      expect(tx.getCfcState().relevant).toBe(true);
+      expect(String(result.error?.message)).toContain("was not prepared");
+      const after = probeCounts(runtime);
+      expect(after.computed - before.computed).toBe(1);
     } finally {
       await runtime.dispose();
       await storageManager.close();

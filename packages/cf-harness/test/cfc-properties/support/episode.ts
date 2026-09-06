@@ -31,10 +31,7 @@ import { RUN_CHECKS } from "../../../audit/checks/registry.ts";
 import { auditRunFamily } from "../../../audit/checks/structural.ts";
 import { discoverRunFamilies } from "../../../audit/evidence.ts";
 import type { CheckResult, CheckVerdict } from "../../../audit/report.ts";
-import {
-  CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
-  type PromptSlotBinding,
-} from "../../../src/contracts/prompt-slot.ts";
+import { type PromptSlotBinding } from "../../../src/contracts/prompt-slot.ts";
 import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 
 import { CAPABILITY_PROBE_SENTINEL } from "../../../src/diagnostics.ts";
@@ -46,6 +43,7 @@ import type {
   SandboxShellRequest,
 } from "../../../src/sandbox/types.ts";
 import { responsesBodyFromChatFixture } from "../../support/responses-fixture.ts";
+import { directPromptSlotBindingFor } from "../../support/prompt-slot-binding.ts";
 
 const signer = await Identity.fromPassphrase("cf-harness cfc properties");
 
@@ -56,15 +54,8 @@ const signer = await Identity.fromPassphrase("cf-harness cfc properties");
  * command the enforcing modes refuse on authority instead (AH-CFC-9), and an
  * episode that stops there establishes nothing about a label.
  */
-export const directPromptSlotBinding: PromptSlotBinding = {
-  type: CFC_PROMPT_SLOT_BOUND_ATOM_TYPE,
-  source: { type: "test.prompt-slot", subject: "cfc-property" },
-  role: "direct-command",
-  kernelName: "cf-harness",
-  surface: "test",
-  subject: "cfc-property",
-  eventId: "event-cfc-property",
-};
+export const directPromptSlotBinding: PromptSlotBinding =
+  directPromptSlotBindingFor("cfc-property");
 
 /**
  * A sandbox that runs nothing.

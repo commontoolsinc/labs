@@ -72,13 +72,19 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       ...(mode !== undefined ? { cfcLabelMetadataProtection: mode } : {}),
       ...(extra.cfcFlowLabels !== undefined
         ? { cfcFlowLabels: extra.cfcFlowLabels }
         : {}),
     });
     return { storageManager, runtime };
+  };
+
+  // A store that declares the clauses the seeded source's join carries.
+  // Writer-fit measures a join against the declaration at its path.
+  const joinStoreSchema: JSONSchema = {
+    type: "object",
+    ifc: { confidentiality: [userAtom, caveatAtom] } as never,
   };
 
   const persistedEntriesFor = (
@@ -96,11 +102,13 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
 
   // Seed a source doc in `sourceSpace` whose STORED cfc metadata carries a
   // root User clause and a sub-path Caveat entry (the authoritative label
-  // state the link machinery re-derives from).
+  // state the link machinery re-derives from). `extraRootClauses` adds
+  // further clauses to the root entry.
   const seedSource = async (
     runtime: Runtime,
     sourceSpace: MemorySpace,
     name: string,
+    extraRootClauses: { type: string; id: string }[] = [],
   ): Promise<string> => {
     const seed = runtime.edit();
     const sourceId = parseLink(
@@ -120,7 +128,10 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
         labelMap: {
           version: 1,
           entries: [
-            { path: [], label: { confidentiality: [userAtom] } },
+            {
+              path: [],
+              label: { confidentiality: [userAtom, ...extraRootClauses] },
+            },
             { path: ["secret"], label: { confidentiality: [caveatAtom] } },
           ],
         },
@@ -348,7 +359,9 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
       // flipped holds verbatim foreign entries; flipping to enforce commits
       // only NEW cross-space entries — no rewrite of the existing ones —
       // and consumers dispatch on the marker shape, so both forms coexist.
-      const { storageManager, runtime } = makeRuntime(undefined);
+      // The pre-flip world is staged with the dial pinned off; the flipped
+      // half raises the same runtime's dial per transaction below.
+      const { storageManager, runtime } = makeRuntime("off");
       try {
         const sourceId = await seedSource(runtime, spaceA, "mixed-source");
         const targetName = "mixed-target";
@@ -432,6 +445,8 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
 
     it("commits flow-derived entries whose join consumed a foreign labeled read", async () => {
       const { storageManager, runtime } = makeRuntime("enforce", {
+        // `persist` is the rung that writes the flow join into the stored
+        // label map. The assertions below read that `derived` entry.
         cfcFlowLabels: "persist",
       });
       try {
@@ -440,7 +455,12 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
         const source = runtime.getCell(spaceA, "flow-source", undefined, tx);
         const raw = source.getRaw() as { secret?: string };
         expect(raw.secret).toBe("classified");
-        const derived = runtime.getCell(spaceB, "flow-derived", undefined, tx);
+        const derived = runtime.getCell<{ copied: string }>(
+          spaceB,
+          "flow-derived",
+          joinStoreSchema as never,
+          tx,
+        );
         derived.set({ copied: `${raw.secret}!` });
         tx.prepareCfc();
         expect((await tx.commit()).ok).toBeDefined();
@@ -457,7 +477,12 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
           type: CFC_ATOM_TYPE.User,
           subject: commitCfcFieldValue("did:key:alice"),
         });
-        expect(JSON.stringify(entries)).not.toContain("did:key:alice");
+        // The store's declaration is authored in this space and persists
+        // as written. Filtering it out leaves the entries the cross-space
+        // transform governs.
+        expect(
+          JSON.stringify(entries.filter((e) => e.origin !== "declared")),
+        ).not.toContain("did:key:alice");
       } finally {
         await runtime.dispose();
       }
@@ -471,11 +496,16 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
       // other protects.
 
       const { storageManager, runtime } = makeRuntime("enforce", {
+        // `persist` is the rung that writes the flow join into the stored
+        // label map. The declaration the assertions below read is minted
+        // from that join.
         cfcFlowLabels: "persist",
       });
       try {
         await seedSource(runtime, spaceA, "substrate-source");
         const tx = runtime.edit();
+        // Route 2 runs at a rung that rejects a writer-fit misfit. The
+        // `declared` entry the assertions below read is minted there.
         tx.setCfcEnforcementMode("enforce-strict");
         const source = runtime.getCell(
           spaceA,
@@ -532,10 +562,18 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
 
     it("persists same-space flow-derived entries verbatim", async () => {
       const { storageManager, runtime } = makeRuntime("enforce", {
+        // `persist` is the rung that writes the flow join into the stored
+        // label map. The assertions below read that `derived` entry.
         cfcFlowLabels: "persist",
       });
       try {
-        await seedSource(runtime, spaceB, "flow-same-source");
+        // The source carries its own space clause beside the User clause.
+        // Residency admits a space's own clause, and the store below
+        // declares the other two.
+        await seedSource(runtime, spaceB, "flow-same-source", [{
+          type: CFC_ATOM_TYPE.Space,
+          id: spaceB,
+        }]);
         const tx = runtime.edit();
         const source = runtime.getCell(
           spaceB,
@@ -544,10 +582,10 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
           tx,
         );
         const raw = source.getRaw() as { secret?: string };
-        const derived = runtime.getCell(
+        const derived = runtime.getCell<{ copied: string }>(
           spaceB,
           "flow-same-derived",
-          undefined,
+          joinStoreSchema as never,
           tx,
         );
         derived.set({ copied: `${raw.secret}!` });
@@ -616,40 +654,24 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
   });
 
   describe("off", () => {
-    it("persists bytes identical to a runtime without the option", async () => {
+    it("persists the verbatim plaintext form", async () => {
       const offRun = makeRuntime("off");
-      const defaultRun = makeRuntime(undefined);
       try {
-        for (const { runtime } of [offRun, defaultRun]) {
-          const sourceId = await seedSource(runtime, spaceA, "off-source");
-          await commitLinkWrite(runtime, spaceA, sourceId, "off-target");
-        }
+        const sourceId = await seedSource(offRun.runtime, spaceA, "off-source");
+        await commitLinkWrite(offRun.runtime, spaceA, sourceId, "off-target");
         const offTarget = parseLink(
           offRun.runtime.getCell(spaceB, "off-target").getAsLink(),
-        ).id!;
-        const defaultTarget = parseLink(
-          defaultRun.runtime.getCell(spaceB, "off-target").getAsLink(),
         ).id!;
         const offEntries = persistedEntriesFor(
           offRun.storageManager,
           spaceB,
           offTarget,
         );
-        const defaultEntries = persistedEntriesFor(
-          defaultRun.storageManager,
-          spaceB,
-          defaultTarget,
-        );
         expect(offEntries.length).toBeGreaterThan(0);
-        expect(JSON.stringify(offEntries)).toBe(
-          JSON.stringify(defaultEntries),
-        );
-        // And those bytes are the verbatim plaintext form.
         expect(containsCfcFieldCommitment(offEntries)).toBe(false);
         expect(JSON.stringify(offEntries)).toContain("did:key:alice");
       } finally {
         await offRun.runtime.dispose();
-        await defaultRun.runtime.dispose();
       }
     });
   });
@@ -800,6 +822,14 @@ describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", ()
       );
       const targetSchema: JSONSchema = {
         type: "object",
+        // The store declares the committed clause the consumed read
+        // carries.
+        ifc: {
+          confidentiality: [{
+            type: CFC_ATOM_TYPE.User,
+            subject: commitCfcFieldValue("did:key:alice"),
+          }],
+        } as never,
         properties: {
           out: {
             type: "string",

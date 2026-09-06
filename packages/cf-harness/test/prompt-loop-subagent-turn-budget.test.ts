@@ -19,6 +19,7 @@ import type {
   SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
+import { directPromptSlotBindingFor } from "./support/prompt-slot-binding.ts";
 
 class FakeSandboxRuntime implements SandboxRuntime {
   describe(): SandboxRuntimeDescription {
@@ -122,6 +123,14 @@ interface DelegateTaskOutput {
 }
 
 /**
+ * The prompt that starts the run, bound as a direct command. A tool call made
+ * under this binding is authorized at every enforcement rung.
+ */
+const directPromptSlotBinding = directPromptSlotBindingFor(
+  "subagent-turn-budget",
+);
+
+/**
  * The parent script: one turn spent on a `bash` call, then a `delegate_task`
  * call on the parent's last available turn under `maxModelTurns: 2`.
  */
@@ -153,7 +162,6 @@ const delegateOutputFromExhaustedParent = async (options: {
     sandboxRuntime: new FakeSandboxRuntime(),
     runId: options.runId,
     model: "gpt-5.4",
-    cfcEnforcementMode: "disabled",
   });
   const loop = new CfHarnessPromptLoop({
     apiKey: "test-key",
@@ -168,6 +176,7 @@ const delegateOutputFromExhaustedParent = async (options: {
 
   await expect(loop.runPrompt({
     prompt: "Delegate the inspection.",
+    promptSlotBinding: directPromptSlotBinding,
     onTranscriptEvent: ({ message }) => {
       if (
         message.role === "tool" &&

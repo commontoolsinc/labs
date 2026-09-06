@@ -171,7 +171,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(minted.table);
@@ -189,7 +188,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
         ], requestBodies),
       });
 
-      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+      const result = await loop.runPrompt({
+        prompt: "Delegate the plan.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       expect(result.finalAssistantText).toBe(
         "Parent received the child summary.",
@@ -231,7 +233,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(minted.table);
@@ -277,7 +278,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(minted.table);
@@ -296,7 +296,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
         ], requestBodies),
       });
 
-      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+      const result = await loop.runPrompt({
+        prompt: "Delegate the plan.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       // The payload never crosses as itself: the parent's third request (the
       // one carrying the delegate tool output) holds the scrub marker, not
@@ -323,7 +326,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(minted.table);
@@ -348,7 +350,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
         ], requestBodies),
       });
 
-      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+      const result = await loop.runPrompt({
+        prompt: "Delegate the plan.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       const parentText = chatViewOfRequest(requestBodies[2]).messages
         .map((message) => message.content).join("\n");
@@ -371,7 +376,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(minted.table);
@@ -408,7 +412,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
         ], requestBodies),
       });
 
-      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+      const result = await loop.runPrompt({
+        prompt: "Delegate the plan.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       // The decoded structured value is what the parent actually consumes.
       // A re-escaped payload sitting in a key, a value, or an array entry
@@ -482,7 +489,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(table);
@@ -501,7 +507,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
         ], requestBodies),
       });
 
-      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+      const result = await loop.runPrompt({
+        prompt: "Delegate the plan.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       const parentText = chatViewOfRequest(requestBodies[2]).messages
         .map((message) => message.content).join("\n");
@@ -522,7 +531,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
       sandboxRuntime: new FakeSandboxRuntime(),
       runId,
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     });
     const requestBodies: unknown[] = [];
     const loop = new CfHarnessPromptLoop({
@@ -537,7 +545,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
       ], requestBodies),
     });
 
-    const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+    const result = await loop.runPrompt({
+      prompt: "Delegate the plan.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     const toolMessage = result.transcript.find(
       (message) => message.role === "tool",
@@ -552,7 +563,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: "run-skill-handle-bad-shape",
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     });
     const requestBodies: unknown[] = [];
     const loop = new CfHarnessPromptLoop({
@@ -567,7 +577,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
       ], requestBodies),
     });
 
-    const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+    const result = await loop.runPrompt({
+      prompt: "Delegate the plan.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     const toolMessage = result.transcript.find(
       (message) => message.role === "tool",
@@ -590,7 +603,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(minted.table);
@@ -607,7 +619,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
         ], requestBodies),
       });
 
-      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+      const result = await loop.runPrompt({
+        prompt: "Delegate the plan.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       const toolMessage = result.transcript.find(
         (message) => message.role === "tool",
@@ -632,7 +647,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(minted.table);
@@ -650,7 +664,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
         ], requestBodies),
       });
 
-      const result = await loop.runPrompt({ prompt: "Delegate the plan." });
+      const result = await loop.runPrompt({
+        prompt: "Delegate the plan.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       const toolMessage = result.transcript.find(
         (message) => message.role === "tool",
@@ -671,7 +688,6 @@ describe("prompt-loop delegate_task skillHandle", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId,
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       await engine.recordHandleTable(minted.table);
@@ -691,7 +707,10 @@ describe("prompt-loop delegate_task skillHandle", () => {
         ], requestBodies),
       });
 
-      await loop.runPrompt({ prompt: "Delegate the plan." });
+      await loop.runPrompt({
+        prompt: "Delegate the plan.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       const childText = chatViewOfRequest(requestBodies[1]).messages
         .map((message) => message.content).join("\n");

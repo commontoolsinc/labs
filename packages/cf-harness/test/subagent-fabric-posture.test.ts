@@ -23,6 +23,7 @@ import type {
   SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
+import { directPromptSlotBindingFor } from "./support/prompt-slot-binding.ts";
 
 class FakeSandboxRuntime implements SandboxRuntime {
   describe(): SandboxRuntimeDescription {
@@ -77,6 +78,14 @@ const SESSION = {
   cfcPosture: "max-enforcement",
 } as const;
 
+/**
+ * The authority the prompt carries. `delegate_task` has an effect, so the
+ * enforcing modes admit it only from a prompt bound as a direct command.
+ */
+const directPromptSlotBinding = directPromptSlotBindingFor(
+  "subagent-fabric-posture",
+);
+
 const delegateCallTurn = (id: string, goal: string) => ({
   choices: [{
     index: 0,
@@ -129,7 +138,6 @@ describe("subagent fabric-session posture", () => {
           sandboxRuntime: new FakeSandboxRuntime(),
           runId,
           model: "gpt-5.4",
-          cfcEnforcementMode: "disabled",
           fabricSession: SESSION,
         }),
         fetchFn: scriptedFetch([
@@ -139,7 +147,10 @@ describe("subagent fabric-session posture", () => {
         ]),
       });
 
-      await loop.runPrompt({ prompt: "Delegate the inspection." });
+      await loop.runPrompt({
+        prompt: "Delegate the inspection.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       const parentState = await readHarnessRunState(
         join(artifactRoot, runId, "run-state.json"),

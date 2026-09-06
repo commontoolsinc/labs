@@ -95,6 +95,10 @@ describe("profile-home addPiece (followable piece card)", () => {
         pieceId: TARGET_PIECE,
         title: "Demo Counter",
       });
+      // A manual test tx prepares the way the runtime's own commit paths do:
+      // an enforcing rung refuses a relevant transaction that arrives
+      // unprepared.
+      rt.prepareTxForCommit(tx2);
       const commit2 = await tx2.commit();
       expect(commit2.error).toBeUndefined();
       await result.pull();

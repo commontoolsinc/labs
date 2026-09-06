@@ -81,6 +81,15 @@ const altProfileViewSchema: JSONSchema = {
   ifc: { confidentiality: ["other"] },
 } as JSONSchema;
 
+// The document each wish target is seeded into. Its root declares the
+// confidentiality its `name` carries. A second seeding transaction has already
+// read the first secret, and the writer-fit check reads this declaration when
+// that transaction writes a new profile here.
+const secretProfileDocSchema: JSONSchema = {
+  ...(profileViewSchema as Record<string, unknown>),
+  ifc: { confidentiality: ["secret"] },
+} as JSONSchema;
+
 const ambiguousWishShapedSchema: JSONSchema = {
   type: "object",
   properties: {
@@ -175,8 +184,10 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
     });
 
     it("observe mode's in-commit prepare fallback survives the crash instead of throwing", async () => {
-      // Observe mode is a runtime-level dial (a stricter tx cannot be
-      // weakened in place), so this test runs on its own observe runtime.
+      // Observe mode is the subject, so this test runs on its own runtime.
+      // The commit below runs with no prepare call, and
+      // `expect(result.error).toBeUndefined()` reads back that observe records
+      // the prep crash and lets the commit through.
       const observeManager = StorageManager.emulate({ as: signer });
       const observeRuntime = new Runtime({
         apiUrl: new URL("https://example.com"),
@@ -420,7 +431,7 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
           const secretCell = rt.runtime.getCell(
             space,
             cellName,
-            profileViewSchema,
+            secretProfileDocSchema,
             tx,
           );
           secretCell.set({ name });

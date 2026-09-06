@@ -149,6 +149,10 @@ describe("profile-create real card-add (REAL patterns, cross-space)", () => {
       profileCell.withTx(writeTx).key("addElement").send({
         title: "My Card",
       });
+      // A manual test tx prepares the way the runtime's own commit paths do:
+      // an enforcing rung refuses a relevant transaction that arrives
+      // unprepared.
+      rt2.prepareTxForCommit(writeTx);
       const writeCommit = await writeTx.commit();
       // The regression site. Pre-fix: "writeAuthorizedBy must remain stable".
       expect(writeCommit.error).toBeUndefined();
