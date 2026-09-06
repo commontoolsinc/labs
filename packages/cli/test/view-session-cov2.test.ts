@@ -217,10 +217,10 @@ function doctoredDiffSession(
   return { s, done };
 }
 
-Deno.test("diffcov2: pressing Enter on a body line with no hunk header above is a no-op on the counts (h < 0)", () => {
-  // A buffer with an added ("+") line but no "@@" header and no diff/---/+++
-  // markers above it: pressing Enter splits the added line and calls
-  // adjustHunkCounts, which finds no hunk for the row and returns.
+Deno.test("diffcov2: pressing Enter on a body line in no parsed hunk leaves the counts alone", () => {
+  // A buffer with an added ("+") line but no "@@" header, so the text parses
+  // to no hunk containing the row: pressing Enter splits the added line and
+  // calls adjustHunkCounts, which finds no hunk for the row and returns.
   const lines = [
     " context one",
     " context two",
