@@ -642,11 +642,30 @@ grammar, and it carries the normalization and confusable policy with it.
 a *kind* by searching the reader's own discovery collections — favorites,
 mentionables, profile elements — and may return several candidates and a picker
 (`docs/common/conventions/wish.md`). A citation names one *instance* and
-resolves deterministically through the scope chain. Both would spell themselves
-with `#`. Either they are one system, in which case a tag search is the
-outermost rung of the same scope chain and the well-known targets that resolve
-by recency need reconciling with the rule that nothing hidden decides what a
-name means; or they are two systems and one of them needs a different sigil.
+resolves deterministically through the scope chain. Both spell themselves with
+`#`.
+
+One surface already routes on the mark alone: Shuttle's `cd` classifies an
+operand beginning `#` as a wish and resolves it as one (`place.ts`,
+`verbs.ts`), so `cd #favorites` is a wish query without the `wish` verb being
+named. Nothing routes a `#` token to a citation the same way — the editor's
+trigger produces one while a person types, and decides what is a reference by
+membership in its map rather than by the token's shape.
+
+So the mark is already load-bearing in one direction and not the other, and
+what is unsettled is what a surface should do when it must choose. **Step 5 is
+where that arises**, which is why it is blocked here rather than merely
+awaiting an answer: sigil parsing reads `#` out of prose generally, and a
+reader that resolves both kinds has to decide which a token is. Until then
+either they are one system, in which case a tag search is the outermost rung
+of the same scope chain and the well-known targets that resolve by recency
+need reconciling with the rule that nothing hidden decides what a name means;
+or they are two systems and one of them needs a different sigil.
+
+The cost that exists now is a reader's rather than a parser's: the same mark
+means "search a kind, perhaps pick from several" in one place and "this exact
+member, resolved deterministically" in another, and only context separates
+them.
 
 **Which spelling a renderer prefers** when several are available and all round
 trip — a collection's compact form, its path form, and any space-level name the
