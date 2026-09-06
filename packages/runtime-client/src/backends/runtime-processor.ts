@@ -709,26 +709,17 @@ type RuntimeOperationSession = {
 };
 
 export class RuntimeProcessor {
-  // These members stay TypeScript-private rather than becoming `#` names, which
-  // is the convention elsewhere. `test/backends/runtime-processor.test.ts`
-  // drives this class by calling methods off `RuntimeProcessor.prototype`
-  // against a stand-in receiver — in places a plain object literal holding just
-  // the one field a handler reads. A `#` name is scoped to real instances, so
-  // every such call would throw `Receiver must be an instance of class
-  // RuntimeProcessor`. Converting the class means rewriting that suite to build
-  // real instances.
-
-  private runtime: Runtime;
-  private cc: PiecesController;
-  private spaces = new Map<DID, PiecesController>();
-  private identity: Identity;
-  private _isDisposed = false;
-  private disposingPromise: Promise<void> | undefined;
+  #runtime: Runtime;
+  #cc: PiecesController;
+  #spaces = new Map<DID, PiecesController>();
+  #identity: Identity;
+  #isDisposed = false;
+  #disposingPromise: Promise<void> | undefined;
   // Cell subscriptions, by the subscribing client's scoped cell key. Two
   // clients watching one cell are two subscriptions, so that one client's
   // unsubscribe stops its own feed and no one else's.
-  private subscriptions = new Map<string, Cancel>();
-  private operationSubscriptions = new Map<
+  #subscriptions = new Map<string, Cancel>();
+  #operationSubscriptions = new Map<
     string,
     {
       cancel?: Cancel;
@@ -737,12 +728,12 @@ export class RuntimeProcessor {
       client: WorkerClient;
     }
   >();
-  private operationSessions = new Map<string, RuntimeOperationSession>();
-  private pieceSourceConfirmations = new Map<
+  #operationSessions = new Map<string, RuntimeOperationSession>();
+  #pieceSourceConfirmations = new Map<
     string,
     { token: string; prepared: PreparedPieceSourceChange }
   >();
-  private telemetry: RuntimeTelemetry;
+  #telemetry: RuntimeTelemetry;
   // Whom this runtime acts as and under which enforcement configuration,
   // fixed by the client that initialized it. A runtime carries exactly one,
   // and every client attached to it is checked against this one.
@@ -753,27 +744,27 @@ export class RuntimeProcessor {
   // VDOM mounts, by the mounting client's scoped mount id. A mount id comes
   // from a counter that starts at 1 in each client's own document, so the id
   // alone names a mount only while there is one client.
-  private vdomMounts = new Map<
+  #vdomMounts = new Map<
     string,
     { reconciler: WorkerReconciler; cancel: Cancel; client: WorkerClient }
   >();
-  private vdomBatchIdCounter = 0;
+  #vdomBatchIdCounter = 0;
   // Render-boundary declassification policy applied to every mount's
   // reconciler. Set from InitializationData; "allow" preserves prior behavior.
-  private renderDeclassificationPolicy: RenderDeclassificationPolicy = "allow";
+  #renderDeclassificationPolicy: RenderDeclassificationPolicy = "allow";
   // Host-supplied default render ceiling applied to every mount's
   // reconciler. Undefined preserves prior behavior (no ceiling).
-  private renderConfidentialityCeiling?: RenderConfidentialityCeiling;
+  #renderConfidentialityCeiling?: RenderConfidentialityCeiling;
   // Runner-side display-boundary resolver (Epic H3b) built once from the
   // runtime's trust config + acting principal when a ceiling is in force.
   // Rewrites a cell's label through the exchange rules so `Space(...)`-via-
   // `HasRole` principal forms resolve before the reconciler's ceiling fit.
-  private renderConfidentialityResolver?: RenderConfidentialityResolver;
+  #renderConfidentialityResolver?: RenderConfidentialityResolver;
   // §4.9.3 Stage 2: the membership provider shared with the resolver above and
   // handed to every mount's reconciler, so a `Space(X)`-labeled cell blocked
   // before X's ACL synced re-renders once the ACL grants READ. Undefined when
   // no ceiling is in force.
-  private renderMembershipProvider?: SpaceMembershipProvider;
+  #renderMembershipProvider?: SpaceMembershipProvider;
 
   private constructor(
     runtime: Runtime,
@@ -783,13 +774,169 @@ export class RuntimeProcessor {
     telemetry: RuntimeTelemetry,
     securityContext: RuntimeSecurityContext,
   ) {
-    this.runtime = runtime;
-    this.cc = cc;
-    this.spaces.set(initSpace, cc);
-    this.identity = identity;
-    this.telemetry = telemetry;
-    this.telemetry.addEventListener("telemetry", this.#onTelemetry);
+    this.#runtime = runtime;
+    this.#cc = cc;
+    this.#spaces.set(initSpace, cc);
+    this.#identity = identity;
+    this.#telemetry = telemetry;
+    this.#telemetry.addEventListener("telemetry", this.#onTelemetry);
     this.#securityContext = securityContext;
+  }
+
+  /**
+   * The collaborators this processor was built over, the tables it keeps by
+   * client and by session, the render policy a mount inherits, and the
+   * per-space context step, which a test drives directly.
+   */
+  get accessForTestingOnly(): {
+    runtime: Runtime;
+    cc: PiecesController;
+    readonly spaces: Map<DID, PiecesController>;
+    identity: Identity;
+    subscriptions: Map<string, Cancel>;
+    operationSubscriptions: Map<
+      string,
+      {
+        cancel?: Cancel;
+        cancelled: boolean;
+        sessionKey?: string;
+        client: WorkerClient;
+      }
+    >;
+    operationSessions: Map<string, RuntimeOperationSession>;
+    pieceSourceConfirmations: Map<
+      string,
+      { token: string; prepared: PreparedPieceSourceChange }
+    >;
+    telemetry: RuntimeTelemetry;
+    isDisposed: boolean;
+    vdomMounts: Map<
+      string,
+      { reconciler: WorkerReconciler; cancel: Cancel; client: WorkerClient }
+    >;
+    vdomBatchIdCounter: number;
+    renderDeclassificationPolicy: RenderDeclassificationPolicy;
+    renderConfidentialityCeiling: RenderConfidentialityCeiling | undefined;
+    getSpaceCtx(space: DID): PiecesController;
+  } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
+    return {
+      get runtime() {
+        return outerThis.#runtime;
+      },
+      set runtime(value) {
+        outerThis.#runtime = value;
+      },
+      get cc() {
+        return outerThis.#cc;
+      },
+      set cc(value) {
+        outerThis.#cc = value;
+      },
+      spaces: this.#spaces,
+      get identity() {
+        return outerThis.#identity;
+      },
+      set identity(value) {
+        outerThis.#identity = value;
+      },
+      get subscriptions() {
+        return outerThis.#subscriptions;
+      },
+      set subscriptions(value) {
+        outerThis.#subscriptions = value;
+      },
+      get operationSubscriptions() {
+        return outerThis.#operationSubscriptions;
+      },
+      set operationSubscriptions(value) {
+        outerThis.#operationSubscriptions = value;
+      },
+      get operationSessions() {
+        return outerThis.#operationSessions;
+      },
+      set operationSessions(value) {
+        outerThis.#operationSessions = value;
+      },
+      get pieceSourceConfirmations() {
+        return outerThis.#pieceSourceConfirmations;
+      },
+      set pieceSourceConfirmations(value) {
+        outerThis.#pieceSourceConfirmations = value;
+      },
+      get telemetry() {
+        return outerThis.#telemetry;
+      },
+      set telemetry(value) {
+        outerThis.#telemetry = value;
+      },
+      get isDisposed() {
+        return outerThis.#isDisposed;
+      },
+      set isDisposed(value) {
+        outerThis.#isDisposed = value;
+      },
+      get vdomMounts() {
+        return outerThis.#vdomMounts;
+      },
+      set vdomMounts(value) {
+        outerThis.#vdomMounts = value;
+      },
+      get vdomBatchIdCounter() {
+        return outerThis.#vdomBatchIdCounter;
+      },
+      set vdomBatchIdCounter(value) {
+        outerThis.#vdomBatchIdCounter = value;
+      },
+      get renderDeclassificationPolicy() {
+        return outerThis.#renderDeclassificationPolicy;
+      },
+      set renderDeclassificationPolicy(value) {
+        outerThis.#renderDeclassificationPolicy = value;
+      },
+      get renderConfidentialityCeiling() {
+        return outerThis.#renderConfidentialityCeiling;
+      },
+      set renderConfidentialityCeiling(value) {
+        outerThis.#renderConfidentialityCeiling = value;
+      },
+      getSpaceCtx: (space) => this.#getSpaceCtx(space),
+    };
+  }
+
+  /**
+   * The constructor, which `initialize()` otherwise keeps to itself, so that
+   * a test builds a real instance over the collaborators it supplies.
+   */
+  static get accessForTestingOnly(): {
+    construct(
+      runtime: Runtime,
+      cc: PiecesController,
+      initSpace: DID,
+      identity: Identity,
+      telemetry: RuntimeTelemetry,
+      securityContext: RuntimeSecurityContext,
+    ): RuntimeProcessor;
+  } {
+    return {
+      construct: (
+        runtime,
+        cc,
+        initSpace,
+        identity,
+        telemetry,
+        securityContext,
+      ) =>
+        new RuntimeProcessor(
+          runtime,
+          cc,
+          initSpace,
+          identity,
+          telemetry,
+          securityContext,
+        ),
+    };
   }
 
   static async initialize(data: InitializationData): Promise<RuntimeProcessor> {
@@ -917,21 +1064,21 @@ export class RuntimeProcessor {
     // InitializationData crosses postMessage with no runtime validation, so a
     // typo'd host config or version-skewed peer must fail CLOSED, not open:
     // any present-but-unknown value becomes "deny"; absent stays "allow".
-    processor.renderDeclassificationPolicy =
+    processor.#renderDeclassificationPolicy =
       normalizeRenderDeclassificationPolicy(data.renderDeclassificationPolicy);
-    processor.renderConfidentialityCeiling =
+    processor.#renderConfidentialityCeiling =
       normalizeRenderConfidentialityCeiling(data.renderConfidentialityCeiling);
-    processor.renderMembershipProvider = renderMembershipProviderFor(
+    processor.#renderMembershipProvider = renderMembershipProviderFor(
       runtime,
       identity,
-      processor.renderConfidentialityCeiling,
+      processor.#renderConfidentialityCeiling,
     );
-    processor.renderConfidentialityResolver = renderConfidentialityResolverFor(
+    processor.#renderConfidentialityResolver = renderConfidentialityResolverFor(
       runtime,
       identity,
-      processor.renderConfidentialityCeiling,
+      processor.#renderConfidentialityCeiling,
       space,
-      processor.renderMembershipProvider,
+      processor.#renderMembershipProvider,
     );
     processor.#intentOutcomeCancel = subscribeEventAttentionNotifications(
       runtime,
@@ -962,8 +1109,8 @@ export class RuntimeProcessor {
    */
   watchSiteTable(): void {
     try {
-      const userDid = this.runtime.userIdentityDID;
-      const table = this.runtime.getCell(
+      const userDid = this.#runtime.userIdentityDID;
+      const table = this.#runtime.getCell(
         userDid,
         siteTableCause(userDid),
         siteTableSchema,
@@ -971,7 +1118,7 @@ export class RuntimeProcessor {
       Promise.resolve(table.sync()).then(() => {
         // dispose() may have run while sync was in flight — installing
         // the sink then would leak a live subscription past disposal.
-        if (this._isDisposed) return;
+        if (this.#isDisposed) return;
         this.#siteTableCancel = table.sink(
           (entries: Readonly<SiteTable> | undefined) => {
             const latestEntries = new Map<
@@ -1005,7 +1152,7 @@ export class RuntimeProcessor {
             }
             for (const entry of latestEntries.values()) {
               try {
-                const accepted = this.runtime.registerSpaceHost(
+                const accepted = this.#runtime.registerSpaceHost(
                   entry.did,
                   entry.host,
                 );
@@ -1013,7 +1160,7 @@ export class RuntimeProcessor {
                 // accepted hint can fix a different host.
                 if (!accepted) {
                   const key = `${entry.did}|${entry.host}`;
-                  const effective = this.runtime.hostForSpace(
+                  const effective = this.#runtime.hostForSpace(
                     entry.did,
                   ).toString();
                   if (
@@ -1057,49 +1204,49 @@ export class RuntimeProcessor {
    * created by a pattern some existing context started).
    */
   piecesFor(space: DID): PiecesController | undefined {
-    return this.spaces.get(space);
+    return this.#spaces.get(space);
   }
 
   dispose(): Promise<void> {
-    if (this.disposingPromise) return this.disposingPromise;
-    this._isDisposed = true;
-    this.disposingPromise = (async () => {
-      this.telemetry.removeEventListener("telemetry", this.#onTelemetry);
+    if (this.#disposingPromise) return this.#disposingPromise;
+    this.#isDisposed = true;
+    this.#disposingPromise = (async () => {
+      this.#telemetry.removeEventListener("telemetry", this.#onTelemetry);
       try {
         this.#intentOutcomeCancel?.();
         this.#intentOutcomeCancel = undefined;
         this.#siteTableCancel?.();
         this.#siteTableCancel = undefined;
-        for (const cancel of this.subscriptions.values()) {
+        for (const cancel of this.#subscriptions.values()) {
           cancel();
         }
-        this.subscriptions.clear();
-        for (const subscription of this.operationSubscriptions.values()) {
+        this.#subscriptions.clear();
+        for (const subscription of this.#operationSubscriptions.values()) {
           subscription.cancelled = true;
           subscription.cancel?.();
         }
-        this.operationSubscriptions.clear();
-        this.operationSessions.clear();
-        this.pieceSourceConfirmations.clear();
+        this.#operationSubscriptions.clear();
+        this.#operationSessions.clear();
+        this.#pieceSourceConfirmations.clear();
 
         // Clean up VDOM mounts
-        for (const { reconciler, cancel } of this.vdomMounts.values()) {
+        for (const { reconciler, cancel } of this.#vdomMounts.values()) {
           cancel();
           reconciler.unmount();
         }
-        this.vdomMounts.clear();
+        this.#vdomMounts.clear();
 
-        await this.runtime.storageManager.synced();
-        await this.runtime.dispose();
+        await this.#runtime.storageManager.synced();
+        await this.#runtime.dispose();
       } catch (e) {
         console.error(`Failure during WorkerRuntime disposal: ${e}`);
       }
     })();
-    return this.disposingPromise;
+    return this.#disposingPromise;
   }
 
   isDisposed(): boolean {
-    return this._isDisposed;
+    return this.#isDisposed;
   }
 
   /**
@@ -1151,15 +1298,15 @@ export class RuntimeProcessor {
   disposeClient(client: WorkerClient): void {
     const prefix = clientKeyPrefix(client);
 
-    for (const [key, cancel] of [...this.subscriptions]) {
+    for (const [key, cancel] of [...this.#subscriptions]) {
       if (!key.startsWith(prefix)) continue;
       cancel();
-      this.subscriptions.delete(key);
+      this.#subscriptions.delete(key);
     }
 
     for (
       const [subscriptionId, subscription] of [
-        ...this.operationSubscriptions,
+        ...this.#operationSubscriptions,
       ]
     ) {
       if (subscription.client.id !== client.id) continue;
@@ -1169,16 +1316,16 @@ export class RuntimeProcessor {
       }, client);
     }
 
-    for (const [key, mount] of [...this.vdomMounts]) {
+    for (const [key, mount] of [...this.#vdomMounts]) {
       if (!key.startsWith(prefix)) continue;
       mount.cancel();
       mount.reconciler.unmount();
-      this.vdomMounts.delete(key);
+      this.#vdomMounts.delete(key);
     }
 
-    for (const [sessionId, session] of [...this.operationSessions]) {
+    for (const [sessionId, session] of [...this.#operationSessions]) {
       if (session.clientId !== client.id) continue;
-      this.operationSessions.delete(sessionId);
+      this.#operationSessions.delete(sessionId);
     }
   }
 
@@ -1194,27 +1341,27 @@ export class RuntimeProcessor {
    * with no implicit default at this layer. (The runtime guard catches
    * out-of-date callers that still omit it.)
    */
-  private getSpaceCtx(space: DID): PiecesController {
+  #getSpaceCtx(space: DID): PiecesController {
     const target: DID | undefined = space;
     if (!target) {
       throw new Error("Piece operations must name a space explicitly.");
     }
-    let ctx = this.spaces.get(target);
+    let ctx = this.#spaces.get(target);
     if (!ctx) {
       const created = new PiecesController(
-        { as: this.identity, space: target },
-        this.runtime,
+        { as: this.#identity, space: target },
+        this.#runtime,
       );
       ctx = created;
-      this.spaces.set(target, ctx);
+      this.#spaces.set(target, ctx);
       // The constructor kicks the space-cell sync into `ready` without
       // awaiting it. Observe the failure and evict, so a transient
       // error (unreachable host, bad space) doesn't poison this space
       // for the worker's lifetime — the next request rebuilds the
       // context — and doesn't surface as an unhandled rejection.
       created.ready.catch((error: unknown) => {
-        if (this.spaces.get(target) === created) {
-          this.spaces.delete(target);
+        if (this.#spaces.get(target) === created) {
+          this.#spaces.delete(target);
         }
         console.error(
           `[RuntimeProcessor] Space context for ${target} failed to sync:`,
@@ -1240,18 +1387,18 @@ export class RuntimeProcessor {
           "use getCfcLabel for the redacted display view",
       );
     }
-    let cell = getCell(this.runtime, request.cell);
+    let cell = getCell(this.#runtime, request.cell);
     if (request.meta !== undefined) {
-      const rootCell = getCell(this.runtime, { ...request.cell, path: [] });
+      const rootCell = getCell(this.#runtime, { ...request.cell, path: [] });
       if (
         request.meta === "pattern" || request.meta === "argument" ||
         request.meta === "result"
       ) {
         // For the meta link fields, use the meta linked cell instead
-        const rootCell = getCell(this.runtime, { ...request.cell, path: [] });
+        const rootCell = getCell(this.#runtime, { ...request.cell, path: [] });
         const link = getMetaLink(rootCell, request.meta);
         if (link === undefined) return { value: undefined };
-        cell = this.runtime.getCellFromLink({
+        cell = this.#runtime.getCellFromLink({
           ...link,
           path: [...link.path, ...request.cell.path],
         });
@@ -1294,13 +1441,13 @@ export class RuntimeProcessor {
   async handleCellPull(
     request: CellPullRequest,
   ): Promise<CellGetResponse> {
-    await getCell(this.runtime, request.cell).pull();
+    await getCell(this.#runtime, request.cell).pull();
     // A client pull is the freshness barrier, not a cache sample. Reactive
     // quiescence can expose a lazy scoped target before the commit that creates
     // its value has registered or landed. Cross the commit-aware fixpoint in
     // the same request so the returned value and subsequent operations observe
     // all work causally demanded by this pull.
-    await this.runtime.scheduler.idleWithPendingCommits();
+    await this.#runtime.scheduler.idleWithPendingCommits();
     return this.handleCellGet({
       type: RequestType.CellGet,
       cell: request.cell,
@@ -1315,8 +1462,8 @@ export class RuntimeProcessor {
       throw new TypeError("Cell initialize requires a defined value.");
     }
     const initial = mapCellRefsToSigilLinks(request.value);
-    const result = await this.runtime.editWithRetry((tx) => {
-      const cell = getCell(this.runtime, request.cell).withTx(tx);
+    const result = await this.#runtime.editWithRetry((tx) => {
+      const cell = getCell(this.#runtime, request.cell).withTx(tx);
       // Initialization materializes the same backing value a whole-cell write
       // targets. A schema default is a readable fallback, not proof that the
       // cell has been stored, and a write redirect is an address rather than
@@ -1351,7 +1498,7 @@ export class RuntimeProcessor {
   // the value's shape.
   handleCellSet(request: CellSetRequest): void | Promise<void> {
     const commit = this.applyCellSet(request);
-    if (request.awaitCommit) return this.requireCellCommit(commit);
+    if (request.awaitCommit) return this.#requireCellCommit(commit);
     void commit.catch((error) => {
       console.error(
         "[RuntimeProcessor] Cell set commit failed:",
@@ -1361,30 +1508,30 @@ export class RuntimeProcessor {
   }
 
   handleCellPush(request: CellPushRequest): void | Promise<void> {
-    const tx = this.runtime.edit();
+    const tx = this.#runtime.edit();
     // A frame ordinal distinguishes members within one append. The operation
     // cause distinguishes first members minted by independent client runtimes.
     const frame = pushFrame({
       cause: `runtime-client cell push ${crypto.randomUUID()}`,
-      runtime: this.runtime,
+      runtime: this.#runtime,
       tx,
       space: request.cell.space,
       generatedIdCounter: 0,
     });
     try {
-      const cell = getCell(this.runtime, request.cell) as Cell<FabricValue[]>;
+      const cell = getCell(this.#runtime, request.cell) as Cell<FabricValue[]>;
       const values = request.values.map(mapCellRefsToSigilLinks);
       cell.withTx(tx).push(...values);
     } finally {
       popFrame(frame);
     }
-    this.runtime.prepareTxForCommit(tx);
+    this.#runtime.prepareTxForCommit(tx);
     const commit = tx.commit();
-    if (request.awaitCommit) return this.requireCellCommit(commit);
-    this.observeCellCommit(commit, "push");
+    if (request.awaitCommit) return this.#requireCellCommit(commit);
+    this.#observeCellCommit(commit, "push");
   }
 
-  private operationSessionKey(cell: CellGetRequest["cell"]): string {
+  #operationSessionKey(cell: CellGetRequest["cell"]): string {
     return JSON.stringify([
       cell.space,
       cell.id,
@@ -1393,7 +1540,7 @@ export class RuntimeProcessor {
     ]);
   }
 
-  private operationTarget(
+  #operationTarget(
     cell: CellGetRequest["cell"],
     operationSessionId: string | undefined,
     client: WorkerClient,
@@ -1404,24 +1551,24 @@ export class RuntimeProcessor {
     ) {
       throw new Error("operation session id is malformed");
     }
-    const cellKey = this.operationSessionKey(cell);
+    const cellKey = this.#operationSessionKey(cell);
     const sessionKey = operationSessionId;
     // A few unit harnesses construct the processor from its prototype. Keep
     // this lazy initialization in addition to the class field so those
     // read-only protocol harnesses exercise the same session behavior.
-    this.operationSessions ??= new Map();
+    this.#operationSessions ??= new Map();
     const existing = sessionKey === undefined
       ? undefined
-      : this.operationSessions.get(sessionKey);
+      : this.#operationSessions.get(sessionKey);
     if (existing !== undefined) {
       if (existing.cellKey !== cellKey) {
         throw new Error("operation session cannot change its source cell");
       }
       return { ...existing.target, sessionKey, session: existing };
     }
-    const link = getCell(this.runtime, cell).resolveAsCell()
+    const link = getCell(this.#runtime, cell).resolveAsCell()
       .getAsNormalizedFullLink();
-    const provider = this.runtime.storageManager.open(link.space);
+    const provider = this.#runtime.storageManager.open(link.space);
     const capability = hasOperationStorageCapability(provider)
       ? provider
       : provider.replica;
@@ -1447,7 +1594,7 @@ export class RuntimeProcessor {
       subscriptions: new Set<string>(),
       clientId: client.id,
     };
-    this.operationSessions.set(sessionKey, session);
+    this.#operationSessions.set(sessionKey, session);
     return { ...target, sessionKey, session };
   }
 
@@ -1455,7 +1602,7 @@ export class RuntimeProcessor {
     request: OperationCapabilitiesRequest,
     client: WorkerClient = ownerClient,
   ): Promise<OperationCapabilitiesResponse> {
-    const { capability } = this.operationTarget(
+    const { capability } = this.#operationTarget(
       request.cell,
       request.operationSessionId,
       client,
@@ -1467,7 +1614,7 @@ export class RuntimeProcessor {
     request: OperationQueryRequest,
     client: WorkerClient = ownerClient,
   ): Promise<OperationFieldResponse> {
-    const { capability, address } = this.operationTarget(
+    const { capability, address } = this.#operationTarget(
       request.cell,
       request.operationSessionId,
       client,
@@ -1483,7 +1630,7 @@ export class RuntimeProcessor {
     request: OperationApplyRequest,
     client: WorkerClient = ownerClient,
   ): Promise<OperationApplyResponse> {
-    const { capability, address } = this.operationTarget(
+    const { capability, address } = this.#operationTarget(
       request.cell,
       request.operationSessionId,
       client,
@@ -1506,10 +1653,10 @@ export class RuntimeProcessor {
     request: OperationSubscribeRequest,
     client: WorkerClient = ownerClient,
   ): Promise<BooleanResponse> {
-    if (this.operationSubscriptions.has(request.subscriptionId)) {
+    if (this.#operationSubscriptions.has(request.subscriptionId)) {
       return { value: false };
     }
-    const { capability, address, sessionKey, session } = this.operationTarget(
+    const { capability, address, sessionKey, session } = this.#operationTarget(
       request.cell,
       request.operationSessionId,
       client,
@@ -1527,7 +1674,7 @@ export class RuntimeProcessor {
       client,
       ...(sessionKey === undefined ? {} : { sessionKey }),
     };
-    this.operationSubscriptions.set(request.subscriptionId, subscription);
+    this.#operationSubscriptions.set(request.subscriptionId, subscription);
     session?.subscriptions.add(request.subscriptionId);
     let cancel: Cancel;
     try {
@@ -1536,7 +1683,7 @@ export class RuntimeProcessor {
         ...(request.after === undefined ? {} : { after: request.after }),
       }, (field) => {
         if (
-          this.operationSubscriptions.get(request.subscriptionId) !==
+          this.#operationSubscriptions.get(request.subscriptionId) !==
             subscription
         ) return;
         queueMicrotask(() =>
@@ -1549,22 +1696,23 @@ export class RuntimeProcessor {
       });
     } catch (error) {
       if (
-        this.operationSubscriptions.get(request.subscriptionId) === subscription
+        this.#operationSubscriptions.get(request.subscriptionId) ===
+          subscription
       ) {
-        this.operationSubscriptions.delete(request.subscriptionId);
+        this.#operationSubscriptions.delete(request.subscriptionId);
         session?.subscriptions.delete(request.subscriptionId);
         if (
           sessionKey !== undefined && session?.subscriptions.size === 0 &&
-          this.operationSessions.get(sessionKey) === session
+          this.#operationSessions.get(sessionKey) === session
         ) {
-          this.operationSessions.delete(sessionKey);
+          this.#operationSessions.delete(sessionKey);
         }
       }
       throw error;
     }
     if (
-      this._isDisposed || subscription.cancelled ||
-      this.operationSubscriptions.get(request.subscriptionId) !== subscription
+      this.#isDisposed || subscription.cancelled ||
+      this.#operationSubscriptions.get(request.subscriptionId) !== subscription
     ) {
       cancel();
       return { value: false };
@@ -1577,7 +1725,7 @@ export class RuntimeProcessor {
     request: OperationReleaseRequest,
     client: WorkerClient = ownerClient,
   ): Promise<BooleanResponse> {
-    const { capability, address } = this.operationTarget(
+    const { capability, address } = this.#operationTarget(
       request.cell,
       request.operationSessionId,
       client,
@@ -1595,7 +1743,7 @@ export class RuntimeProcessor {
     request: OperationUnsubscribeRequest,
     client: WorkerClient = ownerClient,
   ): BooleanResponse {
-    const subscription = this.operationSubscriptions.get(
+    const subscription = this.#operationSubscriptions.get(
       request.subscriptionId,
     );
     // A subscription is its subscriber's to stop, and no one else's. The id
@@ -1605,14 +1753,14 @@ export class RuntimeProcessor {
     if (subscription === undefined || subscription.client.id !== client.id) {
       return { value: false };
     }
-    this.operationSubscriptions.delete(request.subscriptionId);
+    this.#operationSubscriptions.delete(request.subscriptionId);
     subscription.cancelled = true;
     subscription.cancel?.();
     if (subscription.sessionKey !== undefined) {
-      const session = this.operationSessions?.get(subscription.sessionKey);
+      const session = this.#operationSessions?.get(subscription.sessionKey);
       session?.subscriptions.delete(request.subscriptionId);
       if (session?.subscriptions.size === 0) {
-        this.operationSessions.delete(subscription.sessionKey);
+        this.#operationSessions.delete(subscription.sessionKey);
       }
     }
     return { value: true };
@@ -1622,12 +1770,12 @@ export class RuntimeProcessor {
     request: OperationSessionCloseRequest,
     client: WorkerClient = ownerClient,
   ): BooleanResponse {
-    const session = this.operationSessions?.get(request.operationSessionId);
+    const session = this.#operationSessions?.get(request.operationSessionId);
     if (session === undefined || session.clientId !== client.id) {
       return { value: false };
     }
     return {
-      value: this.operationSessions.delete(request.operationSessionId),
+      value: this.#operationSessions.delete(request.operationSessionId),
     };
   }
 
@@ -1636,25 +1784,25 @@ export class RuntimeProcessor {
   // Ordinary UI writes remain fire-and-forget, while strict capability writes
   // can await the same outcome through handleCellSet.
   applyCellSet(request: CellSetRequest) {
-    const cell = getCell(this.runtime, request.cell);
+    const cell = getCell(this.#runtime, request.cell);
     const value = mapCellRefsToSigilLinks(request.value);
-    return this.runtime.commitUiCellWrite(cell, value, {
+    return this.#runtime.commitUiCellWrite(cell, value, {
       blind: true,
-      supersedeKey: this.operationSessionKey(request.cell),
+      supersedeKey: this.#operationSessionKey(request.cell),
     });
   }
 
   handleCellSend(request: CellSendRequest): void | Promise<void> {
-    const tx = this.runtime.edit();
-    const cell = getCell(this.runtime, request.cell);
+    const tx = this.#runtime.edit();
+    const cell = getCell(this.#runtime, request.cell);
     cell.withTx(tx).send(mapCellRefsToSigilLinks(request.event));
-    this.runtime.prepareTxForCommit(tx);
+    this.#runtime.prepareTxForCommit(tx);
     const commit = tx.commit();
-    if (request.awaitCommit) return this.requireCellCommit(commit);
-    this.observeCellCommit(commit, "send");
+    if (request.awaitCommit) return this.#requireCellCommit(commit);
+    this.#observeCellCommit(commit, "send");
   }
 
-  private observeCellCommit(
+  #observeCellCommit(
     commit: ReturnType<ReturnType<Runtime["edit"]>["commit"]>,
     operation: "set" | "push" | "send",
   ): void {
@@ -1676,7 +1824,7 @@ export class RuntimeProcessor {
     );
   }
 
-  private async requireCellCommit(
+  async #requireCellCommit(
     commit: ReturnType<ReturnType<Runtime["edit"]>["commit"]>,
   ): Promise<void> {
     const result = await commit;
@@ -1689,11 +1837,11 @@ export class RuntimeProcessor {
   ): BooleanResponse {
     const key = clientScopedKey(client, cellRefToKey(request.cell));
 
-    if (this.subscriptions.has(key)) {
+    if (this.#subscriptions.has(key)) {
       return { value: false };
     }
 
-    const cell = getCell(this.runtime, request.cell);
+    const cell = getCell(this.#runtime, request.cell);
 
     const cancel = cell.sink((value, cfcLabel) => {
       // Log empty-schema subscriptions that produce CellResult proxies.
@@ -1731,7 +1879,7 @@ export class RuntimeProcessor {
       );
     }, { includeCfcLabel: request.includeCfcLabel === true });
 
-    this.subscriptions.set(key, cancel);
+    this.#subscriptions.set(key, cancel);
     return { value: true };
   }
 
@@ -1740,17 +1888,17 @@ export class RuntimeProcessor {
     client: WorkerClient = ownerClient,
   ): BooleanResponse {
     const key = clientScopedKey(client, cellRefToKey(request.cell));
-    const cancel = this.subscriptions.get(key);
+    const cancel = this.#subscriptions.get(key);
     if (cancel) {
       cancel();
-      this.subscriptions.delete(key);
+      this.#subscriptions.delete(key);
       return { value: true };
     }
     return { value: false };
   }
 
   handleCellResolveAsCell(request: CellResolveAsCellRequest): CellResponse {
-    const cell = getCell(this.runtime, request.cell);
+    const cell = getCell(this.#runtime, request.cell);
     const resolved = cell.resolveAsCell();
     const ref = createCellRef(resolved);
     if (
@@ -1780,7 +1928,7 @@ export class RuntimeProcessor {
     // Label reads must use the runtime's stored cell identity. The request
     // schema is client-supplied view context, not trusted label provenance.
     const { schema: _schema, ...cellRef } = request.cell;
-    const cell = getCell(this.runtime, cellRef);
+    const cell = getCell(this.#runtime, cellRef);
     // Pure, non-blocking read of the CURRENT local store — no sync. getCfcLabel
     // is the display-label seam, and its only callers are reactive UI components
     // (cf-cfc-label, cf-cfc-authorship, cf-profile-badge) that subscribe to the
@@ -1806,8 +1954,8 @@ export class RuntimeProcessor {
   async handleSqliteQuery(
     request: SqliteQueryRequest,
   ): Promise<SqliteQueryResponse> {
-    const cell = getCell(this.runtime, request.cell);
-    const db = await this.pullSqliteDbRef(cell);
+    const cell = getCell(this.#runtime, request.cell);
+    const db = await this.#pullSqliteDbRef(cell);
     // A direct IPC query has no runner result cell on which to persist the
     // label derived from result-column provenance. Refuse that database shape
     // instead of returning rows with their CFC labels silently stripped.
@@ -1817,7 +1965,7 @@ export class RuntimeProcessor {
           "tables; query them inside a pattern so result labels propagate.",
       );
     }
-    const provider = this.runtime.storageManager.open(request.cell.space);
+    const provider = this.#runtime.storageManager.open(request.cell.space);
     if (!provider.sqliteQuery) {
       throw new Error(
         "sqlite: storage provider does not support queries " +
@@ -1828,7 +1976,7 @@ export class RuntimeProcessor {
       ? undefined
       : encodeSqliteParams(
         request.sql,
-        sqliteParamsForRuntime(this.runtime, request.params),
+        sqliteParamsForRuntime(this.#runtime, request.params),
       );
     const result = await provider.sqliteQuery(db, request.sql, params);
     return {
@@ -1844,14 +1992,14 @@ export class RuntimeProcessor {
   }
 
   async handleSqliteExec(request: SqliteExecRequest): Promise<void> {
-    const source = getCell(this.runtime, request.cell);
-    const db = await this.pullSqliteDbRef(source);
-    const result = await this.runtime.editWithRetry((tx) => {
+    const source = getCell(this.#runtime, request.cell);
+    const db = await this.#pullSqliteDbRef(source);
+    const result = await this.#runtime.editWithRetry((tx) => {
       markDurableReadTx(tx);
       const params = request.params === undefined
         ? undefined
-        : sqliteParamsForRuntime(this.runtime, request.params, tx);
-      const cell = getCell(this.runtime, request.cell).withTx(
+        : sqliteParamsForRuntime(this.#runtime, request.params, tx);
+      const cell = getCell(this.#runtime, request.cell).withTx(
         tx,
       ) as unknown as Cell<unknown> & {
         exec(
@@ -1870,7 +2018,7 @@ export class RuntimeProcessor {
     if (result.error) throw new Error(result.error.message);
   }
 
-  private async pullSqliteDbRef(cell: Cell<unknown>): Promise<SqliteDbRef> {
+  async #pullSqliteDbRef(cell: Cell<unknown>): Promise<SqliteDbRef> {
     await cell.pull();
     const raw = cell.getRaw({ lastNode: "value" });
     const missing = raw === undefined ||
@@ -1885,13 +2033,13 @@ export class RuntimeProcessor {
       // replica. Cross the commit-aware barrier before loading only that first
       // missing value. Non-empty malformed handles still fail immediately in
       // readSqliteDbRef instead of being mistaken for a pending factory.
-      await this.runtime.scheduler.idleWithPendingCommits();
+      await this.#runtime.scheduler.idleWithPendingCommits();
       await cell.sync();
     }
-    return this.readSqliteDbRef(cell);
+    return this.#readSqliteDbRef(cell);
   }
 
-  private readSqliteDbRef(cell: Cell<unknown>): SqliteDbRef {
+  #readSqliteDbRef(cell: Cell<unknown>): SqliteDbRef {
     const raw = cell.getRaw({ lastNode: "value" }) as
       | {
         id?: unknown;
@@ -1934,7 +2082,7 @@ export class RuntimeProcessor {
   }
 
   handleGetCell(request: GetCellRequest): CellResponse {
-    const cell = this.runtime.getCell(
+    const cell = this.#runtime.getCell(
       request.space,
       request.cause,
       request.schema,
@@ -1946,7 +2094,7 @@ export class RuntimeProcessor {
   }
 
   handleGetHomeSpaceCell(_request: GetHomeSpaceCellRequest): CellResponse {
-    const homeSpaceCell = this.runtime.getHomeSpaceCell();
+    const homeSpaceCell = this.#runtime.getHomeSpaceCell();
     return {
       cell: createCellRef(homeSpaceCell),
     };
@@ -1960,7 +2108,7 @@ export class RuntimeProcessor {
   async handleEnsureHomePatternRunning(
     _request: EnsureHomePatternRunningRequest,
   ): Promise<CellResponse> {
-    const homeSpaceCell = this.runtime.getHomeSpaceCell();
+    const homeSpaceCell = this.#runtime.getHomeSpaceCell();
     await homeSpaceCell.sync();
 
     // Always the PiecesController path: ensureDefaultPattern() follows the
@@ -1969,10 +2117,10 @@ export class RuntimeProcessor {
     // nothing else heals the root — so no fast path belongs in front of the
     // controller.
     const homeSession: Session = {
-      as: this.identity,
-      space: this.runtime.userIdentityDID,
+      as: this.#identity,
+      space: this.#runtime.userIdentityDID,
     };
-    const homeCC = new PiecesController(homeSession, this.runtime);
+    const homeCC = new PiecesController(homeSession, this.#runtime);
     await homeCC.synced();
 
     const homePattern = await homeCC.ensureDefaultPattern();
@@ -1990,13 +2138,13 @@ export class RuntimeProcessor {
     // the storage manager, covering event handlers, direct cell IPC writes,
     // and reactive write-backs alike). Internal callers that only need
     // reactive quiescence use runtime.idle() and are unaffected.
-    await this.runtime.scheduler.idleWithPendingCommits();
+    await this.#runtime.scheduler.idleWithPendingCommits();
   }
 
   async handleListEventAttention(
     request: ListEventAttentionRequest,
   ): Promise<EventAttentionListResponse> {
-    const provider = this.runtime.storageManager.open(request.space);
+    const provider = this.#runtime.storageManager.open(request.space);
     const indexSync = await provider.sync(
       SERVER_EXECUTION_ATTENTION_DOC_ID as never,
       undefined,
@@ -2044,7 +2192,7 @@ export class RuntimeProcessor {
           entry?.status !== "needs-attention" ||
           entry.attention === undefined ||
           entry.resolution !== undefined ||
-          (actingUser !== undefined && actingUser !== this.identity.did())
+          (actingUser !== undefined && actingUser !== this.#identity.did())
         ) continue;
         notices.push({
           space: request.space,
@@ -2063,12 +2211,12 @@ export class RuntimeProcessor {
   async handleResolveEventAttention(
     request: ResolveEventAttentionRequest,
   ): Promise<EventAttentionResolveResponse> {
-    const resolve = this.runtime.storageManager.resolveEventAttention;
+    const resolve = this.#runtime.storageManager.resolveEventAttention;
     if (resolve === undefined) {
       throw new Error("storage manager does not support event attention");
     }
     const result = await resolve.call(
-      this.runtime.storageManager,
+      this.#runtime.storageManager,
       request.space,
       request.eventId,
       request.seq,
@@ -2082,13 +2230,13 @@ export class RuntimeProcessor {
   // awaits in-flight compile-cache write-backs so a subsequent load reads the
   // freshly-written entry instead of recompiling.
   async handleFlushCompileCacheWrites(): Promise<void> {
-    await this.runtime.patternManager.flushCompileCacheWrites();
+    await this.#runtime.patternManager.flushCompileCacheWrites();
   }
 
   async handlePieceCreate(
     request: PieceCreateRequest,
   ): Promise<PieceResponse> {
-    const cc = this.getSpaceCtx(request.space);
+    const cc = this.#getSpaceCtx(request.space);
     let program: Program | undefined;
     if ("url" in request.source && request.source.url) {
       const sourceUrl = new URL(request.source.url);
@@ -2136,7 +2284,7 @@ export class RuntimeProcessor {
   async handleGetSpaceRootPattern(
     request: PatternGetSpaceRoot,
   ): Promise<PieceResponse> {
-    const cc = this.getSpaceCtx(request.space);
+    const cc = this.#getSpaceCtx(request.space);
     if (request.start === false) {
       // The caller reads the root's exports rather than rendering it, so
       // resolving what is stored answers it — reconciled, so what it reads
@@ -2158,7 +2306,7 @@ export class RuntimeProcessor {
   async handleRecreateSpaceRootPattern(
     request: RecreateSpaceRootPatternRequest,
   ): Promise<PieceResponse> {
-    const cc = this.getSpaceCtx(request.space);
+    const cc = this.#getSpaceCtx(request.space);
     const piece = await cc.recreateDefaultPattern();
     return {
       piece: createPieceRef(piece.getCell()),
@@ -2179,11 +2327,11 @@ export class RuntimeProcessor {
   async handlePieceGet(
     request: PieceGetRequest,
   ): Promise<PieceResponse> {
-    const cc = this.getSpaceCtx(request.space);
+    const cc = this.#getSpaceCtx(request.space);
     // Probed in the scope the request names, because the id alone names a
     // different document in every other scope: reading the default one would
     // ask whether some unrelated document is a redirect.
-    const requestedCell = this.runtime.getCellFromEntityId(
+    const requestedCell = this.#runtime.getCellFromEntityId(
       cc.getSpace(),
       entityIdFrom(request.pieceId),
       [],
@@ -2197,7 +2345,7 @@ export class RuntimeProcessor {
       requestedCell.getAsNormalizedFullLink(),
     );
     if (redirect?.overwrite === "redirect") {
-      const target = this.runtime.getCellFromLink({
+      const target = this.#runtime.getCellFromLink({
         ...redirect,
         space: redirect.space ?? cc.getSpace(),
         scope: redirect.scope ?? "space",
@@ -2240,8 +2388,8 @@ export class RuntimeProcessor {
   async handlePieceGetSlug(
     request: PieceGetSlugRequest,
   ): Promise<SlugResponse> {
-    const pieces = this.getSpaceCtx(request.space);
-    const cell = this.runtime.getCellFromEntityId(
+    const pieces = this.#getSpaceCtx(request.space);
+    const cell = this.#runtime.getCellFromEntityId(
       pieces.getSpace(),
       entityIdFrom(request.pieceId),
       [],
@@ -2278,19 +2426,19 @@ export class RuntimeProcessor {
   async handleSlugResolve(
     request: SlugResolveRequest,
   ): Promise<SlugReferenceResponse> {
-    const cc = this.getSpaceCtx(request.space);
+    const cc = this.#getSpaceCtx(request.space);
     const space = cc.getSpace();
     try {
       if (request.member === undefined) {
         const { piece } = await resolveSlugTargetInPiece(
-          this.runtime,
+          this.#runtime,
           space,
           request.slug,
         );
         return { piece: createPieceRef(piece), pathAfter: [] };
       }
       const { piece, pathAfter } = await resolveSlugReference(
-        this.runtime,
+        this.#runtime,
         space,
         request.slug,
         [request.member],
@@ -2313,14 +2461,14 @@ export class RuntimeProcessor {
   async handlePieceRemove(
     request: PieceRemoveRequest,
   ): Promise<BooleanResponse> {
-    const cc = this.getSpaceCtx(request.space);
+    const cc = this.#getSpaceCtx(request.space);
     return { value: await cc.remove(request.pieceId, request.scope) };
   }
 
   async handlePieceStart(
     request: PieceStartRequest,
   ): Promise<BooleanResponse> {
-    const cc = this.getSpaceCtx(request.space);
+    const cc = this.#getSpaceCtx(request.space);
     await cc.startPiece(request.pieceId, request.scope);
     // @TODO(runtime-worker-refactor): Return status based on if
     // pattern was actually found and stopped
@@ -2330,7 +2478,7 @@ export class RuntimeProcessor {
   async handlePieceStop(
     request: PieceStopRequest,
   ): Promise<BooleanResponse> {
-    const cc = this.getSpaceCtx(request.space);
+    const cc = this.#getSpaceCtx(request.space);
     await cc.stopPiece(request.pieceId, request.scope);
     // @TODO(runtime-worker-refactor): Return status based on if
     // pattern was actually found and stopped
@@ -2338,7 +2486,7 @@ export class RuntimeProcessor {
   }
 
   async handlePieceGetAll(request: PieceGetAllRequest): Promise<CellResponse> {
-    const pieces = this.getSpaceCtx(request.space);
+    const pieces = this.#getSpaceCtx(request.space);
     const piecesCell = await pieces.getPieceRegistry();
     return {
       cell: createCellRef(piecesCell),
@@ -2346,16 +2494,16 @@ export class RuntimeProcessor {
   }
 
   async handlePieceSynced(request: PieceSyncedRequest): Promise<void> {
-    const pieces = this.getSpaceCtx(request.space);
+    const pieces = this.#getSpaceCtx(request.space);
     await pieces.synced();
   }
 
   async handlePieceGetSource(
     request: PieceGetSourceRequest,
   ): Promise<PieceSourceResponse> {
-    const pieces = this.getSpaceCtx(request.space);
+    const pieces = this.#getSpaceCtx(request.space);
     // The reader syncs the piece itself, as its first step.
-    const cell = this.runtime.getCellFromEntityId(
+    const cell = this.#runtime.getCellFromEntityId(
       pieces.getSpace(),
       entityIdFrom(request.pieceId),
       [],
@@ -2363,15 +2511,15 @@ export class RuntimeProcessor {
       undefined,
       request.scope,
     );
-    const state = await readPieceSourceState(this.runtime, cell);
+    const state = await readPieceSourceState(this.#runtime, cell);
     return { source: { ...state, space: state.space as DID } };
   }
 
   async handlePieceGetSourceRevision(
     request: PieceGetSourceRevisionRequest,
   ): Promise<PieceSourceRevisionResponse> {
-    const pieces = this.getSpaceCtx(request.space);
-    const cell = this.runtime.getCellFromEntityId(
+    const pieces = this.#getSpaceCtx(request.space);
+    const cell = this.#runtime.getCellFromEntityId(
       pieces.getSpace(),
       entityIdFrom(request.pieceId),
       [],
@@ -2381,7 +2529,7 @@ export class RuntimeProcessor {
     );
     return {
       source: await readPieceSourceRevision(
-        this.runtime,
+        this.#runtime,
         cell,
         request.revisionId,
       ),
@@ -2390,8 +2538,8 @@ export class RuntimeProcessor {
 
   /** Clone a source piece into another space. */
   async handlePieceClone(request: PieceCloneRequest): Promise<PieceResponse> {
-    const sourcePieces = this.getSpaceCtx(request.sourceSpace);
-    const sourceCell = this.runtime.getCellFromEntityId(
+    const sourcePieces = this.#getSpaceCtx(request.sourceSpace);
+    const sourceCell = this.#runtime.getCellFromEntityId(
       sourcePieces.getSpace(),
       entityIdFrom(request.pieceId),
       [],
@@ -2401,7 +2549,7 @@ export class RuntimeProcessor {
     );
     const source = new PieceController(sourcePieces, sourceCell);
     const clone = await source.cloneTo(
-      this.getSpaceCtx(request.destinationSpace),
+      this.#getSpaceCtx(request.destinationSpace),
       { copyData: request.copyData === true },
     );
     return { piece: createPieceRef(clone.getCell()) };
@@ -2417,7 +2565,7 @@ export class RuntimeProcessor {
     ) {
       throw new Error("confirmationToken must be a non-empty string");
     }
-    const pieces = this.getSpaceCtx(request.space);
+    const pieces = this.#getSpaceCtx(request.space);
     // Keyed on the piece's whole address, and on its bare hash rather than on
     // the request's spelling of it: a caller may prepare a change under one
     // accepted address form and confirm it under the other, and both must
@@ -2429,10 +2577,10 @@ export class RuntimeProcessor {
     }\u0000${hashStringForEntityAddress(request.pieceId)}`;
     let confirmedChange: PreparedPieceSourceChange | undefined;
     if (request.confirmationToken === undefined) {
-      this.pieceSourceConfirmations.delete(confirmationKey);
+      this.#pieceSourceConfirmations.delete(confirmationKey);
     } else {
-      const pending = this.pieceSourceConfirmations.get(confirmationKey);
-      this.pieceSourceConfirmations.delete(confirmationKey);
+      const pending = this.#pieceSourceConfirmations.get(confirmationKey);
+      this.#pieceSourceConfirmations.delete(confirmationKey);
       if (
         pending === undefined ||
         pending.token !== request.confirmationToken
@@ -2443,7 +2591,7 @@ export class RuntimeProcessor {
       }
       confirmedChange = pending.prepared;
     }
-    const cell = this.runtime.getCellFromEntityId(
+    const cell = this.#runtime.getCellFromEntityId(
       pieces.getSpace(),
       entityIdFrom(request.pieceId),
       [],
@@ -2458,18 +2606,18 @@ export class RuntimeProcessor {
     let confirmationToken: string | undefined;
     if (result.status === "incompatible") {
       confirmationToken = crypto.randomUUID();
-      this.pieceSourceConfirmations.set(confirmationKey, {
+      this.#pieceSourceConfirmations.set(confirmationKey, {
         token: confirmationToken,
         prepared: result.prepared,
       });
     }
     const appliedState = result.status === "applied"
-      ? readPieceSourceMetadata(this.runtime, cell)
+      ? readPieceSourceMetadata(this.#runtime, cell)
       : undefined;
     let state;
     let sourceReadWarning: string | undefined;
     try {
-      state = await readPieceSourceState(this.runtime, cell);
+      state = await readPieceSourceState(this.#runtime, cell);
     } catch (error) {
       if (result.status !== "applied") throw error;
       state = appliedState!;
@@ -2500,9 +2648,9 @@ export class RuntimeProcessor {
   async handleSpaceGetAcl(
     request: SpaceGetAclRequest,
   ): Promise<SpaceAclResponse> {
-    this.getSpaceCtx(request.space);
-    const acl = await new ACLManager(this.runtime, request.space).get();
-    return spaceAclResponse(this.runtime, request.space, acl);
+    this.#getSpaceCtx(request.space);
+    const acl = await new ACLManager(this.#runtime, request.space).get();
+    return spaceAclResponse(this.#runtime, request.space, acl);
   }
 
   async handleSpaceSetAclEntry(
@@ -2514,11 +2662,11 @@ export class RuntimeProcessor {
     if (!isCapability(request.capability)) {
       throw new Error("capability must be `READ`, `WRITE`, or `OWNER`");
     }
-    this.getSpaceCtx(request.space);
-    const manager = new ACLManager(this.runtime, request.space);
+    this.#getSpaceCtx(request.space);
+    const manager = new ACLManager(this.#runtime, request.space);
     const acl = await manager.set(request.user, request.capability);
     return spaceAclResponse(
-      this.runtime,
+      this.#runtime,
       request.space,
       acl,
     );
@@ -2530,11 +2678,11 @@ export class RuntimeProcessor {
     if (!isACLUser(request.user)) {
       throw new Error("user must be `*` or a valid DID");
     }
-    this.getSpaceCtx(request.space);
-    const manager = new ACLManager(this.runtime, request.space);
+    this.#getSpaceCtx(request.space);
+    const manager = new ACLManager(this.#runtime, request.space);
     const acl = await manager.remove(request.user);
     return spaceAclResponse(
-      this.runtime,
+      this.#runtime,
       request.space,
       acl,
     );
@@ -2544,25 +2692,25 @@ export class RuntimeProcessor {
     request: RegisterSpaceHostRequest,
   ): BooleanResponse {
     return {
-      value: this.runtime.registerSpaceHost(request.space, request.host),
+      value: this.#runtime.registerSpaceHost(request.space, request.host),
     };
   }
 
   async handleResolveSpaceName(
     request: ResolveSpaceNameRequest,
   ): Promise<SpaceResponse> {
-    return { space: await this.runtime.resolveSpaceName(request.name) };
+    return { space: await this.#runtime.resolveSpaceName(request.name) };
   }
 
   /** Convergence across every opened space — no space named, none implied. */
   async handleRuntimeSynced(): Promise<void> {
     await Promise.all(
-      [...this.spaces.values()].map((pieces) => pieces.synced()),
+      [...this.#spaces.values()].map((pieces) => pieces.synced()),
     );
   }
 
   getGraphSnapshot(_: GetGraphSnapshotRequest): GraphSnapshotResponse {
-    return { snapshot: this.runtime.scheduler.getGraphSnapshot() };
+    return { snapshot: this.#runtime.scheduler.getGraphSnapshot() };
   }
 
   getLoggerCounts(_: GetLoggerCountsRequest): LoggerCountsResponse {
@@ -2590,14 +2738,14 @@ export class RuntimeProcessor {
 
   setTelemetryEnabled(request: SetTelemetryEnabledRequest): void {
     this.#telemetryEnabled = request.enabled;
-    this.runtime.scheduler.setEventPreflightTelemetryEnabled(request.enabled);
+    this.#runtime.scheduler.setEventPreflightTelemetryEnabled(request.enabled);
   }
 
   /** Changes memory-message compression for every remote storage session. */
   async setMemoryMessageCompression(
     request: SetMemoryMessageCompressionRequest,
   ): Promise<void> {
-    await this.runtime.storageManager.setMessageCompressionEnabled?.(
+    await this.#runtime.storageManager.setMessageCompressionEnabled?.(
       request.enabled,
     );
   }
@@ -2633,7 +2781,7 @@ export class RuntimeProcessor {
   getPatternSources(
     _request: GetPatternSourcesRequest,
   ): PatternSourcesResponse {
-    const snapshot = this.runtime.scheduler.getGraphSnapshot();
+    const snapshot = this.#runtime.scheduler.getGraphSnapshot();
     const seen = new Set<string>();
     const patterns: PatternSourceInfo[] = [];
 
@@ -2646,7 +2794,7 @@ export class RuntimeProcessor {
       // module, so the symbol only selects a representative artifact). A
       // source-free by-identity reload carries no program — omit it (same
       // graceful degradation as the prior meta-cell read's try/catch).
-      const program = this.runtime.patternManager.getPatternProgramBySync(
+      const program = this.#runtime.patternManager.getPatternProgramBySync(
         ref.identity,
         ref.symbol,
       );
@@ -2667,7 +2815,7 @@ export class RuntimeProcessor {
   }
 
   setBreakpoints(request: SetBreakpointsRequest): void {
-    this.runtime.scheduler.setBreakpoints(request.actionIds);
+    this.#runtime.scheduler.setBreakpoints(request.actionIds);
   }
 
   async handleUploadBlob(
@@ -2682,7 +2830,7 @@ export class RuntimeProcessor {
     const suffix = (request.suffix ?? "bin").replace(/^\./, "") || "bin";
     // The blob belongs to the named space, so it uploads to — and its
     // returned URL resolves against — THAT space's host.
-    const host = this.runtime.hostForSpace(request.space);
+    const host = this.#runtime.hostForSpace(request.space);
     const target = new URL(
       `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
       host,
@@ -2725,21 +2873,21 @@ export class RuntimeProcessor {
   async detectNonIdempotent(
     request: DetectNonIdempotentRequest,
   ): Promise<DetectNonIdempotentResponse> {
-    const result = await this.runtime.scheduler.runDiagnosis(
+    const result = await this.#runtime.scheduler.runDiagnosis(
       request.durationMs,
     );
     return { result };
   }
 
   getPatternCoverage(_: GetPatternCoverageRequest): PatternCoverageResponse {
-    return { data: this.runtime.patternCoverage?.toData() ?? null };
+    return { data: this.#runtime.patternCoverage?.toData() ?? null };
   }
 
   getSettleStats(
     _request: GetSettleStatsRequest,
   ): SettleStatsResponse {
     return {
-      stats: this.runtime.scheduler.getSettleStats(),
+      stats: this.#runtime.scheduler.getSettleStats(),
     };
   }
 
@@ -2747,56 +2895,56 @@ export class RuntimeProcessor {
     _request: GetSettleStatsHistoryRequest,
   ): SettleStatsHistoryResponse {
     return {
-      history: this.runtime.scheduler.getSettleStatsHistory(),
+      history: this.#runtime.scheduler.getSettleStatsHistory(),
     };
   }
 
   setSettleStatsEnabled(
     request: SetSettleStatsEnabledRequest,
   ): void {
-    this.runtime.scheduler.setSettleStatsEnabled(request.enabled);
+    this.#runtime.scheduler.setSettleStatsEnabled(request.enabled);
   }
 
   getActionRunTrace(
     _request: GetActionRunTraceRequest,
   ): ActionRunTraceResponse {
     return {
-      trace: this.runtime.scheduler.getActionRunTrace(),
+      trace: this.#runtime.scheduler.getActionRunTrace(),
     };
   }
 
   setActionRunTraceEnabled(
     request: SetActionRunTraceEnabledRequest,
   ): void {
-    this.runtime.scheduler.setActionRunTraceEnabled(request.enabled);
+    this.#runtime.scheduler.setActionRunTraceEnabled(request.enabled);
   }
 
   getTriggerTrace(
     _request: GetTriggerTraceRequest,
   ): TriggerTraceResponse {
     return {
-      trace: this.runtime.scheduler.getTriggerTrace(),
+      trace: this.#runtime.scheduler.getTriggerTrace(),
     };
   }
 
   setTriggerTraceEnabled(
     request: SetTriggerTraceEnabledRequest,
   ): void {
-    this.runtime.scheduler.setTriggerTraceEnabled(request.enabled);
+    this.#runtime.scheduler.setTriggerTraceEnabled(request.enabled);
   }
 
   getWriteStackTrace(
     _request: GetWriteStackTraceRequest,
   ): WriteStackTraceResponse {
     return {
-      trace: this.runtime.getWriteStackTrace(),
+      trace: this.#runtime.getWriteStackTrace(),
     };
   }
 
   setWriteStackTraceMatchers(
     request: SetWriteStackTraceMatchersRequest,
   ): void {
-    this.runtime.setWriteStackTraceMatchers(request.matchers);
+    this.#runtime.setWriteStackTraceMatchers(request.matchers);
   }
 
   async handleRequest(
@@ -2989,7 +3137,7 @@ export class RuntimeProcessor {
     request: VDomEventNotification,
     client: WorkerClient = ownerClient,
   ): void {
-    const mount = this.vdomMounts.get(
+    const mount = this.#vdomMounts.get(
       clientScopedKey(client, request.mountId),
     );
     if (!mount) {
@@ -3027,7 +3175,7 @@ export class RuntimeProcessor {
 
     // Check if already mounted. Scoped to this client, so a second client
     // mounting under the same id mounts rather than displacing the first.
-    if (this.vdomMounts.has(key)) {
+    if (this.#vdomMounts.has(key)) {
       this.handleVDomUnmount(
         { type: RequestType.VDomUnmount, mountId },
         client,
@@ -3036,17 +3184,17 @@ export class RuntimeProcessor {
 
     // Get the cell from the runtime and apply rendererVDOMSchema
     // The schema has a [UI] property definition that handles VDOM unwrapping
-    const rawCell = getCell(this.runtime, cellRef);
+    const rawCell = getCell(this.#runtime, cellRef);
     const cell = rawCell.asSchema(rendererVDOMSchema);
 
     // Create a reconciler that sends ops to the main thread
     const reconciler = new WorkerReconciler({
-      renderDeclassificationPolicy: this.renderDeclassificationPolicy,
-      renderConfidentialityCeiling: this.renderConfidentialityCeiling,
-      resolveRenderConfidentiality: this.renderConfidentialityResolver,
-      membershipProvider: this.renderMembershipProvider,
+      renderDeclassificationPolicy: this.#renderDeclassificationPolicy,
+      renderConfidentialityCeiling: this.#renderConfidentialityCeiling,
+      resolveRenderConfidentiality: this.#renderConfidentialityResolver,
+      membershipProvider: this.#renderMembershipProvider,
       onOps: (ops: VDomOp[]) => {
-        const batchId = this.vdomBatchIdCounter++;
+        const batchId = this.#vdomBatchIdCounter++;
         // `mountId` as the client sent it: the scoping is this worker's
         // bookkeeping, and the client knows its mounts by its own ids.
         client.post({
@@ -3065,7 +3213,7 @@ export class RuntimeProcessor {
     const cancel = reconciler.mount(cell);
 
     // Track this mount
-    this.vdomMounts.set(key, { reconciler, cancel, client });
+    this.#vdomMounts.set(key, { reconciler, cancel, client });
 
     return { rootId: reconciler.getRootNodeId() };
   }
@@ -3079,7 +3227,7 @@ export class RuntimeProcessor {
   ): void {
     const { mountId } = request;
 
-    const mount = this.vdomMounts.get(clientScopedKey(client, mountId));
+    const mount = this.#vdomMounts.get(clientScopedKey(client, mountId));
     if (!mount) {
       console.warn(`[RuntimeProcessor] Mount ${mountId} not found for unmount`);
       return;
@@ -3088,14 +3236,14 @@ export class RuntimeProcessor {
     // Cancel subscriptions and clean up
     mount.cancel();
     mount.reconciler.unmount();
-    this.vdomMounts.delete(clientScopedKey(client, mountId));
+    this.#vdomMounts.delete(clientScopedKey(client, mountId));
   }
 
   handleVDomBatchApplied(
     request: VDomBatchAppliedNotification,
     client: WorkerClient = ownerClient,
   ): void {
-    const mount = this.vdomMounts.get(
+    const mount = this.#vdomMounts.get(
       clientScopedKey(client, request.mountId),
     );
     if (!mount) {

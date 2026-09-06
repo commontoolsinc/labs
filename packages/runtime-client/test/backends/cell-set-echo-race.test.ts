@@ -26,10 +26,11 @@ import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { Runtime } from "@commonfabric/runner";
 import * as V2Storage from "@commonfabric/runner/storage/v2";
-import { RuntimeProcessor } from "@/backends/runtime-processor.ts";
+import type { RuntimeProcessor } from "@/backends/runtime-processor.ts";
 import { createCellRef } from "@/backends/utils.ts";
 import { $conn, CellHandle, type RuntimeClient } from "@/mod.ts";
 import { RuntimeConnection } from "@/client/connection.ts";
+import { buildProcessor } from "./build-processor.ts";
 import { EventEmitter } from "@/client/emitter.ts";
 import type {
   RuntimeTransport,
@@ -149,9 +150,7 @@ class InProcessWorkerTransport extends EventEmitter<RuntimeTransportEvents>
       return;
     }
     void Promise.resolve()
-      .then(() =>
-        RuntimeProcessor.prototype.handleRequest.call(this.#processor, data)
-      )
+      .then(() => this.#processor.handleRequest(data))
       .then(
         (response) =>
           this.outbox.push(
@@ -208,13 +207,8 @@ describe("CellSet / CellUpdate echo race over IPC", () => {
       await seed.commit();
       await runtime.idle();
 
-      // A real RuntimeProcessor over that runtime (fields the cell handlers
-      // touch; the private ctor is bypassed the same way the processor's own
-      // test suite does).
-      const processor = Object.assign(
-        Object.create(RuntimeProcessor.prototype) as RuntimeProcessor,
-        { runtime, subscriptions: new Map() },
-      );
+      // A real `RuntimeProcessor` over that runtime.
+      const processor = buildProcessor({ runtime });
       const transport = new InProcessWorkerTransport(processor);
       (globalThis as { postMessage?: unknown }).postMessage = (m: unknown) =>
         transport.outbox.push(

@@ -7,7 +7,7 @@ import { Identity } from "@commonfabric/identity";
 import type { OperationFieldSnapshot } from "@commonfabric/memory/v2";
 import { Runtime } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
-import { RuntimeProcessor } from "../src/backends/runtime-processor.ts";
+import { buildProcessor } from "./backends/build-processor.ts";
 import type { CellHandle } from "../src/cell-handle.ts";
 import { RuntimeClient } from "../src/runtime-client.ts";
 import {
@@ -333,24 +333,22 @@ describe("RuntimeClient operation collaboration", () => {
       releaseOperationField: () => Promise.resolve(),
       subscribeOperationField: () => Promise.resolve(() => {}),
     };
-    const processor = Object.assign(Object.create(RuntimeProcessor.prototype), {
+    const processor = buildProcessor({
       runtime: operationRuntime(replica),
-    }) as RuntimeProcessor;
+    });
     const cell = {
       space: "did:key:z6Mk-operation-client",
       id: "of:bytes",
       path: [],
     };
 
-    const queried = await RuntimeProcessor.prototype.handleOperationQuery.call(
-      processor,
+    const queried = await processor.handleOperationQuery(
       { type: RequestType.OperationQuery, cell } as never,
     );
     expect(
       (queried.field.materialized as FabricBytes).slice(),
     ).toEqual(new Uint8Array([1, 2, 3]));
-    const applied = await RuntimeProcessor.prototype.handleOperationApply.call(
-      processor,
+    const applied = await processor.handleOperationApply(
       {
         type: RequestType.OperationApply,
         cell,
@@ -396,11 +394,9 @@ describe("RuntimeClient operation collaboration", () => {
         return Promise.resolve(() => cancellations++);
       },
     };
-    const processor = Object.assign(Object.create(RuntimeProcessor.prototype), {
+    const processor = buildProcessor({
       runtime: operationRuntime(replica),
-      operationSubscriptions: new Map(),
-      _isDisposed: false,
-    }) as RuntimeProcessor;
+    });
     const cell = {
       space: "did:key:z6Mk-runtime",
       id: "of:lifecycle",
@@ -533,7 +529,7 @@ describe("RuntimeClient operation collaboration", () => {
     ).toEqual({ value: false });
     expect(cancellations).toBe(2);
 
-    (processor as any)._isDisposed = true;
+    processor.accessForTestingOnly.isDisposed = true;
     expect(
       await processor.handleOperationSubscribe({
         cell,
@@ -542,12 +538,7 @@ describe("RuntimeClient operation collaboration", () => {
     ).toEqual({ value: false });
     expect(cancellations).toBe(3);
 
-    const unsupported = Object.assign(
-      Object.create(RuntimeProcessor.prototype),
-      {
-        runtime: operationRuntime({}),
-      },
-    ) as RuntimeProcessor;
+    const unsupported = buildProcessor({ runtime: operationRuntime({}) });
     await expect(unsupported.handleOperationCapabilities({ cell } as never))
       .rejects.toThrow("does not support");
     await expect(processor.handleOperationCapabilities({
@@ -566,11 +557,9 @@ describe("RuntimeClient operation collaboration", () => {
       subscribeOperationField: () =>
         Promise.reject(new Error("watch installation failed")),
     };
-    const processor = Object.assign(Object.create(RuntimeProcessor.prototype), {
+    const processor = buildProcessor({
       runtime: operationRuntime(capability),
-      operationSubscriptions: new Map(),
-      _isDisposed: false,
-    }) as RuntimeProcessor;
+    });
     const request = {
       cell: {
         space: "did:key:z6Mk-runtime",
@@ -583,8 +572,8 @@ describe("RuntimeClient operation collaboration", () => {
 
     await expect(processor.handleOperationSubscribe(request as never)).rejects
       .toThrow("watch installation failed");
-    expect((processor as any).operationSubscriptions.size).toBe(0);
-    expect((processor as any).operationSessions.size).toBe(0);
+    expect(processor.accessForTestingOnly.operationSubscriptions.size).toBe(0);
+    expect(processor.accessForTestingOnly.operationSessions.size).toBe(0);
   });
 
   it("cancels operation subscriptions during worker disposal", async () => {
@@ -597,18 +586,14 @@ describe("RuntimeClient operation collaboration", () => {
       storageManager: { synced: () => Promise.resolve() },
       dispose: () => Promise.resolve(),
     };
-    const processor = new (RuntimeProcessor as unknown as {
-      new (
-        runtime: unknown,
-        controller: unknown,
-        space: unknown,
-        identity: unknown,
-        telemetry: unknown,
-      ): RuntimeProcessor;
-    })(runtime, {}, "did:key:z6Mk-dispose", {}, telemetry);
-    (processor as any).operationSubscriptions.set(
+    const processor = buildProcessor({
+      runtime,
+      space: "did:key:z6Mk-dispose",
+      telemetry: telemetry as never,
+    });
+    processor.accessForTestingOnly.operationSubscriptions.set(
       "subscription:dispose",
-      { cancelled: false, cancel: () => cancellations++ },
+      { cancelled: false, cancel: () => cancellations++ } as never,
     );
 
     await processor.dispose();
@@ -626,11 +611,9 @@ describe("RuntimeClient operation collaboration", () => {
       releaseOperationField: () => Promise.resolve(),
       subscribeOperationField: () => installed.promise,
     };
-    const processor = Object.assign(Object.create(RuntimeProcessor.prototype), {
+    const processor = buildProcessor({
       runtime: operationRuntime(capability),
-      operationSubscriptions: new Map(),
-      _isDisposed: false,
-    }) as RuntimeProcessor;
+    });
     const request = {
       cell: {
         space: "did:key:z6Mk-runtime",
@@ -648,7 +631,7 @@ describe("RuntimeClient operation collaboration", () => {
 
     await expect(subscribing).resolves.toEqual({ value: false });
     expect(cancellations).toBe(1);
-    expect((processor as any).operationSubscriptions.size).toBe(0);
+    expect(processor.accessForTestingOnly.operationSubscriptions.size).toBe(0);
   });
 
   it("pins one resolved target for an operation session", async () => {
@@ -722,11 +705,9 @@ describe("RuntimeClient operation collaboration", () => {
         open: () => ({ ...capability, replica: capability }),
       },
     };
-    const processor = Object.assign(Object.create(RuntimeProcessor.prototype), {
+    const processor = buildProcessor({
       runtime,
-      operationSubscriptions: new Map(),
-      _isDisposed: false,
-    }) as RuntimeProcessor;
+    });
 
     await processor.handleOperationQuery({
       cell: alias,
@@ -827,10 +808,7 @@ describe("RuntimeClient operation collaboration", () => {
       expect((await tx.commit()).error).toBeUndefined();
       const targetId = target.resolveAsCell().getAsNormalizedFullLink().id;
 
-      const processor = Object.assign(
-        Object.create(RuntimeProcessor.prototype),
-        { runtime },
-      ) as RuntimeProcessor;
+      const processor = buildProcessor({ runtime });
       const field = await processor.handleOperationQuery({
         cell: alias.getAsNormalizedFullLink() as unknown as CellRef,
       } as never);
