@@ -58,8 +58,22 @@ export function describeOrigin(
 }
 
 /** A content identity abbreviated for display; the full value stays in a title. */
-export function shortIdentity(identity: string): string {
+function shortIdentity(identity: string): string {
   return identity.length > 14 ? `${identity.slice(0, 12)}…` : identity;
+}
+
+/**
+ * A pattern named for display: its content identity, abbreviated unless the
+ * whole value is asked for, and the export within it that is the pattern.
+ * Naming the export as one and quoting it marks the name as an identifier
+ * taken from the source.
+ */
+export function patternRefLabel(
+  ref: { identity: string; symbol: string },
+  options?: { whole?: boolean },
+): string {
+  const identity = options?.whole ? ref.identity : shortIdentity(ref.identity);
+  return `${identity} (export symbol "${ref.symbol}")`;
 }
 
 /** A recorded timestamp as a readable local time. */

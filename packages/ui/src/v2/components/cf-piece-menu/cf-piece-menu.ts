@@ -46,7 +46,7 @@ import {
   describeSourceFailure,
   type FollowDescription,
   formatTimestamp,
-  shortIdentity,
+  patternRefLabel,
 } from "./origin-view.ts";
 
 /** The marker on the rendered piece while its built-in menu is open. */
@@ -2262,7 +2262,9 @@ export class CFPieceMenu extends BaseElement {
       ? this.space ?? ""
       : panel !== "source" || this.sourceRevision === undefined
       ? this.source?.name ?? this.cell?.id() ?? ""
-      : `Pattern ${this.sourceRevision.pattern.identity} · ${this.sourceRevision.pattern.symbol}`;
+      : `Pattern ${
+        patternRefLabel(this.sourceRevision.pattern, { whole: true })
+      }`;
     return html`
       <div class="backdrop dimmed" @click="${() => this.close()}"></div>
       <div
@@ -2713,8 +2715,7 @@ export class CFPieceMenu extends BaseElement {
           ? html`
             <dt>Pattern</dt>
             <dd title="${source.pattern.identity}">
-              ${shortIdentity(source.pattern.identity)} · ${source.pattern
-                .symbol}
+              ${patternRefLabel(source.pattern)}
             </dd>
           `
           : nothing} ${source.setupPattern &&
@@ -2723,16 +2724,15 @@ export class CFPieceMenu extends BaseElement {
           ? html`
             <dt>Setup applied for</dt>
             <dd title="${source.setupPattern.identity}">
-              ${shortIdentity(source.setupPattern.identity)} · ${source
-                .setupPattern.symbol}
+              ${patternRefLabel(source.setupPattern)}
             </dd>
           `
           : nothing} ${source.displacedPattern
           ? html`
             <dt>Previously ran</dt>
             <dd title="${source.displacedPattern.identity}">
-              ${shortIdentity(source.displacedPattern.identity)} · ${source
-                .displacedPattern.symbol}${source.displacedPattern.displacedAt
+              ${patternRefLabel(source.displacedPattern)}${source
+                  .displacedPattern.displacedAt
                 ? ` · replaced ${
                   formatTimestamp(source.displacedPattern.displacedAt)
                 }`
@@ -2830,8 +2830,7 @@ export class CFPieceMenu extends BaseElement {
           : nothing} ${offered
           ? html`
             <p title="${offered.identity}">
-              The origin is offering ${shortIdentity(offered.identity)} ·
-              ${offered.symbol}.
+              The origin is offering ${patternRefLabel(offered)}.
             </p>
           `
           : nothing}
@@ -3065,8 +3064,7 @@ export class CFPieceMenu extends BaseElement {
           <span>${formatTimestamp(revision.timestamp)}</span>
         </div>
         <div class="revision-details">
-          Pattern ${shortIdentity(revision.pattern.identity)} · ${revision
-            .pattern.symbol} ·
+          Pattern ${patternRefLabel(revision.pattern)} ·
           <button
             type="button"
             class="text-link"
