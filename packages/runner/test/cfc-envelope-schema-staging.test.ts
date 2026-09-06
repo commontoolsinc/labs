@@ -27,7 +27,6 @@ describe("CFC envelope schema documents ride the shared staging path", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     // A seeding failure below never reaches the caller's `finally`, so the
     // resources are released here before it propagates.

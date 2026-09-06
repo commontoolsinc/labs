@@ -126,7 +126,6 @@ const createEngine = (index?: IndexStub): CfHarnessEngine =>
   new CfHarnessEngine({
     sandboxRuntime: new FakeSandboxRuntime(),
     runId: `search-patterns-test-${crypto.randomUUID()}`,
-    cfcEnforcementMode: "disabled",
     ...(index === undefined ? {} : {
       patternIndexClientFactory: () =>
         Promise.resolve(

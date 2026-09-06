@@ -52,7 +52,6 @@ const runInfluenceEpisode = async (): Promise<InfluenceEpisode> => {
     ]),
     runId,
     model: "gpt-5.4",
-    cfcEnforcementMode: "enforce-explicit",
     artifactStore: new FileSystemHarnessArtifactStore({ artifactRoot, runId }),
   });
   const loop = new CfHarnessPromptLoop({

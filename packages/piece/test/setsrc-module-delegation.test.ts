@@ -66,7 +66,6 @@ describe("setsrc module delegation", () => {
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     const session = await createSession({
       identity: signer,
@@ -135,7 +134,6 @@ describe("setsrc module delegation", () => {
         const freshRuntime = new Runtime({
           apiUrl: new URL("http://toolshed.test"),
           storageManager,
-          cfcEnforcementMode: "enforce-explicit",
         });
         // Runtime.dispose() closes the shared emulated storage manager, so all
         // cold-start runtimes stay alive until the assertions are complete.

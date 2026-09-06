@@ -24,7 +24,6 @@ describe("CFC link-write integrity gate", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const tx = runtime.edit();

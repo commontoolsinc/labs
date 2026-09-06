@@ -1005,7 +1005,6 @@ describe("attachOptionsFrom()", () => {
       identity,
       spaceIdentity,
       spaceDid: identity.did(),
-      cfcEnforcementMode: "enforce-strict",
     });
 
     expect(attach.identity).toBe(identity.did());

@@ -56,7 +56,6 @@ describe("CFC envelope version guard", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const id = await seedWithVersion(runtime, "version-guard-throw", 3);
@@ -76,7 +75,6 @@ describe("CFC envelope version guard", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const id = await seedWithVersion(runtime, "version-guard-applies", 3);
@@ -101,7 +99,6 @@ describe("CFC envelope version guard", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       await seedWithVersion(runtime, "version-guard-write", 3);
@@ -135,7 +132,6 @@ describe("CFC envelope version guard", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const id = parseLink(
@@ -221,7 +217,6 @@ describe("CFC envelope version guard", () => {
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
       });
       try {
         const sourceId = parseLink(
@@ -267,7 +262,6 @@ describe("CFC envelope version guard", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       // The read source carries the unreadable envelope and the write target
@@ -307,7 +301,6 @@ describe("CFC envelope version guard", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       // The reserved position is what qualifies the record, never its
@@ -383,7 +376,6 @@ describe("CFC envelope version guard", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       // The failure the guard exists to prevent: a SECRET-labeled envelope
@@ -411,7 +403,6 @@ describe("CFC envelope version guard", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       await seedWithVersion(runtime, "version-guard-link-source", 3);
@@ -446,7 +437,6 @@ describe("CFC envelope version guard", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       // One read policy, no version distinction: a version-1 root carrying

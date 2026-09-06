@@ -98,8 +98,6 @@ describe("projection-key-classification", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
-      cfcFlowLabels: "persist",
       errorHandlers: [() => {}],
     });
   });

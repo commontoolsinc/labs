@@ -95,7 +95,6 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
     const pattern = await runtime.patternManager.compilePattern(PROGRAM);
     await runtime.idle();
@@ -306,7 +305,6 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
         trustSnapshotProvider: () => ({
           id: "ts-attack4",
           actingPrincipal: signer.did(),
@@ -355,7 +353,6 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
         trustSnapshotProvider: () => ({
           id: "ts-attack4b",
           actingPrincipal: signer.did(),
@@ -413,7 +410,6 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
         trustSnapshotProvider: () => ({
           id: "ts-attack4d",
           actingPrincipal: signer.did(),
@@ -464,7 +460,6 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
         trustSnapshotProvider: () => ({
           id: "ts-attack4c",
           actingPrincipal: signer.did(),
@@ -526,7 +521,6 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
       runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
         trustSnapshotProvider: () => ({
           id: `ts-${name}`,
           actingPrincipal: signer.did(),
@@ -836,7 +830,6 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: `ts-${name}`,
         actingPrincipal: signer.did(),

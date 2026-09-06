@@ -2179,7 +2179,6 @@ describe("llmDialog", () => {
     const ceilingRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: ceilingStorageManager,
-      cfcEnforcementMode: "enforce-explicit",
       // Deployment ceiling: the llmDialog sink may carry no confidentiality.
       cfcSinkMaxConfidentiality: { llmDialog: [] },
     });

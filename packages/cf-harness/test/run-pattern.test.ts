@@ -570,7 +570,6 @@ function createStrictEngine(pieces: PiecesController): CfHarnessEngine {
   return new CfHarnessEngine({
     sandboxRuntime: new FakeSandboxRuntime(),
     runId: `run-pattern-strict-${crypto.randomUUID()}`,
-    cfcEnforcementMode: "disabled",
     fabricSessionFactory: () => Promise.resolve({ pieces }),
   });
 }
@@ -707,7 +706,6 @@ describe("run-pattern", () => {
     return new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `run-pattern-test-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       fabricSessionFactory: () => Promise.resolve({ pieces, instantiations }),
     });
   }
@@ -799,7 +797,6 @@ describe("run-pattern", () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `run-pattern-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces }),
       });
       const result = await engine.invokeBuiltinTool("run_pattern", {
@@ -1224,7 +1221,6 @@ describe("run-pattern", () => {
         const engine = new CfHarnessEngine({
           sandboxRuntime: new FakeSandboxRuntime(),
           runId: `run-pattern-strict-${crypto.randomUUID()}`,
-          cfcEnforcementMode: "disabled",
           fabricSessionFactory: () => Promise.resolve({ pieces: strictPieces }),
         });
         const result = await engine.invokeBuiltinTool("run_pattern", {
@@ -2608,7 +2604,6 @@ describe("run-pattern", () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `run-pattern-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => {
           factoryCalls += 1;
           return Promise.reject(
@@ -2695,7 +2690,6 @@ describe("run-pattern", () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `run-pattern-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
       });
       const result = await engine.invokeBuiltinTool("run_pattern", {
         sourceText: DOUBLING_PATTERN_SOURCE,
@@ -2789,7 +2783,6 @@ describe("run-pattern", () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `run-pattern-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces: readerPieces }),
       });
       const result = await engine.invokeBuiltinTool("run_pattern", {
@@ -2842,7 +2835,6 @@ describe("run-pattern", () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `run-pattern-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces: readerPieces }),
       });
       const result = await engine.invokeBuiltinTool("run_pattern", {

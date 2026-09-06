@@ -109,7 +109,6 @@ describe("CFC sink request policy", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
     const tx = runtime.edit();
 

@@ -66,7 +66,6 @@ const engineHolding = async (
     artifactRoot: join(directory, "runs"),
     runId,
     workspaceHostPath: join(directory, "workspace"),
-    cfcEnforcementMode: "disabled",
     fabricSession: fabricSession(directory),
     fabricSessionFactory: () =>
       Promise.reject(new Error("no fabric session is opened by these tests")),
@@ -169,7 +168,6 @@ describe("run-end cell labels", () => {
           artifactRoot: join(directory, "runs"),
           runId,
           workspaceHostPath: join(directory, "workspace"),
-          cfcEnforcementMode: "disabled",
         });
         await engine.recordHandleTable(
           (await mintAddressHandle(
@@ -199,7 +197,6 @@ describe("run-end cell labels", () => {
           artifactRoot: join(directory, "runs"),
           runId,
           workspaceHostPath: join(directory, "workspace"),
-          cfcEnforcementMode: "disabled",
           fabricSession: fabricSession(directory),
           fabricSessionFactory: () =>
             Promise.reject(

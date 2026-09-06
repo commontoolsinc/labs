@@ -29,7 +29,6 @@ describe("onCommit callback final outcome", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     tx = runtime.edit();
   });

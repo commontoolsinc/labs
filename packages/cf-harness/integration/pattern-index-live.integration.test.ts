@@ -267,7 +267,6 @@ describe("pattern index, live", () => {
     new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `pattern-index-live-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       fabricSessionFactory: () => Promise.resolve({ pieces }),
       patternIndexClientFactory: () => Promise.resolve(client),
     });

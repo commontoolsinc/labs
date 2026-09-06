@@ -351,7 +351,6 @@ describe("browser", () => {
       new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `browser-tool-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
         processRunner,
         workspaceHostPath: "/tmp/cf-harness-workspace",
         browserAccess: BROWSER_LEASE,

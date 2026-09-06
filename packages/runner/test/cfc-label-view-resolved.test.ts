@@ -36,8 +36,6 @@ describe("cfcLabelViewForResolvedCellWithStatus", () => {
       const runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
-        cfcDeclaredMonotonicity: "enforce",
       });
       try {
         await body(runtime);

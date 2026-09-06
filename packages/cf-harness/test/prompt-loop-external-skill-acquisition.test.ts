@@ -173,8 +173,6 @@ describe("prompt-loop external skill acquisition", () => {
     const runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
-      cfcEnforcementMode: "disabled",
-      cfcFlowLabels: "off",
     });
     const pieces = new PiecesController(
       await createSession({
@@ -345,8 +343,6 @@ describe("prompt-loop external skill acquisition", () => {
     const runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
-      cfcEnforcementMode: "disabled",
-      cfcFlowLabels: "off",
     });
     const pieces = new PiecesController(
       await createSession({

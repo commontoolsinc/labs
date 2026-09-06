@@ -24,7 +24,6 @@ describe("CFC labelMap confidentiality monotonicity", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const guarded = internSchema(
@@ -116,7 +115,6 @@ describe("CFC labelMap confidentiality monotonicity", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const guarded = internSchema(

@@ -57,7 +57,6 @@ describe("listResultSchema", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
 
     const { commonfabric } = createTrustedBuilder(runtime);

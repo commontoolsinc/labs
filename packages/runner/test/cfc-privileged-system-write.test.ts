@@ -49,7 +49,6 @@ describe("CFC privileged system write (S18)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const tx = runtime.edit();
@@ -90,6 +89,9 @@ describe("CFC privileged system write (S18)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // Observe is the rung under test: `expect(result.ok).toBeDefined()`
+      // reads that the forged write lands, and the diagnostics assertion
+      // below reads the record it leaves instead of a rejection.
       cfcEnforcementMode: "observe",
     });
     try {
@@ -131,7 +133,6 @@ describe("CFC privileged system write (S18)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const tx = runtime.edit();
@@ -156,7 +157,6 @@ describe("CFC privileged system write (S18)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const guarded = internSchema(
@@ -197,6 +197,9 @@ describe("CFC privileged system write (S18)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // The disabled window is the subject. The transaction forges the label
+      // map at this rung, and `unprivilegedSystemWrites.length` is asserted to
+      // be 1 before the escalation below turns that record into a rejection.
       cfcEnforcementMode: "disabled",
     });
     try {
@@ -243,6 +246,9 @@ describe("CFC privileged system write (S18)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // The disabled rung is the subject. The transaction stays at it through
+      // commit, and `expect(result.ok).toBeDefined()` reads that the forged
+      // write commits.
       cfcEnforcementMode: "disabled",
     });
     try {
@@ -277,7 +283,6 @@ describe("CFC privileged system write (S18)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const tx = runtime.edit();
@@ -315,7 +320,6 @@ describe("CFC privileged system write (S18)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const tx = runtime.edit();
@@ -412,7 +416,6 @@ describe("CFC privileged system write (S18)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const address = await seedLabeledDocument(runtime, "s18-root-erase");
@@ -458,7 +461,6 @@ describe("CFC privileged system write (S18)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const address = await seedLabeledDocument(runtime, "s18-root-strip");
@@ -501,7 +503,6 @@ describe("CFC privileged system write (S18)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const tx = runtime.edit();
@@ -537,7 +538,6 @@ describe("CFC privileged system write (S18)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const address = await seedLabeledDocument(runtime, "s18-root-preserve");
@@ -564,7 +564,6 @@ describe("CFC privileged system write (S18)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       for (
@@ -596,7 +595,6 @@ describe("CFC privileged system write (S18)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const address = await seedLabeledDocument(runtime, "s18-root-future");
@@ -617,6 +615,9 @@ describe("CFC privileged system write (S18)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // Observe is the rung under test: `expect(result.ok).toBeDefined()`
+      // reads that the erasing write lands, and the diagnostics assertion
+      // below reads the record it leaves instead of a rejection.
       cfcEnforcementMode: "observe",
     });
     try {
@@ -642,6 +643,9 @@ describe("CFC privileged system write (S18)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // The disabled window is the subject. The erasing write happens at this
+      // rung, and `unprivilegedSystemWrites.length` is asserted to be 1 before
+      // the escalation below turns that record into a rejection.
       cfcEnforcementMode: "disabled",
     });
     try {
@@ -671,7 +675,6 @@ describe("CFC privileged system write (S18)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const guarded = internSchema(
@@ -749,7 +752,6 @@ describe("CFC privileged system write (S18)", () => {
         const runtime = new Runtime({
           apiUrl: new URL("https://example.com"),
           storageManager: storage,
-          cfcEnforcementMode: "enforce-explicit",
         });
         try {
           const seed = runtime.edit();
@@ -779,7 +781,6 @@ describe("CFC privileged system write (S18)", () => {
         const runtime = new Runtime({
           apiUrl: new URL("https://example.com"),
           storageManager: storage,
-          cfcEnforcementMode: "enforce-explicit",
         });
         try {
           const tx = runtime.edit();

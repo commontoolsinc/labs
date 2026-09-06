@@ -439,7 +439,6 @@ describe("prompt-loop address handles", () => {
       workspaceHostPath: workspace,
       runId,
       model: "gpt-5.4",
-      cfcEnforcementMode: "disabled",
     });
     await engine.recordHandleTable(minted.table);
     const loop = new CfHarnessPromptLoop({

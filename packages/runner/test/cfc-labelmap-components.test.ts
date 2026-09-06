@@ -39,7 +39,6 @@ describe("CFC labelMap component origins", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const guarded = internSchema(
@@ -81,7 +80,6 @@ describe("CFC labelMap component origins", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const guarded = internSchema(
@@ -140,11 +138,9 @@ describe("CFC labelMap component origins", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const seed = runtime.edit();
-      seed.setCfcEnforcementMode("enforce-explicit");
       const source = runtime.getCell(
         signer.did(),
         "cfc-components-link-source",
@@ -160,7 +156,6 @@ describe("CFC labelMap component origins", () => {
       expect((await seed.commit()).ok).toBeDefined();
 
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       const linkedSource = runtime.getCell(
         signer.did(),
         "cfc-components-link-source",
@@ -196,7 +191,6 @@ describe("CFC labelMap component origins", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const guarded = internSchema(
@@ -255,7 +249,6 @@ describe("CFC labelMap component origins", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const guarded = internSchema(

@@ -83,7 +83,6 @@ const createEngine = (index?: IndexStub): CfHarnessEngine =>
   new CfHarnessEngine({
     sandboxRuntime: new FakeSandboxRuntime(),
     runId: `record-feedback-test-${crypto.randomUUID()}`,
-    cfcEnforcementMode: "disabled",
     ...(index === undefined ? {} : {
       patternIndexClientFactory: () =>
         Promise.resolve(

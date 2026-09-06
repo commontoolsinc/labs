@@ -41,8 +41,6 @@ describe("cfc-meta-seam-write-policy", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
-      cfcFlowLabels: "persist",
     });
 
     // Seed a doc whose stored ["cfc"] metadata labels the whole document:
@@ -142,7 +140,9 @@ describe("cfc-meta-seam-write-policy", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      // The assertion at the end of this test reads the sink document's
+      // stored labelMap. Persisting flow labels is what puts the writing
+      // transaction's confidentiality into it.
       cfcFlowLabels: "persist",
     });
     try {

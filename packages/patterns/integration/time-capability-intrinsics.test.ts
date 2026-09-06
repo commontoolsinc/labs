@@ -21,7 +21,6 @@ async function makeController(
   const runtime = new Runtime({
     apiUrl: new URL("http://localhost:8000/"),
     storageManager: StorageManager.emulate({ as: session.as }),
-    cfcEnforcementMode: "enforce-explicit",
     trustSnapshotProvider: () => ({
       id: `principal:${session.as.did()}`,
       actingPrincipal: session.as.did(),

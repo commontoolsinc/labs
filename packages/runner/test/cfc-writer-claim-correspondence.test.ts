@@ -92,7 +92,6 @@ describe("writeAuthorizedBy across resolver spellings (labs#4772)", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: snapshotId,
         actingPrincipal: signer.did(),
@@ -428,7 +427,6 @@ describe("the labs#4772 heal end-to-end: exact mint + tolerant adoption + identi
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "ts-heal-e2e",
         actingPrincipal: signer2.did(),

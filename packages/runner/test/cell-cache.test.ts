@@ -856,7 +856,6 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "cell-cache-test",
         actingPrincipal: signer.did(),
@@ -1895,7 +1894,6 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     const coverageRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: coverageStorageManager,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "cell-cache-coverage-replication-test",
         actingPrincipal: signer.did(),
@@ -2340,7 +2338,6 @@ describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
     rtA = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: smA,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "e2e-user-a",
         actingPrincipal: e2eSignerA.did(),
@@ -2349,7 +2346,6 @@ describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
     rtB = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: smB,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "e2e-user-b",
         actingPrincipal: e2eSignerB.did(),

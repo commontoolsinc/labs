@@ -77,7 +77,6 @@ const runEpisode = async (
       sandboxRuntime: new InertSandboxRuntime(),
       runId,
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
       // The factory supplies the emulated session; the config beside it names
       // the space, which is what the run-end cell-labels read needs to know
       // which space to ask about. Without it the run retains no record of

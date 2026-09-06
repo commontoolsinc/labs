@@ -457,7 +457,6 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     const tx = runtime.edit();
     const { commonfabric } = createTrustedBuilder(runtime);
@@ -567,7 +566,6 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     const tx = runtime.edit();
     const { commonfabric } = createTrustedBuilder(runtime);
@@ -680,7 +678,6 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     const tx = runtime.edit();
     const { commonfabric } = createTrustedBuilder(runtime);
@@ -792,7 +789,6 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     const tx = runtime.edit();
     const { commonfabric } = createTrustedBuilder(runtime);
@@ -890,7 +886,6 @@ describe("CFC trusted agent: tool-input requiredIntegrity (Epic D2)", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     const tx = runtime.edit();
     const { commonfabric } = createTrustedBuilder(runtime);
@@ -997,7 +992,6 @@ describe("CFC trusted agent: floors behind reference-form schemas (D2)", () => {
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    cfcEnforcementMode: "enforce-explicit",
   });
   const gate = (schema: unknown, value: unknown) =>
     llmToolExecutionHelpers.toolInputRequiredIntegrityFailure(

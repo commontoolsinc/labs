@@ -153,8 +153,6 @@ const withFabric = async (
   const runtime = new Runtime({
     apiUrl: new URL("http://toolshed.test"),
     storageManager,
-    cfcEnforcementMode: "disabled",
-    cfcFlowLabels: "off",
   });
   const pieces = new PiecesController(
     await createSession({
@@ -179,7 +177,6 @@ const createEngine = (
   new CfHarnessEngine({
     sandboxRuntime: new FakeSandboxRuntime(),
     runId: `acquire-skill-${crypto.randomUUID()}`,
-    cfcEnforcementMode: "disabled",
     now: () => RECEIVED_AT,
     fabricSessionFactory: () => Promise.resolve({ pieces }),
     skillsShSearchClientFactory: () =>
@@ -322,7 +319,6 @@ describe("acquire-skill", () => {
   it("requires both external-skill configuration and a fabric session", async () => {
     const base = {
       sandboxRuntime: new FakeSandboxRuntime(),
-      cfcEnforcementMode: "disabled" as const,
     };
     const withoutEither = new CfHarnessEngine(base);
     const withoutConfig = new CfHarnessEngine({

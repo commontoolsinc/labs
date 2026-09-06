@@ -66,7 +66,6 @@ describe("content-addressed action identity", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
     const pattern = await runtime.patternManager.compilePattern(PROGRAM);
     await runtime.idle();
@@ -348,7 +347,6 @@ export default pattern<{ out: string }>(({ out }) => ({
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
     const pattern = await runtime.patternManager.compilePattern(
       DYNAMIC_PROGRAM,
@@ -464,7 +462,6 @@ export default pattern<{ value: number }>(({ value }) => ({
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
     const pattern = await runtime.patternManager.compilePattern(
       LIFT_PROGRAM,
