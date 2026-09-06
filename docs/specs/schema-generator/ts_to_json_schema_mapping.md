@@ -656,7 +656,13 @@ Mechanics:
   anchors on `moduleIdentity` plus the binding `path`. So the comparison holds
   only the binding `path` and the `uiContract` fixed, and the runner still
   verifies the live writer's `moduleIdentity` against the claim at write time,
-  so this narrows nothing.
+  so this narrows nothing. Where the claim sits in the schema makes no
+  difference to that: the checker descends every keyword that holds schemas —
+  `allOf`, `oneOf`, `if`/`then`, and `not` among them — and normalizes a claim
+  it finds there the same way it normalizes one written onto a property. This
+  package emits none of those keywords, so nothing it produces exercises that
+  today. The checker sees schemas from elsewhere as well, and holds them to the
+  same reading.
 - `SchemaGeneratorTransformer.resolvePolicyOfMarkers` replaces a valid policy
   marker with the compiled module identity, exported symbol, and policy digest.
   If it cannot match a compiler-verified exported `exchangeRules()` binding,

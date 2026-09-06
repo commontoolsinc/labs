@@ -55,6 +55,7 @@
     "./executor/watermark": "./src/executor/watermark.ts",
     "./cfc/migration-reason": "./src/cfc/migration-reason.ts",
     "./cfc/schema-sanitization": "./src/cfc/schema-sanitization.ts",
-    "./cfc/schema-refs": "./src/cfc/schema-refs.ts"
+    "./cfc/schema-refs": "./src/cfc/schema-refs.ts",
+    "./schema-walk": "./src/schema-walk.ts"
   }
 }
