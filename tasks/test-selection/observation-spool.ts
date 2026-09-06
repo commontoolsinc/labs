@@ -49,7 +49,11 @@ export class ObservationSpool implements Disposable, Iterable<Observation> {
     const bytes = new TextEncoder().encode(JSON.stringify(observations));
     this.#file.seekSync(this.#length, Deno.SeekMode.Start);
     for (let written = 0; written < bytes.length;) {
-      written += this.#file.writeSync(bytes.subarray(written));
+      const count = this.#file.writeSync(bytes.subarray(written));
+      if (count <= 0) {
+        throw new Error("Writing the observation spool made no progress.");
+      }
+      written += count;
     }
     this.#runs.push({ at, offset: this.#length, length: bytes.length });
     this.#length += bytes.length;
@@ -69,6 +73,9 @@ export class ObservationSpool implements Disposable, Iterable<Observation> {
         const count = this.#file.readSync(bytes.subarray(read));
         if (count === null) {
           throw new Error("The observation spool is truncated.");
+        }
+        if (count <= 0) {
+          throw new Error("Reading the observation spool made no progress.");
         }
         read += count;
       }

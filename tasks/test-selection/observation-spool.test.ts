@@ -40,6 +40,67 @@ describe("ObservationSpool", () => {
   });
 
   describe("instance members", () => {
+    for (const operation of ["readSync", "writeSync"] as const) {
+      for (const bytes of [0, -1]) {
+        it(`throws after \`${operation}()\` returns \`${bytes}\``, () => {
+          const opened = spy(Deno, "openSync");
+          try {
+            using spool = new ObservationSpool();
+            const run = [observation("stored", "2026-08-20T01:00:00Z")];
+            if (operation === "readSync") spool.add(run);
+            let attempts = 0;
+            const io = stub(opened.calls[0]!.returned!, operation, () => {
+              if (++attempts === 1) return bytes;
+              throw new Error("I/O was repeated without progress");
+            });
+            try {
+              expect(() => {
+                if (operation === "writeSync") spool.add(run);
+                else [...spool];
+              }).toThrow("observation spool made no progress");
+              expect(io.calls.length).toBe(1);
+            } finally {
+              io.restore();
+            }
+          } finally {
+            opened.restore();
+          }
+        });
+      }
+    }
+
+    it("completes partial reads and writes across byte boundaries", () => {
+      const opened = spy(Deno, "openSync");
+      try {
+        using spool = new ObservationSpool();
+        const file = opened.calls[0]!.returned!;
+        const read = file.readSync.bind(file);
+        const write = file.writeSync.bind(file);
+        const reader = stub(
+          file,
+          "readSync",
+          (bytes) => read(bytes.subarray(0, 7)),
+        );
+        const writer = stub(
+          file,
+          "writeSync",
+          (bytes) => write(bytes.subarray(0, 7)),
+        );
+        try {
+          const run = [observation("donut 🍩", "2026-08-20T01:00:00Z")];
+          spool.add(run);
+          expect([...spool]).toEqual(run);
+          expect(reader.calls.length).toBeGreaterThan(1);
+          expect(writer.calls.length).toBeGreaterThan(1);
+        } finally {
+          reader.restore();
+          writer.restore();
+        }
+      } finally {
+        opened.restore();
+      }
+    });
+
     it("replays stored runs in time order on every iteration", () => {
       using spool = new ObservationSpool();
       const later = observation("later", "2026-08-21T01:00:00.100Z");
