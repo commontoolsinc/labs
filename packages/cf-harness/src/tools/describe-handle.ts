@@ -1,4 +1,5 @@
 import type { JSONSchema } from "@commonfabric/api";
+import { columnDeclaresIfc, isSqliteDbRef } from "@commonfabric/memory/v2";
 import type { Cell } from "@commonfabric/runner";
 import { cfcLabelViewForCellFailClosed } from "@commonfabric/runner/cfc";
 import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
@@ -46,6 +47,44 @@ export interface DescribeHandleToolOutput {
    * says the space holds none, which is a different answer.
    */
   labels?: DescribeHandleLabel[];
+
+  /**
+   * The table contract of a referent that is a SQLite database, reported
+   * where the referent declares no schema of its own. Without it a database
+   * handed to a run is indistinguishable from an opaque value, and the code
+   * an agent can write over it is code that treats it as one.
+   */
+  database?: DescribeHandleDatabase;
+}
+
+/**
+ * What a SQLite database handle states about itself: the shape of a row of
+ * each of its tables, and what handling each column demands. Rows are not
+ * part of it. They live in the database rather than in the handle, and
+ * nothing here opens one — the tables are the contract the database was
+ * created under, which is a declaration in exactly the sense a schema is.
+ */
+export interface DescribeHandleDatabase {
+  /**
+   * One property per table, whose own properties are that table's columns
+   * with their declared types. Reduced like every other disclosed schema, so
+   * column annotations, prose and defaults do not ride out on it, and the
+   * table- and column-name channels are bounded exactly as any other
+   * property-name channel is.
+   */
+  tables: JSONSchema;
+
+  /**
+   * The columns that declare a CFC label, each addressed by its table name
+   * and its column name. Atom types and nothing else, the same line
+   * {@link DescribeHandleLabel} draws for a cell's own labels — so an entry
+   * with no atoms says the column declares a label this cannot name, which is
+   * a different fact from a column that declares none and has no entry. A
+   * path names a column only where {@link tables} names it too: the bound on
+   * the property-name channel holds across both, so a column the reduction
+   * refused is absent from this list as well.
+   */
+  labels: DescribeHandleLabel[];
 }
 
 /** The label at one path inside a referent, as atom types and nothing else. */
@@ -67,9 +106,9 @@ export interface DescribeHandleLabel {
 
 /**
  * Describes the SHAPE of a handle's referent and nothing else: property
- * names, types, nesting, and required-ness. No value is ever read and none is
- * ever reported, so an answer here says what a reference is, never what it
- * holds. This is what lets an agent write code over a reference it was handed
+ * names, types, nesting, and required-ness. No datum is ever reported, so a
+ * reply here says what a reference is, never what it holds. This is what lets
+ * an agent write code over a reference it was handed
  * — you cannot compute over data whose shape you do not know — and what lets
  * an orchestrator verify a chain of transformations without reading the data
  * flowing through it.
@@ -105,6 +144,20 @@ export interface DescribeHandleLabel {
  * data without them — so they are the one channel of author-chosen text this
  * tool knowingly accepts.
  *
+ * A referent that declares no schema gets a third read, and it is the one
+ * place this tool reads a value. Some referents state their contract in their
+ * value rather than in their metadata, and a SQLite database handle is the
+ * case that matters: what the handle holds is the set of table schemas the
+ * database was created under, and the rows live in the database file, which
+ * nothing here opens. So where no schema was declared and the value is a
+ * database handle, its tables are reported as {@link DescribeHandleDatabase}
+ * — reduced by the same {@link schemaShapeOnly} pass, with the columns' own
+ * `ifc` annotations reported beside them as labels rather than left on the
+ * schema. Without that a database reads as an opaque value, and the code an
+ * agent writes over an opaque value is code that treats it as one. The read
+ * is conditional on there being no declared schema, so a referent that states
+ * its own shape is never opened.
+ *
  * A run with no fabric session still answers from its own table, so shape
  * stays inspectable in every run that has handles at all.
  *
@@ -123,7 +176,7 @@ export const describeHandleToolDescriptor: HarnessToolDescriptor = {
   toolId: "describe_handle",
   title: "Describe Handle",
   description:
-    "Report the shape of a general handle's referent and the CFC labels it carries: its recorded schema, path and label atom types, never its value. A capability-restricted handle returns a named refusal. Use it to check that a reference is the kind of thing a step expects, and what handling it demands, before passing it on.",
+    "Report the shape of a general handle's referent and the CFC labels it carries: its recorded schema, path and label atom types, never its data. A referent that is a SQLite database reports its tables instead of a schema, under `database`: the columns of each table with their types, and the labels those columns carry. Read such a referent with `db.query` over the handle rather than as a value. A capability-restricted handle returns a named refusal. Use it to check that a reference is the kind of thing a step expects, and what handling it demands, before passing it on.",
   effectClass: "read",
   inputSchema: {
     type: "object",
@@ -160,6 +213,30 @@ export const describeHandleToolDescriptor: HarnessToolDescriptor = {
           required: ["confidentiality", "integrity"],
           additionalProperties: false,
         },
+      },
+      database: {
+        type: "object",
+        properties: {
+          tables: {},
+          labels: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                path: { type: "array", items: { type: "string" } },
+                confidentiality: {
+                  type: "array",
+                  items: { type: "array", items: { type: "string" } },
+                },
+                integrity: { type: "array", items: { type: "string" } },
+              },
+              required: ["confidentiality", "integrity"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["tables", "labels"],
+        additionalProperties: false,
       },
       error: { type: "string" },
     },
@@ -208,26 +285,149 @@ const clauseTypes = (clause: unknown): string[] => {
 };
 
 /**
- * The labels the referent carries, read live through the session. Only atom
- * TYPES cross: an atom's other fields are whatever minted it wrote, and a
- * label is disclosed here so a run can tell what it is holding, not so it can
- * read what a label was computed from.
+ * One stored label as atom types alone. Only atom TYPES cross: an atom's
+ * other fields are whatever minted it wrote, and a label is disclosed here so
+ * a run can tell what it is holding, not so it can read what a label was
+ * computed from. The same projection serves a cell's own labels and a
+ * database column's `ifc`, which are the same structure stored in two places.
  */
+const labelAtomTypes = (
+  label: { confidentiality?: unknown[]; integrity?: unknown[] },
+): Omit<DescribeHandleLabel, "path"> => ({
+  confidentiality: (label.confidentiality ?? [])
+    .map(clauseTypes)
+    .filter((clause) => clause.length > 0),
+  integrity: (label.integrity ?? [])
+    .map(atomType)
+    .filter((type): type is string => type !== undefined),
+});
+
+/** The labels the referent carries, read live through the session. */
 const describedLabels = (cell: Cell<unknown>): DescribeHandleLabel[] =>
   (cfcLabelViewForCellFailClosed(cell)?.entries ?? []).map((entry) => ({
     ...(entry.path.length > 0 ? { path: [...entry.path] } : {}),
-    confidentiality: (entry.label.confidentiality ?? [])
-      .map(clauseTypes)
-      .filter((clause) => clause.length > 0),
-    integrity: (entry.label.integrity ?? [])
-      .map(atomType)
-      .filter((type): type is string => type !== undefined),
+    ...labelAtomTypes(entry.label),
   }));
+
+/** The properties `schema` declares, empty when it declares none. */
+const schemaProperties = (
+  schema: JSONSchema | undefined,
+): Record<string, JSONSchema> =>
+  schema !== undefined && typeof schema === "object" && !Array.isArray(schema)
+    ? (schema.properties ?? {}) as Record<string, JSONSchema>
+    : {};
+
+/**
+ * Every `(table, column)` a reduced table schema still names. The reduction
+ * has already dropped whatever it refused, so walking its output rather than
+ * its input is what holds a second disclosure to the first one's bound.
+ */
+function* disclosedColumns(
+  reduced: JSONSchema,
+): Generator<[string, string]> {
+  for (const [table, spec] of Object.entries(schemaProperties(reduced))) {
+    for (const column of Object.keys(schemaProperties(spec))) {
+      yield [table, column];
+    }
+  }
+}
+
+/** The columns `table` declares in the handle's own tables, as authored. */
+const declaredColumns = (
+  tables: object,
+  table: string,
+): Record<string, { ifc?: unknown } | undefined> =>
+  ((tables as Record<string, { properties?: unknown } | undefined>)[table]
+    ?.properties ?? {}) as Record<string, { ifc?: unknown } | undefined>;
+
+/**
+ * The table contract `value` states, or nothing when it is not a SQLite
+ * database handle or names no tables. A handle's tables are the schemas the
+ * database was created under — a declaration, in the same sense a document's
+ * schema is one — so what leaves here is the same structure every other
+ * disclosure is reduced to, plus the columns' labels.
+ */
+const describedDatabase = (
+  value: unknown,
+): DescribeHandleDatabase | undefined => {
+  if (!isSqliteDbRef(value)) {
+    return undefined;
+  }
+  const tables = value.tables;
+  if (tables === null || typeof tables !== "object") {
+    return undefined;
+  }
+  // Wrapping the tables as one schema's properties is what puts the table
+  // names through the same bound and the same reduction the column names
+  // already go through: a table is an object whose properties are its
+  // columns, which is what the reduction already knows how to walk.
+  const reduced = schemaShapeOnly({
+    type: "object",
+    properties: tables as Record<string, JSONSchema>,
+  });
+  // A label names the column it came off, so its path is the same
+  // property-name channel the reduction bounds — which is why the names it
+  // reports are read back off the reduced schema rather than off the tables.
+  // A column the reduction refused is a column no label may name either.
+  const labels: DescribeHandleLabel[] = [];
+  for (const [table, column] of disclosedColumns(reduced)) {
+    const ifc = declaredColumns(tables, table)[column]?.ifc;
+    if (columnDeclaresIfc(ifc)) {
+      labels.push({
+        path: [table, column],
+        ...labelAtomTypes(ifc as Parameters<typeof labelAtomTypes>[0]),
+      });
+    }
+  }
+  return { tables: reduced, labels };
+};
+
+/**
+ * The schema declared for the referent at `path`, or nothing when none is.
+ * A document's declared schema narrowed by a path is a walk over the schema
+ * rather than a read of the data, so nothing here goes near a value; the
+ * referent's own schema is the last resort, since with no declared schema
+ * there is nothing to walk.
+ */
+const declaredSchema = async (
+  root: Cell<unknown>,
+  referent: Cell<unknown>,
+  path: readonly (string | number)[],
+  documentSchema: JSONSchema | undefined,
+): Promise<JSONSchema | undefined> => {
+  if (path.length === 0) {
+    return documentSchema ?? root.schema;
+  }
+  if (documentSchema !== undefined) {
+    return ((root.asSchema(documentSchema) as Cell<unknown>).key(
+      ...path,
+    ) as Cell<unknown>).schema;
+  }
+  await referent.sync();
+  return referent.schema;
+};
+
+/**
+ * The referent's table contract as a fragment to spread, empty where it has
+ * none. The read is permissive-schema and resolving because a handle written
+ * before the sqlite builtin stored it inline can hold links where its table
+ * schemas belong, and the SqliteDb shape declares no properties, so a shaped
+ * read would reduce the handle to `{}`.
+ */
+const databaseOf = (
+  referent: Cell<unknown>,
+): Pick<DescribedReferent, "database"> => {
+  const database = describedDatabase(
+    referent.asSchema({ type: "object", additionalProperties: true }).get(),
+  );
+  return database === undefined ? {} : { database };
+};
 
 /** What the session can state about `ref`: its declared shape, and its labels. */
 interface DescribedReferent {
   schema?: JSONSchema;
   labels?: DescribeHandleLabel[];
+  database?: DescribeHandleDatabase;
 }
 
 /**
@@ -274,23 +474,18 @@ const describeInFabric = async (
       (link.path.length === 0 ? root : root.key(...link.path)) as Cell<unknown>;
     const labels = describedLabels(referent);
     const documentSchema = root.getMetaRaw("schema") as JSONSchema | undefined;
-    if (link.path.length === 0) {
-      const schema = documentSchema ?? root.schema;
-      return { labels, ...(schema !== undefined ? { schema } : {}) };
+    const declared = await declaredSchema(
+      root,
+      referent,
+      link.path,
+      documentSchema,
+    );
+    if (declared !== undefined) {
+      return { labels, schema: declared };
     }
-    if (documentSchema !== undefined) {
-      // Narrowing a declared schema by a path is a walk over the schema, so
-      // the referent's shape is in hand without going near its value.
-      const schema = ((root.asSchema(documentSchema) as Cell<unknown>).key(
-        ...link.path,
-      ) as Cell<unknown>).schema;
-      return { labels, ...(schema !== undefined ? { schema } : {}) };
-    }
-    // With no declared schema there is nothing to walk, and only the referent
-    // itself can state a shape.
-    await referent.sync();
-    const schema = referent.schema;
-    return { labels, ...(schema !== undefined ? { schema } : {}) };
+    // Nothing was declared, so the referent's own value is the only place a
+    // contract can still be stated, and a database handle states one there.
+    return { labels, ...databaseOf(referent) };
   } catch {
     return {};
   }
@@ -360,6 +555,9 @@ export const describeHandleTool: HarnessToolDefinition<
       ...(disclosed !== undefined ? { schema: disclosed } : {}),
       ...(path !== undefined ? { path } : {}),
       ...(described.labels !== undefined ? { labels: described.labels } : {}),
+      ...(described.database !== undefined
+        ? { database: described.database }
+        : {}),
     };
   },
 };

@@ -669,7 +669,7 @@
     // ------------------------------------------------------------------ layout data
     // The state of this repository the map describes. Bump both when the
     // map is re-verified; the stamp is drawn in the canvas's top-left corner.
-    const SNAPSHOT = { date: "2026-09-04", sha: "38ef88a585" };
+    const SNAPSHOT = { date: "2026-09-07", sha: "8f3c431193" };
     const W = 2760, H = 1840;
     const bands = [
       {
@@ -1977,7 +1977,7 @@
         threats: ["t7"],
         close: [
           "Injection seeds <code>tables: {}</code> and treats injected files as unlabeled, so connector rows carry no labels yet. Decide how a connector's schema and row-label rules reach the handle (CT-2189 gap 2, shared loom + labs).",
-          "<code>describe_handle</code> can tell the model nothing about an injected table until the handle cell declares a schema (gap 4, ours, small).",
+          "<code>describe_handle</code> reports an injected database's tables, its columns and their <code>ifc</code> labels, read off the handle value where the cell declares no schema (gap 4, ours, closed). What the model can be told is therefore bounded by what injection puts on the handle, which is gap 2 above.",
         ],
       },
       connectors: {
@@ -2431,7 +2431,7 @@
             ],
             sel: "handles",
             h: "Mint the handle",
-            t: "The input cell becomes cfh:a:… in the model's world. The model sees the cell's schema and label through describe_handle, never the rows.",
+            t: "The input cell becomes cfh:a:… in the model's world. The model sees the cell's schema and label through describe_handle — or, for a database, its tables and its columns' labels — never the rows.",
           },
           {
             f: ["parent", "e_parent_child", "g_deleg", "child_pa"],

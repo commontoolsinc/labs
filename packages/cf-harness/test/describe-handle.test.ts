@@ -159,6 +159,48 @@ const SPENDING_PATTERN_SOURCE = [
 ].join("\n");
 
 /**
+ * A SQLite database handle in the shape one arrives in when a connector
+ * injects it: the tables it was created under, carried in the handle's own
+ * value, with nothing declaring a schema for the cell that holds it. The
+ * table title, the column description and the column default are the prose
+ * and values a reduction has to drop; the `ifc` annotations are what a reader
+ * has to be told.
+ */
+const MAIL_DB_HANDLE = {
+  id: "db-mail",
+  rev: 3,
+  tables: {
+    messages: {
+      type: "object",
+      title: "The Inbox",
+      properties: {
+        sender: {
+          type: "string",
+          default: "noreply@example.test",
+          ifc: {
+            confidentiality: ["https://cfc.test/atom/email"],
+            integrity: ["https://cfc.test/atom/connector-observed"],
+          },
+        },
+        body: {
+          type: "string",
+          description: "every message this connector observed",
+          ifc: {
+            confidentiality: [{
+              anyOf: [
+                "https://cfc.test/atom/email",
+                "https://cfc.test/atom/screened",
+              ],
+            }],
+          },
+        },
+        received: { type: "integer" },
+      },
+    },
+  },
+};
+
+/**
  * The context members `describe_handle` reads. Everything else on a tool
  * context — sandbox, host runner — is deliberately unused by this tool, so a
  * stub that supplies more would misstate what it can reach.
@@ -305,6 +347,11 @@ describe("describe_handle", () => {
     expect(output.known).toBe(false);
     expect(output.hasSchema).toBe(false);
     expect(output.token).toBe("cfh:a:zzzzz");
+    // A token that names nothing has nothing to report about, database
+    // handles included: the reply's fields are these four and no others.
+    expect(Object.keys(output).sort()).toEqual(
+      ["hasSchema", "known", "outputId", "token"],
+    );
   });
 
   it("reports any token as unknown in a run that has minted none", async () => {
@@ -870,6 +917,177 @@ describe("describe_handle", () => {
 
       expect(output.known).toBe(true);
       expect(output.hasSchema).toBe(false);
+    });
+
+    describe("a referent that is a database", () => {
+      /**
+       * Seeds a cell holding `value` and declaring no schema, and returns a
+       * reference to it — the shape a database injected by a connector
+       * arrives in, where the shape is in the value and nothing declares it.
+       */
+      const seedUndeclaredCell = async (value: unknown): Promise<string> => {
+        const space = session.pieces.getSpace();
+        const seed = runtime.edit();
+        const cell = runtime.getCell(
+          space,
+          `describe-handle-db-${crypto.randomUUID()}`,
+          undefined,
+          seed,
+        );
+        const id = cell.getAsNormalizedFullLink().id;
+        seed.writeOrThrow({ space, scope: "space", id, path: [] }, {
+          value,
+        } as FabricValue);
+        expect((await seed.commit()).ok).toBeDefined();
+        return `/${id}`;
+      };
+
+      it("discloses the tables and the columns' labels of a database that declares no schema", async () => {
+        const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+
+        const output = await describeHandleTool.invoke(
+          contextWith(minted.table, session),
+          { token: minted.token },
+        );
+
+        expect(output.hasSchema).toBe(false);
+        expect(output.database?.tables).toEqual({
+          type: "object",
+          properties: {
+            messages: {
+              type: "object",
+              properties: {
+                sender: { type: "string" },
+                body: { type: "string" },
+                received: { type: "integer" },
+              },
+            },
+          },
+        });
+        // Ordered by column here, since the order the columns come back in is
+        // the storage layer's business rather than part of the disclosure.
+        const labels = [...(output.database?.labels ?? [])].sort((a, b) =>
+          (a.path ?? []).join(".").localeCompare((b.path ?? []).join("."))
+        );
+        expect(labels).toEqual([
+          {
+            path: ["messages", "body"],
+            confidentiality: [[
+              "https://cfc.test/atom/email",
+              "https://cfc.test/atom/screened",
+            ]],
+            integrity: [],
+          },
+          {
+            path: ["messages", "sender"],
+            confidentiality: [["https://cfc.test/atom/email"]],
+            integrity: ["https://cfc.test/atom/connector-observed"],
+          },
+        ]);
+      });
+
+      it("reports no row of the database and no prose off its table schemas", async () => {
+        // The tables are a declaration, so what the reduction does to a
+        // declared schema it must do here: the column default, the column
+        // description and the table title are all author-chosen text on the
+        // one structure this tool now reads out of a value.
+        const ref = await seedUndeclaredCell(MAIL_DB_HANDLE);
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+
+        const output = await describeHandleTool.invoke(
+          contextWith(minted.table, session),
+          { token: minted.token },
+        );
+
+        // Stated first, so the checks below cannot pass on a reply that
+        // disclosed nothing at all.
+        expect(output.database?.labels).toHaveLength(2);
+        const reply = JSON.stringify(output);
+        expect(reply).not.toContain("every message this connector observed");
+        expect(reply).not.toContain("noreply@example.test");
+        expect(reply).not.toContain("The Inbox");
+      });
+
+      it("bounds a column name in a label the way it bounds it in the tables", async () => {
+        // A column name is disclosed through two channels: the reduced table
+        // schema, which bounds it, and a label's path, which names the column
+        // it came off. A name the reduction refused has to be refused in both,
+        // or the label path is the prose channel the reduction exists to close.
+
+        const longColumn = "c".repeat(MAX_PROPERTY_NAME_LENGTH + 1);
+        const ref = await seedUndeclaredCell({
+          id: "db-long-column",
+          tables: {
+            messages: {
+              type: "object",
+              properties: {
+                [longColumn]: {
+                  type: "string",
+                  ifc: {
+                    confidentiality: ["https://cfc.test/atom/email"],
+                  },
+                },
+              },
+            },
+          },
+        });
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+
+        const output = await describeHandleTool.invoke(
+          contextWith(minted.table, session),
+          { token: minted.token },
+        );
+
+        expect(JSON.stringify(output.database?.tables)).not.toContain(
+          longColumn,
+        );
+        expect(JSON.stringify(output)).not.toContain(longColumn);
+      });
+
+      it("reports nothing about a database whose handle names no tables", async () => {
+        const ref = await seedUndeclaredCell({ id: "db-with-no-tables" });
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+
+        const output = await describeHandleTool.invoke(
+          contextWith(minted.table, session),
+          { token: minted.token },
+        );
+
+        expect(output.known).toBe(true);
+        expect(output.database).toBeUndefined();
+      });
+
+      it("does not read the value of a referent that declares a schema", async () => {
+        // The value read is conditional on nothing being declared. A piece
+        // states its own shape, so the reply is the shape and the database
+        // field is absent — which is also what says a value was never opened.
+        const resultRef = await createPiece();
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          resultRef,
+        );
+
+        const output = await describeHandleTool.invoke(
+          contextWith(minted.table, session),
+          { token: minted.token },
+        );
+
+        expect(output.hasSchema).toBe(true);
+        expect(output.database).toBeUndefined();
+      });
     });
   });
 
