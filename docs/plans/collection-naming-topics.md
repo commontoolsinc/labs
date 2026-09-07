@@ -350,10 +350,13 @@ Mike's call, after S4.
    3. Backfill, then bind `namesTable` onto each topic `addTopic` did not
       wire. Run it from a host: laptop runs died 4-6 minutes in during the
       2026-08-28 migration. Never pass `--allow-non-existing` (#6965).
-   4. Verify by address, not by badge. A board's `index --step` read can
-      report every member's stale `shortName` twice in a row while the
-      address already resolves correctly, so repeating the board read is
-      exactly what does not catch it.
+   4. Verify by reading both the board's index and the member addresses.
+      The rerun's fixed board agreed with its members at every index read, so
+      no divergence is established for the code this graft deploys — the two
+      reads that disagreed were on the instrument board carrying the walk
+      #6987 replaced, and are a symptom of that defect rather than a property
+      of board reads. Reading both is what would show a divergence if one
+      appeared, and costs a command.
 
    **The board leg of the deploy needs
    `--dangerously-allow-incompatible-schema`.** `setsrc --check` refuses it over
