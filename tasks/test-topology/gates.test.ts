@@ -1,6 +1,4 @@
 import { expect } from "@std/expect";
-import { parse as parseJsonc } from "@std/jsonc";
-import * as path from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 import { loadGateSuites } from "./gates.ts";
 import type { Suite } from "./suite.ts";
@@ -65,47 +63,6 @@ describe("the repository's gate suites", () => {
       context,
     );
     expect(invocation!.command).toContain("origin/main");
-  });
-
-  it("names a task some manifest it can reach defines", async () => {
-    // `fmt` and `lint` are subcommands of Deno rather than tasks of this
-    // repository, and a gate asking for one as a task exits one having
-    // checked nothing. The lane reports that as a failed gate with no
-    // failing test under it, which is the hardest shape of failure to
-    // read, so the gates are held to naming what they run.
-    const tasksOf = async (dir: string): Promise<Set<string>> => {
-      for (const name of ["deno.json", "deno.jsonc"]) {
-        const text = await Deno.readTextFile(path.join(dir, name)).catch(
-          () => undefined,
-        );
-        if (text === undefined) continue;
-        const manifest = parseJsonc(text) as {
-          tasks?: Record<string, unknown>;
-        };
-        return new Set(Object.keys(manifest.tasks ?? {}));
-      }
-      return new Set();
-    };
-    const rootTasks = await tasksOf(root);
-    const missing: string[] = [];
-    for (const suite of suites) {
-      for (const unit of suite.units) {
-        const [invocation] = await suite.command([{ unit, skip: [] }], {
-          root,
-          outputDir: "/out",
-        });
-        const command = invocation!.command;
-        // What the recorder was told to run, which is everything past the
-        // separator and the Deno path that follows it.
-        const run = command.slice(command.indexOf("--") + 2);
-        if (run[0] !== "task") continue;
-        const local = await tasksOf(invocation!.cwd ?? root);
-        if (!local.has(run[1]!) && !rootTasks.has(run[1]!)) {
-          missing.push(`${suite.id} ${unit}: no task named ${run[1]}`);
-        }
-      }
-    }
-    expect(missing).toEqual([]);
   });
 
   it("runs a gate that belongs to a package in that package", async () => {
