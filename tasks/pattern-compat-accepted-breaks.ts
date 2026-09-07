@@ -463,4 +463,43 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "deployment, so no piece holds the contract they replace.",
     record: "docs/history/collection-naming-mentionable-readonly-break.md",
   },
+  {
+    // Two entries, one per pattern, for one ruling: `LLMMessageSchema` stopped
+    // admitting the `system` role, and that schema reaches the argument
+    // contract of every pattern whose `messages` it types.
+    pattern: "chatbot.tsx",
+    baselines: [
+      "20260729T022742Z-Wx_o-CaAUThcJygl",
+      "20260818T183826Z-ibsxlvix5LQH7bfY",
+    ],
+    paths: [
+      "argument.messages[].role",
+    ],
+    reason:
+      "A system instruction travels in the request's `system` field. The " +
+      "guard the toolshed route gates on refused a system-role message " +
+      "already, and behind it the AI SDK refuses one inside `messages` " +
+      "whatever its content, so the role named a message no piece could ever " +
+      "send. An enum in a deployed contract cannot stop accepting a value " +
+      "compatibly, and no shape of the schema both drops the role and applies " +
+      "over a baseline declaring it. The narrowing strands nothing: the " +
+      "runtime enforces an enum neither on read nor on write, so a stored " +
+      "system-role message materializes under the new contract unchanged.",
+    record: "docs/history/features/llm-message-role-narrowing-break.md",
+  },
+  {
+    // The second pattern of the same ruling. Its baseline appears in no other
+    // entry, so the pairs stay disjoint.
+    pattern: "deep-research.tsx",
+    baselines: [
+      "20260729T022742Z-6PInVAlNOHThJNGH",
+    ],
+    paths: [
+      "argument.messages[].role",
+    ],
+    reason:
+      "The `system` role leaving `LLMMessageSchema`, recorded once for both " +
+      "patterns it breaks.",
+    record: "docs/history/features/llm-message-role-narrowing-break.md",
+  },
 ];

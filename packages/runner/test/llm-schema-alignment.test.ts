@@ -35,6 +35,24 @@ import {
 const signer = await Identity.fromPassphrase("schema-alignment-test");
 const space = signer.did();
 
+/**
+ * `BuiltInLLMMessage`'s roles written out as values. The `satisfies` clause
+ * refuses a role listed here that the type does not carry, and
+ * `EveryRoleIsListed` below refuses one the type carries that is missing here.
+ */
+const MESSAGE_ROLES = [
+  "user",
+  "assistant",
+  "tool",
+] as const satisfies readonly BuiltInLLMMessage["role"][];
+
+/** Its argument is `never` only while `MESSAGE_ROLES` names every role. */
+type AssertNever<T extends never> = T;
+
+type EveryRoleIsListed = AssertNever<
+  Exclude<BuiltInLLMMessage["role"], typeof MESSAGE_ROLES[number]>
+>;
+
 /** Helper: create a cell with data, apply schema, read it back. */
 function materialize<T>(
   runtime: Runtime,
@@ -171,8 +189,8 @@ describe("LLM schema alignment", () => {
       });
     });
 
-    it("materializes all four role values", () => {
-      for (const role of ["user", "assistant", "system", "tool"] as const) {
+    it("materializes every role value", () => {
+      for (const role of MESSAGE_ROLES) {
         const msg: BuiltInLLMMessage = { role, content: "test" };
         const value = materialize<any>(
           runtime,
@@ -183,6 +201,19 @@ describe("LLM schema alignment", () => {
         );
         expect(value.role).toBe(role);
       }
+    });
+
+    it("declares the roles `BuiltInLLMMessage` carries and no others", () => {
+      // `MESSAGE_ROLES` is held to the type's own role union by the compiler,
+      // so the two cannot drift apart; the comparison then holds the schema to
+      // that same list. `system` is absent from all three: a system
+      // instruction travels in the request's `system` field, which
+      // `llmRequestProblem()` in `packages/llm/src/types.ts` enforces and the
+      // model-provider SDK requires.
+      expect(LLMMessageSchema?.properties?.role).toEqual({
+        type: "string",
+        enum: MESSAGE_ROLES,
+      });
     });
   });
 

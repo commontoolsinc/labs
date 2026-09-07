@@ -185,7 +185,7 @@ Deno.test("a tool the model cannot serve is the caller's mistake", async () => {
 
 //
 // A body sent as JSON is parsed by the route's own validator, which answers
-// its own 400 before the handler runs. A body sent as anything else reaches
+// its own 422 before the handler runs. A body sent as anything else reaches
 // the handler unparsed.
 //
 
@@ -202,6 +202,22 @@ Deno.test("a body that is not JSON is the caller's mistake", async () => {
 Deno.test("a body that does not match the schema is reported as unprocessable", async () => {
   const { status } = await post("/api/ai/llm", { messages: "not an array" });
   assertEquals(status, 422);
+});
+
+Deno.test("a system-role message names the field it belongs in", async () => {
+  const response = await app.request("/api/ai/llm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: MOCK_MODEL_NAME,
+      cache: false,
+      messages: [{ role: "system", content: "Be brief" }],
+    }),
+  });
+  assertEquals(response.status, 422);
+  const issues = (await response.json()).error.issues;
+  assertEquals(issues[0].path, ["messages", 0, "role"]);
+  assertStringIncludes(issues[0].message, "'system' field");
 });
 
 Deno.test("a schema that cannot compile is the caller's mistake", async () => {

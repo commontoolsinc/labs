@@ -1,5 +1,5 @@
 import { type BuiltInLLMMessage } from "@commonfabric/api";
-import { isLLMRequest } from "@commonfabric/llm/types";
+import { type LLMRequest, llmRequestProblem } from "@commonfabric/llm/types";
 import type { Context } from "@hono/hono";
 import * as HttpStatusCodes from "stoker/http-status-codes";
 
@@ -154,16 +154,17 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   if (!body.ok) {
     return c.json({ error: body.error }, HttpStatusCodes.BAD_REQUEST);
   }
-  const payload = body.payload;
-  if (!isLLMRequest(payload)) {
+  const problem = llmRequestProblem(body.payload);
+  if (problem !== undefined) {
     return c.json(
-      {
-        error:
-          "Invalid request: requires 'model' (string), 'messages' (array), and 'cache' (boolean)",
-      },
+      { error: `Invalid request: ${problem}` },
       HttpStatusCodes.BAD_REQUEST,
     );
   }
+  // `llmRequestProblem()` answering `undefined` is what makes this hold, and
+  // it is the only thing that does: `body.payload` is whatever the JSON
+  // parser returned.
+  const payload: LLMRequest = body.payload;
 
   if (!payload.metadata) {
     payload.metadata = {};

@@ -133,14 +133,6 @@ export type LLMGenerateObjectResponse = {
   id?: string;
 };
 
-function isArrayOf<T>(
-  callback: (data: unknown) => boolean,
-  input: unknown,
-): input is T[] {
-  return Array.isArray(input) &&
-    input.map((value) => callback(value)).every(Boolean);
-}
-
 export function isLLMRequestMetadata(
   input: unknown,
 ): input is LLMRequestMetadata {
@@ -164,12 +156,6 @@ export function isLLMContent(input: unknown): input is LLMContent {
   ));
 }
 
-export function isLLMToolResult(input: unknown): input is LLMToolResult {
-  return isObjectNotArray(input) &&
-    typeof input.toolCallId === "string" &&
-    (!("error" in input) || typeof input.error === "string");
-}
-
 export function isLLMTool(input: unknown): input is LLMTool {
   return isObjectNotArray(input) &&
     typeof input.description === "string" &&
@@ -177,18 +163,29 @@ export function isLLMTool(input: unknown): input is LLMTool {
     (!("handler" in input) || typeof input.handler === "function");
 }
 
-export function isLLMMessage(input: unknown): input is BuiltInLLMMessage {
-  return isObjectNotArray(input) &&
-    (input.role === "user" || input.role === "assistant" ||
-      input.role === "tool") &&
-    isLLMContent(input.content) &&
-    (!("toolCallId" in input) || typeof input.toolCallId === "string");
+/**
+ * Names what stops `input` from being a `BuiltInLLMMessage`, or `undefined`
+ * when nothing does. The text continues a sentence that names the message, as
+ * in `Message 0 must be an object.`
+ */
+function llmMessageProblem(input: unknown): string | undefined {
+  if (!isObjectNotArray(input)) return "must be an object";
+  const { role } = input;
+  if (role === "system") {
+    return "carries the 'system' role, which belongs in the request's " +
+      "'system' field rather than among its messages";
+  }
+  if (role !== "user" && role !== "assistant" && role !== "tool") {
+    return `must carry the role 'user', 'assistant', or 'tool', not ${
+      JSON.stringify(role)
+    }`;
+  }
+  if (!isLLMContent(input.content)) {
+    return "must carry content that is either a string or an array of text, " +
+      "image, tool-call, and tool-result parts";
+  }
+  return undefined;
 }
-
-export const isLLMMessages = (isArrayOf<BuiltInLLMMessage>).bind(
-  null,
-  isLLMMessage,
-);
 
 /**
  * Extract text content from LLMResponse, handling both string and content parts array
@@ -209,19 +206,59 @@ export function extractTextFromLLMResponse(response: LLMResponse): string {
   return "";
 }
 
-export function isLLMRequest(input: unknown): input is LLMRequest {
-  return isObjectNotArray(input) &&
-    typeof input.model === "string" && isLLMMessages(input.messages) &&
-    ("cache" in input) &&
-    (!("system" in input) || typeof input.system === "string") &&
-    (!("maxTokens" in input) || typeof input.maxTokens === "number") &&
-    (!("stream" in input) || typeof input.stream === "boolean") &&
-    (!("stop" in input) || typeof input.stop === "string") &&
-    (!("mode" in input) || input.mode === "json") &&
-    (!("metadata" in input) || isLLMRequestMetadata(input.metadata)) &&
-    (!("tools" in input) || (isObjectNotArray(input.tools) &&
-      Object.values(input.tools).every((tool: unknown) => isLLMTool(tool)))) &&
-    (!("nativeModelToolIds" in input) ||
-      (Array.isArray(input.nativeModelToolIds) &&
-        input.nativeModelToolIds.every(isLLMNativeModelToolId)));
+/**
+ * Names what stops `input` from being an `LLMRequest`, or `undefined` when
+ * nothing does. A route that refuses a request returns this text, so its
+ * caller learns which part of the payload to change.
+ */
+export function llmRequestProblem(input: unknown): string | undefined {
+  if (!isObjectNotArray(input)) return "The request must be an object.";
+  if (typeof input.model !== "string") return "'model' must be a string.";
+  if (!Array.isArray(input.messages)) return "'messages' must be an array.";
+  // The model provider refuses an empty conversation, `system` field or no,
+  // so a request carrying one is the caller's to fix rather than the
+  // provider's to report.
+  if (input.messages.length === 0) return "'messages' must not be empty.";
+  for (const [index, message] of input.messages.entries()) {
+    const problem = llmMessageProblem(message);
+    if (problem !== undefined) return `Message ${index} ${problem}.`;
+  }
+  if (!("cache" in input)) return "'cache' must be present.";
+  if ("system" in input && typeof input.system !== "string") {
+    return "'system' must be a string.";
+  }
+  if ("maxTokens" in input && typeof input.maxTokens !== "number") {
+    return "'maxTokens' must be a number.";
+  }
+  if ("stream" in input && typeof input.stream !== "boolean") {
+    return "'stream' must be a boolean.";
+  }
+  if ("stop" in input && typeof input.stop !== "string") {
+    return "'stop' must be a string.";
+  }
+  if ("mode" in input && input.mode !== "json") {
+    return "'mode' must be 'json'.";
+  }
+  if ("metadata" in input && !isLLMRequestMetadata(input.metadata)) {
+    return "'metadata' must be an object whose values ordinary JSON " +
+      "serialization carries faithfully.";
+  }
+  if (
+    "tools" in input &&
+    !(isObjectNotArray(input.tools) &&
+      Object.values(input.tools).every(isLLMTool))
+  ) {
+    return "'tools' must be an object naming tools, each with a " +
+      "'description' string and an 'inputSchema' object.";
+  }
+  if (
+    "nativeModelToolIds" in input &&
+    !(Array.isArray(input.nativeModelToolIds) &&
+      input.nativeModelToolIds.every(isLLMNativeModelToolId))
+  ) {
+    return `'nativeModelToolIds' must be an array drawn from ${
+      LLM_NATIVE_MODEL_TOOL_IDS.join(", ")
+    }.`;
+  }
+  return undefined;
 }
