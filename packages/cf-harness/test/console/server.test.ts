@@ -12,6 +12,7 @@ import { harnessSessionChatPolicy } from "../../src/session-assembly.ts";
 import type { ConsoleSessionListing } from "../../console/sessions.ts";
 import type { HarnessFetch } from "../../src/contracts/http-fetch.ts";
 import { PatternIndexClient } from "../../src/pattern-index/client.ts";
+import { MAX_HARNESS_PATTERN_REFS } from "../../src/pattern-refs.ts";
 import {
   type HarnessInteractiveChatEventListener,
   HarnessInteractiveChatService,
@@ -100,6 +101,16 @@ const advancingClock = () => {
 
 /** The identity the proxied index client signs with in these tests. */
 const signer = await Identity.fromPassphrase("cf-harness console index proxy");
+
+/** What the index answers for the pattern a task attaches by id. */
+const INDEXED_PATTERN = {
+  patternId: "pat-expenses",
+  ownerDid: "did:key:zOwner",
+  createdAt: "2026-08-01T00:00:00.000Z",
+  description: "Totals an expense list",
+  hashtags: ["expenses"],
+  dependencies: [],
+};
 
 /** An entity id of the shape an input-cell reference has to carry. */
 const CELL_ID = `of:fid1:${"A".repeat(43)}`;
@@ -1138,6 +1149,154 @@ describe("console/server", () => {
       const started = await startTask({
         text: "track my books",
         inputCells: null,
+      });
+
+      expect(started.turnId).toBeDefined();
+    });
+
+    it("attaches the task's pattern references to the run that answers it", async () => {
+      // The pill's `use <id>` flow: the caller names published patterns by
+      // the index's own id. What reaches the run is the id; resolving it
+      // against the index is the run's, before its first model turn.
+      const loopOptions: CreateHarnessPromptLoopOptions[] = [];
+      const artifactRoot = await Deno.makeTempDir({
+        prefix: "cf-harness-console-pattern-refs-",
+      });
+      const capturing = new ConsoleServer(
+        await resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            "console-test",
+            "--session-db",
+            "none",
+            "--pattern-index-url",
+            "https://index.test/api",
+            "--artifact-root",
+            artifactRoot,
+          ],
+          {},
+          "/console",
+        ),
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            basePromptLoopOptions: {
+              patternIndexClientFactory: () =>
+                Promise.resolve(
+                  new PatternIndexClient({
+                    baseUrl: "https://index.test/api",
+                    fetchFn: () =>
+                      Promise.resolve(Response.json(INDEXED_PATTERN)),
+                    signer,
+                  }),
+                ),
+            },
+            createPromptLoop: (options) => {
+              loopOptions.push(options);
+              return answeringLoop(options);
+            },
+            now: advancingClock(),
+            onEvent,
+          }),
+      );
+      const page = await capturing.handle(getRequest("/"));
+      await page.body?.cancel();
+      const capturedCookie = page.headers.get("set-cookie")!.split(";")[0];
+
+      try {
+        const response = await capturing.handle(jsonRequest("/api/task", {
+          text: "use pat-expenses for a dice roller app",
+          patternRefs: [{ patternId: "pat-expenses" }],
+        }, { cookie: capturedCookie }));
+        expect(response.status).toBe(200);
+        const started = await response.json();
+        await capturing.service.waitForTurn(started.sessionId, started.turnId);
+
+        expect(
+          capturing.service.events(started.sessionId).map((envelope) =>
+            envelope.event.kind
+          ),
+        ).toContain("turn_completed");
+        expect(loopOptions.at(-1)?.patternRefs).toEqual([
+          { patternId: "pat-expenses" },
+        ]);
+      } finally {
+        await Deno.remove(artifactRoot, { recursive: true });
+      }
+    });
+
+    it("answers 400 for a pattern reference that is not an index id, before any turn starts", async () => {
+      // The prose the person typed after `use` is not an id, and an id is
+      // the whole of the reference grammar.
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "use it for a dice roller app",
+        patternRefs: [{ patternId: "it for a dice roller app" }],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain("patternId must match");
+      expect((await listSessions()).sessions).toHaveLength(0);
+    });
+
+    it("answers 400 for pattern references that are not a list at all", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "total my spending",
+        patternRefs: { patternId: "pat-expenses" },
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "patternRefs must be an array",
+      );
+    });
+
+    it("answers 400 for a pattern reference that carries no string patternId", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "total my spending",
+        patternRefs: [{ id: "pat-expenses" }],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "each pattern reference needs a string patternId",
+      );
+    });
+
+    it("answers 400 for an id the request names twice", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "total my spending",
+        patternRefs: [
+          { patternId: "pat-expenses" },
+          { patternId: "pat-expenses" },
+        ],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "patternRefs names `pat-expenses` twice",
+      );
+    });
+
+    it("answers 400 for more pattern references than a task may attach", async () => {
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "total my spending",
+        patternRefs: Array.from(
+          { length: MAX_HARNESS_PATTERN_REFS + 1 },
+          (_unused, index) => ({ patternId: `pat-${index}` }),
+        ),
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toContain(
+        `at most ${MAX_HARNESS_PATTERN_REFS}`,
+      );
+    });
+
+    it("starts a task that names no pattern references at all", async () => {
+      const started = await startTask({
+        text: "track my books",
+        patternRefs: null,
       });
 
       expect(started.turnId).toBeDefined();

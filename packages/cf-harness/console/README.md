@@ -164,7 +164,8 @@ provider turn or make a Fabric round trip. A caller needing proven substrate
 liveness must perform a separate probe.
 
 A task body carries the text, optionally the session to continue, and optionally
-the cells the task is to be computed over:
+the cells the task is to be computed over and the published patterns it is to be
+given:
 
 ```json
 {
@@ -172,6 +173,9 @@ the cells the task is to be computed over:
   "sessionId": "…",
   "inputCells": [
     { "name": "itinerary", "ref": "/of:fid1:…/days" }
+  ],
+  "patternRefs": [
+    { "patternId": "…" }
   ]
 }
 ```
@@ -186,6 +190,23 @@ a 400 before any turn starts: a `ref` has to be a link naming an entity
 grammar and still cannot be minted — one in another space, say — fails the turn
 rather than starting it without what the caller attached, and that turn is
 terminal like any other failed one.
+
+A pattern reference names a published pattern by the index's own id, which is
+the content-addressed identity of its source: it names an entry the index holds
+or it names nothing, and the id is the whole of the reference. The turn's run
+resolves each one against the index before its first model turn and seeds what
+comes back as a `search_patterns` hit, so the model runs it with `run_pattern`'s
+`patternId`, composes it through its `cf:pattern:` specifier, or selects it for
+a child with `delegate_task`'s `patternRefs`, without searching for it. What the
+reference grants is what a search hit grants — compose this source by identifier
+— and attaching one asserts nothing about whether the pattern works.
+
+The grammar is the run's, so a value that is not an id is refused with a 400
+before any turn starts, as a bad `ref` is; so are more than eight references and
+the same id twice. Whether the index holds an id is the run's to find out: an id
+it does not hold fails the turn, naming the id, rather than starting it without
+what the caller attached. A task attaching patterns needs a console started with
+a pattern index (`--pattern-index-url`).
 
 The completed-turn result is:
 

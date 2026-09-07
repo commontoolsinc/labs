@@ -1,6 +1,8 @@
 /**
  * A parent's selected pattern references cross delegation from the trusted
- * search record, not from model-retyped metadata or a delegation-time fetch.
+ * record, not from model-retyped metadata or a delegation-time fetch. The
+ * record is one the parent searched for, or one the task attached by id and
+ * the run resolved before its first model turn.
  */
 
 import { describe, it } from "@std/testing/bdd";
@@ -338,6 +340,77 @@ const runResumedDelegation = async (
   };
 };
 
+/** Runs one delegation over the patterns the task attached, with no search. */
+const runAttachedDelegation = async (): Promise<
+  DelegationFixture & { recorded: readonly string[] }
+> => {
+  const index = stubIndex();
+  const modelRequests: unknown[] = [];
+  const modelTurns = [
+    toolCallTurn("call-delegate", "delegate_task", {
+      goal: "Use the attached pattern to plan the focused task.",
+      patternRefs: [{ patternId: SEARCH_HIT.patternId }],
+    }),
+    assistantTurn("Child completed the focused task."),
+    assistantTurn("Parent received the delegation result."),
+  ];
+  const fetchFn: typeof fetch = (_input, init) => {
+    modelRequests.push(JSON.parse(String(init?.body)));
+    const turn = modelTurns[modelRequests.length - 1];
+    if (turn === undefined) {
+      throw new Error("scripted model ran out of turns");
+    }
+    return Promise.resolve(
+      new Response(JSON.stringify(responsesBodyFromChatFixture(turn)), {
+        status: 200,
+      }),
+    );
+  };
+  const engine = new CfHarnessEngine({
+    sandboxRuntime: new FakeSandboxRuntime(),
+    runId: `run-attached-pattern-refs-${crypto.randomUUID()}`,
+    model: "gpt-5.4",
+    cfcEnforcementMode: "disabled",
+    patternRefs: [{ patternId: SEARCH_HIT.patternId }],
+    patternIndexClientFactory: () =>
+      Promise.resolve(
+        new PatternIndexClient({
+          baseUrl: "https://index.test",
+          fetchFn: index.fetchFn,
+          signer,
+        }),
+      ),
+  });
+  // What the session context does before a turn's first model turn.
+  await engine.establishPatternRefs();
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine,
+    allowedToolIds: ["search_patterns", "delegate_task"],
+    allowedSubagentProfiles: ["default"],
+    fetchFn,
+  });
+
+  const result = await loop.runPrompt({ prompt: "Delegate over it." });
+  const delegateMessage = result.transcript.find((message) =>
+    message.role === "tool" && message.toolName === "delegate_task"
+  );
+  if (delegateMessage?.role !== "tool") {
+    throw new Error("expected a `delegate_task` tool result");
+  }
+  const childRequest = modelRequests[1] === undefined
+    ? undefined
+    : chatViewOfRequest(modelRequests[1]);
+
+  return {
+    childPrompt: childRequest?.messages.at(-1)?.content ?? "",
+    indexCalls: index.calls,
+    delegateOutput: JSON.parse(delegateMessage.content),
+    subagentRuns: result.runState.subagentRuns?.length ?? 0,
+    recorded: (result.runState.patternRefs ?? []).map((ref) => ref.patternId),
+  };
+};
+
 describe("prompt-loop pattern references", () => {
   it("rehydrates a selected hit into neutral child context", async () => {
     const result = await runDelegation([{
@@ -418,5 +491,22 @@ Use this as available evidence; do not assume it is mandatory.`,
     expect(result.childPrompt).toContain(SEARCH_HIT.patternId);
     expect(result.delegateOutput.patternRefRefusals).toBeUndefined();
     expect(result.indexCalls).toEqual(["searchPatterns", "getPattern"]);
+  });
+
+  it("rehydrates a pattern the task attached, which no turn searched for", async () => {
+    const result = await runAttachedDelegation();
+
+    expect(result.subagentRuns).toBe(1);
+    expect(result.childPrompt).toContain(SEARCH_HIT.patternId);
+    expect(result.childPrompt).toContain(PATTERN_RECORD.description);
+    expect(result.delegateOutput.patternRefRefusals).toBeUndefined();
+    // The one read is the attachment's own, made before the first model turn.
+    expect(result.indexCalls).toEqual(["getPattern"]);
+  });
+
+  it("records the patterns the task attached in the run's own state", async () => {
+    const result = await runAttachedDelegation();
+
+    expect(result.recorded).toEqual([SEARCH_HIT.patternId]);
   });
 });

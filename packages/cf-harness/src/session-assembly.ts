@@ -31,6 +31,7 @@ import type { HarnessBrowserAccessLease } from "./contracts/browser-access.ts";
 import type { HarnessChatPolicy } from "./contracts/interactive-chat.ts";
 import type { PromptSlotBinding } from "./contracts/prompt-slot.ts";
 import type { HarnessInputCellSpec } from "./contracts/input-cells.ts";
+import type { HarnessPatternRefSpec } from "./contracts/pattern-refs.ts";
 import type {
   HarnessAllowedSkillScript,
   HarnessSkillScriptExecutionTarget,
@@ -49,6 +50,7 @@ import {
   hostMountsToAdditionalMounts,
 } from "./host-mounts.ts";
 import { inputCellsContextMessage } from "./input-cells.ts";
+import { patternRefsContextMessage } from "./pattern-refs.ts";
 import type { CreateHarnessPromptLoopOptions } from "./prompt-loop.ts";
 import type { DockerRunscAdditionalMountConfig } from "./sandbox/types.ts";
 import { loadHarnessSkillContext } from "./skills/registry.ts";
@@ -121,6 +123,9 @@ export interface HarnessSessionConfig {
 
   /** Cells the operator passes in by reference, named for the model. */
   inputCells: readonly HarnessInputCellSpec[];
+
+  /** Published patterns the caller attaches to the task by index id. */
+  patternRefs: readonly HarnessPatternRefSpec[];
 
   handleValueOrigins: readonly string[];
 
@@ -259,6 +264,9 @@ export const harnessSessionEngineOptions = (
     ...(config.skillsSh !== undefined ? { skillsSh: config.skillsSh } : {}),
     ...(additionalMounts.length > 0 ? { additionalMounts } : {}),
     ...(config.inputCells.length > 0 ? { inputCells: config.inputCells } : {}),
+    ...(config.patternRefs.length > 0
+      ? { patternRefs: config.patternRefs }
+      : {}),
     ...(config.allowedToolIds !== undefined
       ? { allowedToolIds: config.allowedToolIds }
       : {}),
@@ -374,6 +382,12 @@ const establishContextMessages = async (
   );
   if (inputCellsMessage !== undefined) {
     messages.push(inputCellsMessage);
+  }
+  const patternRefsMessage = patternRefsContextMessage(
+    await engine.establishPatternRefs(),
+  );
+  if (patternRefsMessage !== undefined) {
+    messages.push(patternRefsMessage);
   }
   return messages;
 };
