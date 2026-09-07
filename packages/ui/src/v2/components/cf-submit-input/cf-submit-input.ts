@@ -105,8 +105,8 @@ export class CFSubmitInput extends BaseElement {
   declare initialValue: string;
 
   /**
-   * Mirrors the field text. Read on the host as `event.target.value` when the
-   * submit button is clicked.
+   * The field text, mirrored; read on the host as `event.target.value` when
+   * the submit button is clicked.
    */
   declare value: string;
 

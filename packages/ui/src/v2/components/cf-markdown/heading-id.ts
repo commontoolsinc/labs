@@ -101,8 +101,8 @@ class SlugTextRenderer extends TextRenderer {
   }
 
   /**
-   * Renders an image's alt text as its lexer left it, without walking into it,
-   * as marked 4 did when slugging.
+   * Renders an image's alt text as marked 4's lexer left it, without walking
+   * into it, which is how marked 4 slugged one.
    */
   override image({ text }: Tokens.Image): string {
     return escapeNoEncode(text);

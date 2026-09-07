@@ -331,6 +331,7 @@ export class CFToolsChip extends BaseElement {
   @property({ attribute: false })
   accessor theme: CFTheme = defaultTheme;
 
+  // Overlay/popover state
   #overlay: HTMLDivElement | null = null;
   #resizeObs?: ResizeObserver;
   #raf?: number;

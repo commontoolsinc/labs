@@ -79,13 +79,16 @@ class FakeTab {
 
   /**
    * The tag name a real `<cf-tab>` has as a custom element; `handleKeydown()`
-   * gates on it and calls `focus()`/`click()` on the next tab. `click()` must
-   * dispatch the bubbling `tab-click` the real element emits, which is wired
-   * per-instance in `makeTabs()`.
+   * gates on it and calls `focus()`/`click()` on the next tab.
    */
   tagName = "CF-TAB";
 
+  /**
+   * What `click()` dispatches: it must dispatch the bubbling `tab-click` the
+   * real element emits, which `makeTabs()` wires per instance.
+   */
   onClickDispatch: (() => void) | null = null;
+
   attributes = new Map<string, string>();
   constructor(value: string) {
     this.value = value;
@@ -112,8 +115,8 @@ class FakeTabPanel {
   value: string;
 
   /**
-   * Mirrors the real `CFTabPanel` constructor default (`hidden = true`).
-   * `cf-tab-panel` starts hidden and is revealed only when
+   * Whether the panel is hidden, defaulting to `true` as the real `CFTabPanel`
+   * constructor does. `cf-tab-panel` starts hidden and is revealed only when
    * `updateTabSelection()` matches it; a `false` default would make panels
    * look visible before any sync runs.
    */

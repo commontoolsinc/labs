@@ -378,14 +378,14 @@ export class CFPromptInput extends BaseElement {
   accessor theme: CFTheme = defaultTheme;
 
   /**
-   * Runtime and space context, consumed the same way `cf-file-input` does, so
-   * the component can upload attachment bytes itself when `uploadAttachments`
-   * is set.
+   * The runtime, consumed so the component can upload attachment bytes itself
+   * when `uploadAttachments` is set.
    */
   @consume({ context: runtimeContext, subscribe: true })
   @property({ attribute: false })
   accessor runtime: RuntimeClient | undefined = undefined;
 
+  /** The space the runtime uploads into, consumed alongside `runtime`. */
   @consume({ context: spaceContext, subscribe: true })
   @property({ attribute: false })
   accessor space: DID | undefined = undefined;

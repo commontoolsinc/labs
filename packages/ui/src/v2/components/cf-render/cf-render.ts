@@ -288,9 +288,7 @@ export class CFRender extends BaseElement {
   declare cell: CellHandle | undefined;
   declare variant: UIVariant | undefined;
 
-  /**
-   * Lit ref to the container, which stays stable across re-renders.
-   */
+  /** Lit ref to the container, which stays stable across re-renders. */
   private _containerRef: Ref<HTMLDivElement> = createRef();
 
   private _cleanup?: () => void;

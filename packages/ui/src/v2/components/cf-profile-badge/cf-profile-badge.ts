@@ -524,11 +524,12 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
   private _resolvedCell: CellHandle | undefined = undefined;
 
   /**
-   * Whether a click navigates, which is so only when the resolved cell is a
-   * root cell (a real profile piece). A badge bound to a real profile
-   * (rosters/lists) navigates to that profile's page on click; one bound to a
-   * derived/sub-path cell (e.g. a self-view `{name, avatar}` cell on the
-   * profile page itself) is non-navigable and the click is a no-op.
+   * Whether a click navigates, which is so only when `noNavigate` is unset and
+   * the resolved cell is a root cell (a real profile piece). A badge bound to
+   * a real profile (rosters/lists) navigates to that profile's page on click;
+   * one bound to a derived/sub-path cell (e.g. a self-view `{name, avatar}`
+   * cell on the profile page itself) is non-navigable and the click is a
+   * no-op.
    */
   @state()
   private accessor _navigable = false;

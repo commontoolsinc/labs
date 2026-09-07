@@ -239,7 +239,7 @@ class MarkdownTemplate {
   }
 
   /**
-   * Renders a link. This template and the ones below sit inline in a run of
+   * Renders a link. This template and `#image()` below sit inline in a run of
    * text, so each one stays on a single line: a line break inside it would put
    * a space beside the element.
    */
