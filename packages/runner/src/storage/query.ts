@@ -14,7 +14,8 @@ import {
 export class StoreObjectManager implements ObjectStorageManager {
   #store: Map<string, Revision<State>>;
   #readValues = new Map<string, IAttestation>();
-  // Cache our read labels, and any docs we can't read
+
+  /** The docs we can't read, by store key. */
   public missingDocs = new Map<string, BaseMemoryAddress>();
 
   constructor(store = new Map<string, Revision<State>>()) {
@@ -29,7 +30,10 @@ export class StoreObjectManager implements ObjectStorageManager {
     return this.missingDocs.values();
   }
 
-  // Returns null if there is no matching state
+  /**
+   * Loads the state at `address`, or returns `null` if there is no matching
+   * state.
+   */
   load(address: BaseMemoryAddress): IAttestation | null {
     const key = `${address.id}/${address.type ?? "application/json"}`;
     if (this.#readValues.has(key)) {
