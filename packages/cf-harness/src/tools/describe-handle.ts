@@ -79,7 +79,10 @@ export interface DescribeHandleDatabase {
    * and its column name. Atom types and nothing else, the same line
    * {@link DescribeHandleLabel} draws for a cell's own labels — so an entry
    * with no atoms says the column declares a label this cannot name, which is
-   * a different fact from a column that declares none and has no entry.
+   * a different fact from a column that declares none and has no entry. A
+   * path names a column only where {@link tables} names it too: the bound on
+   * the property-name channel holds across both, so a column the reduction
+   * refused is absent from this list as well.
    */
   labels: DescribeHandleLabel[];
 }
@@ -306,6 +309,37 @@ const describedLabels = (cell: Cell<unknown>): DescribeHandleLabel[] =>
     ...labelAtomTypes(entry.label),
   }));
 
+/** The properties `schema` declares, empty when it declares none. */
+const schemaProperties = (
+  schema: JSONSchema | undefined,
+): Record<string, JSONSchema> =>
+  schema !== undefined && typeof schema === "object" && !Array.isArray(schema)
+    ? (schema.properties ?? {}) as Record<string, JSONSchema>
+    : {};
+
+/**
+ * Every `(table, column)` a reduced table schema still names. The reduction
+ * has already dropped whatever it refused, so walking its output rather than
+ * its input is what holds a second disclosure to the first one's bound.
+ */
+function* disclosedColumns(
+  reduced: JSONSchema,
+): Generator<[string, string]> {
+  for (const [table, spec] of Object.entries(schemaProperties(reduced))) {
+    for (const column of Object.keys(schemaProperties(spec))) {
+      yield [table, column];
+    }
+  }
+}
+
+/** The columns `table` declares in the handle's own tables, as authored. */
+const declaredColumns = (
+  tables: object,
+  table: string,
+): Record<string, { ifc?: unknown } | undefined> =>
+  ((tables as Record<string, { properties?: unknown } | undefined>)[table]
+    ?.properties ?? {}) as Record<string, { ifc?: unknown } | undefined>;
+
 /**
  * The table contract `value` states, or nothing when it is not a SQLite
  * database handle or names no tables. A handle's tables are the schemas the
@@ -323,32 +357,29 @@ const describedDatabase = (
   if (tables === null || typeof tables !== "object") {
     return undefined;
   }
-  const labels: DescribeHandleLabel[] = [];
-  for (const [table, spec] of Object.entries(tables)) {
-    const columns =
-      (spec as { properties?: Record<string, { ifc?: unknown }> } | null)
-        ?.properties;
-    for (const [column, declaration] of Object.entries(columns ?? {})) {
-      const ifc = declaration?.ifc;
-      if (columnDeclaresIfc(ifc)) {
-        labels.push({
-          path: [table, column],
-          ...labelAtomTypes(ifc as Parameters<typeof labelAtomTypes>[0]),
-        });
-      }
-    }
-  }
   // Wrapping the tables as one schema's properties is what puts the table
   // names through the same bound and the same reduction the column names
   // already go through: a table is an object whose properties are its
   // columns, which is what the reduction already knows how to walk.
-  return {
-    tables: schemaShapeOnly({
-      type: "object",
-      properties: tables as Record<string, JSONSchema>,
-    }),
-    labels,
-  };
+  const reduced = schemaShapeOnly({
+    type: "object",
+    properties: tables as Record<string, JSONSchema>,
+  });
+  // A label names the column it came off, so its path is the same
+  // property-name channel the reduction bounds — which is why the names it
+  // reports are read back off the reduced schema rather than off the tables.
+  // A column the reduction refused is a column no label may name either.
+  const labels: DescribeHandleLabel[] = [];
+  for (const [table, column] of disclosedColumns(reduced)) {
+    const ifc = declaredColumns(tables, table)[column]?.ifc;
+    if (columnDeclaresIfc(ifc)) {
+      labels.push({
+        path: [table, column],
+        ...labelAtomTypes(ifc as Parameters<typeof labelAtomTypes>[0]),
+      });
+    }
+  }
+  return { tables: reduced, labels };
 };
 
 /**

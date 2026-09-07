@@ -1015,6 +1015,45 @@ describe("describe_handle", () => {
         expect(reply).not.toContain("The Inbox");
       });
 
+      it("bounds a column name in a label the way it bounds it in the tables", async () => {
+        // A column name is disclosed through two channels: the reduced table
+        // schema, which bounds it, and a label's path, which names the column
+        // it came off. A name the reduction refused has to be refused in both,
+        // or the label path is the prose channel the reduction exists to close.
+
+        const longColumn = "c".repeat(MAX_PROPERTY_NAME_LENGTH + 1);
+        const ref = await seedUndeclaredCell({
+          id: "db-long-column",
+          tables: {
+            messages: {
+              type: "object",
+              properties: {
+                [longColumn]: {
+                  type: "string",
+                  ifc: {
+                    confidentiality: ["https://cfc.test/atom/email"],
+                  },
+                },
+              },
+            },
+          },
+        });
+        const minted = await mintAddressHandle(
+          createHarnessHandleTable("run-describe"),
+          ref,
+        );
+
+        const output = await describeHandleTool.invoke(
+          contextWith(minted.table, session),
+          { token: minted.token },
+        );
+
+        expect(JSON.stringify(output.database?.tables)).not.toContain(
+          longColumn,
+        );
+        expect(JSON.stringify(output)).not.toContain(longColumn);
+      });
+
       it("reports nothing about a database whose handle names no tables", async () => {
         const ref = await seedUndeclaredCell({ id: "db-with-no-tables" });
         const minted = await mintAddressHandle(
