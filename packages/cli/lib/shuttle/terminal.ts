@@ -14,7 +14,13 @@
  */
 
 import { decodeKeys, type Key } from "../view/keys.ts";
-import { finish, NOTHING_PAINTED, type PaintedLine, repaint } from "./paint.ts";
+import {
+  above,
+  finish,
+  NOTHING_PAINTED,
+  type PaintedLine,
+  repaint,
+} from "./paint.ts";
 import type { PromptTerminal } from "./prompt.ts";
 
 /** How many bytes one read off the keyboard takes at a time. */
@@ -185,9 +191,21 @@ class StandardTerminal implements PromptTerminal {
   }
 
   /** @inheritDoc */
-  finish(text: string): void {
-    this.#send(finish(this.#painted, text));
+  finish(): void {
+    this.#send(finish(this.#painted));
     this.#painted = NOTHING_PAINTED;
+  }
+
+  /**
+   * @inheritDoc
+   *
+   * The line stays as it was drawn, because what is written above it is
+   * written above it: the drawing is composed against the same width and the
+   * same cursor it already carries, so a run of these leaves one transcript
+   * with the line being typed at the bottom of it.
+   */
+  announce(text: string): void {
+    this.#send(above(this.#painted, text));
   }
 
   /**

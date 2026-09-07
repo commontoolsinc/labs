@@ -313,22 +313,28 @@ Each of these is small and lands on its own; together they are what decision
 
    The second is **lib-internal warnings no seam reaches**, all in
    `lib/piece.ts`, and the sweep is of every `console.*` there rather
-   than the error ones alone:
+   than the error ones alone. Each site below takes a `report` sink from
+   its caller and keeps the stream it had where a caller names none;
+   `loadPieces` takes a `ConnectionOutput` carrying that sink beside the
+   runtime's `consoleHandler`, which a caller now sets whether or not it
+   asked for JSON:
 
-   - `loadPieceForCallables` warns on `console.warn` when it cannot
-     ensure the default pattern. `call` reaches it through
-     `resolvePieceCallable`, `verbs` through `listPieceCallables`, and
-     `describe` through `describePiece` — three v1 verbs, and the last of
-     them a seam that takes `render`/`hint` and cannot route this.
-   - `withRuntimeCleanupOnFailure` warns twice on `console.warn` when
-     disposal itself fails after a failed connect, and `loadPieces` wraps
-     its whole body in it, so any v1 verb can reach both.
-   - The navigate callback inside `loadPieces` writes three lines, and
-     one of them goes to **`console.log` — raw stdout** — whenever
-     `jsonOutput` is false, which is every `cf piece call` without `--json`.
-     Behind a full-screen frame that corrupts the drawing, and it lands
-     in the machine surface besides. It is the one on this list to fix
-     first.
+   - `loadPieceForCallables` warns when it cannot ensure the default
+     pattern, through `PieceCallableDependencies.report`. `call` reaches
+     it through `resolvePieceCallable`, `verbs` through
+     `listPieceCallables`, and `describe` through `describePiece` — three
+     v1 verbs, none of them built yet, so nothing supplies that sink
+     until B2 does.
+   - `withRuntimeCleanupOnFailure` warns twice when disposal itself fails
+     after a failed connect, through its third parameter, and
+     `loadPieces` wraps its whole body in it and forwards the output's
+     sink — so any v1 verb reaches both, and a shell holding a prompt
+     gets them on its out-of-band line.
+   - The navigate callback inside `loadPieces` writes three lines, one of
+     them to raw stdout whenever `jsonOutput` is false. All three take
+     the output's sink, and keep their streams — the designed line on
+     stdout as prose, the two failure reports on stderr — where there is
+     none.
 
    The rest of that file is off a v1 verb's path: the pin-rewrite report
    belongs to `piece new` and to `setsrc` either side of `--check`, the

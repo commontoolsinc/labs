@@ -200,6 +200,34 @@ describe("cli piece parsing", () => {
     expect(disposeCalls).toBe(1);
   });
 
+  it("reports both cleanup failures through the sink a caller supplied", async () => {
+    // The two warnings a failed connect's own cleanup writes. A caller
+    // drawing its own screen — the shell holding a prompt in raw mode — takes
+    // them here instead of finding them written behind its frame; a caller
+    // that names no sink still gets them on the process's own stream.
+
+    const reported: string[] = [];
+    const originalError = new Error("sync failed");
+
+    await expect(withRuntimeCleanupOnFailure(
+      {
+        dispose: () => Promise.reject(new Error("dispose failed")),
+        storageManager: {
+          closeNow: () => Promise.reject(new Error("closeNow failed")),
+        },
+      },
+      () => Promise.reject(originalError),
+      (message) => {
+        reported.push(message);
+      },
+    )).rejects.toBe(originalError);
+
+    expect(reported).toEqual([
+      "loadPieces storage cleanup failed: closeNow failed",
+      "loadPieces cleanup failed: dispose failed",
+    ]);
+  });
+
   it("does not dispose loadPieces runtime after successful initialization", async () => {
     let disposeCalls = 0;
 

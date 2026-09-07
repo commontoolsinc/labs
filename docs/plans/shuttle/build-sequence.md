@@ -256,14 +256,14 @@ Landed:
   in reach.
 
 - **B1c — the prompt, `where`, and the launcher.** A line read off a terminal,
-  handed to the dispatch above, and its outcome written under it. Where a run's
-  output comes from is one place: a verb returns what it did rather than
-  writing it, so everything a line puts on screen passes through the prompt in
-  the order the person caused it, and a case drives the whole loop with a
-  scripted key stream and reads back what it produced. A refusal and a read
-  that failed both land there as text and the loop reads the next line — what
-  the seam's distinction buys here is that a shell whose server went away is
-  still a shell.
+  handed to the dispatch above, and its outcome written where B1f put it.
+  Where a run's output comes from is one place: a verb returns what it did
+  rather than writing it, so everything a line puts on screen passes through
+  the prompt in the order the person caused it, and a case drives the whole
+  loop with a scripted key stream and reads back what it produced. A refusal
+  and a read that failed both land there as text and the loop reads the next
+  line — what the seam's distinction buys here is that a shell whose server
+  went away is still a shell.
 
   The line editor is the view substrate's rather than `node:readline`'s.
   `EditBuffer` holds the motions and `decodeKeys` supplies the key stream a
@@ -395,6 +395,58 @@ Landed:
   operand points, so neither hands back a pending move: a `cd` waits because
   the prompt would go on promising the place, and a read of a cell that is
   not there fails on its own account and in its own words.
+
+- **B1f — the prompt is an event loop, and the out-of-band line.** The keys
+  are read continuously and a running line is a task beside them, so a line
+  waiting on a server holds up neither the keyboard nor the screen. `ctrl-c`
+  reaches a line in flight: an `AbortSignal` rides the deps bag the verbs
+  already read their collaborators through, checked at each boundary between
+  a verb's phases. The rule is that **every read has a check in front of it
+  with nothing awaited in between**, and so does every adoption — an await
+  between the two is a window the cancel lands in and the read goes out of
+  anyway, which is why the settle asks the holder for its connection once and
+  hands it down. What holds the rule is not the enumeration but a case that
+  cancels from inside every read there is, and at each line's first
+  suspension, and asserts nothing was read afterwards; a boundary nobody
+  enumerated fails that too. What a check cannot reach is a read already sent, whose
+  answer is dropped rather than called off; the prompt abandons the line and
+  says so, which is the interruption it can actually deliver.
+
+  A key typed under a running line is drawn as it arrives, into the line that
+  runs next. The two keys that end a line — `enter`, and `ctrl-d` on an empty
+  one — are held instead, along with every key after them, and replayed the
+  moment the prompt is free, so a pasted script runs line by line and each
+  line runs against the place the one before it settled on. Nothing is
+  discarded and nothing runs unseen, which is what B2's `set` and `call` need
+  from a queue that today can only navigate and read.
+
+  `PromptTerminal` gains its third write, the out-of-band line: text above the
+  line being edited, with the prompt drawn again beneath it. A line's own
+  outcome lands through it, because by the time a line settles the person may
+  have gone on typing; decision 28's event lines and A4's `announce` land
+  through the same one when they arrive. It is a door that carries a user
+  program's own strings, so it holds every character a terminal acts on to the
+  glyph naming it — `escapeControlCharacters` exactly, a line feed excepted
+  and let through as a row — at the door in `paint.ts` rather than at each
+  producer, where one of them would be the one that forgot.
+
+  The producers finding 8 names are routed there: `loadPieces` takes a
+  `ConnectionOutput` carrying the sink for what a connection writes for itself
+  and the runtime's `consoleHandler`, and shuttle opens its connection with
+  both aimed at that line. The console it hands the runtime is a proxy rather
+  than a console, and for a reason the enumeration would have missed: a real
+  one raises a *process warning* for a timer or count label it does not hold,
+  which goes to the process's stderr whatever console the call was made on,
+  carrying a label a pattern chose — an escape sequence among the labels it
+  may choose. A proxy answers every property with a function of shuttle's
+  own, so there is no method, named in `ConsoleMethod` or not, that reaches
+  anything but the announce line; the label state those methods read is held
+  beside it, and an ask it cannot answer becomes a line. Item 5's `lib/piece.ts` sweep is finished for every
+  site a v1 verb can reach — the navigate callback's three lines,
+  `withRuntimeCleanupOnFailure`'s two, and `loadPieceForCallables`' bootstrap
+  warning, which no v1 verb reaches yet and which B2's `call` will. The
+  terminal opens before the connection now, since the terminal is where the
+  connection's writing has to land.
 
 Still to come:
 

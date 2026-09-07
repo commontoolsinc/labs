@@ -22,7 +22,12 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { finish, NOTHING_PAINTED, repaint } from "../lib/shuttle/paint.ts";
+import {
+  above,
+  finish,
+  NOTHING_PAINTED,
+  repaint,
+} from "../lib/shuttle/paint.ts";
 import type { PromptTerminal } from "../lib/shuttle/prompt.ts";
 import { withPromptTerminal } from "../lib/shuttle/terminal.ts";
 import type { Key } from "../lib/view/keys.ts";
@@ -453,12 +458,43 @@ describe("terminal", () => {
 
       const watched = await watching({ consoleSize: wide(40) }, (terminal) => {
         terminal.edit("ab", 2);
-        terminal.finish("gone");
+        terminal.finish();
         return Promise.resolve();
       });
       expect(watched.written()).toBe(
         repaint(NOTHING_PAINTED, { text: "ab", column: 2, columns: 40 }) +
-          finish({ text: "ab", column: 2, columns: 40 }, "gone"),
+          finish({ text: "ab", column: 2, columns: 40 }),
+      );
+    });
+
+    it("writes an out-of-band line above the line it is drawing", async () => {
+      const watched = await watching({ consoleSize: wide(40) }, (terminal) => {
+        terminal.edit("ab", 2);
+        terminal.announce("gone");
+        return Promise.resolve();
+      });
+      const drawn = { text: "ab", column: 2, columns: 40 };
+      expect(watched.written()).toBe(
+        repaint(NOTHING_PAINTED, drawn) + above(drawn, "gone"),
+      );
+    });
+
+    it("leaves the line drawn after writing above it", async () => {
+      // The whole log rather than its tail: the second announcement is
+      // composed against the line the first one redrew, so a terminal that
+      // forgot the line was still there would climb over a line it thinks is
+      // gone and write the second one a row too high.
+
+      const watched = await watching({ consoleSize: wide(40) }, (terminal) => {
+        terminal.edit("a".repeat(45), 45);
+        terminal.announce("one");
+        terminal.announce("two");
+        return Promise.resolve();
+      });
+      const drawn = { text: "a".repeat(45), column: 45, columns: 40 };
+      expect(watched.written()).toBe(
+        repaint(NOTHING_PAINTED, drawn) + above(drawn, "one") +
+          above(drawn, "two"),
       );
     });
 
@@ -469,7 +505,7 @@ describe("terminal", () => {
 
       const watched = await watching({ consoleSize: wide(40) }, (terminal) => {
         terminal.edit("a".repeat(45), 45);
-        terminal.finish("");
+        terminal.finish();
         terminal.edit("b", 1);
         return Promise.resolve();
       });
@@ -479,7 +515,7 @@ describe("terminal", () => {
       const wrapped = { text: "a".repeat(45), column: 45, columns: 40 };
       expect(watched.written()).toBe(
         repaint(NOTHING_PAINTED, wrapped) +
-          finish(wrapped, "") +
+          finish(wrapped) +
           repaint(NOTHING_PAINTED, { text: "b", column: 1, columns: 40 }),
       );
     });

@@ -38,6 +38,7 @@ import {
 } from "@commonfabric/piece/ops";
 import {
   Cell,
+  type ConsoleHandler,
   decomposeSchema,
   deepEqual,
   encodeJsonPointer,
@@ -395,6 +396,14 @@ export interface ResolvedPieceCallable extends CallableResolution {
 export interface PieceCallableDependencies extends CallableExecutionDeps {
   helpCommandPrefix?: string;
 
+  /**
+   * Takes the warning a bootstrap that would not run writes, which is
+   * `console.warn` where a caller names none. It is the same sink
+   * `ConnectionOutput.report` is, for the same reason: a caller drawing its
+   * own screen is corrupted by a line written behind the frame.
+   */
+  report?: (message: string) => void;
+
   loadPieces?: (config: SpaceConfig) => Promise<any>;
   loadPiece?: (
     pieces: any,
@@ -477,9 +486,19 @@ function storageManagerCloseNow(
   return undefined;
 }
 
+/**
+ * Runs `run` over `runtime`, disposing the runtime where it failed and
+ * returning what it returned otherwise.
+ *
+ * Both warnings go to `report`, which is `console.warn` where a caller names
+ * none. A caller drawing its own screen supplies one: a line written behind
+ * the frame corrupts the drawing, and these two are written from inside a
+ * connect that such a caller is holding open.
+ */
 export async function withRuntimeCleanupOnFailure<T>(
   runtime: DisposableRuntime,
   run: () => Promise<T>,
+  report: (message: string) => void = (message) => console.warn(message),
 ): Promise<T> {
   try {
     return await run();
@@ -487,7 +506,7 @@ export async function withRuntimeCleanupOnFailure<T>(
     const closeNow = storageManagerCloseNow(runtime.storageManager);
     if (closeNow) {
       await closeNow().catch((disposeError) => {
-        console.warn(
+        report(
           `loadPieces storage cleanup failed: ${
             disposeError instanceof Error
               ? disposeError.message
@@ -498,7 +517,7 @@ export async function withRuntimeCleanupOnFailure<T>(
     }
     await runtime.dispose().catch(
       (disposeError) => {
-        console.warn(
+        report(
           `loadPieces cleanup failed: ${
             disposeError instanceof Error
               ? disposeError.message
@@ -521,6 +540,31 @@ async function makeSession(config: SpaceConfig): Promise<Session> {
 }
 
 /**
+ * Where a connection sends what it writes while it is open, for a caller that
+ * owns the screen it would otherwise be written on.
+ *
+ * A one-shot command owns its terminal for one invocation and is served by
+ * the process's own streams, which is what both fields default to. A caller
+ * drawing a frame — a shell holding a prompt, a full-screen view — is
+ * corrupted by any line written behind it, so it takes these instead and
+ * places what arrives.
+ */
+export interface ConnectionOutput {
+  /**
+   * Takes each line the connection writes for itself: the navigate callback's
+   * three, and the two warnings a failed connect's own cleanup writes.
+   */
+  readonly report?: (message: string) => void;
+
+  /**
+   * Takes what a pattern running on this connection writes to its console.
+   * Where a caller names none, the machine surface is protected under
+   * `jsonOutput` and the process's console serves everything else.
+   */
+  readonly consoleHandler?: ConsoleHandler;
+}
+
+/**
  * Opens a connection to the deployment at `config.apiUrl` and returns the
  * controller over it: a space session, a runtime carrying that deployment's
  * experimental options, and a server proven live before it returns.
@@ -532,9 +576,23 @@ async function makeSession(config: SpaceConfig): Promise<Session> {
  */
 export async function loadPieces(
   config: SpaceConfig,
+  output: ConnectionOutput = {},
 ): Promise<PiecesController> {
   claimProcessDeployment(config.apiUrl);
   setLLMUrl(config.apiUrl);
+  // The navigate callback's designed line and its two failure reports both
+  // go to the caller's sink where there is one, and keep the streams they
+  // have where there is not: the designed line is prose except under
+  // `jsonOutput`, which reserves stdout for the machine surface, and a
+  // failure to write it is not prose at all.
+  const navigateLine = output.report ??
+    ((message: string) => {
+      (config.jsonOutput ? console.error : console.log)(message);
+    });
+  const navigateFailure = output.report ??
+    ((message: string) => console.error(message));
+  const consoleHandler = output.consoleHandler ??
+    (config.jsonOutput ? stderrConsoleHandler : undefined);
   // The deployment's own flag posture, with this process's explicit
   // EXPERIMENTAL_* still winning per flag: a cf binary is installed
   // independently of the server it talks to, so left to the environment alone
@@ -590,19 +648,21 @@ export async function loadPieces(
             try {
               const id = pieceId(target);
               if (!id) {
-                console.error("navigateTo: target missing piece id");
+                navigateFailure("navigateTo: target missing piece id");
                 return;
               }
               // Emit greppable line immediately so scripts can capture without waiting
-              (config.jsonOutput ? console.error : console.log)(
-                `navigateTo new piece id ${id}`,
-              );
+              navigateLine(`navigateTo new piece id ${id}`);
             } catch (e) {
-              console.error("navigateTo callback error:", e);
+              navigateFailure(
+                `navigateTo callback error: ${
+                  e instanceof Error ? e.message : String(e)
+                }`,
+              );
             }
           },
         }),
-        ...(config.jsonOutput ? { consoleHandler: stderrConsoleHandler } : {}),
+        ...(consoleHandler === undefined ? {} : { consoleHandler }),
       }),
   );
   (runtime as Runtime & { [CF_RUNTIME_ERROR_LOG]?: CliRuntimeErrorRecord[] })[
@@ -649,7 +709,7 @@ export async function loadPieces(
     }
     throwOnSpaceAuthorizationError(runtime.storageManager, session.space);
     return pieces;
-  });
+  }, output.report);
 }
 
 export function getProgramFromFile(
@@ -2142,7 +2202,7 @@ async function loadPieceForCallables(
     try {
       await pieces.ensureDefaultPattern();
     } catch (error) {
-      console.warn(
+      (deps.report ?? ((message: string) => console.warn(message)))(
         `Warning: Could not ensure default pattern: ${
           error instanceof Error ? error.message : String(error)
         }`,

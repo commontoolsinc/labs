@@ -88,7 +88,18 @@ export type Outcome =
   /** The verb read `value` out of the fabric. */
   | { readonly kind: "value"; readonly value: unknown }
   /** The line is refused, for the reason given. */
-  | { readonly kind: "refused"; readonly reason: string };
+  | { readonly kind: "refused"; readonly reason: string }
+  | Interruption;
+
+/**
+ * What a line that was cancelled comes back as: it stopped where it was, and
+ * whatever it had not done yet it did not do.
+ *
+ * It is neither a refusal nor a failure. A refusal is a fact about the line —
+ * it would have been wrong whenever it ran — and a failure is a fact about the
+ * read; this is a fact about the person, who stopped waiting.
+ */
+export type Interruption = { readonly kind: "interrupted" };
 
 /**
  * The running shuttle a verb acts on: where it stands, what it connects as,
@@ -125,6 +136,89 @@ export interface VerbDeps {
 
   /** The reads `ls` composes. */
   readonly listing?: ListingDeps;
+
+  /**
+   * Cancels the line, which the prompt aborts on `ctrl-c`.
+   *
+   * What it can stop is what has not started, and the rule that makes that
+   * a property rather than a list is: **every read has a check in front of
+   * it with nothing awaited in between**, and so does every adoption. An
+   * await between the two is a window the cancel lands in and the read goes
+   * out of anyway, which is why the settle asks the holder for its
+   * connection once and hands it down rather than asking again before each
+   * read.
+   *
+   * The rule is what a caller can check, and it is checked: a case cancels
+   * from inside each read there is and at each line's first suspension, and
+   * asserts that nothing was read afterwards (`shuttle-verbs.test.ts`). That
+   * observes the property instead of enumerating the boundaries, so a
+   * boundary nobody thought of fails it too.
+   *
+   * What it cannot stop is a read already sent: the runtime's reads take no
+   * signal, so one in flight finishes and its answer is dropped, and the
+   * checks are what stop it taking effect on the way back.
+   */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * Whether the line running under `deps` has been cancelled, as the outcome
+ * that says so.
+ *
+ * A cancelled line's phases are checked rather than raced, so what comes back
+ * from a verb is always something the verb actually decided. Racing is the
+ * prompt's to do and it does it one layer up, where abandoning a line costs
+ * nothing that a place could later be moved by.
+ */
+function stopped(deps: VerbDeps): Interruption | undefined {
+  return deps.signal?.aborted === true ? { kind: "interrupted" } : undefined;
+}
+
+/** What an act guarded against a cancel did, where it was allowed to run. */
+type Ran<T> = { readonly kind: "ran"; readonly answer: T };
+
+/**
+ * Performs `act` over `args` unless the line has been cancelled, and is what
+ * it answered where it was allowed to.
+ *
+ * Every read this module sends and every move it adopts goes through here,
+ * and the reason is that the rule they are held to is not one discipline can
+ * keep. The rule is that **nothing is awaited between the check and the act
+ * it guards** — an await there is a window the cancel lands in and the act
+ * happens anyway — and a rule of that shape is invisible: the code reads
+ * correctly whether or not the window is there, no case can see it, and the
+ * next author to insert a line between two statements has no way to know
+ * which two they are.
+ *
+ * So the two are one expression here instead. The arguments are evaluated
+ * before this is entered, so a caller that awaits while composing them still
+ * has the check on the far side of its own await; and there is no statement
+ * position between the check and the call for an await to occupy, because
+ * there are no statements between them. Passing `act` and its arguments
+ * separately rather than as a closure is what leaves nowhere to hide one: a
+ * closure has a body, and a body can await.
+ *
+ * What that is worth, stated at its actual size: it stops an await written as
+ * a *statement*, which is how one gets written. It does not stop every
+ * insertion an expression admits — `await (await something(), act(...args))`
+ * reopens the window inside this very line, and nothing here would notice.
+ * So this is a guarantee against the edit somebody makes, not against the
+ * edit somebody constructs, and the cases are what cover the second: a line
+ * cancelled at its first suspension reaches this function before its read,
+ * and every verb that reads has such a case (`shuttle-verbs.test.ts`).
+ *
+ * What is left to the caller is which arm it returns, and the arms are the
+ * outcome's own, so a cancelled act is handed back rather than tested for.
+ */
+async function guarded<A extends readonly unknown[], T>(
+  deps: VerbDeps,
+  act: (...args: A) => T | Promise<T>,
+  ...args: A
+): Promise<Ran<T> | Interruption> {
+  // One expression, so that the check and the act it guards have no statement
+  // position between them here either. This is the one place the rule lives
+  // now, which is the point of it living somewhere rather than at every site.
+  return stopped(deps) ?? { kind: "ran", answer: await act(...args) };
 }
 
 /**
@@ -150,6 +244,11 @@ export interface VerbDeps {
  * raises, so that a server that cannot be reached is told apart from a line
  * that was wrong.
  *
+ * A line cancelled through `deps.signal` comes back interrupted, which is a
+ * third fact and not either of those. What that arm promises is what a check
+ * can promise: nothing further was sent, and nothing was adopted. A read
+ * already in flight is outside it and finishes into nothing.
+ *
  * @throws Whatever a read throws — an unreachable server, an identity that
  * will not load, a path the piece refuses.
  */
@@ -172,7 +271,12 @@ export async function runLine(
       return { kind: "text", text: renderVerbPage(entry) };
     case "read": {
       const wrong = wrongOperandCount(word, entry.arity, reading.operands);
-      return wrong ?? await entry.run(shuttle, reading.operands, deps);
+      // A line already cancelled does not start. Everything above this is a
+      // decision about the words, which is worth making either way — a line
+      // that named no verb, or gave one the wrong number of operands, is not
+      // a verb that was interrupted.
+      return wrong ?? stopped(deps) ??
+        await entry.run(shuttle, reading.operands, deps);
     }
   }
 }
@@ -267,9 +371,8 @@ async function get(
   }
   const aim = shuttle.place.aim(operand);
   const at = await reading(shuttle, aim.move, deps);
-  return at.kind === "refused"
-    ? at
-    : await read(shuttle, at.place, aim.input, deps);
+  if (at.kind !== "place") return at;
+  return await read(shuttle, at.place, aim.input, deps);
 }
 
 /**
@@ -298,13 +401,17 @@ async function ls(
   _operands: readonly string[],
   deps: VerbDeps,
 ): Promise<Outcome> {
-  const listing = await listPlace(
+  const listed = await guarded(
+    deps,
+    listPlace,
     shuttle.config,
     shuttle.place.place,
     shuttle.connection,
     deps.listing,
   );
-  return { kind: "text", text: renderListing(listing) };
+  return listed.kind !== "ran"
+    ? listed
+    : { kind: "text", text: renderListing(listed.answer) };
 }
 
 /** Returns where shuttle stands, both halves of the pair. */
@@ -326,10 +433,12 @@ async function wish(
   deps: VerbDeps,
 ): Promise<Outcome> {
   const target = operands[0];
-  const { result, error } = await (deps.readWish ?? readWish)({
+  const answered = await guarded(deps, deps.readWish ?? readWish, {
     ...shuttle.config,
     query: target,
   }, { loadPieces: () => shuttle.connection.pieces() });
+  if (answered.kind !== "ran") return answered;
+  const { result, error } = answered.answer;
   if (result === null && error !== undefined) {
     return refuse(`\`${target}\` resolved to nothing: ${error}`);
   }
@@ -479,6 +588,15 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
  * settled the way any other is. A confirmed piece lands or refuses, so this
  * calls itself twice at most, and a space named by name is the operand that
  * takes both.
+ *
+ * The cancellation check on each arm comes before the adoption, and that is
+ * the order that matters: adopting is what makes a `cd` a promise, so a line
+ * the person stopped waiting for leaves the place where it was, however far
+ * its reads had got. On the pending arm it is the check *after the settle's
+ * own last read* — the walk of the path, which nothing inside {@link
+ * settlePiece} follows — so it is the one a cancel arriving there meets, and
+ * the earlier reads are stopped by the settle's own checks before they ever
+ * reach here.
  */
 async function landing(
   shuttle: Shuttle,
@@ -492,27 +610,42 @@ async function landing(
       return move;
     case "wish": {
       const resolved = await resolveTarget(shuttle, move.target, deps);
-      return resolved.kind === "refused" ? resolved : await landing(
-        shuttle,
-        shuttle.place.enter(resolved.target, move.target),
+      if (resolved.kind !== "target") return resolved;
+      const entered = await guarded(
         deps,
+        shuttle.place.enter.bind(shuttle.place),
+        resolved.target,
+        move.target,
       );
+      return entered.kind !== "ran"
+        ? entered
+        : await landing(shuttle, entered.answer, deps);
     }
     case "space-by-name": {
       const named = await connectedSpace(shuttle, move.name);
-      return named.kind === "refused" ? named : await landing(
-        shuttle,
-        shuttle.place.settle(move, named.space),
+      if (named.kind === "refused") return named;
+      const settled = await guarded(
         deps,
+        shuttle.place.settle.bind(shuttle.place),
+        move,
+        named.space,
       );
+      return settled.kind !== "ran"
+        ? settled
+        : await landing(shuttle, settled.answer, deps);
     }
     case "pending": {
       const settled = await settlePiece(shuttle, move, deps);
-      return settled.kind === "refused" ? settled : await landing(
-        shuttle,
-        shuttle.place.confirm(move, settled.place),
+      if (settled.kind !== "settled") return settled;
+      const confirmed = await guarded(
         deps,
+        shuttle.place.confirm.bind(shuttle.place),
+        move,
+        settled.place,
       );
+      return confirmed.kind !== "ran"
+        ? confirmed
+        : await landing(shuttle, confirmed.answer, deps);
     }
   }
 }
@@ -530,13 +663,15 @@ type Reading =
 type Targeting =
   /** The target resolved to the address `target` names. */
   | { readonly kind: "target"; readonly target: ResolvedTarget }
-  | Refusal;
+  | Refusal
+  | Interruption;
 
 /** What settling a place against the fabric produced. */
 type Settling =
   /** The fabric holds the place, as `place` resolved it. */
   | { readonly kind: "settled"; readonly place: ResolvedPlace }
-  | Refusal;
+  | Refusal
+  | Interruption;
 
 /** What the piece and path a pending move spelled turned out to be. */
 type Resolved =
@@ -554,7 +689,8 @@ type Resolved =
      */
     readonly held: boolean;
   }
-  | Refusal;
+  | Refusal
+  | Interruption;
 
 /**
  * Helper for {@link landing}, which asks the fabric whether it holds the place
@@ -588,6 +724,13 @@ type Resolved =
  * a handle the space does not hold is adopted — the bound `grammar.md`
  * records.
  *
+ * Three reads means two boundaries between them, and a cancelled line is
+ * checked at both: after the resolution, and after the lookup that only a
+ * piece the resolution did not prove goes through. What each check promises
+ * is what a check can — the read after it was never sent — and the walk, being
+ * last, is followed by {@link landing}'s check instead, so a cancel arriving
+ * during it stops the move rather than a read.
+ *
  * @throws Whatever the read throws — an unreachable server, an identity that
  * will not load. A slug that names nothing is not one of those: it is a fact
  * about the line, so it comes back as a refusal.
@@ -597,13 +740,25 @@ async function settlePiece(
   move: PendingMove,
   deps: VerbDeps,
 ): Promise<Settling> {
-  const resolved = await resolvedPiece(shuttle, move, deps);
-  if (resolved.kind === "refused") return resolved;
+  // The connection is asked for once and handed down, so that every read
+  // below has a check in front of it with nothing awaited in between. Asking
+  // twice would put an await between a check and the read it guards, which is
+  // a window a cancel can land in — and the second ask answers off the
+  // holder's memo anyway, the connection having been opened before the prompt
+  // read its first line (`run.ts`).
+  const pieces = await shuttle.connection.pieces();
+  const resolved = await resolvedPiece(pieces, shuttle, move, deps);
+  if (resolved.kind !== "piece") return resolved;
   const place = resolved.place;
   const settled: Settling = { kind: "settled", place };
   if (!resolved.held) {
-    const pieces = await shuttle.connection.pieces();
-    if (await pieces.entityIdExists(place.piece) === false) {
+    const held = await guarded(
+      deps,
+      pieces.entityIdExists.bind(pieces),
+      place.piece,
+    );
+    if (held.kind !== "ran") return held;
+    if (held.answer === false) {
       return refuse(
         `\`${move.operand}\` reaches no piece: this space holds none by the ` +
           `handle \`${place.piece}\`.`,
@@ -617,12 +772,16 @@ async function settlePiece(
     scope,
   });
   if (from.length === path.length) return settled;
-  let level = await (deps.getCellValue ?? getCellValue)(
+  const walked = await guarded(
+    deps,
+    deps.getCellValue ?? getCellValue,
     { ...shuttle.config, piece: place.piece, pieceScope: scope },
     [...from],
     {},
     { loadPieces: () => shuttle.connection.pieces() },
   );
+  if (walked.kind !== "ran") return walked;
+  let level = walked.answer;
   for (const segment of path.slice(from.length).map(String)) {
     const keys = keysOf(level);
     if (!keys.includes(segment)) {
@@ -661,6 +820,7 @@ async function settlePiece(
  * it.
  */
 async function resolvedPiece(
+  pieces: Awaited<ReturnType<HeldConnection["pieces"]>>,
   shuttle: Shuttle,
   move: PendingMove,
   deps: VerbDeps,
@@ -674,10 +834,12 @@ async function resolvedPiece(
   ) {
     return { kind: "piece", place: { piece: spelled, path }, held: true };
   }
-  let reference;
+  let resolved;
   try {
-    reference = await (deps.resolvePieceReference ?? resolvePieceReference)(
-      await shuttle.connection.pieces(),
+    resolved = await guarded(
+      deps,
+      deps.resolvePieceReference ?? resolvePieceReference,
+      pieces,
       spelled,
       path,
     );
@@ -687,6 +849,8 @@ async function resolvedPiece(
       `\`${move.operand}\` reaches no piece: ${messageOf(thrown)}`,
     );
   }
+  if (resolved.kind !== "ran") return resolved;
+  const reference = resolved.answer;
   return {
     kind: "piece",
     place: {
@@ -928,13 +1092,17 @@ async function read(
     piece: position.piece,
     pieceScope: place.scope,
   };
-  const value = await (deps.getCellValue ?? getCellValue)(
+  const answered = await guarded(
+    deps,
+    deps.getCellValue ?? getCellValue,
     pieceConfig,
     [...position.path],
     { input },
     { loadPieces: () => shuttle.connection.pieces() },
   );
-  return { kind: "value", value };
+  return answered.kind !== "ran"
+    ? answered
+    : { kind: "value", value: answered.answer };
 }
 
 /**
@@ -955,11 +1123,13 @@ async function resolveTarget(
   deps: VerbDeps,
 ): Promise<Targeting> {
   const selection = await parseCellSelectionOptions({ select: ADDRESS_SELECT });
-  const { result, error } = await (deps.readWish ?? readWish)({
+  const answered = await guarded(deps, deps.readWish ?? readWish, {
     ...shuttle.config,
     query: target,
     selection,
   }, { loadPieces: () => shuttle.connection.pieces() });
+  if (answered.kind !== "ran") return answered;
+  const { result, error } = answered.answer;
   const address = addressIn(result);
   if (address === undefined) {
     return {
