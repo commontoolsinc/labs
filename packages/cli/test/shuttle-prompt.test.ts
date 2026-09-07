@@ -455,6 +455,46 @@ describe("prompt", () => {
       ]);
     });
 
+    it("abandons the line while the read it was waiting on is still outstanding", async () => {
+      // The case above says what a cancel produces; this one says when. They
+      // are different claims, and only the second is the loop's: a prompt that
+      // waited for the read and cancelled afterwards would produce exactly the
+      // same words, one server round trip later, and every case that awaits
+      // the run before reading its writes would pass. So this one never
+      // answers the read while the run is going. What ends the run is the keys
+      // running out, and what settles the line is the cancel — so the run
+      // returning at all is the claim, and the writes say what it returned
+      // with.
+      //
+      // The read is answered below, after the assertions, because that is what
+      // makes them a statement about order rather than about outcome. It is
+      // answered rather than dropped for the same reason the case above
+      // answers it: the read a person stopped waiting for still comes back,
+      // and it comes back into nothing.
+
+      const read = gated();
+      let answered = false;
+      const writes = await running(
+        (async function* () {
+          yield* typed("get");
+          yield ENTER;
+          await read.started;
+          yield control("c");
+        })(),
+        atPiece(),
+        {
+          getCellValue: () =>
+            read.read().then((value) => {
+              answered = true;
+              return value;
+            }),
+        },
+      );
+      expect(produced(writes)).toEqual(["Interrupted."]);
+      expect(answered).toBe(false);
+      read.answer({ title: "a" });
+    });
+
     it("drops what was typed ahead when `ctrl-c` cancels the line", async () => {
       const read = gated();
       const writes = await running(

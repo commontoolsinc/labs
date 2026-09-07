@@ -211,6 +211,14 @@ them, `announce.ts` what a connection and a pattern write onto that loop's
 out-of-band line, `record.ts` the form `where` and `pwd` share, and `paint.ts`
 and `terminal.ts` the escape sequences and the raw mode under it.
 
+Each of those is driven by a unit test with nothing behind it — no server, no
+piece, and no terminal — so what the shell does when all of them are real is a
+claim no case there makes.
+[`integration/shuttle-over-a-terminal.sh`](integration/shuttle-over-a-terminal.sh)
+is where that claim lives: it deploys a fixture into a fresh space, opens
+`cf sh` on a pseudo-terminal, and reads back the drawing a line at a time — what
+the shell said, and the prompt it then drew.
+
 ## Cell references
 
 `cf cell` holds the commands that act on a cell: `get` and `set` for its value,
