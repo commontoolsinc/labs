@@ -1241,6 +1241,24 @@ run_bulk_survey_drill() {
   echo "Successfully ran the bulk-survey drill for ${API_URL}."
 }
 
+# The interactive shell against a real fabric, on a real terminal. Same
+# delegation rationale as the walkthroughs above; it deploys its own fixture
+# and takes its own space.
+#
+# It is the only thing anywhere that runs `cf sh`. The shell's unit suite
+# drives every module with nothing behind it — no server, no piece, and no
+# terminal — so what no case there can see is the composition: whether a place
+# the fabric holds is the one a `cd` adopted, and whether the reference a
+# listing printed is the one the next line takes. It needs a pseudo-terminal
+# because the shell refuses to start without one, and python3 is what allocates
+# it, which this suite already depends on for its own timing helper.
+run_shuttle_walkthrough() {
+  echo "Running the shuttle walkthrough..."
+  API_URL="$API_URL" bash "$SCRIPT_DIR/shuttle-over-a-terminal.sh" ||
+    error "The shuttle walkthrough failed."
+  echo "Successfully ran the shuttle walkthrough for ${API_URL}."
+}
+
 run_wish() {
   setup_space
 
@@ -1388,6 +1406,8 @@ case "$SECTION" in
     run_topics_restore_drill
     cf_test_step_begin bulk-survey-drill
     run_bulk_survey_drill
+    cf_test_step_begin shuttle-walkthrough
+    run_shuttle_walkthrough
     cf_test_step_begin wish
     run_wish
     ;;
@@ -1438,6 +1458,8 @@ case "$SECTION" in
     run_topics_restore_drill
     cf_test_step_begin bulk-survey-drill
     run_bulk_survey_drill
+    cf_test_step_begin shuttle-walkthrough
+    run_shuttle_walkthrough
     ;;
   piece-call-only)
     cf_test_step_begin piece-call
@@ -1474,6 +1496,10 @@ case "$SECTION" in
   bulk-survey-drill)
     cf_test_step_begin bulk-survey-drill
     run_bulk_survey_drill
+    ;;
+  shuttle)
+    cf_test_step_begin shuttle-walkthrough
+    run_shuttle_walkthrough
     ;;
   *)
     error "Unknown CLI integration section: $SECTION"
