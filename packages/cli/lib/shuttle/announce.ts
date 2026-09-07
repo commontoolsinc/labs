@@ -102,6 +102,19 @@ interface Saying {
  * The indent is this console's rather than the door's, so it is added here
  * and not in `above` (`paint.ts`): a line shuttle writes for itself is not
  * inside a pattern's group.
+ *
+ * The depth follows the calls and nothing bounds it, which is deliberate and
+ * is what a console does with the same calls: a pattern that opens groups it
+ * never closes indents every line it writes after them for the rest of the
+ * run, and so reads here what it would read written anywhere else. What that
+ * costs is a transcript whose pattern lines start further right the more
+ * groups went unclosed, with no way back short of ending the run.
+ *
+ * The lines a connection writes for itself are not among them. They reach the
+ * prompt through {@link announcingOutput}'s `report`, which is the sink
+ * itself, so they stay at the left margin whatever a pattern has opened —
+ * which is what keeps the indent a reading of a pattern's own nesting rather
+ * than of the transcript.
  */
 function line(saying: Saying, text: string): void {
   saying.announce(`${"  ".repeat(saying.depth)}${text}`);

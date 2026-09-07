@@ -71,6 +71,10 @@ export interface PromptTerminal {
    * Shows `text` as the line being edited, with the cursor `column` code
    * points into it. Both are the whole line, prompt included, because where
    * the prompt ends and the typing begins is nothing a terminal needs to know.
+   *
+   * The count is an index into `text` rather than a place on the screen, so
+   * an implementation that draws on one works out where those code points put
+   * the cursor — `paint.ts` is where the one this package uses does it.
    */
   edit(text: string, column: number): void;
 
@@ -455,8 +459,9 @@ function apply(buffer: EditBuffer, key: Key): void {
 
 /**
  * Helper for {@link runPrompt}, which is the length of `text` in the unit the
- * cursor is measured in. The buffer counts a code point as a column, and this
- * counts the prompt in front of it the same way.
+ * cursor is measured in. The buffer moves its cursor a code point at a time,
+ * and this counts the prompt in front of it the same way, so the sum is an
+ * index into the line rather than a place on the screen.
  */
 function codePoints(text: string): number {
   return [...text].length;
