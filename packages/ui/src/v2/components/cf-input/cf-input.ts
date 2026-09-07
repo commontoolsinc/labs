@@ -441,7 +441,10 @@ export class CFInput extends BaseElement {
     },
   });
 
-  // Form field controller handles buffering when in cf-form context
+  /**
+   * Form field controller, which handles buffering when in a `cf-form`
+   * context.
+   */
   private _formField = createFormFieldController<string>(this, {
     cellController: this._cellController,
     validate: () => ({
@@ -483,7 +486,7 @@ export class CFInput extends BaseElement {
     this.addEventListener("focus", this._forwardFocusToInput);
   }
 
-  // Theme consumption
+  /** The theme, consumed from the provider. */
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
   // deno-lint-ignore no-explicit-any

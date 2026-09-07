@@ -235,7 +235,7 @@ export class CFFileInput extends BaseElement {
   @state()
   protected accessor storedFiles: StoredFile[] = [];
 
-  // Theme consumption
+  /** The theme, consumed from the provider. */
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
   accessor theme: CFTheme = defaultTheme;
