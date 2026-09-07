@@ -58,7 +58,7 @@ describe("generateObject server-side", () => {
               properties: { value: { type: "number" } },
             },
             messages: [{ role: "user", content: "give me a number" }],
-            // No model specified — falls back to DEFAULT_GENERATE_OBJECT_MODELS
+            // No model specified — falls back to DEFAULT_GENERATE_OBJECT_MODEL
           }),
         Error,
       );

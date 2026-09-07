@@ -92,13 +92,17 @@ repeated here.
 Two places where the division is less clean than the above, both worth knowing
 before relying on it:
 
-- `DEFAULT_GENERATE_OBJECT_MODELS` in
+- `DEFAULT_GENERATE_OBJECT_MODEL` in
   [`packages/llm/src/types.ts`](../../packages/llm/src/types.ts) is a
-  provider-qualified model name on the caller's side, and
+  qualified model name on the caller's side, and
   `packages/toolshed/routes/ai/llm/generateObject.ts` imports it back to use as
-  a default. It names an OpenAI model, which registers only where
-  `CFTS_AI_LLM_OPENAI_API_KEY` is set, so on a deployment without that key the
-  `generateObject` default names a model nothing registered.
+  a default. The server's own answer to "which model when the caller names
+  none" is the `default` alias; this constant sits beside that answer rather
+  than deferring to it, because `generateObject` wants a cheaper model than a
+  deployment's general default. What it costs is that the name is a guess about
+  what the deployment serves: it names a `gateway:` model, so a deployment
+  whose gateway does not answer, or does not serve that name, has a
+  `generateObject` default naming a model nothing registered.
 - The response shape of `GET /api/ai/llm/models` is caller-facing vocabulary
   written three times on the server's side — `Capabilities` and
   `GatewayModelCapabilities` in `models.ts`, and the response schema in

@@ -19,9 +19,20 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
  */
 export const DEFAULT_MODEL_NAME: ModelName = "default";
 
-// NOTE(ja): This should be an array of models, the first model will be tried, if it
-// fails, the second model will be tried, etc.
-export const DEFAULT_GENERATE_OBJECT_MODELS: ModelName = "openai:gpt-5-mini";
+/**
+ * The model a `generateObject` request names when it names none. What those
+ * requests mostly do is pull structured data out of text against a schema, and
+ * a mini-tier model is cheap enough to be a default for that and accurate
+ * enough to hold the schema.
+ *
+ * The name is gateway-qualified because that is what a deployment can be
+ * relied on to serve: the toolshed discovers the gateway's models from the
+ * gateway itself, where a name qualified by a direct provider registers only
+ * where that provider's key is set. Which models exist is decided in
+ * `packages/toolshed/routes/ai/llm/models.ts`, and
+ * `docs/features/llm-provider-boundary.md` describes the boundary in full.
+ */
+export const DEFAULT_GENERATE_OBJECT_MODEL: ModelName = "gateway:gpt-5.4-mini";
 
 export type LLMResponse = BuiltInLLMMessage & {
   // The trace span ID
