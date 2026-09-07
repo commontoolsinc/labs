@@ -1873,111 +1873,139 @@ export class Runner {
     PieceRegistration
   >();
   #allCancels = new Set<Cancel>();
-  // In-flight unloadable-pointer roll-forward commits (CT-1923). Deliberately
-  // outside the scheduler, like PatternUpdater's checks — dispose() settles
-  // them before the storage sessions they write through close. Bounded
-  // local commits only.
+
+  /**
+   * In-flight unloadable-pointer roll-forward commits. Deliberately outside the
+   * scheduler, like `PatternUpdater`'s checks — `dispose()` settles them before
+   * the storage sessions they write through close. Bounded local commits only.
+   */
   #pendingPointerCommits = new Set<Promise<unknown>>();
-  // In-flight watcher pattern-load attempts. NEVER awaited by dispose(): a
-  // load can be arbitrarily slow or wedged (network), and the
-  // fire-and-forget design guards post-settle work with lifecycle epochs
-  // instead — awaiting them would let one held load hang teardown (proven
-  // by reload-rehydration-safety's held-hot-swap-load test). Tracked solely
-  // so tests can synchronize deterministically under the frozen-clock
-  // preload, where wall-clock polling cannot observe this work.
+
+  /**
+   * In-flight watcher pattern-load attempts. _Never_ awaited by `dispose()`: a
+   * load can be arbitrarily slow or wedged (network), and the fire-and-forget
+   * design guards post-settle work with lifecycle epochs instead — awaiting
+   * them would let one held load hang teardown. Tracked solely so tests can
+   * synchronize deterministically under the frozen-clock preload, where
+   * wall-clock polling cannot observe this work.
+   */
   #pendingWatcherPatternLoads = new Set<Promise<unknown>>();
-  // In-flight catch-up recoveries of commit-gated starts whose transaction
-  // lost its basis to the serving side's own first-hydration materialization
-  // (see `catchUpAndStartOnStaleRead`). NEVER awaited by dispose(), for the
-  // same reason as the watcher loads above: the readiness gate they await is
-  // a session catch-up, which a closing runtime may never reach, and a
-  // cancelled ownership already tombstones the work. Tracked solely so tests
-  // can synchronize deterministically.
+
+  /**
+   * In-flight catch-up recoveries of commit-gated starts whose transaction lost
+   * its basis to the serving side's own first-hydration materialization (see
+   * `catchUpAndStartOnStaleRead()`). _Never_ awaited by `dispose()`, for the
+   * same reason as the watcher loads above: the readiness gate they await is a
+   * session catch-up, which a closing runtime may never reach, and a cancelled
+   * ownership already tombstones the work. Tracked solely so tests can
+   * synchronize deterministically.
+   */
   #pendingDeferredStartCatchUps = new Set<Promise<unknown>>();
-  // Self-minted piece instantiations commit asynchronously. Their local graph
-  // is speculative until the commit and any serving-wave settlement succeed,
-  // so a stale-read refusal or contribution drop tears down that exact node
-  // group and re-instantiates it once against the repaired view. This set is a
-  // deterministic test seam: disposal relies on the registration and
-  // lifecycle guards rather than waiting for a readiness gate or a wave that
-  // a closing serving loop may abandon.
+
+  /**
+   * In-flight settlements of self-minted piece instantiations, which commit
+   * asynchronously. Their local graph is speculative until the commit and any
+   * serving-wave settlement succeed, so a stale-read refusal or contribution
+   * drop tears down that exact node group and re-instantiates it once against
+   * the repaired view. This set is a deterministic test seam: disposal relies
+   * on the registration and lifecycle guards rather than waiting for a
+   * readiness gate or a wave that a closing serving loop may abandon.
+   */
   #pendingPieceInstantiationSettlements = new Set<Promise<unknown>>();
-  // Both maps record that this runner prepared or stopped a result, so a later
-  // start of the same result can reuse the cells it already assembled instead
-  // of re-syncing dependencies and rehydrating a snapshot. They are shortcuts:
-  // a missing entry costs a slower start, never a wrong one. They are bounded
-  // for that reason — a result key names one result document, and a pattern
-  // that keeps starting and stopping children adds keys it will never revisit.
+
+  /**
+   * Results this runner prepared, so a later start of the same result can reuse
+   * the cells it already assembled instead of re-syncing dependencies and
+   * rehydrating a snapshot. This map and `#locallyStoppedResults` are
+   * shortcuts: a missing entry costs a slower start, never a wrong one. They
+   * are bounded for that reason — a result key names one result document, and a
+   * pattern that keeps starting and stopping children adds keys it will never
+   * revisit.
+   */
   readonly #locallyPreparedResults = new BoundedKeyMap<
     `${MemorySpace}/${ScopeKey}/${URI}`,
     string
   >(RESULT_SHORTCUT_LIMIT);
+
   readonly #locallyStoppedResults = new BoundedKeyMap<
     `${MemorySpace}/${ScopeKey}/${URI}`,
     string
   >(RESULT_SHORTCUT_LIMIT);
-  // Successful event-result starts that are still live in this runner. This is
-  // intentionally local and bounded by live starts: it lets a sequential
-  // redelivery avoid re-materializing an already-won result before the
-  // create-only receipt guard rejects the duplicate. It is not a replacement
-  // for the system-wide commit precondition.
+
+  /**
+   * Successful event-result starts that are still live in this runner. This is
+   * intentionally local and bounded by live starts: it lets a sequential
+   * redelivery avoid re-materializing an already-won result before the
+   * create-only receipt guard rejects the duplicate. It is not a replacement
+   * for the system-wide commit precondition.
+   */
   #locallyCommittedHandlerResultStarts = new Set<
     `${MemorySpace}/${ScopeKey}/${URI}`
   >();
-  // DIAGNOSTIC counter (tests; the loud-no-op pin): served receipt
-  // writes skipped as write-once CAS losses — the handling's result
-  // cell already held a value when the serving run went to write it
-  // (handleJavaScriptHandlerResult's ruled serving-side write,
-  // events.md §4 "Result carriage"). Each skip also logs a warn line;
-  // this is the machine-readable half.
+
+  /**
+   * Diagnostic counter, for tests (the loud-no-op pin): served receipt writes
+   * skipped as write-once CAS losses — the handling's result cell already held
+   * a value when the serving run went to write it
+   * (`handleJavaScriptHandlerResult()`'s serving-side write, `events.md` §4,
+   * "Result carriage"). Each skip also logs a warn line; this is the
+   * machine-readable half.
+   */
   #servedReceiptCasLosses = 0;
-  // Results started in their own right rather than as part of an enclosing
-  // pattern, which is what navigating to a nested result does. An enclosing
-  // pattern releasing such a result leaves it running; only stopping it
-  // directly ends it.
+
+  /**
+   * Results started in their own right rather than as part of an enclosing
+   * pattern, which is what navigating to a nested result does. An enclosing
+   * pattern releasing such a result leaves it running; only stopping it
+   * directly ends it.
+   */
   #independentlyStartedResults = new Set<
     `${MemorySpace}/${ScopeKey}/${URI}`
   >();
-  // Tombstones for `sessionPatternPointers` entries dropped by CAPACITY
-  // EVICTION — never by the sanctioned removals (a real pattern's durable
-  // stamps superseding the pointer; a failed staging's cleanup). Each
-  // records the POINTER the eviction dropped, and the zero-evidence
-  // restage exemption in `setupInternal` consults it: an evicted pointer
-  // is "evidence unknown", not "no evidence". A re-setup with a DIFFERENT
-  // identity takes the conservative restage the un-evicted state would
-  // have taken — without the tombstone, eviction silently skipped that
-  // revalidation. A re-setup with the SAME identity is evidence AGREEING
-  // with the stored setup (the mint is a stable content hash of the
-  // pattern structure), so it keeps the exemption's protective verdict:
-  // forcing a restage there would strictly validate a stored argument the
-  // original staging never validated — the cf-get replay breakage the
-  // exemption exists to prevent, manufactured in-session past 4096
-  // setups. Entries are never individually removed (the doubt they record
-  // stays true for every state that consults them); bounded like the
-  // pointer map itself, so a doubly-blown bound degrades honestly to the
-  // designed zero-evidence verdict.
+
+  /**
+   * Tombstones for `#sessionPatternPointers` entries dropped by _capacity
+   * eviction_ — never by the sanctioned removals (a real pattern's durable
+   * stamps superseding the pointer; a failed staging's cleanup). Each records
+   * the _pointer_ the eviction dropped, and the zero-evidence restage exemption
+   * in `setupInternal()` consults it: an evicted pointer is evidence unknown,
+   * not no evidence. A re-setup with a _different_ identity takes the
+   * conservative restage the un-evicted state would have taken — without the
+   * tombstone, eviction silently skipped that revalidation. A re-setup with the
+   * _same_ identity is evidence _agreeing_ with the stored setup (the mint is a
+   * stable content hash of the pattern structure), so it keeps the exemption's
+   * protective verdict: forcing a restage there would strictly validate a
+   * stored argument the original staging never validated — the cf-get replay
+   * breakage the exemption exists to prevent, manufactured in-session past 4096
+   * setups. Entries are never individually removed (the doubt they record stays
+   * true for every state that consults them); bounded like the pointer map
+   * itself, so a doubly-blown bound degrades honestly to the designed
+   * zero-evidence verdict.
+   */
   #evictedSessionPatternPointers = new BoundedKeyMap<
     `${MemorySpace}/${ScopeKey}/${URI}`,
     { identity: string; symbol: string }
   >(RESULT_SHORTCUT_LIMIT);
-  // SESSION-side pattern pointers for KEYLESS pieces. A hand-built pattern's
-  // setup no longer stamps its session-synthetic `keyless:` ref durably
-  // (never-durable contract; L3(a), RULED 2026-08-27), but the in-session
-  // flows that used to read those stamps are sanctioned and keep working
-  // through this map instead: a separate `start(resultCell)` after setup,
-  // `setup`/`run` without a pattern, restart after `stop()`, and the
-  // setup-reuse marker (`storedSetupMarker`) that lets a re-derived
-  // sub-piece (a lift returning a pattern) reuse its running setup rather
-  // than restage it. Written at the same moment the durable stamps would
-  // have been (end of `#applySetupState`), erased when a real pattern's
-  // stamps supersede it or the staging transaction fails, and it dies with
-  // the session — which is the contract's whole point. Bounded like the
-  // shortcut maps beside it. Eviction costs the designed no-pattern-meta
-  // verdict (the piece's producer re-derives it), a restage, or a loud
-  // moved/not-current abort — with one guarded corner: absence alone would
-  // read as the fresh-session ZERO-EVIDENCE state and skip the restage
-  // validation, so evictions leave a tombstone (above) and the exemption
-  // treats "evicted" as evidence-unknown → restage.
+
+  /**
+   * _Session_-side pattern pointers for _keyless_ pieces. A hand-built
+   * pattern's setup does not stamp its session-synthetic `keyless:` ref durably
+   * (the never-durable contract), but the in-session flows that read those
+   * stamps are sanctioned and keep working through this map instead: a separate
+   * `start(resultCell)` after setup, `setup`/`run` without a pattern, restart
+   * after `stop()`, and the setup-reuse marker (`storedSetupMarker`) that lets
+   * a re-derived sub-piece (a lift returning a pattern) reuse its running setup
+   * rather than restage it. Written at the same moment the durable stamps would
+   * have been (end of `#applySetupState()`), erased when a real pattern's
+   * stamps supersede it or the staging transaction fails, and it dies with the
+   * session — which is the contract's whole point. Bounded like the shortcut
+   * maps beside it. Eviction costs the designed no-pattern-meta verdict (the
+   * piece's producer re-derives it), a restage, or a loud moved/not-current
+   * abort — with one guarded corner: absence alone would read as the
+   * fresh-session _zero-evidence_ state and skip the restage validation, so
+   * evictions leave a tombstone (above) and the exemption treats evicted as
+   * evidence-unknown → restage.
+   */
   readonly #sessionPatternPointers = new BoundedKeyMap<
     `${MemorySpace}/${ScopeKey}/${URI}`,
     { identity: string; symbol: string }
@@ -1986,62 +2014,84 @@ export class Runner {
       this.#evictedSessionPatternPointers.set(key, pointer),
   });
 
-  // SESSION-side pattern-swap channel for RUNNING pieces, the third stamp
-  // stand-in: a re-derived child (a lift returning a pattern) used to reach
-  // its running piece's swap machinery THROUGH the durable stamp — setup
-  // wrote the new `patternIdentity`, the piece's meta watcher fired, and
-  // swapToPattern cancelled the old graph and instantiated the new one.
-  // With keyless stamps gone (L3(a)), a run() over an already-registered
-  // piece requests the swap here instead, handing the LIVE pattern value
-  // straight to the watcher's own swap closure (same guards, same
-  // fail-closed setup). Real patterns keep the durable-stamp path
-  // unchanged. Registered by setupPatternWatcher, removed with the
-  // piece's cancel group.
+  /**
+   * _Session_-side pattern-swap channel for _running_ pieces, the third stamp
+   * stand-in. With keyless stamps never durable, a `run()` over an
+   * already-registered piece requests the swap here, handing the _live_ pattern
+   * value straight to the watcher's own swap closure (same guards, same
+   * fail-closed setup) — the machinery a re-derived child (a lift returning a
+   * pattern) otherwise reaches through the durable stamp: setup writes the new
+   * `patternIdentity`, the piece's meta watcher fires, and `swapToPattern()`
+   * cancels the old graph and instantiates the new one. Real patterns keep the
+   * durable-stamp path. Registered by `setupPatternWatcher()`, removed with the
+   * piece's cancel group.
+   */
   #sessionPatternSwaps = new Map<
     `${MemorySpace}/${ScopeKey}/${URI}`,
     (pattern: Pattern, ref: { identity: string; symbol: string }) => void
   >();
-  // Commit-gated starts that have not installed a registration yet, indexed by
-  // result so an explicit stop can tombstone them before installation.
+
+  /**
+   * Commit-gated starts that have not installed a registration yet, indexed by
+   * result so an explicit stop can tombstone them before installation.
+   */
   readonly #pendingDeferredStarts = new Map<
     `${MemorySpace}/${ScopeKey}/${URI}`,
     Set<DeferredCancelOwnership>
   >();
-  // Two-level memo of what each result cell holds: outer key the result
-  // DOC (space/id), inner key the resolved scope INSTANCE, value a hash
-  // of the pattern's encodable form -- what `#writeJavaScriptActionResult`
-  // compares to decide whether a returned sub-pattern has changed. The
-  // inner key is the SAME per-run resolved ScopeKey that selects the
-  // byScope result cell (review thread r3739139481): a serving runtime
-  // materializes one child per demanded instance, and a doc-level (or
-  // service-identity-resolved) key made the SECOND demanded instance
-  // look "unchanged" and skip its child materialization. The outer
-  // doc key is what change notifications can name (they carry scope by
-  // NAME, which cannot address per-run instances), so eviction drops
-  // the whole doc's entry -- over-eviction across instances is safe:
-  // re-preparing an unchanged pattern is idempotent.
+
+  /**
+   * Two-level memo of what each result cell holds: outer key the result _doc_
+   * (space/id), inner key the resolved scope _instance_, value a hash of the
+   * pattern's encodable form — what `#writeJavaScriptActionResult()` compares
+   * to decide whether a returned sub-pattern has changed. The inner key is the
+   * _same_ per-run resolved `ScopeKey` that selects the byScope result cell: a
+   * serving runtime materializes one child per demanded instance, and a
+   * doc-level (or service-identity-resolved) key would make the _second_
+   * demanded instance look unchanged and skip its child materialization. The
+   * outer doc key is what change notifications can name (they carry scope by
+   * _name_, which cannot address per-run instances), so eviction drops the
+   * whole doc's entry — over-eviction across instances is safe: re-preparing an
+   * unchanged pattern is idempotent.
+   */
   readonly #resultPatternCache = new Map<
     `${MemorySpace}/${URI}`,
     Map<ScopeKey, string>
   >();
-  // Invalidates asynchronous start/resume continuations when stopAll() begins.
-  // A later explicit start captures the new epoch and may proceed normally.
+
+  /**
+   * Epoch which invalidates asynchronous start/resume continuations when
+   * `stopAll()` begins. A later explicit start captures the new epoch and may
+   * proceed normally.
+   */
   #lifecycleEpoch = 0;
-  // Per-result generation for starts that have not installed their cancel
-  // group yet. stop(result) advances it so an in-flight sync/listing cannot
-  // start that piece after the caller has already stopped it. Entries exist
-  // only while at least one tracked start attempt for that doc is unsettled.
+
+  /**
+   * Per-result generation for starts that have not installed their cancel group
+   * yet. `stop(result)` advances it so an in-flight sync or listing cannot
+   * start that piece after the caller has already stopped it. Entries exist
+   * only while at least one tracked start attempt for that doc is unsettled.
+   */
   #startGenerationByDoc = new Map<string, number>();
+
   #activeStartAttemptsByDoc = new Map<string, Set<StartAttempt>>();
-  // Covers the pre-resolution window where a link attempt does not know its
-  // eventual target doc and therefore cannot appear in the per-doc index yet.
+
+  /**
+   * Every unsettled start attempt. Covers the pre-resolution window where a
+   * link attempt does not know its eventual target doc and therefore cannot
+   * appear in the per-doc index yet.
+   */
   readonly #activeStartAttempts = new Set<StartAttempt>();
-  // The attempt a concurrent start() of the same doc joins, keyed by the doc
-  // the call entered through. One entry per doc: the newest attempt that is
-  // still current. Entries are removed when their attempt settles; a stale
-  // entry (stop moved the doc's generation, or the epoch changed) is
-  // overwritten by the fresh attempt that replaces it.
+
+  /**
+   * The attempt a concurrent `start()` of the same doc joins, keyed by the doc
+   * the call entered through. One entry per doc: the newest attempt that is
+   * still current. Entries are removed when their attempt settles; a stale
+   * entry (stop moved the doc's generation, or the epoch changed) is
+   * overwritten by the fresh attempt that replaces it.
+   */
   #inFlightStartsByDoc = new Map<string, StartAttempt>();
+
   #crossSpaceChildSpaces = new WeakMap<
     IExtendedStorageTransaction,
     MemorySpace[]
@@ -5903,10 +5953,12 @@ export class Runner {
     }
   }
 
-  // Result-pattern cache key, per scope INSTANCE (key-vocabulary.md §1
-  // site 2): two instances of one doc may resolve to different patterns,
-  // so the key carries the shared scope_key, resolved against the
-  // runtime's own session (the OFF arm's one identity).
+  /**
+   * Returns the result-pattern cache key for `cell`, per scope _instance_
+   * (`key-vocabulary.md` §1 site 2): two instances of one doc may resolve to
+   * different patterns, so the key carries the shared scope key, resolved
+   * against the runtime's own session (the OFF arm's one identity).
+   */
   #getDocKey(cell: Cell<any>): `${MemorySpace}/${ScopeKey}/${URI}` {
     const { space, id, scope } = cell.getAsNormalizedFullLink();
     return `${space}/${
@@ -6752,15 +6804,17 @@ export class Runner {
     }
   }
 
-  // Walk the pattern tree — this pattern and every nested sub-pattern — and
-  // collect each one's owned (derived internal) cells into `out`, so the resume
-  // pre-sync pulls them before instantiation reads them. A sub-pattern node's
-  // result cell is the cell reserved by the node's resolved output spot, the
-  // same `resultFor` identity instantiatePatternNode mints; deriving owned cells
-  // from it matches what the child's setup will use. The `seen` set keys on the
-  // result cell to bound the walk against a cyclic reference. This only pulls
-  // cells, so a node shape it cannot resolve contributes nothing rather than
-  // misbehaving.
+  /**
+   * Walks the pattern tree — this pattern and every nested sub-pattern — and
+   * collects each one's owned (derived internal) cells into `out`, so the
+   * resume pre-sync pulls them before instantiation reads them. A sub-pattern
+   * node's result cell is the cell reserved by the node's resolved output spot,
+   * the same `resultFor` identity `instantiatePatternNode()` mints; deriving
+   * owned cells from it matches what the child's setup will use. The `seen` set
+   * keys on the result cell to bound the walk against a cyclic reference. This
+   * only pulls cells, so a node shape it cannot resolve contributes nothing
+   * rather than misbehaving.
+   */
   #collectResumeOwnedCells(
     pattern: Pattern,
     resultCell: Cell<any>,

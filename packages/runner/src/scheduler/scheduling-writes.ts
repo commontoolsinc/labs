@@ -39,25 +39,26 @@ export class SchedulerWriteIndex
     readonly scopeKeyIdentity: () => ScopeKeyIdentity,
   ) {}
 
-  // Current-known writes are the action's static declared write surface.
+  /** Current-known writes: each action's static declared write surface. */
   readonly currentKnownWrites = new WeakMap<Action, IMemorySpaceAddress[]>();
-  // Index: entity -> actions that write to it (for fast dependency lookup).
-  // Updated from the active scheduling write set. Keyed by scope NAME
-  // (entityNameKey — server-execution v2 stage A, the instance-AGNOSTIC
-  // writer index): the reader→writer relation is a NODE-level topology
-  // relation — under C11b one node writes ALL instances of its declared
-  // surface — so a reader whose logged read names one principal's
-  // instance must still find the writer whose surface declares the scope
-  // by name. An instance-keyed index would drop that edge the moment
-  // reads carry non-own instances (today both sides collapse to the
-  // runtime's own instance and match by accident). Cost of the fan-in:
-  // any instance's change re-dirties the (singular) node, so all N
-  // instances re-run — O(N) per input change, equality cutoffs absorb the
-  // unchanged siblings; instance-precise dirtiness is stage B's B7 and
-  // is never a correctness need here (dirtiness/dependency keys stay per
-  // instance via entityKey).
+
+  /**
+   * Index: entity → actions that write to it (for fast dependency lookup).
+   * Updated from the active scheduling write set. Keyed by scope _name_
+   * (`entityNameKey()`, the instance-_agnostic_ writer index): the
+   * reader→writer relation is a _node_-level topology relation — one node
+   * writes _all_ instances of its declared surface — so a reader whose logged
+   * read names one principal's instance must still find the writer whose
+   * surface declares the scope by name. An instance-keyed index would drop that
+   * edge the moment reads carry non-own instances. Cost of the fan-in: any
+   * instance's change re-dirties the (singular) node, so all N instances re-run
+   * — O(N) per input change, equality cutoffs absorb the unchanged siblings;
+   * instance-precise dirtiness is never a correctness need here
+   * (dirtiness/dependency keys stay per instance via `entityKey()`).
+   */
   readonly writersByEntity = new Map<SpaceScopeAndURI, Set<Action>>();
-  // Reverse index: action -> entities it writes to (for cleanup).
+
+  /** Reverse index: action → entities it writes to (for cleanup). */
   readonly actionWriteEntities = new WeakMap<
     Action,
     Set<SpaceScopeAndURI>
