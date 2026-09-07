@@ -596,9 +596,9 @@ describe("Memory v2 storage notifications", () => {
       ],
     });
 
-    // The replica notifies the commit's source of the rejection just before
-    // it waits out the read repair, so the listener fires as the repair
-    // starts.
+    // The push path notifies the rejection's sources and then finalizes the
+    // rejection, which reaches the read-repair wait with no await between,
+    // so the listener fires as the repair starts.
     const source = staleReadSource(firstUri, 1);
     registerCommitRejectionListener(source, () => repairStarted.resolve());
     const commitPromise = replica.commitNative({

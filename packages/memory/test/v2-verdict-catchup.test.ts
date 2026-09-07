@@ -655,8 +655,7 @@ Deno.test("memory v2 server: the verdict leaves within the transact's publicatio
     subscriptionRefreshDelayMs: 60_000,
     store: "memory://verdict-catchup-publication-turn",
   });
-  const { server, space, committer, committerMessages, committerSessionId } =
-    context;
+  const { server, space, committerMessages, committerSessionId } = context;
 
   // Train-side re-pin of #5529's verdict-precedes-fan-out. The test takes
   // publication turns of its own on the space's lock: turn A holds the lock
@@ -686,7 +685,14 @@ Deno.test("memory v2 server: the verdict leaves within the transact's publicatio
       }],
     },
   }, (verdict) => committerMessages.push(verdict));
-  const heldB = lock(space, () => turnB.promise);
+  // B's body runs as soon as the transact's turn ends: a verdict published
+  // inside that turn is at the committer by then, one published after any
+  // later await is not.
+  let verdictsAtB = -1;
+  const heldB = lock(space, () => {
+    verdictsAtB = committerMessages.length;
+    return turnB.promise;
+  });
   const fanout = server.flushSessions([space]);
 
   turnA.resolve();
@@ -698,6 +704,7 @@ Deno.test("memory v2 server: the verdict leaves within the transact's publicatio
     shiftMessage(committerMessages),
   );
   assertEquals(verdict.ok?.seq, 2);
+  assertEquals(verdictsAtB, 1);
   // Fan-out serializes behind turn B: while B is held, no frame reaches the
   // committer.
   assertEquals(committerMessages.length, 0);

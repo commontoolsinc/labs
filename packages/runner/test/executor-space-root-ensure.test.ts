@@ -35,18 +35,16 @@ import { Identity } from "@commonfabric/identity";
 import type { FabricValue } from "@commonfabric/api";
 import type { Signer, URI } from "@commonfabric/memory/interface";
 import {
+  decodeMemoryBoundary,
   encodeMemoryBoundary,
+  type ServerMessage,
   type SessionSync,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import {
-  type Options as V2Options,
-  type SessionFactory,
-  type SpaceReplica,
-} from "../src/storage/v2.ts";
+import type { SessionFactory, SpaceReplica } from "../src/storage/v2.ts";
 import { Runtime, type RuntimeFetch } from "../src/runtime.ts";
 import type {
   IExtendedStorageTransaction,
@@ -134,42 +132,44 @@ class CidDroppingSessionFactory implements SessionFactory {
     return { client, session };
   }
 
+  /**
+   * The real loopback, with each frame decoded, filtered, and re-encoded on
+   * its way to the client, so the client keeps loopback's one-frame-per-turn
+   * delivery and sees only what the filter lets through.
+   */
   #transport(): MemoryV2Client.Transport {
-    let receiver: (payload: string) => void = () => {};
-    const connection = this.#getServer().connect((message) => {
-      receiver(
-        encodeMemoryBoundary(this.#filter(message) as unknown as FabricValue),
-      );
-    });
+    const inner = MemoryV2Client.loopback(this.#getServer());
     return {
-      async send(payload: string) {
-        await connection.receive(payload);
-      },
-      close() {
-        connection.close();
-        return Promise.resolve();
-      },
-      setReceiver(next) {
-        receiver = next;
-      },
-      setCloseReceiver() {},
+      ...inner,
+      setReceiver: (next) =>
+        inner.setReceiver((payload) =>
+          next(
+            encodeMemoryBoundary(
+              this.#filter(
+                decodeMemoryBoundary(payload) as unknown as ServerMessage,
+              ) as unknown as FabricValue,
+            ),
+          )
+        ),
     };
   }
 
-  #filter(message: unknown): unknown {
-    const frame = message as {
-      type?: string;
+  #filter(message: ServerMessage): ServerMessage {
+    const frame = message as ServerMessage & {
       effect?: SessionSync;
       ok?: { sync?: SessionSync };
     };
     if (frame.type === "session/effect" && frame.effect?.type === "sync") {
-      return { ...frame, effect: this.#filterSync(frame.effect) };
+      return {
+        ...(frame as object),
+        effect: this.#filterSync(frame.effect),
+      } as unknown as ServerMessage;
     }
     if (frame.type === "response" && frame.ok?.sync?.type === "sync") {
       return {
-        ...frame,
-        ok: { ...frame.ok, sync: this.#filterSync(frame.ok.sync) },
-      };
+        ...(frame as object),
+        ok: { ...(frame.ok as object), sync: this.#filterSync(frame.ok.sync) },
+      } as unknown as ServerMessage;
     }
     return message;
   }
@@ -476,7 +476,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     const readerManager = TestStorageManager.create({
       as: readerSigner,
       memoryHost: new URL("memory://"),
-    } as V2Options, dropping);
+    }, dropping);
     const reader = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager: readerManager,
