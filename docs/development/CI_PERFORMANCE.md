@@ -252,14 +252,22 @@ the pair goes when the last job that read it does. `tasks/ci-workflow.test.ts`
 holds every bound to being an alias; it does not ask whether every anchor is
 used, which is a thing to check by eye when a job is deleted.
 
-The lanes take a pair of their own. A pull-request lane is bounded at five
-minutes of work inside a job bounded at fifteen, and a lane of the full run at
-ten inside twenty. Those numbers are the ones the packer packs against:
-`LANE_BOUND_SECONDS` and `FULL_LANE_BOUND_SECONDS` in
-`tasks/test-selection/policy.ts` are the same bounds in seconds, and moving one
-without the other would let the packer fill a lane past what its job allows. A
-job needing its own bound adds a pair of anchors alongside these rather than a
-number next to the step.
+The lanes take a pair of their own, and theirs is not the same number as the
+budget they are packed against. `LANE_BOUND_SECONDS` and
+`FULL_LANE_BOUND_SECONDS` in `tasks/test-selection/policy.ts` are what the
+packer aims at; the anchors here are where the runner gives up. The two are
+deliberately far apart.
+
+The budget governs what the packer *chooses* to add to a lane. It does not
+govern what must run — what the change touched, and every unit no manifest has
+seen — and a mandatory set larger than the budget is placed anyway, because a
+test that must run and does not is the one failure this design refuses. A lane
+over its budget says by how much in its summary and finishes. So the bound on
+the step is generous: a lane that reaches it is one nothing is going to finish,
+not one that was given more than its share.
+
+A job needing its own bound adds a pair of anchors alongside these rather than
+a number next to the step.
 
 The deploy jobs carry no bound at all. A deploy hands the work to a script that
 lives outside this repository, and a bound here would cancel a deploy this

@@ -62,7 +62,7 @@ import {
 } from "./test-selection/coverage.ts";
 import { readWorkspaceMembers } from "./workspace-tests.ts";
 import type { Manifest, WithheldReason } from "./test-selection/manifest.ts";
-import { FULL_RUN_LABEL, LANES } from "./test-selection/policy.ts";
+import { LANES } from "./test-selection/policy.ts";
 import {
   LANE_MEASUREMENT_PREFIX,
   LANE_MEASUREMENT_SURFACE,
@@ -989,21 +989,17 @@ export async function runLane(
     `${entry.cost.toFixed(0)}s, more than a lane can hold`
   );
   if (laid.overBudgetSeconds > 0) {
-    // In the job summary rather than only on the output, because this is
-    // the one line that explains a lane the runner kills: a lane past its
-    // bound reports a timeout and nothing about why it had more work than
-    // it could hold.
-    const over = laid.overBudgetSeconds;
+    // In the job summary rather than only on the output. A lane that runs
+    // well past the time a lane is meant to take is worth explaining, and
+    // what explains it is the work that had to run whatever it cost.
     say([
-      `The work that must run puts a lane ${over.toFixed(0)} seconds past ` +
-      `the ${laid.budgetSeconds}-second budget.` +
-      (over < laid.budgetSeconds
-        ? ""
-        : " That is more than a lane holds, so this lane will reach the " +
-          "bound its job is killed at. What must run is what the change " +
-          "touched plus every unit no manifest has seen, and a tree whose " +
-          "unseen units outweigh a lane is one to run whole: label the " +
-          `pull request \`${FULL_RUN_LABEL}\`.`),
+      `The work that must run puts this lane ` +
+      `${laid.overBudgetSeconds.toFixed(0)} seconds past the ` +
+      `${laid.budgetSeconds}-second budget, and it runs anyway: what must ` +
+      `run is what the change touched and every unit no manifest has seen, ` +
+      `and a test that must run and does not is the one thing selection ` +
+      `may never do. The budget is what the packer chooses against, not a ` +
+      `bound on the lane.`,
     ]);
   }
 

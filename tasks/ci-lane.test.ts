@@ -39,7 +39,6 @@ import type { Manifest, ManifestEntry } from "./test-selection/manifest.ts";
 import {
   FULL_LANE_BOUND_SECONDS,
   FULL_LANE_BUDGET_SECONDS,
-  FULL_RUN_LABEL,
   LANE_BUDGET_SECONDS,
   UNMEASURED_COST_SECONDS,
 } from "./test-selection/policy.ts";
@@ -1241,11 +1240,11 @@ describe("planning a lane the manifest chose", () => {
   });
 });
 
-describe("a lane that cannot hold what must run", () => {
-  it("says so in the summary, and says what to do about it", async () => {
-    // A lane past its bound reports a timeout and nothing about why it
-    // had more work than it could hold. This is the one line that
-    // explains it, so it goes where somebody reading the job looks.
+describe("a lane holding more than its budget", () => {
+  it("says how far past it is, and that it runs anyway", async () => {
+    // A lane that takes far longer than a lane is meant to take is worth
+    // explaining, and what explains it is the work that had to run
+    // whatever it cost. It goes where somebody reading the job looks.
     const lines: string[] = [];
     const log = console.log;
     console.log = (line: string) => lines.push(line);
@@ -1282,8 +1281,10 @@ describe("a lane that cannot hold what must run", () => {
 
     const said = lines.join("\n");
     expect(said).toContain("past the");
-    expect(said).toContain("more than a lane holds");
-    expect(said).toContain(FULL_RUN_LABEL);
+    expect(said).toContain("runs anyway");
+    // The budget is what the packer chooses against. A lane over it is
+    // not a lane in trouble, so the line must not read as one.
+    expect(said).not.toContain("killed");
   });
 });
 

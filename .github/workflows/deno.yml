@@ -46,14 +46,25 @@ env:
   ASTRAL_BIN_PATH: /usr/bin/google-chrome
   WORK_TIMEOUT_MINUTES: &work-timeout 30
   JOB_TIMEOUT_MINUTES: &job-timeout 40
-  # A pull-request lane is packed against a five-minute budget, and the full
-  # run's lanes against ten. Each pair keeps the repository's rule that a job's
-  # bound is at least ten minutes above its work step's, which leaves room for
-  # the setup either side of the work step.
-  LANE_WORK_TIMEOUT_MINUTES: &lane-work-timeout 5
-  LANE_JOB_TIMEOUT_MINUTES: &lane-job-timeout 15
-  FULL_LANE_WORK_TIMEOUT_MINUTES: &full-lane-work-timeout 10
-  FULL_LANE_JOB_TIMEOUT_MINUTES: &full-lane-job-timeout 20
+  # What a lane is packed against and what a lane is killed at are two
+  # different numbers, and this is the second of them.
+  #
+  # `LANE_BUDGET_SECONDS` in tasks/test-selection/policy.ts is what the packer
+  # aims at: five minutes for a pull request's lanes and ten for the full
+  # run's, minus the setup either side and a margin. That budget governs what
+  # the packer *chooses* to add. It does not govern what must run — what the
+  # change touched, and every unit no manifest has seen — and a mandatory set
+  # larger than the budget is placed anyway, because a test that must run and
+  # does not is the one failure this design refuses.
+  #
+  # So the bound here is generous rather than tight. A lane over its budget
+  # says so in its summary and finishes; a lane that reaches this bound is one
+  # nothing is going to finish. The pair keeps the repository's rule that a
+  # job's bound is at least ten minutes above its work step's.
+  LANE_WORK_TIMEOUT_MINUTES: &lane-work-timeout 30
+  LANE_JOB_TIMEOUT_MINUTES: &lane-job-timeout 40
+  FULL_LANE_WORK_TIMEOUT_MINUTES: &full-lane-work-timeout 30
+  FULL_LANE_JOB_TIMEOUT_MINUTES: &full-lane-job-timeout 40
 
 # Every step name must begin with a phase-marker emoji (setup / work / shutdown).
 # scripts/ci-gantt.ts reads that emoji to split each job bar by phase. See the
