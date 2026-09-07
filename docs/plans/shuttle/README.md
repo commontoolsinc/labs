@@ -196,9 +196,19 @@ invisible, the prompt renders the whole ambient record — place and scope
     and its error names `|!`. The native set — names that work bare and
     are guaranteed wherever shuttle runs, contract not implementation —
     is designed and deferred ([`futures.md`](futures.md)).
-17. **Numbered handles.** Listings number their rows and `%n` is a
-    reference until the next listing — the mechanism by which a view
-    (decision 12) feeds the next command without being a place.
+17. **Numbered handles, in the first column.** Listings number their rows and
+    `%n` is a reference until the next listing — the mechanism by which a view
+    (decision 12) feeds the next command without being a place. The handle
+    opens the row, in a fixed-width column the widest of them sets, and the
+    name comes next. A short handle column is what makes a numbered listing
+    scannable: every name starts at the same offset, so a reader runs their
+    eye down one column for the names and down another for the numbers.
+    Numbers written after names are not a column at all — the names vary in
+    length, so the numbers land ragged, and the reader who wants `%39` has
+    nowhere to look for it. What the order costs is that the name is no
+    longer the first thing on a line, so what identifies a row with no name
+    is the marker standing in its name column rather than the line's first
+    character; [`grammar.md`](grammar.md) carries that rendering.
 18. **`!` means local, everywhere.** Line-initial `! <cmd>` runs a local
     program, `|!` is the same escape inside a pipeline, `!cf` the special
     case that injects place-derived flags.
@@ -373,7 +383,7 @@ several) stay reachable later.
 | --- | --- | --- |
 | Canonical + alias reference grammar | `packages/cli/lib/llm-friendly-ref.ts` (doc comment), runner's `parseLLMFriendlyLink` | The address syntax; shuttle consumes it and must not fork it |
 | Target option surface | `targetOptions` in `packages/cli/commands/piece.ts` | The enumeration of exactly what a place must supply |
-| Live-state listing and completion | `listCellKeys` in `packages/cli/lib/cell-listing.ts` — exported, taking its connection as a parameter, with `keysOf` beside it; path completion in `packages/cli/lib/completion/providers.ts` reads it | The `ls` primitive and tab completion; shuttle passes the connection it holds, and a failed read raises rather than listing empty |
+| Live-state listing and completion | `keysOf` in `packages/cli/lib/cell-listing.ts` — exported, beside the `listCellKeys` that reads a cell through it, which path completion in `packages/cli/lib/completion/providers.ts` uses | The `ls` primitive and tab completion; shuttle reads the cell over the connection it holds and names its rows through `keysOf`, and a failed read raises rather than listing empty |
 | Pager/TUI substrate | `packages/cli/lib/view/` — `pager.ts` is the only module doing raw-mode full-screen TTY handling; `mod.ts` and `loadinput.ts` touch stdio for the one-shot path (capability probes, plain-output writes, piped input); `keys.ts`, `ansi.ts`, `render.ts`, `session.ts` hold state and decoding as pure logic | The full-screen half: raw mode, frames, key decoding, testable without a terminal; already follows references and edits buffers |
 | FUSE mount | `packages/fuse` | The same addressing as a POSIX filesystem; prior art for layout (arrays as numeric directories, handlers as executables, links as symlinks). Shuttle is its interactive, live sibling, not a replacement |
 | Offline inspector | `packages/state-inspector`, `cf inspect` | The forensic counterpart (snapshots, scopes, history); its HTML explorer is prior art for tree-plus-detail browsing |

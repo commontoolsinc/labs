@@ -23,10 +23,12 @@ import { describe, it } from "@std/testing/bdd";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { PiecesController } from "@commonfabric/piece/ops";
 
+import { UI } from "@commonfabric/runner";
+
 import type { SpaceConfig } from "../lib/piece.ts";
-import { safeStringify } from "../lib/render.ts";
 import { HeldConnection } from "../lib/shuttle/connection.ts";
 import { CurrentPlace } from "../lib/shuttle/place.ts";
+import { ShuttleSession } from "../lib/shuttle/session.ts";
 import { moved } from "./shuttle-place-helpers.ts";
 import { type PromptTerminal, runPrompt } from "../lib/shuttle/prompt.ts";
 import type { Shuttle, VerbDeps } from "../lib/shuttle/verbs.ts";
@@ -69,6 +71,7 @@ function shuttleIn(): Shuttle {
         getSpaceName: () => "board",
       } as unknown as PiecesController,
     }),
+    session: new ShuttleSession(),
   };
 }
 
@@ -198,7 +201,7 @@ describe("prompt", () => {
         {
           kind: "announce",
           text: "`pw` is not a verb. The verbs are `cd`, `get`, `help`, " +
-            "`ls`, `pwd`, `where`, and `wish`.",
+            "`ls`, `more`, `pwd`, `where`, and `wish`.",
         },
         { kind: "edit", text: AT_ROOT, column: 18 },
         { kind: "finish" },
@@ -229,161 +232,33 @@ describe("prompt", () => {
       });
     });
 
-    it("writes a value as indented JSON", async () => {
-      const writes = await running([...typed("get"), ENTER], atPiece(), {
-        getCellValue: () => Promise.resolve({ title: "a" }),
+    it("writes what a verb read as a value, as indented JSON", async () => {
+      // The value arm reaches the one writer (`value.ts`), which is where the
+      // form is pinned. What this case is about is that the arm reaches it at
+      // all, so the assertion is the shape and not the whole vocabulary.
+
+      const writes = await running([...typed("wish #favorites"), ENTER], {
+        ...shuttleIn(),
+      }, {
+        readWish: () => Promise.resolve({ result: { title: "a" } }),
       });
       expect(produced(writes)).toEqual(['{\n  "title": "a"\n}']);
     });
 
-    it("writes `undefined` for a value nothing else can be written for", async () => {
-      // `JSON.stringify` returns no string at all for it, so a value the
-      // fabric does not hold would otherwise print as nothing and read as a
-      // line that produced none.
+    it("writes a piece's `$UI` node out for a value a target resolved to", async () => {
+      // The arm asks for the node rather than a marker, and the asymmetry is
+      // deliberate: a person naming a target asked for that target, where a
+      // person reading the cell they are standing in did not ask for the
+      // piece's picture of itself. `get` is the verb that elides, and it
+      // writes its own rendering.
 
-      const writes = await running([...typed("get"), ENTER], atPiece(), {
-        getCellValue: () => Promise.resolve(undefined),
-      });
-      expect(produced(writes)).toEqual(["undefined"]);
-    });
-
-    it("writes a value's acted-on characters as the escapes JSON spells them with", async () => {
-      // `JSON.stringify` finishes C0 and leaves `DEL` and every C1 character
-      // as it found them, so those are what is left to escape. The convention
-      // is JSON's own rather than the glyphs a message gets, because this is a
-      // value somebody may parse or paste rather than prose they read.
-
-      const writes = await running([...typed("get"), ENTER], atPiece(), {
-        getCellValue: () =>
-          Promise.resolve({ title: "a\u007fb\u009bc\u001bd" }),
+      const writes = await running([...typed("wish #favorites"), ENTER], {
+        ...shuttleIn(),
+      }, {
+        readWish: () => Promise.resolve({ result: { [UI]: { type: "v" } } }),
       });
       expect(produced(writes)[0]).toBe(
-        '{\n  "title": "a\\u007fb\\u009bc\\u001bd"\n}',
-      );
-    });
-
-    it("writes a value holding no acted-on character unchanged", async () => {
-      const writes = await running([...typed("get"), ENTER], atPiece(), {
-        getCellValue: () => Promise.resolve({ title: "a b" }),
-      });
-      expect(produced(writes)[0]).toBe('{\n  "title": "a b"\n}');
-    });
-
-    it("leaves the line breaks the writer laid the value out with", async () => {
-      // A line feed still standing raw in that output is the pretty printer's
-      // own formatting, because every C0 character a value held is escaped
-      // before this sees it. Escaping it would fold the value onto one line.
-
-      const writes = await running([...typed("get"), ENTER], atPiece(), {
-        getCellValue: () => Promise.resolve({ a: 1, b: 2 }),
-      });
-      expect(produced(writes)[0]).toBe('{\n  "a": 1,\n  "b": 2\n}');
-    });
-
-    it("writes a line break inside a value as the escape, not as a break", async () => {
-      // The other side of the boundary the case above draws, and the two
-      // together are the whole rule: the writer's own breaks are layout and
-      // stay breaks, and a break the value holds is content, which is two
-      // characters by the time this sees it — so the row it is written on is
-      // still one row.
-
-      const writes = await running([...typed("get"), ENTER], atPiece(), {
-        getCellValue: () => Promise.resolve({ a: "x\ny" }),
-      });
-      expect(produced(writes)[0]).toBe('{\n  "a": "x\\ny"\n}');
-    });
-
-    it("writes a value that still parses back to the value it was", async () => {
-      // What the convention buys: the output is JSON, and reading it back
-      // gives what the fabric held rather than what the escaping did to it.
-
-      const held = { title: "a\u007fb\u009bc", nested: [1, "d\u0000e"] };
-      const writes = await running([...typed("get"), ENTER], atPiece(), {
-        getCellValue: () => Promise.resolve(held),
-      });
-      const printed = produced(writes)[0];
-      expect(/\p{Cc}/u.test(printed.replaceAll("\n", ""))).toBe(false);
-      expect(JSON.parse(printed)).toEqual(held);
-    });
-
-    it("names the kind of a value JSON has no form for, rather than the word", async () => {
-      // `JSON.stringify` returns no string for a symbol and for a function
-      // exactly as it does for `undefined`, and without throwing, so a reader
-      // told `undefined` would be told the cell was empty when it is not —
-      // and the loop would hand a non-string to the terminal, which ends the
-      // session on the first one of these.
-      //
-      // The symbol is registry-interned because that is the kind a cell
-      // takes: the fabric's admission test refuses a unique one
-      // (`assertValidFabricValueLayer`). The function is the other side of
-      // that same test, refused on the way in and so unreachable from a read
-      // — it is here because the parameter is `unknown` and what a wrong
-      // answer costs is the session.
-
-      for (
-        const [value, kind] of [
-          [Symbol.for("cf.shuttle.written"), "symbol"],
-          [() => {}, "function"],
-        ] as const
-      ) {
-        const writes = await running([...typed("get"), ENTER], atPiece(), {
-          getCellValue: () => Promise.resolve(value),
-        });
-        expect(produced(writes)[0])
-          .toBe(`The value is a ${kind}, which JSON has no way to write.`);
-      }
-    });
-
-    it("drops a nested value JSON has no form for, and says nothing", async () => {
-      // The bound the doc comment on `written` names, pinned so that it is a
-      // measured property rather than a claim. A cell takes each of these and
-      // hands it back: the fabric's admission test accepts `undefined`, an
-      // array's hole, and a registry-interned symbol. What JSON does to them
-      // differs by position, and the array is the worse half — a key that
-      // vanishes reads as a key the fabric does not hold, but an element
-      // rewritten to `null` reads as a value the fabric holds.
-
-      const holed: (number | undefined)[] = [1, 2, 3];
-      delete holed[1];
-
-      for (
-        const [held, printed] of [
-          [{ a: 1, b: undefined }, '{\n  "a": 1\n}'],
-          [{ a: 1, b: Symbol.for("cf.shuttle.nested") }, '{\n  "a": 1\n}'],
-          [[1, undefined, 3], "[\n  1,\n  null,\n  3\n]"],
-          [holed, "[\n  1,\n  null,\n  3\n]"],
-        ] as const
-      ) {
-        const writes = await running([...typed("get"), ENTER], atPiece(), {
-          getCellValue: () => Promise.resolve(held),
-        });
-        expect(produced(writes)[0]).toBe(printed);
-      }
-    });
-
-    it("writes a `bigint` the way `cf cell get` writes one", async () => {
-      // A `bigint` is a value a cell holds — it survives a cold replica in
-      // the runner's `action-result-fabric-values.test.ts` — and the writer
-      // throws on one rather than declining it, so with no arm for it the
-      // prompt answers a legitimate read with the engine's own message.
-      //
-      // The form belongs to `cf cell get`, so this asks that printer for it
-      // instead of restating its spelling: a change to either side reds here
-      // rather than letting one question acquire two answers. The literal
-      // below is what stops both sides drifting together.
-
-      for (const held of [{ a: 1, b: 2n }, 9007199254740993n]) {
-        const writes = await running([...typed("get"), ENTER], atPiece(), {
-          getCellValue: () => Promise.resolve(held),
-        });
-        expect(produced(writes)[0]).toBe(safeStringify(held));
-      }
-
-      const writes = await running([...typed("get"), ENTER], atPiece(), {
-        getCellValue: () => Promise.resolve({ a: 1, b: 2n }),
-      });
-      expect(produced(writes)[0]).toBe(
-        '{\n  "a": 1,\n  "b": {\n    "$bigint": "2"\n  }\n}',
+        `{\n  "${UI}": {\n    "type": "v"\n  }\n}`,
       );
     });
 

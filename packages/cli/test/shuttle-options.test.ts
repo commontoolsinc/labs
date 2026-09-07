@@ -19,17 +19,31 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import {
+  optionFlag,
+  optionNumber,
   type OptionReading,
+  optionString,
   readOptions,
   readsAsOption,
   type VerbOption,
 } from "../lib/shuttle/options.ts";
 
 /** A verb that declares one option taking a value, for the cases that need one. */
-const SELECT: VerbOption = { name: "select", type: "string" };
+const SELECT: VerbOption = {
+  name: "select",
+  type: "string",
+  description: "Project the value to these fields.",
+};
 
 /** A verb that declares one option taking none. */
-const ALL: VerbOption = { name: "all" };
+const ALL: VerbOption = { name: "all", description: "List every one." };
+
+/** A verb that declares one option taking a number. */
+const LIMIT: VerbOption = {
+  name: "limit",
+  type: "number",
+  description: "Write this many rows.",
+};
 
 /**
  * A verb that declares one option it requires, which is the shape the shared
@@ -41,6 +55,7 @@ const REQUIRED_SELECT: VerbOption = {
   name: "select",
   type: "string",
   required: true,
+  description: "Project the value to these fields.",
 };
 
 /**
@@ -153,8 +168,86 @@ describe("options", () => {
 
     it("raises where the verb's table names a type nothing registered, which is no fact about the line", () => {
       expect(() =>
-        readOptions("get", ["--pick", "1"], [{ name: "pick", type: "nope" }])
+        readOptions("get", ["--pick", "1"], [{
+          name: "pick",
+          type: "nope",
+          description: "Pick one.",
+        }])
       ).toThrow('Unknown type "nope"');
+    });
+  });
+
+  describe("optionString()", () => {
+    it("returns what the line wrote for a declared option", () => {
+      const reading = readOptions("get", ["--select", "title"], [SELECT]);
+      const options = reading.kind === "read" ? reading.options : {};
+      expect(optionString(options, "select")).toBe("title");
+    });
+
+    it("returns nothing for an option the line did not write", () => {
+      expect(optionString({}, "select")).toBeUndefined();
+    });
+
+    it("raises where the option holds something other than a string", () => {
+      // Reachable only from a table and a reading that disagree — the parser
+      // refuses a value of the wrong type long before this — so the raise is
+      // the fault it names rather than a refusal the line earned.
+
+      expect(() => optionString({ select: 3 }, "select"))
+        .toThrow(
+          "The option `--select` is declared to hold a string and holds a " +
+            "number.",
+        );
+    });
+  });
+
+  describe("optionFlag()", () => {
+    it("returns `true` for an option the line wrote", () => {
+      const reading = readOptions("verbs", ["--all"], [ALL]);
+      const options = reading.kind === "read" ? reading.options : {};
+      expect(optionFlag(options, "all")).toBe(true);
+    });
+
+    it("returns `false` for an option the line did not write", () => {
+      expect(optionFlag({}, "all")).toBe(false);
+    });
+
+    it("raises where the option holds something other than a boolean", () => {
+      expect(() => optionFlag({ all: "yes" }, "all"))
+        .toThrow(
+          "The option `--all` is declared to hold a boolean and holds a " +
+            "string.",
+        );
+    });
+  });
+
+  describe("optionNumber()", () => {
+    it("returns the number the line wrote for a declared option", () => {
+      const reading = readOptions("ls", ["--limit", "5"], [LIMIT]);
+      const options = reading.kind === "read" ? reading.options : {};
+      expect(optionNumber(options, "limit")).toBe(5);
+    });
+
+    it("returns nothing for an option the line did not write", () => {
+      expect(optionNumber({}, "limit")).toBeUndefined();
+    });
+
+    it("returns a negative number the parser took, leaving the range to the verb", () => {
+      // The parser's type test is what a number is, not what a count is:
+      // `--limit -1` parses. So a verb wanting a count refuses the rest in
+      // its own words, and this is the reading that hands it one to refuse.
+
+      const reading = readOptions("ls", ["--limit", "-1"], [LIMIT]);
+      const options = reading.kind === "read" ? reading.options : {};
+      expect(optionNumber(options, "limit")).toBe(-1);
+    });
+
+    it("raises where the option holds something other than a number", () => {
+      expect(() => optionNumber({ limit: "5" }, "limit"))
+        .toThrow(
+          "The option `--limit` is declared to hold a number and holds a " +
+            "string.",
+        );
     });
   });
 

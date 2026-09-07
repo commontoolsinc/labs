@@ -1,5 +1,6 @@
 /**
- * What `ls` finds where shuttle stands, and how each row is written back.
+ * What `ls` finds where shuttle stands, what each row turns out to be, and how
+ * each is written back.
  *
  * A listing prints names a person then types, so a row carries the operand
  * `cd` takes to reach it and not only the name it goes by. The two are the
@@ -8,15 +9,31 @@
  * question about the place rather than about the listing, so
  * `operandForChild` answers it and this module asks.
  *
+ * A row also carries what it is. The kind is recorded as the row is made
+ * rather than worked out again by whoever reads it, which is what lets a
+ * handle minted off a listing say what it stands for without a second read
+ * (decision 27, `docs/plans/shuttle/README.md`) and what lets a callable be
+ * annotated where it is listed rather than found by asking a piece for its
+ * verbs.
+ *
  * The reads are `packages/cli`'s, over the connection this process holds: a
  * space root has nothing to read, the two facets are `listSpaceSlugs` and
- * `listPieces`, and the keys inside a piece are `listCellKeys`. Each takes the
+ * `listPieces`, and the cell inside a piece is `getCellValue`. Each takes the
  * connection through `deps.loadPieces`, which is the seam a held connection
  * fills.
+ *
+ * The cell is read for its value where a listing of keys alone would do, and
+ * that costs nothing: `listCellKeys` (`lib/cell-listing.ts`) is `keysOf` over
+ * exactly this read, so what a kind costs is the classification and not a
+ * round trip. `keysOf` is still what names the rows, so a listing lists what
+ * that seam lists.
  */
 
-import { listCellKeys } from "../cell-listing.ts";
+import { isStreamValue } from "@commonfabric/runner";
+
+import { keysOf } from "../cell-listing.ts";
 import {
+  getCellValue,
   listPieces,
   listSpaceSlugs,
   type PieceConfig,
@@ -24,6 +41,7 @@ import {
 } from "../piece.ts";
 import type { HeldConnection } from "./connection.ts";
 import { quoteToken } from "./line.ts";
+import { marker } from "./page.ts";
 import {
   escapeControlCharacters,
   type Facet,
@@ -43,10 +61,36 @@ import {
 const SLUG_INDEX_BOUND = "the space's slug index names these, and a slug it " +
   "never recorded still resolves";
 
+/**
+ * What a row turned out to be, recorded where the row is made.
+ *
+ * Five kinds and no sixth, closed by the projection {@link ANNOTATED} makes of
+ * them: what stands at a space root is a facet, which is a `container`; what
+ * stands in the two facets is a `slug` or a `piece`; and what stands inside a
+ * piece is a `container` where a walk continues through it, a `callable` where
+ * the position is a verb's dispatch surface, and a `value` otherwise.
+ *
+ * A link is not among them, and its absence is a fact about the read rather
+ * than a gap in the vocabulary: a cell read resolves a link on the way past,
+ * so what a listing is handed at a position holding one is what it points at.
+ * Marking such a row is the open question `docs/plans/shuttle/pathref.md`
+ * leaves for `ls`, and answering it means a read that stops before a crossing
+ * rather than another arm here.
+ */
+export type RowKind =
+  | "container"
+  | "value"
+  | "callable"
+  | "piece"
+  | "slug";
+
 /** One thing a listing found standing where it was read. */
 export interface ListingRow {
   /** What the row is called where it stands. */
   readonly name: string;
+
+  /** What the row turned out to be. */
+  readonly kind: RowKind;
 
   /**
    * The operand `cd` takes to reach it, written as a token, and absent where
@@ -73,6 +117,42 @@ export interface Listing {
 }
 
 /**
+ * The handles one listing minted: its rows, numbered from `%1` in the order
+ * they were listed, and the place they were listed at.
+ *
+ * The place is what makes a handle a bound reference rather than a row number
+ * (decision 27): a row's name is a name inside that place, so the pair names a
+ * cell from anywhere and goes on naming it after the place has moved. For a
+ * callable row the same pair is the receiver and the verb name `call` wants —
+ * the place being the receiver and the name the verb — so neither is recorded
+ * a second time on the row, where the two copies would be free to part.
+ */
+export interface ListingHandles {
+  /** Where the listing was read, which its rows stand inside. */
+  readonly place: Place;
+
+  /** The rows in the order they were numbered: `%1` is the first. */
+  readonly rows: readonly ListingRow[];
+}
+
+/**
+ * What a listing prints as: its rows, one line each, and the bound's line
+ * where it carries one.
+ *
+ * They are two fields rather than one array because a page treats them
+ * differently. The rows are what a page cuts and what `--limit` counts; the
+ * bound is shown whatever either says, being the listing's own account of what
+ * it is a listing of.
+ */
+export interface ListingRendering {
+  /** The bound's line, where the listing carries a bound. */
+  readonly bound?: string;
+
+  /** One line per row, numbered, in the order the listing lists them. */
+  readonly rows: readonly string[];
+}
+
+/**
  * The reads a listing is made of, each `packages/cli`'s own. A caller supplies
  * its own to drive this module with nothing behind it.
  */
@@ -83,8 +163,8 @@ export interface ListingDeps {
   /** Lists the space's pieces. */
   readonly listPieces?: typeof listPieces;
 
-  /** Lists the keys directly under a piece's cell path. */
-  readonly listCellKeys?: typeof listCellKeys;
+  /** Reads the cell a listing inside a piece names its keys off. */
+  readonly getCellValue?: typeof getCellValue;
 }
 
 /**
@@ -108,7 +188,9 @@ export async function listPlace(
   const position = place.position;
   switch (position.kind) {
     case "root":
-      return { rows: FACETS.map((facet) => rowFor(place, facet)) };
+      return {
+        rows: FACETS.map((facet) => rowFor(place, facet, "container")),
+      };
     case "facet":
       return await listFacet(config, place, position.facet, connection, deps);
     case "piece":
@@ -117,20 +199,34 @@ export async function listPlace(
 }
 
 /**
- * What `ls` prints for `listing`: one line per row, and one more for a bound.
+ * What `ls` prints for `listing`: one line per row, and the bound's own line
+ * beside them.
  *
- * A name is the first thing on its line and is written as a token, so what a
- * reader copies off the front of a line is what `cd` takes. A line that opens
- * with `<` carries no name — and `quoteToken` is what holds that, not anything
+ * The lines come back as lines rather than as one string, because how many of
+ * them fit is `page.ts`'s question and not this module's. What this decides is
+ * what each line says, and which of them are rows.
+ *
+ * A row opens with the handle a person types to reach it again, in a column
+ * the widest of them sets, and its name comes next in a column of its own. The
+ * name is written as a token, so what a reader copies out of the name column
+ * is what `cd` takes; a name a row has none for stands as a marker in that
+ * column instead — and `quoteToken` is what keeps the two apart, not anything
  * here: `<` is one of the characters the grammar reserves, so a name holding
- * one is printed quoted and a printed name never opens with it.
+ * one is printed quoted and a name never opens with it. The name column
+ * therefore opens with `<` exactly where the row has no name.
  *
- * Everything else on a line — the row with no operand, a row's error, and the
- * bound — is written between angle brackets. Those brackets delimit for a
- * reader and not for a parser: a payload may hold an angle bracket of its own
- * and nothing escapes it. Nothing parses a listed line, and a form that could
- * be parsed is a second output form rather than a rule for this one
- * (`docs/plans/shuttle/futures.md`).
+ * Everything else on a line — the row with no operand, a callable's
+ * annotation, a row's error, and the bound — is written as a marker. Those
+ * brackets delimit for a reader and not for a parser: a payload may hold an
+ * angle bracket of its own and nothing escapes it. Nothing parses a listed
+ * line, and a form that could be parsed is a second output form rather than a
+ * rule for this one (`docs/plans/shuttle/futures.md`).
+ *
+ * The bound comes back beside the rows rather than among them, because it is
+ * not one of them: a page cuts rows and always shows the bound, and `--limit`
+ * counts rows and never counts the bound. What it says — that these rows are
+ * not everything standing here — is what a reader of a partial listing most
+ * needs, so it is the one line a page may not drop.
  *
  * A row is one line, and lines are separated by a newline, so nothing written
  * on a line may put one inside it: a message and a bound each have their
@@ -141,10 +237,26 @@ export async function listPlace(
  * which is the guarantee the name is printed for, so what a terminal makes of
  * it is not something this can spend that on.
  */
-export function renderListing(listing: Listing): string {
-  const lines = listing.rows.map(lineFor);
-  if (listing.bound !== undefined) lines.push(marker(oneLine(listing.bound)));
-  return lines.join("\n");
+export function listingLines(listing: Listing): ListingRendering {
+  const column = handleFor(listing.rows.length).length;
+  const rows = listing.rows.map((row, index) =>
+    lineFor(row, handleFor(index + 1).padStart(column))
+  );
+  return listing.bound === undefined
+    ? { rows }
+    : { bound: marker(oneLine(listing.bound)), rows };
+}
+
+/**
+ * The handle a listing's `number`th row is reached by, which is what a person
+ * types to name it again.
+ *
+ * Numbering runs from one rather than from zero: these are read off a screen
+ * and typed back, which is what a shell's job numbers and a printed list's
+ * items do, and neither starts at zero.
+ */
+export function handleFor(number: number): string {
+  return `%${number}`;
 }
 
 /**
@@ -168,7 +280,7 @@ async function listFacet(
         loadPieces,
       });
       return {
-        rows: slugs.map((row) => rowFor(place, row.slug, row.error)),
+        rows: slugs.map((row) => rowFor(place, row.slug, "slug", row.error)),
         bound: SLUG_INDEX_BOUND,
       };
     }
@@ -176,7 +288,9 @@ async function listFacet(
       const pieces = await (deps.listPieces ?? listPieces)(config, {
         loadPieces,
       });
-      return { rows: pieces.map((row) => rowFor(place, row.id, row.error)) };
+      return {
+        rows: pieces.map((row) => rowFor(place, row.id, "piece", row.error)),
+      };
     }
   }
 }
@@ -185,12 +299,17 @@ async function listFacet(
  * Helper for {@link listPlace}, which is what the cell `position` names lists
  * at `place`.
  *
- * The piece, the path and the scope all ride the config. A place stands on the
- * piece as an operand named it, a slug included, so what makes a slug typed
- * back off a listing reach its piece is the read's own resolution step
- * (`PieceResolutionDeps.resolvePieceAddress`). An empty listing means the path
- * names a leaf, and nothing here can tell that from an empty container, so
- * nothing here says which it was.
+ * The piece and the scope ride the config and the path is the read's operand,
+ * which is where `getCellValue` takes one: the config's own `piecePath` is
+ * dropped by the resolution, so a path written in both places would be walked
+ * once whichever way it arrived. A place stands on the piece as an operand
+ * named it, a slug included, so what makes a slug typed back off a listing
+ * reach its piece is the read's own resolution step
+ * (`PieceResolutionDeps.resolvePieceAddress`).
+ *
+ * An empty listing means the path names a leaf, and nothing here says which:
+ * `keysOf` gives a leaf no keys and gives an empty container none either, and
+ * telling the two apart is not something this read can do.
  */
 async function listKeys(
   config: SpaceConfig,
@@ -203,37 +322,110 @@ async function listKeys(
     ...config,
     piece: position.piece,
     pieceScope: place.scope,
-    piecePath: [...position.path],
   };
-  const keys = await (deps.listCellKeys ?? listCellKeys)(pieceConfig, "", {}, {
-    loadPieces: () => connection.pieces(),
-  });
-  return { rows: keys.map((key) => rowFor(place, key)) };
+  const level = await (deps.getCellValue ?? getCellValue)(
+    pieceConfig,
+    [...position.path],
+    {},
+    { loadPieces: () => connection.pieces() },
+  );
+  return {
+    rows: keysOf(level).map((key) =>
+      rowFor(place, key, kindOf(childOf(level, key)))
+    ),
+  };
+}
+
+/**
+ * Helper for {@link listKeys}, which is what the cell holds at `key`, and
+ * nothing where it holds nothing there.
+ *
+ * `keysOf` names only the keys of an array or an object, so the cast is over a
+ * value already known to be one of those; a key holding `undefined` is a key
+ * all the same, and what it stands for is a value rather than a container.
+ */
+function childOf(level: unknown, key: string): unknown {
+  return (level as Record<string, unknown>)[key];
+}
+
+/**
+ * Helper for {@link listKeys}, which is what a position holding `value` is.
+ *
+ * A stream is a dispatch surface rather than a value — nothing is stored at
+ * it to read, and a read aimed at one is refused (`classifyReadPathVerb`,
+ * `lib/piece.ts`) — so it is the piece's callable and is marked as one. The
+ * test is the runner's own (`isStreamValue`), over the `{ $stream: true }`
+ * sentinel a stream position reads as, so a listing and the read that refuses
+ * such a position agree about which positions those are.
+ *
+ * Everything else divides by whether a walk continues through it: an array or
+ * an object holds keys and `cd` descends into it, and anything else is where a
+ * path ends.
+ */
+function kindOf(value: unknown): RowKind {
+  if (isStreamValue(value)) return "callable";
+  return value !== null && typeof value === "object" ? "container" : "value";
 }
 
 /**
  * Helper for {@link listPlace}, which is the row `name` stands as at `place`,
- * carrying `error` where the read reported one against it.
+ * being a `kind` and carrying `error` where the read reported one against it.
  */
-function rowFor(place: Place, name: string, error?: string): ListingRow {
+function rowFor(
+  place: Place,
+  name: string,
+  kind: RowKind,
+  error?: string,
+): ListingRow {
   const operand = operandForChild(place, name);
   return {
     name,
+    kind,
     ...(operand === undefined ? {} : { operand: quoteToken(operand) }),
     ...(error === undefined ? {} : { error }),
   };
 }
 
-/** Helper for {@link renderListing}, which is the line `row` prints as. */
-function lineFor(row: ListingRow): string {
-  const head = row.operand ?? marker(noOperandFor(row.name));
-  return row.error === undefined
-    ? head
-    : `${head} ${marker(`error: ${oneLine(row.error)}`)}`;
+/**
+ * Which kinds a listed line annotates, and with what.
+ *
+ * A projection over every kind rather than a test for the one that is marked,
+ * closed by the compiler: a kind added to {@link RowKind} without a line here
+ * does not compile, so whether it is annotated is a decision somebody made
+ * rather than an absence nobody noticed.
+ *
+ * Only the callable is marked, and what marks it is what `grammar.md`
+ * promises: a piece's callables surface inline in listings, annotated as
+ * callable, rather than behind a reserved name. The rest are not marked
+ * because the annotation would be on every row and would say what the next
+ * `ls` says anyway — a container lists, and a value does not.
+ */
+const ANNOTATED = {
+  container: undefined,
+  value: undefined,
+  callable: "callable",
+  piece: undefined,
+  slug: undefined,
+} satisfies Record<RowKind, string | undefined>;
+
+/**
+ * Helper for {@link listingLines}, which is the line `row` prints as, opening
+ * with `handle`.
+ */
+function lineFor(row: ListingRow, handle: string): string {
+  const annotation: string | undefined = ANNOTATED[row.kind];
+  return [
+    handle,
+    row.operand ?? marker(noOperandFor(row.name)),
+    ...(annotation === undefined ? [] : [marker(annotation)]),
+    ...(row.error === undefined
+      ? []
+      : [marker(`error: ${oneLine(row.error)}`)]),
+  ].join(" ");
 }
 
 /**
- * Helper for {@link renderListing}, which says that a row called `name` has no
+ * Helper for {@link listingLines}, which says that a row called `name` has no
  * operand, showing the name where a line has room for it.
  *
  * It says no operand rather than that nothing reaches the row, which is the
@@ -265,13 +457,8 @@ function noOperandFor(name: string): string {
     : `no operand: ${quoteToken(name)}`;
 }
 
-/** Helper for {@link renderListing}, which writes `text` as a marker. */
-function marker(text: string): string {
-  return `<${text}>`;
-}
-
 /**
- * Helper for {@link renderListing}, which is `text` fit to be written on a
+ * Helper for {@link listingLines}, which is `text` fit to be written on a
  * line and acted on by nothing: each newline as a space, so that what is
  * written on a line takes one line, and each remaining character a terminal
  * acts on as the glyph that names it.

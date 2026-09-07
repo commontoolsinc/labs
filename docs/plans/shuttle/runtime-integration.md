@@ -211,8 +211,11 @@ returns the resolution as a value. The rest are composed from the library:
   `partitionVerbListing`**, rendering the rows itself rather than running that
   command's inline action.
 - **`ls` composes `listSpaceSlugs` and `listPieces` (`lib/piece.ts`) with
-  `listCellKeys` (`lib/cell-listing.ts`)**, handing each the held connection as
-  `deps.loadPieces`.
+  `getCellValue` (`lib/piece.ts`) read through `keysOf`
+  (`lib/cell-listing.ts`)**, handing each the held connection as
+  `deps.loadPieces`. The cell is read for its value rather than for its keys
+  alone, because a row records what it is: `listCellKeys` is `keysOf` over
+  exactly that read, so the kind costs a classification and no round trip.
 - **`get` calls `getCellValue` and `set` calls `setCellValue`**
   (`lib/piece.ts`), each over a `PieceConfig` built from the place and each
   handed the connection as `deps.loadPieces`. A read that fails on a data

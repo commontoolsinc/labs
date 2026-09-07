@@ -38,10 +38,10 @@ import { EditBuffer } from "../view/editbuffer.ts";
 import type { Key } from "../view/keys.ts";
 import {
   escapeControlCharacters,
-  escapeControlCharactersInJson,
   holdsControlCharacter,
   messageOf,
 } from "./place.ts";
+import { renderValue } from "./value.ts";
 import { type Outcome, runLine, type Shuttle, type VerbDeps } from "./verbs.ts";
 
 /** What the prompt opens every line with, before the place it carries. */
@@ -345,10 +345,16 @@ function promptFor(shuttle: Shuttle): string {
  * the next one — the empty string where it produced nothing to say.
  *
  * A value prints as indented JSON, and what cannot be written that way is
- * said rather than shown — by {@link written} for a value the writer declines,
- * and by the catch here for one it cannot walk at all, a cycle among them.
- * Either way the line is answered and the run carries on, which is what a read
- * that failed gets too.
+ * said rather than shown — by `renderValue` (`value.ts`) for a value the
+ * writer declines, and by the catch here for one it cannot walk at all, a
+ * cycle among them. Either way the line is answered and the run carries on,
+ * which is what a read that failed gets too.
+ *
+ * The value arm writes a piece's `$UI` node out. What comes through it is what
+ * a named entry point resolved to, which a person asked for by name and which
+ * carries no page bound of its own; the verb that reads a cell writes its own
+ * rendering, elides that node and bounds the page, because it is the verb a
+ * person lands on by standing somewhere rather than by naming a target.
  *
  * Reading the message off a thrown value is `messageOf`'s and not this
  * expression's, because the obvious spelling of it throws on values a
@@ -396,7 +402,7 @@ async function report(
       case "refused":
         return escapeControlCharacters(outcome.reason);
       case "value":
-        return written(outcome.value);
+        return renderValue(outcome.value, { ui: true });
     }
   } catch (thrown) {
     return escapeControlCharacters(messageOf(thrown));
@@ -418,62 +424,6 @@ function abandoned(signal: AbortSignal): Promise<Outcome> {
       once: true,
     });
   });
-}
-
-/**
- * Helper for {@link report}, which is `value` as the reader sees it.
- *
- * `JSON.stringify` returns no string for several different reasons and says
- * which for none of them, so this tells them apart before it is asked. A
- * value that is `undefined` is what the fabric holds nothing at, and the word
- * says so. A registry-interned symbol is a value a cell does hold and JSON
- * has no form for, and the word there would say the cell was empty when it is
- * not, so what comes back names the kind instead.
- *
- * A `bigint` is a value a cell holds too, and the writer throws on one rather
- * than declining it, so it is given a form on the way past: `{ $bigint: "…" }`
- * with the number as its decimal string, which is what `cf cell get` writes
- * for the same value (`safeStringify`, `render.ts`). One question answered
- * twice ought to be answered the same way, and a test compares the two rather
- * than restating the spelling.
- *
- * Where the two surfaces still differ they differ on purpose, and this is the
- * one that is right: `cf cell get` writes `null` both for a value that is
- * `undefined` and for a symbol, and `null` is a value a cell can hold. What
- * a cell holds nothing at is nothing, and the word above says that instead.
- *
- * The bound is on nesting rather than on a kind, and it is what a caller
- * cannot see. An `undefined` or an interned symbol under a key loses the key,
- * which reads as a key the fabric does not hold; either of them at an array
- * index, and an array's hole, is written `null`, which reads as a value the
- * fabric holds. Every one of those is a value a cell takes and hands back,
- * and a read produces them without being asked: a property a schema does not
- * require reads as `undefined` where the data underneath does not match it
- * (`schema-view.ts`). A function and a unique symbol are not bounds here,
- * because neither survives to be read out of a cell. The fabric's
- * value-admission test refuses both on the way in
- * (`assertValidFabricValueLayer`, `packages/data-model/src/type-check.ts`),
- * and its codec has no form for either at the commit that would store one
- * (`BaseEncodeAct`), so the raw write that skips the first still meets the
- * second.
- *
- * What the writer leaves for this one to do is the class a terminal acts on.
- * It escapes every C0 character a value held and passes `DEL` and C1 through,
- * so those are finished here, in JSON's own spelling rather than the glyphs a
- * message gets — the two conventions and the reason they differ are with
- * `escapeControlCharactersInJson` (`place.ts`).
- */
-function written(value: unknown): string {
-  if (value === undefined) return "undefined";
-  const json = JSON.stringify(
-    value,
-    (_key, held) =>
-      typeof held === "bigint" ? { $bigint: held.toString() } : held,
-    2,
-  );
-  return json === undefined
-    ? `The value is a ${typeof value}, which JSON has no way to write.`
-    : escapeControlCharactersInJson(json);
 }
 
 /**

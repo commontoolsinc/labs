@@ -7,6 +7,10 @@
  * test is the composing. A case that wants to know where the place stands asks
  * the session for it, by typing `pwd` at the prompt and reading what came
  * back, which is the only way in that does not reach past the seam.
+ *
+ * One case stands in for `Deno.consoleSize`, which is a member of the whole
+ * process, so this file runs in the serial pass (`SERIAL_TESTS`,
+ * `test/run-tests.ts`).
  */
 
 import { expect } from "@std/expect";
@@ -152,6 +156,34 @@ describe("runShuttle()", () => {
       "navigateTo new piece id of:fid1:whatever",
       "a pattern said so",
     ]);
+  });
+
+  it("bounds what a line writes at the height the terminal reports", async () => {
+    // The one wiring only this seam can show: a verb bounds its page at what
+    // the deps say the screen is, and `run.ts` is where that number comes
+    // from. A session that handed the prompt nothing would take the assumed
+    // height instead and write both facets, which is what makes the case
+    // fail rather than merely look different.
+    //
+    // `ls` at a space root reads nothing — the facets are a closed set — so
+    // the case needs no controller past the one the helper supplies.
+    //
+    // Two rows is the only height that bounds a two-row listing, and a page
+    // that small cannot hold a row and a status line at once. So the line it
+    // writes carries both halves of what a bounded page promises: what it
+    // held back, and that what it did write ran past the screen.
+
+    const prior = Deno.consoleSize;
+    Deno.consoleSize = () => ({ columns: 80, rows: 2 });
+    try {
+      const ran = await running("ls");
+      expect(ran.produced[0]).toBe(
+        "%1 slugs\n<what is above fills more than the screen; 1 line not " +
+          "shown — more continues>",
+      );
+    } finally {
+      Deno.consoleSize = prior;
+    }
   });
 
   it("closes the connection where the session threw", async () => {

@@ -176,8 +176,8 @@ Landed:
   (`packages/cli/lib/shuttle/listing.ts`). What stands at a place — a space root's
   facets, the slugs the index records, the space's pieces, the keys directly
   under the cell a place names — read over the held connection through
-  `listSpaceSlugs`, `listPieces` and `listCellKeys`, each of which takes that
-  connection as `deps.loadPieces`. A row that failed on its own account is
+  `listSpaceSlugs`, `listPieces` and a cell read named through `keysOf`, each
+  of which takes that connection as `deps.loadPieces`. A row that failed on its own account is
   still a row and carries what went wrong; a read that failed outright raises.
   `slugs/` says what it is a listing of. Its index records the names assigned
   since it existed, which is not the set of slugs that resolve: one assigned
@@ -448,6 +448,39 @@ Landed:
   terminal opens before the connection now, since the terminal is where the
   connection's writing has to land.
 
+- **B1g — projection on `get`, and a listing that numbers, marks and pages.**
+  The two verbs a person reaches for first were each unbounded: `get` at a
+  piece root wrote everything the piece computed, the rendering included, and
+  `ls` at `pieces/` in a populated space wrote a row per piece. Both are now
+  one page with a status line, and `more` continues either — one mechanism,
+  because what a page held back is lines whichever verb composed them
+  (`page.ts`), waiting on the session beside the place (`session.ts`).
+
+  `get` takes the read and projection options decision 7 gives a data verb —
+  `--filter`, `--select`, `--schema` and `--json` — declared as
+  `cf cell get` declares them and parsed by that command's own parser
+  (`parseCellSelectionOptions`), so a flag means on both surfaces what it
+  means on one. It is the first caller of the option grammar B1d built, and
+  what it settles is how a verb receives what the parse read: the options and
+  the operands arrive together as one value, since `readOptions` divides a
+  line into exactly that pair and a verb that reads one usually reads the
+  other. A piece's `$UI` node is stood in for unless a projection named the
+  fields the line wants, `--select '$UI'` being what reads it.
+
+  `ls` numbers its rows from `%1` and records what each one is — container,
+  value, callable, piece or slug — as it mints the handle, which is decision
+  27's structured handle and what B2's `call %4` resolves against. A callable
+  row is annotated as one, which is what [`grammar.md`](grammar.md) promises.
+  The listing reads the cell's value rather than a list of its keys, which is
+  the same read `listCellKeys` makes and no extra round trip. `--limit`
+  overrides the height rather than capping it.
+
+  **What this leaves for B2 is the other half of a handle: `%n` is printed
+  and is not yet an operand.** `cd %3` reads as a key of that name today.
+  The table is what lands here because `call %4` reads it at mint time; the
+  reading of `%n` as a reference belongs with the verb that consumes it, and
+  is B2's first slice rather than its last.
+
 Still to come:
 
 - **Liveness, in two halves.** Recovery of an *established* connection needs
@@ -471,11 +504,12 @@ reference instead of copying a value (decision 14), which leans on
 equivalent behind it. `call` through
 `callFromCommand`, with `verbs` and `describe` beside it, since listing a
 piece's callables is what makes `call` usable without leaving the shell.
-Numbered handles from listings land here, and `more` with them: `more`
-continues a listing *and its handle numbering* (decision 24), so it needs
-the handle table, not merely a page cursor. Handles are structured at mint
-— each row's kind, plus receiver and verb name for a callable row — which
-is what `call %n` resolves against (decision 27). The invocation session is
+`%n` becomes an operand here, over the handle table B1g's listing mints:
+the table carries each row's kind and the place its rows stand in, which is
+the receiver and the verb name a callable handle needs (decision 27), and
+what `call %n` resolves against. `more` continues a listing *and its
+numbering* already, the rows being numbered where they are read rather than
+where they are written (decision 24). The invocation session is
 minted once at startup and passed explicitly. The step-10 call section
 is shuttle's own line grammar, parsed locally and fed to the
 schema-derived flag machinery `cf` already exports (`pieceCallRawArgs`,

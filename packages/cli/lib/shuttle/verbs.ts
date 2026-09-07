@@ -13,6 +13,12 @@
  * connection through `deps.loadPieces`, which is the seam a held connection
  * fills.
  *
+ * What a verb writes is bounded to one page (`page.ts`), and what did not fit
+ * waits on the session beside the place for `more` (`session.ts`). Two verbs
+ * write enough to need it — a listing of a populated space and the result of
+ * a piece are each larger than a screen — and they take the same bound, so
+ * `more` continues either without knowing which it is continuing.
+ *
  * Three spellings come back off a `cd` unsettled, because settling each is a
  * read: a `#name` target, which the fabric resolves to an address; a space
  * written as a name, which the connection is asked about; and a place standing
@@ -40,6 +46,8 @@ import {
 
 import { keysOf } from "../cell-listing.ts";
 import {
+  type CellSelection,
+  CellSelectionError,
   LINK_MARKER_KEY,
   parseCellSelectionOptions,
 } from "../cell-selection.ts";
@@ -49,8 +57,30 @@ import { projectWishValue, readWish } from "../wish.ts";
 import { connectionEntries, type HeldConnection } from "./connection.ts";
 import { renderVerbList, renderVerbPage, type VerbHelp } from "./help.ts";
 import { splitLine } from "./line.ts";
-import { type ListingDeps, listPlace, renderListing } from "./listing.ts";
-import { readOptions } from "./options.ts";
+import {
+  type ListingDeps,
+  type ListingHandles,
+  listingLines,
+  listPlace,
+} from "./listing.ts";
+import {
+  optionFlag,
+  optionNumber,
+  optionString,
+  readOptions,
+  type VerbOption,
+  type VerbOptions,
+} from "./options.ts";
+import {
+  ASSUMED_COLUMNS,
+  ASSUMED_ROWS,
+  heightFit,
+  type Page,
+  type PageBound,
+  pageOf,
+  statusLine,
+  wrapped,
+} from "./page.ts";
 import {
   type Aimed,
   CurrentPlace,
@@ -68,6 +98,8 @@ import {
   type SpaceRootPosition,
 } from "./place.ts";
 import { renderRecord } from "./record.ts";
+import { ShuttleSession } from "./session.ts";
+import { renderValue } from "./value.ts";
 
 /**
  * What `--select` writes to ask a read for the address of what it resolved,
@@ -114,6 +146,13 @@ export interface Shuttle {
 
   /** The one connection this process holds. */
   readonly connection: HeldConnection;
+
+  /**
+   * What the lines before this one left behind: the handles the last listing
+   * numbered, and what `more` writes next. It stands beside the place because
+   * `cd` neither resets nor carries either of them (`session.ts`).
+   */
+  readonly session: ShuttleSession;
 }
 
 /**
@@ -128,6 +167,17 @@ export interface VerbDeps {
   readonly readWish?: typeof readWish;
 
   /**
+   * Reads the projection options a data verb takes, which is the parser
+   * `cf cell get` reads its own through (`lib/cell-selection.ts`).
+   *
+   * It is a seam like the reads beside it rather than a call, because what a
+   * verb does with what it throws is a decision worth driving: a selection
+   * this parser refuses is a fact about the line, and anything else it throws
+   * is a fault, which `get` raises rather than turning into a refusal.
+   */
+  readonly parseCellSelectionOptions?: typeof parseCellSelectionOptions;
+
+  /**
    * Resolves the piece and path an operand named, which is what `cd` settles.
    * It is the resolution a read makes too (`pieceReferenceResolver`,
    * `lib/piece.ts`), so the two verbs reach the same cell for one reference.
@@ -136,6 +186,30 @@ export interface VerbDeps {
 
   /** The reads `ls` composes. */
   readonly listing?: ListingDeps;
+
+  /**
+   * How many rows the terminal shows, which is half of what bounds a page a
+   * verb writes (`page.ts`). It is a function rather than a number so that a
+   * window resized between two lines bounds the second one at the size it has
+   * now, and it is a dep rather than a field of the shuttle because the screen
+   * is something a verb writes to rather than part of where shuttle stands.
+   *
+   * A caller that supplies none gets {@link ASSUMED_ROWS}, which is what a
+   * terminal that will not measure itself gets too, so a verb driven with
+   * nothing behind it still bounds what it writes.
+   */
+  readonly rows?: () => number;
+
+  /**
+   * How many columns it shows, which is the other half: a line wider than the
+   * terminal wraps, so what a page has to count is rows and what it is handed
+   * is lines. A bound that took the width for granted would let one long value
+   * fill the screen without ever reaching it.
+   *
+   * A caller that supplies none gets {@link ASSUMED_COLUMNS}, on the terms
+   * {@link VerbDeps.rows} takes its assumption on.
+   */
+  readonly columns?: () => number;
 
   /**
    * Cancels the line, which the prompt aborts on `ctrl-c`.
@@ -225,8 +299,9 @@ async function guarded<A extends readonly unknown[], T>(
  * Runs `line` against `shuttle` and returns what that did.
  *
  * The line splits by `splitLine`, its first token names a verb, and the tokens
- * after it are divided by `readOptions`: one opening with `-` is an option up
- * to a bare `--`, and every other one is an operand the verb reads. A line
+ * after it are divided by `readOptions` against the table that verb declares:
+ * one opening with `-` is an option up to a bare `--`, and every other one is
+ * an operand the verb reads. A line
  * with no token at all did nothing; one whose first token names no verb is
  * refused, and the refusal names it and lists what would have been taken.
  *
@@ -263,7 +338,7 @@ export async function runLine(
   if (word === undefined) return { kind: "nothing" };
   const entry = VERBS.get(word);
   if (entry === undefined) return refuse(notAVerb(word));
-  const reading = readOptions(word, tokens);
+  const reading = readOptions(word, tokens, entry.options);
   switch (reading.kind) {
     case "refused":
       return reading;
@@ -276,7 +351,10 @@ export async function runLine(
       // that named no verb, or gave one the wrong number of operands, is not
       // a verb that was interrupted.
       return wrong ?? stopped(deps) ??
-        await entry.run(shuttle, reading.operands, deps);
+        await entry.run(shuttle, {
+          options: reading.options,
+          operands: reading.operands,
+        }, deps);
     }
   }
 }
@@ -303,10 +381,30 @@ type Arity =
   /** One, needed, `names` being what the refusal for none calls it. */
   | { readonly operands: "required"; readonly names: string };
 
-/** What a verb does with the operands written after its name. */
+/**
+ * What a line said past the verb that named it: the options it set, by the
+ * names the verb declared, and the operands after them.
+ *
+ * The two halves arrive together because they are one reading — `readOptions`
+ * divides a line into exactly this pair — and because a verb that reads one
+ * usually reads the other. Handing them over as one value is what keeps a
+ * verb's signature still while verbs gain flags: `ls` grew an option without
+ * `pwd` growing a parameter, and the call section a `call` will carry
+ * (`docs/plans/shuttle/grammar.md`) is a third member of this rather than a
+ * fourth argument.
+ */
+export interface VerbLine {
+  /** What the line's options set, by name. */
+  readonly options: VerbOptions;
+
+  /** The operands after them, in the order they were written. */
+  readonly operands: readonly string[];
+}
+
+/** What a verb does with the line written after its name. */
 type Verb = (
   shuttle: Shuttle,
-  operands: readonly string[],
+  line: VerbLine,
   deps: VerbDeps,
 ) => Outcome | Promise<Outcome>;
 
@@ -338,19 +436,19 @@ interface VerbEntry extends VerbHelp {
  */
 async function cd(
   shuttle: Shuttle,
-  operands: readonly string[],
+  line: VerbLine,
   deps: VerbDeps,
 ): Promise<Outcome> {
   // `cd ''` is one operand, so the dispatch passes it on and the place is what
   // answers it — in the sentence the dispatch composes for no operand at all,
   // so the two spellings read alike. That guard is `movePlace`'s own and
   // stands for the callers this one is not.
-  return await landing(shuttle, shuttle.place.cd(operands[0]), deps);
+  return await landing(shuttle, shuttle.place.cd(line.operands[0]), deps);
 }
 
 /**
- * Reads the value at the cell `operands` name, which is where shuttle stands
- * where they name nothing.
+ * Reads the value at the cell `line` names, which is where shuttle stands
+ * where it names nothing, and writes as much of it as a page holds.
  *
  * The operand is read through the door `cd` reads one through, plus the
  * `#argument` suffix that door turns down: standing in an arguments cell is
@@ -359,20 +457,74 @@ async function cd(
  *
  * A container is refused rather than read: a space root and a facet are lists
  * of what stands inside them and hold no value of their own.
+ *
+ * The projection options are `cf cell get`'s, parsed by that command's own
+ * parser and handed to that command's own read, so `--filter`, `--select` and
+ * `--schema` mean here exactly what they mean there (decision 7). A projection
+ * that will not parse is a fact about the line and is refused; one the value
+ * will not take is a fact about the data and raises, which is the division
+ * `cf` draws too.
  */
 async function get(
   shuttle: Shuttle,
-  operands: readonly string[],
+  line: VerbLine,
   deps: VerbDeps,
 ): Promise<Outcome> {
-  const operand = operands[0];
-  if (operand === undefined) {
-    return await read(shuttle, shuttle.place.place, false, deps);
+  let selection: CellSelection | undefined;
+  try {
+    selection = await (deps.parseCellSelectionOptions ??
+      parseCellSelectionOptions)({
+        filter: optionString(line.options, "filter"),
+        select: optionString(line.options, "select"),
+        schema: optionString(line.options, "schema"),
+      });
+  } catch (thrown) {
+    if (!(thrown instanceof CellSelectionError)) throw thrown;
+    return refuse(messageOf(thrown));
   }
+  const operand = line.operands[0];
+  const at = operand === undefined
+    ? { kind: "place" as const, place: shuttle.place.place, input: false }
+    : await aimed(shuttle, operand, deps);
+  if (at.kind === "refused") return at;
+  const value = await read(shuttle, at.place, at.input, selection, deps);
+  if (value.kind !== "value") return value;
+  // Writing what `more` continues is an adoption too, so it goes through the
+  // guard rather than behind a check of its own: a line the person stopped
+  // waiting for leaves the session to whichever line owns it now.
+  const shown = await guarded(
+    deps,
+    written,
+    shuttle,
+    value,
+    selection,
+    optionFlag(line.options, "json"),
+    deps,
+  );
+  return shown.kind !== "ran" ? shown : shown.answer;
+}
+
+/**
+ * Helper for {@link ls}, which is the act of numbering a listing's rows —
+ * named rather than written as a closure where it is guarded, so that the
+ * thing `guarded` is handed has no body for an await to be added to.
+ */
+function numbering(session: ShuttleSession, handles: ListingHandles): void {
+  session.listed(handles);
+}
+
+/**
+ * Helper for {@link get}, which is where `operand` points, read from where
+ * shuttle stands and settling nothing.
+ */
+async function aimed(
+  shuttle: Shuttle,
+  operand: string,
+  deps: VerbDeps,
+): Promise<Aiming> {
   const aim = shuttle.place.aim(operand);
   const at = await reading(shuttle, aim.move, deps);
-  if (at.kind !== "place") return at;
-  return await read(shuttle, at.place, aim.input, deps);
+  return at.kind === "refused" ? at : { ...at, input: aim.input };
 }
 
 /**
@@ -384,8 +536,8 @@ async function get(
  * refuses one in: `help` is where a person goes when they are unsure what the
  * words are, so it is the door most likely to be given one that is not.
  */
-function help(_shuttle: Shuttle, operands: readonly string[]): Outcome {
-  const word = operands[0];
+function help(_shuttle: Shuttle, line: VerbLine): Outcome {
+  const word = line.operands[0];
   if (word === undefined) {
     return { kind: "text", text: renderVerbList([...VERBS.values()]) };
   }
@@ -395,23 +547,103 @@ function help(_shuttle: Shuttle, operands: readonly string[]): Outcome {
     : { kind: "text", text: renderVerbPage(entry) };
 }
 
-/** Lists what stands where shuttle stands. */
+/**
+ * Lists what stands where shuttle stands, numbering the rows and writing one
+ * page of them.
+ *
+ * Every row is numbered and every row's handle is recorded, page or no page:
+ * what a page decides is how many of them are on the screen at once, and
+ * `more` writes the rest under the numbers they already carry. So `%39` names
+ * the same row whether it was written by the `ls` or by the `more` after it,
+ * which is what decision 24 asks of a run's handles.
+ *
+ * `--limit` overrides the height rather than capping it, because a person who
+ * asked for forty rows on a screen that shows twenty asked for forty.
+ */
 async function ls(
   shuttle: Shuttle,
-  _operands: readonly string[],
+  line: VerbLine,
   deps: VerbDeps,
 ): Promise<Outcome> {
+  const limit = optionNumber(line.options, "limit");
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) {
+    return refuse(
+      `\`ls --limit\` takes a whole number of rows above zero, and was ` +
+        `given ${limit}.`,
+    );
+  }
+  const place = shuttle.place.place;
   const listed = await guarded(
     deps,
     listPlace,
     shuttle.config,
-    shuttle.place.place,
+    place,
     shuttle.connection,
     deps.listing,
   );
-  return listed.kind !== "ran"
-    ? listed
-    : { kind: "text", text: renderListing(listed.answer) };
+  if (listed.kind !== "ran") return listed;
+  // Writing the session is an adoption exactly as moving the place is, so it
+  // goes through the same guard rather than behind a check of its own: a line
+  // the person stopped waiting for would otherwise hand a newer listing's
+  // `%3` back to the row this one read, and `more` the tail of a listing
+  // nobody is looking at. The rows are composed into the argument before
+  // `guarded` is entered, which is what leaves no await between its check and
+  // the write.
+  const numbered = await guarded(
+    deps,
+    numbering,
+    shuttle.session,
+    { place, rows: listed.answer.rows },
+  );
+  if (numbered.kind !== "ran") return numbered;
+  const rendering = listingLines(listed.answer);
+  return paged(
+    shuttle,
+    rendering.bound === undefined ? [] : [rendering.bound],
+    rendering.rows,
+    // A limit names rows of the listing, so it bounds the rows and nothing
+    // else: the screen stops bounding the page, the person having asked for
+    // that many rows rather than for that much screen, and the bound line and
+    // the status line come out of neither — they are not rows of the listing.
+    limit === undefined ? screenFit(deps) : {
+      columns: measured(deps.columns?.(), ASSUMED_COLUMNS),
+      entries: limit,
+    },
+  );
+}
+
+/**
+ * Writes the next page of whatever did not fit on the last one.
+ *
+ * It continues a listing and its numbering, and a read's value just as
+ * readily: what a page held back is lines either way, and the line that says
+ * how many are left is the same line. What it never continues is the line
+ * before last — a rendering that fit whole says so, and clears what was
+ * waiting.
+ *
+ * It awaits nothing, so it needs no guard: the dispatch's own check is the
+ * last thing before it and there is no suspension after that for a cancel to
+ * arrive in.
+ */
+function more(
+  shuttle: Shuttle,
+  _line: VerbLine,
+  deps: VerbDeps,
+): Outcome {
+  const continuation = shuttle.session.continuation;
+  if (continuation === undefined) {
+    return refuse(
+      "`more` writes the rest of a listing or a value that did not fit on " +
+        "one page, and nothing is waiting.",
+    );
+  }
+  return paged(
+    shuttle,
+    [],
+    continuation.lines,
+    screenFit(deps),
+    continuation.hint,
+  );
 }
 
 /** Returns where shuttle stands, both halves of the pair. */
@@ -429,10 +661,10 @@ function pwd(shuttle: Shuttle): Outcome {
  */
 async function wish(
   shuttle: Shuttle,
-  operands: readonly string[],
+  line: VerbLine,
   deps: VerbDeps,
 ): Promise<Outcome> {
-  const target = operands[0];
+  const target = line.operands[0];
   const answered = await guarded(deps, deps.readWish ?? readWish, {
     ...shuttle.config,
     query: target,
@@ -471,6 +703,65 @@ function where(shuttle: Shuttle): Outcome {
     ]),
   };
 }
+
+/**
+ * The read and projection options a data verb takes, which decision 7 makes
+ * the ones `cf` takes: same names, same values, same refusal for a value the
+ * parser will not take, and the same pair of spellings for one projection with
+ * the same conflict between them. `parseCellSelectionOptions`
+ * (`lib/cell-selection.ts`) is what reads them, which is what `cf cell get`
+ * reads its own through, so what a flag means is settled in one place for both
+ * surfaces.
+ *
+ * What is shuttle's own is the wording: a page here speaks about the place a
+ * verb reads from, where `cf`'s speaks about `--cell` and a path positional.
+ *
+ * `--json` is the machine-readable form. A value is written as JSON either
+ * way, but what a person reads is a rendering — cut to a page, broken at the
+ * width, with a piece's `$UI` node stood in for — and every one of those is a
+ * rewrite that a program reading the output would have to undo, or could not.
+ * So the flag turns all three off and hands back the value whole. That is what
+ * `cf cell get --json` hands back, and decision 7 makes the flag mean here
+ * what it means there: the same spelling, and the same thing arriving.
+ */
+const READ_OPTIONS: readonly VerbOption[] = [
+  {
+    name: "filter",
+    type: "string",
+    placeholder: "predicate",
+    description: "Return the array elements a predicate matches.",
+  },
+  {
+    name: "select",
+    type: "string",
+    placeholder: "fields",
+    description: "Return these field paths, `@` after one for its address.",
+  },
+  {
+    name: "schema",
+    type: "string",
+    placeholder: "schema",
+    // Both flags carry the one projection, so a line naming both has not said
+    // which shape it wants. Refuse before the read rather than pick, which is
+    // the declaration `cf cell get` gives the same pair.
+    conflicts: ["select"],
+    description: "Return what a JSON Schema, `@file`, or field list says.",
+  },
+  {
+    name: "json",
+    description: "Write the value whole, for a program to read.",
+  },
+];
+
+/** The options `ls` takes, which bound what one page of a listing writes. */
+const LIST_OPTIONS: readonly VerbOption[] = [
+  {
+    name: "limit",
+    type: "number",
+    placeholder: "rows",
+    description: "Write this many rows instead of one screenful.",
+  },
+];
 
 /**
  * The verbs, by the word that names one. It is the one record of what a line
@@ -514,6 +805,7 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
   ["get", {
     run: get,
     arity: { operands: "optional" },
+    options: READ_OPTIONS,
     usage: "get [<ref>]",
     summary: "Reads the value at a cell, defaulting to where you stand.",
     detail: "The operand takes everything `cd` takes, plus the `#argument` " +
@@ -521,7 +813,14 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
       "rather than its\nresult. A `#name` entry point is the one spelling " +
       "it does not take,\n`wish` being the verb that reads one.\n\nA space " +
       "root and a facet hold no value of their own and are refused;\n`ls` " +
-      "lists what stands inside them.",
+      "lists what stands inside them.\n\nThe value is written as JSON, one " +
+      "page of it, and `more` writes the rest.\nA piece's `$UI` node is " +
+      "stood in for unless the line names the fields it\nwants: it is the " +
+      "piece's picture of itself rather than state to debug\nhere, and " +
+      "`--select '$UI'` reads it.\n\nThe projection options are `cf cell " +
+      "get`'s. `--select` takes a\ncomma-separated field list, `--schema` a " +
+      "JSON Schema or an `@file`, and a\n`@` written after a field path asks " +
+      "for that position's address rather\nthan its value.",
   }],
   ["help", {
     run: help,
@@ -534,13 +833,27 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
   ["ls", {
     run: ls,
     arity: { operands: "none" },
+    options: LIST_OPTIONS,
     usage: "ls",
     summary: "Lists what stands where shuttle stands.",
     detail: "A space root lists its facets, `slugs/` the names the space's " +
       "index\nrecords, `pieces/` the space's pieces, and a cell the keys " +
       "directly\nunder it. A row that failed on its own account is still a " +
       "row and\ncarries what went wrong, where a read that failed outright " +
-      "is no\nlisting at all and is reported as the failure it is.",
+      "is no\nlisting at all and is reported as the failure it is.\n\nEvery " +
+      "row is numbered from `%1`, and a row that is one of the piece's\n" +
+      "callables says so. One screenful is written and `more` writes the " +
+      "rest\nunder the numbers it already gave them.",
+  }],
+  ["more", {
+    run: more,
+    arity: { operands: "none" },
+    usage: "more",
+    summary: "Writes the next page of what did not fit on the last one.",
+    detail: "A listing continues under the numbers it already gave its " +
+      "rows, and a\nvalue continues where it left off. A rendering that fit " +
+      "whole leaves\nnothing to continue, and this says so rather than " +
+      "writing the tail of\nthe one before it.",
   }],
   ["pwd", {
     run: pwd,
@@ -658,6 +971,26 @@ type Reading =
   /** The operand names `place`. */
   | { readonly kind: "place"; readonly place: Place }
   | Refusal;
+
+/**
+ * Where an operand points and which of the piece's two cells it names, or the
+ * reason it names nothing to read.
+ */
+type Aiming =
+  | {
+    readonly kind: "place";
+    readonly place: Place;
+    /** The arguments cell rather than the result, which `#argument` spells. */
+    readonly input: boolean;
+  }
+  | Refusal;
+
+/** What a cell read produced, or the reason there was nothing to read. */
+type Held =
+  /** The cell holds `value`, which is what the read returned. */
+  | { readonly kind: "value"; readonly value: unknown }
+  | Refusal
+  | Interruption;
 
 /** What resolving a named entry point produced. */
 type Targeting =
@@ -1067,7 +1400,8 @@ async function reading(
 
 /**
  * Helper for {@link get}, which is the value at `place`, in the piece's
- * arguments cell where `input` says so and in its result otherwise.
+ * arguments cell where `input` says so and in its result otherwise, projected
+ * by `selection` where the line wrote one.
  *
  * The piece, the path and the scope all ride the config, as they do for a
  * listing, so a slug stands unresolved in the place and the read resolves it
@@ -1078,8 +1412,9 @@ async function read(
   shuttle: Shuttle,
   place: Place,
   input: boolean,
+  selection: CellSelection | undefined,
   deps: VerbDeps,
-): Promise<Outcome> {
+): Promise<Held> {
   const position = place.position;
   if (position.kind !== "piece") {
     return refuse(
@@ -1097,12 +1432,76 @@ async function read(
     deps.getCellValue ?? getCellValue,
     pieceConfig,
     [...position.path],
-    { input },
+    { input, ...(selection === undefined ? {} : { selection }) },
     { loadPieces: () => shuttle.connection.pieces() },
   );
   return answered.kind !== "ran"
     ? answered
     : { kind: "value", value: answered.answer };
+}
+
+/**
+ * What `--select` is offered as, where a page could not write the whole of
+ * what a read returned. It is offered beside `more` rather than instead of it,
+ * because the two answer different questions: `more` writes the rest of what
+ * was read, and a projection reads less.
+ */
+const NARROWS_THE_READ = "--select narrows the read";
+
+/**
+ * Helper for {@link get}, which is `held` written for whoever asked for it.
+ *
+ * There are two readers and they want different things, which is what `json`
+ * picks between. A person gets a rendering: cut to one page with what did not
+ * fit left for `more`, broken at the width so the page has somewhere to cut,
+ * and with a piece's `$UI` node stood in for. A program gets the value —
+ * whole, unbroken, and with every key it holds.
+ *
+ * Every one of those is a rewrite of the text, and that is the point. Counting
+ * rows is one act and inserting breaks is another: a terminal wraps a long
+ * line by itself and the bytes are unchanged, where a break this module writes
+ * is a character that was not in the value. Inside a JSON string it is not
+ * even legal — `JSON.parse` refuses a raw newline there — so a form something
+ * parses may carry none of it. `cf cell get --json` hands back parseable
+ * output, and decision 7 makes that flag mean here what it means there, which
+ * reaches past how it is spelled to what it hands over.
+ *
+ * The elision goes with them for the same reason: it writes a string where an
+ * object was, which reads back as a value the fabric does not hold. So a
+ * person's rendering elides unless the line asked for fields by name — a
+ * projection is what asking looks like, `--select '$UI'` names that key and
+ * gets what it holds, and a `--filter` alone is not asking, since it says
+ * which elements come back rather than what each holds — and a program's form
+ * elides nothing at all.
+ */
+function written(
+  shuttle: Shuttle,
+  held: { readonly value: unknown },
+  selection: CellSelection | undefined,
+  json: boolean,
+  deps: VerbDeps,
+): Outcome {
+  const text = renderValue(held.value, {
+    ui: json || selection?.projection !== undefined,
+  });
+  if (json) {
+    // Nothing is held back, so nothing may be waiting: a `more` after this
+    // would otherwise continue the line before it.
+    shuttle.session.holding();
+    return { kind: "text", text };
+  }
+  // Broken at the width before the page sees it, because a page cuts between
+  // entries and a value the fabric holds as one long string is one entry: a
+  // piece result written as a single line is one line and a screenful of rows,
+  // and unbroken it is shown whole with nothing left for `more` to continue.
+  const bound = screenFit(deps);
+  return paged(
+    shuttle,
+    [],
+    wrapped(text.split("\n"), bound.columns),
+    bound,
+    NARROWS_THE_READ,
+  );
 }
 
 /**
@@ -1325,6 +1724,68 @@ function listed(words: readonly string[]): string {
   const marked = words.map((word) => `\`${word}\``);
   const last = marked.pop();
   return marked.length === 0 ? `${last}` : `${marked.join(", ")}, and ${last}`;
+}
+
+/**
+ * Helper for the verbs that write a rendering, which is one page of `lines`
+ * within `bound`, with the rest left on the session for `more`.
+ *
+ * `hint` is what the status line offers beside `more`, and it rides the
+ * continuation so that every page of one rendering makes the same offer: a
+ * `get` whose value ran to four pages says `--select` on all four, because it
+ * is as true on the fourth as on the first.
+ *
+ * Every rendering passes through here, including one that fit whole, which is
+ * what clears a continuation the line before it left: `more` after a listing
+ * that fit is `more` with nothing waiting, not `more` writing the tail of the
+ * listing before it.
+ */
+function paged(
+  shuttle: Shuttle,
+  header: readonly string[],
+  entries: readonly string[],
+  bound: PageBound,
+  hint?: string,
+): Outcome {
+  const page: Page = pageOf(
+    header,
+    entries,
+    bound,
+    (left, overran) => statusLine(left, hint, overran),
+  );
+  shuttle.session.holding(
+    page.rest.length === 0
+      ? undefined
+      : { lines: page.rest, ...(hint === undefined ? {} : { hint }) },
+  );
+  return { kind: "text", text: page.text };
+}
+
+/**
+ * Helper for {@link paged}'s callers, which is the bound the screen puts on a
+ * page: both of its dimensions, each what the deps say and each assumed where
+ * they say nothing.
+ */
+function screenFit(deps: VerbDeps): PageBound {
+  return heightFit(
+    measured(deps.rows?.(), ASSUMED_ROWS),
+    measured(deps.columns?.(), ASSUMED_COLUMNS),
+  );
+}
+
+/**
+ * Helper for {@link screenFit}, which is `reported` where it is a usable count
+ * and `assumed` where it is not.
+ *
+ * A terminal that cannot measure itself reports a dimension that is no count
+ * at all, and a caller driving a verb with nothing behind it reports none.
+ * Both mean the same thing here — nothing said how big the screen is — so both
+ * take the assumption rather than one of them reaching arithmetic over it.
+ */
+function measured(reported: number | undefined, assumed: number): number {
+  return reported !== undefined && Number.isFinite(reported) && reported > 0
+    ? reported
+    : assumed;
 }
 
 /**
