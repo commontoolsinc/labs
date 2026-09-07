@@ -1501,8 +1501,10 @@ class TransformObjectCreator
     return mergeAnyOfMatches(matches);
   }
 
-  // This controls the behavior when properties is specified, but
-  // additonalProperties is not.
+  /**
+   * Does nothing: when `properties` is specified but `additionalProperties` is
+   * not, a property outside the map is excluded rather than stored.
+   */
   addOptionalProperty(
     _obj: Record<string, FabricValue>,
     _key: string,
@@ -1512,6 +1514,7 @@ class TransformObjectCreator
     // in the schema, but it doesn't include our property, and we don't have
     // additionalProperties set. So we don't do `obj[key] = value`;
   }
+
   applyDefault<T>(
     link: NormalizedFullLink,
     value: T | undefined,
@@ -1570,8 +1573,10 @@ class TransformObjectCreator
     );
   }
 
-  // This is an early pass to see if we should just create a proxy or cell
-  // If not, we will actually resolve our links to get to our values.
+  /**
+   * Creates the object. This is an early pass to see if we should just create a
+   * proxy or cell; if not, we actually resolve our links to get to our values.
+   */
   createObject(
     link: NormalizedFullLink,
     value: AnyCellWrapping<FabricValue> | undefined,

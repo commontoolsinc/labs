@@ -61,10 +61,13 @@ export class PatternsRoute {
   #baseUrl: URL;
   #extraSources: Array<{ routePrefix: string; baseUrl: URL }>;
 
-  // Pattern files are fixed for the process's lifetime (baked into the binary
-  // or static on disk), so each file's content identity is computed once and
-  // cached forever. A rejected computation is evicted so a transient failure
-  // (e.g. an incomplete closure during a partial deploy) can be retried.
+  /**
+   * Each pattern file's content identity, computed once and cached forever:
+   * pattern files are fixed for the process's lifetime (baked into the binary
+   * or static on disk). A rejected computation is evicted so a transient
+   * failure (e.g. an incomplete closure during a partial deploy) can be
+   * retried.
+   */
   #identityCache = new Map<string, Promise<string>>();
 
   /**

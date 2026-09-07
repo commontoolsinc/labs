@@ -140,8 +140,9 @@ export class SpaceOutbox {
    * it), and outbox.completed counts only when it settles. */
   #capturing: Array<Promise<unknown>> | undefined;
 
-  // Per-space egress budgets (Phase 6, serving-loop.md §5).
+  /** Per-space egress budgets (`serving-loop.md` §5). */
   readonly #budget: OutboxBudgetPolicy | undefined;
+
   readonly #now: () => number;
 
   /** DISPATCHED-but-unsettled network effects (the outstanding cap's

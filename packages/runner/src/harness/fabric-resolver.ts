@@ -48,9 +48,11 @@ export class FabricAwareResolver implements ProgramResolver {
     return this.#inner.main();
   }
 
-  // Forwarded like the rest of the interface. A wrapper that answers for part
-  // of a resolver and quietly drops the rest is the shape this whole seam
-  // exists to avoid.
+  /**
+   * Forwards to the wrapped resolver, like the rest of the interface. A wrapper
+   * that answers for part of a resolver and quietly drops the rest is the shape
+   * this whole seam exists to avoid.
+   */
   resolveDataFile(name: string): Promise<Source | undefined> {
     return this.#inner.resolveDataFile
       ? this.#inner.resolveDataFile(name)
