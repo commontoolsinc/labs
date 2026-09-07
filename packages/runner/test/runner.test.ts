@@ -1694,8 +1694,8 @@ describe("setup/start", () => {
 
   it("run() with a given pattern leaves no running registration when instantiation throws", () => {
     // Same regression as above, via the fresh-run entry (the path a live
-    // `cf piece new` takes): startCore's givenPattern branch must also clean
-    // up when node instantiation throws.
+    // `cf piece new` takes): `Runner.#startCore()`'s givenPattern branch must
+    // also clean up when node instantiation throws.
     const pattern: Pattern = {
       argumentSchema: { type: "object", properties: {} },
       resultSchema: {},

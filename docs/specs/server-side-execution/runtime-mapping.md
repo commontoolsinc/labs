@@ -75,7 +75,7 @@ Status legend:
 
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
-| 30 | `setup` / `start` / `run` / `runSynced`: argument staging, setup state, node instantiation | `runner.ts:1077`, `1941`, `2950`, `3052`, `Runner.startCore()` | serving-loop §3 (hosted runtime) | COVERED |
+| 30 | `setup` / `start` / `run` / `runSynced`: argument staging, setup state, node instantiation | `runner.ts:1077`, `1941`, `2950`, `3052`, `Runner.#startCore()` | serving-loop §3 (hosted runtime) | COVERED |
 | 31 | Who starts pieces: shell navigation, `ensurePieceRunning` on event, CLI, roots at bootstrap | `ensure-piece-running.ts:97`, `runner.ts:2343-2530` | serving-loop §1 (no piece-start policy; demand-driven pull) | RULED |
 | 32 | `stop` / `stopAll`: cancel groups, start-generation tombstones, lifecycle epochs | `runner.ts:3807-3852`, `3926-3956`, `2056-2077` | serving-loop §1 (park = dispose) | COVERED |
 | 33 | Child pieces from list coordinators (map/filter/flatMap): per-element `runner.run`, identity reuse, release-on-removal, `resumeMode: "always-run"` | `builtins/map.ts:344-412`, release `builtins/list-element-keys.ts:38-59`, registration `scheduler/facade.ts:316-322` | builtins §1 (listed as pure) | CHANGED |

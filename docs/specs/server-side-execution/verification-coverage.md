@@ -6051,7 +6051,7 @@ supply; OW29/OW32/OW34 closed):
     > servers fills in, it converges, done)."
 
     — owner (Berni), 2026-08-24. As built (`runner.ts`
-    `catchUpAndStartOnStaleRead` + `startFromServedState`; the
+    `Runner.#catchUpAndStartOnStaleRead()` + `startFromServedState`; the
     readiness `awaitCommitRetryReadiness` cherry-picked from closed
     #6208 along with its discriminator — the retry itself
     deliberately NOT brought): both deferred-start arms' stale-read
@@ -6100,21 +6100,22 @@ supply; OW29/OW32/OW34 closed):
     foreign registration into (the delta review's D2, closed by
     construction) — and the hand-off is IDENTITY-EXACT (Cubic P1,
     post-mini-delta, confirmed and fixed red-first): the attempt
-    records the registration its OWN startCore created, and only
+    records the registration its OWN `Runner.#startCore()` created, and only
     that registration, still current, is handed off — because a
     COMPETING start can install into the registry the recovery's
-    entry emptied with no stop and so no generation bump (startCore's
+    entry emptied with no stop and so no generation bump
+    (`Runner.#startCore()`'s
     unconditional install; the only bump sites live in stopResult),
     and the walk's already-started returns report it as success; on
     a foreign registration the recovery YIELDS exactly as
-    `startWithTx` yields on an owned key (the piece runs under the
+    `Runner.#startWithTx()` yields on an owned key (the piece runs under the
     competitor's authority — an independent navigate keeps its
     life). After the hand-off the parent's one Cancel handle stops
     the recovered run, and a cancel that landed during the wait or
     the walk is finished by that markInstalled against the real
     registration: stopped in the same breath, the walk reporting
     not-running. If another start took the key during the wait, the
-    recovery yields exactly as `startWithTx` yields on an owned
+    recovery yields exactly as `Runner.#startWithTx()` yields on an owned
     key. The recovery arm commits nothing (store-door pin: zero
     `commitNative` calls post-refusal), mints no transaction, and
     re-issues the one-shot pull the refused commit's success arm

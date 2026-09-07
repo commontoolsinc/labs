@@ -1791,8 +1791,8 @@ describe("opening a space root", () => {
     // fails to load), so there is no patternIdentity watcher when the swap
     // lands. ensureDefaultPattern reconciles BEFORE start
     // (startEnsuredDefaultPattern -> checkAndUpdateDefaultPattern), then
-    // cold-starts the piece — and Runner.startCore's initial instantiation
-    // does not run the setup phase, so the incoming pattern's
+    // cold-starts the piece — and `Runner.#startCore()`'s initial
+    // instantiation does not run the setup phase, so the incoming pattern's
     // { "$stream": true } markers were never materialized on the reused doc.
 
     await setupHome();

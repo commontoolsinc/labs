@@ -43,8 +43,8 @@ export function navigateTo(
     // A SERVED run never consults the `navigated` closure state
     // (independent review M2, 2026-08-11): the running builtin instance
     // and its closure are REUSED across a wave requeue (runner.ts's
-    // startWithTx cancels-guard), so closure state would suppress the
-    // re-issue a requeued event's wave-2 re-run owes — the handler's
+    // `Runner.#startWithTx()` cancels-guard), so closure state would suppress
+    // the re-issue a requeued event's wave-2 re-run owes — the handler's
     // consequences re-landed while the intent stayed lost forever.
     // Store-derived state governs the served arm instead: the
     // result-cell read below returns a LANDED navigation early (and a

@@ -10,6 +10,8 @@ import {
 } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
+import type { CommitError } from "../src/storage/interface.ts";
+import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 
 // A commit-gated piece start whose transaction is REFUSED for a stale
 // confirmed read. Under server-side execution that refusal is the expected
@@ -34,27 +36,27 @@ import { entityKey } from "../src/scheduler/keys.ts";
 // today's terminal behavior, pinned below.
 //
 // These tests drive the runner through its public surface and refuse the
-// START transaction at the transaction seam — the idiom this package already
-// uses to isolate a commit-classification decision from every other moving
-// part (edit-with-retry-classification.test.ts,
-// compile-cache-writeback-conflict.test.ts). Refusing at the memory server
-// instead cannot reach this path: a start whose setup already committed with
-// its handler's transaction carries no operations of its own, so its commit
-// never makes a server round trip at all, while the real first-hydration
-// start (whose setup rides the start) does. The refusal object is the shape
-// `toRejectedError` (storage/v2.ts) produces from the wire — the engine's own
-// message text, plus the conflict descriptor it parses out of it — so the
-// discriminator under test sees exactly what a real refusal presents.
+// START transaction at the runner's own commit seam: the deferred-start
+// committer it takes through `accessForTestingOnly`, which is handed exactly
+// the transaction under test and no other commit of the run. Refusing at the
+// memory server instead cannot reach this path: a start whose setup already
+// committed with its handler's transaction carries no operations of its own,
+// so its commit never makes a server round trip at all, while the real
+// first-hydration start (whose setup rides the start) does. The refusal
+// object is the shape `toRejectedError` (storage/v2.ts) produces from the
+// wire — the engine's own message text, plus the conflict descriptor it
+// parses out of it — so the discriminator under test sees exactly what a
+// real refusal presents.
 
 const signer = await Identity.fromPassphrase("deferred start catch up");
 const space = signer.did();
 
 /**
  * Refuse the first `count` START transactions with `error`, and nothing
- * else. A start transaction is recognized by the runner handing it to
- * `startWithTx` — which happens before the commit — so this refuses exactly
- * the transaction under test and leaves every other commit of the run
- * (the setup, the scheduler's runs, the readiness pull) untouched.
+ * else. A start transaction is the one the runner hands its deferred-start
+ * committer, so this refuses exactly the transaction under test and leaves
+ * every other commit of the run (the setup, the scheduler's runs, the
+ * readiness pull) untouched.
  *
  * With `count` at MAX_SAFE_INTEGER the injector doubles as the NO-RECOMMIT
  * witness: any second commit of a start-marked transaction would be refused
@@ -82,40 +84,24 @@ function refuseDeferredStartCommits(
   refusals(): number;
   restore(): void;
 } {
-  const originalEdit = runtime.edit.bind(runtime);
-  const runner = runtime.runner as unknown as {
-    startWithTx: (...args: unknown[]) => () => void;
-  };
-  const originalStartWithTx = runner.startWithTx;
-  const startTransactions = new WeakSet<object>();
+  const harness = runtime.runner.accessForTestingOnly;
   const waiters = new Map<number, ReturnType<typeof Promise.withResolvers>>();
   let refusals = 0;
 
-  runner.startWithTx = (...args: unknown[]) => {
-    startTransactions.add(args[0] as object);
-    return Reflect.apply(originalStartWithTx, runtime.runner, args) as () =>
-      void;
+  expect(harness.deferredStartCommitter).toBeUndefined();
+  harness.deferredStartCommitter = (tx, _resultCell, commit) => {
+    if (refusals >= count) return commit();
+    refusals++;
+    onRefusal?.();
+    for (const [at, waiter] of waiters) {
+      if (at <= refusals) waiter.resolve(undefined);
+    }
+    // A refused commit applies nothing, so discard this attempt's writes
+    // the way the rollback behind a server refusal does. The refusal is the
+    // wire's shape, declared here as the commit error it stands in for.
+    tx.abort(error.message);
+    return Promise.resolve({ error: error as CommitError });
   };
-
-  (runtime as unknown as { edit: typeof runtime.edit }).edit = ((
-    ...args: Parameters<typeof runtime.edit>
-  ) => {
-    const tx = originalEdit(...args);
-    const commit = tx.commit.bind(tx);
-    (tx as unknown as { commit: typeof tx.commit }).commit = (() => {
-      if (refusals >= count || !startTransactions.has(tx)) return commit();
-      refusals++;
-      onRefusal?.();
-      for (const [at, waiter] of waiters) {
-        if (at <= refusals) waiter.resolve(undefined);
-      }
-      // A refused commit applies nothing, so discard this attempt's writes
-      // the way the rollback behind a server refusal does.
-      tx.abort(error.message);
-      return Promise.resolve({ error });
-    }) as typeof tx.commit;
-    return tx;
-  }) as typeof runtime.edit;
 
   return {
     refusalsReach: (n: number) => {
@@ -129,8 +115,7 @@ function refuseDeferredStartCommits(
     },
     refusals: () => refusals,
     restore: () => {
-      (runtime as unknown as { edit: typeof runtime.edit }).edit = originalEdit;
-      runner.startWithTx = originalStartWithTx;
+      harness.deferredStartCommitter = undefined;
     },
   };
 }
@@ -149,52 +134,41 @@ async function waitForSignal(
 }
 
 /**
- * Watch the runner assemble the client-side piece context for one result:
- * how many context installs ran, and whether one ever ran while a previous
- * one was still registered — the double-install question a recovery raises.
+ * Watch the runner assemble the client-side piece context for the result
+ * registered under `key`: how many context installs ran, and whether one
+ * ever ran while a previous one was still registered — the double-install
+ * question a recovery raises.
  *
- * Hooked at `startCore` rather than `startWithTx`, because the two context
- * paths meet there: the deferred first attempt reaches it through
- * `startWithTx`, and the catch-up recovery reaches it through the ordinary
- * load walk (`doStart`), which never passes `startWithTx` at all.
- *
- * Deliberately passes `startCore`'s return value through UNCHANGED. The
- * runner compares that exact cancel against its registry to decide whether
- * an ownership still owns the registration, so a harness that wraps it
- * silently suppresses every teardown and would manufacture the very
- * concurrency it claims to measure. Liveness is read from the runner's own
- * registry instead.
+ * Read from the `runner.piece.install` marker, which the runner emits as an
+ * install begins and before it registers, on both context paths: the
+ * deferred first attempt's and the catch-up recovery's ordinary load walk.
+ * Liveness is read from the runner's own registry.
  */
 function observeContextInstalls(
   runtime: Runtime,
-  matches: (cell: Cell<unknown>) => boolean,
-  registered: () => boolean,
+  key: ReturnType<typeof entityKey>,
 ): {
   installs(): number;
   everConcurrent(): boolean;
   nth(n: number): Promise<void>;
   restore(): void;
 } {
-  const runner = runtime.runner as unknown as {
-    startCore: (...args: unknown[]) => () => void;
-  };
-  const original = runner.startCore;
   const waiters = new Map<number, ReturnType<typeof Promise.withResolvers>>();
   let installs = 0;
   let everConcurrent = false;
 
-  runner.startCore = (...args: unknown[]) => {
-    if (matches(args[0] as Cell<unknown>)) {
-      // Read BEFORE this install registers: a registration still standing
-      // here belongs to a previous attempt that was never torn down.
-      if (registered()) everConcurrent = true;
-      installs++;
-      for (const [at, waiter] of waiters) {
-        if (at <= installs) waiter.resolve(undefined);
-      }
+  const listener = (event: Event) => {
+    const { marker } = (event as RuntimeTelemetryEvent).detail;
+    if (marker.type !== "runner.piece.install" || marker.key !== key) return;
+    // Read BEFORE this install registers: a registration still standing
+    // here belongs to a previous attempt that was never torn down.
+    if (runtime.runner.cancels.has(key)) everConcurrent = true;
+    installs++;
+    for (const [at, waiter] of waiters) {
+      if (at <= installs) waiter.resolve(undefined);
     }
-    return Reflect.apply(original, runtime.runner, args) as () => void;
   };
+  runtime.telemetry.addEventListener("telemetry", listener);
 
   return {
     installs: () => installs,
@@ -209,7 +183,7 @@ function observeContextInstalls(
       return waiter.promise as Promise<void>;
     },
     restore: () => {
-      runner.startCore = original;
+      runtime.telemetry.removeEventListener("telemetry", listener);
     },
   };
 }
@@ -281,6 +255,24 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     );
   }
 
+  // A stale-confirmed-read refusal whose readiness gate forces the recovery's
+  // walk onto the RESUME path. The gate runs AFTER the recovery's entry (whose
+  // teardown re-arms the local-assembly shortcuts) and BEFORE the walk;
+  // clearing the shortcuts there sends the walk through its dependency
+  // pre-sync, whose await is the real-world interleaving window (a cold
+  // resume looks exactly like this) and the seam a test can act inside.
+  function resumingRefusalOf(cell: Cell<unknown>) {
+    const harness = runtime.runner.accessForTestingOnly;
+    return {
+      ...staleConfirmedReadOf(cell),
+      readyToRetry: () => {
+        harness.locallyStoppedResults.delete(key(cell));
+        harness.locallyPreparedResults.delete(key(cell));
+        return Promise.resolve();
+      },
+    };
+  }
+
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
     // EXPLICITLY flag-ON, with no serving posture: a flag-ON CLIENT — the
@@ -318,11 +310,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       Number.MAX_SAFE_INTEGER,
     );
     const storeCommits = countStoreCommits(storageManager);
-    const installed = observeContextInstalls(
-      runtime,
-      (cell) => key(cell) === key(result),
-      () => runtime.runner.cancels.has(key(result)),
-    );
+    const installed = observeContextInstalls(runtime, key(result));
     try {
       runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
       expect((await tx.commit()).error).toBeUndefined();
@@ -383,11 +371,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       runtime,
       staleConfirmedReadOf(result),
     );
-    const installed = observeContextInstalls(
-      runtime,
-      (cell) => key(cell) === key(result),
-      () => runtime.runner.cancels.has(key(result)),
-    );
+    const installed = observeContextInstalls(runtime, key(result));
     try {
       runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
       expect((await tx.commit()).error).toBeUndefined();
@@ -443,11 +427,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       // the install-still-current check can cover.
       () => runtime.runner.stop(result),
     );
-    const installed = observeContextInstalls(
-      runtime,
-      (cell) => key(cell) === key(result),
-      () => runtime.runner.cancels.has(key(result)),
-    );
+    const installed = observeContextInstalls(runtime, key(result));
     try {
       runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
       expect((await tx.commit()).error).toBeUndefined();
@@ -496,11 +476,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       runtime,
       staleConfirmedReadOf(result),
     );
-    const installed = observeContextInstalls(
-      runtime,
-      (cell) => key(cell) === key(result),
-      () => runtime.runner.cancels.has(key(result)),
-    );
+    const installed = observeContextInstalls(runtime, key(result));
     try {
       const { cancelDeferredStart } = harness.runWithStartOwnership(
         tx,
@@ -556,20 +532,10 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       undefined,
       tx,
     );
-    // The refusal carries a readiness gate that runs AFTER the recovery's
-    // entry (whose teardown re-arms the local-assembly shortcuts) and
-    // BEFORE the walk: clearing the shortcuts there forces the walk onto
-    // the RESUME path, whose dependency-sync await is the real-world
-    // interleaving window (a cold resume looks exactly like this).
-    const refusal = {
-      ...staleConfirmedReadOf(result),
-      readyToRetry: () => {
-        harness.locallyStoppedResults.delete(key(result));
-        harness.locallyPreparedResults.delete(key(result));
-        return Promise.resolve();
-      },
-    };
-    const injector = refuseDeferredStartCommits(runtime, refusal);
+    const injector = refuseDeferredStartCommits(
+      runtime,
+      resumingRefusalOf(result),
+    );
     // The competitor: a second, independent public start of the same
     // result (the navigate landing flow), fired inside the recovery
     // walk's dependency-sync await.
@@ -635,11 +601,6 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       doubled: lift((input: number) => input * 2)(value),
     }));
     const harness = runtime.runner.accessForTestingOnly;
-    // Replaced by assignment below, which only a TypeScript-private member
-    // allows, so it is reached the old way.
-    const stubbed = runtime.runner as unknown as {
-      startCore: (...args: unknown[]) => () => void;
-    };
     const tx = gatedTxOn(runtime);
     const result = runtime.getCell<{ doubled?: number }>(
       space,
@@ -649,20 +610,17 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     );
     const injector = refuseDeferredStartCommits(
       runtime,
-      staleConfirmedReadOf(result),
+      resumingRefusalOf(result),
     );
-    // Fire the parent's handle synchronously INSIDE the recovery's context
-    // assembly — the widest point of the walk window.
+    const installed = observeContextInstalls(runtime, key(result));
+    // Fire the parent's handle INSIDE the recovery's walk: at its dependency
+    // pre-sync, after the readiness wait resolved and before the walk's
+    // install lands. Only the recovery's walk pre-syncs this result; the
+    // refused attempt's install never passed this step.
     let parentCancel: (() => void) | undefined;
-    let assemblies = 0;
-    const originalStartCore = stubbed.startCore;
-    stubbed.startCore = (...args: unknown[]) => {
-      if (key(args[0] as Cell<unknown>) === key(result)) {
-        assemblies++;
-        if (assemblies === 2) parentCancel?.();
-      }
-      return Reflect.apply(originalStartCore, runtime.runner, args) as () =>
-        void;
+    harness.dependencySyncer = (cell, executable, inputs, sync) => {
+      if (key(cell) === key(result)) parentCancel?.();
+      return sync(cell, executable, inputs);
     };
     try {
       const { cancelDeferredStart } = harness.runWithStartOwnership(
@@ -686,10 +644,11 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       // Both assemblies ran (the refused attempt's and the recovery's),
       // the mid-walk cancel landed, and NOTHING stays registered: the
       // recovered run was stopped, not leaked.
-      expect(assemblies).toBe(2);
+      expect(installed.installs()).toBe(2);
       expect(runtime.runner.cancels.has(key(result))).toBe(false);
     } finally {
-      stubbed.startCore = originalStartCore;
+      harness.dependencySyncer = undefined;
+      installed.restore();
       injector.restore();
     }
   });
@@ -715,11 +674,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       runtime,
       staleConfirmedReadOf(result),
     );
-    const installed = observeContextInstalls(
-      runtime,
-      (cell) => key(cell) === key(result),
-      () => runtime.runner.cancels.has(key(result)),
-    );
+    const installed = observeContextInstalls(runtime, key(result));
     try {
       runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
       expect((await tx.commit()).error).toBeUndefined();
@@ -772,11 +727,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       // flight, so the teardown cannot see a token that does not exist yet.
       () => runtime.runner.stopAll(),
     );
-    const installed = observeContextInstalls(
-      runtime,
-      (cell) => key(cell) === key(result),
-      () => runtime.runner.cancels.has(key(result)),
-    );
+    const installed = observeContextInstalls(runtime, key(result));
     try {
       runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
       expect((await tx.commit()).error).toBeUndefined();
@@ -823,11 +774,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       },
     };
     const injector = refuseDeferredStartCommits(runtime, refusal);
-    const installed = observeContextInstalls(
-      runtime,
-      (cell) => key(cell) === key(result),
-      () => runtime.runner.cancels.has(key(result)),
-    );
+    const installed = observeContextInstalls(runtime, key(result));
     try {
       runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
       expect((await tx.commit()).error).toBeUndefined();
@@ -891,11 +838,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       },
       Number.MAX_SAFE_INTEGER,
     );
-    const installed = observeContextInstalls(
-      runtime,
-      (cell) => key(cell) === key(result),
-      () => runtime.runner.cancels.has(key(result)),
-    );
+    const installed = observeContextInstalls(runtime, key(result));
     try {
       runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
       expect((await tx.commit()).error).toBeUndefined();
@@ -972,11 +915,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
         refusal,
         Number.MAX_SAFE_INTEGER,
       );
-      const installed = observeContextInstalls(
-        runtime,
-        (cell) => key(cell) === key(result),
-        () => runtime.runner.cancels.has(key(result)),
-      );
+      const installed = observeContextInstalls(runtime, key(result));
       try {
         runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
         expect((await tx.commit()).error).toBeUndefined();
@@ -1016,28 +955,22 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       undefined,
       tx,
     );
+    const harness = runtime.runner.accessForTestingOnly;
     const injector = refuseDeferredStartCommits(
       runtime,
-      staleConfirmedReadOf(result),
+      resumingRefusalOf(result),
     );
-    // Fail the SECOND context assembly (the recovery's) at the same seam the
-    // install observer hooks: the first attempt wires normally and is torn
-    // down by the refusal; the recovery's walk then dies synchronously.
-    const runner = runtime.runner as unknown as {
-      startCore: (...args: unknown[]) => () => void;
-    };
-    const originalStartCore = runner.startCore;
-    let assemblies = 0;
-    runner.startCore = (...args: unknown[]) => {
-      const cell = args[0] as Cell<unknown>;
-      if (key(cell) === key(result)) {
-        assemblies++;
-        if (assemblies >= 2) {
-          throw new Error("injected: the recovery walk's assembly failed");
-        }
-      }
-      return Reflect.apply(originalStartCore, runtime.runner, args) as () =>
-        void;
+    const installed = observeContextInstalls(runtime, key(result));
+    // Fail the recovery's walk at its dependency pre-sync: the first attempt
+    // wires normally, never passing that step, and is torn down by the
+    // refusal; the recovery's walk then dies at the step only it reaches.
+    let syncFailures = 0;
+    harness.dependencySyncer = (cell, executable, inputs, sync) => {
+      if (key(cell) !== key(result)) return sync(cell, executable, inputs);
+      syncFailures++;
+      return Promise.reject(
+        new Error("injected: the recovery walk's dependency sync failed"),
+      );
     };
     try {
       runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
@@ -1050,13 +983,17 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       await runtime.runner.idleDeferredStartCatchUps();
       await runtime.idle();
 
-      // Both assemblies were attempted, the failure was contained, and the
-      // runner holds neither a registration nor a pending recovery.
-      expect(assemblies).toBe(2);
+      // The refused attempt installed once, the recovery's walk failed once
+      // and was contained, and the runner holds neither a registration nor
+      // a pending recovery.
+      expect(installed.installs()).toBe(1);
+      expect(syncFailures).toBe(1);
       expect(injector.refusals()).toBe(1);
       expect(runtime.runner.cancels.has(key(result))).toBe(false);
+      expect(harness.pendingDeferredStarts.has(key(result))).toBe(false);
     } finally {
-      runner.startCore = originalStartCore;
+      harness.dependencySyncer = undefined;
+      installed.restore();
       injector.restore();
     }
   });
@@ -1079,11 +1016,6 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       doubled: lift((input: number) => input * 2)(value),
     }));
     const harness = runtime.runner.accessForTestingOnly;
-    // Replaced by assignment below, which only a TypeScript-private member
-    // allows, so it is reached the old way.
-    const stubbed = runtime.runner as unknown as {
-      catchUpAndStartOnStaleRead(...args: unknown[]): boolean;
-    };
     const tx = runtime.edit();
     const receipt = runtime.getCell<Record<string, unknown>>(
       space,
@@ -1094,7 +1026,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     // THIS pin refuses at the STORE DOOR (replica.commitNative), not at
     // the tx seam: the cross-space arm's startTx carries the SETUP (this
     // arm's defining difference), so runWithStartOwnership attached a
-    // failure-compensation commit callback to it — and the tx-seam
+    // failure-compensation commit callback to it — and the committer
     // injector's abort() settles that callback with an ABORT-shaped
     // error, which releases the install BEFORE the error arm (an injector
     // artifact: a real wire refusal settles the callbacks with the
@@ -1102,19 +1034,30 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     // install). Because this startTx carries operations, it genuinely
     // reaches the store door — the primary arm's op-less startTx cannot —
     // so here the refusal can ride the REAL commit machinery end to end.
-    const error = staleConfirmedReadOf(receipt);
-    const runnerForMark = runtime.runner as unknown as {
-      startWithTx: (...args: unknown[]) => (() => void) | undefined;
+    // The ROUTING witness (review F13 / Cubic P2): the old terminal path
+    // also produces one refusal, no registration, and a settled idle, so
+    // those observables alone cannot tell recovery from terminal death. Only
+    // a SCHEDULED recovery awaits the refusal's readiness gate, so counting
+    // that call is the pin: deleting the recovery's call site from
+    // runPatternAfterSuccessfulCommit leaves it at zero. Holding the gate
+    // also exposes the scheduled recovery's token in the pending index.
+    const gate = Promise.withResolvers<void>();
+    const gateReached = Promise.withResolvers<void>();
+    let scheduled = 0;
+    const error = {
+      ...staleConfirmedReadOf(receipt),
+      readyToRetry: () => {
+        scheduled++;
+        gateReached.resolve();
+        return gate.promise;
+      },
     };
-    const originalStartWithTx = runnerForMark.startWithTx;
+    // The committer marks the start transaction, whose inner transaction is
+    // what the store door sees, and commits it through the real machinery.
     const startTransactions = new WeakSet<object>();
-    runnerForMark.startWithTx = (...args: unknown[]) => {
-      startTransactions.add(
-        (args[0] as { tx?: object }).tx ?? (args[0] as object),
-      );
-      return Reflect.apply(originalStartWithTx, runtime.runner, args) as
-        | (() => void)
-        | undefined;
+    harness.deferredStartCommitter = (startTx, _resultCell, commit) => {
+      startTransactions.add(startTx.tx);
+      return commit();
     };
     const replica = storageManager.open(space).replica as unknown as {
       commitNative: (...args: unknown[]) => unknown;
@@ -1135,28 +1078,6 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       }
       return Reflect.apply(originalCommitNative, this, args);
     };
-    // The ROUTING witness (review F13 / Cubic P2): the old terminal path
-    // also produces one refusal, no registration, and a settled idle, so
-    // those observables alone cannot tell recovery from terminal death.
-    // Instrument the recovery entry point for this receipt: the pin
-    // demands the error arm actually ROUTED here and the recovery was
-    // SCHEDULED — deleting the call site from
-    // runPatternAfterSuccessfulCommit reds this, where it used to pass.
-    const originalEntry = stubbed.catchUpAndStartOnStaleRead;
-    let routed = 0;
-    let scheduled = 0;
-    stubbed.catchUpAndStartOnStaleRead = function (...args: unknown[]) {
-      const took = Reflect.apply(
-        originalEntry,
-        runtime.runner,
-        args,
-      ) as boolean;
-      if (key(args[1] as Cell<unknown>) === key(receipt)) {
-        routed++;
-        if (took) scheduled++;
-      }
-      return took;
-    };
     try {
       harness.runPatternAfterSuccessfulCommit(
         tx,
@@ -1172,22 +1093,29 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
         refusalWaiter.promise,
         "the cross-space start's transaction being refused at the store",
       );
+      // The refusal ROUTED into the recovery and the recovery was
+      // scheduled — the discriminating assertions: it awaits the readiness
+      // gate, and its token sits in the pending index while it does.
+      await waitForSignal(
+        gateReached.promise,
+        "the recovery awaiting the refusal's readiness gate",
+      );
+      expect(scheduled).toBe(1);
+      expect(harness.pendingDeferredStarts.get(key(receipt))?.size).toBe(1);
+      gate.resolve();
       await runtime.runner.idleDeferredStartCatchUps();
       await runtime.idle();
 
-      // The refusal ROUTED into the recovery and the recovery was
-      // scheduled — the discriminating assertions…
-      expect(routed).toBe(1);
-      expect(scheduled).toBe(1);
-      // …and exactly one refusal (the recovery never re-committed a start
+      // Exactly one refusal (the recovery never re-committed a start
       // transaction — its walk failed before any second commit), the
       // failed recovery leaving nothing behind.
+      expect(scheduled).toBe(1);
       expect(refusals).toBe(1);
       expect(runtime.runner.cancels.has(key(receipt))).toBe(false);
     } finally {
-      stubbed.catchUpAndStartOnStaleRead = originalEntry;
+      gate.resolve();
       replica.commitNative = originalCommitNative;
-      runnerForMark.startWithTx = originalStartWithTx;
+      harness.deferredStartCommitter = undefined;
     }
   });
 
@@ -1214,11 +1142,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       runtime,
       staleConfirmedReadOf(result),
     );
-    const installed = observeContextInstalls(
-      runtime,
-      (cell) => key(cell) === key(result),
-      () => runtime.runner.cancels.has(key(result)),
-    );
+    const installed = observeContextInstalls(runtime, key(result));
     try {
       runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
       expect((await tx.commit()).error).toBeUndefined();
@@ -1287,11 +1211,7 @@ describe("a deferred start refused for a stale confirmed read, flag-OFF", () => 
       staleConfirmedReadOf(result),
       Number.MAX_SAFE_INTEGER,
     );
-    const installed = observeContextInstalls(
-      runtime,
-      (cell) => key(cell) === key(result),
-      () => runtime.runner.cancels.has(key(result)),
-    );
+    const installed = observeContextInstalls(runtime, key(result));
     try {
       runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
       expect((await tx.commit()).error).toBeUndefined();

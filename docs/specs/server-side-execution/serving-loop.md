@@ -850,7 +850,7 @@ at the stamping choke points the scheduler and runner own: the
 reactive-action run, the event dispatch, the pattern swap, and — the
 PIECE-START site (RULED 2026-08-13, the F1 fold-in) — the
 demanded-piece startup path's setup/instantiation writes
-(`ensurePieceRunning` → start → `startCore`: the self-minted
+(`ensurePieceRunning` → start → `Runner.#startCore()`: the self-minted
 instantiation tx, the missing-stream-marker setup REPAIR, the
 deferred piece-start/run transactions, and the runtime-internal
 pattern-update/rollforward writes — the same `applySetupState`

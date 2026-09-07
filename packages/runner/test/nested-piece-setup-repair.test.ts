@@ -14,10 +14,11 @@ import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 // pattern watcher armed to self-heal. If its stored doc predates the pattern's
 // setup (here: set up for V1, then re-pointed at the handler-bearing V3 whose
 // `bump` stream marker the V1 doc never materialized), instantiation throws
-// "Handler used as lift … marker was never written". Runner.startCore's initial
-// instantiation re-runs the pinned pattern's OWN setup on that failure and
-// retries — the same repair the home ROOT gets in startEnsuredDefaultPattern,
-// here for the nested pieces that never pass through the PieceController.
+// "Handler used as lift … marker was never written". `Runner.#startCore()`'s
+// initial instantiation re-runs the pinned pattern's OWN setup on that
+// failure and retries — the same repair the home ROOT gets in
+// startEnsuredDefaultPattern, here for the nested pieces that never pass
+// through the PieceController.
 // The repair moves no durable identity pointer; it replays the pattern the
 // pointer already names. The root itself is excluded because its controller
 // owns the repair; a nested piece is never a space's `.defaultPattern`, so it
