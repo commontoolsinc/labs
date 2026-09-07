@@ -646,8 +646,20 @@ export function resolveCapabilities(
 
 /** What opening a set of capabilities produced. */
 export interface OpenedCapabilities {
-  /** The environment every batch runs with, the requests merged in order. */
-  env: Record<string, string>;
+  /**
+   * The environment the capabilities a suite asked for export, merged in
+   * the order they opened.
+   *
+   * A batch is given what its own suite asked for and not the union of
+   * what the lane opened, because two capabilities may export the same
+   * name and mean different things by it. The two Toolshed servers are
+   * the case: both export the address theirs is listening on, and a batch
+   * handed the merged environment reaches whichever opened last. The
+   * default and opposite server-execution arms can share a lane, so that
+   * is a batch testing one arm against the other's server and reporting
+   * that the arm it named works.
+   */
+  envFor(requested: Iterable<CapabilityId>): Record<string, string>;
 
   /** Seconds each capability's setup took, in the order they opened. */
   timings: Array<{ capability: CapabilityId; seconds: number }>;
@@ -667,7 +679,7 @@ export async function openCapabilities(
   context: CapabilityContext,
   registry: ReadonlyMap<CapabilityId, Capability> = CAPABILITIES,
 ): Promise<OpenedCapabilities> {
-  const env: Record<string, string> = {};
+  const exported = new Map<CapabilityId, Record<string, string>>();
   const timings: Array<{ capability: CapabilityId; seconds: number }> = [];
   const opened: OpenCapability[] = [];
   const close = async (): Promise<void> => {
@@ -686,7 +698,7 @@ export async function openCapabilities(
       const startedAt = performance.now();
       const open = await capability.open(context);
       opened.push(open);
-      Object.assign(env, open.env);
+      exported.set(id, open.env);
       timings.push({
         capability: id,
         seconds: (performance.now() - startedAt) / 1000,
@@ -696,5 +708,17 @@ export async function openCapabilities(
     await close();
     throw error;
   }
-  return { env, timings, close };
+  return {
+    envFor: (requested) => {
+      const env: Record<string, string> = {};
+      // Resolved rather than taken as given, so that a suite naming a
+      // capability gets what the capabilities under it export too.
+      for (const id of resolveCapabilities(requested, registry)) {
+        Object.assign(env, exported.get(id) ?? {});
+      }
+      return env;
+    },
+    timings,
+    close,
+  };
 }

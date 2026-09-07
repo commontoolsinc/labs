@@ -1058,7 +1058,11 @@ export async function runLane(
           options,
           workDir,
           spool,
-          opened.env,
+          // What this suite asked for, not what the lane opened. Two
+          // capabilities may export the same name and mean different
+          // things by it, and the two server-execution arms can share a
+          // lane.
+          opened.envFor(batch.suite.needs),
           measuring(options, gate, batch),
         );
         if (!result.ok) ok = false;

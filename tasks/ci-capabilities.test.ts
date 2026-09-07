@@ -72,7 +72,7 @@ describe("ci capabilities", () => {
       dryRun: true,
       workDir: "/nonexistent",
     });
-    expect(opened.env.API_URL).toBe("http://localhost:8000/");
+    expect(opened.envFor(["toolshed"]).API_URL).toBe("http://localhost:8000/");
     expect(opened.timings.map((timing) => timing.capability)).toEqual([
       "deno",
       "toolshed",
@@ -134,17 +134,57 @@ describe("ci capabilities", () => {
     expect(opened.timings.length).toBe(CAPABILITIES.size);
     // The two servers export the addresses their suites reach them at,
     // and the command line exports the path it is found on.
-    expect(opened.env.API_URL).toBeDefined();
-    expect(opened.env.TOOLSHED_PORT).toBeDefined();
-    expect(opened.env.CF_LABS_ROOT).toBe(Deno.cwd());
-    expect(opened.env.BG_PIECE_SERVICE_BIN).toBe(
+    const every = opened.envFor([...CAPABILITIES.keys()]);
+    expect(every.API_URL).toBeDefined();
+    expect(every.TOOLSHED_PORT).toBeDefined();
+    expect(every.CF_LABS_ROOT).toBe(Deno.cwd());
+    expect(every.BG_PIECE_SERVICE_BIN).toBe(
       `${Deno.cwd()}/${BINARY_CACHE_DIR}/bg-piece-service`,
     );
-    expect(opened.env.PATH?.startsWith(`${Deno.cwd()}/bin`)).toBe(true);
-    expect(opened.env.CF_COMPILE_CACHE_FILE).toBe(
+    expect(every.PATH?.startsWith(`${Deno.cwd()}/bin`)).toBe(true);
+    expect(every.CF_COMPILE_CACHE_FILE).toBe(
       `${Deno.cwd()}/${COMPILE_CACHE_FILE}`,
     );
     await opened.close();
+  });
+
+  it("gives a suite the addresses its own server is listening on", async () => {
+    // Both Toolshed capabilities export the address theirs is listening
+    // on, and a lane may hold the default and opposite server-execution
+    // arms at once. A batch handed everything the lane opened would
+    // reach whichever server opened last, pass, and report that the arm
+    // it named works.
+    const opened = await openCapabilities(
+      ["toolshed", "toolshed-baked-opposite"],
+      { root: Deno.cwd(), dryRun: true, workDir: "/nonexistent" },
+    );
+    try {
+      const dflt = opened.envFor(["toolshed"]);
+      const opposite = opened.envFor(["toolshed-baked-opposite"]);
+      expect(dflt.API_URL).toBeDefined();
+      expect(opposite.API_URL).toBeDefined();
+      // A dry run gives both the same stand-in port, so what this can
+      // hold is that each is answered from its own capability rather
+      // than from whichever the lane opened last.
+      expect(opened.envFor(["cf"]).API_URL).toBeUndefined();
+    } finally {
+      await opened.close();
+    }
+  });
+
+  it("gives a suite what the capabilities under its own export too", async () => {
+    // A suite names `toolshed`, and `toolshed` is built on `deno`. What
+    // the batch runs with has to be the closure, not the one name.
+    const opened = await openCapabilities(["cf"], {
+      root: Deno.cwd(),
+      dryRun: true,
+      workDir: "/nonexistent",
+    });
+    try {
+      expect(opened.envFor(["cf"]).CF_LABS_ROOT).toBe(Deno.cwd());
+    } finally {
+      await opened.close();
+    }
   });
 
   it("closes what it opened, in the reverse of the opening order", async () => {
@@ -353,9 +393,10 @@ describe("opening a capability on a machine that answers", () => {
   it("starts a server on a port of its own and kills what it started", async () => {
     const m = machine({ "index.ts": "listening (pid 999999). Logs: x\n" });
     const { opened } = await open("toolshed", m);
-    const port = Number(opened.env.TOOLSHED_PORT);
+    const served = opened.envFor(["toolshed"]);
+    const port = Number(served.TOOLSHED_PORT);
     expect(Number.isInteger(port) && port > 0).toBe(true);
-    expect(opened.env.API_URL).toBe(`http://localhost:${port}/`);
+    expect(served.API_URL).toBe(`http://localhost:${port}/`);
     expect(m.asked.some((line) => line.includes(`--port=${port}`))).toBe(true);
     expect(m.asked.some((line) => line.includes("--background"))).toBe(true);
     // Closing is what `open` already did; killing a process this test
@@ -512,7 +553,7 @@ describe("the compile cache a lane hands the pattern suites", () => {
         dryRun: false,
         workDir: root,
       });
-      expect(opened.env.CF_COMPILE_CACHE_FILE).toBe(
+      expect(opened.envFor(["compile-cache"]).CF_COMPILE_CACHE_FILE).toBe(
         `${root}/${COMPILE_CACHE_FILE}`,
       );
       expect((await Deno.stat(`${root}/${CACHE_DIR}/compile`)).isDirectory)
