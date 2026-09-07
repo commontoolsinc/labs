@@ -925,35 +925,52 @@ export class V2StorageTransaction implements IStorageTransaction {
   readonly journal = new V2TransactionJournal(this);
 
   #state: TxState = { status: "ready" };
-  // The commit's fate — server verdict or local rejection — which commit()
-  // itself may resolve later than: commit() additionally waits for the
-  // subscribed view to reflect the committed write (CT-1950 coverage).
-  // Post-commit effects gated on durability alone hook this via
-  // commitVerdict(). Resolved with the same result commit() returns.
+
+  /**
+   * The commit's fate — server verdict or local rejection — which `commit()`
+   * itself may resolve later than: `commit()` additionally waits for the
+   * subscribed view to reflect the committed write. Post-commit effects gated
+   * on durability alone hook this via `commitVerdict()`. Resolved with the same
+   * result `commit()` returns.
+   */
   readonly #verdict = Promise.withResolvers<Result<Unit, CommitError>>();
+
   #branches = new Map<MemorySpace, SpaceBranch>();
   #readActivities: IReadActivity[] = [];
-  // Per-transaction monotonic activity clock, shared between read activities
-  // and write attempts so their relative order (the read|write interleaving)
-  // is recoverable without a journal scan — V2 journals don't support
-  // activity(). Stamped at the two record points: the read() activity push
-  // and recordPatchIntent(). Consumed by CFC write-prefix provenance
-  // (docs/specs/cfc-write-prefix-provenance.md §4/§6).
+
+  /**
+   * Per-transaction monotonic activity clock, shared between read activities
+   * and write attempts so their relative order (the read/write interleaving) is
+   * recoverable without a journal scan — V2 journals don't support
+   * `activity()`. Stamped at the two record points: the `read()` activity push
+   * and `#recordPatchIntent()`. Consumed by CFC write-prefix provenance
+   * (`docs/specs/cfc-write-prefix-provenance.md` §4/§6).
+   */
   #activityClock = 0;
-  // How many times this transaction has replaced a document root. A read taken
-  // at epoch E describes the state after E replacements, which is what lets a
-  // materialized read keep answering for the moment it was taken while the
-  // reader goes on writing. Zero writes means every document still stands at
-  // its `initial` attestation, so every epoch describes the same state and
-  // nothing below has to run.
+
+  /**
+   * How many times this transaction has replaced a document root. A read taken
+   * at epoch E describes the state after E replacements, which is what lets a
+   * materialized read keep answering for the moment it was taken while the
+   * reader goes on writing. Zero writes means every document still stands at
+   * its `initial` attestation, so every epoch describes the same state and
+   * nothing below has to run.
+   */
   #writeEpoch = 0;
-  // The epoch reads resolve against while a materialized read is walking, or
-  // undefined for the transaction's current state.
+
+  /**
+   * The epoch reads resolve against while a materialized read is walking, or
+   * `undefined` for the transaction's current state.
+   */
   #readEpoch: number | undefined;
-  // The newest epoch handed to a reader, or undefined where none has been. A
-  // replacement keeps the root it displaces only when a reader could still ask
-  // for it, and this is what decides that.
+
+  /**
+   * The newest epoch handed to a reader, or `undefined` where none has been. A
+   * replacement keeps the root it displaces only when a reader could still ask
+   * for it, and this is what decides that.
+   */
   #lastIssuedEpoch: number | undefined;
+
   #writeAttemptLog: IWriteAttempt[] = [];
   #reactivityLogCache?: TransactionReactivityLog;
   #commitPreconditions = new Map<MemorySpace, CommitPrecondition[]>();
@@ -961,33 +978,52 @@ export class V2StorageTransaction implements IStorageTransaction {
     MemorySpace,
     Map<string, { id: string; scope: CellScope }>
   >();
-  // Folded SQLite write ops per space, applied in the same commit as cell ops.
+
+  /**
+   * Folded SQLite write ops per space, applied in the same commit as cell ops.
+   */
   #sqliteOps = new Map<MemorySpace, SqliteOperation[]>();
+
   #writeSpace?: MemorySpace;
-  // Multi-space write opt-in (see enableMultiSpaceWrites). When disabled the
-  // transaction rejects writes to a second space; when enabled commit() splits
-  // into one per-space commit.
+
+  /**
+   * Whether multi-space writes are enabled (see `enableMultiSpaceWrites()`).
+   * When disabled the transaction rejects writes to a second space; when
+   * enabled `commit()` splits into one per-space commit.
+   */
   #multiSpaceWrites = false;
-  // Authoritative-writes mode (see IStorageTransaction.markAuthoritativeWrites
-  // and the F2 rationale there): value writes are recorded and committed even
-  // when equal to the currently-visible state — the no-op elision in
-  // writeWithinBranch/writeBatchRun yields, the doc-level elision in
-  // getNativeCommit yields, and the commit is emitted as a WHOLE-DOC
-  // set/delete rather than patches (round-2 thread 17: a patch base
-  // extrapolated over a doomed sealed overlay can name ancestors durable
-  // state never had, and `replace` cannot create them).
-  // Set by effect-completion writebacks under the serving posture; one-way.
+
+  /**
+   * Whether authoritative-writes mode is on (see
+   * `IStorageTransaction.markAuthoritativeWrites()` and the rationale there):
+   * value writes are recorded and committed even when equal to the
+   * currently-visible state — the no-op elision in
+   * `#writeWithinBranch()`/`#writeBatchRun()` yields, the doc-level elision
+   * in `getNativeCommit()` yields, and the commit is emitted as a _whole-doc_
+   * set/delete rather than patches (a patch base extrapolated over a doomed
+   * sealed overlay can name ancestors durable state never had, and `replace`
+   * cannot create them). Set by effect-completion writebacks under the serving
+   * posture; one-way.
+   */
   #authoritativeWrites = false;
-  // Whole-document-writes mode (see
-  // IStorageTransaction.markWholeDocumentWrites): the emission half of
-  // authoritative mode on its own — set/delete rather than patches and
-  // mergeable ops — with the no-op elision left in place. Set by the client
-  // speculation overlay's seal, whose entries layer their ops over a
-  // confirmed value that moves under them. One-way.
+
+  /**
+   * Whether whole-document-writes mode is on (see
+   * `IStorageTransaction.markWholeDocumentWrites()`): the emission half of
+   * authoritative mode on its own — set/delete rather than patches and
+   * mergeable ops — with the no-op elision left in place. Set by the client
+   * speculation overlay's seal, whose entries layer their ops over a confirmed
+   * value that moves under them. One-way.
+   */
   #wholeDocumentWrites = false;
+
   #commitOrder?: readonly MemorySpace[];
-  // Spaces written to, in first-write order. Used as the default commit order.
+
+  /**
+   * Spaces written to, in first-write order. Used as the default commit order.
+   */
   #writtenSpaces: MemorySpace[] = [];
+
   #readOnlySource?: string;
   #lastDocument?: {
     branch: SpaceBranch;
@@ -1160,10 +1196,12 @@ export class V2StorageTransaction implements IStorageTransaction {
     });
   }
 
-  // Records one mergeable-op delta at a path. Which ops exist, whether a delta
-  // records nothing, how repeated deltas fold into one intent, and how an intent
-  // becomes wire ops are all defined once in ./mergeable-ops.ts — this method
-  // just accumulates, deferring the per-op questions to that registry.
+  /**
+   * Records one mergeable-op delta at a path. Which ops exist, whether a delta
+   * records nothing, how repeated deltas fold into one intent, and how an
+   * intent becomes wire ops are all defined once in `./mergeable-ops.ts` — this
+   * method just accumulates, deferring the per-op questions to that registry.
+   */
   recordMergeableOp(
     address: IMemorySpaceAddress,
     delta: MergeableOpDelta,
@@ -1200,26 +1238,29 @@ export class V2StorageTransaction implements IStorageTransaction {
     );
   }
 
-  // Abandon the mergeable fast path for `address`: a foreign write (a reshape
-  // that is not itself a mergeable op) has rewritten the array after an op was
-  // recorded, so the recorded tail no longer identifies the appended elements.
-  // Drop any covered intent and mark its path poisoned so the commit emits the
-  // whole-array diff (the correct local value) instead.
-  //
-  // The reshape reaches every intent AT or BENEATH the written path: a write to
-  // an enclosing object (`doc.set({rows})`) rewrites the array inside it just as
-  // surely as a write to the array itself, and the intent's recorded tail then
-  // spans elements the reshape supplied rather than ones an op appended. Intents
-  // ABOVE the write are untouched, which is what keeps an element edit
-  // (`cell.key(i).set(...)`, a write beneath the array) composing with a push,
-  // and leaves a write to a sibling field alone.
-  //
-  // A path carrying no intent yet is left alone — but that is not a statement
-  // that a reshape before an op is harmless. It is caught later instead, by each
-  // builder's own check at commit that its intent still describes the local
-  // value (see ./mergeable-ops.ts). The same goes for an element edit, which is
-  // beneath the array and so passes through here untouched: harmless to a tail
-  // op, fatal to a remove-by-value, and the builders are what tell them apart.
+  /**
+   * Abandons the mergeable fast path for `address`: a foreign write (a reshape
+   * that is not itself a mergeable op) has rewritten the array after an op was
+   * recorded, so the recorded tail no longer identifies the appended elements.
+   * Drops any covered intent and marks its path poisoned so the commit emits
+   * the whole-array diff (the correct local value) instead.
+   *
+   * The reshape reaches every intent _at_ or _beneath_ the written path: a
+   * write to an enclosing object (`doc.set({rows})`) rewrites the array inside
+   * it just as surely as a write to the array itself, and the intent's recorded
+   * tail then spans elements the reshape supplied rather than ones an op
+   * appended. Intents _above_ the write are untouched, which is what keeps an
+   * element edit (`cell.key(i).set(...)`, a write beneath the array) composing
+   * with a push, and leaves a write to a sibling field alone.
+   *
+   * A path carrying no intent yet is left alone — but that is not a statement
+   * that a reshape before an op is harmless. It is caught later instead, by
+   * each builder's own check at commit that its intent still describes the
+   * local value (see `./mergeable-ops.ts`). The same goes for an element edit,
+   * which is beneath the array and so passes through here untouched: harmless
+   * to a tail op, fatal to a remove-by-value, and the builders are what tell
+   * them apart.
+   */
   poisonMergeableOp(address: IMemorySpaceAddress): void {
     // Only ever called right after a write on this transaction, so the tx is
     // editable — no editable() re-check. The write also made the address's
@@ -1238,9 +1279,12 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
   }
 
-  // The caller wrote through this same transaction, so the entry is writable.
-  // A missing writable entry is an invariant violation the record methods throw
-  // on rather than silently dropping the operation.
+  /**
+   * Returns the writable document entry for `address`, or `undefined` when it
+   * is not writable. The caller wrote through this same transaction, so the
+   * entry is writable; a missing writable entry is an invariant violation the
+   * record methods throw on rather than silently dropping the operation.
+   */
   #writableMergeableTarget(
     address: IMemorySpaceAddress,
   ): WritableDocumentEntry | undefined {
@@ -3311,28 +3355,31 @@ export class V2StorageTransaction implements IStorageTransaction {
     return { op: "patch", id, type, scope, patches, value: doc.current.value };
   }
 
-  // Builds the mergeable ops for a document's recorded intents, plus the paths
-  // each covers so the diff candidates the op replaces can be suppressed. The
-  // per-op payload/suppression rules live in ./mergeable-ops.ts; here we only
-  // supply each intent the working/initial array state its builder needs.
-  //
-  // A builder can also abandon its intent — the recorded op no longer describes
-  // the transaction's local value (see `buildTailOp` / `buildRemoveByValue`).
-  // Abandoning must poison the path here rather than just skip the op, because a
-  // surviving intent still narrows the op's reads out of the commit's conflict
-  // set (v2.ts) and would hand the replacing whole-value diff a read set it has
-  // not earned. This runs inside getNativeCommit, which precedes that narrowing,
-  // so both sides see the same intents.
-  //
-  // One intent is also abandoned for what its SIBLINGS carry, which is why the
-  // contexts are computed for all of them before any is built: a tail op's
-  // payload is live values read out of the working document, so an intent whose
-  // target sits inside that payload has already had its change applied by the
-  // covering op, and sending it too would apply it twice (see
-  // `mergeableOpPayloadContains`). Coverage is judged on what each intent
-  // RECORDED, not on which ops survived — an intent contained by an op that is
-  // itself abandoned must fall back with it, so that the whole-value diff is the
-  // only thing carrying that region.
+  /**
+   * Builds the mergeable ops for a document's recorded intents, plus the paths
+   * each covers so the diff candidates the op replaces can be suppressed. The
+   * per-op payload/suppression rules live in `./mergeable-ops.ts`; here we only
+   * supply each intent the working/initial array state its builder needs.
+   *
+   * A builder can also abandon its intent — the recorded op no longer describes
+   * the transaction's local value (see `buildTailOp()` /
+   * `buildRemoveByValue()`). Abandoning must poison the path here rather than
+   * just skip the op, because a surviving intent still narrows the op's reads
+   * out of the commit's conflict set (`v2.ts`) and would hand the replacing
+   * whole-value diff a read set it has not earned. This runs inside
+   * `getNativeCommit()`, which precedes that narrowing, so both sides see the
+   * same intents.
+   *
+   * One intent is also abandoned for what its _siblings_ carry, which is why
+   * the contexts are computed for all of them before any is built: a tail op's
+   * payload is live values read out of the working document, so an intent whose
+   * target sits inside that payload has already had its change applied by the
+   * covering op, and sending it too would apply it twice (see
+   * `mergeableOpPayloadContains()`). Coverage is judged on what each intent
+   * _recorded_, not on which ops survived — an intent contained by an op that
+   * is itself abandoned must fall back with it, so that the whole-value diff is
+   * the only thing carrying that region.
+   */
   #buildMergeableOps(
     doc: WritableDocumentEntry,
   ): { ops: PatchOp[]; suppress: OpSuppression[] } {
@@ -3367,21 +3414,22 @@ export class V2StorageTransaction implements IStorageTransaction {
     return { ops, suppress };
   }
 
-  // Abandons every mergeable intent a document recorded, for a commit that
-  // emits the document whole. An intent narrows the reads incidental to its op
-  // out of the commit's read set (`SpaceReplica.#commitReadActivities` in
-  // ./v2.ts), which is sound only while the op is what carries that region:
-  // a mergeable op
-  // resolves against durable state, so the value it read does not constrain
-  // it. A whole-document set carries the region instead, and it is the value
-  // the run computed from what it read — so those reads are real dependencies
-  // and have to stay. Abandoning is the delete-and-poison shape
-  // `poisonMergeableOp` uses, and it runs inside getNativeCommit, which
-  // precedes the narrowing, so both sides see the same intents.
-  //
-  // For a speculative seal the read set is what the entry's retirement floor
-  // and its pending-read documents are built from, so an intent surviving here
-  // retires the entry against a watermark that never covered what the run read.
+  /**
+   * Abandons every mergeable intent a document recorded, for a commit that
+   * emits the document whole. An intent narrows the reads incidental to its op
+   * out of the commit's read set (`SpaceReplica.#commitReadActivities` in
+   * `./v2.ts`), which is sound only while the op is what carries that region: a
+   * mergeable op resolves against durable state, so the value it read does not
+   * constrain it. A whole-document set carries the region instead, and it is
+   * the value the run computed from what it read — so those reads are real
+   * dependencies and have to stay. Abandoning is the delete-and-poison shape
+   * `poisonMergeableOp()` uses, and it runs inside `getNativeCommit()`, which
+   * precedes the narrowing, so both sides see the same intents.
+   *
+   * For a speculative seal the read set is what the entry's retirement floor
+   * and its pending-read documents are built from, so an intent surviving here
+   * retires the entry against a watermark that never covered what the run read.
+   */
   #abandonMergeableOps(doc: WritableDocumentEntry): void {
     if (!doc.mergeableOps?.size) {
       return;
@@ -3392,8 +3440,10 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
   }
 
-  // The working / initial state at one intent's path, which its builder turns
-  // into wire ops.
+  /**
+   * Returns the working/initial state at one intent's path, which its builder
+   * turns into wire ops.
+   */
   #mergeableBuildContext(
     doc: WritableDocumentEntry,
     intent: MergeableOpIntent,
