@@ -830,6 +830,7 @@ describe("listing", () => {
       let named = 0;
       let unnamed = 0;
       let reported = 0;
+      let reportedWithOperand = 0;
       let reportedWithoutOperand = 0;
 
       /**
@@ -877,6 +878,7 @@ describe("listing", () => {
         expect(moved(standing, tokens[0]).kind).toBe("moved");
         expect(standing.place).toEqual(childOf(from, row.name));
         named++;
+        if (row.error !== undefined) reportedWithOperand++;
       }
 
       const sources: {
@@ -946,11 +948,16 @@ describe("listing", () => {
       // counts add is that both arms are reached and that an error reaches
       // each — `named` and `unnamed` for the arms, `reported` for an error
       // anywhere, and one guard per arm for an error inside it, since the
-      // arms are where a row and its error are printed together and the
-      // marker arm is the one this case twice computed and did not read.
+      // arms are where a row and its error are printed together.
+      //
+      // Two arms means two guards, and neither stands for the other: an
+      // error counted in the marker arm leaves the strong clause free to hold
+      // over a set with no named row carrying an error in it, and a clause
+      // with nothing to hold over is the want these counts exist to refuse.
       expect(named).toBeGreaterThan(0);
       expect(unnamed).toBeGreaterThan(0);
       expect(reported).toBeGreaterThan(0);
+      expect(reportedWithOperand).toBeGreaterThan(0);
       expect(reportedWithoutOperand).toBeGreaterThan(0);
     });
   });
