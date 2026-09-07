@@ -25,9 +25,9 @@ const space = signer.did();
 // of the link TARGET — read basis seq 0 vs the server's newer seq, a
 // guaranteed ConflictError. v1 was immune (populate's aborted first runs
 // subscribed the target before the first real commit). The v2 equivalent:
-// the resume pre-sync (syncCellsForRunningPattern) must follow the resumed
-// pattern's argument links one level and pull their targets before the
-// settle runs.
+// the resume pre-sync (`Runner.#syncCellsForRunningPattern()`) must follow
+// the resumed pattern's argument links one level and pull their targets
+// before the settle runs.
 //
 // Two managers with their OWN replicas loopback-connected to one in-process
 // server (same shape as inspace-child-owner-seed.test.ts): a shared emulate

@@ -549,11 +549,6 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       doubled: lift((input: number) => input * 2)(value),
     }));
     const harness = runtime.runner.accessForTestingOnly;
-    // Replaced by assignment below, which only a TypeScript-private member
-    // allows, so it is reached the old way.
-    const stubbed = runtime.runner as unknown as {
-      syncCellsForRunningPattern(...args: unknown[]): Promise<unknown>;
-    };
     const tx = gatedTxOn(runtime);
     const result = runtime.getCell<{ doubled?: number }>(
       space,
@@ -578,20 +573,16 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     // The competitor: a second, independent public start of the same
     // result (the navigate landing flow), fired inside the recovery
     // walk's dependency-sync await.
-    const originalSync = stubbed.syncCellsForRunningPattern;
     let competitorRan = false;
-    stubbed.syncCellsForRunningPattern = async function (...args: unknown[]) {
-      if (
-        !competitorRan &&
-        key(args[0] as Cell<unknown>) === key(result)
-      ) {
+    harness.dependencySyncer = async (resultCell, executable, inputs, sync) => {
+      if (!competitorRan && key(resultCell) === key(result)) {
         competitorRan = true;
         // The entry-stop cleared these too late for the injector hook
         // above to matter to the competitor; make the competitor's own
         // walk take whatever path it finds — it installs either way.
         await runtime.runner.start(result);
       }
-      return Reflect.apply(originalSync, runtime.runner, args);
+      return sync(resultCell, executable, inputs);
     };
     try {
       const { cancelDeferredStart } = harness.runWithStartOwnership(
@@ -622,7 +613,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       cancelDeferredStart!();
       expect(runtime.runner.cancels.has(key(result))).toBe(true);
     } finally {
-      stubbed.syncCellsForRunningPattern = originalSync;
+      harness.dependencySyncer = undefined;
       injector.restore();
     }
   });

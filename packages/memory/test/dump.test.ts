@@ -74,7 +74,7 @@ Deno.test("spaceStorePath matches the server's canonical path + blocks traversal
   const store = await makeStore();
   try {
     seedStore(store, SPACE_A, 1);
-    // Must equal the exact path MemoryServer.openEngine would resolve.
+    // Must equal the exact path `Server.#openEngine()` would resolve.
     assertEquals(spaceStorePath(store, SPACE_A), canonicalPath(store, SPACE_A));
     assertEquals(spaceStorePath(store, "did:key:zMissing"), null);
     // Path traversal in the id is rejected by the encode guard.

@@ -524,7 +524,8 @@ describe("v2 document cache", () => {
   });
   it("drains by recency of access, not by order of opening: a retained engine's reads count", async () => {
     // A, then B, then A again THROUGH THE ENGINE HANDED OUT EARLIER (the
-    // runner's SpaceServer holds one, and its reads never pass openEngine),
+    // runner's SpaceServer holds one, and its reads never pass
+    // `Server.#openEngine()`),
     // then C under pressure: the least recently used space is B, and B
     // alone must give. Recency by order of opening would drain A, the hot
     // space, while B survived.

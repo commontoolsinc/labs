@@ -678,23 +678,19 @@ Deno.test("acl enforce: a taken-over session cannot finish an in-flight transact
   const second = await connect(server);
   const openEngineStarted = Promise.withResolvers<void>();
   const releaseOpenEngine = Promise.withResolvers<void>();
-  const mutableServer = server as unknown as {
-    openEngine: (space: string) => Promise<unknown>;
-  };
-  const originalOpenEngine = mutableServer.openEngine.bind(server);
   try {
     await initializeSpaceAcl(server, space, { [ALICE]: "OWNER" });
     const opened = await openSession(first, space, ALICE);
     assertExists(opened.ok);
 
     let pauseNextOpen = true;
-    mutableServer.openEngine = async (requestedSpace: string) => {
+    server.accessForTestingOnly.engineOpener = async (requestedSpace, open) => {
       if (pauseNextOpen) {
         pauseNextOpen = false;
         openEngineStarted.resolve();
         await releaseOpenEngine.promise;
       }
-      return await originalOpenEngine(requestedSpace);
+      return await open(requestedSpace);
     };
 
     const staleWrite = server.transact({
@@ -735,7 +731,6 @@ Deno.test("acl enforce: a taken-over session cannot finish an in-flight transact
     );
   } finally {
     releaseOpenEngine.resolve();
-    mutableServer.openEngine = originalOpenEngine;
     await server.close();
   }
 });

@@ -1290,6 +1290,30 @@ export interface PieceSourceTransition {
   selectedRevisionId?: string;
 }
 
+/**
+ * Pre-syncs what a run of `pattern` on `resultCell` reads before it runs:
+ * the cells `inputs` links to, the result cell, and the nodes' argument and
+ * result documents. Resolves to whether the node walk ran, which it does not
+ * for a module: the shape of `Runner`'s own step.
+ */
+export type DependencySync = (
+  resultCell: Cell<any>,
+  pattern: Module | Pattern,
+  inputs?: any,
+) => Promise<boolean>;
+
+/**
+ * The dependency pre-sync a test supplies in place of `Runner`'s own step.
+ * It receives that step as `sync`, so it can pause before it, fail in its
+ * stead, or observe what it returns.
+ */
+export type DependencySyncer = (
+  resultCell: Cell<any>,
+  pattern: Module | Pattern,
+  inputs: any,
+  sync: DependencySync,
+) => Promise<boolean>;
+
 type RunResult<R> = {
   resultCell: Cell<R>;
 
@@ -2093,6 +2117,12 @@ export class Runner {
    */
   #inFlightStartsByDoc = new Map<string, StartAttempt>();
 
+  /**
+   * The syncer a test supplies around the dependency pre-sync; `undefined`
+   * means the runner's own.
+   */
+  #dependencySyncer: DependencySyncer | undefined = undefined;
+
   #crossSpaceChildSpaces = new WeakMap<
     IExtendedStorageTransaction,
     MemorySpace[]
@@ -2112,9 +2142,10 @@ export class Runner {
 
   /**
    * The result and pointer tables, the deferred-start and start-attempt
-   * sets, the setup, storage-subscription, commit-gated run, ownership,
-   * key, sync, walk, and retry steps, and the implementation invoker, which
-   * a test drives directly.
+   * sets, the dependency syncer a test may supply, the setup,
+   * storage-subscription, commit-gated run, ownership, key, sync, walk, and
+   * retry steps, and the implementation invoker, which a test drives
+   * directly.
    */
   get accessForTestingOnly(): {
     readonly locallyPreparedResults: BoundedKeyMap<
@@ -2138,6 +2169,7 @@ export class Runner {
       Map<ScopeKey, string>
     >;
     readonly activeStartAttempts: Set<StartAttempt>;
+    dependencySyncer: DependencySyncer | undefined;
     createStorageSubscription(): IStorageSubscription;
     setupInternal<T, R>(
       providedTx: IExtendedStorageTransaction | undefined,
@@ -2191,6 +2223,8 @@ export class Runner {
       argument: unknown,
     ): unknown;
   } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
     return {
       locallyPreparedResults: this.#locallyPreparedResults,
       locallyStoppedResults: this.#locallyStoppedResults,
@@ -2198,6 +2232,12 @@ export class Runner {
       pendingDeferredStarts: this.#pendingDeferredStarts,
       resultPatternCache: this.#resultPatternCache,
       activeStartAttempts: this.#activeStartAttempts,
+      get dependencySyncer() {
+        return outerThis.#dependencySyncer;
+      },
+      set dependencySyncer(value) {
+        outerThis.#dependencySyncer = value;
+      },
       createStorageSubscription: () => this.#createStorageSubscription(),
       // Forwards to the TypeScript-private member so that a test which
       // replaces it by assignment is honored here too.
@@ -4794,7 +4834,7 @@ export class Runner {
         patternIdentityKey(current) === expectedPatternKey;
     };
     return (async () => {
-      await this.syncCellsForRunningPattern(rootCell, resolvedPattern);
+      await this.#syncCellsForRunningPattern(rootCell, resolvedPattern);
       if (!this.#isStartAttemptCurrent(attempt)) return false;
       // The result doc can hot-swap while the dependency pre-sync is awaiting
       // I/O. Never carry the old resolved Pattern into the new identity; restart
@@ -4819,7 +4859,7 @@ export class Runner {
           schedulerRehydration: this.#schedulerRehydrationOptions(
             rootCell,
             // Resumed from a synced state (it just awaited
-            // syncCellsForRunningPattern): hold each action's initial run
+            // `#syncCellsForRunningPattern()`): hold each action's initial run
             // until the space finishes syncing so we don't race the data
             // (e.g. maps reconciling an empty array, then re-running once it
             // streams in).
@@ -5751,7 +5791,7 @@ export class Runner {
   }> {
     await resultCell.sync();
 
-    const synced = await this.syncCellsForRunningPattern(
+    const synced = await this.#syncCellsForRunningPattern(
       resultCell,
       pattern,
       inputs,
@@ -5887,7 +5927,7 @@ export class Runner {
     try {
       // If a new pattern was specified, make sure to sync any new cells
       if (pattern || !synced) {
-        await this.syncCellsForRunningPattern(resultCell, pattern);
+        await this.#syncCellsForRunningPattern(resultCell, pattern);
       }
 
       if (setupRes?.needsStart) {
@@ -6113,33 +6153,40 @@ export class Runner {
   }
 
   /**
-   * TypeScript-private rather than a `#` name, because
-   * `test/runner.test.ts`, `test/deferred-start-catchup-start.test.ts`,
-   * and the `piece` package's `pull-materialization` and
-   * `setsrc-commit-receipt` tests replace this member by assignment, which a `#`
-   * method does not allow.
+   * Pre-syncs what a run of `pattern` on `resultCell` reads before it runs:
+   * the cells `inputs` links to, the result cell, and the nodes' argument and
+   * result documents. Resolves to whether the node walk ran, which it does
+   * not for a module. A syncer a test supplied wraps the whole step.
    */
-  private async syncCellsForRunningPattern(
+  #syncCellsForRunningPattern(
     resultCell: Cell<any>,
     pattern: Module | Pattern,
     inputs?: any,
   ): Promise<boolean> {
-    const syncStart = performance.now();
-    try {
-      return await this.#syncCellsForRunningPatternInner(
-        resultCell,
-        pattern,
-        inputs,
-      );
-    } finally {
-      // Resume-boot decomposition: this is the dependency pre-sync a fresh
-      // runtime pays before wiring a stored piece back up. Recorded under the
-      // runner timing stats (they record even when the logger is disabled) so
-      // load summaries can attribute slow storage-resume boots.
-      logger.time(syncStart, "start", "syncCellsForRunningPattern");
-    }
+    const sync: DependencySync = async (resultCell, pattern, inputs) => {
+      const syncStart = performance.now();
+      try {
+        return await this.#syncCellsForRunningPatternInner(
+          resultCell,
+          pattern,
+          inputs,
+        );
+      } finally {
+        // Resume-boot decomposition: this is the dependency pre-sync a fresh
+        // runtime pays before wiring a stored piece back up. Recorded under
+        // the runner timing stats (they record even when the logger is
+        // disabled) so load summaries can attribute slow storage-resume
+        // boots.
+        logger.time(syncStart, "start", "syncCellsForRunningPattern");
+      }
+    };
+    const syncer = this.#dependencySyncer;
+    return syncer === undefined
+      ? sync(resultCell, pattern, inputs)
+      : syncer(resultCell, pattern, inputs, sync);
   }
 
+  /** Helper for `#syncCellsForRunningPattern()`, which does the syncing. */
   async #syncCellsForRunningPatternInner(
     resultCell: Cell<any>,
     pattern: Module | Pattern,
@@ -6300,7 +6347,8 @@ export class Runner {
 
     // Per-cell spans: `n` in the timing stats is the number of cells this
     // resume pre-synced, total/max its round-trip cost (spans overlap, so the
-    // wall cost is bounded by the enclosing syncCellsForRunningPattern span).
+    // wall cost is bounded by the enclosing `#syncCellsForRunningPattern()`
+    // span).
     await Promise.all(cells.map((cell) => {
       const c = documentBoundedResumeCell(cell);
       const cellSyncStart = performance.now();
@@ -8896,7 +8944,7 @@ export class Runner {
     // dispatching the event. Without it, a synchronous in-handler read of an
     // asCell input (e.g. SqliteDb.exec reading the handle doc) races the
     // doc-carrying storage response on a cold replica — piece-start sync
-    // (syncCellsForRunningPattern) covers node binding docs, not the docs
+    // (`#syncCellsForRunningPattern()`) covers node binding docs, not the docs
     // behind link VALUES like a builtin's result handle. Steady-state this is
     // ~free: covered selectors resolve without a server round trip.
     const presyncInputs = module.argumentSchema !== undefined

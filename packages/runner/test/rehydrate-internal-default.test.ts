@@ -31,9 +31,9 @@ describe("rehydrate internal default (CT-1666)", () => {
   // build-time default UNDER it (persisted wins). But the internal cell lives
   // in a separate content-addressed doc reached only via the result cell's meta
   // link — not through the schema/value graph — so the run's awaited sync gate
-  // (`syncCellsForRunningPattern`) did not load it. The fix makes that gate
-  // sync the `internal`/`argument` meta docs, so the persisted value is loaded
-  // before the pattern (re)starts and renders.
+  // (`Runner.#syncCellsForRunningPattern()`) did not load it. The fix makes
+  // that gate sync the `internal`/`argument` meta docs, so the persisted value
+  // is loaded before the pattern (re)starts and renders.
   //
   // `activeTab` is intentionally internal-only here (never exported in
   // `result`), matching home.tsx where it is bound only to `<cf-tabs

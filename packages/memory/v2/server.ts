@@ -1380,6 +1380,17 @@ class Connection {
   }
 }
 
+/**
+ * The engine opener a test supplies in place of `Server`'s own step, which
+ * opens the engine for a space or hands back the one already open. It
+ * receives that step as `open`, so it can pause before it or fail in its
+ * stead, and returns what that step returns.
+ */
+export type EngineOpener = (
+  space: string,
+  open: (space: string) => Promise<Engine.Engine>,
+) => Promise<Engine.Engine>;
+
 export class Server {
   #sessions: SessionRegistry;
   #connections = new Map<string, Connection>();
@@ -1393,9 +1404,15 @@ export class Server {
 
   /**
    * The resolved-engine index for the synchronous cross-engine lease lookup
-   * in `#liveCoHostedLeaseSpaceFor()`; `openEngine()` populates it.
+   * in `#liveCoHostedLeaseSpaceFor()`; `#openEngineInner()` populates it.
    */
   #resolvedEngines = new Map<string, Engine.Engine>();
+
+  /**
+   * The opener a test supplies around the engine open; `undefined` means the
+   * server's own.
+   */
+  #engineOpener: EngineOpener | undefined = undefined;
 
   /** Holds `documentCacheTotalBudgetBytes` across this server's engines and
    * keeps their recency; every engine this server opens reports to it. */
@@ -1646,17 +1663,26 @@ export class Server {
   }
 
   /**
-   * The timer-driven refresh pass and the per-space publication lock, which
-   * a test drives directly.
+   * The engine opener a test may supply, and the timer-driven refresh pass
+   * and the per-space publication lock, which a test drives directly.
    */
   get accessForTestingOnly(): {
+    engineOpener: EngineOpener | undefined;
     flushScheduledSessions(): Promise<void>;
     withSpacePublicationLock<T>(
       space: string,
       run: () => Promise<T>,
     ): Promise<T>;
   } {
+    // deno-lint-ignore no-this-alias
+    const outerThis = this;
     return {
+      get engineOpener() {
+        return outerThis.#engineOpener;
+      },
+      set engineOpener(value) {
+        outerThis.#engineOpener = value;
+      },
       flushScheduledSessions: () => this.#flushScheduledSessions(),
       withSpacePublicationLock: (space, run) =>
         this.#withSpacePublicationLock(space, run),
@@ -1926,7 +1952,7 @@ export class Server {
     // return, then independently await their read engine/evaluation. Some
     // legacy runtime ordering depends on those two yield points.
     if (this.#aclMode() === "off") return null;
-    const engine = await this.openEngine(space);
+    const engine = await this.#openEngine(space);
     return this.#authorizeMessageWithEngine(
       engine,
       space,
@@ -2229,7 +2255,7 @@ export class Server {
     space: string,
     id: string,
   ): Promise<EntityDocument | null> {
-    const engine = await this.openEngine(space);
+    const engine = await this.#openEngine(space);
     return Engine.read(engine, { id });
   }
 
@@ -2239,7 +2265,7 @@ export class Server {
     value: EntityDocument["value"],
   ): Promise<Engine.AppliedCommit> {
     return await this.#withSpacePublicationLock(space, async () => {
-      const engine = await this.openEngine(space);
+      const engine = await this.#openEngine(space);
       if (this.#aclMode() !== "off") {
         if (id === aclDocId(space)) {
           throw new Engine.ProtocolError(
@@ -2325,7 +2351,7 @@ export class Server {
     // multi-statement) is refused even against a never-written cell-db rather
     // than silently returning [].
     assertReadOnly(sql);
-    const engine = await this.openEngine(space);
+    const engine = await this.#openEngine(space);
     const path = this.#cellDbPath(engine, space, db.id, scopeKey);
     // A never-written cell-db has no file yet (its schema is created on the
     // first write, via the attach path). Treat a missing file as an empty
@@ -2395,7 +2421,7 @@ export class Server {
     } catch {
       throw new Engine.ProtocolError(`disk source path not found: ${path}`);
     }
-    const engine = await this.openEngine(space);
+    const engine = await this.#openEngine(space);
     if (engine.url.protocol === "file:") {
       // Canonicalize the store dir too (not just the source path): `canonical`
       // is realpath-resolved, so comparing it against a NON-canonical storeDir
@@ -2717,7 +2743,7 @@ export class Server {
      * is the one and only re-send dedupe. */
     localSeq: number;
   }): Promise<{ seq?: number; deduped: boolean }> {
-    const engine = await this.openEngine(entry.targetSpace);
+    const engine = await this.#openEngine(entry.targetSpace);
     // Read-check-append runs synchronously from here (no await), so the
     // horizon check and the commit are atomic on the single-threaded
     // co-hosted engine. The engine's event-append admission re-runs the
@@ -2870,7 +2896,7 @@ export class Server {
     }
     const aclEngine = this.#aclMode() === "off"
       ? undefined
-      : await this.openEngine(message.space);
+      : await this.#openEngine(message.space);
     {
       const deny = aclEngine === undefined
         ? await this.#authorizeMessage(
@@ -2995,7 +3021,7 @@ export class Server {
     }
     const aclEngine = this.#aclMode() === "off"
       ? undefined
-      : await this.openEngine(message.space);
+      : await this.#openEngine(message.space);
     {
       // Maps a server filesystem path into the space — operator surface.
       const deny = aclEngine === undefined
@@ -3063,7 +3089,7 @@ export class Server {
         authContext,
       );
       connection.consumeSessionOpenChallenge(authContext.challenge);
-      const engine = await this.openEngine(message.space);
+      const engine = await this.#openEngine(message.space);
       // The delegated READ binding (OW31, READ side RULED 2026-08-19):
       // `actingAs: "space-owner"` is admitted only for a DELEGATING-class
       // envelope (the co-hosted process identity under the flag — the
@@ -3247,7 +3273,7 @@ export class Server {
       );
     }
     try {
-      const engine = await this.openEngine(message.space);
+      const engine = await this.#openEngine(message.space);
       return {
         type: "response",
         requestId: message.requestId,
@@ -3342,7 +3368,7 @@ export class Server {
             toError("SessionError", "Unknown session for space"),
           );
         }
-        const engine = await this.openEngine(message.space);
+        const engine = await this.#openEngine(message.space);
         if (this.#sessions.get(message.space, message.sessionId) !== session) {
           return respondTypedError<EventAttentionResolveResult>(
             message.requestId,
@@ -3701,8 +3727,9 @@ export class Server {
           span.setAttribute("user.did", session.principal);
         }
         try {
-          const engine = await this.openEngine(message.space);
-          // The session may be revoked or replaced while openEngine awaits.
+          const engine = await this.#openEngine(message.space);
+          // The session may be revoked or replaced while `#openEngine()`
+          // awaits.
           // Re-check the exact registry object before using the captured
           // principal so an old connection cannot commit after takeover.
           if (
@@ -3933,7 +3960,7 @@ export class Server {
               session,
               message.commit,
             );
-            const engine = await this.openEngine(message.space);
+            const engine = await this.#openEngine(message.space);
             retryAfterSeq = Engine.serverSeq(engine);
           }
           const messageText = error instanceof Error
@@ -4002,7 +4029,7 @@ export class Server {
     }
     const aclEngine = this.#aclMode() === "off"
       ? undefined
-      : await this.openEngine(message.space);
+      : await this.#openEngine(message.space);
     {
       const deny = aclEngine === undefined
         ? await this.#authorizeMessage(
@@ -4106,7 +4133,7 @@ export class Server {
       );
     }
     try {
-      const engine = await this.openEngine(message.space);
+      const engine = await this.#openEngine(message.space);
       const deny = this.#authorizeCurrentSessionWithEngine(
         engine,
         message.space,
@@ -4170,7 +4197,7 @@ export class Server {
     }
 
     try {
-      const engine = await this.openEngine(message.space);
+      const engine = await this.#openEngine(message.space);
       const deny = this.#authorizeCurrentSessionWithEngine(
         engine,
         message.space,
@@ -4265,7 +4292,7 @@ export class Server {
     }
 
     try {
-      const engine = await this.openEngine(message.space);
+      const engine = await this.#openEngine(message.space);
       const deny = this.#authorizeCurrentSessionWithEngine(
         engine,
         message.space,
@@ -4308,7 +4335,7 @@ export class Server {
     }
     const aclEngine = this.#aclMode() === "off"
       ? undefined
-      : await this.openEngine(message.space);
+      : await this.#openEngine(message.space);
     {
       const deny = aclEngine === undefined
         ? await this.#authorizeMessage(
@@ -4457,7 +4484,7 @@ export class Server {
     }
     const aclEngine = this.#aclMode() === "off"
       ? undefined
-      : await this.openEngine(message.space);
+      : await this.#openEngine(message.space);
     {
       const deny = aclEngine === undefined
         ? await this.#authorizeMessage(
@@ -4514,7 +4541,7 @@ export class Server {
 
     try {
       const startedAt = performance.now();
-      const engine = aclEngine ?? await this.openEngine(message.space);
+      const engine = aclEngine ?? await this.#openEngine(message.space);
       const nextOperationCursors = new Map(session.operationCursors);
       const existingById = new Map(
         session.watches.map((watch) => [watch.id, watch] as const),
@@ -4796,7 +4823,7 @@ export class Server {
       // response carries exactly the declared result shape.
       const { stats, ...result } = queryGraph(
         space,
-        engine ?? await this.openEngine(space),
+        engine ?? await this.#openEngine(space),
         query,
         reuse,
         {
@@ -4831,7 +4858,7 @@ export class Server {
     entities: Map<string, SessionCacheEntry>;
   }> {
     const startedAt = performance.now();
-    const resolvedEngine = engine ?? await this.openEngine(space);
+    const resolvedEngine = engine ?? await this.#openEngine(space);
     const reuse: QueryGraphReuseContext = {
       managers: new Map(),
     };
@@ -5128,7 +5155,7 @@ export class Server {
             toSeq?: number,
           ): Promise<SessionEffectMessage | null> => {
             const serverSeq = toSeq ??
-              Engine.serverSeq(await this.openEngine(space));
+              Engine.serverSeq(await this.#openEngine(space));
             const mayCarryOperations = session.watches.some((watch) =>
               watch.kind === "operation"
             ) && serverSeq > fromSeq;
@@ -5161,7 +5188,7 @@ export class Server {
             if (session.entities.size === 0) {
               return await emptyCatchUp();
             }
-            const serverSeq = Engine.serverSeq(await this.openEngine(space));
+            const serverSeq = Engine.serverSeq(await this.#openEngine(space));
             const sync: SessionSync = {
               type: "sync",
               fromSeq: session.lastSyncedSeq,
@@ -5231,7 +5258,7 @@ export class Server {
               return await emptyCatchUp();
             }
 
-            const engine = await this.openEngine(space);
+            const engine = await this.#openEngine(space);
             const fromSeq = session.lastSyncedSeq;
             const identity = this.#sessionScopeIdentity(session);
             const updates = new Map<string, SessionCacheEntry>();
@@ -5575,7 +5602,7 @@ export class Server {
     if (operationWatches.length === 0) return;
     operationActiveWatchCount.record(operationWatches.length);
     const cursors = operationCursors ?? session.operationCursors;
-    const engine = await this.openEngine(space);
+    const engine = await this.#openEngine(space);
     sync.operationFields = operationWatches.map((watch) => {
       const after = cursors.get(watch.id) ?? watch.query.after;
       const field = Engine.queryOperationField(engine, {
@@ -6141,7 +6168,7 @@ export class Server {
           "EXPERIMENTAL_SERVER_EXECUTION is off (protocol.md §2)",
       );
     }
-    const engine = await this.openEngine(space);
+    const engine = await this.#openEngine(space);
     const fullHolder = session.principal === undefined
       ? undefined
       : executionLeaseHolder(session.principal);
@@ -6206,7 +6233,7 @@ export class Server {
     // keeps receiving the foreign instances its cross-space serving
     // reads named). Full-holder equality throughout (the per-process
     // sharpening).
-    const engine = await this.openEngine(space);
+    const engine = await this.#openEngine(space);
     const fullHolder = executionLeaseHolder(session.principal);
     const holdsReadSpace = liveExecutionLeaseHolder(engine, space) ===
       fullHolder;
@@ -6726,7 +6753,7 @@ export class Server {
    * tests only — nothing session-facing reaches an engine directly.
    */
   engineForSpace(space: string): Promise<Engine.Engine> {
-    return this.openEngine(space);
+    return this.#openEngine(space);
   }
 
   /**
@@ -6749,7 +6776,7 @@ export class Server {
    *   creating commit is what makes it the actor's (CT-1650's
    *   deterministic per-user-per-event DIDs; quota attribution stays
    *   the recorded residual, README §3.8). Probed WITHOUT creating:
-   *   the open-engine map first, then the store path — `openEngine`
+   *   the open-engine map first, then the store path — `#openEngine()`
    *   materializes a store as a side effect, which is exactly what an
    *   ungranted probe must not do.
    * - **acl**: the target's OWN ACL document grants the principal (or
@@ -6795,7 +6822,7 @@ export class Server {
     if (!(await this.#spaceStoreExists(space))) {
       return { granted: true, via: "creation" };
     }
-    const engine = await this.openEngine(space);
+    const engine = await this.#openEngine(space);
     const state = this.#aclState(engine, space);
     if (state.kind === "valid") {
       const capability = state.acl[principal] ?? state.acl[ANYONE_USER] ??
@@ -6820,7 +6847,7 @@ export class Server {
   }
 
   /** Whether a store for `space` already exists, WITHOUT creating one
-   * (the foreignWriteAuthorityFor probe's creation arm — `openEngine`
+   * (the foreignWriteAuthorityFor probe's creation arm — `#openEngine()`
    * materializes stores as a side effect). An open (or opening) engine
    * exists by definition; a file-backed store exists iff its file
    * does; a memory-backed store exists only while an engine holds it. */
@@ -6840,11 +6867,24 @@ export class Server {
   }
 
   /**
-   * TypeScript-private rather than a `#` name, because
-   * `test/v2-server-acl.test.ts` replaces this member by assignment, which a
-   * `#` method does not allow.
+   * Opens the engine for `space`, or hands back the one already open or
+   * opening. An opener a test supplied wraps the whole step.
    */
-  private openEngine(space: string): Promise<Engine.Engine> {
+  #openEngine(space: string): Promise<Engine.Engine> {
+    const opener = this.#engineOpener;
+    if (opener !== undefined) {
+      return opener(space, (space) => this.#openEngineInner(space));
+    }
+    return this.#openEngineInner(space);
+  }
+
+  /**
+   * Helper for `#openEngine()`, which does the opening: an engine already
+   * open or opening is handed back; otherwise one is opened at the space's
+   * store URL, its directory created first when the store is a file, and
+   * indexed while it opens.
+   */
+  #openEngineInner(space: string): Promise<Engine.Engine> {
     const existing = this.#engines.get(space);
     if (existing !== undefined) {
       return existing;
@@ -6903,10 +6943,10 @@ export class Server {
    *   process-instance component the co-hosted ExecutorHost mints
    *   holders from — so a second process authenticated as the same
    *   service DID no longer passes on this process's lease rows.
-   * - SYNCHRONOUS: scans the RESOLVED engine map only (see openEngine),
-   *   so callers on the read path add no microtask boundary. Sound
-   *   because a lease row can only be written through an open co-hosted
-   *   engine.
+   * - SYNCHRONOUS: scans the RESOLVED engine map only (see
+   *   `#openEngineInner()`), so callers on the read path add no microtask
+   *   boundary. Sound because a lease row can only be written through an
+   *   open co-hosted engine.
    */
   #liveCoHostedLeaseSpaceFor(principal: string): string | undefined {
     const holder = executionLeaseHolder(principal);

@@ -17,6 +17,7 @@ import {
   isLink,
   type JSONSchema,
   KeepAsCell,
+  type Module,
   NAME,
   Pattern,
   PatternSetupPostCommitError,
@@ -7115,23 +7116,14 @@ describe("piece pull materialization", () => {
     const winnerPostCommitSync = defer<void>();
     const releaseFirst = defer<void>();
     const releaseWinner = defer<void>();
-    const runnerInternals = runtime.runner as unknown as {
-      syncCellsForRunningPattern(
-        resultCell: unknown,
-        pattern: Pattern,
-        inputs?: unknown,
-      ): Promise<boolean>;
-    };
-    const originalSync = runnerInternals.syncCellsForRunningPattern.bind(
-      runtime.runner,
-    );
-    const syncCounts = new Map<Pattern, number>();
-    runnerInternals.syncCellsForRunningPattern = async (
+    const syncCounts = new Map<Module | Pattern, number>();
+    runtime.runner.accessForTestingOnly.dependencySyncer = async (
       resultCell,
       pattern,
       inputs,
+      sync,
     ) => {
-      const synced = await originalSync(resultCell, pattern, inputs);
+      const synced = await sync(resultCell, pattern, inputs);
       const count = (syncCounts.get(pattern) ?? 0) + 1;
       syncCounts.set(pattern, count);
       if (count === 2 && pattern === firstPattern) {
@@ -7201,7 +7193,7 @@ describe("piece pull materialization", () => {
     } finally {
       releaseFirst.resolve();
       releaseWinner.resolve();
-      runnerInternals.syncCellsForRunningPattern = originalSync;
+      runtime.runner.accessForTestingOnly.dependencySyncer = undefined;
       runtime.patternManager.compilePattern = originalCompile;
     }
   });
@@ -7509,29 +7501,20 @@ describe("piece pull materialization", () => {
         runtime.patternManager.getArtifactEntryRef(remotePattern),
       );
 
-      const runnerInternals = runtime.runner as unknown as {
-        syncCellsForRunningPattern(
-          resultCell: unknown,
-          pattern: Pattern,
-          inputs?: unknown,
-        ): Promise<boolean>;
-      };
-      const originalSync = runnerInternals.syncCellsForRunningPattern.bind(
-        runtime.runner,
-      );
       let dependencySyncs = 0;
-      runnerInternals.syncCellsForRunningPattern = async (
+      runtime.runner.accessForTestingOnly.dependencySyncer = async (
         resultCell,
         pattern,
         inputs,
+        sync,
       ) => {
         if (pattern === remotePattern) dependencySyncs++;
-        return await originalSync(resultCell, pattern, inputs);
+        return await sync(resultCell, pattern, inputs);
       };
       try {
         await runtime.start(piece);
       } finally {
-        runnerInternals.syncCellsForRunningPattern = originalSync;
+        runtime.runner.accessForTestingOnly.dependencySyncer = undefined;
       }
 
       expect(dependencySyncs).toBeGreaterThan(0);
