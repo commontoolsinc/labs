@@ -101,9 +101,13 @@ function parseDetailName(name: string): ParsedName | null {
 }
 
 export class CiGanttDetailStore {
-  // A function defers reading the dashboard cache directory until the first
-  // request, the way the run index defers reading its own file name.
+  /**
+   * The dashboard cache directory, or a function returning it. A function
+   * defers reading the directory until the first request, the way the run
+   * index defers reading its own file name.
+   */
   #directory: string | (() => string) | undefined;
+
   #temporaries = new Set<string>();
 
   constructor(directory?: string | (() => string)) {
@@ -182,10 +186,12 @@ export class CiGanttDetailStore {
     }
   }
 
-  // Drops the attempts of one repository and workflow that `keep` does not
-  // name, and removes temporary files a crashed write left behind. Attempts of
-  // other repositories are left alone, so pruning one source can never take
-  // another's detail. A temporary this process is still writing is left alone.
+  /**
+   * Drops the attempts of one repository and workflow that `keep` does not
+   * name, and removes temporary files a crashed write left behind. Attempts of
+   * other repositories are left alone, so pruning one source can never take
+   * another's detail. A temporary this process is still writing is left alone.
+   */
   async prune(
     source: CiGanttDetailSource,
     keep: Iterable<CachedCiRunReference>,

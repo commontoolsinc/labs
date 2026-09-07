@@ -26,41 +26,44 @@ export class Manifest {
     this.#config = config;
   }
 
-  // The root directory path of the project being tested.
+  /** The root directory path of the project being tested. */
   get projectDir(): string {
     return this.#projectDir;
   }
 
-  // An array of relative paths to tests
-  // from `projectDir`.
+  /** An array of relative paths to tests from `projectDir`. */
   get tests(): string[] {
     return this.#tests;
   }
 
-  // The root directory path of the static server.
+  /** The root directory path of the static server. */
   get serverDir(): string {
     return path.join(this.#runDir, "server");
   }
 
-  // The directory the browser keeps its profile in.
+  /** The directory the browser keeps its profile in. */
   get profileDir(): string {
     return path.join(this.#runDir, "profile");
   }
 
-  // The requested port the static server is being served on.
-  // If `0` (the default), the actual listening port will be different.
+  /**
+   * The requested port the static server is being served on. If `0` (the
+   * default), the actual listening port will be different.
+   */
   get requestedPort(): number {
     return 0;
   }
 
-  // Configuration defined via `deno-web-test.config.ts`
+  /** Configuration defined via `deno-web-test.config.ts`. */
   get config(): Config {
     return this.#config;
   }
 
-  // Removes everything the run wrote, both directories above included. The
-  // browser has to be closed and the static server stopped first, so that
-  // nothing the run started is writing to either directory as it goes.
+  /**
+   * Removes everything the run wrote, both directories above included. The
+   * browser has to be closed and the static server stopped first, so that
+   * nothing the run started is writing to either directory as it goes.
+   */
   async remove(): Promise<void> {
     await removeDirectory(this.#runDir);
   }
