@@ -759,16 +759,18 @@ export class SpaceSession {
   #background = new Set<Promise<void>>();
 
   /**
-   * Watch-mutation ordering: serializes the _application_ of watch responses
-   * (the `#watchSpecs` / `#watchView` mutations) in call order. `#watchIssue`
-   * serializes request _issue_ in call order and, in concurrent mode, advances
-   * as soon as a request has been _sent_ (not answered), so multiple watch
-   * round trips overlap on the wire while application stays ordered. In
-   * single-flight mode `#watchIssue` is unused and each mutation's request and
-   * apply run together on `#watchApply`.
+   * Serializes the _application_ of watch responses (the `#watchSpecs` /
+   * `#watchView` mutations) in call order, so application stays ordered even
+   * when round trips overlap on the wire.
    */
   #watchApply: Promise<void> = Promise.resolve();
 
+  /**
+   * Serializes request _issue_ in call order; in concurrent mode it advances
+   * as soon as a request has been _sent_ (not answered), so multiple watch
+   * round trips overlap on the wire. In single-flight mode it is unused and
+   * each mutation's request and apply run together on `#watchApply`.
+   */
   #watchIssue: Promise<void> = Promise.resolve();
 
   /**

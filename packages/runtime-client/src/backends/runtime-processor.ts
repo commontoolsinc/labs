@@ -2129,13 +2129,12 @@ export class RuntimeProcessor {
    * sigil-shaped payload with broken internals throws into a typed refusal.
    * These are one walk with two implementations, and this is the copy to
    * retire.
-   *
-   * TODO(danfuzz): Refuse a cell that is not a piece cell in the surviving
-   * walk, once `parseSlugRedirect` is the one copy.
    */
   async handlePieceGet(
     request: PieceGetRequest,
   ): Promise<PieceResponse> {
+    // TODO(danfuzz): Refuse a cell that is not a piece cell in the surviving
+    // walk, once `parseSlugRedirect()` is the one copy.
     const cc = this.#getSpaceCtx(request.space);
     // Probed in the scope the request names, because the id alone names a
     // different document in every other scope: reading the default one would

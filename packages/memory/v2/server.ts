@@ -1392,8 +1392,8 @@ export class Server {
   #engines = new Map<string, Promise<Engine.Engine>>();
 
   /**
-   * The resolved-engine index for the synchronous cross-engine lease lookup;
-   * see `openEngine()`.
+   * The resolved-engine index for the synchronous cross-engine lease lookup
+   * in `#liveCoHostedLeaseSpaceFor()`; `openEngine()` populates it.
    */
   #resolvedEngines = new Map<string, Engine.Engine>();
 
@@ -1402,12 +1402,14 @@ export class Server {
   #documentCacheCoordinator: Engine.DocumentCacheCoordinator;
 
   /**
-   * Synthesized session state for direct out-of-band document writes, such as
+   * Synthesized session id for direct out-of-band document writes, such as
    * blob uploads.
    */
   #directSessionId = `server:${crypto.randomUUID()}`;
 
+  /** Local sequence counter for the synthesized direct-write session. */
   #directLocalSeq = 0;
+
   #dirtySpaces = new Set<string>();
   #dirtyDocsBySpace = new Map<string, Set<string>>();
   #dirtyOriginsBySpace = new Map<string, Map<string, DirtyOrigin>>();
@@ -1470,8 +1472,8 @@ export class Server {
   /**
    * Injected on-disk SQLite sources, keyed by handle cell id. A registered id
    * is attached read-only from its descriptor path instead of the cell-derived
-   * per-(space, id) file. In-memory only; persistence is deferred (see
-   * `docs/specs/sqlite-builtin/plans/on-disk-source.md`).
+   * per-(space, id) file. In-memory only: a registration does not survive a
+   * restart.
    */
   #diskSources = new DiskSourceRegistry();
 

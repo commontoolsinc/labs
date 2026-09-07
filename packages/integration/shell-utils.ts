@@ -379,8 +379,8 @@ export class ShellIntegration {
   }
 
   /**
-   * Navigates to the URL represented by `frontendUrl`, `spaceName`, and
-   * `pieceId`. Waits for state to settle reflecting these properties.
+   * Navigates to the URL that `frontendUrl` and `view` represent, and waits
+   * for state to settle reflecting `view`.
    *
    * `urlPath` sends a different spelling of the same address: the rooted path
    * to navigate to, where the caller is checking a form the shell reads but

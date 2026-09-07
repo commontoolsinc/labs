@@ -131,8 +131,8 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
    * entropy directly as the seed with no KDF between — so a caller can do
    * `entropyToMnemonic(identity.toRaw())` to re-encode an existing key as a
    * phrase without re-keying. But the BIP39 vocabulary belongs at that call
-   * site: if a KDF is ever introduced, `toRaw` stays true (it still returns
-   * the seed) while a hypothetical `toEntropy` would silently start lying.
+   * site: if a KDF is ever introduced, `toRaw()` stays true (it still returns
+   * the seed) while a hypothetical `toEntropy()` would silently start lying.
    *
    * Like `toPkcs8()`, only noble implementations can do this — WebCrypto hides
    * the private key material — and it throws otherwise.

@@ -123,7 +123,7 @@ export class Page extends EventTarget {
   /**
    * Rewrites the contents' `console.*` methods to stringify objects. The
    * Astral console handler only provides a concatenated string of all console
-   * arguments, with objects represented as `undefined`. Calling this method
+   * arguments, with objects represented as `"undefined"`. Calling this method
    * after navigating to a fresh document will properly stringify objects in
    * `ConsoleEvent#detail.text`.
    *
@@ -260,7 +260,7 @@ export class Page extends EventTarget {
   }
 
   /**
-   * Astral's keyboard, with `type` patched to apply the configured default
+   * Astral's keyboard, with `type()` patched to apply the configured default
    * delay when a call omits one.
    */
   get keyboard(): Keyboard {
@@ -656,7 +656,7 @@ export class Page extends EventTarget {
   /**
    * Exposes a CDP binding named `name` on the page's global object. Calling
    * `globalThis[name](payload)` in the page produces a `Runtime.bindingCalled`
-   * notification that `onBindingCalled` delivers to the test process. This is
+   * notification that `onBindingCalled()` delivers to the test process. This is
    * how an in-page notifier signals the moment a condition holds without the
    * test polling the DOM.
    */

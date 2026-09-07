@@ -991,10 +991,10 @@ export class CellHandle<T = unknown> {
   }
 
   /**
-   * Serializes `value` into sigil form, which is the same canonical traversal
-   * with hydratable links. It snapshots local values through `applyValue()`
-   * without confusing an ordinary record that happens to resemble a `CellRef`
-   * or replacing a live `CellHandle`.
+   * Serializes `value` for the wire, converting each `CellHandle` to a link
+   * in `linkFormat`: a `CellRef` (`ref`) or a hydratable sigil link (`sigil`).
+   * An ordinary record that happens to resemble a `CellRef` is walked as data,
+   * and a live `CellHandle` is never replaced in place.
    */
   static #serialize(
     value: ClientCellValue,
