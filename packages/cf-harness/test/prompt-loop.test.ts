@@ -415,53 +415,6 @@ Deno.test("CfHarnessPromptLoop persists a fresh Codex model selection before the
   );
 });
 
-Deno.test("CfHarnessPromptLoop attributes a resumed run's enforcement mode to the record", async () => {
-  // The policy snapshot takes its mode from the run state and its source
-  // label from the resolved configuration, so a resume is where those two can
-  // come apart. This is the artifact an auditor reads: the mode the run
-  // enforced at, credited to the record that carries it rather than to a
-  // harness default this resume never took.
-  const resumedState: HarnessRunState = {
-    runId: "run-resumed-cfc-snapshot",
-    status: "failed",
-    createdAt: "2026-09-04T12:00:00.000Z",
-    updatedAt: "2026-09-04T12:00:01.000Z",
-    cfcEnforcementMode: "observe",
-    currentDir: "/workspace",
-    model: "gpt-5.4",
-    modelProvider: "openai-compatible-gateway",
-    policyEvents: [],
-    toolOutputs: [],
-    failureRecords: [],
-  };
-  const loop = new CfHarnessPromptLoop({
-    engine: new CfHarnessEngine({
-      sandboxRuntime: new FakeSandboxRuntime(),
-      runState: resumedState,
-    }),
-    modelClient: {
-      providerId: "openai-compatible-gateway",
-      complete: () =>
-        Promise.resolve({
-          assistant: { role: "assistant", content: "done" },
-        }),
-    },
-  });
-
-  const result = await loop.runTranscript({
-    transcript: [{ role: "user", content: "Continue." }],
-    model: "gpt-5.4",
-  });
-  assertEquals(
-    result.runState.cfcPolicySnapshot?.cfc.enforcementMode,
-    "observe",
-  );
-  assertEquals(
-    result.runState.cfcPolicySnapshot?.cfc.enforcementModeSource,
-    "inherited",
-  );
-});
-
 Deno.test("CfHarnessPromptLoop executes injected model-client tool calls through the shared CFC loop", async () => {
   const sandbox = new FakeSandboxRuntime();
   let turns = 0;

@@ -627,16 +627,6 @@ export class CfHarnessEngine {
       ...(options.runState !== undefined && recordedAuthSource !== undefined
         ? { modelAuthSource: recordedAuthSource }
         : {}),
-      // A resume resolves its enforcement mode from the mode the run
-      // recorded, which is the mode the loop enforces at: the sandbox
-      // transport floor and the tool policy both read
-      // `runState.cfcEnforcementMode`. Starting the resolution anywhere else
-      // gives the resolved configuration a mode nothing honors, and the
-      // policy snapshot a source label describing a decision the run never
-      // took.
-      ...(options.runState !== undefined
-        ? { inheritedCfcEnforcementMode: options.runState.cfcEnforcementMode }
-        : {}),
     });
     // A resume that states its own enforcement dials, or that introduces a
     // fabric session whose raise outranks the recorded mode, resolves a mode
