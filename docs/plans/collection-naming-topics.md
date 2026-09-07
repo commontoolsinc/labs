@@ -328,12 +328,13 @@ Mike's call, after S4.
    **Held 2026-09-06, and not for a technical reason.** The step is rehearsed
    twice; the second run, after the positional-link fix, is recorded at
    `../history/plans/collection-naming-s6-backfill-rehearsal-rerun-2026-09-06.md`
-   and measured what the first could not. A forced board deploy leaves
-   `removed 0`, moves the board's argument document by exactly one key
-   (`names: {}`), and leaves every topic's title and body intact; the
-   mention-index transition costs eleven commits and one written key per
-   topic. What is missing is a demand — nobody has asked for named Topics on
-   the deployed board.
+   and measured what the first could not. On a clone holding three topics, the
+   forced board deploy verified `removed 0`, moved the board's argument
+   document by one key (`names: {}`), and left those topics' titles and bodies
+   intact; the mention-index transition cost eleven commits and one written key
+   per topic. Three topics is not 125, and the record says which of its figures
+   scale and which are counts of that run. What is missing is not a measurement
+   but a demand — nobody has asked for named Topics on the deployed board.
 
    The sequence that makes running it routine rather than a one-way door,
    whenever consensus appears:
