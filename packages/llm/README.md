@@ -65,8 +65,9 @@ Four declarations say that, and they have to agree.
   argument contract of every pattern using an LLM builtin. It describes rather
   than polices: the runtime enforces an `enum` neither on read nor on write.
 - `llmMessageProblem()` in [`src/types.ts`](src/types.ts) is the check that
-  refuses one, reached through `llmRequestProblem()`, which is what the toolshed
-  handler gates an incoming payload on.
+  refuses one, reached through `llmRequestProblem()` and
+  `llmGenerateObjectRequestProblem()`, which are what the toolshed handlers gate
+  an incoming payload on.
 - `MessageSchema` in
   [`packages/toolshed/routes/ai/llm/llm.routes.ts`](../toolshed/routes/ai/llm/llm.routes.ts)
   is the route's own validator, and the one a caller sending JSON meets first:

@@ -1,11 +1,16 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { BuiltInLLMContent, BuiltInLLMMessage } from "@commonfabric/api";
+import type {
+  BuiltInLLMContent,
+  BuiltInLLMMessage,
+  JSONSchema,
+} from "@commonfabric/api";
 import {
   DEFAULT_GENERATE_OBJECT_MODEL,
   DEFAULT_MODEL_NAME,
   GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
   isLLMTool,
+  llmGenerateObjectRequestProblem,
   llmRequestProblem,
   type LLMTool,
 } from "../src/types.ts";
@@ -23,6 +28,13 @@ const TOOL: LLMTool = {
 const request = (input: object) => ({
   cache: true,
   model: DEFAULT_MODEL_NAME,
+  messages: [{ role: "user", content: "Hi" }] satisfies BuiltInLLMMessage[],
+  ...input,
+});
+
+/** A well-formed generateObject request, with `input` written over it. */
+const objectRequest = (input: object) => ({
+  schema: { type: "object" } satisfies JSONSchema,
   messages: [{ role: "user", content: "Hi" }] satisfies BuiltInLLMMessage[],
   ...input,
 });
@@ -181,6 +193,61 @@ describe("types", () => {
       // gateway's models wherever the gateway answers, where a name qualified
       // by a direct provider registers only where that provider's key is set.
       expect(DEFAULT_GENERATE_OBJECT_MODEL.startsWith("gateway:")).toBe(true);
+    });
+  });
+
+  describe("llmGenerateObjectRequestProblem()", () => {
+    // The route this guards accepts a body of any content type, and only an
+    // `application/json` one meets the route validator first. So every case
+    // here is one a caller can reach with the guard as the sole check. The
+    // conversation walk the two checkers share is covered above; one case
+    // here pins that this checker reaches it.
+
+    it("returns `undefined` for the requests it accepts", () => {
+      // The fixture names no model, which is a request this accepts: the
+      // route picks a default for one that names none.
+      expect(llmGenerateObjectRequestProblem(objectRequest({})))
+        .toBeUndefined();
+      expect(llmGenerateObjectRequestProblem(objectRequest({
+        model: DEFAULT_MODEL_NAME,
+        system: "System prompt",
+        maxTokens: 4096,
+        cache: false,
+        metadata: { context: "piece" },
+      }))).toBeUndefined();
+    });
+
+    it("returns text naming `schema` or `messages` when a request omits one", () => {
+      const messages: BuiltInLLMMessage[] = [{ role: "user", content: "Hi" }];
+      expect(llmGenerateObjectRequestProblem({ messages })).toContain(
+        "'schema'",
+      );
+      expect(llmGenerateObjectRequestProblem({ schema: { type: "object" } }))
+        .toContain("'messages'");
+    });
+
+    it("returns text naming `schema` for a schema given as a boolean", () => {
+      // JSON Schema admits `true` and `false` as schemas. The route declares
+      // an object, and this holds the guard to the same shape.
+      expect(llmGenerateObjectRequestProblem(objectRequest({ schema: true })))
+        .toContain("'schema'");
+    });
+
+    it("returns text naming the field whose value is of the wrong type", () => {
+      // `model` and `cache` are the two this checker states for itself.
+      const named = (input: object, field: string) =>
+        expect(llmGenerateObjectRequestProblem(objectRequest(input)))
+          .toContain(field);
+      named({ model: 7 }, "'model'");
+      named({ cache: "yes" }, "'cache'");
+    });
+
+    it("returns text naming the `system` field for a system-role message", () => {
+      const problem = llmGenerateObjectRequestProblem(objectRequest({
+        messages: [{ role: "system", content: "Be brief" }],
+      }));
+      expect(problem).toContain("Message 0");
+      expect(problem).toContain("'system' field");
     });
   });
 
