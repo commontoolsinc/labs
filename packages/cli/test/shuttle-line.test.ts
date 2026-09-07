@@ -24,8 +24,34 @@ import { describe, it } from "@std/testing/bdd";
 import {
   quoteToken,
   RESERVED_CHARACTERS,
+  separatesTokens,
   splitLine,
+  tailOfLine,
 } from "../lib/shuttle/line.ts";
+
+/**
+ * Helper for the cases below, which divides every code point into the ones
+ * the split separates on and the ones it does not.
+ *
+ * The division is the split's own predicate rather than a list written here,
+ * which is what lets a case over either side close the class: a character the
+ * expression starts or stops matching moves between the two sides, and the
+ * case that then fails is the one whose claim stopped holding.
+ *
+ * The lone surrogates are left out because neither side is a claim about
+ * them: they are not characters, and a line carrying one is not a line
+ * anything typed.
+ */
+function classified(): { separators: string[]; others: string[] } {
+  const separators: string[] = [];
+  const others: string[] = [];
+  for (let code = 0; code <= 0x10ffff; code++) {
+    if (code >= 0xd800 && code <= 0xdfff) continue;
+    const character = String.fromCodePoint(code);
+    (separatesTokens(character) ? separators : others).push(character);
+  }
+  return { separators, others };
+}
 
 describe("line", () => {
   describe("RESERVED_CHARACTERS", () => {
@@ -332,6 +358,108 @@ describe("line", () => {
           tokens: [value],
         });
       }
+    });
+  });
+
+  describe("tailOfLine()", () => {
+    it("returns the token the line ends in, and the head up to where it opens", () => {
+      expect(tailOfLine("cd a b"))
+        .toEqual({ before: ["cd", "a"], head: "cd a ", prefix: "b" });
+    });
+
+    it("returns the whole line as the token where it holds no separator", () => {
+      expect(tailOfLine("cd"))
+        .toEqual({ before: [], head: "", prefix: "cd" });
+    });
+
+    it("returns an empty prefix where the line ends in a separator", () => {
+      expect(tailOfLine("cd "))
+        .toEqual({ before: ["cd"], head: "cd ", prefix: "" });
+    });
+
+    it("returns an empty pair for the empty line", () => {
+      expect(tailOfLine("")).toEqual({ before: [], head: "", prefix: "" });
+    });
+
+    it("returns a head carrying the separators exactly as they were written", () => {
+      expect(tailOfLine("  cd   sl"))
+        .toEqual({ before: ["cd"], head: "  cd   ", prefix: "sl" });
+    });
+
+    it("returns the token the split reads, not the run after the last separator", () => {
+      // The finding this exists for. A backslash before a separator makes it a
+      // character of its token, and the backslash then sits in the head rather
+      // than in the run after it — so a reading that looked at that run alone
+      // would find `sl`, call it an operand, and hand a completion the option's
+      // value to rewrite.
+
+      expect(tailOfLine("get --select a\\ sl")).toEqual({
+        before: ["get", "--select"],
+        head: "get --select ",
+        prefix: "a sl",
+      });
+    });
+
+    it("returns a quoted token as its value, opening where the quote does", () => {
+      expect(tailOfLine("cd 'a b" + "'")).toEqual({
+        before: ["cd"],
+        head: "cd ",
+        prefix: "a b",
+      });
+    });
+
+    it("returns the tokens before it whole, and without it among them", () => {
+      expect(tailOfLine("cd 'a b' c"))
+        .toEqual({ before: ["cd", "a b"], head: "cd 'a b' ", prefix: "c" });
+    });
+
+    it("returns nothing where the line ends in a quote that never closes", () => {
+      expect(tailOfLine("cd 'a b")).toBeUndefined();
+    });
+
+    it("returns nothing where the line ends in a backslash escaping nothing", () => {
+      expect(tailOfLine("cd a\\")).toBeUndefined();
+    });
+
+    it("opens a token at every separator the split separates on", () => {
+      // The claim ranges over a class, so the enumeration is derived from the
+      // expression that defines it rather than sampled: `separatesTokens` is
+      // the split's own test, and every code point is asked. A case listing
+      // the separators it happened to think of would have said nothing about
+      // the ones it did not — U+2028, U+2029 and U+FEFF among them.
+
+      const separators = classified().separators;
+      expect(separators.length).toBeGreaterThan(7);
+      for (const separator of separators) {
+        expect(tailOfLine(`cd${separator}sl`)).toEqual({
+          before: ["cd"],
+          head: `cd${separator}`,
+          prefix: "sl",
+        });
+      }
+    });
+
+    it("opens a token at no character the split does not separate on", () => {
+      // The other direction, and the one the case above does not reach: that
+      // separators separate says nothing about whether anything else does.
+      // It is the same scan with the predicate flipped, over the complement
+      // the same pass already collected — so the pair closes the class in
+      // both directions rather than in the one that is easy to ask.
+      //
+      // Two characters answer differently and are named rather than allowed
+      // for: a quote opens a token nothing closes, so the line has no reading
+      // at all. Every other character is data — the ones the grammar reserves
+      // among them, and the backslash, which escapes the character after it
+      // and still leaves one token.
+
+      const { others } = classified();
+      const refused: string[] = [];
+      for (const character of others) {
+        const tail = tailOfLine(`cd${character}sl`);
+        if (tail === undefined) refused.push(character);
+        else expect(tail.before).toEqual([]);
+      }
+      expect(refused.sort()).toEqual(['"', "'"]);
     });
   });
 });

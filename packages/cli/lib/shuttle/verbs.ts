@@ -249,15 +249,15 @@ function stopped(deps: VerbDeps): Interruption | undefined {
 }
 
 /** What an act guarded against a cancel did, where it was allowed to run. */
-type Ran<T> = { readonly kind: "ran"; readonly answer: T };
+export type Ran<T> = { readonly kind: "ran"; readonly answer: T };
 
 /**
  * Performs `act` over `args` unless the line has been cancelled, and is what
  * it answered where it was allowed to.
  *
- * Every read this module sends and every move it adopts goes through here,
- * and the reason is that the rule they are held to is not one discipline can
- * keep. The rule is that **nothing is awaited between the check and the act
+ * Every read a line sends and every move it adopts goes through here — this
+ * module's, and the completion's beside it (`completion.ts`) — and the reason
+ * is that the rule they are held to is not one discipline can keep. The rule is that **nothing is awaited between the check and the act
  * it guards** — an await there is a window the cancel lands in and the act
  * happens anyway — and a rule of that shape is invisible: the code reads
  * correctly whether or not the window is there, no case can see it, and the
@@ -284,7 +284,7 @@ type Ran<T> = { readonly kind: "ran"; readonly answer: T };
  * What is left to the caller is which arm it returns, and the arms are the
  * outcome's own, so a cancelled act is handed back rather than tested for.
  */
-async function guarded<A extends readonly unknown[], T>(
+export async function guarded<A extends readonly unknown[], T>(
   deps: VerbDeps,
   act: (...args: A) => T | Promise<T>,
   ...args: A
@@ -360,13 +360,33 @@ export async function runLine(
 }
 
 /**
- * How many operands a verb takes, and what one that needs an operand calls the
- * one it needs.
+ * What a completion offers where a token may stand.
+ *
+ * Three arms and no fourth, since what a v1 verb reads an operand as is a
+ * reference or a verb name, and everything else is a word only the fabric
+ * could supply: a `#name` entry point is resolved by a read of its own rather
+ * than listed, so `wish` declares `nothing` and says so where it declares it.
+ */
+export type Candidates =
+  /** The words that name a verb. */
+  | "verbs"
+  /** The children of the place, as the operands `cd` takes to reach them. */
+  | "children"
+  /** Nothing: no token this can name stands there. */
+  | "nothing";
+
+/**
+ * How many operands a verb takes, what one that needs an operand calls the
+ * one it needs, and what a completion offers for it.
  *
  * The noun phrase rides the arity because the refusal for a missing operand is
  * the verb's own sentence and the count is the dispatch's rule: declaring them
  * together is what lets one reader enforce every verb's arity without every
- * verb's refusal collapsing into one wording.
+ * verb's refusal collapsing into one wording. What a completion offers rides
+ * it for the tighter reason that it is the same slot: it is declared on the
+ * two arms that have an operand and unspellable on the arm that has none, so
+ * a verb taking an operand cannot be written without deciding what completes
+ * it, and one taking none cannot be given a decision that would never fire.
  *
  * Taking no operand and taking an optional one are told apart by what a verb
  * does with none, which is why `optional` is an arm rather than the absence of
@@ -377,9 +397,13 @@ type Arity =
   /** No operand at all, so any is too many. */
   | { readonly operands: "none" }
   /** One at most, and what no operand means is the verb's own. */
-  | { readonly operands: "optional" }
+  | { readonly operands: "optional"; readonly completes: Candidates }
   /** One, needed, `names` being what the refusal for none calls it. */
-  | { readonly operands: "required"; readonly names: string };
+  | {
+    readonly operands: "required";
+    readonly names: string;
+    readonly completes: Candidates;
+  };
 
 /**
  * What a line said past the verb that named it: the options it set, by the
@@ -784,7 +808,11 @@ const LIST_OPTIONS: readonly VerbOption[] = [
 const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
   ["cd", {
     run: cd,
-    arity: { operands: "required", names: "a place to move to" },
+    arity: {
+      operands: "required",
+      names: "a place to move to",
+      completes: "children",
+    },
     usage: "cd <ref>",
     summary: "Moves the place, which fills in what a reference omits.",
     detail:
@@ -804,7 +832,7 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
   }],
   ["get", {
     run: get,
-    arity: { operands: "optional" },
+    arity: { operands: "optional", completes: "children" },
     options: READ_OPTIONS,
     usage: "get [<ref>]",
     summary: "Reads the value at a cell, defaulting to where you stand.",
@@ -824,7 +852,7 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
   }],
   ["help", {
     run: help,
-    arity: { operands: "optional" },
+    arity: { operands: "optional", completes: "verbs" },
     usage: "help [<verb>]",
     summary: "Lists the verbs, or writes the page of the one named.",
     detail: "`<verb> --help` writes the same page, and every verb takes that " +
@@ -881,6 +909,10 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
     arity: {
       operands: "required",
       names: "the target to resolve, as in `wish #favorites`",
+      // A target is a name the fabric holds rather than a row of the place,
+      // and what would list them is a read of a different index; `wish`
+      // completes nothing until one exists to read.
+      completes: "nothing",
     },
     usage: "wish <#name>",
     summary: "Resolves a named entry point, as `cf wish` does.",
@@ -902,6 +934,66 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
  * a verb the gate asks about, with no second list to keep in step.
  */
 export const VERB_HELP: ReadonlyMap<string, VerbHelp> = VERBS;
+
+/**
+ * The words that name a verb, in the order the table declares them.
+ *
+ * Derived from the table rather than written beside it, so it is the same set
+ * the dispatch takes, `help` lists and a refusal names — a verb added is a
+ * verb a completion offers, with nothing to remember.
+ */
+export const VERB_WORDS: readonly string[] = [...VERBS.keys()];
+
+/**
+ * What a completion offers for the token standing after `tokens` on a line.
+ *
+ * The tokens are the whole ones written before it, so the question is the one
+ * the dispatch asks of a line and it is answered the same way: the first
+ * token names a verb, the rest go to that verb's own option reading, and what
+ * is left is the operands the line has already given it. A completion is
+ * offered where the verb takes another operand and nowhere else, which is
+ * what keeps a completion to a token the line takes — a second operand for a
+ * verb that takes one, or any for a verb that takes none, is a token the
+ * dispatch would refuse.
+ *
+ * Four lines answer `nothing` and each is a different fact: no verb by that
+ * word, so nothing is known about what follows it; a reading the parser
+ * refused, whose last token is an option's value rather than an operand; a
+ * verb with its operands already given; and a verb whose operand is a name
+ * only the fabric could supply.
+ *
+ * A line asking for a verb's page is among the refused readings rather than
+ * beside them: `--help` takes the whole reading and carries no operands, so
+ * there is no operand position for a completion to stand in.
+ */
+export function candidatesAfter(tokens: readonly string[]): Candidates {
+  const [word, ...rest] = tokens;
+  if (word === undefined) return "verbs";
+  const entry = VERBS.get(word);
+  if (entry === undefined) return "nothing";
+  const reading = readOptions(word, rest, entry.options);
+  if (reading.kind !== "read") return "nothing";
+  return afterOperands(entry.arity, reading.operands.length);
+}
+
+/**
+ * Helper for {@link candidatesAfter}, which is what `arity` offers where
+ * `given` operands have already been written.
+ *
+ * The arms are the arity's own, so a verb that takes no operand offers
+ * nothing without declaring it and the two that take one offer what they
+ * declared — until one has been given, since v1's every arity is one operand
+ * at most.
+ */
+function afterOperands(arity: Arity, given: number): Candidates {
+  switch (arity.operands) {
+    case "none":
+      return "nothing";
+    case "optional":
+    case "required":
+      return given === 0 ? arity.completes : "nothing";
+  }
+}
 
 /**
  * Helper for {@link cd}, which finishes `move`.
@@ -1725,7 +1817,7 @@ function tooMany(verb: string, takes: string, given: number): Outcome {
  */
 function notAVerb(word: string): string {
   return `\`${word}\` is not a verb. The verbs are ` +
-    `${listed([...VERBS.keys()])}.`;
+    `${listed(VERB_WORDS)}.`;
 }
 
 /**

@@ -194,9 +194,35 @@ Emacs keys: `ctrl-a`/`ctrl-e` and `home`/`end` for the ends of the line,
 `ctrl-b`/`ctrl-f` and the arrows for a character, `alt-b`/`alt-f` for a word,
 `backspace` and `delete`/`ctrl-d` to delete, `ctrl-w`/`alt-backspace` and
 `alt-d` to kill a word, `ctrl-k` and `ctrl-u` to kill to the end of the line and
-to kill the line, `ctrl-y`/`alt-y` to yank and cycle, `ctrl-c` to abandon the
-line or cancel the one in flight, and `ctrl-d` on an empty line to end the
-session.
+to kill the line, `ctrl-y`/`alt-y` to yank and cycle, `up`/`ctrl-p` and
+`down`/`ctrl-n` to walk the lines you have typed, `ctrl-c` to abandon the line
+or cancel the work in flight, and `ctrl-d` on an empty line to end the session.
+
+`up` and `down` walk this run's own lines — nothing is written to disk and
+nothing survives the process. What they walk is those lines and the line you
+were typing, so `down` back past the newest returns it, and a half-typed change
+to a recalled line is still there when you come back to it. A line with nothing
+on it is not recorded, nor is one you just ran again, and neither end wraps
+round. Running a line or pressing `ctrl-c` returns you to the line being typed.
+
+`tab` completes the token the line ends in: a verb where you have typed none,
+and after a verb whatever that verb's operand takes — a verb name for `help`,
+and for `cd` and `get` the rows that stand where you stand. What it writes is
+what `ls` prints for the same row, so a name needing quotes arrives quoted and a
+name the reference has to carry arrives as the reference; where several rows
+agree only as far as a partial that would need quoting, nothing is written and
+you type on. Completing under a place is a read, so it runs beside the keys the
+way a line does: `enter` typed under it is held and runs the line it completed,
+`ctrl-c` cancels it, and a read that failed writes nothing rather than saying
+so. What it completes is the token at the end of the line, so a cursor elsewhere
+leaves the line alone — and the token is the one the split reads, so a space you
+quoted or escaped stays inside its token rather than starting a new one.
+
+Nothing turns a candidate down for its shape. What bounds a completion is which
+rows stand where you stand, so `cd slugs/bo` at a space root writes nothing —
+not because a rule forbids the `/`, but because no row standing at the root is
+called that. A row whose own operand carries a `/` completes exactly as any
+other does.
 
 The code is `lib/shuttle/`: `run.ts` composes a session, `place.ts` holds the
 place and what `cd` refuses, `connection.ts` the one `PiecesController` a
@@ -207,9 +233,11 @@ writes nothing — `help.ts` the form a verb's account of itself prints in,
 `page.ts` how much of a rendering one page holds, `value.ts` how a value the
 fabric holds is written, `session.ts` what the last listing numbered and what
 `more` writes next, `prompt.ts` the loop that reads keys and runs a line beside
-them, `announce.ts` what a connection and a pattern write onto that loop's
-out-of-band line, `record.ts` the form `where` and `pwd` share, and `paint.ts`
-and `terminal.ts` the escape sequences and the raw mode under it.
+them, `history.ts` the lines that loop has read and the traversal over them,
+`completion.ts` what `tab` finishes, `announce.ts` what a connection and a
+pattern write onto that loop's out-of-band line, `record.ts` the form `where`
+and `pwd` share, and `paint.ts` and `terminal.ts` the escape sequences and the
+raw mode under it.
 
 Each of those is driven by a unit test with nothing behind it — no server, no
 piece, and no terminal — so what the shell does when all of them are real is a

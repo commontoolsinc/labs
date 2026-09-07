@@ -817,6 +817,78 @@ short surface and is on screen continuously; what `pwd` is for is the thing
 you copy, so a form that cannot be pasted is the one output it should not
 produce.
 
+## Recall and completion
+
+`up` and `down` walk the lines this run typed. What they walk is those lines
+and the line being typed — one position each, the line being typed last — so
+an edit made at any of them is held there until the line is ended, and
+everything that ends a line ends the traversal with it: running the line, and
+`ctrl-c`. There is no wrap: `up` at the oldest line and `down` at the line
+being typed each leave the prompt as it is. A line with nothing on it is not
+recorded, nor is one identical to the line recorded last, and the comparison is
+against that one line alone — comparing against every line would drop a line
+from the middle of the run and leave the order no longer the order it was
+typed in. What is recorded is the line exactly as it was typed, at the moment
+it is taken rather than when it settles, so `up` reaches a line that is still
+running. The recall is the run's own memory; persistent history is a separate
+feature ([`futures.md`](futures.md)).
+
+`tab` completes the token the line ends in, and it completes that token only:
+with the cursor anywhere else on the line it does nothing, the token being
+finished being the one the line ends with. What may stand there is asked of
+the dispatch — the first token names a verb, and after a verb it is whatever
+that verb declares its next operand completes, which is a verb name for
+`help`, a reference for `cd` and `get`, and nothing for a verb whose operands
+are already given or which takes none. So a completion never offers a token
+the line would then refuse.
+
+**What a completion writes is a token that reaches what it names.** The
+candidates under a place are the operands `cd` takes to the rows `ls` lists,
+which is the same answer the listing prints in its name column: a name whose
+own characters are readings comes back as the reference that names it, and a
+name needing quotes comes back quoted. A row nothing names is not offered,
+which is the same shape as a listing printing a marker where a row has no
+operand.
+
+Three bounds, each of them a decision:
+
+- **A common prefix shorter than a whole candidate is written only where it is
+  bare.** Several candidates agreeing on `my ` agree on a partial that is not
+  a token — a quote around it closes where the person's next character has to
+  land, and no quote leaves the split refusing the line — so what is written
+  in that case is nothing, and typing on reaches the same candidates again.
+- **A completion is written onto the line it was computed for and onto no
+  other.** A read already sent cannot be called off, so its answer may come
+  back to a line a key has changed or a `ctrl-c` has emptied, and writing
+  there would take back a character the person typed after the `tab`.
+- **A read that failed offers nothing.** A `tab` is not a request for an
+  answer about the fabric, so where `ls` reports a failed read as the failure
+  it is, a completion writes nothing and says nothing. That is what
+  `packages/cli`'s own completion does, and the one thing shuttle's takes
+  from it.
+
+The token being completed is the last one the split reads, off the same scan
+the split itself runs. A separator inside quotes or behind a backslash is a
+character of its token, so the run of characters after the last separator is
+not the token: on `get --select a\ sl` it is `sl`, where the token is the
+option's value `a sl` — and a completion working from the run would offer an
+operand where the line has none and rewrite the value to reach it. The one
+line not completed is one the split refuses: both its refusals are a token
+with no end, and where the token being typed opens is exactly what such a
+line does not yet say.
+
+Nothing gates a candidate on its shape. What bounds a completion is which
+candidates there are — the operands reaching what stands where shuttle stands
+— so a prefix is completed exactly where it opens one of those. Two things
+follow, and the second is the first read the other way round. An operand
+carrying the separator is completed like any other, which is what reaches a
+row whose own operand is a reference: standing at a piece, `/@space/piece@…/.`
+completes to that reference's own `/..`, since the reference *is* the operand
+`operandForChild` offers for that row. And `cd slugs/bo` at a space root
+completes nothing — not because a rule turns it down, but because no row
+standing at the root is called that; the row it names stands inside `slugs/`,
+and reaching it is a read of a place the line has not moved to.
+
 ## Writes
 
 - `set <path> <value>` — the value parses as JSON; a bare word is a string

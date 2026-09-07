@@ -172,8 +172,10 @@ decisions point here where they defer.
    refused with the reason.
 4. **History and records.** Persistent, searchable command history; a
    `record` verb writing the transcript to a `file:` target or into the
-   fabric. The event-line design already makes transcripts evidence;
-   this makes them saveable.
+   fabric. The recall `up` and `down` give is v1 and is over one run's own
+   lines (decision 29); what waits here is the half that outlives the
+   process. The event-line design already makes transcripts evidence; this
+   makes them saveable.
 5. **Time and diff.** `history <ref>` and `diff` across time or between
    references — the state inspector's reconstruction machinery is the
    offline prior art — plus a modest `undo` that writes back what the

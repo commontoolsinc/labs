@@ -481,6 +481,47 @@ Landed:
   reading of `%n` as a reference belongs with the verb that consumes it, and
   is B2's first slice rather than its last.
 
+- **B1h — recall and completion, at the prompt B1c built.** The two keys a
+  person's fingers reach for before they reach for a verb, and B1 owns them:
+  each rides the prompt loop and the line grammar rather than any verb, and
+  decision 29 rules what each is over.
+
+  `up` and `down` walk the lines this run typed
+  (`packages/cli/lib/shuttle/history.ts`), which is a value beside the
+  buffer and nothing outside the process reads. They are ordinary rows of
+  B1c's binding table, `ctrl-p` and `ctrl-n` beside them, since the buffer a
+  prompt holds is one row and a vertical motion over it has nowhere else to
+  go. The traversal runs over the recorded lines *and the line being typed*,
+  which is one mechanism rather than a mechanism plus a special case: an edit
+  is held at whichever position it was made at, the line being written when
+  the first `up` left it included, and everything that ends the line —
+  running it, and `ctrl-c` — drops the edits and returns the traversal to it.
+
+  `tab` completes the token the line ends in
+  (`packages/cli/lib/shuttle/completion.ts`): a verb where the line names
+  none, and where it names one, whatever that verb's arity declares its next
+  operand completes — a slot declared on the two arms that have an operand
+  and unspellable on the arm that has none, so a verb cannot be added without
+  the decision. The candidates under a place are the listing `ls` reads and
+  the operands `operandForChild` offers for its rows, so a completion writes
+  a token `cd` takes back to the row, a name needing quotes and a name the
+  reference has to carry included, and nothing gates a candidate on its shape.
+  Which token a half-typed line ends in is the split's own question, and it is
+  answered off the split's own scan (`tailOfLine`, `line.ts`): the token is
+  the last one the split reads rather than the run after the last separator,
+  which is what keeps an escaped or quoted separator a character of its token
+  instead of the edge of one.
+
+  A completion reads, so it is work in flight beside the keys exactly as a
+  line is: `enter` typed under one is held and runs the line it completed,
+  and `ctrl-c` cancels it — the read that has not gone out through the guard
+  every read here goes through, and the prompt back through the race, since a
+  read already sent may never answer. Two bounds are ruled rather than
+  inherited, and [`grammar.md`](grammar.md) carries them: a completion is
+  written onto the line it was computed for and onto no other, and a common
+  prefix shorter than a whole candidate is written only where it needs no
+  quoting.
+
 Still to come:
 
 - **Liveness, in two halves.** Recovery of an *established* connection needs
