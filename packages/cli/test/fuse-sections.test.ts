@@ -1,34 +1,42 @@
 /**
  * The `case "$SECTION"` table at the end of integration/fuse-exec.sh chooses
- * which phases a run executes, and each phase records as its own test. CI
- * dispatches the table through `CF_FUSE_INTEGRATION_SECTION` on the FUSE step
- * of the cli-integration-test job, and a run with no section dispatches `all`.
+ * which phases a run executes, and each phase records as its own test. Each
+ * arm besides `all` is a unit of the `cli-fuse` suite, dispatched through
+ * `CF_FUSE_INTEGRATION_SECTION`, and a run with no section dispatches `all`.
  *
  * The script brings up one FUSE mount and one daemon and then works through a
  * piece on it, so a phase that reached for what a phase in another section
  * left behind would pass under `all` and fail whenever a lane ran its section
  * alone. These hold the table to the properties that make a section
- * schedulable: every phase is reachable, from `all` and from what CI
- * dispatches; the prelude every section depends on runs whichever section was
- * asked for; and the orderings the script's phases depend on survive.
+ * schedulable: every phase is reachable, from `all` and from the sections a
+ * lane can be pointed at; the prelude every section depends on runs whichever
+ * section was asked for; and the orderings the script's phases depend on
+ * survive.
  *
- * What they read is the text of the table, of the phase functions, and of the
- * workflow. Whether a section really stands alone is settled by running it,
- * which only CI can do.
+ * What they read is the text of the table and of the phase functions. Whether
+ * a section really stands alone is settled by running it, which only a lane
+ * can do.
  */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { loadCliSuites } from "../../../tasks/test-topology/cli.ts";
 
 /** The FUSE integration script, whose tail holds the dispatch table. */
 const SCRIPT = await Deno.readTextFile(
   new URL("../integration/fuse-exec.sh", import.meta.url),
 );
 
-/** The CI workflow, whose cli-integration-test job dispatches a section. */
-const WORKFLOW = await Deno.readTextFile(
-  new URL("../../../.github/workflows/deno.yml", import.meta.url),
-);
+/**
+ * The sections the `cli-fuse` suite gives a lane something to ask for,
+ * under the names the table writes them: the suite names a unit for the
+ * script as well as the section, and the table knows only the section.
+ */
+const UNITS =
+  (await loadCliSuites(new URL("../../..", import.meta.url).pathname))
+    .find((suite) => suite.id === "cli-fuse")!.units
+    .filter((unit) => unit.startsWith("fuse-exec.sh "))
+    .map((unit) => unit.slice("fuse-exec.sh ".length));
 
 /** The shell function that runs a phase, by the script's naming rule. */
 function phaseFunction(phase: string): string {
@@ -108,24 +116,6 @@ function recordedBy(script: string, fn: string): string[] {
   });
 }
 
-/** The cli-integration-test job's block of the workflow. */
-function ciJobBlock(workflow: string): string {
-  const start = workflow.indexOf("\n  cli-integration-test:\n");
-  if (start < 0) throw new Error("deno.yml has no cli-integration-test job");
-  const rest = workflow.slice(start + 1);
-  const next = rest.search(/\n {2}[a-z][a-z0-9-]*:\n/);
-  return next < 0 ? rest : rest.slice(0, next + 1);
-}
-
-/** The sections that job dispatches, one per step that runs the script. */
-function ciSections(workflow: string): string[] {
-  return [
-    ...ciJobBlock(workflow).matchAll(
-      /^ +CF_FUSE_INTEGRATION_SECTION: (\S+)$/gm,
-    ),
-  ].map((m) => m[1]);
-}
-
 const { arms, malformed } = parseDispatchTable(SCRIPT);
 const byArm = new Map(arms.map((arm) => [arm.section, arm.phases]));
 const prelude = shellArray(SCRIPT, "PRELUDE");
@@ -158,13 +148,13 @@ describe("fuse-sections", () => {
     expect(selectable.filter((phase) => !all.has(phase))).toEqual([]);
   });
 
-  it("runs every selectable phase under a section CI dispatches", () => {
-    const sections = ciSections(WORKFLOW);
-    expect(sections.length).toBeGreaterThan(0);
-    expect(sections.filter((section) => !byArm.has(section))).toEqual([]);
-    const covered = new Set(
-      sections.flatMap((section) => byArm.get(section) ?? []),
-    );
+  it("runs every selectable phase under a section a lane can ask for", () => {
+    // The two readings meet here. This file reads the table its own way and
+    // the topology reads it another, so a section named in one and absent
+    // from the other, or a phase left out of every unit, is caught.
+    expect(UNITS.length).toBeGreaterThan(0);
+    expect(UNITS.filter((unit) => !byArm.has(unit))).toEqual([]);
+    const covered = new Set(UNITS.flatMap((unit) => byArm.get(unit) ?? []));
     expect(selectable.filter((phase) => !covered.has(phase))).toEqual([]);
   });
 

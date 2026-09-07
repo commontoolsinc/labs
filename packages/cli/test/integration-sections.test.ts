@@ -1,33 +1,39 @@
 /**
  * The `case "$SECTION"` table at the end of integration/integration.sh decides
- * which steps a run executes. CI dispatches three of its arms, one per leg of
- * the cli-integration-test matrix, and a run with no section argument
- * dispatches `all`.
+ * which steps a run executes. An arm running one step is what the `cli-core`
+ * suite turns into a unit, and a unit is what a lane can be asked for; a run
+ * with no section argument dispatches `all`.
  *
- * A step no CI arm reaches runs nowhere: it is maintained and it passes when
- * someone runs it by hand, and no run of the repository reports on it. `wish`
- * was in that state, reachable only from `all`, while test/wish.test.ts
- * described the session-backed read as covered by the integration lane. These
+ * A step no arm runs alone runs nowhere: it is maintained and it passes when
+ * someone runs it by hand, and no run of the repository reports on it. These
  * hold the table to reaching every step from both directions, and hold each
  * recorded step name to naming a function the script actually defines.
  *
- * What they read is the text of the table and of the matrix, so they see which
- * steps are dispatched and nothing about what a step does once it runs. They
- * also say nothing about the arms CI does not dispatch: `piece-basics` and the
- * one-step arms are local conveniences, free to hold any subset.
+ * What they read is the text of the table, so they see which steps are
+ * reachable and nothing about what a step does once it runs. The group arms
+ * are free to hold any subset: `piece-basics` and `all` exist for hand runs,
+ * and no lane is pointed at either.
  */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { loadCliSuites } from "../../../tasks/test-topology/cli.ts";
 
 /** The integration script, whose tail holds the dispatch table. */
 const SCRIPT = await Deno.readTextFile(
   new URL("../integration/integration.sh", import.meta.url),
 );
 
-/** The CI workflow, whose cli-integration-test job names the sections. */
-const WORKFLOW = await Deno.readTextFile(
-  new URL("../../../.github/workflows/deno.yml", import.meta.url),
+/**
+ * The steps of this script the `cli-core` suite gives a lane something to
+ * ask for. The suite also holds the standalone scripts beside it, which
+ * carry no step name and are left out here.
+ */
+const UNITS = new Set(
+  (await loadCliSuites(new URL("../../..", import.meta.url).pathname))
+    .find((suite) => suite.id === "cli-core")!.units
+    .filter((unit) => unit.startsWith("integration.sh "))
+    .map((unit) => unit.slice("integration.sh ".length)),
 );
 
 /** The shell function that runs a step, by the table's naming rule. */
@@ -117,21 +123,6 @@ function definedFunctions(script: string): string[] {
   return [...script.matchAll(/^(run_[a-z_]+)\(\) \{$/gm)].map((m) => m[1]);
 }
 
-/** The cli-integration-test job's block of the workflow. */
-function ciJobBlock(workflow: string): string {
-  const start = workflow.indexOf("\n  cli-integration-test:\n");
-  if (start < 0) throw new Error("deno.yml has no cli-integration-test job");
-  const rest = workflow.slice(start + 1);
-  const next = rest.search(/\n {2}[a-z][a-z0-9-]*:\n/);
-  return next < 0 ? rest : rest.slice(0, next + 1);
-}
-
-/** The sections that job's matrix dispatches, one per leg. */
-function ciSections(workflow: string): string[] {
-  return [...ciJobBlock(workflow).matchAll(/^ +core_section: (\S+)$/gm)]
-    .map((m) => m[1]);
-}
-
 const { arms, malformed } = parseDispatchTable(SCRIPT);
 const bySection = new Map(arms.map((arm) => [arm.section, arm.steps]));
 const everyStep = [...new Set(arms.flatMap((arm) => arm.steps))].sort();
@@ -163,15 +154,12 @@ describe("integration-sections", () => {
     expect(everyStep.filter((step) => !all.has(step))).toEqual([]);
   });
 
-  it("runs every step under a section CI dispatches", () => {
-    const sections = ciSections(WORKFLOW);
-    expect(sections.length).toBeGreaterThan(0);
-    const unknown = sections.filter((section) => !bySection.has(section));
-    expect(unknown).toEqual([]);
-    const covered = new Set(
-      sections.flatMap((section) => bySection.get(section) ?? []),
-    );
-    expect(everyStep.filter((step) => !covered.has(step))).toEqual([]);
+  it("gives every step a unit a lane can be pointed at", () => {
+    // The two readings meet here. This file reads the table its own way,
+    // the topology reads it another, and a step present in one and absent
+    // from the other is a step nothing runs.
+    expect(everyStep.filter((step) => !UNITS.has(step))).toEqual([]);
+    expect([...UNITS].filter((unit) => !everyStep.includes(unit))).toEqual([]);
   });
 
   it("gives every step an arm that runs it alone", () => {
@@ -184,11 +172,5 @@ describe("integration-sections", () => {
       arms.filter((arm) => arm.steps.length === 1).map((arm) => arm.steps[0]),
     );
     expect(everyStep.filter((step) => !alone.has(step))).toEqual([]);
-  });
-
-  it("reads the CI section from the matrix leg it is named for", () => {
-    expect(ciJobBlock(WORKFLOW)).toContain(
-      "CF_CLI_INTEGRATION_SECTION: ${{ matrix.core_section }}",
-    );
   });
 });
