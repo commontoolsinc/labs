@@ -1262,15 +1262,19 @@ reason. Narrowing past the circle with a projection beside the predicate —
 cwd-independent, with no Deno startup noise and roughly half the per-invocation
 cost. (`--cli-only` is a legacy alias for the same thing.)
 
-It exists for CI, which downloads it in `cli-integration-test` (on
-`$GITHUB_PATH`) and `pattern-unit-test` (as `CF_BINARY`). A CI run never edits
-the source the binary was built from, so it cannot go stale mid-run.
+It exists to be attested and deployed: a push to the default branch builds it,
+attests it and publishes it. A pull request compiles it inside a lane instead,
+as one unit of the `binaries` suite, so that a change breaking the compile can
+be caught where it was made rather than after it merges. No test run uses the
+compiled binary. A suite that needs `cf` asks for the `cf` capability, which
+puts `bin/cf` on the path, and `bin/cf` runs from source and works out which
+checkout it belongs to.
 
-That does not hold for a working tree you are editing, and there is no
-invalidation story to catch it — see "Why not `dist/cf`" under Installing `cf`
-on PATH. Use `bin/cf` or `deno task cf` locally. If you do build it, rebuild
-after every `git pull`: a stale binary rejects newer flags and can hit
-wire-protocol skew against an updated server.
+A stale binary is therefore a hazard for a working tree you are editing, and
+there is no invalidation story to catch it — see "Why not `dist/cf`" under
+Installing `cf` on PATH. Use `bin/cf` or `deno task cf` locally. If you do build
+it, rebuild after every `git pull`: a stale binary rejects newer flags and can
+hit wire-protocol skew against an updated server.
 
 ## Launcher Contract
 
@@ -1572,10 +1576,9 @@ Nor is mtime a usable substitute: `revertWorkspace` restores `deno.jsonc` and
 the compile-cache version module _after_ the binary is written, so `dist/cf` is
 older than its own inputs the moment the build finishes.
 
-CI is a different case and legitimately uses the binary — a workflow run never
-mutates the source it was built from. `cli-integration-test` puts it on
-`$GITHUB_PATH` and `pattern-unit-test` passes it as `CF_BINARY`. That reasoning
-does not transfer to a working tree you are actively editing.
+CI does not use the binary. A suite that needs `cf` gets it from the `cf`
+capability, which puts `bin/cf` on the path, so what runs in a lane is the
+source of the checkout the lane is testing.
 
 ## Shell completion
 
