@@ -4,9 +4,9 @@
  *
  * A line being edited is redrawn where it stands, so a terminal is told where
  * the last drawing put the cursor as well as what to draw. That bookkeeping is
- * arithmetic over two numbers and a width, and it is here rather than beside
- * the writing so that a case can read the escape sequences back without a
- * terminal to send them to.
+ * a line, a cursor and a width laid out into rows, and it is here rather than
+ * beside the writing so that a case can read the escape sequences back without
+ * a terminal to send them to.
  *
  * The cursor is put back with the terminal's own save and restore
  * (`ESC 7`/`ESC 8`) rather than by counting where the text left it, because
@@ -15,8 +15,12 @@
  * screen: the saved position is the line's first row, and a line taller than
  * the terminal scrolls that row away.
  *
- * A code point is a column here, as it is in the buffer these numbers come
- * from, so a character a terminal draws double-wide is one column to both.
+ * A cursor arrives as a code-point index into the line, which is the unit the
+ * buffer it comes from moves in, and where that lands on the screen is worked
+ * out here at the columns a terminal gives each character. The two are not the
+ * same count: a character drawn double-wide is one code point and two columns,
+ * so a cursor moved by the index would sit left of where the typing appears,
+ * and by one column more for every such character in front of it.
  *
  * A line carries the width it was drawn at rather than taking the current one,
  * because a window resized between two drawings leaves the old line occupying
@@ -26,7 +30,10 @@
  * that put it there.
  */
 
+import { unicodeWidth } from "@std/cli/unicode-width";
+
 import { CSI, ESC } from "../view/ansi.ts";
+import { wrapped } from "./page.ts";
 import { escapeControlCharacters } from "./place.ts";
 
 /** A line as it was last drawn: what it said, where its cursor sat, how wide. */
@@ -34,7 +41,12 @@ export interface PaintedLine {
   /** The whole line, prompt included. */
   readonly text: string;
 
-  /** How many code points into it the cursor sat. */
+  /**
+   * How many code points into the text the cursor sat, which is an index into
+   * it rather than a place on the screen. What a terminal draws each of those
+   * code points as is what turns the one into the other, and this module is
+   * where that conversion happens.
+   */
   readonly column: number;
 
   /** How wide the terminal was when it was drawn. */
@@ -42,9 +54,9 @@ export interface PaintedLine {
 }
 
 /**
- * The empty line a terminal is on before anything is drawn on it. Its width is
- * the one width that divides nothing into no rows whatever it is, so which one
- * it carries decides nothing.
+ * The empty line a terminal is on before anything is drawn on it. No width
+ * lays nothing out over more than the row it starts on, so which one it
+ * carries decides nothing.
  */
 export const NOTHING_PAINTED: PaintedLine = { text: "", column: 0, columns: 1 };
 
@@ -57,15 +69,16 @@ export const NOTHING_PAINTED: PaintedLine = { text: "", column: 0, columns: 1 };
  * behind on the rows below.
  */
 export function repaint(from: PaintedLine, to: PaintedLine): string {
+  const cursor = cursorOf(to);
   return [
-    up(Math.floor(from.column / from.columns)),
+    up(cursorOf(from).row),
     "\r",
     `${ESC}7`,
     `${CSI}0J`,
     to.text,
     `${ESC}8`,
-    down(Math.floor(to.column / to.columns)),
-    right(to.column % to.columns),
+    down(cursor.row),
+    right(cursor.column),
   ].join("");
 }
 
@@ -76,13 +89,15 @@ export function repaint(from: PaintedLine, to: PaintedLine): string {
  * with whatever was written under it. Ending it is all this does: what a line
  * produced lands through {@link above}, because between the two the person may
  * have gone on typing and a terminal writes where its cursor is.
+ *
+ * The move is to the row the text ends on and not to the row the cursor is on,
+ * which are different rows for a line filling its last one exactly: ending
+ * where the cursor sits would leave a blank row above whatever is written next.
  */
 export function finish(painted: PaintedLine): string {
-  const cursorRow = Math.floor(painted.column / painted.columns);
-  const lastRow = Math.floor(
-    Math.max(width(painted.text) - 1, 0) / painted.columns,
-  );
-  return [down(lastRow - cursorRow), up(cursorRow - lastRow), "\r\n"].join("");
+  const cursor = cursorOf(painted).row;
+  const last = lastRowOf(painted);
+  return [down(last - cursor), up(cursor - last), "\r\n"].join("");
 }
 
 /**
@@ -111,7 +126,7 @@ export function finish(painted: PaintedLine): string {
  */
 export function above(painted: PaintedLine, text: string): string {
   return [
-    up(Math.floor(painted.column / painted.columns)),
+    up(cursorOf(painted).row),
     "\r",
     `${CSI}0J`,
     inert(text),
@@ -149,7 +164,52 @@ function right(count: number): string {
   return count > 0 ? `${CSI}${count}C` : "";
 }
 
-/** Helper for {@link finish}, which is how many columns `text` occupies. */
-function width(text: string): number {
-  return [...text].length;
+/** Where a drawn line left the cursor, counted from the line's own start. */
+interface Cursor {
+  /** How many rows below the line's first row it sat. */
+  readonly row: number;
+
+  /** How many columns across that row it sat. */
+  readonly column: number;
+}
+
+/**
+ * Helper for the writes above, which is where `painted` left the cursor.
+ *
+ * The count a line carries is an index and the answer is a place on the
+ * screen, so the text in front of the cursor is broken into rows the way the
+ * terminal breaks it — {@link wrapped} (`page.ts`), the one traversal this
+ * and a page both measure by. Two things follow from it being the terminal's
+ * traversal rather than a division. A character counts the columns it is drawn
+ * in, so a double-wide one moves the cursor two. And a row with one column
+ * left and a double-wide character to place is left that column blank, the
+ * character starting the row below, so the row a division names can be a row
+ * short and the column across it can be a column short of that.
+ *
+ * Text filling its last row exactly leaves the cursor at the start of the next
+ * row rather than at the end of the filled one. Every write here counts rows
+ * by this function, so whichever of those a terminal would have done, a
+ * drawing climbs back over exactly the rows the drawing before it came down.
+ * {@link finish} is the one caller wanting the other reading, and it asks for
+ * the row the text ends on separately.
+ */
+function cursorOf({ text, column, columns }: PaintedLine): Cursor {
+  const width = Math.max(columns, 1);
+  const rows = wrapped([[...text].slice(0, column).join("")], width);
+  const filled = unicodeWidth(rows[rows.length - 1]!);
+  return filled >= width
+    ? { row: rows.length, column: 0 }
+    : { row: rows.length - 1, column: filled };
+}
+
+/**
+ * Helper for {@link finish}, which is how many rows below its first row the
+ * last row of `painted` is.
+ *
+ * It measures the whole text where {@link cursorOf} measures what is in front
+ * of the cursor, and by the same traversal, so the two answers are rows of one
+ * layout and the difference between them is a distance to move.
+ */
+function lastRowOf({ text, columns }: PaintedLine): number {
+  return wrapped([text], columns).length - 1;
 }

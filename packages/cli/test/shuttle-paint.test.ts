@@ -73,14 +73,68 @@ describe("paint", () => {
         .toBe(`\r\x1b7\x1b[0J${"a".repeat(25)}\x1b8\x1b[1B\x1b[5C`);
     });
 
-    it("counts a code point as a column, whatever a terminal draws it as", () => {
-      // The buffer the columns come from counts in code points, so this counts
-      // the same way rather than measuring what the glyphs occupy. A character
-      // a terminal draws double-wide therefore moves the cursor one column
-      // where it drew two.
+    describe("a double-width character", () => {
+      // The cursor arrives as an index into the line and leaves as a place on
+      // the screen, and a character a terminal draws double-wide is one of the
+      // first and two of the second. Every fixture here is written where
+      // counting the index and counting the columns give different answers.
 
-      expect(repaint(NOTHING_PAINTED, line("\u{1F9F5}", 1)))
-        .toBe("\r\x1b7\x1b[0J\u{1F9F5}\x1b8\x1b[1C");
+      it("moves the cursor across the columns the characters are drawn in", () => {
+        // Two wide characters are two code points and four columns.
+
+        expect(repaint(NOTHING_PAINTED, line("界界", 2)))
+          .toBe("\r\x1b7\x1b[0J界界\x1b8\x1b[4C");
+      });
+
+      it("moves the cursor onto the row a character orphaned by one column starts", () => {
+        // Three wide characters are six columns, which a width of five divides
+        // into one row and one column across it. The terminal puts the cursor
+        // a column further along: two characters fill four columns, the third
+        // wants two and one is left, so it starts the row below and leaves
+        // that column blank.
+
+        expect(repaint(NOTHING_PAINTED, line("界界界", 3, 5)))
+          .toBe("\r\x1b7\x1b[0J界界界\x1b8\x1b[1B\x1b[2C");
+      });
+
+      it("counts a blank column per row that a wrap left one on", () => {
+        // The case above at a width the columns divide evenly, which is where
+        // a measure that divides looks right and so is where the fixture has
+        // to be. Five wide characters are ten columns, and a width of five
+        // divides them into two rows and no columns across. The terminal
+        // agrees on the row and not on the column: each row fits two
+        // characters and leaves its fifth column blank, so the cursor sits two
+        // columns into the third row rather than at its start.
+
+        expect(repaint(NOTHING_PAINTED, line("界界界界界", 5, 5)))
+          .toBe("\r\x1b7\x1b[0J界界界界界\x1b8\x1b[2B\x1b[2C");
+      });
+
+      it("climbs back over the rows the old line's columns filled", () => {
+        expect(repaint(line("界界界", 3, 5), line("b", 1)))
+          .toBe("\x1b[1A\r\x1b7\x1b[0Jb\x1b8\x1b[1C");
+      });
+
+      it("counts a character outside the basic plane as one code point of the index", () => {
+        // The index the cursor arrives as counts code points, and one outside
+        // the basic plane is stored as two of the units a string is held in.
+        // A cursor two code points along here has passed a character drawn in
+        // two columns and one drawn in one.
+
+        expect(repaint(NOTHING_PAINTED, line("\u{1F9F5}a", 2)))
+          .toBe("\r\x1b7\x1b[0J\u{1F9F5}a\x1b8\x1b[3C");
+      });
+
+      it("moves the cursor onto the next row where the characters fill one exactly", () => {
+        // The other side of that boundary, and what stops the measure
+        // over-charging: two wide characters fill a width of four with nothing
+        // orphaned, which is the one row a division gives too. A row filled
+        // exactly leaves the cursor at the start of the next one and nowhere
+        // across it.
+
+        expect(repaint(NOTHING_PAINTED, line("界界", 2, 4)))
+          .toBe("\r\x1b7\x1b[0J界界\x1b8\x1b[1B");
+      });
     });
   });
 
@@ -103,6 +157,28 @@ describe("paint", () => {
 
     it("ends a wrapped line at the width it was drawn at", () => {
       expect(finish(line("a".repeat(25), 3, 20))).toBe("\x1b[1B\r\n");
+    });
+
+    describe("a double-width character", () => {
+      // Ending a line means reaching the last row it occupies, and that row is
+      // the terminal's own layout of it: neither a count of the characters nor
+      // a division of the columns they take lands on it.
+
+      it("moves down to the last row the drawn columns reach", () => {
+        // Four wide characters are eight columns. At a width of three each one
+        // starts a row of its own, since two columns do not fit in the one a
+        // character before it leaves, so the line is four rows. Counting the
+        // characters says two rows and dividing the columns says three.
+
+        expect(finish(line("界界界界", 0, 3))).toBe("\x1b[3B\r\n");
+      });
+
+      it("charges no extra row where the characters divide the width evenly", () => {
+        // Two wide characters fill a width of four with nothing orphaned, so
+        // the line is the one row it stands on and the ending goes where it is.
+
+        expect(finish(line("界界", 0, 4))).toBe("\r\n");
+      });
     });
   });
 
@@ -171,6 +247,17 @@ describe("paint", () => {
 
     it("leaves a text holding nothing of that class alone", () => {
       expect(above(NOTHING_PAINTED, "a b")).toContain("\r\x1b[0Ja b\r\n");
+    });
+
+    it("climbs the rows a line's drawn columns filled before it clears", () => {
+      // The climb is by the same measure the drawing came down by, so a line
+      // holding characters a terminal draws double-wide is climbed by the rows
+      // those columns filled rather than by the code points behind them.
+
+      expect(above(line("界界界", 3, 5), "gone"))
+        .toBe(
+          "\x1b[1A\r\x1b[0Jgone\r\n\r\x1b7\x1b[0J界界界\x1b8\x1b[1B\x1b[2C",
+        );
     });
 
     it("draws the line again at the width it was drawn at", () => {
