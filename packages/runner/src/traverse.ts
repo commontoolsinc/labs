@@ -841,9 +841,12 @@ export function resolveSchemaRefsCanonical(
  * @template V The type of values stored in the sets
  */
 export class MapSet<K, V> {
-  // When hashFunction is set, use hash-based dedup: key → (hash → value)
-  // When unset, use plain Set: key → Set<value>
+  /**
+   * The hash-based store, used when `hashFunction` is set: key → (hash →
+   * value). When unset, `#setMap` holds a plain set per key instead.
+   */
   #hashMap?: Map<K, Map<string, V>>;
+
   #setMap?: Map<K, Set<V>>;
   #hashFunction?: (value: V) => string;
 
@@ -1204,7 +1207,7 @@ export class CompoundCycleTracker<
   ExtraKey extends JSONSchema | undefined,
   Value = unknown,
 > {
-  // partialKey (identity) → Map<interned extraKey hashString, Value?>
+  /** `partialKey` (identity) → `Map<interned extraKey hashString, Value?>`. */
   readonly #partial = new Map<EqualKey, Map<string, Value | undefined>>();
 
   /**
@@ -1246,7 +1249,10 @@ export class CompoundCycleTracker<
     };
   }
 
-  // After a failed include (that returns null), we can use getExisting to find the registered value
+  /**
+   * Returns the registered value for the pair, for use after a failed
+   * `include()` (one that returned `null`).
+   */
   getExisting(partialKey: EqualKey, extraKey: ExtraKey): Value | undefined {
     const existing = this.#partial.get(partialKey);
     if (existing === undefined) {
@@ -1720,9 +1726,12 @@ function getNormalizedLink(
 // Value traversed must be a DAG, though it may have aliases or cell links
 // that make it seem like it has cycles
 export abstract class BaseObjectTraverser {
-  // `context` is required: it carries the traversal's acting identity
-  // (scopeKeyIdentity), which no default could supply — identity arrives
-  // with the work, never from ambient state (key-vocabulary.md §3).
+  /**
+   * Constructs an instance. `context` is required: it carries the traversal's
+   * acting identity (`scopeKeyIdentity`), which no default could supply —
+   * identity arrives with the work, never from ambient state
+   * (`key-vocabulary.md` §3).
+   */
   constructor(
     protected tx: IExtendedStorageTransaction,
     protected selector: SchemaPathSelector = DEFAULT_SELECTOR,
@@ -1733,6 +1742,7 @@ export abstract class BaseObjectTraverser {
     // Identity passthrough unless CF_TRAVERSE_CAPTURE is recording a fixture.
     this.tx = wrapTxForTraverseCapture(tx);
   }
+
   protected dagMemo = new Map<string, FabricValue>();
   traverseDAGCalls = 0;
   getDocAtPathCalls = 0;
@@ -1989,7 +1999,10 @@ export abstract class BaseObjectTraverser {
     }
   }
 
-  // Wrapper for getAtPath that provides all the parameters that are class fields.
+  /**
+   * Wrapper for `getAtPath()` that provides all the parameters that are class
+   * fields.
+   */
   protected getDocAtPath(
     doc: IMemorySpaceValueAttestation,
     path: readonly string[],
@@ -3740,20 +3753,28 @@ export class SchemaObjectTraverser<V extends FabricValue>
   // Track per-doc visit counts and unique paths
   #docVisits = new Map<string, number>();
   #uniquePaths = new Set<string>();
-  // Read once per traversal, so one traversal collects and reports the same
-  // way throughout.
+
+  /**
+   * Whether diagnostics are on, read once per traversal, so one traversal
+   * collects and reports the same way throughout.
+   */
   #diagnostics = traverseDiagnosticsEnabled();
+
   #maxDepth = 0;
   #currentDepth = 0;
-  // Memoization cache for traverseWithSchema: key → result, scoped to one
-  // traverse() call and cleared at the start of each.
-  // The query path may instead use sharedSchemaMemo, which persists across
-  // the traverse() calls of one selectSchema query; the read path never does,
-  // because its entries are only sound within the traversal that made them.
+
+  /**
+   * Memoization cache for `traverseWithSchema()`: key → result, scoped to one
+   * `traverse()` call and cleared at the start of each. The query path may
+   * instead use `sharedSchemaMemo`, which persists across the `traverse()`
+   * calls of one `selectSchema` query; the read path never does, because its
+   * entries are only sound within the traversal that made them.
+   */
   #schemaMemo = new Map<
     string,
     TraverseResult<FabricValue>
   >();
+
   schemaMemoHits = 0;
 
   get #activeMemo(): Map<
@@ -3978,11 +3999,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
     }
   }
 
-  // Generally handles anyOf
-  // TODO(@ubik2): Need to break this up -- it's too long
-
   /**
-   * Traverse the doc with the specified schema.
+   * Traverses the doc with the specified schema. Generally handles `anyOf`.
    *
    * Our doc parameter has been read in nonRecursive mode.
    *
@@ -3998,6 +4016,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     schema: JSONSchema,
     link?: NormalizedFullLink,
   ): TraverseResult<FabricValue> {
+    // TODO(@ubik2): Need to break this up -- it's too long
     this.traverseWithSchemaCalls++;
     this.#currentDepth++;
     if (this.#currentDepth > this.#maxDepth) {
@@ -5290,10 +5309,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
     return filteredObj;
   }
 
-  // This just has a schema, since the doc.address.path should match the
-  // selector.path.
-  // The doc.value should be a primitive cell link, and we've already
-  // done a nonRecursive read on it.
+  /**
+   * Traverses a pointer. This just has a schema, since `doc.address.path`
+   * should match `selector.path`. The `doc.value` should be a primitive cell
+   * link, and we've already done a non-recursive read on it.
+   */
   #traversePointerWithSchema(
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,

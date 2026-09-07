@@ -135,7 +135,10 @@ export class EngineProgramResolver extends InMemoryProgram {
     this.#cache = cache;
   }
 
-  // Add `.d.ts` files for known supported 3P modules.
+  /**
+   * Resolves a source, adding `.d.ts` files for known supported third-party
+   * modules.
+   */
   override async resolveSource(
     identifier: string,
   ): Promise<Source | undefined> {
@@ -1773,8 +1776,10 @@ export class Engine extends EventTarget {
     });
   }
 
-  // Invokes a function that should've came from this SES runtime
-  // (unverifiable). We use this to hook into its source mapping functionality.
+  /**
+   * Invokes a function that should have come from this SES runtime
+   * (unverifiable). We use this to hook into its source mapping functionality.
+   */
   invoke(fn: () => any): any {
     // Scheduler dictates this is a synchronous function,
     // and if we have functions from this source, this should already
@@ -1805,8 +1810,11 @@ export class Engine extends EventTarget {
     this.#executableRegistry.trustHostValue(value, options);
   }
 
-  // Parse an error stack trace, mapping all positions back to original sources.
-  // Returns the original stack if runtime internals haven't been initialized.
+  /**
+   * Parses an error stack trace, mapping all positions back to original
+   * sources. Returns the original stack if runtime internals haven't been
+   * initialized.
+   */
   parseStack(stack: string): string {
     if (!this.#runtimeInternals) {
       return stack;
@@ -1814,7 +1822,7 @@ export class Engine extends EventTarget {
     return this.#runtimeInternals.runtime.parseStack(stack);
   }
 
-  // Returns a map of runtime module types.
+  /** Returns a map of runtime module types. */
   static getRuntimeModuleTypes(cache: StaticCache) {
     return getRuntimeModuleTypes(cache);
   }

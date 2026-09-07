@@ -874,10 +874,12 @@ describe("pattern-binding", () => {
         }
       }
       class Watched extends Array {
-        // `ArrayConstructor` is what the base class declares here, and `Spy`
-        // does not structurally satisfy it (no callable-without-`new` form).
-        // The cast is the point of the fixture: an exotic species is exactly
-        // what is under test.
+        /**
+         * The species, cast: `ArrayConstructor` is what the base class declares
+         * here, and `Spy` does not structurally satisfy it (no
+         * callable-without-`new` form). The cast is the point of the fixture:
+         * an exotic species is exactly what is under test.
+         */
         static override get [Symbol.species](): ArrayConstructor {
           return Spy as unknown as ArrayConstructor;
         }

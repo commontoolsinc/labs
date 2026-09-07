@@ -436,20 +436,26 @@ class ScriptedModelTransport extends ScriptedSessionTransport {
     this.model.connectionCount += 1;
   }
 
-  // The commit payloads carry full FabricValues; decode with a context that
-  // FAILS on cell reconstruction rather than the default memory context.
+  /**
+   * Decodes a commit payload, which carries full `FabricValue`s, with a context
+   * that _fails_ on cell reconstruction rather than the default memory context.
+   */
   protected override decode(payload: string): ScriptedTransportMessage {
     return fabricFromJsonValue(
       payload,
       testLiveEnvironment,
     ) as ScriptedTransportMessage;
   }
+
   protected override encode(message: unknown): string {
     return jsonFromFabricValue(message as FabricValue);
   }
 
-  // The harness owns teardown; closing the session must not signal a
-  // disconnect (which would trigger client reconnect churn mid-assertion).
+  /**
+   * Does nothing: the harness owns teardown, and closing the session must not
+   * signal a disconnect (which would trigger client reconnect churn
+   * mid-assertion).
+   */
   protected override onClose(): void {}
 
   protected override handle(message: ScriptedTransportMessage): void {
@@ -517,10 +523,12 @@ class ScriptedModelTransport extends ScriptedSessionTransport {
     }
   }
 
-  // Verdict callbacks queued by `handle`'s transact case but not yet booked
-  // into the model (their responseGate may still be held). `drainVerdicts`
-  // awaits them so tests can assert on final server-side bookkeeping without
-  // a wall-clock sleep.
+  /**
+   * Verdict callbacks queued by `handle()`'s transact case but not yet booked
+   * into the model (their `responseGate` may still be held). `drainVerdicts()`
+   * awaits them so tests can assert on final server-side bookkeeping without a
+   * wall-clock sleep.
+   */
   readonly #verdictTasks = new Set<Promise<void>>();
 
   /**
