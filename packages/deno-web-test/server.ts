@@ -5,9 +5,10 @@ export class TestServer {
   #server: Deno.HttpServer<Deno.NetAddr> | null;
   #manifest: Manifest;
 
-  // Takes the root dir of the current package `projectDir`,
-  // and a directory to use as the root of the static
-  // content server `serverDir`.
+  /**
+   * Constructs an instance which serves the static content under
+   * `manifest.serverDir`.
+   */
   constructor(manifest: Manifest) {
     this.#server = null;
     this.#manifest = manifest;
@@ -30,7 +31,7 @@ export class TestServer {
     this.#server.unref();
   }
 
-  // Returns the listening port, if server running.
+  /** Returns the listening port, if the server is running. */
   port(): number | undefined {
     return this.#server?.addr?.port;
   }

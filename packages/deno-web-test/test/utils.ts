@@ -149,9 +149,11 @@ export class HarnessRun {
     this.stderrText = decode(output.stderr);
   }
 
-  // Fails with `message` followed by the whole transcript. An assertion here
-  // reads one line of what the run printed, and the rest of that output is
-  // what says why the line is not the one it should be.
+  /**
+   * Fails with `message` followed by the whole transcript. An assertion here
+   * reads one line of what the run printed, and the rest of that output is what
+   * says why the line is not the one it should be.
+   */
   assert(condition: boolean, message: string): void {
     if (condition) {
       return;
