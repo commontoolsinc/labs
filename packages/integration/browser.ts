@@ -40,8 +40,10 @@ export class Browser {
     this.#timeout = options.timeout;
   }
 
-  // Passthru of `@astral/astral`'s `Browser#newPage`, applying
-  // the browser timeout.
+  /**
+   * Passes through to `@astral/astral`'s `Browser#newPage`, applying the
+   * browser timeout.
+   */
   async newPage(
     url?: string,
     options?: WaitForOptions & SandboxOptions & UserAgentOptions,
@@ -57,25 +59,29 @@ export class Browser {
     return page;
   }
 
-  // The browser-level CDP websocket endpoint. Chrome supports multiple
-  // concurrent CDP clients, so a second connection (e.g. for CPU profiling
-  // via `cdp-profiler.ts`) can attach alongside Astral's.
+  /**
+   * Returns the browser-level CDP websocket endpoint. Chrome supports multiple
+   * concurrent CDP clients, so a second connection (e.g. for CPU profiling via
+   * `cdp-profiler.ts`) can attach alongside Astral's.
+   */
   wsEndpoint(): string {
     this.#checkIsOk();
     return this.#process!.wsEndpoint();
   }
 
-  // Closes the browser and removes its profile directory.
-  //
-  // The removal follows the close rather than running beside it. Chrome
-  // recreates the directory `--user-data-dir` names, every missing parent
-  // included, whenever it writes into it, so a removal that overlapped one of
-  // the processes the browser started would put the directory back.
-  //
-  // The browser is given up before the wait rather than after it, so that a
-  // page opened while this is running is refused rather than opened on a
-  // browser that is going away. A close that fails hands it back, so a caller
-  // whose browser stopped but whose directory stayed can close again.
+  /**
+   * Closes the browser and removes its profile directory.
+   *
+   * The removal follows the close rather than running beside it. Chrome
+   * recreates the directory `--user-data-dir` names, every missing parent
+   * included, whenever it writes into it, so a removal that overlapped one of
+   * the processes the browser started would put the directory back.
+   *
+   * The browser is given up before the wait rather than after it, so that a
+   * page opened while this is running is refused rather than opened on a
+   * browser that is going away. A close that fails hands it back, so a caller
+   * whose browser stopped but whose directory stayed can close again.
+   */
   async close(): Promise<void> {
     this.#checkIsOk();
     const process = this.#process!;

@@ -72,9 +72,12 @@ export class Ed25519Signer<ID extends DIDKey> implements Signer<ID> {
     );
   }
 
-  // The raw 32-byte ed25519 seed. Like toPkcs8, only "noble" implementations
-  // expose the private material; WebCrypto (native) hides it, so this throws.
-  // The array is freshly allocated, so the caller owns it outright.
+  /**
+   * Returns the raw 32-byte ed25519 seed. Like `toPkcs8()`, only noble
+   * implementations expose the private material; WebCrypto (native) hides it,
+   * so this throws. The array is freshly allocated, so the caller owns it
+   * outright.
+   */
   toRaw(): Uint8Array {
     if (this.#impl instanceof NobleEd25519Signer) {
       return this.#impl.privateKey().slice();

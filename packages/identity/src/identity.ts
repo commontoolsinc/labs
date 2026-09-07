@@ -36,7 +36,7 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return this.#verifier;
   }
 
-  // Sign `data` with this identity.
+  /** Signs `payload` with this identity. */
   sign<T>(payload: AsBytes<T>) {
     return this.#keypair.sign(payload);
   }
@@ -46,7 +46,7 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return this.#keypair.keyPair;
   }
 
-  // Derive a new `Identity` given a seed string.
+  /** Derives a new `Identity` given a seed string. */
   async derive<ID extends DIDKey>(
     name: string,
     config: IdentityCreateConfig = {},
@@ -60,14 +60,16 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return await Identity.fromRaw(new Uint8Array(signedHash), config);
   }
 
-  // Derive PKCS8/PEM bytes from this identity.
-  // Implementations other than "noble" throw as private key
-  // material is needed to create the PKCS8/PEM bytes.
+  /**
+   * Derives PKCS8/PEM bytes from this identity. Implementations other than
+   * noble throw, as private key material is needed to create the PKCS8/PEM
+   * bytes.
+   */
   toPkcs8(): Uint8Array {
     return this.#keypair.toPkcs8();
   }
 
-  // Generate a new identity from raw ed25519 key material.
+  /** Generates a new identity from raw ed25519 key material. */
   static async fromRaw<ID extends DIDKey>(
     rawPrivateKey: Uint8Array,
     config: IdentityCreateConfig = {},
@@ -75,7 +77,7 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return new Identity(await Ed25519Signer.fromRaw<ID>(rawPrivateKey, config));
   }
 
-  // Generate a new identity.
+  /** Generates a new identity. */
   static async generate<ID extends DIDKey>(
     config: IdentityCreateConfig = {},
   ): Promise<Identity<ID>> {
@@ -91,18 +93,19 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return [new Identity(signer), mnemonic];
   }
 
-  // Generate a new keypair in PKCS8, PEM encoded form.
-  //
-  // Due to hiding access to private key material
-  // in the JS environment (via WebCrypto), we cannot
-  // simply "export" existing keys. If a key should
-  // be stored as PKCS8, generate it with this method.
+  /**
+   * Generates a new keypair in PKCS8, PEM encoded form.
+   *
+   * Due to hiding access to private key material in the JS environment (via
+   * WebCrypto), we cannot simply export existing keys. If a key should be
+   * stored as PKCS8, generate it with this method.
+   */
   static async generatePkcs8(): Promise<Uint8Array> {
     // Not a promise, but force it for consistent interface
     return await Ed25519Signer.generatePkcs8();
   }
 
-  // Read a PKCS8/PEM key.
+  /** Reads a PKCS8/PEM key. */
   static async fromPkcs8<ID extends DIDKey>(
     pkcs8: Uint8Array,
     config: IdentityCreateConfig = {},
@@ -119,19 +122,21 @@ export class Identity<ID extends DIDKey = DIDKey> implements Signer<ID> {
     return new Identity(signer);
   }
 
-  // Recover the raw 32-byte ed25519 seed for this identity — the exact inverse
-  // of `fromRaw`, mirroring the `fromPkcs8`/`toPkcs8` pair.
-  //
-  // Named `toRaw`, NOT `toEntropy`, on purpose: it returns a SEED. Those bytes
-  // are *also* valid BIP39 entropy only because `fromMnemonic` uses the
-  // entropy directly as the seed with no KDF between — so a caller can do
-  // `entropyToMnemonic(identity.toRaw())` to re-encode an existing key as a
-  // phrase without re-keying. But the BIP39 vocabulary belongs at that call
-  // site: if a KDF is ever introduced, `toRaw` stays true (it still returns the
-  // seed) while a hypothetical `toEntropy` would silently start lying.
-  //
-  // Like `toPkcs8`, only "noble" implementations can do this — WebCrypto hides
-  // the private key material — and it throws otherwise.
+  /**
+   * Recovers the raw 32-byte ed25519 seed for this identity — the exact
+   * inverse of `fromRaw()`, mirroring the `fromPkcs8()`/`toPkcs8()` pair.
+   *
+   * Named `toRaw`, _not_ `toEntropy`, on purpose: it returns a _seed_. Those
+   * bytes are _also_ valid BIP39 entropy only because `fromMnemonic()` uses the
+   * entropy directly as the seed with no KDF between — so a caller can do
+   * `entropyToMnemonic(identity.toRaw())` to re-encode an existing key as a
+   * phrase without re-keying. But the BIP39 vocabulary belongs at that call
+   * site: if a KDF is ever introduced, `toRaw()` stays true (it still returns
+   * the seed) while a hypothetical `toEntropy()` would silently start lying.
+   *
+   * Like `toPkcs8()`, only noble implementations can do this — WebCrypto hides
+   * the private key material — and it throws otherwise.
+   */
   toRaw(): Uint8Array {
     return this.#keypair.toRaw();
   }
