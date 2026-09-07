@@ -16,7 +16,7 @@ const REPOSITORY = new URL("../..", import.meta.url).pathname.replace(
   /\/$/,
   "",
 );
-import { UNMEASURED_COST_SECONDS } from "./policy.ts";
+import { STAND_IN_QUORUM, UNMEASURED_COST_SECONDS } from "./policy.ts";
 
 /** A suite holding exactly what a case describes. */
 function suite(partial: Partial<Suite> & { id: string }): Suite {
@@ -320,21 +320,33 @@ describe("what the tree says and the manifest does not", () => {
   });
 
   it("charges an unmeasured unit what its suite's middle unit costs", () => {
-    // Three units, holding one, three and one test. What a stand-in
-    // stands for is a whole unit, so the middle of 2, 30 and 200 is what
-    // it costs — not the middle of the seven tests inside them, which
-    // would charge a new file a fraction of what running it takes.
+    // Five measured units, one of them holding three tests. What a
+    // stand-in stands for is a whole unit, so the middle of 1, 2, 30, 200
+    // and 300 is what it costs — not the middle of the tests inside them,
+    // which would charge a new file a fraction of what running it takes.
     const wide = suite({
       id: "workspace-unit",
       units: [
         "packages/bakery/glaze.test.ts",
         "packages/bakery/proof.test.ts",
         "packages/bakery/knead.test.ts",
+        "packages/bakery/score.test.ts",
+        "packages/bakery/bake.test.ts",
         "packages/bakery/rest.test.ts",
       ],
     });
     const manifest = manifestOf([
       { unit: "packages/bakery/glaze.test.ts", cost: 2 },
+      {
+        test: { k: "unit", s: "bakery", n: "score > slashes" },
+        unit: "packages/bakery/score.test.ts",
+        cost: 1,
+      },
+      {
+        test: { k: "unit", s: "bakery", n: "bake > browns" },
+        unit: "packages/bakery/bake.test.ts",
+        cost: 300,
+      },
       {
         test: { k: "unit", s: "bakery", n: "proof > rises" },
         unit: "packages/bakery/proof.test.ts",
@@ -361,6 +373,59 @@ describe("what the tree says and the manifest does not", () => {
       entry.unit === "packages/bakery/rest.test.ts"
     );
     expect(standing?.cost).toBe(30);
+  });
+
+  it("gives a suite too thinly measured to model no cost model", () => {
+    // A median over one unit is that unit, not a middle. The pattern
+    // integration suites are the case: one recorded identity, a
+    // twelve-millisecond unit test sitting in a file of browser-driven
+    // ones, and every other file in the suite charged twelve
+    // milliseconds for work that takes half a minute. Such a suite is
+    // charged what the most expensive suite that does have a model
+    // charges, which errs high — too much and a lane finishes early,
+    // too little and it runs past the bound its job is killed at.
+    const thin = suite({
+      id: "pattern-integration",
+      units: [
+        "packages/patterns/integration/a.test.ts",
+        "packages/patterns/integration/b.test.ts",
+      ],
+    });
+    const modelled = suite({
+      id: "workspace-unit",
+      units: Array.from(
+        { length: STAND_IN_QUORUM },
+        (_, index) => `packages/bakery/${index}.test.ts`,
+      ),
+    });
+    const manifest = manifestOf([
+      {
+        test: { k: "integration", s: "patterns", n: "a > trivial" },
+        suite: "pattern-integration",
+        unit: "packages/patterns/integration/a.test.ts",
+        cost: 0.012,
+      },
+      ...Array.from({ length: STAND_IN_QUORUM }, (_, index) => ({
+        test: { k: "unit" as const, s: "bakery", n: `bakes ${index}` },
+        unit: `packages/bakery/${index}.test.ts`,
+        cost: 40,
+      })),
+    ]);
+
+    const seen = census([thin, modelled], manifest, new Set());
+    const standing = seen.manifest.entries.find((entry) =>
+      entry.unit === "packages/patterns/integration/b.test.ts"
+    );
+    expect(standing?.cost).toBe(40);
+  });
+
+  it("charges the bare figure where no suite has a cost model", () => {
+    const thin = suite({
+      id: "pattern-integration",
+      units: ["packages/patterns/integration/a.test.ts"],
+    });
+    const seen = census([thin], manifestOf([]), new Set());
+    expect(seen.manifest.entries[0]?.cost).toBe(UNMEASURED_COST_SECONDS);
   });
 
   it("replaces what the publisher's own tree said, and its packing", () => {

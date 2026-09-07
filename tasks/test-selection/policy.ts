@@ -65,6 +65,21 @@ export const FULL_RUN_LABEL = "ci: full";
  */
 export const UNMEASURED_COST_SECONDS = 1;
 
+/**
+ * Measured units a suite needs before the middle one is taken as what a
+ * new unit of that suite costs.
+ *
+ * A median over one sample is that sample, and one unit is not evidence
+ * about a suite. The pattern integration suites are the case that shows
+ * it: the store held a single identity for each, a twelve-millisecond
+ * unit test that happens to sit in a file of browser-driven ones, so
+ * every other file in those suites was charged twelve milliseconds for
+ * work that takes half a minute. Below this many, a suite has no cost
+ * model of its own and its units are charged what the most expensive
+ * suite that does have one charges.
+ */
+export const STAND_IN_QUORUM = 5;
+
 /** The score of a test that has never failed anywhere. */
 export const VALUE_FLOOR = 0.05;
 
@@ -386,9 +401,20 @@ export const DIALS: readonly Dial[] = [
     unit: "seconds",
     setBy: "chosen",
     why: "Up when a lane holding new tests runs long; down when it finishes " +
-      "early. It is reached for only by a suite with no measured test at " +
-      "all, since a suite that has any charges an unmeasured one what its " +
-      "middle test costs.",
+      "early. It is reached for only where no suite has a cost model at " +
+      "all, since a suite that has one charges an unmeasured unit what its " +
+      "middle unit costs and one that has none charges what the most " +
+      "expensive modelled suite charges.",
+  },
+  {
+    name: "STAND_IN_QUORUM",
+    value: STAND_IN_QUORUM,
+    unit: "measured units",
+    setBy: "chosen",
+    why: "Up when a suite's stand-ins are being charged from too thin a " +
+      "sample and its lanes run long; down when suites with real " +
+      "measurement are being treated as having none. A median over one " +
+      "unit is that unit, not a middle.",
   },
   {
     name: "VALUE_FLOOR",

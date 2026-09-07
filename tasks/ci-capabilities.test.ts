@@ -301,7 +301,17 @@ describe("opening a capability on a machine that answers", () => {
     expect(present.asked.some((line) => line.includes("chmod 666 /dev/fuse")))
       .toBe(true);
 
-    const missing = machine({ "command -v fusermount3": "!not found" });
+    // The runner image carries the FUSE runtime and not its development
+    // files, so `fusermount3` answers while the library the mount opens
+    // is absent. What the probe asks has to be the library.
+    const library = machine({
+      "pkg-config --exists fuse3": "!no such package",
+    });
+    await open("fuse", library);
+    expect(library.asked.some((line) => line.includes("libfuse3-dev")))
+      .toBe(true);
+
+    const missing = machine({ "command -v gcc": "!not found" });
     await open("fuse", missing);
     expect(missing.asked.some((line) => line.includes("apt-get update")))
       .toBe(true);

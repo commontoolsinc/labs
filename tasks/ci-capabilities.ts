@@ -168,15 +168,42 @@ async function onPath(exec: Exec, command: string): Promise<boolean> {
   }
 }
 
-/** Installs Debian packages, and does nothing where they are all present. */
+/** Whether a command runs and reports success. */
+async function succeeds(
+  exec: Exec,
+  command: readonly string[],
+): Promise<boolean> {
+  const [name, ...args] = command;
+  try {
+    await exec(name!, args);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Installs Debian packages, and does nothing where the probes say they
+ * are already there.
+ *
+ * A probe is either a command the packages put on the path, or a command
+ * whose success means what the packages provide is there. The second
+ * shape is for a package whose point is a file rather than a command: the
+ * runner image carries the FUSE runtime, so `fusermount3` is on the path
+ * while the library the mount opens is not, and a probe for the command
+ * would find the one and miss the other.
+ */
 async function apt(
   exec: Exec,
   packages: readonly string[],
-  probes: readonly string[],
+  probes: readonly (string | readonly string[])[],
 ): Promise<void> {
   let missing = false;
   for (const probe of probes) {
-    if (!await onPath(exec, probe)) missing = true;
+    const present = typeof probe === "string"
+      ? await onPath(exec, probe)
+      : await succeeds(exec, probe);
+    if (!present) missing = true;
   }
   if (!missing) return;
   await exec("sudo", ["apt-get", "update"]);
@@ -208,10 +235,16 @@ const fuse: Capability = {
   async open(context) {
     if (!context.dryRun) {
       const exec = execOf(context);
+      // The mount opens `libfuse3.so` through the foreign-function
+      // interface, and that unversioned name comes from the development
+      // package. `pkg-config --exists fuse3` is the question that names
+      // it: it fails where the development package is absent, and it
+      // fails where `pkg-config` itself is, which is the other thing this
+      // installs.
       await apt(
         exec,
         ["pkg-config", "gcc", "libfuse3-dev", "fuse3"],
-        ["pkg-config", "gcc", "fusermount3"],
+        ["gcc", ["pkg-config", "--exists", "fuse3"]],
       );
       // The mount itself needs the device, and the runner image leaves it
       // owned by root.
