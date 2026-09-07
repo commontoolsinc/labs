@@ -162,7 +162,11 @@ export class XDeviceLinkView extends LitElement {
   private accessor guarded = true;
 
   #answered = false;
-  // `setTimeout` is typed as Node's `Timeout` under this config, not `number`.
+
+  /**
+   * Timer guarding the link attempt. `setTimeout` is typed as Node's
+   * `Timeout` under this config, not `number`.
+   */
   #guardTimer: ReturnType<typeof setTimeout> | undefined;
 
   /** The answer step of this dialog, which a test drives directly. */
