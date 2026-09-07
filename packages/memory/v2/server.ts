@@ -1404,7 +1404,7 @@ export class Server {
 
   /**
    * The resolved-engine index for the synchronous cross-engine lease lookup
-   * in `#liveCoHostedLeaseSpaceFor()`; `#openEngine()` populates it.
+   * in `#liveCoHostedLeaseSpaceFor()`; `#openEngineInner()` populates it.
    */
   #resolvedEngines = new Map<string, Engine.Engine>();
 
@@ -6943,10 +6943,10 @@ export class Server {
    *   process-instance component the co-hosted ExecutorHost mints
    *   holders from — so a second process authenticated as the same
    *   service DID no longer passes on this process's lease rows.
-   * - SYNCHRONOUS: scans the RESOLVED engine map only (see `#openEngine()`),
-   *   so callers on the read path add no microtask boundary. Sound
-   *   because a lease row can only be written through an open co-hosted
-   *   engine.
+   * - SYNCHRONOUS: scans the RESOLVED engine map only (see
+   *   `#openEngineInner()`), so callers on the read path add no microtask
+   *   boundary. Sound because a lease row can only be written through an
+   *   open co-hosted engine.
    */
   #liveCoHostedLeaseSpaceFor(principal: string): string | undefined {
     const holder = executionLeaseHolder(principal);
