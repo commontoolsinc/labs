@@ -160,10 +160,14 @@ export class XRootView extends BaseView implements ShellApp {
   >();
   #eventAttentionRefreshOwners = new Map<DID, symbol>();
 
-  // Invalidates callbacks from replaced workers. A coded compiler-load error
-  // can arrive through either a request reply or an asynchronous runtime error;
-  // only the currently-owned worker may trigger one replacement.
+  /**
+   * Generation counter which invalidates callbacks from replaced workers. A
+   * coded compiler-load error can arrive through either a request reply or an
+   * asynchronous runtime error; only the currently-owned worker may trigger
+   * one replacement.
+   */
   #runtimeGeneration = 0;
+
   #preserveRuntimeErrorsForNextViewChange = false;
 
   readonly preserveRuntimeErrorsForNextViewChange = (): void => {
@@ -218,11 +222,14 @@ export class XRootView extends BaseView implements ShellApp {
   @state()
   private accessor presenceUrl: string | undefined = PRESENCE_URL?.href;
 
-  // The runtime task runs when AppState changes, and determines if a new
-  // RuntimeInternals must be created — only when identity or host (apiUrl)
-  // change; one runtime serves every space. This is manually run in `updated()`
-  // because we want to compare to previous values, leaving this function
-  // responsible for cleaning up previous runtimes, and creating a new one.
+  /**
+   * The runtime task, which runs when `AppState` changes and determines if a
+   * new `RuntimeInternals` must be created — only when identity or host
+   * (`apiUrl`) change; one runtime serves every space. This is run manually,
+   * from `updated()` and after a worker replacement, because we want to
+   * compare to previous values, leaving this task responsible for cleaning up
+   * previous runtimes, and creating a new one.
+   */
   #rt = new Task<[AppState | undefined], RuntimeInternals | undefined>(
     this,
     {
@@ -381,23 +388,28 @@ export class XRootView extends BaseView implements ShellApp {
     super.disconnectedCallback();
   }
 
-  // A page teardown (reload, tab close, external navigation) terminates the
-  // runtime worker, dropping any commit the server has not yet confirmed. The
-  // worker mirrors its pending-commit state to `RuntimeClient.hasPendingWrites`
-  // on every transition, so this synchronous check is current; while writes are
-  // unconfirmed, ask the browser to confirm leaving instead of silently losing
-  // them. Commits confirm quickly (typically well under a second), so the
-  // prompt only appears in the narrow window a reload would actually lose data.
+  /**
+   * Handler for `beforeunload`. A page teardown (reload, tab close, external
+   * navigation) terminates the runtime worker, dropping any commit the server
+   * has not yet confirmed. The worker mirrors its pending-commit state to
+   * `RuntimeClient.hasPendingWrites` on every transition, so this synchronous
+   * check is current; while writes are unconfirmed, this asks the browser to
+   * confirm leaving instead of silently losing them. Commits confirm quickly
+   * (typically well under a second), so the prompt only appears in the narrow
+   * window a reload would actually lose data.
+   */
   #onBeforeUnload = (event: BeforeUnloadEvent): void => {
     if (this.runtime?.hasPendingWrites()) {
       event.preventDefault();
     }
   };
 
-  // Point `space` at the space the new view addresses. This runs before
-  // render, not in updated(), so no render ever pairs a view with the space
-  // of the view it replaced. AppView reads the view and the space together
-  // and treats a space name that disagrees with a space DID as an error.
+  /**
+   * Points `space` at the space the new view addresses. This runs before
+   * render, not in `updated()`, so no render ever pairs a view with the space
+   * of the view it replaced. `XAppView` reads the view and the space together
+   * and treats a space name that disagrees with a space DID as an error.
+   */
   protected override willUpdate(changedProperties: PropertyValues<this>): void {
     if (changedProperties.has("app")) {
       const previousView = changedProperties.get("app")?.view;
@@ -430,29 +442,40 @@ export class XRootView extends BaseView implements ShellApp {
     }
   }
 
-  // The active browser telemetry sink (undefined when telemetry is disabled
-  // or no runtime); kept only so space.did attribution can track navigation.
+  /**
+   * The active browser telemetry sink (`undefined` when telemetry is disabled
+   * or there is no runtime); kept only so `space.did` attribution can track
+   * navigation.
+   */
   #telemetry: BrowserTelemetry | undefined;
 
-  // The name the current lookup was started for, while the view addresses its
-  // space by name. Navigating within that name keeps the space already
-  // resolved, and keeps a lookup still in flight running. A lookup that fails
-  // clears this, so a later navigation to the same name tries again.
+  /**
+   * The name the current lookup was started for, while the view addresses its
+   * space by name. Navigating within that name keeps the space already
+   * resolved, and keeps a lookup still in flight running. A lookup that fails
+   * clears this, so a later navigation to the same name tries again.
+   */
   #resolvedSpaceName: string | undefined;
-  // Invalidates a resolution that a newer navigation has superseded.
+
+  /** Token which invalidates a resolution a newer navigation has superseded. */
   #resolveSpaceToken = 0;
+
   #spaceResolution: Promise<void> | undefined;
 
-  // Resolves once the space the current view addresses is known. A view that
-  // names its space resolves that name asynchronously, and addresses no space
-  // until the name lands.
+  /**
+   * Returns a promise which resolves once the space the current view
+   * addresses is known. A view that names its space resolves that name
+   * asynchronously, and addresses no space until the name lands.
+   */
   spaceResolved(): Promise<void> {
     return this.#spaceResolution ?? Promise.resolve();
   }
 
-  // Derive the view's space DID — view state, independent of the runtime's
-  // lifecycle. Every path assigns synchronously except a space named by the
-  // view, which has to be looked up.
+  /**
+   * Derives the view's space DID — view state, independent of the runtime's
+   * lifecycle. Every path assigns synchronously except a space named by the
+   * view, which has to be looked up.
+   */
   #syncViewSpace(app: AppState | undefined): void {
     const identity = app?.identity;
     const view = app?.view;
@@ -624,8 +647,11 @@ export class XRootView extends BaseView implements ShellApp {
     this._themePreference = (e as CustomEvent).detail;
   };
 
-  // An event handler cannot await, so a command that fails after its first
-  // suspension point reports as an unhandled rejection.
+  /**
+   * Handler for command events. An event handler cannot await, so a command
+   * that fails after its first suspension point reports as an unhandled
+   * rejection.
+   */
   onCommand = (e: Event) => {
     void this.#runCommand((e as CustomEvent<Command>).detail);
   };
@@ -650,8 +676,10 @@ export class XRootView extends BaseView implements ShellApp {
     return clone(this.app);
   }
 
-  // The application state in the JSON-shaped form that survives the page
-  // boundary the integration harness reads across.
+  /**
+   * Returns the application state in the JSON-shaped form that survives the
+   * page boundary the integration harness reads across.
+   */
   serialize(): AppStateSerialized {
     return serialize(this.state());
   }
@@ -686,8 +714,10 @@ export class XRootView extends BaseView implements ShellApp {
     return this.#commit(next, `set-config ${key}=${value}`);
   }
 
-  // Adopts the next application state and resolves once the render it triggers
-  // has landed.
+  /**
+   * Adopts the next application state and resolves once the render it triggers
+   * has landed.
+   */
   #commit(next: AppState, description: string): Promise<void> {
     this.app = next;
     if (ENVIRONMENT !== "production") {

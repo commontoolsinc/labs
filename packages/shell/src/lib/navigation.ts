@@ -47,9 +47,10 @@ export class Navigation {
     this.#apply(init);
   }
 
-  // Stop listening. The shell's own `Navigation` lives as long as the page, so
-  // nothing in the application calls this; a caller that builds one around a
-  // fixture needs the four global listeners back.
+  /**
+   * Stops listening, removing the four global listeners the constructor
+   * added.
+   */
   dispose() {
     globalThis.removeEventListener(NAVIGATE_EVENT, this.#onNavigate);
     globalThis.removeEventListener(
@@ -115,13 +116,13 @@ export class Navigation {
     this.#apply(command);
   };
 
-  // Push a new command state to the browser's history.
+  /** Pushes a new command state to the browser's history. */
   #push(command: NavigationCommand) {
     logger.log("Push", command);
     globalThis.history.pushState(command, "", appViewToUrlPath(command));
   }
 
-  // Updates the current browser history state and page with a new title.
+  /** Updates the current browser history state and page with a new title. */
   #replace(command: NavigationCommand, title?: string) {
     logger.log("Replace", command, title);
     globalThis.history.replaceState(
@@ -131,7 +132,7 @@ export class Navigation {
     );
   }
 
-  // Propagates the command state into the App.
+  /** Propagates the command state into the app. */
   #apply(command: NavigationCommand) {
     logger.log("Apply", command);
     this.#app.setView(command);

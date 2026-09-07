@@ -346,8 +346,10 @@ export class XAppView extends BaseView {
     args: () => [this.app, this.rt, this.space],
   });
 
-  // One-shot ?path= deep-link delivery (set after the first send so slug
-  // re-resolutions and task reruns never re-fire it).
+  /**
+   * Whether the one-shot `?path=` deep link has been delivered; set after the
+   * first send so slug re-resolutions and task reruns never re-fire it.
+   */
   #openPathDelivered = false;
 
   /** Deliver a `?path=` deep link into the loaded piece, once.
@@ -483,8 +485,10 @@ export class XAppView extends BaseView {
     args: () => [this.app, this.rt, this.space, this._slugRevision],
   });
 
-  // Derive the active pattern from completed task values so child views never
-  // receive an in-flight or stale selection.
+  /**
+   * Task deriving the active pattern from completed task values, so child
+   * views never receive an in-flight or stale selection.
+   */
   _patterns = new Task(this, {
     task: function (
       [
@@ -902,8 +906,11 @@ export class XAppView extends BaseView {
     }
   }
 
-  // Always defer to the loaded active pattern for the ID,
-  // but until that loads, use an ID in the view if available.
+  /**
+   * Returns the active pattern's id. Always defers to the loaded active
+   * pattern for the id, but until that loads, uses an id in the view if
+   * available.
+   */
   #getActivePatternId(): string | undefined {
     const activePattern = this._patterns.value?.activePattern;
     if (activePattern) return activePattern.id();

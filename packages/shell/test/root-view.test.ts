@@ -29,8 +29,11 @@ function installBrowserGlobals(): () => void {
     });
   }
   class TestHTMLElement extends EventTarget {
-    // Minimal render root so Lit's connectedCallback (createRenderRoot ->
-    // attachShadow -> adoptStyles) runs without a real DOM.
+    /**
+     * Returns a minimal render root, so Lit's `connectedCallback`
+     * (`createRenderRoot`, then `attachShadow`, then `adoptStyles`) runs
+     * without a real DOM.
+     */
     attachShadow() {
       return {
         adoptedStyleSheets: [],

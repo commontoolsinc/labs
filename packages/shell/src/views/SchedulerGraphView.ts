@@ -1126,7 +1126,7 @@ export class XSchedulerGraph extends LitElement {
   @state()
   private accessor tableExpandedParents = new Set<string>();
 
-  // When true, sort table by delta values instead of lifetime totals
+  /** Whether to sort the table by delta values instead of lifetime totals. */
   @state()
   private accessor sortByDelta = false;
 
@@ -1150,7 +1150,7 @@ export class XSchedulerGraph extends LitElement {
     );
   }
 
-  // Minimum effective node size before we boost triggered nodes
+  /** Minimum effective node size before we boost triggered nodes. */
   static readonly #READABLE_THRESHOLD = 50;
 
   /** The two action-id label helpers, which a test drives directly. */
