@@ -34,32 +34,45 @@ it was read from is quoted beside it.
 
 The first rehearsal's convention about mechanisms is kept: where a passage says
 WHY something happened, the reason is read from the named source file and cited
-there, and no run attributed an observation to it. Two observations here are
-deliberately left without a mechanism, and say so.
+there, and no run attributed an observation to it. Where this record has an
+observation and no mechanism, it says so at that observation.
+
+One further rule, added after two rounds of review found conclusions standing
+wider than the output beside them: a sentence here reports what a quoted block
+shows, and where it does not, it names what is not isolated. Several sentences
+earlier drafts carried have been deleted rather than qualified.
 
 ## The headline
 
-The forced deploy is cheap and it destroys nothing. On a genuine pre-graft
-clone, forcing the board and its three Topics past the schema refusals left
-`removed 0`, every title and body intact, and one added key in each of four
-argument documents: `names: {}` on the board and `boardNames: []` on each
-Topic. Nothing authored was overwritten.
+On a genuine pre-graft clone, forcing the board and its three Topics past the
+schema refusals reported `removed 0` at every step, 29 commits for the board
+and 11 per Topic, and one added key in each of four argument documents:
+`names: {}` on the board and `boardNames: []` on each Topic. The board's
+`topicCount` and index were read before the deploy and after it and returned
+the same three rows and the same three titles; the three bodies were read
+after. Those reads are what any authored-content claim here rests on — the
+fingerprint tally cannot make one, and Finding 2 says why.
 
-The removal case — the one no rehearsal had seen — passes, and a negative
-control proves the test can fail. After a member is removed, every surviving
-name still resolves to its own member. Under a board carrying the pre-#6987
-walk, in the same store and the same session, name `1` follows the slot to
-whoever shifted into it and name `4` stops resolving at all.
+The removal case passes on a board built to exercise it, and a negative control
+carrying the pre-#6987 walk fails in the same store: on the fixed board every
+surviving name still resolves to its own member, and on the control name `1`
+follows the slot to whoever shifted into it while name `4` stops resolving at
+all. The removal could not be produced on the Topics board itself, so the
+instrument and its control are what carry this, and Finding 5 quotes the whole
+of what separates them.
 
-One new trap, and it is worse than the one the first rehearsal recorded. A
-board-level `index --step` read reports each member's STALE `shortName`. Two
-consecutive reads agreed with each other and both were wrong; only stepping
-each member piece brought the value forward. "Read twice" is not enough.
+A trap the first rehearsal's list does not carry. On the control board an
+`index --step` read reported `shortName` values that the members themselves no
+longer reported: two consecutive board reads agreed with each other and
+disagreed with the members, and the third — after each member had been stepped
+by its own read — agreed with them. Reading the board twice is not what
+resolved it.
 
 ## Setup
 
-One store this time, because the forced deploy carried it all the way through
-— the reason the first rehearsal needed a second, assembled store is gone.
+One store this time. The first rehearsal built a second, assembled one
+"because the deploy that would reach it was refused on the first store"; here
+the deploy was forced and the first store carried the whole run.
 
 **A genuine pre-graft clone.** A board deployed from the pre-graft `main.tsx`,
 three Topics filed through *its* `addTopic` so they predate the namespace
@@ -99,9 +112,18 @@ revisions  741 → 741
 OK — nothing moved.
 ```
 
-The three Topics are called A, B and C below; their pieces are
-`fid1:MY1hl…`, `fid1:zB92…` and `fid1:YRns…`, and the board is
-`fid1:2cz27…`.
+The board is `fid1:2cz27…`, from `cf piece new`. The three Topics are called A,
+B and C below, after the titles their pieces read back:
+
+```
+$ cf cell get --cell "$TOPIC" title --input     # once per piece
+fid1:MY1hlV9P4dSvnc4IsBHVfgcMycsUw6V9NAwaF0yaB_0 -> "Legacy topic A"
+fid1:YRns-lbzx9QKDUN8LJKyGAwnNmc1V82H6A0Zo2Nvonk -> "Legacy topic C"
+fid1:zB92OJBKdC4t8cu8WKBtX-pXI--dzTe0F4W4FAnd-38 -> "Legacy topic B"
+```
+
+The three piece ids came from `cf inspect entities`, whose `pattern:` line for
+each is `/topic.tsx`; filing order is A, B, C and the id order above is not.
 
 ## Finding 1 — the deploy is still refused, and the checker still answers a known question
 
@@ -121,10 +143,12 @@ packages/patterns/topics/main.tsx cannot replace the source for piece fid1:2cz27
 piece source is incompatible with retained input: input link at topics.0 schema is not compatible: input link at topics.0.shortName: an unconstrained schema is no longer accepted
 ```
 
-Verbatim the message the first rehearsal recorded, at a commit six days newer.
-That rehearsal established with two probes that the refusal is general to any
-new per-member demand property rather than particular to `shortName`; those
-probes were not re-run here and nothing in this run contradicts them.
+Verbatim the message the first rehearsal recorded, at a different repository
+commit — that record states `63de1a1e8c` and this one runs at `a8f9d0874e`; no
+run here measured the distance between them. That rehearsal established with
+two probes that the refusal is general to any new per-member demand property
+rather than particular to `shortName`; those probes were not re-run here and
+nothing in this run contradicts them.
 
 ## Finding 2 — what the forced board deploy leaves behind
 
@@ -140,6 +164,29 @@ content    unchanged
 commits    167 → 167
 revisions  741 → 741
 ```
+
+The board's own reads at that point, so there is a before to compare the after
+against — this is the pre-graft source running, and `shortName` is not in its
+index rows:
+
+```
+$ cf cell get --cell "$BOARD" topicCount --step
+3
+$ cf cell get --cell "$BOARD" index --step
+[
+  { "commentCount": 0, "createdAt": 1788679532000,
+    "createdBy": { "kind": "agent", "name": "Rerun" },
+    "lastActivityAt": 1788679532000, "title": "Legacy topic A" },
+  { "commentCount": 0, "createdAt": 1788679534000,
+    "createdBy": { "kind": "agent", "name": "Rerun" },
+    "lastActivityAt": 1788679534000, "title": "Legacy topic B" },
+  { "commentCount": 0, "createdAt": 1788679537000,
+    "createdBy": { "kind": "agent", "name": "Rerun" },
+    "lastActivityAt": 1788679537000, "title": "Legacy topic C" }
+]
+```
+
+Each row is shown on three lines here; the command printed one field per line.
 
 The deploy carried the complete source package — six `--test` entries, the
 whole of `packages/patterns/topics/*.test.tsx` — which the first rehearsal
@@ -195,8 +242,22 @@ owned-cell	of:fid1:XerVoLrsD0mNSKAo1aMA-Av1N2rFjajN1tlg86uw8BE
 piece	of:fid1:2cz27KUxVbq9sO19J6fkG_G0H4CfUnhaopw4udwjEHM
 ```
 
-`of:fid1:XerVo…` is the board's ARGUMENT cell, and what the deploy did to it is
-one added key:
+`of:fid1:XerVo…` is the board's ARGUMENT cell, resolved from the `input:` line
+of `cf inspect piece`. Its revision history picks the seq to diff from:
+
+```
+$ cf inspect history "$DB" of:fid1:XerVo…
+seq=10	commit=10	set	z6MkgQ…8nyU/10b442c1	local=9	2026-09-06 07:24:41
+seq=32	commit=32	patch	z6MkgQ…8nyU/d7c71407	local=1	2026-09-06 07:25:32
+seq=77	commit=77	patch	z6MkgQ…8nyU/8edf7a2d	local=2	2026-09-06 07:25:35
+seq=122	commit=122	patch	z6MkgQ…8nyU/307c10ed	local=2	2026-09-06 07:25:37
+seq=171	commit=171	patch	z6MkgQ…8nyU/34eacdb9	local=4	2026-09-06 07:30:54
+```
+
+By the timestamps in that block, `122` at 07:25:37 is the newest write before
+the deploy and `171` at 07:30:54 the only one after it; the verify quoted above
+puts the store at `commits 167 → 167` immediately before the deploy ran. So
+`--from 122` spans the deploy:
 
 ```
 $ cf inspect diff "$DB" of:fid1:XerVo… --from 122
@@ -204,9 +265,10 @@ diff of:fid1:XerVoLrsD0mNSKAo1aMA-Av1N2rFjajN1tlg86uw8BE  (122 → latest)
   + names: {}
 ```
 
-Nothing else in that document moved: the diff from its last pre-deploy revision
-reports that key and nothing more. So the forced board deploy's whole effect on
-the board's durable authored state is `names: {}`.
+One added key and no other line. What that bounds is this document: across the
+deploy, the board's argument gained `names: {}` and nothing else in it moved.
+It says nothing about the other six changed entities, which the list above
+names and the paragraphs below take separately.
 
 The lone changed `free-cell` is a rendered view node, and it is worth naming
 because the procedure says to investigate one:
@@ -252,10 +314,10 @@ here. The board's argument cell is in the list above as `owned-cell`, not as a
 derived view node that legitimately went to null, so the tally raises an alarm
 about it. The other three argument cells are classified the same way once they
 move, which the annotated list under "Final state of the clone" below shows.
-What found the truth was diffing each argument cell by name — resolved through
-`cf inspect piece`, exactly as the document says to — rather than reading the
-kinds. No run here established why the classification differs from the
-document.
+What separated the two cases here was diffing each argument cell by name —
+resolved through `cf inspect piece`, exactly as the document says to — rather
+than reading the kind tally. No run here established why the classification
+differs from the document.
 
 ## Finding 3 — the #6990 transition cost, measured on a pre-graft clone
 
@@ -284,10 +346,11 @@ Pattern schemas are not backward compatible:
 - argument.mentionable: asCell changed
 ```
 
-So #6990's replacement cost, measured once by its author on a fresh store, is
-what a genuine pre-graft clone reports too. The older blocker is not gone from
-the world; it is gone from the path a migration takes, and it is still what a
-Topic left on pre-graft source is held to.
+Two blocks, two messages, one Topic: the older refusal answers the pre-graft
+candidate and the `asCell changed` refusal answers the current one. So the
+older blocker is not absent from this store — it is what a Topic left on
+pre-graft source is still held to — and it is not what stands in the way of
+moving that Topic forward.
 
 **One forced update per Topic, and what each costs.** The three were forced by
 one loop that ran `cf space verify` immediately before and immediately after
@@ -328,12 +391,17 @@ diff of:fid1:l4f2HUA0VXPjf1g2J_fCPGLxFLmdaoxW5cKPNK6gAnc  (122 → latest)
   + boardNames: [0]
 ```
 
-That is `boardNames` arriving as a durably written empty array, not as a
-defaulted absence. It corroborates with a mechanism the audit rule
-`skills/topics/SKILL.md` already states — read the VALUE, never the keys — and
-it sharpens it: after step 2 the key is present in the stored document, so a
-key-presence check answers yes for every migrated Topic whether or not it has
-been bound.
+`[0]` is how this renderer writes a zero-length array; the same notation
+labels three-element lists as `[3]` in the `cf inspect entities` output quoted
+under "Final state of the clone", and writes an object's keys as
+`{topics, names}`. Read that way, the forced update wrote the `boardNames` key
+into each of these three argument documents with an empty array in it, rather
+than leaving the key absent to be defaulted.
+
+That is the same direction as the audit rule `skills/topics/SKILL.md` already
+states — read the VALUE, never the keys — for these three Topics. Whether every
+Topic a forced update touches acquires the key this way is not established
+here; three did.
 
 Titles and bodies after all four forced updates:
 
@@ -365,10 +433,11 @@ Cannot read piece result at "shortName": stored data is present, but its schema 
 ```
 
 and the map it wrote, read out of the board's argument document rather than
-through the pattern — this is the durable evidence of #6987, and it is what the
-first rehearsal had no way to see:
+through the pattern, each entry projected to the id its link carries:
 
 ```
+$ cf inspect value-at "$DB" of:fid1:XerVo… --json \
+    | jq -c '.value.names | to_entries | map({name:.key, member:.value["$link"].id})'
 [
   {"name":"1","member":"of:fid1:MY1hlV9P4dSvnc4IsBHVfgcMycsUw6V9NAwaF0yaB_0"},
   {"name":"2","member":"of:fid1:zB92OJBKdC4t8cu8WKBtX-pXI--dzTe0F4W4FAnd-38"},
@@ -376,9 +445,29 @@ first rehearsal had no way to see:
 ]
 ```
 
-Each entry names a Topic PIECE. The board's `topics` array at the same moment
-holds `of:fid1:rSBG…`, `of:fid1:Z-kah…`, `of:fid1:UW7I…` — different documents
-— so no entry is an address into the list.
+Those three ids are the Topic pieces named at the top of this record. The
+board's `topics` array holds three different documents:
+
+```
+$ cf cell get --cell "$BOARD" topics --input --schema '{"type":"array","items":{"$link":true}}'
+[
+  {
+    "$link": "/of:fid1:rSBGbIfQ-Oz0j_5589jMzS3gQ7CswRH1ok2dJlo4vM8"
+  },
+  {
+    "$link": "/of:fid1:Z-kahKGwF5q3VGcExpHdgtfZ7x-HcmTWCPBLvy7X1Lw"
+  },
+  {
+    "$link": "/of:fid1:UW7IAX7wV32aHaRb66yiU3mTzMsSccweFWRbVa95ERk"
+  }
+]
+```
+
+So the three names point at documents that are not the three the list holds.
+That is what these two blocks show. They do not show the entries' internal
+form: the projection above keeps only the `id`, so whether an entry also
+carries a path is not visible here. The control in Finding 5, whose entries
+carry `"path": ["items", N]` and no id, is where that difference is quoted.
 
 The binds, one per Topic, with a control left unbound between the first and the
 rest:
@@ -392,8 +481,16 @@ $ cf cell get --cell "$TB" shortName --step
 Cannot read piece result at "shortName": stored data is present, but its schema could not resolve all required values. The piece was stepped, but the required value still did not materialize.
 ```
 
-After all three: `A: "1"`, `B: "2"`, `C: "3"`. The same bracketing loop, with
-the three `Linked …` lines elided:
+After all three binds, each Topic read from itself:
+
+```
+A: "1"
+B: "2"
+C: "3"
+```
+
+The same bracketing loop around the binds, with the three `Linked …` lines
+elided:
 
 ```
 before bind: commits 167 → 254 revisions 741 → 1285
@@ -408,11 +505,13 @@ after TC: commits 167 → 275 revisions 741 → 1306
 ```
 
 Six commits and six revisions per bind, and 0.92 s, 0.81 s and 0.89 s of wall
-time. The three commits between `after bind TA` and `before TB` are the two
-`shortName` reads quoted above, not the bind. The first rehearsal reported one
-commit and one revision per bind, measured differently (`cf inspect churn
---bucket 5` over a bracketing window on a freshly deployed piece); the two
-numbers are not comparable and neither was re-measured the other's way.
+time. Three commits fall between `after bind TA` and `before TB`, outside every
+bind's brackets; the only commands run in that gap were the two `shortName`
+reads quoted above, and nothing here attributes the commits to them. The first
+rehearsal reported one commit and one revision per bind, measured differently
+(`cf inspect churn --bucket 5` over a bracketing window on a freshly deployed
+piece); the two numbers are not comparable and neither was re-measured the
+other's way.
 
 What the bind writes is the replacement of that empty array with a link:
 
@@ -421,8 +520,23 @@ $ cf inspect value-at "$DB" of:fid1:5AolZ… --json | jq -c '.value.boardNames'
 {"$link":{"id":"of:fid1:2cz27KUxVbq9sO19J6fkG_G0H4CfUnhaopw4udwjEHM","path":["namesTable"]}}
 ```
 
-A second `backfillNames` returns `{"assigned": []}` and leaves the map
-identical. It is not free, bracketed the same way:
+A second `backfillNames`, same board, same verb:
+
+```
+  "result": {
+    "assigned": []
+  }
+}
+```
+
+and the names map read the same way as before, afterwards:
+
+```
+[{"name":"1","member":"of:fid1:MY1hlV9P4dSvnc4IsBHVfgcMycsUw6V9NAwaF0yaB_0"},{"name":"2","member":"of:fid1:zB92OJBKdC4t8cu8WKBtX-pXI--dzTe0F4W4FAnd-38"},{"name":"3","member":"of:fid1:YRns-lbzx9QKDUN8LJKyGAwnNmc1V82H6A0Zo2Nvonk"}]
+```
+
+— the same three pairs the first backfill wrote. It is not free, bracketed the
+same way:
 
 ```
 before second backfill: commits 167 → 449 revisions 741 → 1873
@@ -430,7 +544,7 @@ after second backfill: commits 167 → 450 revisions 741 → 1874
 ```
 
 One commit and one revision for a call that assigned nothing. No run here
-attributed that commit, and the names map read back unchanged afterwards.
+attributed that commit.
 
 Member addressing, after `cf piece set-slug top "$BOARD/names"`:
 
@@ -450,11 +564,13 @@ still not being accepted for either a space name or a DID.
 
 ## Finding 5 — the removal case, and a control that can fail
 
-**No deployed verb removes a member.** Neither `packages/patterns/topics/main.tsx`
-nor the exemplar `packages/patterns/collection-naming/board.tsx` publishes one;
-the removals in `board.test.tsx` are `items.removeByValue(items.key(n))` inside
-test actions. Three routes were tried on the Topics board and all three were
-refused, which is why this finding runs on a purpose-built instrument instead:
+**Neither board pattern publishes a verb that removes a member.** Read at
+`a8f9d0874e`: `packages/patterns/topics/main.tsx` and the exemplar
+`packages/patterns/collection-naming/board.tsx` declare none, and the removals
+in `board.test.tsx` are `items.removeByValue(items.key(n))` inside test
+actions. Three routes were then tried against the Topics board and all three
+were refused, which is why this finding runs on a purpose-built instrument
+instead:
 
 ```
 $ cf cell set --cell "$BOARD" topics --input   # shortened array, links to the member cells
@@ -594,32 +710,44 @@ the input and output types, `addItem`, `assignName`, `namesTable`,
 character the same. Three doc comments the first carries were not copied into
 the second, which the diff also shows.
 
-So this is not a one-difference claim: it is one behavioral difference plus two
+So this is not a one-difference claim. It is one behavioral difference plus two
 display strings, and the vendored walk is a reconstruction of the pre-#6987
 code rather than its bytes — `incrementName` is module-private in `naming.ts`,
-so the copy spells that step itself. What rules the display strings out as the
-cause is not an argument about `[NAME]`: it is that the two boards' names maps
-below differ in exactly the way the vendored walk predicts, and in no other
-way.
+so the copy spells that step itself.
+
+**The display strings are not independently ruled out.** No run here varies the
+walk while holding the strings fixed, or the reverse, so nothing separates
+them. What the outputs below show is that two boards differing in both produce
+different names maps, and that the difference in those maps is the one the
+walk's code predicts. A reader who wants the strings excluded needs a run this
+rehearsal did not make.
 
 Four items were filed on each, the names map was cleared so the backfill had to
-write every entry, and `backfillNames` was run once. The two maps, read out of
-the boards' argument documents:
+write every entry, and `backfillNames` was run once. The two maps came out of
+`cf inspect value-at "$DB" <argument> --json` on each board, but through
+different `jq` projections — the fixed board's mapped to name/member pairs, the
+control's raw — so the two blocks are not like for like and the commands are
+shown with them:
 
 ```
-fixed:    [{"name":"1","member":"of:fid1:jnV6yGi…"},{"name":"2","member":"of:fid1:a3-Smcc…"},
-           {"name":"3","member":"of:fid1:KDGN9St…"},{"name":"4","member":"of:fid1:Gflqq-v…"}]
+fixed, jq -c '.value.names | to_entries | map({name:.key, member:.value["$link"].id})':
+[{"name":"1","member":"of:fid1:jnV6yGi…"},{"name":"2","member":"of:fid1:a3-Smcc…"},
+ {"name":"3","member":"of:fid1:KDGN9St…"},{"name":"4","member":"of:fid1:Gflqq-v…"}]
 
-control:  {"1":{"$link":{"path":["items","0"],…}},"2":{"$link":{"path":["items","1"],…}},
-           "3":{"$link":{"path":["items","2"],…}},"4":{"$link":{"path":["items","3"],…}}}
+control, jq -c '.value.names':
+{"1":{"$link":{"path":["items","0"],…}},"2":{"$link":{"path":["items","1"],…}},
+ "3":{"$link":{"path":["items","2"],…}},"4":{"$link":{"path":["items","3"],…}}}
 ```
 
-The fixed board's entries name item PIECES; the control's name list positions.
-That is the defect, on disk, in one line.
+The fixed board's projection returns an id for every entry, and
+`of:fid1:jnV6yGi…` came back from `cf inspect piece` as a piece running
+`/packages/patterns/collection-naming/item.tsx`. The control's raw form carries
+a `path` into `items` and no `id`. What the pair shows is that one map's
+entries carry member documents and the other's carry list positions.
 
 Both boards then had the member at position 0 removed, through the same verb,
-in the same store, minutes apart. Reading each board's namespace through its
-own slug — `rb` for the fixed board, `sb` for the control:
+in the same store. Reading each board's namespace through its own slug — `rb`
+for the fixed board, `sb` for the control:
 
 | address | fixed board (`/rb/<n>`) | control (`/sb/<n>`, pre-#6987 walk) |
 | --- | --- | --- |
@@ -631,8 +759,9 @@ own slug — `rb` for the fixed board, `sb` for the control:
 On the fixed board every surviving name still resolves to its own member, and
 the departed member is still reachable by the name it was given. On the control
 every name has moved one member up the list and the last name resolves to
-nothing at all. That is the property #6987 fixed, exercised against a served
-store rather than in a pattern unit test, with a control beside it that fails.
+nothing at all. The maps above are where the walk's difference is visible on
+disk; this table is where it is visible through an address. Neither isolates
+the display strings.
 
 Each member's own `shortName`, read from the member rather than the board, says
 the same thing:
@@ -674,11 +803,12 @@ Finding 5 — and the same board read, unchanged, third time:
 ```
 
 The only commands between the second board read and the third were those
-per-member reads. So a `--step` read of the board does not step its members,
-and a member's `shortName` on the board's index can be behind what the member
-itself would report. The first rehearsal's rule — read
-twice before concluding a bind failed — does not cover this: two identical
-reads were both stale, and what moved the value was stepping the member.
+per-member reads. So on this board a `--step` read of the board did not bring
+its members' `shortName` values forward, and two such reads in a row agreed
+with each other while disagreeing with what each member reported when stepped.
+No run here shows this on another board or verb. The first rehearsal's rule —
+read twice before concluding a bind failed — does not resolve this case:
+repeating the board read is what did not move it.
 
 The fixed board's index was read across the same sequence and did not move. Its
 third read, taken in the same command as the control's third read above:
@@ -693,13 +823,14 @@ third read, taken in the same command as the control's third read above:
 
 No run here attributed the staleness to a mechanism.
 
-The operational consequence is worth stating plainly, because it is what makes
-this defect class expensive: **the badge does not reveal the defect.** On the
-control board the index showed correct-looking names for two full reads while
-`/…/1` was already resolving to the wrong member. Only the address, and the
-member's own read, tell the truth.
+What that costs an operator, bounded to what the blocks show: on the control
+board the index carried `2, 3, 4` for two consecutive reads — the numbering the
+board had before the removal — while `/sb/1` was already answering with the
+wrong member. The third index read, after the members were stepped, agreed with
+the members. So the badge was not a reliable place to look for this on these
+reads; the address disagreed first.
 
-## Finding 7 — `setsrc --check` writes only when the candidate is new
+## Finding 7 — a `--check` wrote only when its candidate was new to the store
 
 The first rehearsal established that `setsrc --check` writes to the store
 (#6964) and measured one refused check at 18 entities and two commits without
@@ -741,14 +872,17 @@ before: added 578 commits 167 → 448 revisions 741 → 1865
 after check of a never-stored source: added 586 commits 167 → 449 revisions 741 → 1873
 ```
 
-So what a check costs is the compiled module set it has to store, and a check
-whose candidate is already in the space's content store costs nothing. The pair
-measurement on the clone is consistent with the refused check having paid all
-of it. That consistency is an inference from the second experiment, not a
-separate measurement of the board.
+Three checks against one piece, then: the two whose candidates the store
+already held moved nothing, and the one whose candidate was new to the store
+cost one commit and eight entities. The pair measurement on the board is
+consistent with the refused check there having paid all of that pair's two
+commits and 18 entities, but no run separated the two checks on the board, so
+that is an inference from the four-check experiment rather than a measurement
+of the board.
 
-The practical form: a clone is spent by a check of a source it has not seen
-before, not by every check.
+What these runs support, and no more: on this store a `--check` wrote when its
+candidate's compiled module set was new to the space and did not write when it
+was not. Whether that holds for candidates or spaces unlike these is untested.
 
 ## Finding 8 — the invocation-session requirement is not in the quoted procedure
 
@@ -765,11 +899,27 @@ Run as written with no session in the environment, this build answers:
 --invocation names an id to replay, and an id is replayable only within the session it was chosen in. Mint a session with `cf invocation-session new` and set `CF_INVOCATION_SESSION`, or pass it as `--invocation-session <id>`.
 ```
 
-The message is self-explanatory and the fix is one command, so this is a gap in
-a quoted procedure rather than a defect. Two smaller shapes cost time the same
-way: `--json` and `--quiet` are parsed inside the callable's own section when
-they follow the callable name, so `--quiet` has to precede it, and a positional
-JSON argument beside a trailing flag is rejected as `Unexpected argument`.
+The message names its own fix, so what this records is a quoted procedure that
+has fallen behind the CLI, not a defect in either. Two smaller shapes cost time
+the same way. A flag after the callable name is parsed inside the callable's
+own section, so `--quiet` there collides with the input:
+
+```
+$ cf piece call --cell "$BOARD" --invocation … backfillNames --json '{"agentName":"Rerun"}' --quiet
+--json cannot be combined with generated flags
+```
+
+and a positional JSON value beside a trailing `--json` is not read as the
+input:
+
+```
+$ cf piece call --cell "$BOARD" --invocation … addTopic '{"title":"Legacy topic A",…}' --json
+Unexpected argument {"title":"Legacy topic A","body":"body of A","agentName":"Rerun"}
+```
+
+Both are fixed by putting `--quiet` before the callable name and passing the
+input as `--json '<value>'` after it, which is how every call in this record
+was run.
 
 ## Final state of the clone
 
@@ -825,10 +975,17 @@ computed:fid1:Djt2mt…   owned-cell "Space Home (3)"
 computed:fid1:i4ZalH…   owned-cell false
 ```
 
-— five three-element lists, a name and a boolean, so no changed entity in this
-store is authored content. The instrument boards
-and their items are not here: they were created after the baseline, so they
-are counted in `added`, not `changed`.
+Five three-element lists, a name and a boolean. **That is a label column, not
+contents**: an authored three-element list would print `[3]` too, and nothing
+here reads what these seven hold or which piece owns them. So this block
+identifies which entities changed and rules none of them in or out as authored
+content. What the authored-content claim rests on is the direct reads —
+`topicCount`, the index, and the three bodies in Finding 2, and the four
+argument diffs in Findings 2 and 3 — not this list.
+
+The instrument boards and their items are absent from the list because the
+comparison that produced it selects only entities the pristine manifest already
+carried; anything created after the clone is counted in `added`.
 
 Churn over the whole run, `--bucket 60`, with `--until` set past the last
 write so the trailing quiet minute is inside the window:
@@ -860,11 +1017,14 @@ last commit 2026-09-06 07:44:00, observed through 2026-09-06 07:45:00
 That is the settle: `last commit 2026-09-06 07:44:00, observed through
 2026-09-06 07:45:00`, and that minute reported at zero. The busiest minute is
 56 commits at 07:39, the minute before it is zero and the minute after it 19,
-so there is no plateau — the shape is spikes with quiet between them. The 07:32
-through 07:35 band is the three forced Topic updates and the binds; 07:39
-through 07:44 is the removal instrument and the `setsrc --check` attribution,
-which are this rehearsal's own machinery rather than anything a migration would
-do.
+and three whole minutes in the middle of the window are zero — a curve of
+spikes with quiet between them rather than a sustained plateau.
+
+Which minute belongs to which command is not recorded. The churn output carries
+timestamps and counts and no operation identifiers, and the deploy, bind and
+check blocks above carry durations and no timestamps, so nothing here joins
+them. An earlier draft attributed bands to particular steps; it was guessing
+and the sentences are gone.
 
 ## What this rehearsal did not cover
 
