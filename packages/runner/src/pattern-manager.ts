@@ -997,7 +997,7 @@ export class PatternManager {
    * Session-side resolution hints for _keyless_ list-builtin ops, keyed by the
    * node's immutable inputs-doc address (`<space>\0<id>`). A keyless op's
    * durable inputs carry its full embedded graph (the never-durable contract
-   * forbids the `keyless:` `$patternRef` sentinel there), but the embedded
+   * forbids the keyless `$patternRef` sentinel there), but the embedded
    * round-trip corrupts nested output-alias defer levels, so the _same_ session
    * that instantiated the node resolves the pristine artifact through this map
    * instead. Entries are session-lifetime like the artifact index; a fresh

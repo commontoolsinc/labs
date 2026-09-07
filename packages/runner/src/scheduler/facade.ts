@@ -1565,14 +1565,14 @@ export class Scheduler {
     });
 
   /**
-   * Returns the owning pattern instance for an input stream, used to group a
-   * pattern's input across its several streams into one delivery-shaping window
-   * (per-pattern coalescing). The wake shaper's `hold()` runs before the
-   * handler is resolved, so we find it here from the registered handlers;
-   * `undefined` when none is registered yet (the shaper then falls back to
-   * per-stream grouping). The key includes the owning space so two instances of
-   * one pattern in different spaces (same content-addressed `pieceId`) do not
-   * share a bucket (see `shaperInstanceGroupKey()`).
+   * Returns the id of the owning pattern instance for an input stream, used to
+   * group a pattern's input across its several streams into one
+   * delivery-shaping window (per-pattern coalescing). The wake shaper's
+   * `hold()` runs before the handler is resolved, so we find it here from the
+   * registered handlers; `undefined` when none is registered yet (the shaper
+   * then falls back to per-stream grouping). The key includes the owning space
+   * so two instances of one pattern in different spaces (same content-addressed
+   * `pieceId`) do not share a bucket (see `shaperInstanceGroupKey()`).
    */
   #pieceIdForEventLink(
     eventLink: NormalizedFullLink,

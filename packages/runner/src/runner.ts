@@ -1927,6 +1927,7 @@ export class Runner {
     string
   >(RESULT_SHORTCUT_LIMIT);
 
+  /** Results this runner stopped, paired with `#locallyPreparedResults`. */
   readonly #locallyStoppedResults = new BoundedKeyMap<
     `${MemorySpace}/${ScopeKey}/${URI}`,
     string
@@ -1990,20 +1991,20 @@ export class Runner {
   /**
    * _Session_-side pattern pointers for _keyless_ pieces. A hand-built
    * pattern's setup does not stamp its session-synthetic `keyless:` ref durably
-   * (the never-durable contract), but the in-session flows that read those
-   * stamps are sanctioned and keep working through this map instead: a separate
-   * `start(resultCell)` after setup, `setup`/`run` without a pattern, restart
-   * after `stop()`, and the setup-reuse marker (`storedSetupMarker`) that lets
-   * a re-derived sub-piece (a lift returning a pattern) reuse its running setup
-   * rather than restage it. Written at the same moment the durable stamps would
-   * have been (end of `#applySetupState()`), erased when a real pattern's
-   * stamps supersede it or the staging transaction fails, and it dies with the
-   * session — which is the contract's whole point. Bounded like the shortcut
-   * maps beside it. Eviction costs the designed no-pattern-meta verdict (the
-   * piece's producer re-derives it), a restage, or a loud moved/not-current
-   * abort — with one guarded corner: absence alone would read as the
-   * fresh-session _zero-evidence_ state and skip the restage validation, so
-   * evictions leave a tombstone (above) and the exemption treats evicted as
+   * (the never-durable contract), but the in-session flows that need that
+   * pointer are sanctioned and go through this map instead: a separate
+   * `start(resultCell)` after setup, `setup()`/`run()` without a pattern,
+   * restart after `stop()`, and the setup-reuse marker (`storedSetupMarker()`)
+   * that lets a re-derived sub-piece (a lift returning a pattern) reuse its
+   * running setup rather than restage it. Written at the same moment the
+   * durable stamps would have been (end of `#applySetupState()`), erased when a
+   * real pattern's stamps supersede it or the staging transaction fails, and it
+   * dies with the session — which is the contract's whole point. Bounded like
+   * the shortcut maps beside it. Eviction costs the designed no-pattern-meta
+   * verdict (the piece's producer re-derives it), a restage, or a loud
+   * moved/not-current abort — with one guarded corner: absence alone would read
+   * as the fresh-session _zero-evidence_ state and skip the restage validation,
+   * so evictions leave a tombstone (above) and the exemption treats evicted as
    * evidence-unknown → restage.
    */
   readonly #sessionPatternPointers = new BoundedKeyMap<
@@ -2045,8 +2046,8 @@ export class Runner {
    * (space/id), inner key the resolved scope _instance_, value a hash of the
    * pattern's encodable form — what `#writeJavaScriptActionResult()` compares
    * to decide whether a returned sub-pattern has changed. The inner key is the
-   * _same_ per-run resolved `ScopeKey` that selects the byScope result cell: a
-   * serving runtime materializes one child per demanded instance, and a
+   * _same_ per-run resolved `ScopeKey` that selects the `byScope` result cell:
+   * a serving runtime materializes one child per demanded instance, and a
    * doc-level (or service-identity-resolved) key would make the _second_
    * demanded instance look unchanged and skip its child materialization. The
    * outer doc key is what change notifications can name (they carry scope by
@@ -5954,10 +5955,10 @@ export class Runner {
   }
 
   /**
-   * Returns the result-pattern cache key for `cell`, per scope _instance_
-   * (`key-vocabulary.md` §1 site 2): two instances of one doc may resolve to
-   * different patterns, so the key carries the shared scope key, resolved
-   * against the runtime's own session (the OFF arm's one identity).
+   * Returns the per-scope-_instance_ key under which this runner tracks
+   * `cell`'s document (`key-vocabulary.md` §1 site 2): two instances of one doc
+   * may resolve to different patterns, so the key carries the shared scope key,
+   * resolved against the runtime's own session (the OFF arm's one identity).
    */
   #getDocKey(cell: Cell<any>): `${MemorySpace}/${ScopeKey}/${URI}` {
     const { space, id, scope } = cell.getAsNormalizedFullLink();
