@@ -116,7 +116,13 @@ export type LLMToolResult = {
 export type LLMRequestMetadata = Record<string, JSONValue | undefined>;
 
 export type LLMRequest = {
+  /**
+   * Whether this request asks for its response to be cached. A request that
+   * leaves the field out asks for caching; only `false` declines. The
+   * toolshed may answer live for reasons of its own.
+   */
   cache?: boolean;
+
   messages: readonly BuiltInLLMMessage[];
   model: ModelName;
   system?: string;
@@ -134,7 +140,14 @@ export type LLMGenerateObjectRequest = {
   messages: readonly BuiltInLLMMessage[];
   model?: ModelName;
   system?: string;
+
+  /**
+   * Whether this request asks for its response to be cached. A request that
+   * leaves the field out asks for caching; only `false` declines. The
+   * toolshed may answer live for reasons of its own.
+   */
   cache?: boolean;
+
   maxTokens?: number;
   metadata?: LLMRequestMetadata;
 };
@@ -245,7 +258,9 @@ export function llmRequestProblem(input: unknown): string | undefined {
   if (typeof input.model !== "string") return "'model' must be a string.";
   const conversation = conversationProblem(input.messages);
   if (conversation !== undefined) return conversation;
-  if (!("cache" in input)) return "'cache' must be present.";
+  if ("cache" in input && typeof input.cache !== "boolean") {
+    return "'cache' must be a boolean.";
+  }
   if ("system" in input && typeof input.system !== "string") {
     return "'system' must be a string.";
   }

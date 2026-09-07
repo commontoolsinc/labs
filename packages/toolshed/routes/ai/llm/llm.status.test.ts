@@ -184,6 +184,22 @@ Deno.test("a tool the model cannot serve is the caller's mistake", async () => {
   assertStringIncludes(error, "is not supported by model");
 });
 
+Deno.test("a request that leaves `cache` out reaches the provider", async () => {
+  // `cache` is optional, so the status is the provider's refusal rather than
+  // the guard's. The body posted here is the one the OpenAPI document
+  // publishes as valid: a model and a conversation, and nothing else.
+
+  const { status } = await withMockModel(
+    rejectingWith(429, "Rate limit exceeded"),
+    () =>
+      post("/api/ai/llm", {
+        model: MOCK_MODEL_NAME,
+        messages: [{ role: "user", content: "hi" }],
+      }),
+  );
+  assertEquals(status, 429);
+});
+
 //
 // A body sent as JSON is parsed by the route's own validator, which answers
 // its own 422 before the handler runs. A body sent as anything else reaches
