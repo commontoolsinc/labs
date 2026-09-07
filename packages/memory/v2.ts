@@ -1526,6 +1526,16 @@ export type SqliteDbRef = {
   owner?: string;
 };
 
+/** Whether `value` is a SQLite db handle. The `id` is the whole of the test:
+ *  it is the one field every consumer needs and the one the runner's own
+ *  handle read validates, and the rest of the shape is optional. Shared so
+ *  that a reader deciding "is this a database?" and the runner deciding "may
+ *  I query it?" cannot drift apart. */
+export function isSqliteDbRef(value: unknown): value is SqliteDbRef {
+  return !!value && typeof value === "object" &&
+    typeof (value as SqliteDbRef).id === "string";
+}
+
 export type SqliteQueryRequest = {
   type: "sqlite.query";
   requestId: string;

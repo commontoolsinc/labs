@@ -52,6 +52,7 @@ import {
 import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import {
   columnDeclaresIfc,
+  isSqliteDbRef,
   type SqliteDbRef as WireSqliteDbRef,
   type SqliteParamsWire,
   sqliteRowToWire,
@@ -158,10 +159,7 @@ function makeResultCell<T>(
 }
 
 function readDbRef(value: unknown): SqliteDbRef {
-  if (
-    value && typeof value === "object" &&
-    typeof (value as SqliteDbRef).id === "string"
-  ) {
+  if (isSqliteDbRef(value)) {
     const ref = value as SqliteDbRef;
     return {
       id: ref.id,

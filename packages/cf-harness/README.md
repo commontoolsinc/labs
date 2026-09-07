@@ -124,8 +124,9 @@ What works today:
   - `edit_file`
   - `write_file`
   - `delegate_task`
-  - `describe_handle` (shape and labels of a handle's referent, never its value;
-    see [Inspecting a handle's shape](#inspecting-a-handles-shape))
+  - `describe_handle` (shape and labels of a handle's referent, and the tables
+    of one that is a database, never its data; see
+    [Inspecting a handle's shape](#inspecting-a-handles-shape))
   - `run_pattern` (present only when the run configures a fabric session; see
     [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
   - `search_patterns` (present only when the run configures a pattern index with
@@ -929,6 +930,28 @@ table, so shape stays inspectable in every run that has handles at all. A token
 the run's table does not hold comes back `known: false` rather than as an error,
 since a token from another run simply names nothing here.
 
+**A referent that declares nothing and is a database is the third source, and
+the one place the tool reads a value.** Some referents state their contract in
+their value rather than in their metadata, and a SQLite database handle is the
+case that matters: an injected connector database arrives as a cell nothing
+declared a schema for, whose value carries the table schemas the database was
+created under. The rows are in the database file, which nothing here opens. So
+where no schema was declared and the value is a database handle, the reply
+carries `database` instead of `schema`: `tables`, one property per table whose
+own properties are that table's columns with their types, and `labels`, one
+entry per column that declares an `ifc`, addressed by table name and column
+name. The tables go through the same reduction every disclosed schema does, so
+the table- and column-name channels are bounded exactly as a property-name
+channel is and the columns' annotations, prose and defaults do not ride out on
+the schema. The read is conditional on nothing being declared, so a referent
+that states its own shape is never opened.
+
+Without it a database reads as an opaque value, and the code an agent writes
+over an opaque value is code that treats it as one — stringifying a handle and
+handing it to a language model rather than issuing a query against it.
+[`docs/common/capabilities/sqlite.md`](../../docs/common/capabilities/sqlite.md)
+is what a pattern does with the answer.
+
 **What is disclosed is structure and only structure**: property names, types,
 nesting, required-ness, array and object composition, a `type` from the schema
 vocabulary, a `format` from the small known set, and a local `$ref` with the
@@ -1000,9 +1023,10 @@ and never the path taken from it, and that whatever comes back is reduced to
 structure before any of it crosses. An address the session can state no shape
 for is reported as shapeless rather than as a failed call.
 
-`describe_handle` is declared `effectClass: "read"` and reads no value, but
-answering from the fabric establishes the run's fabric session — loading the
-identity key and opening a remote connection. The first call in a run therefore
+`describe_handle` is declared `effectClass: "read"`. It reads no value except a
+database handle's own table declaration, and it reports no datum from any of
+them. Answering from the fabric establishes the run's fabric session — loading
+the identity key and opening a remote connection — so the first call in a run
 carries that cost and that effect.
 
 Shape is also what makes a chain of steps checkable. An orchestrator that passes

@@ -179,11 +179,14 @@ with the Browser Access CDP endpoint attached by the harness rather than written
 by the model.
 
 `describe_handle` reports the referent's structural schema and path segments,
-never its value. It prefers the session Fabric's declared shape when available
+never its data. It prefers the session Fabric's declared shape when available
 and otherwise uses a harness-captured schema, recursively removes value-bearing
 and descriptive schema fields, bounds disclosed property names, and scrubs bare
-Fabric identifiers. An unknown or shapeless token remains an ordinary bounded
-tool result rather than a dereference path.
+Fabric identifiers. A referent that declares no schema and holds a SQLite
+database handle reports that database's tables and its columns' labels through
+the same reduction, which is the one value the tool reads. An unknown or
+shapeless token remains an ordinary bounded tool result rather than a
+dereference path.
 
 `run_pattern` accepts at most 256 KiB of inline source. It resolves whole-string
 LLM-friendly link inputs to live cells only within the configured space and

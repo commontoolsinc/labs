@@ -172,12 +172,19 @@ The current package provides:
   `const`, `enum`, `default`, `examples`, and free-text annotations never leave
   the tool. Property names do cross, since code cannot be written over data
   without them, so they are bounded in count and length and the model-facing
-  reply is scrubbed of bare fabric identifiers at every depth, keys included.
-  Disclosure is permissive and fixed rather than configurable — no setting
-  narrows it — and is bounded to addresses in the session's own space; that
-  bound is on the handle's own address rather than on everything the document
-  reaches from it. Answering from the fabric establishes the run's fabric
-  session despite the tool's `read` effect class;
+  reply is scrubbed of bare fabric identifiers at every depth, keys included. A
+  referent that declares no schema and whose value is a SQLite database handle
+  reports `database` instead: its tables, one property per table whose own
+  properties are that table's columns with their types, reduced by the same
+  allowlist, and one label entry per column that declares an `ifc`, addressed by
+  table name and column name. That is the one place the tool reads a value, and
+  it is conditional on nothing being declared — a database's tables are the
+  contract it was created under, its rows are in the database file, and nothing
+  here opens one. Disclosure is permissive and fixed rather than configurable —
+  no setting narrows it — and is bounded to addresses in the session's own
+  space; that bound is on the handle's own address rather than on everything the
+  document reaches from it. Answering from the fabric establishes the run's
+  fabric session despite the tool's `read` effect class;
 - bounded request-attribution headers on OpenAI-compatible gateway traffic,
   using persisted operational provenance rather than request content or personal
   identifiers;
