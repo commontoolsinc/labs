@@ -1,6 +1,6 @@
 /**
- * How a shuttle line splits into tokens, and how a value prints as one of
- * them.
+ * How a shuttle line splits into tokens, how a value prints as one of them,
+ * and where the token a half-typed line ends in begins.
  *
  * `cf` never does either: it is handed `Deno.args`, split for it already by
  * the operating system's shell. Shuttle reads its own line, so the split is
@@ -10,6 +10,11 @@
  * {@link quoteToken} writes, {@link splitLine} reads back as the one value it
  * was given. That is what lets a value print bare where nothing in it needs
  * more, which is the common case and the point.
+ *
+ * {@link tailOfLine} is the third, and it is here for the same reason: where
+ * a token ends is this module's question whether the line is whole or still
+ * being typed, and a completion that answered it for itself would be a
+ * second grammar to keep in step with this one.
  *
  * What a token then means is decided elsewhere — `place.ts` reads an operand
  * as a reference or as one of the navigation spellings, and a verb reads its
@@ -101,9 +106,115 @@ export type LineSplit =
  * the choice is safe, not that it was forced.
  */
 export function splitLine(line: string): LineSplit {
+  const scanned = scanLine(line);
+  return scanned.kind === "refused"
+    ? scanned
+    : { kind: "split", tokens: scanned.tokens };
+}
+
+/** What a completion at the end of a line is completing. */
+export interface LineTail {
+  /**
+   * The whole tokens written before the one being completed, which is what
+   * says where on the line that token stands.
+   */
+  readonly before: readonly string[];
+
+  /**
+   * The line up to where that token opens, which a completion keeps and
+   * writes the token it chose after.
+   */
+  readonly head: string;
+
+  /**
+   * The value of the token being completed — what the split reads it as,
+   * rather than how it is spelled. It is the empty string where the line ends
+   * in a separator, a completion there opening a token rather than continuing
+   * one.
+   */
+  readonly prefix: string;
+}
+
+/**
+ * What a completion at the end of `line` is completing, and nothing where the
+ * line is one the split refuses.
+ *
+ * The token is the last one {@link splitLine} reads, and `head` is the line up
+ * to where that token opened. Both come off the one scan the split itself
+ * runs, which is what makes this a projection of the grammar rather than a
+ * second reading of it — and the difference is not academic. A separator
+ * inside quotes or behind a backslash is a character of its token, so the run
+ * of characters after the last separator is not the token at all: on
+ * `get --select a\ sl` it is `sl`, where the token is the option's value
+ * `a sl`, and a completion working from the run would offer an operand where
+ * the line has none and rewrite the value to reach it.
+ *
+ * A line the split refuses is not completed. Both its refusals are a token
+ * with no end — an unclosed quote, a trailing backslash — so where the token
+ * being typed opens is exactly what such a line does not yet say.
+ *
+ * The prefix is a value rather than a spelling, so a caller matches candidates
+ * against it and writes its choice back as a token of its own
+ * ({@link quoteToken}); `head` ends where a token may open, so writing one
+ * after it puts it where this one was.
+ */
+export function tailOfLine(line: string): LineTail | undefined {
+  const scanned = scanLine(line);
+  if (scanned.kind === "refused") return undefined;
+  const { tokens, starts, unterminated } = scanned;
+  return unterminated
+    ? {
+      before: tokens.slice(0, -1),
+      head: line.slice(0, starts[starts.length - 1]),
+      prefix: tokens[tokens.length - 1],
+    }
+    : { before: tokens, head: line, prefix: "" };
+}
+
+/**
+ * Whether `character` separates two tokens, which is the one question the
+ * split asks of a character before any other.
+ *
+ * The class is exported as a predicate rather than as the expression, so a
+ * caller asks about a character and cannot come to depend on how the class is
+ * written. What it is for is a caller that has to enumerate the class rather
+ * than test one member of it.
+ */
+export function separatesTokens(character: string): boolean {
+  return SEPARATOR.test(character);
+}
+
+/** What one scan of a line found. */
+type LineScan =
+  | {
+    readonly kind: "scanned";
+    /** The tokens, in the order written. */
+    readonly tokens: readonly string[];
+    /** Where each of them opened on the line, in the same order. */
+    readonly starts: readonly number[];
+    /**
+     * Whether the last token was still open when the line ended — which is
+     * what tells a token being typed from one a separator finished.
+     */
+    readonly unterminated: boolean;
+  }
+  | { readonly kind: "refused"; readonly reason: string };
+
+/**
+ * Helper for {@link splitLine} and {@link tailOfLine}, which reads `line` as
+ * the grammar above describes and reports everything either of them needs.
+ *
+ * One scan rather than two, because there is one grammar: where a token ends
+ * is the same question whether the line is whole or still being typed, and a
+ * second traversal answering it would be a second grammar to keep in step.
+ * What the two projections differ in is which of the answers they carry.
+ */
+function scanLine(line: string): LineScan {
   const tokens: string[] = [];
+  const starts: number[] = [];
   let current = "";
   let started = false;
+  let openedTokenAt = 0;
   let quote: string | undefined;
   let openedAt = 0;
 
@@ -130,14 +241,20 @@ export function splitLine(line: string): LineSplit {
     if (SEPARATOR.test(character)) {
       if (started) {
         tokens.push(current);
+        starts.push(openedTokenAt);
         current = "";
         started = false;
       }
       continue;
     }
     // Set before the branches rather than in each of them, so that an empty
-    // pair of quotes opens a token the way a character does.
-    started = true;
+    // pair of quotes opens a token the way a character does. Where the token
+    // opened is recorded only as it opens, so that it names the token's first
+    // character rather than its last.
+    if (!started) {
+      started = true;
+      openedTokenAt = index;
+    }
     if (character === "'" || character === '"') {
       quote = character;
       openedAt = index;
@@ -159,8 +276,11 @@ export function splitLine(line: string): LineSplit {
         `never closed.`,
     );
   }
-  if (started) tokens.push(current);
-  return { kind: "split", tokens };
+  if (started) {
+    tokens.push(current);
+    starts.push(openedTokenAt);
+  }
+  return { kind: "scanned", tokens, starts, unterminated: started };
 }
 
 /**
@@ -194,8 +314,15 @@ function columnOf(line: string, index: number): number {
   return [...line.slice(0, index)].length + 1;
 }
 
-/** Helper for {@link splitLine}, which builds a refusal carrying `reason`. */
-function refuse(reason: string): LineSplit {
+/**
+ * Helper for {@link scanLine}, which builds the refusal carrying `reason`.
+ *
+ * The one shape serves both projections: a refused scan and a refused split
+ * are the same fact about the line, so the caller that splits hands it
+ * straight back and the caller that completes reads it as a line it cannot
+ * answer for.
+ */
+function refuse(reason: string): LineScan & { kind: "refused" } {
   return { kind: "refused", reason };
 }
 

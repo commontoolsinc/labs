@@ -90,6 +90,15 @@ function typed(text: string): Key[] {
 /** Helper for the cases below, which is the key that runs a line. */
 const ENTER: Key = { name: "enter" };
 
+/** Helper for the cases below, which is the key that completes a token. */
+const TAB: Key = { name: "tab" };
+
+/** Helper for the cases below, which is the key that recalls an earlier line. */
+const UP: Key = { name: "up" };
+
+/** Helper for the cases below, which is the key that recalls a later one. */
+const DOWN: Key = { name: "down" };
+
 /** Helper for the cases below, which is `letter` typed with control held. */
 function control(letter: string): Key {
   return { name: `ctrl-${letter}`, ctrl: true };
@@ -747,6 +756,251 @@ describe("prompt", () => {
         text: `${AT_ROOT}ab`,
         column: 20,
       });
+    });
+  });
+
+  describe("recalling a line", () => {
+    // What the prompt does with the traversal, which is where the two meet:
+    // what the traversal itself holds is pinned in `shuttle-history.test.ts`.
+
+    it("draws the line before it on `up`, with the cursor at its end", async () => {
+      const writes = await running([...typed("pwd"), ENTER, UP]);
+      expect(drawn(writes)).toEqual({
+        kind: "edit",
+        text: `${AT_ROOT}pwd`,
+        column: 21,
+      });
+    });
+
+    it("draws the line that was being typed on `down` back past the newest", async () => {
+      const writes = await running([
+        ...typed("pwd"),
+        ENTER,
+        ...typed("ab"),
+        UP,
+        DOWN,
+      ]);
+      expect(drawn(writes)).toEqual({
+        kind: "edit",
+        text: `${AT_ROOT}ab`,
+        column: 20,
+      });
+    });
+
+    it("recalls on `ctrl-p` and `ctrl-n`, which are the same two motions", async () => {
+      const back = await running([...typed("pwd"), ENTER, control("p")]);
+      expect(drawn(back))
+        .toEqual({ kind: "edit", text: `${AT_ROOT}pwd`, column: 21 });
+      const forward = await running(
+        [...typed("pwd"), ENTER, ...typed("ab"), control("p"), control("n")],
+      );
+      expect(drawn(forward))
+        .toEqual({ kind: "edit", text: `${AT_ROOT}ab`, column: 20 });
+    });
+
+    it("records the line where it is taken, so `up` reaches one still running", async () => {
+      const read = gated();
+      const writes = await running(
+        (async function* () {
+          yield* typed("get");
+          yield ENTER;
+          await read.started;
+          yield UP;
+          read.answer({ title: "a" });
+        })(),
+        atPiece(),
+        { getCellValue: read.read },
+      );
+      expect(drawn(writes)).toEqual({
+        kind: "edit",
+        text: `${AT_PIECE}get`,
+        column: [...AT_PIECE].length + 3,
+      });
+    });
+
+    it("records nothing for a line with nothing on it", async () => {
+      // The blank line runs nothing, so `up` past it reaches the line that
+      // did rather than a position with nothing on it.
+
+      const writes = await running([...typed("pwd"), ENTER, ENTER, UP]);
+      expect(drawn(writes)).toEqual({
+        kind: "edit",
+        text: `${AT_ROOT}pwd`,
+        column: 21,
+      });
+    });
+
+    it("returns the traversal to an empty line on `ctrl-c`", async () => {
+      // The `ab` was held against the line being typed when the first `up`
+      // left it. `ctrl-c` throws that line away, so the position it was held
+      // at holds nothing, and `down` back to it draws an empty prompt.
+
+      const writes = await running([
+        ...typed("pwd"),
+        ENTER,
+        ...typed("ab"),
+        UP,
+        control("c"),
+        UP,
+        DOWN,
+      ]);
+      expect(drawn(writes)).toEqual({
+        kind: "edit",
+        text: AT_ROOT,
+        column: 18,
+      });
+    });
+  });
+
+  describe("completing a token", () => {
+    // What `tab` does at the prompt. Which candidates a position offers is
+    // pinned in `shuttle-completion.test.ts`; these are about the loop the
+    // read runs inside.
+
+    /** Helper for the cases below, which is the read a listing makes. */
+    function listing(read: Gated): VerbDeps {
+      return { listing: { getCellValue: read.read } };
+    }
+
+    it("draws the completed line, with the cursor at its end", async () => {
+      const writes = await running([...typed("pw"), TAB]);
+      expect(drawn(writes)).toEqual({
+        kind: "edit",
+        text: `${AT_ROOT}pwd`,
+        column: 21,
+      });
+    });
+
+    it("leaves the line alone where the cursor is not at its end", async () => {
+      // The token a completion finishes is the one the line ends in, so a
+      // cursor standing anywhere else is standing in a token this is not
+      // completing.
+
+      const writes = await running([...typed("pw"), control("a"), TAB]);
+      expect(drawn(writes)).toEqual({
+        kind: "edit",
+        text: `${AT_ROOT}pw`,
+        column: 18,
+      });
+    });
+
+    it("writes onto the line it was computed for and onto no other", async () => {
+      // A read cannot be called off once sent, so its answer may reach a line
+      // that has moved on. Writing `cd title` here would take back the `m`
+      // the person typed while the read was out.
+
+      const read = gated();
+      const writes = await running(
+        (async function* () {
+          yield* typed("cd ti");
+          yield TAB;
+          await read.started;
+          yield* typed("m");
+          read.answer({ title: 1 });
+        })(),
+        atPiece(),
+        listing(read),
+      );
+      expect(drawn(writes)).toEqual({
+        kind: "edit",
+        text: `${AT_PIECE}cd tim`,
+        column: [...AT_PIECE].length + 6,
+      });
+    });
+
+    it("holds `enter` typed under a completion, and runs the line it completed", async () => {
+      const read = gated();
+      const writes = await running(
+        (async function* () {
+          yield* typed("get ti");
+          yield TAB;
+          await read.started;
+          yield ENTER;
+          read.answer({ title: 1, tail: 2 });
+        })(),
+        atPiece(),
+        {
+          ...listing(read),
+          // Answering by path is what makes the line that ran readable: the
+          // held `enter` runs whatever is on the buffer, and only the
+          // completed line reads `title`.
+          getCellValue: (_config, path) =>
+            Promise.resolve(path[0] === "title" ? "the title" : "the tail"),
+        },
+      );
+      expect(produced(writes)[0]).toContain("the title");
+    });
+
+    it("leaves `tab` alone while a line is in flight, and is not held either", async () => {
+      // A line that is running is one that may be about to move the place a
+      // completion reads against, so `tab` is not a completion there — and it
+      // is not held for later either, since the token it would finish is on a
+      // line the person is still typing.
+
+      const read = gated();
+      const writes = await running(
+        (async function* () {
+          yield* typed("get");
+          yield ENTER;
+          await read.started;
+          yield* typed("pw");
+          yield TAB;
+          read.answer({ title: "a" });
+        })(),
+        atPiece(),
+        { getCellValue: read.read },
+      );
+      expect(drawn(writes)).toEqual({
+        kind: "edit",
+        text: `${AT_PIECE}pw`,
+        column: [...AT_PIECE].length + 2,
+      });
+    });
+
+    it("frees the prompt on `ctrl-c` where the read never answers", async () => {
+      // The one thing `ctrl-c` at a server that has gone quiet is for. A read
+      // already sent cannot be called off, so what the prompt does is stop
+      // waiting on it — and the `pwd` behind it is the evidence that it did.
+
+      const read = gated();
+      const writes = await running(
+        (async function* () {
+          yield* typed("get ti");
+          yield TAB;
+          await read.started;
+          yield control("c");
+          yield* typed("pwd");
+          yield ENTER;
+        })(),
+        atPiece(),
+        listing(read),
+      );
+      expect(produced(writes)).toEqual([
+        `position  /@${SPACE}/${HANDLE}@space\nscope     @space`,
+      ]);
+    });
+
+    it("ends the line being completed on `ctrl-c`, which is still the line being typed", async () => {
+      // A verb's line was ended where it was taken and what is under it is
+      // the next one; a completion's line is the one on the screen, so
+      // throwing it away leaves it there and draws a fresh prompt below.
+
+      const read = gated();
+      const writes = await running(
+        (async function* () {
+          yield* typed("get ti");
+          yield TAB;
+          await read.started;
+          yield control("c");
+        })(),
+        atPiece(),
+        listing(read),
+      );
+      const typing = writes.findLastIndex((write) =>
+        write.kind === "edit" && write.text === `${AT_PIECE}get ti`
+      );
+      expect(typing).toBeGreaterThan(-1);
+      expect(writes[typing + 1]).toEqual({ kind: "finish" });
     });
   });
 });

@@ -318,6 +318,22 @@ invisible, the prompt renders the whole ambient record — place and scope
     lives in the event lines, never in mutated history. The pinned strip
     (a live region above the prompt) is designed and deferred
     ([`futures.md`](futures.md)).
+29. **Recall is in-session; completion offers a token the line takes.** `up`
+    and `down` walk the lines this run typed, which is the run's own memory
+    and nothing a later process reads — persistent, searchable history is a
+    separate feature and is deferred ([`futures.md`](futures.md)). The
+    traversal runs over those lines and the line being typed, one position
+    each, so an edit is held wherever it was made and everything that ends
+    the line returns the traversal to it. `tab` completes the token the line
+    ends in: a verb where the line names none, and otherwise whatever the
+    verb declares its next operand completes, which the two arms of the arity
+    that take an operand require and the arm that takes none cannot express.
+    What is offered under a place is the listing `ls` reads, under the
+    operands `operandForChild` offers for its rows, so a completion writes
+    what a listing prints and what `cd` takes back — the round trip decision
+    13's checked names rest on, held by reuse rather than by a second answer.
+    A completion is a read, so it is work in flight: it is cancelled by
+    `ctrl-c` and written onto the line it was computed for and onto no other.
 
 The line grammar itself — what a line may say, what its parts denote, and what
 shuttle does and shows in return — is drafted in [`grammar.md`](grammar.md). The
@@ -383,7 +399,7 @@ several) stay reachable later.
 | --- | --- | --- |
 | Canonical + alias reference grammar | `packages/cli/lib/llm-friendly-ref.ts` (doc comment), runner's `parseLLMFriendlyLink` | The address syntax; shuttle consumes it and must not fork it |
 | Target option surface | `targetOptions` in `packages/cli/commands/piece.ts` | The enumeration of exactly what a place must supply |
-| Live-state listing and completion | `keysOf` in `packages/cli/lib/cell-listing.ts` — exported, beside the `listCellKeys` that reads a cell through it, which path completion in `packages/cli/lib/completion/providers.ts` uses | The `ls` primitive and tab completion; shuttle reads the cell over the connection it holds and names its rows through `keysOf`, and a failed read raises rather than listing empty |
+| Live-state listing and completion | `keysOf` in `packages/cli/lib/cell-listing.ts` — exported, beside the `listCellKeys` that reads a cell through it, which path completion in `packages/cli/lib/completion/providers.ts` uses | The `ls` primitive and tab completion; shuttle reads the cell over the connection it holds and names its rows through `keysOf`, and a failed read raises rather than listing empty. Shuttle's own tab completion reads that listing rather than a second read, and swallows the failure at its own call site, as the providers do at theirs |
 | Pager/TUI substrate | `packages/cli/lib/view/` — `pager.ts` is the only module doing raw-mode full-screen TTY handling; `mod.ts` and `loadinput.ts` touch stdio for the one-shot path (capability probes, plain-output writes, piped input); `keys.ts`, `ansi.ts`, `render.ts`, `session.ts` hold state and decoding as pure logic | The full-screen half: raw mode, frames, key decoding, testable without a terminal; already follows references and edits buffers |
 | FUSE mount | `packages/fuse` | The same addressing as a POSIX filesystem; prior art for layout (arrays as numeric directories, handlers as executables, links as symlinks). Shuttle is its interactive, live sibling, not a replacement |
 | Offline inspector | `packages/state-inspector`, `cf inspect` | The forensic counterpart (snapshots, scopes, history); its HTML explorer is prior art for tree-plus-detail browsing |

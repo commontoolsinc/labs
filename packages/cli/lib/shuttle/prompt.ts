@@ -15,7 +15,9 @@
  * follow, and they are the whole reason for the shape. `ctrl-c` reaches a line
  * that is already running, which is the only way a shell whose server has gone
  * quiet is still a shell. And a key typed during that wait is drawn as it
- * arrives instead of being queued unseen and run blind afterwards.
+ * arrives instead of being queued unseen and run blind afterwards. A `tab`
+ * that reads is a second thing that runs beside the keys, and it runs beside
+ * them the same way and under the same cancel.
  *
  * The line editor is the view substrate's rather than `node:readline`'s.
  * `EditBuffer` (`lib/view/editbuffer.ts`) holds the motions and `decodeKeys`
@@ -36,6 +38,8 @@
 
 import { EditBuffer } from "../view/editbuffer.ts";
 import type { Key } from "../view/keys.ts";
+import { completeLine } from "./completion.ts";
+import { LineHistory, recall } from "./history.ts";
 import {
   escapeControlCharacters,
   holdsControlCharacter,
@@ -110,7 +114,7 @@ export interface PromptTerminal {
  * draws is that a shell whose server went away is still a shell, so this
  * reports it and reads the next line where a one-shot command would exit.
  *
- * One line runs at a time, and the keys keep arriving while it does. Three
+ * One line runs at a time, and the keys keep arriving while it does. Four
  * keys mean something other than editing:
  *
  * - `enter` runs the line. Pressed while a line is in flight it is held,
@@ -122,9 +126,19 @@ export interface PromptTerminal {
  *   shell spells that way, and on a line with anything on it deletes forward
  *   instead. On an empty line while a line is in flight it is held, as
  *   `enter` is.
- * - `ctrl-c` cancels: the line in flight, or the line being typed where none
+ * - `ctrl-c` cancels: the work in flight, or the line being typed where none
  *   is. It is never held, and it drops what was typed ahead of it, which is
  *   what a terminal does with type-ahead when the interrupt arrives.
+ * - `tab` completes the token the line ends in (`completion.ts`), which is a
+ *   read and therefore work in flight of its own: `enter` typed under one is
+ *   held as it is under a line, and `ctrl-c` cancels it. It acts only at a
+ *   prompt with no line in flight, since a line that is running is one that
+ *   may be about to move the place a completion reads against, and only with
+ *   the cursor at the end of the line.
+ *
+ * `up` and `down` are ordinary bindings rather than any of those: they walk
+ * the lines this run typed (`history.ts`), which is a value the prompt holds
+ * beside the line being edited and nothing reads.
  *
  * Cancelling is honest about what it can reach. The line is abandoned and the
  * prompt comes back, but a read already sent to the server is not something
@@ -138,6 +152,7 @@ export async function runPrompt(
   deps: VerbDeps = {},
 ): Promise<void> {
   const buffer = new EditBuffer("");
+  const history = new LineHistory();
   let prompt = promptFor(shuttle);
   const show = () =>
     terminal.edit(
@@ -161,6 +176,18 @@ export async function runPrompt(
     if (key.name === "ctrl-c") {
       terminal.finish();
       buffer.setText("");
+      history.abandon();
+    } else if (key.name === "tab") {
+      // Only at the end of the line, and nothing is drawn either way. The
+      // token a completion finishes is the one the line ends in, so a cursor
+      // standing anywhere else is standing in a token this would not be
+      // completing — and a line unchanged is a line already on the screen.
+      // Both sides of the test are the buffer's own count, which is where the
+      // cursor is in the line rather than where it lands on the screen.
+      if (buffer.col === buffer.currentLineLength()) {
+        running = startCompleting(buffer.text(), shuttle, deps);
+      }
+      return;
     } else if (endsLine(key, buffer)) {
       if (key.name === "ctrl-d") {
         ended = true;
@@ -170,6 +197,9 @@ export async function runPrompt(
       const line = buffer.text();
       terminal.finish();
       buffer.setText("");
+      // Recorded where the line is taken rather than where it settles, which
+      // is what puts a line still running under the first `up`.
+      history.record(line);
       running = start(line, shuttle, deps);
       // Nothing is drawn: the prompt for the next line appears when the line
       // settles, or when a key is typed before it does, so a line that
@@ -177,7 +207,7 @@ export async function runPrompt(
       // waited for it.
       return;
     } else {
-      apply(buffer, key);
+      apply({ buffer, history }, key);
     }
     show();
   };
@@ -204,6 +234,17 @@ export async function runPrompt(
       show();
       continue;
     }
+    if (arrival.kind === "completed") {
+      running = undefined;
+      // Onto the line it was computed for and onto no other. A read cannot be
+      // called off once sent, so what it answers may reach a line that has
+      // moved on — a key typed while it was out, or a `ctrl-c` that emptied
+      // it — and writing there would take back a character the person typed
+      // after the `tab`.
+      if (buffer.text() === arrival.from) recall(buffer, arrival.line);
+      show();
+      continue;
+    }
     typing = undefined;
     if (arrival.step.done) {
       ended = true;
@@ -213,33 +254,55 @@ export async function runPrompt(
     if (running === undefined) {
       act(key);
     } else if (key.name === "ctrl-c") {
+      // A completion runs beside the line it is completing, which is still
+      // being edited and so is still the line to end; a verb's line was ended
+      // where it was taken, and what is being edited under it is the next
+      // one.
+      if (running.kind === "completion") terminal.finish();
       running.stop();
       held = [];
       buffer.setText("");
+      history.abandon();
       show();
     } else if (held.length > 0 || endsLine(key, buffer)) {
       held.push(key);
     } else {
-      apply(buffer, key);
+      apply({ buffer, history }, key);
       show();
     }
   }
   terminal.finish();
 }
 
-/** What the loop is waiting on: the next key, or the line it is running. */
+/**
+ * What the loop is waiting on: the next key, or the work it started beside
+ * them.
+ */
 type Arrival =
   /** The key stream answered, with a key or with the end of the keys. */
   | { readonly kind: "typed"; readonly step: IteratorResult<Key> }
   /** The line in flight settled, and `text` is what it produced. */
-  | { readonly kind: "ran"; readonly text: string };
+  | { readonly kind: "ran"; readonly text: string }
+  /** A completion answered, for the line `from` and with `line` to write. */
+  | {
+    readonly kind: "completed";
+    readonly from: string;
+    readonly line: string | undefined;
+  };
 
-/** A line in flight: what it will produce, and how to cancel it. */
+/** Work in flight beside the keys: what it will produce, and how to stop it. */
 interface Running {
-  /** Settles with what the line produced, cancelled or not. */
+  /**
+   * Which of the two the prompt runs beside the keys, which is what says
+   * whether the line being edited is the one it came from: a verb's line was
+   * ended where it was taken, and a completion's is still being typed.
+   */
+  readonly kind: "line" | "completion";
+
+  /** Settles with what it produced, cancelled or not. */
   readonly settled: Promise<Arrival>;
 
-  /** Cancels the line, which settles it with what a cancelled line says. */
+  /** Cancels it, which settles it with what a cancelled one says. */
   stop(): void;
 }
 
@@ -265,9 +328,54 @@ function nextKey(keys: AsyncIterator<Key>): Promise<Arrival> {
 function start(line: string, shuttle: Shuttle, deps: VerbDeps): Running {
   const stopper = new AbortController();
   return {
+    kind: "line",
     stop: () => stopper.abort(),
     settled: report(line, shuttle, { ...deps, signal: stopper.signal })
       .then((text) => ({ kind: "ran", text }) as const),
+  };
+}
+
+/**
+ * Helper for {@link runPrompt}, which starts a completion of `line` and
+ * returns what running it is.
+ *
+ * The signal rides the deps bag as a verb's does, and for the same reason: a
+ * completion reads, so a `ctrl-c` reaches the read it has not sent and the
+ * answer it has not given (`completion.ts`).
+ *
+ * What the signal cannot reach is raced instead. A read already sent finishes
+ * into nothing and may never finish at all, and a completion awaited rather
+ * than raced would hold the prompt for the rest of the run against a server
+ * that has gone quiet — which is the one thing `ctrl-c` at such a server is
+ * for. The race delivers the prompt back and the read, whenever it lands, is
+ * answering a completion nothing is waiting on.
+ */
+function startCompleting(
+  line: string,
+  shuttle: Shuttle,
+  deps: VerbDeps,
+): Running {
+  const stopper = new AbortController();
+  const completed = completeLine(shuttle, line, {
+    ...deps,
+    signal: stopper.signal,
+  }).then((written) =>
+    ({ kind: "completed", from: line, line: written }) as const
+  );
+  return {
+    kind: "completion",
+    stop: () => stopper.abort(),
+    settled: Promise.race([
+      completed,
+      whenAborted(
+        stopper.signal,
+        {
+          kind: "completed",
+          from: line,
+          line: undefined,
+        } as const,
+      ),
+    ]),
   };
 }
 
@@ -286,6 +394,22 @@ function endsLine(key: Key, buffer: EditBuffer): boolean {
 }
 
 /**
+ * What a key acts on: the line being typed, and the lines typed before it.
+ *
+ * The two travel together because the recall keys act on both at once — a
+ * line put on the buffer is a position the traversal moved to — and a table
+ * of motions over one value is what lets the second table modal editing wants
+ * (`docs/plans/shuttle/futures.md`) bind the same acts.
+ */
+interface Editing {
+  /** The line being typed. */
+  readonly buffer: EditBuffer;
+
+  /** The lines this run typed, and where the traversal over them stands. */
+  readonly history: LineHistory;
+}
+
+/**
  * The motions a key runs, by the key that runs it. Emacs bindings, because
  * they are what the substrate's own editor binds and what a terminal's other
  * line editors offer.
@@ -299,28 +423,51 @@ function endsLine(key: Key, buffer: EditBuffer): boolean {
  * `ctrl-d` deletes forward here and ends the run in {@link runPrompt}, which
  * reads it first: what the two spellings have in common is that each removes
  * what is in front of the cursor, and on an empty line there is only the run.
+ *
+ * `up` and `down` walk the lines this run typed rather than the rows of the
+ * buffer, and nothing is lost by that: the prompt reads one line, `enter`
+ * being what ends it rather than what breaks it, so a buffer here has one row
+ * and a vertical motion over it has nowhere to go. `ctrl-p` and `ctrl-n` are
+ * bound beside them, those being what an Emacs binding spells the same two
+ * motions as.
  */
-const BINDINGS: ReadonlyMap<string, (buffer: EditBuffer) => void> = new Map([
-  ["left", (buffer) => buffer.moveLeft()],
-  ["ctrl-b", (buffer) => buffer.moveLeft()],
-  ["right", (buffer) => buffer.moveRight()],
-  ["ctrl-f", (buffer) => buffer.moveRight()],
-  ["home", (buffer) => buffer.moveLineStart()],
-  ["ctrl-a", (buffer) => buffer.moveLineStart()],
-  ["end", (buffer) => buffer.moveLineEnd()],
-  ["ctrl-e", (buffer) => buffer.moveLineEnd()],
-  ["alt-b", (buffer) => buffer.moveWordBackward()],
-  ["alt-f", (buffer) => buffer.moveWordForward()],
-  ["backspace", (buffer) => buffer.deleteBackward()],
-  ["delete", (buffer) => buffer.deleteForward()],
-  ["ctrl-d", (buffer) => buffer.deleteForward()],
-  ["ctrl-k", (buffer) => buffer.killLine()],
-  ["ctrl-u", (buffer) => buffer.killWholeLine()],
-  ["ctrl-w", (buffer) => buffer.killWordBackward()],
-  ["alt-backspace", (buffer) => buffer.killWordBackward()],
-  ["alt-d", (buffer) => buffer.killWordForward()],
-  ["ctrl-y", (buffer) => buffer.yank()],
-  ["alt-y", (buffer) => buffer.yankPop()],
+const BINDINGS: ReadonlyMap<string, (editing: Editing) => void> = new Map([
+  ["left", ({ buffer }) => buffer.moveLeft()],
+  ["ctrl-b", ({ buffer }) => buffer.moveLeft()],
+  ["right", ({ buffer }) => buffer.moveRight()],
+  ["ctrl-f", ({ buffer }) => buffer.moveRight()],
+  ["home", ({ buffer }) => buffer.moveLineStart()],
+  ["ctrl-a", ({ buffer }) => buffer.moveLineStart()],
+  ["end", ({ buffer }) => buffer.moveLineEnd()],
+  ["ctrl-e", ({ buffer }) => buffer.moveLineEnd()],
+  ["alt-b", ({ buffer }) => buffer.moveWordBackward()],
+  ["alt-f", ({ buffer }) => buffer.moveWordForward()],
+  ["backspace", ({ buffer }) => buffer.deleteBackward()],
+  ["delete", ({ buffer }) => buffer.deleteForward()],
+  ["ctrl-d", ({ buffer }) => buffer.deleteForward()],
+  ["ctrl-k", ({ buffer }) => buffer.killLine()],
+  ["ctrl-u", ({ buffer }) => buffer.killWholeLine()],
+  ["ctrl-w", ({ buffer }) => buffer.killWordBackward()],
+  ["alt-backspace", ({ buffer }) => buffer.killWordBackward()],
+  ["alt-d", ({ buffer }) => buffer.killWordForward()],
+  ["ctrl-y", ({ buffer }) => buffer.yank()],
+  ["alt-y", ({ buffer }) => buffer.yankPop()],
+  [
+    "up",
+    ({ buffer, history }) => recall(buffer, history.earlier(buffer.text())),
+  ],
+  [
+    "ctrl-p",
+    ({ buffer, history }) => recall(buffer, history.earlier(buffer.text())),
+  ],
+  [
+    "down",
+    ({ buffer, history }) => recall(buffer, history.later(buffer.text())),
+  ],
+  [
+    "ctrl-n",
+    ({ buffer, history }) => recall(buffer, history.later(buffer.text())),
+  ],
 ]);
 
 /**
@@ -392,9 +539,10 @@ async function report(
 ): Promise<string> {
   try {
     const running = runLine(line, shuttle, deps);
-    const outcome = await (deps.signal === undefined
-      ? running
-      : Promise.race([running, abandoned(deps.signal)]));
+    const outcome = await (deps.signal === undefined ? running : Promise.race([
+      running,
+      whenAborted<Outcome>(deps.signal, { kind: "interrupted" }),
+    ]));
     switch (outcome.kind) {
       case "nothing":
       case "moved":
@@ -414,19 +562,23 @@ async function report(
 }
 
 /**
- * Helper for {@link report}, which settles once `signal` is aborted and never
- * otherwise.
+ * Helper for {@link report} and {@link startCompleting}, which settles with
+ * `answer` once `signal` is aborted and never otherwise.
  *
- * A promise that never settles is exactly what is wanted for a line nobody
+ * A promise that never settles is exactly what is wanted for work nobody
  * cancels: it loses every race it is in and is collected with the controller
- * the line held. Nothing here waits on a clock, so a line that is slow is a
- * line that is still running.
+ * the work held. Nothing here waits on a clock, so work that is slow is work
+ * that is still running.
+ *
+ * The two callers race it for one reason. A read already sent cannot be
+ * called off, so this is what says the person has stopped waiting for it —
+ * the line answered as interrupted, the completion as one with nothing to
+ * write — and it is the answer either of them gets against a server that
+ * never replies at all.
  */
-function abandoned(signal: AbortSignal): Promise<Outcome> {
+function whenAborted<T>(signal: AbortSignal, answer: T): Promise<T> {
   return new Promise((resolve) => {
-    signal.addEventListener("abort", () => resolve({ kind: "interrupted" }), {
-      once: true,
-    });
+    signal.addEventListener("abort", () => resolve(answer), { once: true });
   });
 }
 
@@ -446,14 +598,14 @@ function abandoned(signal: AbortSignal): Promise<Outcome> {
  * (`place.ts`), so a line carrying one is a line already refused, and drawing
  * it would corrupt the screen on the way to that refusal.
  */
-function apply(buffer: EditBuffer, key: Key): void {
+function apply(editing: Editing, key: Key): void {
   const motion = BINDINGS.get(key.alt === true ? `alt-${key.name}` : key.name);
   if (motion !== undefined) {
-    motion(buffer);
+    motion(editing);
     return;
   }
   if (key.char !== undefined && !holdsControlCharacter(key.char)) {
-    buffer.insert(key.char);
+    editing.buffer.insert(key.char);
   }
 }
 
