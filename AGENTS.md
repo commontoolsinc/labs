@@ -344,13 +344,16 @@ Each of these gates fails CI on its own, and none of them run as part of
   hand-maintained tables, and a slot missing from both is silent: it offers
   nothing, exactly as an unreachable fabric does. Give it candidates, or record
   in the task why it has none
-- `deno task check-command-docs` — a `cf` command no live document names. The
-  obligation to update a document when behavior changes cannot fire for a
-  command no document describes, so a command ships and its prose does not.
-  Describe it in a live document — the README of the package that implements it
-  is the usual home — or record in the task why it needs none. It fails the
-  other way round too, on a recorded reason naming a command the tree no longer
-  accepts: a command removed takes its entry with it
+- `deno task check-command-docs` — a `cf` command, or a shuttle verb, that no
+  live document describes. The obligation to update a document when behavior
+  changes cannot fire for a surface no document describes, so a command ships
+  and its prose does not. Describe it in a live document — the README of the
+  package that implements it is the usual home — or record in the task why it
+  needs none. What counts as described differs with the surface: a command is
+  named the way a caller types it, and a verb, whose name is a word a sentence
+  may hold for its own reasons, is given a row of its own in a table. It fails
+  the other way round too, on a recorded reason naming a command or a verb that
+  no longer exists: one removed takes its entry with it
 - `deno task check-local-program` — a program built from local files by hand
   rather than through `resolveLocalProgram`, which silently drops any data files
   the caller attached

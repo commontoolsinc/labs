@@ -42,11 +42,12 @@ is out of date when a command ships with no prose, because nothing claimed to
 cover it, and the absence is visible only to someone who already knows the
 command exists.
 
-For the `cf` command surface that half is mechanical: `deno task check-command-docs`
-fails when a command the CLI accepts is named in no live document, and takes a
-recorded reason instead where a command genuinely needs none. Prose belongs with
-the code it describes — the README of the package that implements the command,
-or the feature document that owns the surface — which is where the gate looks.
+For the surfaces a caller types that half is mechanical:
+`deno task check-command-docs` fails when a command the CLI accepts, or a verb
+shuttle accepts, is described in no live document, and takes a recorded reason
+instead where one genuinely needs none. Prose belongs with the code it
+describes — the README of the package that implements the command, or the
+feature document that owns the surface — which is where the gate looks.
 
 ## Historical documentation
 
