@@ -17,6 +17,8 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { Identity } from "@commonfabric/identity";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
+import { table } from "@commonfabric/memory/sqlite/schema";
+import type { SqliteDbRef } from "@commonfabric/memory/v2";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { createBuilder } from "../src/builder/factory.ts";
@@ -98,6 +100,75 @@ describe("sqliteQuery()", () => {
     it("settles a string `db` with the same `error`", async () => {
       const state = await settledQueryOver("string", "of:fid1:not-a-handle");
       expect(state.error).toBe("sqlite: invalid database handle");
+    });
+  });
+
+  describe("a `db` that becomes a handle after the error", () => {
+    // The other half of the contract the reported error buys. Settling the
+    // error rather than throwing is only worth anything if the action that
+    // settled it is still subscribed to its inputs: an action killed by a
+    // throw reports the same first state and never reaches the second. So the
+    // case drives one query across both, through a single input cell.
+
+    it("re-runs the same action and settles a successful result once the input reads back as a handle", async () => {
+      const dbRef: SqliteDbRef = {
+        id: `of:recovers-${crypto.randomUUID()}`,
+        tables: { notes: table({ id: "integer primary key", body: "text" }) },
+      };
+      // Seeded through the real write path, so a recovered read that returns
+      // this row cannot be confused with a query answering over no table.
+      const seedTx = runtime.edit();
+      seedTx.recordSqliteWrite!(space, {
+        op: "sqlite",
+        db: dbRef,
+        sql: "INSERT INTO notes (body) VALUES (?)",
+        params: ["recovered"],
+      });
+      expect((await seedTx.commit()).error).toBeUndefined();
+
+      // `{}` is what an object read that resolved to nothing produces, and is
+      // the state the handle arrives late from.
+      const inputs = runtime.getCell<{ db: unknown }>(
+        space,
+        "sqlite-invalid-handle-recovers-inputs",
+        undefined,
+        tx,
+      );
+      inputs.set({ db: {} });
+
+      const queryPattern = cf.pattern<{ db: unknown }>(({ db }) =>
+        cf.sqliteQuery({
+          db: db as never,
+          sql: "SELECT body FROM notes",
+          reactOn: db as never,
+        })
+      );
+      const resultCell = runtime.getCell(
+        space,
+        "sqlite-invalid-handle-recovers-result",
+        queryPattern.resultSchema,
+        tx,
+      );
+      const result = runtime.run(tx, queryPattern, inputs, resultCell);
+      await tx.commit();
+
+      const failed = await waitForCellValue<QueryState>(
+        runtime,
+        result,
+        (value) => value?.pending === false,
+      );
+      expect(failed.error).toBe("sqlite: invalid database handle");
+
+      await runtime.editWithRetry((edit) => {
+        inputs.withTx(edit).key("db").set(dbRef);
+      });
+
+      const recovered = await waitForCellValue<QueryState>(
+        runtime,
+        result,
+        (value) => value?.pending === false && value?.error === undefined,
+      );
+      expect(recovered.result).toEqual([{ body: "recovered" }]);
     });
   });
 });
