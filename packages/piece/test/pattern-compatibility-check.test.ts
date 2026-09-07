@@ -499,13 +499,7 @@ describe("setsrc compatibility preflight", () => {
     const server = (storageManager as unknown as {
       server(): MemoryV2Server.Server;
     }).server();
-    const engine = await (server as unknown as {
-      openEngine(space: string): Promise<{
-        database: {
-          prepare(sql: string): { run(params: Record<string, unknown>): void };
-        };
-      }>;
-    }).openEngine(link.space);
+    const engine = await server.engineForSpace(link.space);
     const forged = encodeMemoryBoundary({ value: { type: "string" } });
     engine.database.prepare(
       `UPDATE revision SET data = :data, seq = seq + 1 WHERE id = :id`,
@@ -569,16 +563,7 @@ describe("setsrc compatibility preflight", () => {
     const server = (storageManager as unknown as {
       server(): MemoryV2Server.Server;
     }).server();
-    const engine = await (server as unknown as {
-      openEngine(space: string): Promise<{
-        database: {
-          prepare(sql: string): {
-            run(params: Record<string, unknown>): void;
-            get(params: Record<string, unknown>): { data?: string } | undefined;
-          };
-        };
-      }>;
-    }).openEngine(link.space);
+    const engine = await server.engineForSpace(link.space);
     const row = engine.database.prepare(
       `SELECT data FROM revision WHERE id = :id`,
     ).get({ id: link.id });
