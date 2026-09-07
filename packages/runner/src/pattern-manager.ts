@@ -753,7 +753,6 @@ export class PatternManager {
     readonly inProgressCompilations: Map<string, Promise<Pattern>>;
     maxEvaluatedModuleCacheSize: number;
     readonly modulesByIdentity: Map<string, { exports: Exports }>;
-    readonly pendingCacheWriteBacks: Set<Promise<unknown>>;
     readonly persistedCompileCacheClosures: Map<string, string>;
     hasStoredCompileCacheClosure(
       space: MemorySpace,
@@ -795,7 +794,6 @@ export class PatternManager {
         outerThis.#maxEvaluatedModuleCacheSize = value;
       },
       modulesByIdentity: this.#modulesByIdentity,
-      pendingCacheWriteBacks: this.#pendingCacheWriteBacks,
       persistedCompileCacheClosures: this.#persistedCompileCacheClosures,
       hasStoredCompileCacheClosure: (
         space,
@@ -2728,8 +2726,7 @@ export class PatternManager {
       closureSignature,
       persistence,
     });
-    this.#compileCacheWrites.add(persistence);
-    this.#pendingCacheWriteBacks.add(persistence);
+    this.#trackCacheWriteBack(space, entryIdentity, persistence);
     try {
       await persistence;
     } finally {
@@ -2739,9 +2736,45 @@ export class PatternManager {
       if (current?.persistence === persistence) {
         this.#inProgressCompileCacheWrites.delete(persistenceSlotKey);
       }
-      this.#compileCacheWrites.delete(persistence);
-      this.#pendingCacheWriteBacks.delete(persistence);
+      this.#untrackCacheWriteBack(space, entryIdentity, persistence);
     }
+  }
+
+  /**
+   * Helper for the write-back steps, which enters `write` into both in-flight
+   * sets and emits the `pattern.cache-write-back.start` marker for it.
+   */
+  #trackCacheWriteBack(
+    space: MemorySpace,
+    entryIdentity: string,
+    write: Promise<unknown>,
+  ): void {
+    this.#compileCacheWrites.add(write);
+    this.#pendingCacheWriteBacks.add(write);
+    this.#runtime.telemetry.submit({
+      type: "pattern.cache-write-back.start",
+      space,
+      entryIdentity,
+    });
+  }
+
+  /**
+   * Helper for the write-back steps, which removes `write` from both
+   * in-flight sets once it has settled and emits the
+   * `pattern.cache-write-back.complete` marker for it.
+   */
+  #untrackCacheWriteBack(
+    space: MemorySpace,
+    entryIdentity: string,
+    write: Promise<unknown>,
+  ): void {
+    this.#compileCacheWrites.delete(write);
+    this.#pendingCacheWriteBacks.delete(write);
+    this.#runtime.telemetry.submit({
+      type: "pattern.cache-write-back.complete",
+      space,
+      entryIdentity,
+    });
   }
 
   async #hasStoredCompileCacheClosure(
@@ -2808,8 +2841,7 @@ export class PatternManager {
       moduleDelegations,
       delegated,
     );
-    this.#compileCacheWrites.add(writeBack);
-    this.#pendingCacheWriteBacks.add(writeBack);
+    this.#trackCacheWriteBack(space, entryIdentity, writeBack);
     try {
       await writeBack;
       this.#recordPersistedClosureSpaces(
@@ -2817,8 +2849,7 @@ export class PatternManager {
         space,
       );
     } finally {
-      this.#compileCacheWrites.delete(writeBack);
-      this.#pendingCacheWriteBacks.delete(writeBack);
+      this.#untrackCacheWriteBack(space, entryIdentity, writeBack);
     }
   }
 

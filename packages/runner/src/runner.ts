@@ -2169,11 +2169,11 @@ export class Runner {
   }
 
   /**
-   * The result and pointer tables, the deferred-start and start-attempt
-   * sets, the dependency syncer and deferred-start committer a test may
-   * supply, the setup, storage-subscription, commit-gated run, ownership,
-   * key, sync, walk, and retry steps, and the implementation invoker, which
-   * a test drives directly.
+   * The result and pointer tables, the start-attempt set, the dependency
+   * syncer and deferred-start committer a test may supply, the setup,
+   * storage-subscription, commit-gated run, ownership, key, sync, walk, and
+   * retry steps, and the implementation invoker, which a test drives
+   * directly.
    */
   get accessForTestingOnly(): {
     readonly locallyPreparedResults: BoundedKeyMap<
@@ -2187,10 +2187,6 @@ export class Runner {
     readonly sessionPatternPointers: BoundedKeyMap<
       `${MemorySpace}/${ScopeKey}/${URI}`,
       { identity: string; symbol: string }
-    >;
-    readonly pendingDeferredStarts: Map<
-      `${MemorySpace}/${ScopeKey}/${URI}`,
-      Set<DeferredCancelOwnership>
     >;
     readonly resultPatternCache: Map<
       `${MemorySpace}/${URI}`,
@@ -2258,7 +2254,6 @@ export class Runner {
       locallyPreparedResults: this.#locallyPreparedResults,
       locallyStoppedResults: this.#locallyStoppedResults,
       sessionPatternPointers: this.#sessionPatternPointers,
-      pendingDeferredStarts: this.#pendingDeferredStarts,
       resultPatternCache: this.#resultPatternCache,
       activeStartAttempts: this.#activeStartAttempts,
       get dependencySyncer() {
@@ -4965,28 +4960,59 @@ export class Runner {
     // from then on, or it was cancelled.
     const ownership: DeferredCancelOwnership = {
       cancel: () => {
-        unregister();
+        this.#unregisterPendingDeferredStart(key, ownership, "cancelled");
         base.cancel();
       },
       isCancelled: base.isCancelled,
       markInstalled: (registration) => {
-        unregister();
+        this.#unregisterPendingDeferredStart(key, ownership, "installed");
         return base.markInstalled(registration);
       },
     };
-    const unregister = () => {
-      const pending = this.#pendingDeferredStarts.get(key);
-      if (pending === undefined) return;
-      pending.delete(ownership);
-      if (pending.size === 0) this.#pendingDeferredStarts.delete(key);
-    };
+    this.#registerPendingDeferredStart(key, ownership);
+    return ownership;
+  }
+
+  /**
+   * Helper for the deferred-start paths, which enters `ownership` into the
+   * pending index under `key` and emits the `runner.deferred-start.pending`
+   * marker for it.
+   */
+  #registerPendingDeferredStart(
+    key: `${MemorySpace}/${ScopeKey}/${URI}`,
+    ownership: DeferredCancelOwnership,
+  ): void {
     let pending = this.#pendingDeferredStarts.get(key);
     if (pending === undefined) {
       pending = new Set();
       this.#pendingDeferredStarts.set(key, pending);
     }
     pending.add(ownership);
-    return ownership;
+    this.#runtime.telemetry.submit({
+      type: "runner.deferred-start.pending",
+      key,
+    });
+  }
+
+  /**
+   * Helper for the deferred-start paths, which removes `ownership` from the
+   * pending index under `key` and emits the `runner.deferred-start.settled`
+   * marker for it. Does nothing for an ownership the index does not hold, so
+   * the marker pairs with the one `#registerPendingDeferredStart()` emitted.
+   */
+  #unregisterPendingDeferredStart(
+    key: `${MemorySpace}/${ScopeKey}/${URI}`,
+    ownership: DeferredCancelOwnership,
+    outcome: "installed" | "cancelled",
+  ): void {
+    const pending = this.#pendingDeferredStarts.get(key);
+    if (pending === undefined || !pending.delete(ownership)) return;
+    if (pending.size === 0) this.#pendingDeferredStarts.delete(key);
+    this.#runtime.telemetry.submit({
+      type: "runner.deferred-start.settled",
+      key,
+      outcome,
+    });
   }
 
   #cancelPendingDeferredStarts(
@@ -4994,8 +5020,13 @@ export class Runner {
   ): void {
     const pending = this.#pendingDeferredStarts.get(key);
     if (pending === undefined) return;
-    this.#pendingDeferredStarts.delete(key);
-    for (const ownership of pending) ownership.cancel();
+    // Every entry leaves the index before any of them is cancelled, so the
+    // index never holds an attempt whose cancel is under way.
+    const owners = [...pending];
+    for (const ownership of owners) {
+      this.#unregisterPendingDeferredStart(key, ownership, "cancelled");
+    }
+    for (const ownership of owners) ownership.cancel();
   }
 
   #startAfterSuccessfulCommit<T = any>(
@@ -5262,12 +5293,7 @@ export class Runner {
     // the same path that tombstones a pending first attempt. (The
     // markInstalled above also unregistered the token — a no-op, it was
     // not registered — so this add is the token's one live entry.)
-    let pending = this.#pendingDeferredStarts.get(key);
-    if (pending === undefined) {
-      pending = new Set();
-      this.#pendingDeferredStarts.set(key, pending);
-    }
-    pending.add(ownership);
+    this.#registerPendingDeferredStart(key, ownership);
     const recovery = this.#runtime.awaitCommitRetryReadiness(error)
       .then(async () => {
         // Paired guards, each the other's backstop (the mutation pins kill

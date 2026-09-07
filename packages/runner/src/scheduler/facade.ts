@@ -541,13 +541,10 @@ export class Scheduler {
   get accessForTestingOnly(): {
     readonly actionStats: BoundedKeyMap<string, ActionStats>;
     readonly dependencyUpdateState: DependencyUpdateState;
-    readonly diagnosisEnabled: boolean;
-    readonly errorHandlers: Set<ErrorHandler>;
     readonly eventExecutionState: SchedulerEventExecutionState;
     readonly eventQueue: QueuedEvent[];
     readonly eventQueueState: SchedulerEventQueueState;
     readonly gates: SchedulerGates;
-    readonly materializers: SchedulerMaterializers;
     readonly nodes: NodeRegistry;
     readonly pending: Set<Action>;
     pendingQueueTaskTimer: ReturnType<typeof setTimeout> | null;
@@ -573,10 +570,6 @@ export class Scheduler {
       get dependencyUpdateState() {
         return outerThis.#dependencyUpdateState;
       },
-      get diagnosisEnabled() {
-        return outerThis.#diagnosisEnabled;
-      },
-      errorHandlers: this.#errorHandlers,
       get eventExecutionState() {
         return outerThis.#eventExecutionState;
       },
@@ -585,7 +578,6 @@ export class Scheduler {
         return outerThis.#eventQueueState;
       },
       gates: this.#gates,
-      materializers: this.#materializers,
       nodes: this.#nodes,
       pending: this.#pending,
       get pendingQueueTaskTimer() {
@@ -2321,6 +2313,7 @@ export class Scheduler {
 
   #createDiagnosisControlState(): SchedulerDiagnosisControlState {
     return {
+      telemetry: this.runtime.telemetry,
       getDiagnosisEnabled: () => this.#diagnosisEnabled,
       setDiagnosisEnabled: (enabled) => {
         this.#diagnosisEnabled = enabled;
@@ -3252,6 +3245,12 @@ export class Scheduler {
       action,
       (action as Partial<TelemetryAnnotations>).materializerWriteEnvelopes,
     );
+    this.runtime.telemetry.submit({
+      type: "scheduler.materializer.register",
+      actionId: this.#getActionId(action),
+      writes: (this.#materializers.getMaterializerWriteEnvelopes(action) ?? [])
+        .map((w) => `${w.space}/${w.id}/${w.path.join("/")}`),
+    });
     notifyNodeLivenessChange(this.#dependencyGraphState, action, wasLive);
   }
 

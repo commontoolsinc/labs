@@ -169,6 +169,47 @@ export type RuntimeTelemetryMarker = {
   type: "runner.piece.install";
   key: string;
 } | {
+  // Emitted as a commit-gated start for the result under `key` enters the
+  // runner's pending index, where a stop arriving before the commit finds it.
+  // One marker per pending attempt; a key can hold several at once.
+  type: "runner.deferred-start.pending";
+  key: string;
+} | {
+  // Emitted as a pending commit-gated start leaves the index: `installed`
+  // when its commit landed and the registration now owns itself, `cancelled`
+  // when a stop or a failed commit ended it first. Pairs one-to-one with
+  // `runner.deferred-start.pending` for the same attempt.
+  type: "runner.deferred-start.settled";
+  key: string;
+  outcome: "installed" | "cancelled";
+} | {
+  // Emitted as the pattern manager begins a tracked compile-cache write-back
+  // into `space` for the closure rooted at `entryIdentity`: a closure
+  // persistence or a source write-back, the writes replication waits on
+  // before reading its origin space.
+  type: "pattern.cache-write-back.start";
+  space: string;
+  entryIdentity: string;
+} | {
+  // Emitted as a tracked compile-cache write-back settles, whichever way it
+  // settled. Pairs one-to-one with `pattern.cache-write-back.start`.
+  type: "pattern.cache-write-back.complete";
+  space: string;
+  entryIdentity: string;
+} | {
+  // Emitted each time the scheduler decides an action's materializer
+  // registration, on subscribe and on resubscribe. `writes` are the compacted
+  // write envelopes the action is registered under, as `space/id/path`
+  // strings; an action registered under none is not a materializer.
+  type: "scheduler.materializer.register";
+  actionId: string;
+  writes: string[];
+} | {
+  // Emitted as diagnosis mode switches on, whether by an explicit run or by
+  // the non-settling auto-trigger, with the window it will capture for.
+  type: "scheduler.diagnosis.start";
+  durationMs: number;
+} | {
   // Emitted once per settle pass, unconditionally (unlike SettleStats, which
   // is opt-in): the user-facing "event → stable graph" number.
   type: "scheduler.settle";

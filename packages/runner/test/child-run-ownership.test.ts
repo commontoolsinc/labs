@@ -11,6 +11,7 @@ import {
 } from "./support/trusted-builder.ts";
 import { Runtime } from "../src/runtime.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
+import { observePendingDeferredStarts } from "./support/telemetry-observers.ts";
 
 // The four guarantees a child run carries beyond "whoever created it stops it".
 // Each drives the public API only: a parent pattern, a child reached through
@@ -357,10 +358,10 @@ describe("child run ownership", () => {
       undefined,
       tx,
     );
+    const pending = observePendingDeferredStarts(runtime);
     runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
 
-    const pending = runtime.runner.accessForTestingOnly.pendingDeferredStarts;
-    expect(pending.size).toBe(1);
+    expect(pending.keys()).toBe(1);
 
     expect((await tx.commit()).error).toBeUndefined();
     await runtime.idle();
@@ -368,7 +369,8 @@ describe("child run ownership", () => {
     // The installed registration owns itself from here, so nothing is left
     // waiting to be tombstoned.
     expect(runtime.runner.cancels.has(key(result))).toBe(true);
-    expect(pending.size).toBe(0);
+    expect(pending.keys()).toBe(0);
+    pending.restore();
     runtime.runner.stop(result);
   });
 
@@ -387,10 +389,10 @@ describe("child run ownership", () => {
       undefined,
       tx,
     );
+    const pending = observePendingDeferredStarts(runtime);
     runtime.run(tx, Piece, { value: 3 }, result.withTx(tx));
 
-    const pending = runtime.runner.accessForTestingOnly.pendingDeferredStarts;
-    expect(pending.size).toBe(1);
+    expect(pending.keys()).toBe(1);
 
     expect(tx.abort("setup rejected").error).toBeUndefined();
     await runtime.idle();
@@ -398,7 +400,8 @@ describe("child run ownership", () => {
     // The start will never install, so it settles as cancelled and leaves
     // nothing behind for the result's key.
     expect(runtime.runner.cancels.has(key(result))).toBe(false);
-    expect(pending.size).toBe(0);
+    expect(pending.keys()).toBe(0);
+    pending.restore();
   });
 
   it("stops tracking a commit-gated pattern run when its transaction fails", async () => {
@@ -418,6 +421,7 @@ describe("child run ownership", () => {
       undefined,
       tx,
     );
+    const pending = observePendingDeferredStarts(runtime);
     harness.runPatternAfterSuccessfulCommit(
       tx,
       receipt,
@@ -426,13 +430,14 @@ describe("child run ownership", () => {
       true,
       true,
     );
-    expect(harness.pendingDeferredStarts.size).toBe(1);
+    expect(pending.keys()).toBe(1);
 
     expect(tx.abort("handler rejected").error).toBeUndefined();
     await runtime.idle();
 
-    expect(harness.pendingDeferredStarts.size).toBe(0);
+    expect(pending.keys()).toBe(0);
     expect(runtime.runner.cancels.has(key(receipt))).toBe(false);
+    pending.restore();
   });
 
   it("declines to release a result that has no registration", () => {

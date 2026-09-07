@@ -1417,7 +1417,7 @@ Deno.test("CellBridge reconnect does not require entity listing support", async 
   reconnectable.disconnected = true;
   await reconnectable.attemptReconnect();
 
-  assertEquals(reconnectable.disconnected, false);
+  assertEquals(bridge.disconnected, false);
   assertEquals(sessionProbes, 1);
   assertEquals(pieceListRequests, 0);
   assertEquals(disposedManagers, 1);
@@ -1479,7 +1479,7 @@ Deno.test("CellBridge reconnect checks every space before resuming writes", asyn
     reconnectable.reconnectTimer = null;
   }
 
-  assertEquals(reconnectable.disconnected, true);
+  assertEquals(bridge.disconnected, true);
   assertEquals(sessionProbes, ["authorized", "revoked"]);
   assertEquals(piecesSyncs, ["authorized", "revoked"]);
   assertEquals(disposedManagers, ["authorized", "revoked"]);

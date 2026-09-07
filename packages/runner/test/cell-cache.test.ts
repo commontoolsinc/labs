@@ -29,6 +29,7 @@ import {
   writeSourceDocs,
 } from "../src/compilation-cache/cell-cache.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { observeCacheWriteBacks } from "./support/telemetry-observers.ts";
 
 import { ensureCompilerStack } from "../src/harness/deferred-compiler-stack.ts";
 import { buildCfcPolicyArtifactManifest } from "../src/cfc/policy.ts";
@@ -2145,6 +2146,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
       ],
     });
     const manager = runtime.patternManager.accessForTestingOnly;
+    const writeBacks = observeCacheWriteBacks(runtime);
     const firstStarted = Promise.withResolvers<void>();
     const releaseFirst = Promise.withResolvers<void>();
     const secondStarted = Promise.withResolvers<void>();
@@ -2178,7 +2180,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
         { runtimeVersion },
       );
 
-      expect(manager.pendingCacheWriteBacks.size).toBe(2);
+      expect(writeBacks.inFlight()).toBe(2);
       releaseFirst.resolve();
       await secondStarted.promise;
       releaseSecond.resolve();
@@ -2192,6 +2194,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
           (write): write is Promise<void> => write !== undefined,
         ),
       );
+      writeBacks.restore();
       manager.compileCacheWriter = undefined;
     }
   });

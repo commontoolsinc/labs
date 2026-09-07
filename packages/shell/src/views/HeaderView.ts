@@ -652,24 +652,17 @@ export class XHeaderView extends BaseView {
   #resizeTimer?: ReturnType<typeof setTimeout>;
 
   /**
-   * The favorites subscription step, the favorite-toggle guard, the
-   * favorited-piece test, and the three click handlers, which a test drives
-   * directly.
+   * The favorites subscription step, the favorited-piece test, and the three
+   * click handlers, which a test drives directly.
    */
   get accessForTestingOnly(): {
-    readonly isFavoriteLoading: boolean;
     ensureFavoritesSubscription(): void;
     isFavorite(): boolean;
     handleLogoClick(e: Event): void;
     handleToggleFavorite(e: Event): Promise<void>;
     copyReference(e: Event): Promise<void>;
   } {
-    // deno-lint-ignore no-this-alias
-    const outerThis = this;
     return {
-      get isFavoriteLoading() {
-        return outerThis.#isFavoriteLoading;
-      },
       ensureFavoritesSubscription: () => this.#ensureFavoritesSubscription(),
       isFavorite: () => this.#isFavorite(),
       handleLogoClick: (e) => this.#handleLogoClick(e),
