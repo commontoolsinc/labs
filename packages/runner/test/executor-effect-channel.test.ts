@@ -691,7 +691,7 @@ describe("Phase 4 client-effect channel", () => {
     // takes the intent tx with it), release, and require the wave-2
     // re-run to re-issue the intent. Store-derived state must govern
     // the served arm: the builtin instance and its closure are REUSED
-    // across the re-run (runner.ts's startWithTx cancels-guard), so a
+    // across the re-run (the `Runner.#startWithTx()` cancels-guard), so a
     // closure `navigated` guard would suppress the re-issue forever —
     // the defect this test pins red-first.
     ({ manager: clientManager, runtime: clientRuntime } = openClient(

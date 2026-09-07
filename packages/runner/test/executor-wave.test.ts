@@ -175,9 +175,10 @@ describe("stage D seal-into-wave", () => {
             if (instantiations === options.throwOnInstantiation) {
               throw new Error(`witness instantiation ${instantiations} failed`);
             }
-            // `parentCell` is bound to startCore's actual transaction. A
-            // changing value makes every instantiation contribute a real
-            // bookkeeping write instead of being optimized to a no-op.
+            // `parentCell` is bound to `Runner.#startCore()`'s actual
+            // transaction. A changing value makes every instantiation
+            // contribute a real bookkeeping write instead of being optimized
+            // to a no-op.
             parentCell.key("witness").set(instantiations);
             const thisInstantiation = instantiations;
             const action = () => {

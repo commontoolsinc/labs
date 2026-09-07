@@ -163,6 +163,12 @@ export type RuntimeTelemetryMarker = {
   durationMs: number;
   error?: string;
 } | {
+  // Emitted as the runner begins installing a piece's registration under
+  // `key`, BEFORE the registration is set: a listener reads the registry as
+  // it stood when the install began.
+  type: "runner.piece.install";
+  key: string;
+} | {
   // Emitted once per settle pass, unconditionally (unlike SettleStats, which
   // is opt-in): the user-facing "event → stable graph" number.
   type: "scheduler.settle";

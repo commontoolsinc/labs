@@ -759,7 +759,7 @@ describe("stage P2-F piece-start commit failure surfacing (F1)", () => {
   // handler-bearing V3 whose stream marker the V1 doc never
   // materialized — the exact durable state whose demanded start mints
   // a setup-REPAIR write on the serving runtime (`ensurePieceRunning`
-  // → start → startCore → applySetupState).
+  // → start → `Runner.#startCore()` → applySetupState).
   const brickedPiece = async () => {
     const tx = runtime.edit();
     const pm = runtime.patternManager;
@@ -847,7 +847,7 @@ describe("stage P2-F piece-start commit failure surfacing (F1)", () => {
 
   it("surfaces a refused fire-and-forget piece-INSTANTIATE commit through the observer (the start path's own arm, not only the repair's)", async () => {
     // A HEALTHY piece — no repair involved: run V1, stop, restart. The
-    // restart's startCore mints the self-minted fire-and-forget
+    // restart's `Runner.#startCore()` mints the self-minted fire-and-forget
     // instantiation tx (`piece-instantiate/<root>`) — the arm the F1
     // hazard was actually filed about (start() resolves before the
     // commit settles, so a swallowed refusal leaves the piece silently

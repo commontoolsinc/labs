@@ -26,7 +26,8 @@ const elsewhere =
  * `cfc-writer-fit.test.ts` states the RULE against a hand-recorded marker.
  * These run a real piece, so they cover the wiring the rule rests on: which
  * transaction names the stores, and when the enrollment ends. A hand-recorded
- * marker cannot tell whether `startCore` registered anything at all.
+ * marker cannot tell whether `Runner.#startCore()` registered anything at
+ * all.
  */
 describe("runtime-owned-store enrollment wiring", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;

@@ -131,12 +131,15 @@ import { rendererVDOMSchema } from "./schemas.ts";
 import { flattenBuilderArtifacts } from "./storage-preflight.ts";
 import { TransactionWrapper } from "./storage/extended-storage-transaction.ts";
 import {
+  type CommitError,
   type DID,
   type IExtendedStorageTransaction,
   type IReadOptions,
   type IStorageSubscription,
   type MemorySpace,
+  type Result,
   toThrowable,
+  type Unit,
   type URI,
 } from "./storage/interface.ts";
 import {
@@ -256,7 +259,7 @@ type StartAttempt = {
   // The result this attempt resolved to, which a link start only learns by
   // following the link.
   targetKey?: `${MemorySpace}/${ScopeKey}/${URI}`;
-  // The exact registration THIS attempt's startCore created, when it
+  // The exact registration THIS attempt's `#startCore()` created, when it
   // created one. A walk can also report success for a registration it did
   // NOT create (doStart's already-started returns, including the
   // mid-resume re-check) — a COMPETING start can install into a registry
@@ -1049,7 +1052,7 @@ const markPieceOwnedStores = (
  * from its stored identity — a cold replica loading one — enrolls too, and so
  * that a setup attempt that never commits enrolls nothing. It runs again on
  * every re-instantiation, which is idempotent; the enrollment goes out once,
- * with the piece, at the release `startCore` registers.
+ * with the piece, at the release `Runner.#startCore()` registers.
  */
 const enrollPieceOwnedStores = (
   tx: IExtendedStorageTransaction,
@@ -1314,6 +1317,24 @@ export type DependencySyncer = (
   sync: DependencySync,
 ) => Promise<boolean>;
 
+/**
+ * Commits a commit-gated start's transaction and resolves to its verdict:
+ * the shape of `Runner`'s own step.
+ */
+export type DeferredStartCommit = () => Promise<Result<Unit, CommitError>>;
+
+/**
+ * The committer a test supplies around `Runner`'s own commit of a
+ * commit-gated start's transaction. It receives that step as `commit`, so
+ * it can refuse the transaction in its stead, mark it before the store sees
+ * it, or observe its verdict; `resultCell` is the piece the start is for.
+ */
+export type DeferredStartCommitter = (
+  tx: IExtendedStorageTransaction,
+  resultCell: Cell<any>,
+  commit: DeferredStartCommit,
+) => Promise<Result<Unit, CommitError>>;
+
 type RunResult<R> = {
   resultCell: Cell<R>;
 
@@ -1402,7 +1423,8 @@ const LIST_OP_INPUT_SCHEMAS = {
   flatMap: FLATMAP_INPUT_SCHEMA,
 } as const;
 
-// Options shared by run()/startWithTx()/startAfterSuccessfulCommit().
+// Options shared by `run()`, `#startWithTx()`, and
+// `#startAfterSuccessfulCommit()`.
 type RunnerRunOptions = {
   doNotUpdateOnPatternChange?: boolean;
   // Resumed-from-synced-state: hold each action's initial rehydration/run until
@@ -1918,11 +1940,11 @@ export class Runner {
   /**
    * In-flight catch-up recoveries of commit-gated starts whose transaction lost
    * its basis to the serving side's own first-hydration materialization (see
-   * `catchUpAndStartOnStaleRead()`). _Never_ awaited by `dispose()`, for the
-   * same reason as the watcher loads above: the readiness gate they await is a
-   * session catch-up, which a closing runtime may never reach, and a cancelled
-   * ownership already tombstones the work. Tracked solely so tests can
-   * synchronize deterministically.
+   * `#catchUpAndStartOnStaleRead()`). _Never_ awaited by `dispose()`, for
+   * the same reason as the watcher loads above: the readiness gate they await
+   * is a session catch-up, which a closing runtime may never reach, and a
+   * cancelled ownership already tombstones the work. Tracked solely so tests
+   * can synchronize deterministically.
    */
   #pendingDeferredStartCatchUps = new Set<Promise<unknown>>();
 
@@ -2123,6 +2145,12 @@ export class Runner {
    */
   #dependencySyncer: DependencySyncer | undefined = undefined;
 
+  /**
+   * The committer a test supplies around a commit-gated start's commit;
+   * `undefined` means the runner's own.
+   */
+  #deferredStartCommitter: DeferredStartCommitter | undefined = undefined;
+
   #crossSpaceChildSpaces = new WeakMap<
     IExtendedStorageTransaction,
     MemorySpace[]
@@ -2142,10 +2170,10 @@ export class Runner {
 
   /**
    * The result and pointer tables, the deferred-start and start-attempt
-   * sets, the dependency syncer a test may supply, the setup,
-   * storage-subscription, commit-gated run, ownership, key, sync, walk, and
-   * retry steps, and the implementation invoker, which a test drives
-   * directly.
+   * sets, the dependency syncer and deferred-start committer a test may
+   * supply, the setup, storage-subscription, commit-gated run, ownership,
+   * key, sync, walk, and retry steps, and the implementation invoker, which
+   * a test drives directly.
    */
   get accessForTestingOnly(): {
     readonly locallyPreparedResults: BoundedKeyMap<
@@ -2170,6 +2198,7 @@ export class Runner {
     >;
     readonly activeStartAttempts: Set<StartAttempt>;
     dependencySyncer: DependencySyncer | undefined;
+    deferredStartCommitter: DeferredStartCommitter | undefined;
     createStorageSubscription(): IStorageSubscription;
     setupInternal<T, R>(
       providedTx: IExtendedStorageTransaction | undefined,
@@ -2237,6 +2266,12 @@ export class Runner {
       },
       set dependencySyncer(value) {
         outerThis.#dependencySyncer = value;
+      },
+      get deferredStartCommitter() {
+        return outerThis.#deferredStartCommitter;
+      },
+      set deferredStartCommitter(value) {
+        outerThis.#deferredStartCommitter = value;
       },
       createStorageSubscription: () => this.#createStorageSubscription(),
       // Forwards to the TypeScript-private member so that a test which
@@ -3689,7 +3724,7 @@ export class Runner {
       // an entity id with the space-scoped root, so omitting scope would
       // misclassify it as the root and silently suppress its heal. `path` is
       // intentionally not compared: doStart normalizes a subpath input to its
-      // root before startCore, so resultCell is always a root cell here.
+      // root before `#startCore()`, so resultCell is always a root cell here.
       return a.space === b.space &&
         (a.scope ?? "space") === (b.scope ?? "space") &&
         a.id === b.id;
@@ -3734,12 +3769,8 @@ export class Runner {
    * @param options.tx - Transaction to use for initial setup (optional)
    * @param options.givenPattern - Pattern to use instead of looking up by ID
    * @returns The exact cancel registration installed for this start
-   *
-   * TypeScript-private rather than a `#` name, because
-   * `test/deferred-start-catchup-start.test.ts` replaces this member by
-   * assignment, which a `#` method does not allow.
    */
-  private startCore<T = any>(
+  #startCore<T = any>(
     resultCell: Cell<T>,
     options: {
       tx?: IExtendedStorageTransaction;
@@ -3759,6 +3790,9 @@ export class Runner {
       doNotUpdateOnPatternChange,
     } = options;
     const key = this.#getDocKey(resultCell);
+    // Before the registration below is set, so that a listener reads the
+    // registry as it stood when this install began.
+    this.#runtime.telemetry.submit({ type: "runner.piece.install", key });
     this.#locallyStoppedResults.delete(key);
 
     // Create cancel group early, before wiring pattern/node sinks.
@@ -4455,7 +4489,7 @@ export class Runner {
         // precondition read or prepare throwing) aborts the tx and rethrows the
         // ORIGINAL instantiate error, so the piece is left exactly as it was.
         const repairTx = this.#runtime.edit();
-        // Self-minted repair tx inside startCore — piece machinery with
+        // Self-minted repair tx inside `#startCore()` — piece machinery with
         // no scheduler run around it; bookkeeping per serving-loop.md
         // §3d (reachable server-side via the demand loader's start).
         this.#runtime.stampServerRun(repairTx, {
@@ -4808,7 +4842,7 @@ export class Runner {
     if (wasPreparedLocally || wasStoppedLocally) {
       if (!this.#isStartAttemptCurrent(attempt)) return Promise.resolve(false);
       try {
-        attempt.installedRegistration = this.startCore(rootCell, {
+        attempt.installedRegistration = this.#startCore(rootCell, {
           givenPattern: resolvedPattern,
         });
       } catch (err) {
@@ -4854,7 +4888,7 @@ export class Runner {
 
       const startCoreStart = performance.now();
       try {
-        attempt.installedRegistration = this.startCore(rootCell, {
+        attempt.installedRegistration = this.#startCore(rootCell, {
           givenPattern: resolvedPattern,
           schedulerRehydration: this.#schedulerRehydrationOptions(
             rootCell,
@@ -4879,12 +4913,8 @@ export class Runner {
   /**
    * Starts the pattern behind `resultCell` inside `tx`, returning the
    * registration's cancel, or nothing when there was nothing to start.
-   *
-   * TypeScript-private rather than a `#` name, because
-   * `test/deferred-start-catchup-start.test.ts` replaces this member by
-   * assignment, which a `#` method does not allow.
    */
-  private startWithTx<T = any>(
+  #startWithTx<T = any>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<T>,
     givenPattern?: Pattern,
@@ -4893,13 +4923,28 @@ export class Runner {
     const key = this.#getDocKey(resultCell);
     if (this.#cancels.has(key)) return undefined;
 
-    return this.startCore(resultCell, {
+    return this.#startCore(resultCell, {
       tx,
       givenPattern,
       doNotUpdateOnPatternChange: options.doNotUpdateOnPatternChange,
       awaitSyncBeforeInitialRun: options.awaitSyncBeforeInitialRun,
       parentPieceRootId: options.parentPieceRootId,
     });
+  }
+
+  /**
+   * Commits `tx`, a commit-gated start's transaction for `resultCell`, and
+   * resolves to its verdict. A committer a test supplied wraps the commit.
+   */
+  #commitDeferredStart(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<any>,
+  ): Promise<Result<Unit, CommitError>> {
+    const committer = this.#deferredStartCommitter;
+    const commit: DeferredStartCommit = () => tx.commit();
+    return committer === undefined
+      ? commit()
+      : committer(tx, resultCell, commit);
   }
 
   #createDeferredStartOwnership<T>(
@@ -5015,7 +5060,7 @@ export class Runner {
         startTx,
       );
       try {
-        const installedRegistration = this.startWithTx(
+        const installedRegistration = this.#startWithTx(
           startTx,
           committedResultCell,
           givenPattern,
@@ -5026,10 +5071,10 @@ export class Runner {
           return;
         }
         this.#runtime.prepareTxForCommit(startTx);
-        startTx.commit().then(({ error }) => {
+        this.#commitDeferredStart(startTx, resultCell).then(({ error }) => {
           if (error) {
             if (
-              this.catchUpAndStartOnStaleRead(
+              this.#catchUpAndStartOnStaleRead(
                 error,
                 resultCell,
                 "start",
@@ -5086,7 +5131,7 @@ export class Runner {
    * the client reads their targets as absent, so the client's basis is
    * stale whenever the interleaving is tight — the EXPECTED outcome of
    * losing the race, not an exceptional one. Terminating there is what
-   * made the race fatal: `startWithTx` has already installed the
+   * made the race fatal: `#startWithTx()` has already installed the
    * client-side piece inside the transaction when the refusal lands, the
    * error arm's cancel tears that install down, and nothing re-runs it —
    * the piece has no client context for the rest of the session and every
@@ -5146,7 +5191,7 @@ export class Runner {
    * mapping — the same synchronous block as the claim checks, no
    * promise hop for a stop+restart to slip a foreign registration into
    * (delta review D2) — and the hand-off is EXACT: only the
-   * registration this attempt's own startCore created, still current
+   * registration this attempt's own `#startCore()` created, still current
    * (Cubic P1 — a COMPETING start can install into the registry the
    * recovery's entry emptied with no stop and so no generation bump,
    * and the walk's already-started returns report it as success; an
@@ -5158,17 +5203,13 @@ export class Runner {
    * real registration: the run is stopped in the same breath and the
    * walk reports not-running.
    * If another start took the key while the recovery waited, the
-   * recovery yields exactly as `startWithTx` yields on an owned key:
+   * recovery yields exactly as `#startWithTx()` yields on an owned key:
    * the piece has a context under someone else's authority, and the
    * token settles without touching it. The lifecycle epoch still covers
    * the one window no token can: a teardown that ran before the
    * refusal's continuation, whose sweep could not see this scheduling.
-   *
-   * TypeScript-private rather than a `#` name, because
-   * `test/deferred-start-catchup-start.test.ts` replaces this member by
-   * assignment, which a `#` method does not allow.
    */
-  private catchUpAndStartOnStaleRead<T>(
+  #catchUpAndStartOnStaleRead<T>(
     error: { name?: string; message?: string },
     resultCell: Cell<T>,
     label: string,
@@ -5243,8 +5284,8 @@ export class Runner {
         }
         if (this.#cancels.has(key)) {
           // Another start took the key while the recovery waited — the
-          // same yield startWithTx makes on an owned key. The piece HAS a
-          // context under someone else's authority; the recovery's purpose
+          // same yield `#startWithTx()` makes on an owned key. The piece HAS
+          // a context under someone else's authority; the recovery's purpose
           // is met and its claim dissolves. Settling the token touches no
           // live registration (its stale install no longer matches).
           ownership.cancel();
@@ -5363,7 +5404,7 @@ export class Runner {
               // success. The piece runs under the competitor's
               // authority; binding it to the caller's token would let a
               // parent cancel tear down a run whose lifecycle the
-              // parent does not own. Yield exactly as startWithTx
+              // parent does not own. Yield exactly as `#startWithTx()`
               // yields on an owned key: settle the token without
               // touching the registration.
               ownership.cancel();
@@ -5456,10 +5497,10 @@ export class Runner {
           );
         }
         this.#runtime.prepareTxForCommit(startTx);
-        startTx.commit().then(({ error }) => {
+        this.#commitDeferredStart(startTx, resultCell).then(({ error }) => {
           if (error) {
             if (
-              this.catchUpAndStartOnStaleRead(
+              this.#catchUpAndStartOnStaleRead(
                 error,
                 resultCell,
                 "cross-space pattern",
@@ -5628,7 +5669,7 @@ export class Runner {
           pullOnceAfterStart,
         );
       } else {
-        installedCancel = this.startWithTx(
+        installedCancel = this.#startWithTx(
           tx,
           resultCell,
           pattern,
@@ -5932,7 +5973,7 @@ export class Runner {
 
       if (setupRes?.needsStart) {
         if (givenTx) {
-          this.startWithTx(
+          this.#startWithTx(
             givenTx,
             resultCell.withTx(givenTx),
             setupRes.pattern,
@@ -7208,11 +7249,11 @@ export class Runner {
 
   /**
    * TESTS ONLY: settle in-flight catch-up recoveries of commit-gated starts
-   * (see `catchUpAndStartOnStaleRead`). Loops in case a settled recovery's
-   * continuation schedules another. Never called from dispose(): the
-   * readiness gate a recovery awaits is a session catch-up, which a closing
-   * runtime need never reach — a cancelled ownership is what stops the work
-   * there.
+   * (see `#catchUpAndStartOnStaleRead()`). Loops in case a settled
+   * recovery's continuation schedules another. Never called from dispose():
+   * the readiness gate a recovery awaits is a session catch-up, which a
+   * closing runtime need never reach — a cancelled ownership is what stops
+   * the work there.
    */
   async idleDeferredStartCatchUps(): Promise<void> {
     while (this.#pendingDeferredStartCatchUps.size > 0) {
@@ -7239,7 +7280,7 @@ export class Runner {
     // Invalidate every asynchronous start continuation before canceling live
     // registrations. In-flight snapshot listings may still resolve after
     // storage teardown, but they can neither publish a cache nor call
-    // startCore under the new epoch.
+    // `#startCore()` under the new epoch.
     this.#lifecycleEpoch++;
     // The epoch change already makes every held attempt non-current, so no
     // later start can join one; dropping the index releases the attempts too.
