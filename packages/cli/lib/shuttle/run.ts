@@ -12,14 +12,26 @@
  * resolved it, and a place stands in a space. That is the connect a shell pays
  * once where a one-shot command pays it per invocation.
  *
+ * The invocation session is minted here for the same reason and on the same
+ * terms: it is what makes an invocation id replayable, and one shuttle is one
+ * run — exactly the span over which repeating an id should mean repeating a
+ * call.
+ *
+ * The editor is wired here and nowhere under it, because an editor draws on
+ * the screen the prompt is holding in raw mode: what runs one has to take that
+ * mode off around it and put it back after, and only what opened the terminal
+ * can.
+ *
  * Nothing here reads the command line. What a person wrote is read by the
  * command, in the words every other command reads a space and an identity in,
  * and what arrives is the connection it settled on.
  */
 
 import { loadPieces, type SpaceConfig } from "../piece.ts";
+import { newSessionId } from "../session.ts";
 import { announcingOutput } from "./announce.ts";
 import { type ConnectionOpener, HeldConnection } from "./connection.ts";
+import { openEditor } from "./editor.ts";
 import { CurrentPlace } from "./place.ts";
 import { runPrompt } from "./prompt.ts";
 import { ShuttleSession } from "./session.ts";
@@ -37,6 +49,21 @@ export interface ShuttleDeps {
 
   /** Holds a terminal open for the prompt to read and write through. */
   readonly terminal?: typeof withPromptTerminal;
+
+  /** Mints the invocation session; a fresh one where a caller names none. */
+  readonly newSessionId?: typeof newSessionId;
+
+  /**
+   * Reads lines against what this composed, which is where everything above
+   * ends up.
+   *
+   * It is a seam for the same reason the other three are: what this module
+   * does is compose, and a composition nothing can stand behind is one whose
+   * wiring is only ever asserted by running the whole shell. The editor trip
+   * is the wire that needs it — it exists to be handed to a verb, and no verb
+   * reaches it without a cell to read first.
+   */
+  readonly prompt?: typeof runPrompt;
 }
 
 /**
@@ -70,15 +97,21 @@ export async function runShuttle(
       place: new CurrentPlace(pieces.getSpace()),
       connection,
       session: new ShuttleSession(),
+      invocationSession: (deps.newSessionId ?? newSessionId)(),
     };
     // How big the screen is arrives as functions rather than numbers, so a
     // window resized mid-session bounds the next line at the size it has then.
     // Both dimensions ride the deps bag because that is what already reaches
     // every verb, and a verb writing a page is where both are wanted: a page
     // is measured in rows, and a line becomes rows at the width.
-    await runPrompt(shuttle, terminal, {
+    await (deps.prompt ?? runPrompt)(shuttle, terminal, {
       rows: consoleRows,
       columns: consoleColumns,
+      // The same sink the connection's own writing goes to, so a call's
+      // dispatch announcement and a pattern's console reach one screen in the
+      // order they happened rather than in two orders.
+      announce: (text) => terminal.announce(text),
+      editText: (text) => terminal.suspend(() => openEditor(text)),
     });
   });
 }

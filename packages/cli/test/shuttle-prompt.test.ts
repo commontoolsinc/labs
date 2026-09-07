@@ -72,6 +72,7 @@ function shuttleIn(): Shuttle {
       } as unknown as PiecesController,
     }),
     session: new ShuttleSession(),
+    invocationSession: "a-session",
   };
 }
 
@@ -171,8 +172,21 @@ async function running(
     announce: (text) => {
       writes.push({ kind: "announce", text });
     },
+    // Nothing the prompt does suspends the terminal: the trip is `edit`'s,
+    // taken through a dep the run wires (`run.ts`), so a case here that
+    // reached this would be a case about a verb rather than about the loop.
+    suspend: () => {
+      throw new Error("The prompt handed the terminal over.");
+    },
   };
-  await runPrompt(shuttle, terminal, deps);
+  // Warming is answered for every case rather than by each, because it is not
+  // something a case here arranges: reaching into a piece warms it, so any
+  // line that touches one warms it, and these cases are about what the prompt
+  // draws. A case that cares can still say so, `deps` coming last.
+  await runPrompt(shuttle, terminal, {
+    warmPiece: (config) => Promise.resolve({ piece: config.piece }),
+    ...deps,
+  });
   return writes;
 }
 
@@ -209,8 +223,9 @@ describe("prompt", () => {
         { kind: "finish" },
         {
           kind: "announce",
-          text: "`pw` is not a verb. The verbs are `cd`, `get`, `help`, " +
-            "`ls`, `more`, `pwd`, `where`, and `wish`.",
+          text: "`pw` is not a verb. The verbs are `call`, `cd`, " +
+            "`describe`, `edit`, `get`, `help`, `link`, `ls`, `more`, " +
+            "`pwd`, `set`, `verbs`, `where`, and `wish`.",
         },
         { kind: "edit", text: AT_ROOT, column: 18 },
         { kind: "finish" },

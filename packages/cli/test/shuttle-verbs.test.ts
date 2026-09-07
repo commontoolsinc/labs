@@ -31,14 +31,20 @@ import type { PiecesController } from "@commonfabric/piece/ops";
 
 import { UI } from "@commonfabric/runner";
 
+import { ValidationError } from "@cliffy/command";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { FabricSpecialObject } from "@commonfabric/data-model";
+
 import { pieceDataCommand } from "../commands/piece.ts";
 import {
   type CellSelection,
   LINK_MARKER_KEY,
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
+import { LinkValidationError } from "../lib/piece.ts";
 import type {
   GetCellValueOptions,
+  PieceCallableListing,
   PieceConfig,
   SpaceConfig,
 } from "../lib/piece.ts";
@@ -138,6 +144,28 @@ const READS_NOTHING: VerbDeps = {
       throw new Error("The cell was listed.");
     },
   },
+  setCellValue: () => {
+    throw new Error("A cell was written.");
+  },
+  linkPieces: () => {
+    throw new Error("A reference was written.");
+  },
+  // Answered rather than refused, because warming is not a read a case
+  // arranges: reaching into a piece warms it (decision 10), so every line that
+  // touches one warms it, and a fixture that threw here would fail every such
+  // case for doing what the verb is meant to do. It answers with the piece the
+  // config named, which is what a resolution spending no collection segment
+  // returns.
+  warmPiece: (config) => Promise.resolve({ piece: config.piece }),
+  listPieceCallables: () => {
+    throw new Error("The callables were listed.");
+  },
+  describePiece: () => {
+    throw new Error("A piece was described.");
+  },
+  callFromCommand: () => {
+    throw new Error("A call was dispatched.");
+  },
 };
 
 /**
@@ -150,6 +178,7 @@ function shuttleIn(pieces: PiecesController = PIECES): Shuttle {
     place: new CurrentPlace(SPACE),
     connection: new HeldConnection({ kind: "borrowed", pieces }),
     session: new ShuttleSession(),
+    invocationSession: "a-session",
   };
 }
 
@@ -159,6 +188,61 @@ function atPiece(...path: string[]): Shuttle {
   moved(shuttle.place, `/${HANDLE}`);
   for (const segment of path) moved(shuttle.place, segment);
   return shuttle;
+}
+
+/**
+ * Helper for the cases below, which is one callable, as a listing describes
+ * one.
+ */
+function callable(
+  name: string,
+  extra: Partial<PieceCallableListing> = {},
+): PieceCallableListing {
+  return {
+    name,
+    kind: "handler",
+    on: "result",
+    inputSchema: true,
+    ...extra,
+  };
+}
+
+/**
+ * Helper for the cases below, which answers every read a verb can make with
+ * something harmless.
+ *
+ * It is for the cases that are about the dispatch rather than about a read: a
+ * verb that reaches a seam gets an answer, so what such a case observes is
+ * what the dispatch did with the line and not what the fabric said.
+ */
+function answering(over: VerbDeps = {}): VerbDeps {
+  return {
+    getCellValue: () => Promise.resolve({ title: "a" }),
+    readWish: () => Promise.resolve({ result: "b" }),
+    resolvePieceReference: (_pieces, token, path) =>
+      Promise.resolve({ piece: token, pathAfter: [...path] }),
+    listing: {
+      getCellValue: () => Promise.resolve({ title: "a" }),
+      listSpaceSlugs: () => Promise.resolve([]),
+      listPieces: () => Promise.resolve([]),
+    },
+    warmPiece: (config) => Promise.resolve({ piece: config.piece }),
+    setCellValue: () => Promise.resolve({ piece: HANDLE, path: ["title"] }),
+    linkPieces: () => Promise.resolve(),
+    listPieceCallables: () =>
+      Promise.resolve({ pattern: null, verbs: [callable("a-verb")] }),
+    describePiece: () =>
+      Promise.resolve({ pattern: null, verbs: [callable("a-verb")] }),
+    callFromCommand: () => Promise.resolve(),
+    editText: (text) =>
+      Promise.resolve({
+        kind: "edited" as const,
+        text: `${text} `,
+        file: "/tmp/edited",
+        discard: () => Promise.resolve(),
+      }),
+    ...over,
+  };
 }
 
 /** Helper for the cases below, which stands `value` in for a cell's value. */
@@ -353,27 +437,86 @@ function reasonOf(outcome: Outcome): string {
  */
 const VERB_ARITY: readonly (readonly [
   string,
-  "none" | "optional" | "required",
+  "none" | "optional" | "required" | "pair" | "section",
 ])[] = [
+  ["call", "section"],
   ["cd", "required"],
+  ["describe", "optional"],
+  ["edit", "optional"],
   ["get", "optional"],
   ["help", "optional"],
+  ["link", "pair"],
   ["ls", "none"],
   ["more", "none"],
   ["pwd", "none"],
+  ["set", "pair"],
+  ["verbs", "optional"],
   ["where", "none"],
   ["wish", "required"],
 ];
 
 /**
- * Helper for the cases below, which is what a verb needing an operand refuses
- * a line naming none with. A verb absent from this either takes no operand at
- * all or reads its own meaning into having none.
+ * Helper for the cases below, which is the most operands the dispatch takes
+ * for each arity, and nothing for the arity that takes any number.
+ *
+ * A verb whose maximum is stated is one a line may write too many operands
+ * for; the section arity has no maximum, since the words past a verb's own
+ * operands are the callable's section and no number here bounds them.
+ */
+const MOST_OPERANDS: ReadonlyMap<string, number> = new Map([
+  ["none", 0],
+  ["optional", 1],
+  ["required", 1],
+  ["pair", 2],
+]);
+
+/** Helper for the cases below, which is what the dispatch calls that maximum. */
+const TAKES: ReadonlyMap<string, string> = new Map([
+  ["none", "no operand"],
+  ["optional", "one operand"],
+  ["required", "one operand"],
+  ["pair", "two operands"],
+]);
+
+/**
+ * Helper for the cases below, which is what a verb needing operands refuses a
+ * line naming too few with. A verb absent from this reads its own meaning into
+ * having none.
  */
 const NEEDS_ONE: ReadonlyMap<string, string> = new Map([
+  [
+    "call",
+    "`call` takes the piece to call on and the verb to call, as in `call " +
+    "topics/3 add-reply`. A piece handle stands where the reference does, " +
+    "and a callable handle off `verbs` carries the name already, as in " +
+    "`call %4`.",
+  ],
   ["cd", "`cd` takes a place to move to."],
+  [
+    "link",
+    "`link` takes the cell to point at and the path to write it at, as in " +
+    "`link topics/3 latest`.",
+  ],
+  [
+    "set",
+    "`set` takes the path to write and the value to write there, as in " +
+    `\`set title '"a"'\`.`,
+  ],
   ["wish", "`wish` takes the target to resolve, as in `wish #favorites`."],
 ]);
+
+/**
+ * Helper for the cases below, which is the sentence naming every verb, as the
+ * refusal for a word that names none writes it.
+ *
+ * Written out rather than composed from {@link VERB_WORDS}, because what these
+ * cases claim is the sentence: the set, the order the dispatch lists it in,
+ * and the English list the words are joined into. One copy rather than one per
+ * case, so a verb added is a verb named here once and the cases still fail
+ * until it is.
+ */
+const THE_VERBS = "The verbs are `call`, `cd`, `describe`, `edit`, `get`, " +
+  "`help`, `link`, `ls`, `more`, `pwd`, `set`, `verbs`, `where`, and `wish`.";
 
 /** Helper for the cases below, which is every verb, in that same order. */
 const VERB_WORDS = VERB_ARITY.map(([word]) => word);
@@ -388,12 +531,18 @@ const VERB_WORDS = VERB_ARITY.map(([word]) => word);
  * so.
  */
 const LINE_PER_VERB: ReadonlyMap<string, string> = new Map([
+  ["call", "call . a-verb"],
   ["cd", "cd .."],
+  ["describe", "describe"],
+  ["edit", "edit"],
   ["get", "get"],
   ["help", "help"],
+  ["link", "link a b"],
   ["ls", "ls"],
   ["more", "more"],
   ["pwd", "pwd"],
+  ["set", 'set a "b"'],
+  ["verbs", "verbs"],
   ["where", "where"],
   ["wish", "wish #favorites"],
 ]);
@@ -409,8 +558,7 @@ describe("verbs", () => {
     it("returns a refusal naming a word that is no verb, and listing the verbs", async () => {
       expect(await runLine("frob x", shuttleIn(), READS_NOTHING)).toEqual({
         kind: "refused",
-        reason: "`frob` is not a verb. The verbs are `cd`, `get`, `help`, " +
-          "`ls`, `more`, `pwd`, `where`, and `wish`.",
+        reason: `\`frob\` is not a verb. ${THE_VERBS}`,
       });
     });
 
@@ -435,8 +583,7 @@ describe("verbs", () => {
       ) {
         expect(await runLine(word, shuttleIn(), READS_NOTHING)).toEqual({
           kind: "refused",
-          reason: `\`${word}\` is not a verb. The verbs are \`cd\`, \`get\`, ` +
-            "`help`, `ls`, `more`, `pwd`, `where`, and `wish`.",
+          reason: `\`${word}\` is not a verb. ${THE_VERBS}`,
         });
       }
     });
@@ -468,11 +615,7 @@ describe("verbs", () => {
         Deno.stdout.writeSync(new Uint8Array([0x61]));
         expect(written).toEqual([1]);
         written.length = 0;
-        const answers: VerbDeps = {
-          getCellValue: () => Promise.resolve("a"),
-          readWish: () => Promise.resolve({ result: "b" }),
-          listing: { getCellValue: () => Promise.resolve({ title: "a" }) },
-        };
+        const answers = answering();
         const shuttle = atPiece();
         for (const word of VERB_WORDS) {
           const line = LINE_PER_VERB.get(word);
@@ -594,24 +737,63 @@ describe("verbs", () => {
     // reads, so a count changed there names the verb it was changed for.
 
     for (const [word, arity] of VERB_ARITY) {
-      const given = arity === "none" ? 1 : 2;
+      const most = MOST_OPERANDS.get(arity);
+      if (most === undefined) continue;
+      const given = most + 1;
       it(`refuses ${given} operand${given === 1 ? "" : "s"}, one more than \`${word}\` takes`, async () => {
-        const line = [word, ...["a", "b"].slice(0, given)].join(" ");
+        const line = [word, ...["a", "b", "c"].slice(0, given)].join(" ");
         expect(reasonOf(await runLine(line, shuttleIn(), READS_NOTHING)))
           .toBe(
-            arity === "none"
-              ? `\`${word}\` takes no operand, and was given 1.`
-              : `\`${word}\` takes one operand, and was given 2.`,
+            `\`${word}\` takes ${TAKES.get(arity)}, and was given ${given}.`,
           );
       });
     }
 
+    it("takes every operand past a section verb's own, up to twelve of them", async () => {
+      // The half no maximum can express, and the reason `section` is an arm
+      // rather than a large number. The claim is bounded because the set is
+      // not: what is asserted is that a line of each length is taken *and*
+      // that the whole of its tail reached the seam, so a maximum anywhere in
+      // that range fails here rather than passing on the one length somebody
+      // happened to write.
+
+      const taken: number[] = [];
+      const handed: string[][] = [];
+      for (let count = 0; count <= 12; count++) {
+        const tail = Array.from({ length: count }, (_, at) => `word${at}`);
+        const outcome = await runLine(
+          ["call", ".", "a-verb", ...tail].join(" "),
+          atPiece(),
+          answering({
+            callFromCommand: (_options, _spelling, _name, tailArgs) => {
+              handed.push([...tailArgs]);
+              return Promise.resolve();
+            },
+          }),
+        );
+        if (outcome.kind !== "refused") taken.push(count);
+      }
+      expect(taken).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+      expect(handed.map((tail) => tail.length))
+        .toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+      expect(handed[12]?.at(-1)).toBe("word11");
+    });
+
     for (const [word, arity] of VERB_ARITY) {
-      if (arity !== "required") continue;
-      it(`refuses a line naming no operand, \`${word}\` needing one`, async () => {
-        expect(reasonOf(await runLine(word, shuttleIn(), READS_NOTHING)))
-          .toBe(NEEDS_ONE.get(word));
-      });
+      if (arity !== "required" && arity !== "pair" && arity !== "section") {
+        continue;
+      }
+      const given = arity === "pair" ? 1 : 0;
+      it(
+        `refuses a line naming ${given} operand${
+          given === 1 ? "" : "s"
+        }, \`${word}\` needing more`,
+        async () => {
+          const line = [word, ...["a"].slice(0, given)].join(" ");
+          expect(reasonOf(await runLine(line, shuttleIn(), READS_NOTHING)))
+            .toBe(NEEDS_ONE.get(word));
+        },
+      );
     }
 
     for (const [word, arity] of VERB_ARITY) {
@@ -621,7 +803,7 @@ describe("verbs", () => {
         // and `help` lists the verbs, so neither is a line the dispatch may
         // answer for, and a count refusing none would take both readings away.
 
-        const outcome = await runLine(word, atPiece(), cellValue("a value"));
+        const outcome = await runLine(word, atPiece(), answering());
         expect(outcome.kind).not.toBe("refused");
       });
     }
@@ -647,8 +829,7 @@ describe("verbs", () => {
     it("refuses a word that names no verb, in the sentence the dispatch refuses one in", async () => {
       expect(reasonOf(await runLine("help frob", shuttleIn(), READS_NOTHING)))
         .toBe(
-          "`frob` is not a verb. The verbs are `cd`, `get`, `help`, `ls`, " +
-            "`more`, `pwd`, `where`, and `wish`.",
+          `\`frob\` is not a verb. ${THE_VERBS}`,
         );
     });
   });
@@ -846,6 +1027,7 @@ describe("verbs", () => {
             pieces: lookingUp(false),
           }),
           session: new ShuttleSession(),
+          invocationSession: "a-session",
         };
         moved(shuttle.place, `/${HANDLE}`);
         const outcome = await runLine(
@@ -2052,6 +2234,7 @@ describe("verbs", () => {
           open: () => Promise.reject(new Error("The server refused.")),
         }),
         session: new ShuttleSession(),
+        invocationSession: "a-session",
       };
       expect(textOf(await runLine("where", shuttle, READS_NOTHING)))
         .toBe(
@@ -2073,6 +2256,7 @@ describe("verbs", () => {
         place: new CurrentPlace(SPACE),
         connection: new HeldConnection({ kind: "borrowed", pieces: PIECES }),
         session: new ShuttleSession(),
+        invocationSession: "a-session",
       };
       expect(textOf(await runLine("where", shuttle, READS_NOTHING))).toContain(
         `space     ${SPACE_NAME}\nposition  @${SPACE}/`,
@@ -2089,6 +2273,7 @@ describe("verbs", () => {
         place: new CurrentPlace(SPACE),
         connection: new HeldConnection({ kind: "borrowed", pieces: PIECES }),
         session: new ShuttleSession(),
+        invocationSession: "a-session",
       };
       const text = textOf(await runLine("where", shuttle, READS_NOTHING));
       expect(text).toContain("space     boa␦rd");
@@ -2708,6 +2893,1962 @@ describe("verbs", () => {
     });
   });
 
+  describe("set", () => {
+    it("writes the value at the cell the first operand names", async () => {
+      let written: unknown;
+      let at: (string | number)[] | undefined;
+      await runLine(
+        'set title "a"',
+        atPiece(),
+        answering({
+          setCellValue: (_config, path, value) => {
+            at = [...path];
+            written = value;
+            return Promise.resolve({ piece: HANDLE, path: [...path] });
+          },
+        }),
+      );
+      expect({ at, written }).toEqual({ at: ["title"], written: "a" });
+    });
+
+    it("writes a bare word as the string it spells", async () => {
+      let written: unknown;
+      await runLine(
+        "set title milk",
+        atPiece(),
+        answering({
+          setCellValue: (_config, path, value) => {
+            written = value;
+            return Promise.resolve({ piece: HANDLE, path: [...path] });
+          },
+        }),
+      );
+      expect(written).toBe("milk");
+    });
+
+    it("refuses a value opening the way JSON opens one and then not parsing", async () => {
+      // The two readings divide on the first character, and this is the half
+      // that is a mistake rather than a word: reading it as the string it
+      // spells would write a value nobody meant and call it a success.
+
+      expect(
+        reasonOf(await runLine("set title [1,", atPiece(), answering()))
+          .split(":")[0],
+      ).toBe("`[1,` is not JSON");
+    });
+
+    it("refuses the standard-input sentinel rather than reading it", async () => {
+      expect(reasonOf(await runLine("set title -", atPiece(), answering())))
+        .toBe(
+          "`-` reads the value from standard input, which the prompt is " +
+            "reading keys from. Write the value on the line, or open the " +
+            "cell with `edit`.",
+        );
+    });
+
+    it("refuses a container, which holds no value to write", async () => {
+      expect(reasonOf(await runLine('set slugs "a"', shuttleIn(), answering())))
+        .toBe(
+          "`slugs/` is a list of what stands inside it rather than a cell, " +
+            "so `set` has nothing to write there.",
+        );
+    });
+
+    it("selects the arguments cell where the operand wrote the suffix", async () => {
+      let options: { input?: boolean } | undefined;
+      await runLine(
+        'set title#argument "a"',
+        atPiece(),
+        answering({
+          setCellValue: (_config, path, _value, given) => {
+            options = given;
+            return Promise.resolve({ piece: HANDLE, path: [...path] });
+          },
+        }),
+      );
+      expect(options?.input).toBe(true);
+    });
+
+    it("asks the seam to refuse a write onto a whole piece", async () => {
+      // Only resolution can decide it — an address naming a collection spends
+      // its leading segments reaching the member, so a path can still resolve
+      // to a piece's root — so the refusal is the seam's, in its own words.
+
+      let options: { refuseRootWrite?: boolean } | undefined;
+      await runLine(
+        'set title "a"',
+        atPiece(),
+        answering({
+          setCellValue: (_config, path, _value, given) => {
+            options = given;
+            return Promise.resolve({ piece: HANDLE, path: [...path] });
+          },
+        }),
+      );
+      expect(options?.refuseRootWrite).toBe(true);
+    });
+
+    it("says where the write landed, which is where the seam put it", async () => {
+      // Not where the operand pointed: an operand naming a collection's
+      // member spends its leading segments getting there, and only the piece
+      // the seam reached says what was written.
+
+      expect(
+        textOf(
+          await runLine(
+            'set title "a"',
+            atPiece(),
+            answering({
+              setCellValue: () =>
+                Promise.resolve({ piece: BOARD, path: ["deep", "title"] }),
+            }),
+          ),
+        ),
+      ).toBe(`Wrote \`deep/title\` on \`${BOARD}\`.`);
+    });
+
+    it("says the arguments cell was written where it was", async () => {
+      expect(
+        textOf(
+          await runLine(
+            'set title#argument "a"',
+            atPiece(),
+            answering({
+              setCellValue: () =>
+                Promise.resolve({ piece: BOARD, path: ["title"] }),
+            }),
+          ),
+        ),
+      ).toBe(`Wrote \`title\` on \`${BOARD}#argument\`.`);
+    });
+
+    it("refuses what the seam turned down, in the seam's own sentence", async () => {
+      expect(
+        reasonOf(
+          await runLine(
+            'set title "a"',
+            atPiece(),
+            answering({
+              setCellValue: () => {
+                throw new ValidationError("The schema will not take that.");
+              },
+            }),
+          ),
+        ),
+      ).toBe("The schema will not take that.");
+    });
+
+    it("starts the piece before it writes, so a computed value is live", async () => {
+      const order: string[] = [];
+      await runLine(
+        'set title "a"',
+        atPiece(),
+        answering({
+          warmPiece: (config) => {
+            order.push("warm");
+            return Promise.resolve({ piece: config.piece });
+          },
+          setCellValue: () => {
+            order.push("write");
+            return Promise.resolve({ piece: HANDLE, path: ["title"] });
+          },
+        }),
+      );
+      expect(order).toEqual(["warm", "write"]);
+    });
+
+    it("starts the piece the walk reached, at the path it was aimed at", async () => {
+      // A walk into a collection holder reaches a member, and the member is
+      // what runs. The path goes over so the seam can spend what the walk
+      // needs, which is what decides which piece starts.
+
+      let path: (string | number)[] | undefined;
+      await runLine(
+        'set title "a"',
+        atPiece("inbox"),
+        answering({
+          warmPiece: (config, given) => {
+            path = [...(given ?? [])];
+            return Promise.resolve({ piece: config.piece });
+          },
+        }),
+      );
+      expect(path).toEqual(["inbox", "title"]);
+    });
+
+    /**
+     * Helper for the warming cases, which is a `warmPiece` that models the
+     * real one: it resolves `path` to a piece the way a collection walk does,
+     * honours the caller's memo, and records the starts it actually made.
+     *
+     * Counting calls would count the wrong thing. The memo's job is to stop a
+     * piece being *started* twice, and the resolution in front of the start
+     * happens either way — so a case that counted calls would go green for a
+     * memo that saved nothing.
+     */
+    function counting(starts: string[]): VerbDeps {
+      return answering({
+        warmPiece: (config, path, deps) => {
+          // A leading `members` segment stands for the collection walk that
+          // makes two paths under one holder two pieces.
+          const piece = path?.[0] === "members"
+            ? `${config.piece}/${String(path[1])}`
+            : config.piece;
+          if (deps?.alreadyRunning?.(piece) !== true) starts.push(piece);
+          return Promise.resolve({ piece });
+        },
+      });
+    }
+
+    it("starts a piece once for a run, however many fields are written", async () => {
+      // The property the memo exists for, and the one a key over the path
+      // rather than the piece loses: two lines writing two fields of one piece
+      // are two lines reaching one piece.
+
+      const starts: string[] = [];
+      const shuttle = atPiece();
+      const deps = counting(starts);
+      await runLine('set title "a"', shuttle, deps);
+      await runLine('set body "b"', shuttle, deps);
+      expect(starts).toEqual([HANDLE]);
+    });
+
+    it("starts each member a walk reaches, two under one holder being two pieces", async () => {
+      // The other side of the same key, and what a key over the piece alone
+      // would lose: a walk into a collection reaches a member, and the second
+      // member is not the first however alike the operands look.
+
+      const starts: string[] = [];
+      const shuttle = atPiece();
+      const deps = counting(starts);
+      await runLine('set members/1/title "a"', shuttle, deps);
+      await runLine('set members/2/title "b"', shuttle, deps);
+      expect(starts).toEqual([`${HANDLE}/1`, `${HANDLE}/2`]);
+    });
+
+    it("starts one piece for two operands that reach it by different paths", async () => {
+      // The repeat the old key paid for and this one does not: the memo is
+      // asked with what the resolution reached, so a second operand reaching
+      // the same member finds it already running.
+
+      const starts: string[] = [];
+      const shuttle = atPiece();
+      const deps = counting(starts);
+      await runLine('set members/1/title "a"', shuttle, deps);
+      await runLine('set members/1/body "b"', shuttle, deps);
+      expect(starts).toEqual([`${HANDLE}/1`]);
+    });
+  });
+
+  describe("link", () => {
+    it("writes a reference at the second operand naming the first", async () => {
+      let wrote: unknown;
+      await runLine(
+        "link title latest",
+        atPiece(),
+        answering({
+          linkPieces: (_config, piece, path, onto, at) => {
+            wrote = { piece, path: [...path], onto, at: [...at] };
+            return Promise.resolve();
+          },
+        }),
+      );
+      expect(wrote).toEqual({
+        piece: HANDLE,
+        path: ["title"],
+        onto: HANDLE,
+        at: ["latest"],
+      });
+    });
+
+    it("says which way round it wrote, quoting the line's own words", async () => {
+      expect(textOf(await runLine("link title latest", atPiece(), answering())))
+        .toBe("Wrote a reference at `latest` naming `title`.");
+    });
+
+    it("refuses the arguments suffix on the endpoint pointed at", async () => {
+      expect(
+        reasonOf(
+          await runLine("link title#argument latest", atPiece(), answering()),
+        ),
+      ).toBe(
+        "`title#argument` selects a piece's arguments cell, and a link " +
+          "endpoint is a cell of a piece's result. Write the endpoint " +
+          "without the `#argument` suffix.",
+      );
+    });
+
+    it("refuses it on the endpoint written at, which is the other half", async () => {
+      expect(
+        reasonOf(
+          await runLine("link title latest#argument", atPiece(), answering()),
+        ),
+      ).toBe(
+        "`latest#argument` selects a piece's arguments cell, and a link " +
+          "endpoint is a cell of a piece's result. Write the endpoint " +
+          "without the `#argument` suffix.",
+      );
+    });
+
+    it("refuses a container as an endpoint, which holds no cell to point at", async () => {
+      // The endpoint door is `writable`'s plus the suffix rule, so a place
+      // that is no cell is refused before either endpoint is read.
+
+      expect(
+        reasonOf(await runLine("link slugs latest", shuttleIn(), answering())),
+      )
+        .toBe(
+          "`slugs/` is a list of what stands inside it rather than a cell, " +
+            "so `link` has nothing to write there.",
+        );
+    });
+
+    it("carries the scope each endpoint was reached through", async () => {
+      const shuttle = atPiece();
+      moved(shuttle.place, ".@session");
+      let scopes: unknown;
+      await runLine(
+        "link title latest",
+        shuttle,
+        answering({
+          linkPieces: (_c, _p, _pa, _o, _a, given) => {
+            scopes = given;
+            return Promise.resolve();
+          },
+        }),
+      );
+      expect(scopes)
+        .toEqual({ sourceScope: "session", targetScope: "session" });
+    });
+
+    it("refuses what the seam turned down, in the seam's own sentence", async () => {
+      expect(
+        reasonOf(
+          await runLine(
+            "link title latest",
+            atPiece(),
+            answering({
+              linkPieces: () => {
+                throw new LinkValidationError(
+                  "A link may not point at itself.",
+                );
+              },
+            }),
+          ),
+        ),
+      ).toBe("A link may not point at itself.");
+    });
+
+    it("starts the piece before it writes, and starts it once for both ends", async () => {
+      // Two endpoints on one piece are one piece. What warms is a piece, so
+      // the memo answers for the second end without another start — the same
+      // rule two lines writing two fields of one piece meet.
+
+      const order: string[] = [];
+      await runLine(
+        "link title latest",
+        atPiece(),
+        answering({
+          warmPiece: (config) => {
+            order.push(`warm ${config.piece}`);
+            return Promise.resolve({ piece: config.piece });
+          },
+          linkPieces: () => {
+            order.push("write");
+            return Promise.resolve();
+          },
+        }),
+      );
+      expect(order).toEqual([`warm ${HANDLE}`, "write"]);
+    });
+  });
+
+  describe("edit", () => {
+    it("refuses where no editor is reachable, rather than guessing at one", async () => {
+      expect(
+        reasonOf(
+          await runLine(
+            "edit title",
+            atPiece(),
+            answering({
+              editText: undefined,
+            }),
+          ),
+        ),
+      ).toBe(
+        "No editor is reachable from here, so there is nothing to open the " +
+          "value in.",
+      );
+    });
+
+    it("opens the value as JSON a person can read", async () => {
+      let opened: string | undefined;
+      await runLine(
+        "edit title",
+        atPiece(),
+        answering({
+          getCellValue: () => Promise.resolve({ a: 1 }),
+          editText: (text) => {
+            opened = text;
+            return Promise.resolve({
+              kind: "edited" as const,
+              text,
+              file: "/tmp/edited",
+              discard: () => Promise.resolve(),
+            });
+          },
+        }),
+      );
+      expect(opened).toBe('{\n  "a": 1\n}');
+    });
+
+    it("writes back what the editor saved, parsed", async () => {
+      let written: unknown;
+      await runLine(
+        "edit title",
+        atPiece(),
+        answering({
+          getCellValue: () => Promise.resolve({ a: 1 }),
+          editText: () =>
+            Promise.resolve({
+              kind: "edited" as const,
+              text: '{"a":2}',
+              file: "/tmp/edited",
+              discard: () => Promise.resolve(),
+            }),
+          setCellValue: (_config, path, value) => {
+            written = value;
+            return Promise.resolve({ piece: HANDLE, path: [...path] });
+          },
+        }),
+      );
+      expect(written).toEqual({ a: 2 });
+    });
+
+    it("writes nothing where the text came back unchanged, and says so", async () => {
+      let wrote = false;
+      const outcome = await runLine(
+        "edit title",
+        atPiece(),
+        answering({
+          getCellValue: () => Promise.resolve({ a: 1 }),
+          editText: (text) =>
+            Promise.resolve({
+              kind: "edited" as const,
+              text,
+              file: "/tmp/edited",
+              discard: () => Promise.resolve(),
+            }),
+          setCellValue: () => {
+            wrote = true;
+            return Promise.resolve({ piece: HANDLE, path: [] });
+          },
+        }),
+      );
+      expect({ wrote, said: textOf(outcome) })
+        .toEqual({
+          wrote: false,
+          said: "Nothing changed, so nothing was written.",
+        });
+    });
+
+    it("leaves the file behind where the text will not parse, and names it", async () => {
+      // The one arm where a person's work exists nowhere else, so the file is
+      // not removed and the refusal says where it is.
+
+      let discarded = false;
+      const reason = reasonOf(
+        await runLine(
+          "edit title",
+          atPiece(),
+          answering({
+            getCellValue: () => Promise.resolve({ a: 1 }),
+            editText: () =>
+              Promise.resolve({
+                kind: "edited" as const,
+                text: "{ not json",
+                file: "/tmp/edited",
+                discard: () => {
+                  discarded = true;
+                  return Promise.resolve();
+                },
+              }),
+          }),
+        ),
+      );
+      expect({
+        discarded,
+        names: reason.endsWith(
+          "Nothing was written, and the text is in `/tmp/edited`.",
+        ),
+      }).toEqual({ discarded: false, names: true });
+    });
+
+    it("removes the file once the write landed", async () => {
+      let discarded = false;
+      await runLine(
+        "edit title",
+        atPiece(),
+        answering({
+          getCellValue: () => Promise.resolve({ a: 1 }),
+          editText: () =>
+            Promise.resolve({
+              kind: "edited" as const,
+              text: '{"a":2}',
+              file: "/tmp/edited",
+              discard: () => {
+                discarded = true;
+                return Promise.resolve();
+              },
+            }),
+        }),
+      );
+      expect(discarded).toBe(true);
+    });
+
+    it("opens no editor where the cancel arrived while the value was read", async () => {
+      // The read answers whether or not the line was cancelled while it was
+      // in flight, so the window after it is a boundary of its own — and
+      // opening an editor is an adoption rather than a read, which is why the
+      // rows above cannot reach it: they count reads, and this is not one.
+
+      const stopper = new AbortController();
+      let opened = false;
+      const outcome = await runLine(
+        "edit title",
+        atPiece(),
+        answering({
+          getCellValue: () => {
+            stopper.abort();
+            return Promise.resolve({ a: 1 });
+          },
+          editText: (text) => {
+            opened = true;
+            return Promise.resolve({
+              kind: "edited" as const,
+              text,
+              file: "/tmp/edited",
+              discard: () => Promise.resolve(),
+            });
+          },
+          signal: stopper.signal,
+        }),
+      );
+      expect({ opened, kind: outcome.kind })
+        .toEqual({ opened: false, kind: "interrupted" });
+    });
+
+    it("carries the editor's own refusal through", async () => {
+      expect(
+        reasonOf(
+          await runLine(
+            "edit title",
+            atPiece(),
+            answering({
+              editText: () =>
+                Promise.resolve({
+                  kind: "refused" as const,
+                  reason: "`$EDITOR` names nothing.",
+                }),
+            }),
+          ),
+        ),
+      ).toBe("`$EDITOR` names nothing.");
+    });
+
+    /**
+     * The values JSON cannot carry, each with where in a cell it sits.
+     *
+     * They are the losses a serialize-and-parse round trip makes rather than a
+     * list of types: each is dropped, turned into something else, or throws,
+     * and every one of them is a value a cell legitimately holds.
+     */
+    const UNWRITABLE: readonly (readonly [string, unknown, string])[] = [
+      ["an `undefined`", { a: undefined }, "an `undefined` at a"],
+      ["a symbol", { a: Symbol.for("x") }, "a symbol at a"],
+      ["a `bigint`", { a: 1n }, "a `bigint` at a"],
+      ["a function", { a: () => 1 }, "a function at a"],
+      ["an array hole", { a: [, 1] }, "a hole at a/0"],
+      [
+        "a value that is itself `undefined`",
+        undefined,
+        "an `undefined` at the value itself",
+      ],
+      [
+        "a nested one, at the path it sits at",
+        { a: { b: 1n } },
+        "a `bigint` at a/b",
+      ],
+    ];
+
+    for (const [what, held, at] of UNWRITABLE) {
+      it(`refuses ${what} before the editor opens`, async () => {
+        let opened = false;
+        const reason = reasonOf(
+          await runLine(
+            "edit title",
+            atPiece(),
+            answering({
+              getCellValue: () => Promise.resolve(held),
+              editText: (text) => {
+                opened = true;
+                return Promise.resolve({
+                  kind: "edited" as const,
+                  text,
+                  file: "/tmp/edited",
+                  discard: () => Promise.resolve(),
+                });
+              },
+            }),
+          ),
+        );
+        expect({ opened, says: reason.startsWith(`The cell holds ${at},`) })
+          .toEqual({ opened: false, says: true });
+      });
+    }
+
+    /**
+     * The numbers the fabric holds and JSON does not write back.
+     *
+     * Each was checked against the round trip rather than reasoned about: the
+     * fabric admits every `number` (`isValidFabricValueLayer` admits by
+     * `typeof`), and these four come back as something else — three as `null`,
+     * having no JSON spelling, and the fourth as a positive zero.
+     */
+    const ALTERED_NUMBERS: readonly (readonly [string, number, string])[] = [
+      ["a `NaN`", NaN, "a `NaN`"],
+      ["an `Infinity`", Infinity, "an `Infinity`"],
+      ["a `-Infinity`", -Infinity, "a `-Infinity`"],
+      ["a negative zero", -0, "a negative zero"],
+    ];
+
+    for (const [what, held, named] of ALTERED_NUMBERS) {
+      it(`refuses ${what} before the editor opens`, async () => {
+        let opened = false;
+        const reason = reasonOf(
+          await runLine(
+            "edit title",
+            atPiece(),
+            answering({
+              getCellValue: () => Promise.resolve({ a: held, b: 1 }),
+              editText: (text) => {
+                opened = true;
+                return Promise.resolve({
+                  kind: "edited" as const,
+                  text,
+                  file: "/tmp/edited",
+                  discard: () => Promise.resolve(),
+                });
+              },
+            }),
+          ),
+        );
+        expect({
+          opened,
+          says: reason.startsWith(`The cell holds ${named} at a,`),
+        })
+          .toEqual({ opened: false, says: true });
+      });
+    }
+
+    it("opens a value whose numbers JSON writes back unchanged", async () => {
+      // The other side of the same line, and what makes the four above a
+      // boundary rather than a blanket: an ordinary number, both safe-integer
+      // bounds and a positive zero all survive the round trip, so a cell
+      // holding them is a cell `edit` opens.
+
+      let opened: string | undefined;
+      await runLine(
+        "edit title",
+        atPiece(),
+        answering({
+          getCellValue: () =>
+            Promise.resolve({
+              a: 1.5,
+              b: 0,
+              c: Number.MAX_SAFE_INTEGER,
+              d: Number.MIN_SAFE_INTEGER,
+              // An array the walk descends and comes back out of, which is
+              // the arm that finds nothing rather than one that finds a loss.
+              e: [1, "two", { three: 3 }],
+            }),
+          editText: (text) => {
+            opened = text;
+            return Promise.resolve({
+              kind: "edited" as const,
+              text,
+              file: "/tmp/edited",
+              discard: () => Promise.resolve(),
+            });
+          },
+        }),
+      );
+      expect(opened).toBe(JSON.stringify(
+        {
+          a: 1.5,
+          b: 0,
+          c: Number.MAX_SAFE_INTEGER,
+          d: Number.MIN_SAFE_INTEGER,
+          e: [1, "two", { three: 3 }],
+        },
+        null,
+        2,
+      ));
+    });
+
+    it("refuses a value JSON cannot carry nested inside an array element", async () => {
+      // The walk descends through arrays as well as objects, and the element
+      // it descends into is where a loss can sit as readily as at the top.
+
+      expect(
+        reasonOf(
+          await runLine(
+            "edit title",
+            atPiece(),
+            answering({
+              getCellValue: () => Promise.resolve({ rows: [{ n: 1n }] }),
+            }),
+          ),
+        ).startsWith("The cell holds a `bigint` at rows/0/n,"),
+      ).toBe(true);
+    });
+
+    it("refuses a fabric value whose class a serializer drops", async () => {
+      // The arm a walk over `typeof` alone misses entirely. A `FabricBytes`
+      // is an object to `typeof` and a class instance in fact: it keeps its
+      // bytes where a serializer cannot see them and writes as `{}`, so
+      // opening the value would offer an empty object for editing and write
+      // that back over the bytes.
+
+      let opened = false;
+      const reason = reasonOf(
+        await runLine(
+          "edit title",
+          atPiece(),
+          answering({
+            getCellValue: () =>
+              Promise.resolve({
+                payload: new FabricBytes(new Uint8Array([1, 2])),
+              }),
+            editText: (text) => {
+              opened = true;
+              return Promise.resolve({
+                kind: "edited" as const,
+                text,
+                file: "/tmp/edited",
+                discard: () => Promise.resolve(),
+              });
+            },
+          }),
+        ),
+      );
+      expect({
+        opened,
+        says: reason.startsWith("The cell holds a `FabricBytes` at payload,"),
+      })
+        .toEqual({ opened: false, says: true });
+    });
+
+    it("refuses one nested inside an array, the walk reaching it there too", async () => {
+      expect(
+        reasonOf(
+          await runLine(
+            "edit title",
+            atPiece(),
+            answering({
+              getCellValue: () =>
+                Promise.resolve({
+                  rows: [new FabricBytes(new Uint8Array([1]))],
+                }),
+            }),
+          ),
+        ).startsWith("The cell holds a `FabricBytes` at rows/0,"),
+      ).toBe(true);
+    });
+
+    it("names one that will not say what class it is for what it is", async () => {
+      // The name is read off the prototype, and a class expression given no
+      // name has none to read. The refusal still has to say what it found,
+      // because a person deciding what to `set` instead is deciding from it.
+
+      const nameless = new (class extends FabricSpecialObject {})();
+      expect(
+        reasonOf(
+          await runLine(
+            "edit title",
+            atPiece(),
+            answering({
+              getCellValue: () => Promise.resolve({ payload: nameless }),
+            }),
+          ),
+        ).startsWith("The cell holds a `fabric value` at payload,"),
+      ).toBe(true);
+    });
+
+    it("refuses a cycle, which a serializer throws on", async () => {
+      const held: Record<string, unknown> = {};
+      held.self = held;
+      expect(
+        reasonOf(
+          await runLine(
+            "edit title",
+            atPiece(),
+            answering({
+              getCellValue: () => Promise.resolve(held),
+            }),
+          ),
+        ).startsWith("The cell holds a cycle at self,"),
+      ).toBe(true);
+    });
+
+    it("refuses a property a serializer would leave out", async () => {
+      // What `Object.entries` leaves out is what `JSON.stringify` leaves out,
+      // so a walk over the entries alone would agree with the serializer and
+      // miss the loss. Counting the own keys is what notices one.
+
+      const held = {};
+      Object.defineProperty(held, "hidden", { value: 1, enumerable: false });
+      expect(
+        reasonOf(
+          await runLine(
+            "edit title",
+            atPiece(),
+            answering({
+              getCellValue: () => Promise.resolve(held),
+            }),
+          ),
+        ).startsWith(
+          "The cell holds a property JSON does not write at the value itself,",
+        ),
+      ).toBe(true);
+    });
+  });
+
+  describe("call", () => {
+    /**
+     * Helper for the cases below, which runs `line` and is what the seam was
+     * handed.
+     */
+    async function handed(
+      line: string,
+      shuttle: Shuttle = atPiece(),
+      over: VerbDeps = {},
+    ): Promise<Record<string, unknown>> {
+      let seen: Record<string, unknown> = {};
+      await runLine(
+        line,
+        shuttle,
+        answering({
+          callFromCommand: (
+            options,
+            spelling,
+            callableArg,
+            tailArgs,
+            rawArgs,
+            literalArgs,
+          ) => {
+            seen = {
+              cell: options.cell,
+              invocationSession: options.invocationSession,
+              spelling,
+              callableArg,
+              tailArgs: [...tailArgs],
+              rawArgs: [...rawArgs],
+              literalArgs: [...literalArgs],
+            };
+            return Promise.resolve();
+          },
+          ...over,
+        }),
+      );
+      return seen;
+    }
+
+    it("takes the receiver first and the verb name after it", async () => {
+      expect(await handed("call . add-reply")).toMatchObject({
+        callableArg: "add-reply",
+        tailArgs: [],
+      });
+    });
+
+    it("addresses the receiver as the reference a `--cell` takes", async () => {
+      expect((await handed("call . add-reply")).cell)
+        .toBe(`/${HANDLE}@space`);
+    });
+
+    it("carries the path a walk spent, so a member is what is called on", async () => {
+      expect((await handed("call . add-reply", atPiece("inbox"))).cell)
+        .toBe(`/${HANDLE}@space/inbox`);
+    });
+
+    it("carries the scope the place reads through", async () => {
+      const shuttle = atPiece();
+      moved(shuttle.place, ".@session");
+      expect((await handed("call . add-reply", shuttle)).cell)
+        .toBe(`/${HANDLE}@session`);
+    });
+
+    it("invokes under the session the run was started with", async () => {
+      expect((await handed("call . add-reply")).invocationSession)
+        .toBe("a-session");
+    });
+
+    it("names the mount a person could run the same call from", async () => {
+      // The seam prints it in the corrected line a grammar refusal ends with,
+      // and a corrected line is only worth printing where it can be run.
+
+      expect((await handed("call . add-reply")).spelling).toBe("piece call");
+    });
+
+    it("hands the callable's own flags over unread", async () => {
+      // The verb name opens the callable's section, so what follows it is the
+      // callable's grammar and no table here names it.
+
+      expect(await handed("call . search --query milk")).toMatchObject({
+        callableArg: "search",
+        tailArgs: ["--query", "milk"],
+      });
+    });
+
+    it("keeps the words past the bare `--` apart, as the read step's own", async () => {
+      expect(await handed("call . search --query milk -- --json x"))
+        .toMatchObject({
+          tailArgs: ["--query", "milk"],
+          literalArgs: ["--json", "x"],
+        });
+    });
+
+    it("hands over the argv a person could have run outside the shell", async () => {
+      expect((await handed("call . search --query milk -- x")).rawArgs)
+        .toEqual([
+          "--cell",
+          `/${HANDLE}@space`,
+          "search",
+          "--query",
+          "milk",
+          "--",
+          "x",
+        ]);
+    });
+
+    it("writes no `--` into that argv where the line wrote none", async () => {
+      expect((await handed("call . search")).rawArgs)
+        .toEqual(["--cell", `/${HANDLE}@space`, "search"]);
+    });
+
+    it("refuses a receiver with no verb after it, naming the form to write", async () => {
+      expect(reasonOf(await runLine("call topics/3", atPiece(), answering())))
+        .toBe(
+          "`topics/3` names the piece to call on, and the verb to call " +
+            "follows it, as in `call topics/3 add-reply`. A path ending in " +
+            "a callable names no cell: a verb is interface vocabulary " +
+            "rather than a data path.",
+        );
+    });
+
+    it("takes a walk written after a handle to the cell it reaches", async () => {
+      // The suffix every other verb takes on a handle. `call` reads the
+      // receiver through the same grammar, so a handle carrying one is a
+      // reference to a cell and the verb name follows it as usual.
+
+      const shuttle = atPiece();
+      await runLine("ls", shuttle, answering());
+      let handed: unknown;
+      await runLine(
+        "call %1/deeper search",
+        shuttle,
+        answering({
+          getCellValue: () => Promise.resolve({ title: { deeper: 1 } }),
+          callFromCommand: (options, _spelling, name) => {
+            handed = { cell: options.cell, name };
+            return Promise.resolve();
+          },
+        }),
+      );
+      expect(handed)
+        .toEqual({ cell: `/${HANDLE}@space/title/deeper`, name: "search" });
+    });
+
+    it("refuses a walk written after a callable handle, a callable being no place", async () => {
+      // A bare callable handle carries the verb name; one with a walk after it
+      // does not, because the walk would have to start at the callable and a
+      // callable is not somewhere to stand. So the two spellings part here,
+      // and this is the one that is refused rather than invoked.
+
+      const shuttle = atPiece();
+      await runLine("verbs", shuttle, answering());
+      let dispatched = false;
+      const outcome = await runLine(
+        "call %1/deeper search",
+        shuttle,
+        answering({
+          callFromCommand: () => {
+            dispatched = true;
+            return Promise.resolve();
+          },
+        }),
+      );
+      expect({ dispatched, reason: reasonOf(outcome) }).toEqual({
+        dispatched: false,
+        reason: "`%1` names a row no place stands at, it being one of the " +
+          "piece's callables. `call` is what invokes one.",
+      });
+    });
+
+    it("refuses a verb name written in the shape of an option", async () => {
+      // It reaches the fabric as a callable of that literal name otherwise,
+      // and comes back as a piece that has no such verb — an answer about the
+      // piece for a line that was never about the piece.
+
+      let dispatched = false;
+      const outcome = await runLine(
+        "call . --help",
+        atPiece(),
+        answering({
+          callFromCommand: () => {
+            dispatched = true;
+            return Promise.resolve();
+          },
+        }),
+      );
+      expect({ dispatched, reason: reasonOf(outcome) }).toEqual({
+        dispatched: false,
+        reason: "`--help` names no verb: a verb name is interface " +
+          "vocabulary, and a token opening with `-` is read as an option " +
+          "wherever one may be written. `verbs` lists what this piece can be " +
+          "asked to do, and `call --help` writes this verb's own page.",
+      });
+    });
+
+    it("refuses `-h` the same way, it being the other one written on purpose", async () => {
+      expect(reasonOf(await runLine("call . -h", atPiece(), answering())))
+        .toContain("`verbs` lists what this piece can be asked to do");
+    });
+
+    it("refuses an option-shaped name that is asking for nothing, without the offer", async () => {
+      // The sentence divides: the shape is refused for every such name, and
+      // the pointer is added only for the two a person writes meaning to ask.
+
+      const reason = reasonOf(
+        await runLine("call . --nope", atPiece(), answering()),
+      );
+      expect(reason.startsWith("`--nope` names no verb:")).toBe(true);
+      expect(reason).not.toContain("`verbs` lists");
+    });
+
+    it("refuses a container, which is no receiver", async () => {
+      expect(reasonOf(await runLine("call slugs a", shuttleIn(), answering())))
+        .toBe(
+          "`slugs/` is a list of what stands inside it rather than a piece, " +
+            "and `call` acts on a piece.",
+        );
+    });
+
+    it("refuses the arguments suffix, a verb belonging to neither cell", async () => {
+      expect(
+        reasonOf(await runLine("call .#argument a", atPiece(), answering())),
+      )
+        .toBe(
+          "`#argument` selects one of a piece's two cells, and a verb " +
+            "belongs to the piece rather than to either of them. Write the " +
+            "piece without the suffix.",
+        );
+    });
+
+    it("refuses a call that reads the keyboard, rather than wedging on it", async () => {
+      // Standard input is what the prompt reads its keys off, and a read that
+      // never reaches end of input would wedge the shell rather than fail.
+      // Every spelling arrives at one reader, which is what closes the set.
+
+      let refused: string | undefined;
+      await runLine(
+        "call . search -",
+        atPiece(),
+        answering({
+          callFromCommand: async (_o, _s, _n, _t, _r, _l, deps = {}) => {
+            try {
+              await deps.executePieceCallable?.(
+                {} as PieceConfig,
+                "search",
+                [],
+                {},
+              );
+            } catch (thrown) {
+              refused = (thrown as Error).message;
+            }
+          },
+          executePieceCallable: async (_config, _name, _args, given) => {
+            await given?.readTextInput?.();
+            throw new Error("The reader answered instead of refusing.");
+          },
+        }),
+      );
+      expect(refused).toBe(
+        "`-` reads the input from standard input, which the prompt is " +
+          "reading keys from. Write the input on the line, as inline JSON " +
+          "or as the verb's own flags.",
+      );
+    });
+
+    it("tells the call that standard input is a terminal, so nothing reads it", async () => {
+      let terminal: boolean | undefined;
+      await runLine(
+        "call . search",
+        atPiece(),
+        answering({
+          callFromCommand: async (_o, _s, _n, _t, _r, _l, deps = {}) => {
+            await deps.executePieceCallable?.(
+              {} as PieceConfig,
+              "search",
+              [],
+              {},
+            );
+          },
+          executePieceCallable: (_config, _name, _args, given) => {
+            terminal = given?.isStdinTerminal?.();
+            return Promise.resolve(undefined as never);
+          },
+        }),
+      );
+      expect(terminal).toBe(true);
+    });
+
+    it("writes what the call published while it ran out of band, not into the outcome", async () => {
+      // It happens before there is an outcome to carry it, which is what an
+      // out-of-band line is for.
+
+      const announced: string[] = [];
+      const outcome = await runLine(
+        "call . search",
+        atPiece(),
+        answering({
+          announce: (text) => announced.push(text),
+          callFromCommand: (_o, _s, _n, _t, _r, _l, deps = {}) => {
+            deps.announce?.("invocation: 1");
+            deps.render?.("done");
+            return Promise.resolve();
+          },
+        }),
+      );
+      expect({ announced, said: textOf(outcome) })
+        .toEqual({ announced: ["invocation: 1"], said: "done" });
+    });
+
+    it("drops those lines where a caller offered nowhere to write them", async () => {
+      const outcome = await runLine(
+        "call . search",
+        atPiece(),
+        answering({
+          callFromCommand: (_o, _s, _n, _t, _r, _l, deps = {}) => {
+            deps.announce?.("invocation: 1");
+            return Promise.resolve();
+          },
+        }),
+      );
+      expect(textOf(outcome)).toBe("");
+    });
+
+    it("returns a failed call as a refusal rather than ending the run", async () => {
+      expect(
+        reasonOf(
+          await runLine(
+            "call . search",
+            atPiece(),
+            answering({
+              callFromCommand: (_o, _s, _n, _t, _r, _l, deps = {}) => {
+                deps.printError?.("The call failed.");
+                deps.exit?.(1);
+                return Promise.resolve();
+              },
+            }),
+          ),
+        ),
+      ).toBe("The call failed.");
+    });
+
+    it("refuses what the seam's grammar turned down, in its own sentence", async () => {
+      expect(
+        reasonOf(
+          await runLine(
+            "call . search",
+            atPiece(),
+            answering({
+              callFromCommand: () => {
+                throw new ValidationError("The section is not grammar.");
+              },
+            }),
+          ),
+        ),
+      ).toBe("The section is not grammar.");
+    });
+
+    it("starts the piece before it calls", async () => {
+      const order: string[] = [];
+      await runLine(
+        "call . search",
+        atPiece(),
+        answering({
+          warmPiece: (config) => {
+            order.push("warm");
+            return Promise.resolve({ piece: config.piece });
+          },
+          callFromCommand: () => {
+            order.push("call");
+            return Promise.resolve();
+          },
+        }),
+      );
+      expect(order).toEqual(["warm", "call"]);
+    });
+  });
+
+  describe("verbs", () => {
+    /** Helper for the cases below, which is what `verbs` wrote, row by row. */
+    async function rowsOf(
+      line: string,
+      listed: PieceCallableListing[],
+    ): Promise<string[]> {
+      return textOf(
+        await runLine(
+          line,
+          atPiece(),
+          answering({
+            listPieceCallables: () =>
+              Promise.resolve({ pattern: null, verbs: listed }),
+          }),
+        ),
+      ).split("\n");
+    }
+
+    it("numbers every row from one", async () => {
+      expect(await rowsOf("verbs", [callable("first"), callable("second")]))
+        .toEqual([
+          "%1 first <handler on result>",
+          "%2 second <handler on result>",
+        ]);
+    });
+
+    it("writes the author's own prose after what the verb is", async () => {
+      expect(
+        await rowsOf("verbs", [
+          callable("search", { description: "Find things." }),
+        ]),
+      ).toEqual(["%1 search <handler on result> <Find things.>"]);
+    });
+
+    it("writes a description's line break as a space, keeping the row one row", async () => {
+      expect(
+        await rowsOf("verbs", [
+          callable("search", { description: "Find\nthings." }),
+        ]),
+      ).toEqual(["%1 search <handler on result> <Find things.>"]);
+    });
+
+    it("describes a name a terminal would act on rather than writing it", async () => {
+      // Writing it would put on the screen what every door refuses to let
+      // through, and a rewritten name is no longer the name. The number the
+      // row was minted under is what still reaches the verb.
+
+      expect(await rowsOf("verbs", [callable("a\u0001b")]))
+        .toEqual([
+          "%1 <no name: a verb name holding a control character> " +
+          "<handler on result>",
+        ]);
+    });
+
+    it("marks a wrapper and a deprecated verb where `--all` shows them", async () => {
+      expect(
+        await rowsOf("verbs --all", [
+          callable("old", { tier: "wrapper", deprecated: true }),
+        ]),
+      ).toEqual([
+        "%1 old <handler on result, wrapper, deprecated>",
+      ]);
+    });
+
+    it("withholds those rows by default, and says how many", async () => {
+      const rows = await rowsOf("verbs", [
+        callable("shown"),
+        callable("old", { tier: "wrapper" }),
+      ]);
+      expect(rows[0]).toContain("hidden");
+      expect(rows.slice(1)).toEqual(["%1 shown <handler on result>"]);
+    });
+
+    it("records each row as a callable, so `cd` has nothing to walk to", async () => {
+      const shuttle = atPiece();
+      await runLine("verbs", shuttle, answering());
+      expect(shuttle.session.handles?.rows)
+        .toEqual([{ name: "a-verb", kind: "callable" }]);
+    });
+
+    it("records the piece as the place the rows stand inside", async () => {
+      // The receiver `call %n` wants, recorded once for the listing rather
+      // than once per row, where two copies would be free to part.
+
+      const shuttle = atPiece();
+      await runLine("verbs", shuttle, answering());
+      expect(shuttle.session.handles?.place).toEqual(shuttle.place.place);
+    });
+
+    it("refuses an operand the place would not read, before it acts on a piece", async () => {
+      // The aim answers first, and a `#name` entry point is not a cell under
+      // this place — so the refusal is the place's rather than a sentence
+      // about pieces written here.
+
+      expect(
+        reasonOf(await runLine("verbs #favorites", atPiece(), answering())),
+      )
+        .toBe(
+          "`#favorites` names an entry point rather than a cell under this " +
+            "place. `wish #favorites` reads what it resolves to.",
+        );
+    });
+
+    it("refuses a container, which holds no callables", async () => {
+      expect(reasonOf(await runLine("verbs slugs", shuttleIn(), answering())))
+        .toBe(
+          "`slugs/` is a list of what stands inside it rather than a piece, " +
+            "and `verbs` acts on a piece.",
+        );
+    });
+
+    it("starts the piece before it lists", async () => {
+      const order: string[] = [];
+      await runLine(
+        "verbs",
+        atPiece(),
+        answering({
+          warmPiece: (config) => {
+            order.push("warm");
+            return Promise.resolve({ piece: config.piece });
+          },
+          listPieceCallables: () => {
+            order.push("list");
+            return Promise.resolve({ pattern: null, verbs: [] });
+          },
+        }),
+      );
+      expect(order).toEqual(["warm", "list"]);
+    });
+  });
+
+  describe("describe", () => {
+    it("writes the page the piece describes itself with", async () => {
+      const text = textOf(
+        await runLine(
+          "describe",
+          atPiece(),
+          answering({
+            describePiece: () =>
+              Promise.resolve({
+                pattern: null,
+                name: "A board",
+                verbs: [callable("a-verb")],
+              }),
+          }),
+        ),
+      );
+      expect(text).toContain("A board");
+    });
+
+    it("numbers nothing, `verbs` being the listing `call %n` reads", async () => {
+      const shuttle = atPiece();
+      await runLine("describe", shuttle, answering());
+      expect(shuttle.session.handles).toBeUndefined();
+    });
+
+    it("refuses a container, which describes nothing", async () => {
+      expect(
+        reasonOf(await runLine("describe slugs", shuttleIn(), answering())),
+      ).toBe(
+        "`slugs/` is a list of what stands inside it rather than a piece, " +
+          "and `describe` acts on a piece.",
+      );
+    });
+
+    it("starts the piece before it describes", async () => {
+      const order: string[] = [];
+      await runLine(
+        "describe",
+        atPiece(),
+        answering({
+          warmPiece: (config) => {
+            order.push("warm");
+            return Promise.resolve({ piece: config.piece });
+          },
+          describePiece: () => {
+            order.push("describe");
+            return Promise.resolve({ pattern: null, verbs: [] });
+          },
+        }),
+      );
+      expect(order).toEqual(["warm", "describe"]);
+    });
+  });
+  describe("a numbered handle", () => {
+    // The other half of a handle: `%n` is printed by a listing and read here.
+    // What every case turns on is that the row and the place it was listed at
+    // come back together, since a row's name is a name inside that place.
+
+    it("moves to the row the last listing numbered", async () => {
+      const shuttle = atPiece();
+      await runLine("ls", shuttle, answering());
+      await runLine("cd %1", shuttle, answering());
+      expect(shuttle.place.place.position).toMatchObject({ path: ["title"] });
+    });
+
+    it("reads the row a listing numbered, without moving", async () => {
+      const shuttle = atPiece();
+      await runLine("ls", shuttle, answering());
+      const at = shuttle.place.place;
+      const outcome = await runLine(
+        "get %1",
+        shuttle,
+        answering({
+          getCellValue: (_config, path) => Promise.resolve(path.join("/")),
+        }),
+      );
+      expect({ read: textOf(outcome), moved: shuttle.place.place !== at })
+        .toEqual({ read: renderValue("title"), moved: false });
+    });
+
+    it("walks the segments written after the handle, from where the row stands", async () => {
+      const shuttle = atPiece();
+      const nested = answering({
+        getCellValue: () => Promise.resolve({ title: { deeper: 1 } }),
+        listing: { getCellValue: () => Promise.resolve({ title: {} }) },
+      });
+      await runLine("ls", shuttle, nested);
+      await runLine("cd %1/deeper", shuttle, nested);
+      expect(shuttle.place.place.position)
+        .toMatchObject({ path: ["title", "deeper"] });
+    });
+
+    it("names the row against the place the listing was read at, not where shuttle now stands", async () => {
+      // A handle is a bound reference, which is what keeps `%3` naming the row
+      // it was minted for after the place has moved on.
+
+      const shuttle = atPiece();
+      await runLine("ls", shuttle, answering());
+      await runLine("cd /", shuttle, answering());
+      let read: (string | number)[] | undefined;
+      await runLine(
+        "get %1",
+        shuttle,
+        answering({
+          getCellValue: (config, path) => {
+            read = [config.piece, ...path];
+            return Promise.resolve(null);
+          },
+        }),
+      );
+      expect(read).toEqual([HANDLE, "title"]);
+    });
+
+    it("reaches a row whose name has to be quoted to be typed", async () => {
+      // The round trip a listing promises: what it prints is what `cd` takes.
+      // A name holding a space prints quoted, and the quoting is the line's
+      // rather than the row's — a walk of the printed characters would look
+      // for a key whose name holds the quotes.
+
+      const shuttle = atPiece();
+      const spaced = answering({
+        getCellValue: () => Promise.resolve({ "first name": {} }),
+        listing: { getCellValue: () => Promise.resolve({ "first name": {} }) },
+      });
+      const listing = textOf(await runLine("ls", shuttle, spaced));
+      expect(listing).toBe("%1 'first name'");
+      await runLine("cd %1", shuttle, spaced);
+      expect(shuttle.place.place.position)
+        .toMatchObject({ path: ["first name"] });
+    });
+
+    it("refuses a handle where no listing has numbered a row", async () => {
+      expect(reasonOf(await runLine("cd %1", atPiece(), answering())))
+        .toBe(
+          "`%1` names no row: no listing has numbered one yet. `ls` lists " +
+            "what stands here and numbers what it lists.",
+        );
+    });
+
+    it("refuses a callable row for a verb that walks, and says what invokes one", async () => {
+      const shuttle = atPiece();
+      await runLine("verbs", shuttle, answering());
+      expect(reasonOf(await runLine("cd %1", shuttle, answering())))
+        .toBe(
+          "`%1` names a row no place stands at, it being one of the piece's " +
+            "callables. `call` is what invokes one.",
+        );
+    });
+
+    it("invokes a callable row without the name being written again", async () => {
+      const shuttle = atPiece();
+      await runLine("verbs", shuttle, answering());
+      let called: string | undefined;
+      await runLine(
+        "call %1",
+        shuttle,
+        answering({
+          callFromCommand: (_options, _spelling, name) => {
+            called = name;
+            return Promise.resolve();
+          },
+        }),
+      );
+      expect(called).toBe("a-verb");
+    });
+
+    it("takes the verb name after a row that is a place rather than a callable", async () => {
+      const shuttle = atPiece();
+      await runLine("ls", shuttle, answering());
+      let handed: unknown;
+      await runLine(
+        "call %1 add-reply",
+        shuttle,
+        answering({
+          callFromCommand: (options, _spelling, name) => {
+            handed = { cell: options.cell, name };
+            return Promise.resolve();
+          },
+        }),
+      );
+      expect(handed)
+        .toEqual({ cell: `/${HANDLE}@space/title`, name: "add-reply" });
+    });
+
+    it("reads the sigil in a later segment as an ordinary character of a key", async () => {
+      // It heads an operand and nothing else, so a key named with it is
+      // reached by a walk that passes through something first.
+
+      const shuttle = atPiece();
+      await runLine(
+        "cd title/%3",
+        shuttle,
+        answering({
+          getCellValue: () => Promise.resolve({ title: { "%3": 1 } }),
+        }),
+      );
+      expect(shuttle.place.place.position)
+        .toMatchObject({ path: ["title", "%3"] });
+    });
+  });
+
+  describe("more of what a cancel stops", () => {
+    // The guard checks before the act and again with its answer, so a cancel
+    // that arrived while an act was in flight stops the adoption that follows.
+    // One case per adoption, because each is a different thing being written.
+
+    it("writes nothing where the cancel arrived while the value was written", async () => {
+      const stopper = new AbortController();
+      const outcome = await runLine(
+        'set title "a"',
+        atPiece(),
+        answering({
+          setCellValue: () => {
+            stopper.abort();
+            return Promise.resolve({ piece: HANDLE, path: ["title"] });
+          },
+          signal: stopper.signal,
+        }),
+      );
+      expect(outcome.kind).toBe("interrupted");
+    });
+
+    it("writes nothing where the cancel arrived while the editor was open", async () => {
+      let wrote = false;
+      const stopper = new AbortController();
+      const outcome = await runLine(
+        "edit title",
+        atPiece(),
+        answering({
+          getCellValue: () => Promise.resolve({ a: 1 }),
+          editText: () => {
+            stopper.abort();
+            return Promise.resolve({
+              kind: "edited" as const,
+              text: '{"a":2}',
+              file: "/tmp/edited",
+              discard: () => Promise.resolve(),
+            });
+          },
+          setCellValue: () => {
+            wrote = true;
+            return Promise.resolve({ piece: HANDLE, path: [] });
+          },
+          signal: stopper.signal,
+        }),
+      );
+      expect({ kind: outcome.kind, wrote })
+        .toEqual({ kind: "interrupted", wrote: false });
+    });
+
+    it("writes nothing where the cancel arrived while `edit`'s write was in flight", async () => {
+      const stopper = new AbortController();
+      const outcome = await runLine(
+        "edit title",
+        atPiece(),
+        answering({
+          getCellValue: () => Promise.resolve({ a: 1 }),
+          editText: () =>
+            Promise.resolve({
+              kind: "edited" as const,
+              text: '{"a":2}',
+              file: "/tmp/edited",
+              discard: () => Promise.resolve(),
+            }),
+          setCellValue: () => {
+            stopper.abort();
+            return Promise.resolve({ piece: HANDLE, path: [] });
+          },
+          signal: stopper.signal,
+        }),
+      );
+      expect(outcome.kind).toBe("interrupted");
+    });
+
+    it("links nothing where the cancel arrived while the second piece warmed", async () => {
+      // `link` warms both endpoints, so the second warm is a boundary the
+      // first one's cases do not reach.
+
+      let linked = false;
+      const stopper = new AbortController();
+      let warms = 0;
+      const outcome = await runLine(
+        "link title latest",
+        atPiece(),
+        answering({
+          warmPiece: (config) => {
+            warms += 1;
+            if (warms === 2) stopper.abort();
+            return Promise.resolve({ piece: `${config.piece}/${warms}` });
+          },
+          linkPieces: () => {
+            linked = true;
+            return Promise.resolve();
+          },
+          signal: stopper.signal,
+        }),
+      );
+      expect({ kind: outcome.kind, linked, warms })
+        .toEqual({ kind: "interrupted", linked: false, warms: 2 });
+    });
+
+    it("moves nowhere where the cancel arrived while the settle warmed", async () => {
+      // The property is about the move, not about which check holds it: a
+      // cancel that arrives while the settle is warming leaves the place
+      // where it was. The line chosen is the one with the least between the
+      // warm and the adoption — a move onto the piece already stood at has no
+      // path left to walk — so what the case reads is close to the boundary.
+      // Two checks stand behind it, the one the warm's answer meets and the
+      // one in front of the confirm, and the case asks for the outcome rather
+      // than for either of them.
+
+      const order: string[] = [];
+      const stopper = new AbortController();
+      const shuttle = atPiece();
+      const at = shuttle.place.place;
+      const outcome = await runLine(
+        `cd /${HANDLE}`,
+        shuttle,
+        answering({
+          warmPiece: (config) => {
+            order.push("warm");
+            stopper.abort();
+            return Promise.resolve({ piece: config.piece });
+          },
+          getCellValue: () => {
+            order.push("walk");
+            return Promise.resolve({ title: "a" });
+          },
+          signal: stopper.signal,
+        }),
+      );
+      expect({ kind: outcome.kind, order, moved: shuttle.place.place !== at })
+        .toEqual({ kind: "interrupted", order: ["warm"], moved: false });
+    });
+  });
+
+  describe("what a seam raised rather than refused", () => {
+    // Every verb here draws one line twice: a failure the seam reports as a
+    // fact about the line is a refusal, and anything else is a fault and
+    // raises. The pair is what makes the first half a decision — a verb that
+    // caught everything would turn an unreachable server into a refusal about
+    // the person's typing.
+
+    /** The seams that turn a `ValidationError` into a refusal. */
+    const REFUSING: readonly (readonly [string, string, keyof VerbDeps])[] = [
+      ['set title "a"', "set", "setCellValue"],
+      ["link title latest", "link", "linkPieces"],
+      ["verbs", "verbs", "listPieceCallables"],
+      ["describe", "describe", "describePiece"],
+      ["call . a-verb", "call", "callFromCommand"],
+    ];
+
+    for (const [line, verb, seam] of REFUSING) {
+      it(`refuses what \`${verb}\`'s seam turned down, in the seam's own words`, async () => {
+        expect(
+          reasonOf(
+            await runLine(
+              line,
+              atPiece(),
+              answering({
+                [seam]: () => {
+                  throw new ValidationError("The seam said no.");
+                },
+              }),
+            ),
+          ),
+        ).toBe("The seam said no.");
+      });
+
+      it(`raises what \`${verb}\`'s seam threw that was no refusal`, async () => {
+        // The other half. A server that cannot be reached is not a fact about
+        // the line, and a verb that answered for it would report it as one.
+
+        await expect(runLine(
+          line,
+          atPiece(),
+          answering({
+            [seam]: () => {
+              throw new Error("The server cannot be reached.");
+            },
+          }),
+        )).rejects.toThrow("The server cannot be reached.");
+      });
+    }
+
+    it("refuses what `edit`'s write turned down, in the seam's own words", async () => {
+      expect(
+        reasonOf(
+          await runLine(
+            "edit title",
+            atPiece(),
+            answering({
+              getCellValue: () => Promise.resolve({ a: 1 }),
+              editText: () =>
+                Promise.resolve({
+                  kind: "edited" as const,
+                  text: '{"a":2}',
+                  file: "/tmp/edited",
+                  discard: () => Promise.resolve(),
+                }),
+              setCellValue: () => {
+                throw new ValidationError("The schema will not take that.");
+              },
+            }),
+          ),
+        ),
+      ).toBe("The schema will not take that.");
+    });
+
+    it("raises what `edit`'s write threw that was no refusal", async () => {
+      // `edit` reads before it writes, so its write is reached through the
+      // editor rather than directly, and the arm is its own.
+
+      await expect(runLine(
+        "edit title",
+        atPiece(),
+        answering({
+          getCellValue: () => Promise.resolve({ a: 1 }),
+          editText: () =>
+            Promise.resolve({
+              kind: "edited" as const,
+              text: '{"a":2}',
+              file: "/tmp/edited",
+              discard: () => Promise.resolve(),
+            }),
+          setCellValue: () => {
+            throw new Error("The server cannot be reached.");
+          },
+        }),
+      )).rejects.toThrow("The server cannot be reached.");
+    });
+  });
+
+  describe("what a call publishes past its outcome", () => {
+    it("writes the next steps the seam offered under what it returned", async () => {
+      const outcome = await runLine(
+        "call . search",
+        atPiece(),
+        answering({
+          callFromCommand: (_o, _s, _n, _t, _r, _l, deps = {}) => {
+            deps.render?.("the answer");
+            deps.hint?.("try `--wait` next time");
+            return Promise.resolve();
+          },
+        }),
+      );
+      expect(textOf(outcome)).toBe("the answer\ntry `--wait` next time");
+    });
+
+    it("refuses a call that reads standard input as JSON, the other reader", async () => {
+      // Two readers reach the same stream and both are bound, which is what
+      // makes the refusal a property of the stream rather than of one
+      // spelling.
+
+      let refused: string | undefined;
+      await runLine(
+        "call . search",
+        atPiece(),
+        answering({
+          callFromCommand: async (_o, _s, _n, _t, _r, _l, deps = {}) => {
+            try {
+              await deps.executePieceCallable?.(
+                {} as PieceConfig,
+                "search",
+                [],
+                {},
+              );
+            } catch (thrown) {
+              refused = (thrown as Error).message;
+            }
+          },
+          executePieceCallable: async (_config, _name, _args, given) => {
+            await given?.readJsonInput?.();
+            throw new Error("The reader answered instead of refusing.");
+          },
+        }),
+      );
+      expect(refused).toContain("reads the input from standard input");
+    });
+
+    it("refuses a call whose handle names no row, before anything is read", async () => {
+      let dispatched = false;
+      const outcome = await runLine(
+        "call %9 search",
+        atPiece(),
+        answering({
+          callFromCommand: () => {
+            dispatched = true;
+            return Promise.resolve();
+          },
+        }),
+      );
+      expect({ dispatched, reason: reasonOf(outcome) }).toEqual({
+        dispatched: false,
+        reason: "`%9` names no row: no listing has numbered one yet. `ls` " +
+          "lists what stands here and numbers what it lists.",
+      });
+    });
+  });
+
+  describe("reaching in warms", () => {
+    // Decision 10: every read shuttle serves is live, so there is no unlabeled
+    // stored-state path. The verbs that write were never the whole of reaching
+    // in — navigating to a piece and reading one are reaching in too, and a
+    // read served by a pattern that is not running is the thing the decision
+    // rules out.
+
+    /** Helper for these cases, which is the pieces a line started. */
+    function warming(started: string[]): VerbDeps {
+      return answering({
+        warmPiece: (config) => {
+          started.push(config.piece);
+          return Promise.resolve({ piece: config.piece });
+        },
+      });
+    }
+
+    it("warms the piece a `cd` landed on", async () => {
+      const started: string[] = [];
+      await runLine("cd title", atPiece(), warming(started));
+      expect(started).toEqual([HANDLE]);
+    });
+
+    it("warms nothing where the `cd` reached no piece to warm", async () => {
+      // A move the place itself turns down never reaches a piece, so there is
+      // nothing to start. An unknown scope is such a move: the readings refuse
+      // it with no read behind them.
+
+      const started: string[] = [];
+      const outcome = await runLine("cd .@bogus", atPiece(), warming(started));
+      expect({ kind: outcome.kind, started })
+        .toEqual({ kind: "refused", started: [] });
+    });
+
+    it("warms the piece before judging its path, so a cold walk cannot refuse a live one", async () => {
+      // Where the warm belongs and why. The walk that says whether the fabric
+      // holds the path is a read, and a read against a piece that is not
+      // running is a read of what was last committed — so the piece runs
+      // first, and a path the running piece has is a path `cd` finds.
+
+      const order: string[] = [];
+      const outcome = await runLine(
+        "cd nowhere",
+        atPiece(),
+        answering({
+          warmPiece: (config) => {
+            order.push("warm");
+            return Promise.resolve({ piece: config.piece });
+          },
+          getCellValue: () => {
+            order.push("walk");
+            return Promise.resolve({ title: "a" });
+          },
+        }),
+      );
+      expect({ kind: outcome.kind, order })
+        .toEqual({ kind: "refused", order: ["warm", "walk"] });
+    });
+
+    it("warms the piece a `get` reads, before it reads it", async () => {
+      // The order is the whole point: a read served before the pattern runs is
+      // a read of what was last committed.
+
+      const order: string[] = [];
+      await runLine(
+        "get title",
+        atPiece(),
+        answering({
+          warmPiece: (config) => {
+            order.push("warm");
+            return Promise.resolve({ piece: config.piece });
+          },
+          getCellValue: () => {
+            order.push("read");
+            return Promise.resolve("a");
+          },
+        }),
+      );
+      expect(order).toEqual(["warm", "read"]);
+    });
+
+    it("warms the piece an `ls` lists, before it lists it", async () => {
+      const order: string[] = [];
+      await runLine(
+        "ls",
+        atPiece(),
+        answering({
+          warmPiece: (config) => {
+            order.push("warm");
+            return Promise.resolve({ piece: config.piece });
+          },
+          listing: {
+            getCellValue: () => {
+              order.push("list");
+              return Promise.resolve({ title: "a" });
+            },
+          },
+        }),
+      );
+      expect(order).toEqual(["warm", "list"]);
+    });
+
+    it("warms nothing for a place that is no piece, there being no pattern behind one", async () => {
+      // A space root and a facet are lists of what stands inside them. The
+      // absence of a warm is the position's claim rather than a verb reaching
+      // in less than another one does.
+
+      const started: string[] = [];
+      const shuttle = shuttleIn();
+      await runLine("ls", shuttle, warming(started));
+      moved(shuttle.place, "slugs");
+      await runLine("ls", shuttle, warming(started));
+      expect(started).toEqual([]);
+    });
+  });
+
   describe("a line the prompt cancelled", () => {
     // What an `AbortSignal` on the deps bag buys, which is a check at each
     // boundary between a verb's phases rather than anything that reaches a
@@ -2755,6 +4896,12 @@ describe("verbs", () => {
       "listPieces",
       "listing.getCellValue",
       "entityIdExists",
+      "warmPiece",
+      "setCellValue",
+      "linkPieces",
+      "listPieceCallables",
+      "describePiece",
+      "callFromCommand",
     ] as const;
 
     /** One of {@link READS}. */
@@ -2847,6 +4994,37 @@ describe("verbs", () => {
             return Promise.resolve({});
           },
         },
+        warmPiece: (config) => {
+          note("warmPiece");
+          return Promise.resolve({ piece: config.piece });
+        },
+        setCellValue: () => {
+          note("setCellValue");
+          return Promise.resolve({ piece: HANDLE, path: ["title"] });
+        },
+        linkPieces: () => {
+          note("linkPieces");
+          return Promise.resolve(undefined as never);
+        },
+        listPieceCallables: () => {
+          note("listPieceCallables");
+          return Promise.resolve({ verbs: [] } as never);
+        },
+        describePiece: () => {
+          note("describePiece");
+          return Promise.resolve({ verbs: [] } as never);
+        },
+        callFromCommand: () => {
+          note("callFromCommand");
+          return Promise.resolve();
+        },
+        editText: (text) =>
+          Promise.resolve({
+            kind: "edited" as const,
+            text: `${text} `,
+            file: "/tmp/edit",
+            discard: () => Promise.resolve(),
+          }),
         signal: stopper.signal,
       });
       if (at === "suspend") stopper.abort();
@@ -2905,6 +5083,19 @@ describe("verbs", () => {
       ["ls", atFacet("slugs"), "listSpaceSlugs"],
       ["ls", atFacet("pieces"), "listPieces"],
       ["ls", onPiece, "listing.getCellValue"],
+      ['set title "a"', onPiece, "suspend"],
+      ['set title "a"', onPiece, "warmPiece"],
+      ['set title "a"', onPiece, "setCellValue"],
+      ["edit title", onPiece, "suspend"],
+      ["edit title", onPiece, "getCellValue"],
+      ["link title other", onPiece, "suspend"],
+      ["link title other", onPiece, "linkPieces"],
+      ["call . a-verb", onPiece, "suspend"],
+      ["call . a-verb", onPiece, "callFromCommand"],
+      ["verbs", onPiece, "suspend"],
+      ["verbs", onPiece, "listPieceCallables"],
+      ["describe", onPiece, "suspend"],
+      ["describe", onPiece, "describePiece"],
     ];
 
     it("issues no read after the cancel, on any line and from any read", async () => {
@@ -2959,6 +5150,60 @@ describe("verbs", () => {
         expect({ verb, answered: outcome.kind !== "interrupted" })
           .toEqual({ verb, answered: true });
       }
+    });
+
+    it("adopts nothing where the cancel arrived while the act was in flight", async () => {
+      // The window the guard's first check cannot see. A read already sent
+      // finishes whatever the person did, so the answer arrives either way;
+      // what must not happen is the line acting on it. Here the acting is
+      // `paged` replacing what `more` writes next, and a continuation left by
+      // an earlier line is what would be erased.
+
+      const stopper = new AbortController();
+      const shuttle = atPiece();
+      shuttle.session.holding({ lines: ["what the line before left"] });
+      const outcome = await runLine(
+        "describe",
+        shuttle,
+        answering({
+          describePiece: () => {
+            stopper.abort();
+            return Promise.resolve({ pattern: null, verbs: [] });
+          },
+          signal: stopper.signal,
+        }),
+      );
+      expect({
+        kind: outcome.kind,
+        waiting: shuttle.session.continuation?.lines,
+      }).toEqual({
+        kind: "interrupted",
+        waiting: ["what the line before left"],
+      });
+    });
+
+    it("records no warm where the cancel arrived while the piece was starting", async () => {
+      // The same window over the other kind of adoption: a memo entry claiming
+      // a piece is running, written for a start the person stopped waiting
+      // for, would keep every later line from starting it.
+
+      const stopper = new AbortController();
+      const shuttle = atPiece();
+      const outcome = await runLine(
+        'set title "a"',
+        shuttle,
+        answering({
+          warmPiece: (config) => {
+            stopper.abort();
+            return Promise.resolve({ piece: config.piece });
+          },
+          signal: stopper.signal,
+        }),
+      );
+      expect({
+        kind: outcome.kind,
+        remembered: shuttle.session.hasWarmed(HANDLE, "space"),
+      }).toEqual({ kind: "interrupted", remembered: false });
     });
 
     it("drives every read there is, which is what closes the case above", async () => {
@@ -3161,8 +5406,7 @@ describe("verbs", () => {
         }),
       ).toEqual({
         kind: "refused",
-        reason: "`frob` is not a verb. The verbs are `cd`, `get`, `help`, " +
-          "`ls`, `more`, `pwd`, `where`, and `wish`.",
+        reason: `\`frob\` is not a verb. ${THE_VERBS}`,
       });
     });
 

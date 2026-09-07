@@ -475,8 +475,6 @@ Landed:
   the same read `listCellKeys` makes and no extra round trip. `--limit`
   overrides the height rather than capping it.
 
-  **What this leaves for B2 is the other half of a handle: `%n` is printed
-  and is not yet an operand.** `cd %3` reads as a key of that name today.
   The table is what lands here because `call %4` reads it at mint time; the
   reading of `%n` as a reference belongs with the verb that consumes it, and
   is B2's first slice rather than its last.
@@ -536,8 +534,8 @@ Still to come:
   prompt and the view markers consume it. No retry loop in shuttle on
   either half.
 
-**B2 — writes, calls, handles** (after A2, A3, and A4 — a failed call or
-write must surface as a value, never reach `Deno.exit`). `set` with
+**B2 — writes, calls, handles.** Done. (After A2, A3, and A4 — a failed call
+or write must surface as a value, never reach `Deno.exit`.) `set` with
 inline values,
 `edit` over `$EDITOR`, and `link` — the one spelling that writes a
 reference instead of copying a value (decision 14), which leans on
@@ -548,7 +546,20 @@ piece's callables is what makes `call` usable without leaving the shell.
 `%n` becomes an operand here, over the handle table B1g's listing mints:
 the table carries each row's kind and the place its rows stand in, which is
 the receiver and the verb name a callable handle needs (decision 27), and
-what `call %n` resolves against. `more` continues a listing *and its
+what `call %n` resolves against. It settles the way the other unsettled
+spellings do — an arm `place.ts` hands back and `verbs.ts` looks up
+(`handles.ts`) — so a row naming a piece is confirmed by the read `cd`
+already makes, and a walk written after the handle is the walk a person could
+have typed.
+
+Two things the landed modules did not carry come with it. `Arity` gains the
+arms these verbs need: two operands for `set` and `link`, and a verb whose
+own operands run on into a callable's section for `call`. And that section is
+what the option grammar reads differently — the parse stops at `call`'s first
+operand, so a callable's schema-derived flags reach the callable, and the bare
+`--` closes the section rather than quoting an operand.
+
+`more` continues a listing *and its
 numbering* already, the rows being numbered where they are read rather than
 where they are written (decision 24). The invocation session is
 minted once at startup and passed explicitly. The step-10 call section

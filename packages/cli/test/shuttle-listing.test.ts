@@ -29,7 +29,7 @@ import { linkPathSegmentToCellPathSegment } from "@commonfabric/runner/shared";
 
 import type { SlugSummary, SpaceConfig } from "../lib/piece.ts";
 import { HeldConnection } from "../lib/shuttle/connection.ts";
-import { splitLine } from "../lib/shuttle/line.ts";
+import { quoteToken, splitLine } from "../lib/shuttle/line.ts";
 import { readsAsOption } from "../lib/shuttle/options.ts";
 import {
   handleFor,
@@ -754,7 +754,23 @@ describe("listing", () => {
       // The digit spellings sit here rather than among the marks: what they
       // exercise is the conversion a path segment goes through, where a
       // canonical index becomes a number and everything else stays a string.
-      const values = ["", "3", "0", "01", "1e21", "-1", "1.5", "..", "-"];
+      // `-x y` is the one that separates the two readings of a token: it
+      // needs quoting, and its quoted form opens with a quote where the token
+      // itself opens with a dash. A row offered by name would be eaten by the
+      // option grammar, so the reference is what must be offered — and only an
+      // assertion about the *decoded* token can tell the two apart.
+      const values = [
+        "",
+        "3",
+        "0",
+        "01",
+        "1e21",
+        "-1",
+        "1.5",
+        "..",
+        "-",
+        "-x y",
+      ];
       for (const mark of MARKS) {
         values.push(
           mark + head + tail,
@@ -865,15 +881,33 @@ describe("listing", () => {
           return;
         }
         expect(printed.startsWith("<")).toBe(false);
-        expect(printed.startsWith(row.operand)).toBe(true);
-        const rest = printed.slice(row.operand.length);
+        // The row carries the operand `cd` reads and the line carries the
+        // token that spells it, so the property runs through the pair rather
+        // than around it: what is printed splits back to what the row holds,
+        // and what the row holds reaches the row. A name needing quotes is
+        // where the two differ, and where a walk of the printed characters
+        // would look for a key whose name holds the quotes.
+        // The line opens with the row's own token, and the markers follow it.
+        // Only that token is meant to be typed back — the rest is prose for a
+        // reader — so the properties below are asked of it alone.
+        const token = quoteToken(row.operand);
+        expect(printed.startsWith(token)).toBe(true);
+        const rest = printed.slice(token.length);
         expect(rest === "").toBe(row.error === undefined);
         if (rest !== "") expect(rest.startsWith(" <")).toBe(true);
+
+        // And they are asked of what the token *becomes*, not of how it looks.
+        // A line is split before its options are read (`runLine`), so what the
+        // option grammar receives is the decoded token: asking `readsAsOption`
+        // about the quoted spelling would pass a name like `-x`, whose quoted
+        // form opens with a quote, while the token the parser gets opens with
+        // the dash and is eaten.
         const from = standing.place;
-        const split = splitLine(row.operand);
+        const split = splitLine(token);
         expect(split.kind).toBe("split");
         const tokens = split.kind === "split" ? split.tokens : [];
         expect(tokens.length).toBe(1);
+        expect(tokens[0]).toBe(row.operand);
         expect(readsAsOption(tokens[0])).toBe(false);
         expect(moved(standing, tokens[0]).kind).toBe("moved");
         expect(standing.place).toEqual(childOf(from, row.name));

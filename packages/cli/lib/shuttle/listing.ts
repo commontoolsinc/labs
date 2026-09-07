@@ -46,6 +46,7 @@ import {
   escapeControlCharacters,
   type Facet,
   FACETS,
+  HANDLE_SIGIL,
   holdsControlCharacter,
   operandForChild,
   type PiecePosition,
@@ -93,10 +94,18 @@ export interface ListingRow {
   readonly kind: RowKind;
 
   /**
-   * The operand `cd` takes to reach it, written as a token, and absent where
+   * The operand `cd` takes to reach it, as `cd` reads it, and absent where
    * `operandForChild` offers none. Absent is the narrower claim it makes:
    * that neither the name nor the reference names the row, not that nothing
    * reaches it.
+   *
+   * It is the decoded operand rather than the quoted token a line writes it
+   * as. A row is read back by two consumers that want different forms — a
+   * line prints it, and a `%n` walks it — and quoting is the printer's step
+   * ({@link listingLines}). Storing the printed form instead would leave the
+   * walker undoing it, which is one grammar written twice and the pair free
+   * to disagree: a key called `first name` prints as `'first name'`, and a
+   * walk of those characters looks for a key whose name holds the quotes.
    */
   readonly operand?: string;
 
@@ -238,13 +247,32 @@ export async function listPlace(
  * it is not something this can spend that on.
  */
 export function listingLines(listing: Listing): ListingRendering {
-  const column = handleFor(listing.rows.length).length;
-  const rows = listing.rows.map((row, index) =>
-    lineFor(row, handleFor(index + 1).padStart(column))
-  );
+  const rows = numbered(listing.rows.map(lineFor));
   return listing.bound === undefined
     ? { rows }
     : { bound: marker(oneLine(listing.bound)), rows };
+}
+
+/**
+ * `lines` with the handle each one is named back by in front of it, right
+ * aligned so that every line's own text opens in the same column.
+ *
+ * Alignment is over the whole listing rather than over a page of it, so a row
+ * sits in the same column on the page it first appeared on and on the page
+ * `more` writes: the widest number the listing will hand out is known once the
+ * rows are, and it is what every page is padded to.
+ *
+ * Every listing shuttle writes goes through here, so a verb that composes its
+ * own lines numbers them the way `ls` numbers its rows without restating how.
+ * The numbering is positional in the array, which is also how a handle table
+ * reads a row back (`handles.ts`), so the two agree by construction rather
+ * than by carrying a number apiece.
+ */
+export function numbered(lines: readonly string[]): readonly string[] {
+  const column = handleFor(lines.length).length;
+  return lines.map((line, index) =>
+    `${handleFor(index + 1).padStart(column)} ${line}`
+  );
 }
 
 /**
@@ -256,7 +284,7 @@ export function listingLines(listing: Listing): ListingRendering {
  * items do, and neither starts at zero.
  */
 export function handleFor(number: number): string {
-  return `%${number}`;
+  return `${HANDLE_SIGIL}${number}`;
 }
 
 /**
@@ -381,7 +409,7 @@ function rowFor(
   return {
     name,
     kind,
-    ...(operand === undefined ? {} : { operand: quoteToken(operand) }),
+    ...(operand === undefined ? {} : { operand }),
     ...(error === undefined ? {} : { error }),
   };
 }
@@ -409,14 +437,15 @@ const ANNOTATED = {
 } satisfies Record<RowKind, string | undefined>;
 
 /**
- * Helper for {@link listingLines}, which is the line `row` prints as, opening
- * with `handle`.
+ * Helper for {@link listingLines}, which is the line `row` prints as, without
+ * the number {@link numbered} puts in front of it.
  */
-function lineFor(row: ListingRow, handle: string): string {
+function lineFor(row: ListingRow): string {
   const annotation: string | undefined = ANNOTATED[row.kind];
   return [
-    handle,
-    row.operand ?? marker(noOperandFor(row.name)),
+    row.operand === undefined
+      ? marker(noOperandFor(row.name))
+      : quoteToken(row.operand),
     ...(annotation === undefined ? [] : [marker(annotation)]),
     ...(row.error === undefined
       ? []
@@ -478,7 +507,11 @@ function noOperandFor(name: string): string {
  * Nothing else is touched, an angle bracket included: those delimit a marker
  * for a reader rather than for a parser, and a payload holding one is that
  * decision rather than this one.
+ *
+ * A verb composing rows of its own writes the prose on them through here, so
+ * one rule holds for every annotation shuttle prints beside a row rather than
+ * one per producer.
  */
-function oneLine(text: string): string {
+export function oneLine(text: string): string {
   return escapeControlCharacters(text.replaceAll("\n", " "));
 }

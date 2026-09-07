@@ -18,9 +18,17 @@
  * parser reads both that way, and {@link readsAsOption} is the same rule
  * written as a predicate for the one caller that has to ask without parsing.
  *
+ * One verb reads that rule the other way, and it is a verb whose operands
+ * carry somebody else's flags: a callable's own section opens at the verb name
+ * a `call` line writes, so the tokens from there are the callable's and no
+ * table here could name them. Such a verb says so, the parse stops at its
+ * first operand, and the bare `--` closes the section instead of quoting an
+ * operand.
+ *
  * `--help` is added to every table here rather than declared by each verb,
  * which is what makes it an option every verb takes rather than one each verb
- * remembered to offer.
+ * remembered to offer. A verb that opens a section takes it before its first
+ * operand and not after, the tokens after one being the section's.
  *
  * What the parse hands back is a record of names, since that is what a parser
  * reading a table at run time can hand back. {@link optionString} and the two
@@ -95,6 +103,16 @@ export type OptionReading =
     readonly kind: "read";
     readonly options: VerbOptions;
     readonly operands: readonly string[];
+
+    /**
+     * The tokens past the bare `--`, for a verb that opens a section, and
+     * absent for a verb that does not.
+     *
+     * Absent is the claim that the verb reads no section, which is why it is
+     * absent rather than empty: a verb that opens one and was written no `--`
+     * carries an empty array, and the two are different lines.
+     */
+    readonly section?: readonly string[];
   }
   /** The line is refused, for the reason given. */
   | { readonly kind: "refused"; readonly reason: string };
@@ -110,6 +128,19 @@ export type OptionReading =
  * the operands in the order they were written, with the bare `--` taken off
  * and every token after it an operand.
  *
+ * `opens` is for the one verb whose operands carry flags that are not its own.
+ * A callable's schema-derived flags follow the verb name bare — `call topics/3
+ * search --query milk` — and `--query` is the callable's rather than `call`'s,
+ * so a table naming every option a line may carry is a table shuttle cannot
+ * write. Under it the parse stops at the first operand and every token from
+ * there is handed over unread, and the bare `--` closes the section rather
+ * than quoting an operand: what follows it is the read step's own argv, which
+ * is a different thing from an operand and comes back separately as
+ * {@link OptionReading.section}. The options before the first operand are
+ * still the verb's own and are still refused where nothing declared them, so
+ * `call --nope topics/3 x` is refused here and `call topics/3 x --nope` is
+ * the callable's to refuse.
+ *
  * A refusal is the parser's own sentence, which is the sentence the same flag
  * gets on a `cf` command line, plus one naming the verb's page. What the
  * parser refuses is what `cf` refuses: an option nothing declared, one written
@@ -124,10 +155,14 @@ export function readOptions(
   verb: string,
   tokens: readonly string[],
   declared: readonly VerbOption[] = [],
+  opens = false,
 ): OptionReading {
   let parsed;
   try {
-    parsed = parseFlags([...tokens], { flags: [HELP_OPTION, ...declared] });
+    parsed = parseFlags([...tokens], {
+      flags: [HELP_OPTION, ...declared],
+      stopEarly: opens,
+    });
   } catch (thrown) {
     if (!(thrown instanceof ValidationError)) throw thrown;
     return {
@@ -140,10 +175,13 @@ export function readOptions(
   return {
     kind: "read",
     options: parsed.flags,
-    // The two arrays are the operands before the bare `--` and the ones after
-    // it, and nothing after it can be written before one before it, so joining
-    // them keeps the order the line was written in.
-    operands: [...parsed.unknown, ...parsed.literal],
+    // For a verb that opens no section the two arrays are the operands before
+    // the bare `--` and the ones after it, and nothing after it can be written
+    // before one before it, so joining them keeps the order the line was
+    // written in. For a verb that opens one they are the two sides of a
+    // boundary and joining them would erase it.
+    operands: opens ? parsed.unknown : [...parsed.unknown, ...parsed.literal],
+    ...(opens ? { section: parsed.literal } : {}),
   };
 }
 

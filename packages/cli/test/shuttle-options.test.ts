@@ -74,6 +74,14 @@ function reasonOf(reading: OptionReading): string | undefined {
   return reading.kind === "refused" ? reading.reason : undefined;
 }
 
+/**
+ * Helper for the cases below, which is the section `tokens` came back with:
+ * the words past the bare `--`, and nothing where the verb opens no section.
+ */
+function sectionOf(reading: OptionReading): readonly string[] | undefined {
+  return reading.kind === "read" ? reading.section : undefined;
+}
+
 describe("options", () => {
   describe("readOptions()", () => {
     it("returns every token as an operand where none opens with `-`", () => {
@@ -248,6 +256,106 @@ describe("options", () => {
           "The option `--limit` is declared to hold a number and holds a " +
             "string.",
         );
+    });
+    describe("a verb that opens a section", () => {
+      // The one verb whose operands carry somebody else's flags. What these
+      // cases turn on is that the two readings of a token opening with `-`
+      // are chosen by the verb rather than by the token: the same line is an
+      // operand list under one and a refusal under the other.
+
+      it("hands a token opening with `-` past the first operand over unread", () => {
+        expect(
+          operandsOf(
+            readOptions(
+              "call",
+              ["topics/3", "search", "--query", "milk"],
+              [],
+              true,
+            ),
+          ),
+        ).toEqual(["topics/3", "search", "--query", "milk"]);
+      });
+
+      it("refuses that same line for a verb that opens none", () => {
+        // The pair is the whole of the difference, and it is worth seeing as
+        // a pair: `--query` belongs to the callable and no table here names
+        // it, so a verb reading its own flags to the end of the line is a
+        // verb that cannot carry a section.
+
+        expect(
+          reasonOf(
+            readOptions("call", ["topics/3", "search", "--query", "milk"]),
+          ),
+        ).toBe(
+          'Unknown option "--query". Did you mean option "--help"? `call ' +
+            "--help` says what `call` takes.",
+        );
+      });
+
+      it("still refuses an option nobody declared written before the first operand", () => {
+        // The stop is at the first operand and not at the verb, so the
+        // options a `call` line writes for itself are still its own and are
+        // still held to its table.
+
+        expect(reasonOf(readOptions("call", ["--nope", "topics/3"], [], true)))
+          .toBe(
+            'Unknown option "--nope". Did you mean option "--help"? `call ' +
+              "--help` says what `call` takes.",
+          );
+      });
+
+      it("closes the section at the bare `--`, keeping the two sides apart", () => {
+        const reading = readOptions(
+          "call",
+          ["topics/3", "search", "--query", "milk", "--", "tail"],
+          [],
+          true,
+        );
+        expect({
+          operands: operandsOf(reading),
+          section: sectionOf(reading),
+        }).toEqual({
+          operands: ["topics/3", "search", "--query", "milk"],
+          section: ["tail"],
+        });
+      });
+
+      it("joins those two sides for a verb that opens no section", () => {
+        // The same `--` read the other way, which is the reading every other
+        // verb wants: a bare `--` quotes an operand that opens with `-`
+        // rather than closing anything.
+
+        expect(operandsOf(readOptions("cd", ["a", "--", "-x"])))
+          .toEqual(["a", "-x"]);
+      });
+
+      it("returns an empty section where the line wrote no `--`", () => {
+        // Empty rather than absent, and the difference is a claim: a verb
+        // that opens a section and was written none carries one that ran to
+        // the end of what was typed.
+
+        expect(sectionOf(readOptions("call", ["topics/3"], [], true)))
+          .toEqual([]);
+      });
+
+      it("returns no section at all for a verb that opens none", () => {
+        expect(sectionOf(readOptions("cd", ["a", "--", "-x"]))).toBeUndefined();
+      });
+
+      it("reads `--help` written before the first operand", () => {
+        expect(readOptions("call", ["--help"], [], true))
+          .toEqual({ kind: "help" });
+      });
+
+      it("hands `--help` written after the first operand to the section", () => {
+        // The page a person asks for after the verb name is the callable's,
+        // not this one's, so the option is not read here at all.
+
+        expect(
+          operandsOf(readOptions("call", ["topics/3", "--help"], [], true)),
+        )
+          .toEqual(["topics/3", "--help"]);
+      });
     });
   });
 

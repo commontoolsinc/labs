@@ -1,11 +1,12 @@
 /**
  * Unit tests for the session objects beside the place: what the last listing
- * numbered, and what a rendering left for `more`.
+ * numbered, what a rendering left for `more`, and which pieces the run has
+ * started.
  *
- * The pair exists because two lines reset it differently, so the cases that
- * matter are the ones where one is written and the other is asked. Nothing
- * here reads or writes outside itself, so every case drives the whole of it
- * with no connection, no place and no terminal.
+ * The three are separate because different lines reset them, so the cases that
+ * matter are the ones where one is written and another is asked. Nothing here
+ * reads or writes outside itself, so every case drives the whole of it with no
+ * connection, no place and no terminal.
  */
 
 import { expect } from "@std/expect";
@@ -98,6 +99,58 @@ describe("ShuttleSession", () => {
         session.holding({ lines: ["a"] });
         session.listed(handles("title"));
         expect(session.continuation?.lines).toEqual(["a"]);
+      });
+    });
+    describe("the warm set", () => {
+      // What a start is remembered under is the whole of what decides which
+      // piece runs, so the cases that matter are the ones where two warms
+      // differ in one part of that key and are two pieces.
+
+      it("says a piece nothing warmed has not been warmed", () => {
+        expect(new ShuttleSession().hasWarmed("piece", "space")).toBe(false);
+      });
+
+      it("says a piece it recorded has been", () => {
+        const session = new ShuttleSession();
+        session.warmed("piece", "space");
+        expect(session.hasWarmed("piece", "space")).toBe(true);
+      });
+
+      it("holds two pieces apart", () => {
+        const session = new ShuttleSession();
+        session.warmed("one", "space");
+        expect(session.hasWarmed("two", "space")).toBe(false);
+      });
+
+      it("holds two scopes under one piece apart", () => {
+        // The same id under two scopes is two documents, so a start under one
+        // says nothing about the other.
+
+        const session = new ShuttleSession();
+        session.warmed("piece", "space");
+        expect(session.hasWarmed("piece", "session")).toBe(false);
+      });
+
+      it("asks about the piece alone, whatever path reached it", () => {
+        // What warms is a piece. The path an operand walked decided *which*
+        // piece by being resolved, and by the time a start is recorded that
+        // question is answered — so two lines writing two fields of one piece
+        // ask one question and get one answer.
+
+        const session = new ShuttleSession();
+        session.warmed("piece", "space");
+        expect(session.hasWarmed("piece", "space")).toBe(true);
+      });
+
+      it("survives a listing and a continuation, which reset the other two", () => {
+        // A piece started stays started for the life of the process, so
+        // nothing resets this one.
+
+        const session = new ShuttleSession();
+        session.warmed("piece", "space");
+        session.listed(handles("title"));
+        session.holding();
+        expect(session.hasWarmed("piece", "space")).toBe(true);
       });
     });
   });

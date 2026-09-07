@@ -28,6 +28,13 @@ import type { PromptTerminal } from "./prompt.ts";
 const READ_SIZE = 1024;
 
 /**
+ * The key that runs a line, and the one key not carried out of a suspension:
+ * what was typed at another program may appear in the next line and may not
+ * submit it.
+ */
+const SUBMIT = "enter";
+
+/**
  * The signals that end a run, and the status each one reports.
  *
  * A signal ends the process without unwinding, so the `finally` that takes the
@@ -170,7 +177,20 @@ function listenFor(
 class StandardTerminal implements PromptTerminal {
   #painted: PaintedLine = NOTHING_PAINTED;
   #encoder = new TextEncoder();
-  #keys = typedKeys();
+
+  /**
+   * Pending exactly while a program holds the terminal, and absent otherwise.
+   *
+   * It is one field for both halves of holding it, which is what keeps them
+   * from parting: the reader awaits it before every read, and every write
+   * checks it, so a program that has the terminal has all of it.
+   */
+  #held: Promise<void> | undefined;
+
+  /** Ends {@link StandardTerminal.#held}, held by the suspension that made it. */
+  #release: (() => void) | undefined;
+
+  #keys = typedKeys(() => this.#held);
 
   /**
    * The keys typed on standard input — one stream for the life of the
@@ -207,6 +227,57 @@ class StandardTerminal implements PromptTerminal {
   }
 
   /**
+   * @inheritDoc
+   *
+   * Raw mode is what the prompt has and what the program taking over must not:
+   * it stops the terminal echoing and line buffering, and a full-screen editor
+   * sets whatever mode it wants for itself. So it comes off before `body` and
+   * goes back on after, whatever `body` did, because a prompt reading a cooked
+   * terminal reads nothing until a whole line has been typed.
+   *
+   * Raw mode is the smaller half. The larger one is that this prompt reads
+   * nothing and draws nothing for as long as `body` runs: the key loop issues
+   * no read while the terminal is held, so what is typed stays on the stream
+   * for the program to read, and every write is dropped, so nothing of this
+   * prompt's appears under a screen the program is drawing.
+   *
+   * What it cannot take back is a read already in flight when `body` started.
+   * `Deno.stdin.read` takes no signal, so that read finishes and its bytes
+   * leave the stream whatever this does — most often catching the first key
+   * typed at the program, which is then a key the program never sees. Where
+   * they go is what is decided here: they are carried out of the suspension
+   * into the next line rather than dropped, a keystroke that appears
+   * somewhere being one a person can act on where a dropped one is invisible.
+   * The submit is held back, so such a key may appear in a line and may never
+   * run one.
+   *
+   * What was drawn is forgotten across the trip. The program had the screen
+   * and may have left anything on it, so where the last line was drawn says
+   * nothing about where the cursor is now; drawing the next line as a repaint
+   * of that one would clear whatever the program left above it. Forgetting
+   * leaves the next drawing an ordinary first one, written where the cursor
+   * stands.
+   */
+  async suspend<T>(body: () => Promise<T>): Promise<T> {
+    this.#held = new Promise<void>((resolve) => {
+      this.#release = resolve;
+    });
+    Deno.stdin.setRaw(false);
+    try {
+      return await body();
+    } finally {
+      // The order is what the property needs: raw mode back first, then the
+      // reader let go, so the loop that wakes reads a terminal in the mode it
+      // expects rather than one still cooked.
+      Deno.stdin.setRaw(true);
+      this.#painted = NOTHING_PAINTED;
+      this.#held = undefined;
+      this.#release?.();
+      this.#release = undefined;
+    }
+  }
+
+  /**
    * Helper for the writes, which is how wide the terminal is.
    *
    * It is asked per drawing rather than once, so a window resized between two
@@ -229,6 +300,10 @@ class StandardTerminal implements PromptTerminal {
    * further attempts would improve on.
    */
   #send(text: string): void {
+    // Nothing is drawn while a program holds the terminal. It is the one check
+    // rather than one per write, so the three writes above cannot drift from
+    // each other about what holding the terminal means.
+    if (this.#held !== undefined) return;
     const bytes = this.#encoder.encode(text);
     let offset = 0;
     while (offset < bytes.length) {
@@ -303,18 +378,73 @@ function measured(
  * The decoder is incremental: an escape sequence split across two reads leaves
  * its first bytes unconsumed, and they open the next read's bytes rather than
  * being decoded as the keys they are not.
+ *
+ * Nothing is read while a program holds the terminal, which is what leaves the
+ * keys typed at it on the stream for it to read. That is
+ * {@link readWhenFree}'s to keep rather than this loop's, because keeping it
+ * is a question of what may sit between the ask and the read, and a loop is
+ * exactly where something sits.
  */
-async function* typedKeys(): AsyncGenerator<Key> {
+async function* typedKeys(
+  held: () => Promise<void> | undefined,
+): AsyncGenerator<Key> {
   const buffer = new Uint8Array(READ_SIZE);
   let rest: Uint8Array = new Uint8Array(0);
   while (true) {
-    const read = await Deno.stdin.read(buffer);
+    const read = await readWhenFree(held, buffer);
     if (read === null) return;
     const arrived = new Uint8Array(rest.length + read);
     arrived.set(rest);
     arrived.set(buffer.subarray(0, read), rest.length);
     const decoded = decodeKeys(arrived);
     rest = decoded.rest;
+    const during = held();
+    if (during !== undefined) {
+      // A read already in flight when the program took over is the one thing
+      // holding the terminal cannot take back: `Deno.stdin.read` takes no
+      // signal, so it finishes and its bytes leave the stream whatever this
+      // does — most often catching the first key typed at the program, which
+      // is then a key the program never sees.
+      //
+      // Where they go is decided here, and they are kept rather than dropped.
+      // Dropping loses a keystroke with nothing to show for it, and a person
+      // cannot tell that it happened; kept, it lands in the next line where it
+      // can be seen and erased. The submit is the one key not kept, because it
+      // is the one that would act rather than appear — so what was typed at
+      // another program may reach the next line as text and may never run one.
+      await during;
+      yield* decoded.keys.filter((key) => key.name !== SUBMIT);
+      continue;
+    }
     yield* decoded.keys;
+  }
+}
+
+/**
+ * Helper for {@link typedKeys}, which is one read of standard input, issued
+ * only from a turn in which nothing holds the terminal.
+ *
+ * A reader that asks whether it may read and then reads on the way back from
+ * an `await` has asked a question whose answer expired: the terminal was free
+ * when it was told so and a program had it by the time it read. That is the
+ * rule {@link guarded} (`verbs.ts`) keeps for the same reason, and it is kept
+ * the same way — the ask and the read stand in one turn with nothing awaited
+ * between them, so no suspension can begin after the decision and before the
+ * call. The waiting is on the other arm, and the ask is made again after it.
+ *
+ * The property that follows is the one the prompt owes a program it started:
+ * from the moment a program holds the terminal, no read is issued at all, so
+ * what is typed at it stays on the stream for it to read. The one read this
+ * cannot promise anything about is the one already in flight, which
+ * {@link StandardTerminal.suspend} accounts for.
+ */
+async function readWhenFree(
+  held: () => Promise<void> | undefined,
+  buffer: Uint8Array,
+): Promise<number | null> {
+  while (true) {
+    const during = held();
+    if (during === undefined) return await Deno.stdin.read(buffer);
+    await during;
   }
 }
