@@ -2712,6 +2712,13 @@ export type DataFileFunction = (path: string) => string;
 // SQLite builtins (docs/specs/sqlite-builtin)
 //
 
+/**
+ * Brand symbol keying {@link SqliteDatabase}, so a handle value is nominal
+ * rather than an empty object any value satisfies. Exported because a pattern
+ * naming `SqliteDb` in an exported signature emits a declaration that refers
+ * to it, and declaration emit cannot name a symbol the pattern's module has
+ * no route to.
+ */
 export declare const SQLITE_DB_BRAND: unique symbol;
 
 /**
