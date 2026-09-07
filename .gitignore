@@ -67,3 +67,16 @@ docs/.doccheck*
 # removes each one in a `finally`, so these survive only when a run is
 # interrupted, at which point `git add -A` would otherwise commit one.
 tasks/.write-lcov-uncompiled.*.ts
+
+# Written into the checkout by CI: the compile-cache restore result the
+# Coverage Check reads (.github/actions/record-compile-cache-state), the
+# test-record fragments a lane spools and the bundle it ships from them
+# (.github/actions/test-records-ship), and the server logs a failed lane
+# keeps (tasks/ci-lane.ts). The lane runs `deno fmt --check` as one of its
+# own units, in the same checkout the rest of the job writes into, so a
+# generated file it can format is a formatting failure over output nobody
+# wrote by hand.
+cache-state/
+test-records-spool/
+test-records-artifact/
+ci-lane-logs/
