@@ -443,6 +443,7 @@ type IntentionallyUnrequired =
   | "DEFAULT_MARKER"
   | "FRAMEWORK_PROVIDED_MARKER"
   | "SCOPE_BRAND"
+  | "SQLITE_DB_BRAND"
   // The CFC authoring vocabulary. `packages/api/index.ts` re-exports the types
   // out of `cfc.ts` with `export type *`, and TypeScript carries the value
   // meaning of those names into the module's type even though nothing is

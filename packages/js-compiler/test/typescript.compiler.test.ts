@@ -118,6 +118,20 @@ types["commonfabric.d.ts"] = await staticCache.getText(
   "types/commonfabric.d.ts",
 );
 
+/**
+ * The modules a pattern's `commonfabric` import resolves to, as the compiler
+ * takes them: one program file per module name, since the resolver maps a
+ * runtime module to a `.d.ts` of the same name among the program's files.
+ */
+const FABRIC_RUNTIME_MODULES = ["commonfabric", "commonfabric/schema"];
+const fabricTypeModules: Record<string, string> = {
+  "commonfabric.d.ts": types["commonfabric.d.ts"],
+  "commonfabric/schema.d.ts": await staticCache.getText(
+    "types/commonfabric-schema.d.ts",
+  ),
+  "cfc.ts": await staticCache.getText("types/cfc.ts"),
+};
+
 /** Resolve via the compiler's resolver, then emit per-module CommonJS. */
 async function resolveAndCompileToModules(
   compiler: TypeScriptCompiler,
@@ -570,6 +584,35 @@ export type PerUser<T> = T & { readonly [SCOPE_BRAND]?: "user" };
     await resolveAndCompileToModules(compiler, program, {
       runtimeModules: ["commonfabric"],
     });
+  });
+
+  it("compiles a pattern whose default export is typed by a branded runtime handle", async () => {
+    // The pattern API's branded handle types key on `unique symbol`s the
+    // sandbox module declares, and TypeScript's declaration emit cannot name
+    // one from the pattern's own emitted declaration. Only the compiler's
+    // filter over those brands (`KNOWN_EXPORTED_SYMBOLS`) keeps this
+    // compiling, and only when the brand is on it — so the real type module
+    // is what this compiles against, not a stand-in.
+
+    const program = new InMemoryProgram("/main.tsx", {
+      "/main.tsx": `
+import { pattern, type SqliteDb } from "commonfabric";
+
+interface BillRow { id: number; subject: string; }
+type Input = { mail: SqliteDb };
+type Output = { bills: unknown };
+
+export default pattern<Input, Output>(({ mail }) => ({
+  bills: mail.query<BillRow>("SELECT id, subject FROM messages", {}),
+}));
+`,
+      ...fabricTypeModules,
+    });
+    const compiler = new TypeScriptCompiler(types);
+    const modules = await resolveAndCompileToModules(compiler, program, {
+      runtimeModules: FABRIC_RUNTIME_MODULES,
+    });
+    expect(modules.get("/main.tsx")).toBeDefined();
   });
 
   it("Inlines errors", async () => {
