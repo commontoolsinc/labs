@@ -1618,32 +1618,19 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     expect(runtime.patternManager.getArtifactEntryRef(keyed)).toEqual(ref);
     expect(runtime.patternManager.getArtifactEntryRef(keyless)).toBeUndefined();
 
-    const manager = runtime.patternManager as unknown as {
-      replicateClosures(
-        entryIdentity: string,
-        fromSpace: string,
-        toSpace: string,
-      ): Promise<void>;
-    };
-    const originalReplicateClosures = manager.replicateClosures;
-    let replicationCalls = 0;
-    manager.replicateClosures = () => {
-      replicationCalls++;
-      return Promise.resolve();
-    };
-    try {
-      runtime.patternManager.replicatePatternToSpace(keyed, spaceA, spaceA);
-      runtime.patternManager.replicatePatternToSpace(
-        keyless,
-        "did:key:z6MkCellCacheKeylessReplicationTarget",
-        spaceA,
-      );
-
-      await runtime.patternManager.flushCompileCacheWrites();
-      expect(replicationCalls).toBe(0);
-    } finally {
-      manager.replicateClosures = originalReplicateClosures;
-    }
+    // An issued replication registers in the manager's write set at once,
+    // so the set's size says whether either call issued one.
+    const writes =
+      runtime.patternManager.accessForTestingOnly.compileCacheWrites;
+    const before = writes.size;
+    runtime.patternManager.replicatePatternToSpace(keyed, spaceA, spaceA);
+    runtime.patternManager.replicatePatternToSpace(
+      keyless,
+      "did:key:z6MkCellCacheKeylessReplicationTarget",
+      spaceA,
+    );
+    expect(writes.size).toBe(before);
+    await runtime.patternManager.flushCompileCacheWrites();
   });
 
   it("replicates fabric dependencies without importing authority", async () => {

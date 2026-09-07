@@ -244,12 +244,7 @@ const assertCommitBurstBeforeFanout = async (
 
 Deno.test("memory v2 server keeps publication locks independent per space", async () => {
   const server = createServer("memory://memory-v2-publication-lock-spaces");
-  const internals = server as unknown as {
-    withSpacePublicationLock<T>(
-      space: string,
-      run: () => Promise<T>,
-    ): Promise<T>;
-  };
+  const internals = server.accessForTestingOnly;
   const firstEntered = Promise.withResolvers<void>();
   const releaseFirst = Promise.withResolvers<void>();
   let sameSpaceEntered = false;

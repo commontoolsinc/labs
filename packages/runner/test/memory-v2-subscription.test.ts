@@ -15,6 +15,7 @@ import { defer } from "@commonfabric/utils/defer";
 
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import { registerCommitRejectionListener } from "../src/storage/reactivity-log.ts";
 import type {
   IExtendedStorageTransaction,
   IReadActivity,
@@ -565,19 +566,6 @@ describe("Memory v2 storage notifications", () => {
       ) => Promise<{ ok?: unknown; error?: unknown }>;
     };
     const repairStarted = defer<void>();
-    // Replaced by assignment below, which its `private` rather than `#` name
-    // allows; the cast reaches only it.
-    const stubbed = replica as unknown as {
-      waitForConflictReadRepair(
-        rejection: StorageTransactionRejected,
-      ): Promise<void>;
-    };
-    const originalWaitForConflictReadRepair = stubbed
-      .waitForConflictReadRepair.bind(stubbed);
-    stubbed.waitForConflictReadRepair = async (rejection) => {
-      repairStarted.resolve();
-      await originalWaitForConflictReadRepair(rejection);
-    };
     const firstUri = `of:memory-v2-close-retry-a-${Date.now()}` as URI;
     const secondUri = `of:memory-v2-close-retry-b-${Date.now()}` as URI;
     const factAddress = { id: firstUri, type: "application/json" as MIME };
@@ -608,6 +596,11 @@ describe("Memory v2 storage notifications", () => {
       ],
     });
 
+    // The replica notifies the commit's source of the rejection just before
+    // it waits out the read repair, so the listener fires as the repair
+    // starts.
+    const source = staleReadSource(firstUri, 1);
+    registerCommitRejectionListener(source, () => repairStarted.resolve());
     const commitPromise = replica.commitNative({
       operations: [{
         op: "set",
@@ -615,7 +608,7 @@ describe("Memory v2 storage notifications", () => {
         type: "application/json",
         value: { value: { version: 3 } },
       }],
-    }, staleReadSource(firstUri, 1));
+    }, source);
     expect(replica.get(factAddress)?.is).toEqual({ value: { version: 3 } });
 
     // Close only after the server conflict has reached the read-repair path.

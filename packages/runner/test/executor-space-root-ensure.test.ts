@@ -32,11 +32,21 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import type { SessionSync } from "@commonfabric/memory/v2";
+import type { FabricValue } from "@commonfabric/api";
+import type { Signer, URI } from "@commonfabric/memory/interface";
+import {
+  encodeMemoryBoundary,
+  type SessionSync,
+} from "@commonfabric/memory/v2";
+import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { SpaceReplica } from "../src/storage/v2.ts";
+import {
+  type Options as V2Options,
+  type SessionFactory,
+  type SpaceReplica,
+} from "../src/storage/v2.ts";
 import { Runtime, type RuntimeFetch } from "../src/runtime.ts";
 import type {
   IExtendedStorageTransaction,
@@ -61,7 +71,7 @@ import {
   getPatternSource,
   resolveEntryIdentity,
 } from "../src/index.ts";
-import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { newSharedServer, TestStorageManager } from "./memory-v2-test-utils.ts";
 import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("space root ensure space");
@@ -83,6 +93,100 @@ function rootSource(marker: string): string {
     "export default Root;",
     "",
   ].join("\n");
+}
+
+/**
+ * A loopback session factory whose frames reach the client with every `cid:`
+ * upsert dropped, the absorb defect placed at the wire: the replica applies
+ * exactly the frames a defective client would hand it. Counts what it
+ * dropped and records the `computed:` documents it let through.
+ */
+class CidDroppingSessionFactory implements SessionFactory {
+  droppedCids = 0;
+  readonly computedSeen = new Set<string>();
+  readonly #getServer: () => MemoryV2Server.Server;
+
+  constructor(getServer: () => MemoryV2Server.Server) {
+    this.#getServer = getServer;
+  }
+
+  async create(
+    space: MemorySpace,
+    signer?: Signer,
+    mountOptions: MemoryV2Client.MountOptions = {},
+  ) {
+    const client = await MemoryV2Client.connect({
+      transport: this.#transport(),
+    });
+    const session = await client.mount(
+      space,
+      mountOptions,
+      (_space, _session, context) => ({
+        invocation: {
+          aud: context.audience,
+          challenge: context.challenge.value,
+        },
+        authorization: {
+          principal: signer?.did(),
+        },
+      }),
+    );
+    return { client, session };
+  }
+
+  #transport(): MemoryV2Client.Transport {
+    let receiver: (payload: string) => void = () => {};
+    const connection = this.#getServer().connect((message) => {
+      receiver(
+        encodeMemoryBoundary(this.#filter(message) as unknown as FabricValue),
+      );
+    });
+    return {
+      async send(payload: string) {
+        await connection.receive(payload);
+      },
+      close() {
+        connection.close();
+        return Promise.resolve();
+      },
+      setReceiver(next) {
+        receiver = next;
+      },
+      setCloseReceiver() {},
+    };
+  }
+
+  #filter(message: unknown): unknown {
+    const frame = message as {
+      type?: string;
+      effect?: SessionSync;
+      ok?: { sync?: SessionSync };
+    };
+    if (frame.type === "session/effect" && frame.effect?.type === "sync") {
+      return { ...frame, effect: this.#filterSync(frame.effect) };
+    }
+    if (frame.type === "response" && frame.ok?.sync?.type === "sync") {
+      return {
+        ...frame,
+        ok: { ...frame.ok, sync: this.#filterSync(frame.ok.sync) },
+      };
+    }
+    return message;
+  }
+
+  #filterSync(sync: SessionSync): SessionSync {
+    const kept = sync.upserts.filter((upsert) => {
+      if (upsert.id.startsWith("computed:")) this.computedSeen.add(upsert.id);
+      if (upsert.id.startsWith("cid:")) {
+        this.droppedCids += 1;
+        return false;
+      }
+      return true;
+    });
+    return kept.length === sync.upserts.length
+      ? sync
+      : { ...sync, upserts: kept };
+  }
 }
 
 describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
@@ -365,41 +469,26 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     await seedAcl({ [space]: "OWNER" });
     const created = newSpaceServer();
 
-    const reader = clientRuntime(readerSigner);
-    // The simulated absorb defect: DROP every cid: upsert before the
-    // frame applies. Installed on the reader's replica before its
-    // space-cell subscription (the suite's established instance-patch
-    // seam).
-    const replica = (reader.storageManager.open(space) as unknown as {
-      replica: {
-        applySessionSync: SpaceReplica["accessForTestingOnly"][
-          "applySessionSync"
-        ];
-        getDocument(uri: string): unknown;
-      };
-    }).replica;
-    let droppedCids = 0;
-    const computedSeen = new Set<string>();
-    const originalApply = replica.applySessionSync.bind(replica);
-    replica.applySessionSync = (sync, type) => {
-      const frame = sync as { upserts?: Array<{ id?: unknown }> };
-      const upserts = Array.isArray(frame?.upserts) ? frame.upserts : [];
-      const kept = upserts.filter((upsert) => {
-        if (typeof upsert?.id !== "string") return true;
-        if (upsert.id.startsWith("computed:")) computedSeen.add(upsert.id);
-        if (upsert.id.startsWith("cid:")) {
-          droppedCids += 1;
-          return false;
-        }
-        return true;
-      });
-      return originalApply(
-        kept.length === upserts.length
-          ? sync
-          : { ...sync, upserts: kept } as SessionSync,
-        type,
-      );
-    };
+    // The simulated absorb defect: every cid: upsert is DROPPED at the
+    // wire, before the reader's replica sees the frame, so the replica
+    // applies exactly what a defective client would hand it.
+    const dropping = new CidDroppingSessionFactory(() => server);
+    const readerManager = TestStorageManager.create({
+      as: readerSigner,
+      memoryHost: new URL("memory://"),
+    } as V2Options, dropping);
+    const reader = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager: readerManager,
+      fetch: fetchStub,
+    });
+    cleanups.push(async () => {
+      await reader.dispose();
+      await readerManager.close();
+    });
+    const replica = readerManager.open(space).replica as SpaceReplica;
+    const droppedCids = () => dropping.droppedCids;
+    const computedSeen = dropping.computedSeen;
 
     // Subscribe FIRST (this starts the background consumer), activate
     // SECOND: everything the ensure materializes reaches this replica
@@ -424,7 +513,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
       "the ensured root's computed cell riding the plain subscription",
     );
     await waitUntil(
-      () => droppedCids > 0,
+      () => droppedCids() > 0,
       "the simulated absorb defect dropping a cid delivery",
     );
     await waitUntil(
@@ -440,7 +529,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     await waitUntil(
       () => {
         quarantinedId = [...computedSeen].find((id) =>
-          replica.getDocument(id) === undefined
+          replica.getDocument(id as URI) === undefined
         );
         return quarantinedId !== undefined;
       },
@@ -511,7 +600,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     // The request path exercised the exact quarantined doc, and the
     // quarantine held through it (its cid rode the response and was
     // dropped by the simulated defect again).
-    expect(replica.getDocument(quarantinedId!)).toBeUndefined();
+    expect(replica.getDocument(quarantinedId! as URI)).toBeUndefined();
     const witness = reader.getCell<{ n?: number }>(
       space,
       "ow61-containment-witness",
