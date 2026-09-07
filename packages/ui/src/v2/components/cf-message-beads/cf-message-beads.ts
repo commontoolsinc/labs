@@ -16,11 +16,10 @@ const MessagesSchema = {
   items: { type: "object" },
 } as const satisfies JSONSchema;
 
-type BeadColor = "blue" | "green" | "amber" | "purple" | "gray";
+type BeadColor = "blue" | "green" | "amber" | "purple";
 
 function classifyMessage(msg: BuiltInLLMMessage): BeadColor {
   const { role, content } = msg;
-  if (role === "system") return "gray";
   if (role === "tool") return "purple";
   if (role === "user") return "blue";
   // assistant
@@ -147,12 +146,6 @@ export class CFMessageBeads extends BaseElement {
       }
       .bead.purple:hover {
         box-shadow: 0 0 0 2px rgba(168, 85, 247, 0.3);
-      }
-      .bead.gray {
-        background: #9ca3af;
-      }
-      .bead.gray:hover {
-        box-shadow: 0 0 0 2px rgba(156, 163, 175, 0.3);
       }
       .label {
         font-size: 10px;

@@ -2353,8 +2353,16 @@ export type BuiltInLLMContentPart =
 
 export type BuiltInLLMContent = string | BuiltInLLMContentPart[];
 
+/**
+ * One message in the conversation an LLM request carries.
+ *
+ * A system instruction is not a message. It travels in the request's separate
+ * `system` field, because the model-provider SDK the request reaches refuses a
+ * system-role message inside `messages` and takes system content from an
+ * option of its own instead.
+ */
 export type BuiltInLLMMessage = {
-  role: "user" | "assistant" | "system" | "tool";
+  role: "user" | "assistant" | "tool";
   content: BuiltInLLMContent;
 };
 

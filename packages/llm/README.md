@@ -44,6 +44,37 @@ sets all of this out in full, including the two places the division leaks.
 - [`src/schema-transport.ts`](src/schema-transport.ts) — the check that a schema
   is still the same schema after a round trip through JSON.
 
+## A system instruction is not a message
+
+`LLMRequest` carries a `system` field, and a caller puts a system instruction
+there and nowhere else. A message carries one of three roles — `user`,
+`assistant`, and `tool` — and the AI SDK the toolshed hands the array to refuses
+a system-role message inside `messages`, directing the caller to its own
+`instructions` option instead. (What the toolshed does with the field afterwards
+is its own business: for a model whose capability record says it takes no system
+prompt, `generateText.ts` folds the instruction into the first message's
+content.)
+
+Four declarations say that, and they have to agree.
+
+- `BuiltInLLMMessage` in [`packages/api/index.ts`](../api/index.ts) is the type
+  a pattern is written against.
+- `LLMMessageSchema` in
+  [`packages/runner/src/builtins/llm-schemas.ts`](../runner/src/builtins/llm-schemas.ts)
+  is the runtime schema describing that type, and it reaches the durable
+  argument contract of every pattern using an LLM builtin. It describes rather
+  than polices: the runtime enforces an `enum` neither on read nor on write.
+- `llmMessageProblem()` in [`src/types.ts`](src/types.ts) is the check that
+  refuses one, reached through `llmRequestProblem()`, which is what the toolshed
+  handler gates an incoming payload on.
+- `MessageSchema` in
+  [`packages/toolshed/routes/ai/llm/llm.routes.ts`](../toolshed/routes/ai/llm/llm.routes.ts)
+  is the route's own validator, and the one a caller sending JSON meets first:
+  it refuses a system-role message by naming the field to move it to.
+
+`docs/history/features/llm-message-role-narrowing-break.md` records why the role
+left, and what that cost the patterns whose contracts carried it.
+
 ## The routes on the other side
 
 | Route                        | Method | What it does                                 |
