@@ -195,7 +195,11 @@ function getFileContent(tree: FsTree, parentIno: bigint, name: string): string {
   return decoder.decode(node.content);
 }
 
-/** A source write path for a piece, as the flush path would hand one over. */
+/**
+ * A source write path for a piece, as the flush path would hand one over;
+ * `piece` is what a finalize consults, and the default serves callers whose
+ * finalize never does.
+ */
 function sourceWritePath(
   spaceName: string,
   pieceName: string,
@@ -297,23 +301,17 @@ async function openDirectorySnapshot(
 
 /**
  * An `FsTree` that refuses to add one named entry, throwing `failure`; every
- * other add goes through. `refuse()` arms it, so a test can build its setup
- * on the tree first and then have the bridge's own next write of that name
- * fail.
+ * other add goes through.
  */
 class RefusingTree extends FsTree {
+  #refusedName: string;
   #failure: Error;
-  #refusedName: string | undefined;
 
-  /** Constructs an instance which throws `failure` at the refused name. */
-  constructor(failure: Error) {
+  /** Constructs an instance which throws `failure` at every add of `name`. */
+  constructor(name: string, failure: Error) {
     super();
-    this.#failure = failure;
-  }
-
-  /** Refuses every later add of `name`. */
-  refuse(name: string): void {
     this.#refusedName = name;
+    this.#failure = failure;
   }
 
   override addDir(
@@ -543,12 +541,12 @@ Deno.test("CellBridge rejects invalid entity projection cache limits", () => {
 
 Deno.test("CellBridge removes partial state after a late connection failure", async () => {
   // The failure lands at the connect's index write, after the space's tree
-  // and state exist: the tree refuses `.index.json`. Everything the connect
-  // had recorded for the space by then must be gone afterward, and the
-  // failing dispose of the space's runtime is warned about, not thrown.
+  // and state exist: the tree refuses `.index.json`. The space's tree and
+  // state, and the per-space table entries seeded here as a connect could
+  // have left them, must be gone afterward, and the failing dispose of the
+  // space's runtime is warned about, not thrown.
   const connectionFailure = new Error("manifest generation failed");
-  const tree = new RefusingTree(connectionFailure);
-  tree.refuse(".index.json");
+  const tree = new RefusingTree(".index.json", connectionFailure);
   let disposeCalls = 0;
   const spacePieces = {
     getSpace: () => "did:key:zFailedSpace",
@@ -597,7 +595,7 @@ Deno.test("CellBridge removes partial state after a late connection failure", as
   assertEquals(internals.syncAgain.has("home"), false);
 });
 
-Deno.test("CellBridge.removeFailedSpaceTree cancels every subscription and forgets every table entry of the space", async () => {
+Deno.test("CellBridge.#removeFailedSpaceTree cancels every subscription and forgets every table entry of the space", () => {
   // The cleanup a late connection failure runs, driven on a space seeded
   // with every kind of state a partially built space can hold: cancels in
   // both subscription tables, a partial piece and entity directory, and an
@@ -626,6 +624,7 @@ Deno.test("CellBridge.removeFailedSpaceTree cancels every subscription and forge
     {} as UnhydratedEntityRootInfo,
   );
   internals.entityProjectionUseOrder.set(entityIno, 1);
+  internals.entityProjectionLookupRefs.set(entityIno, entityIno);
   internals.pendingEntityRemovals.set(
     entityIno,
     {} as UnhydratedEntityRootInfo,
@@ -635,7 +634,6 @@ Deno.test("CellBridge.removeFailedSpaceTree cancels every subscription and forge
   internals.syncAgain.add("home");
 
   internals.removeFailedSpaceTree("home", state);
-  await Promise.resolve();
 
   assertEquals(cancellations, 3);
   assertEquals(
@@ -651,6 +649,7 @@ Deno.test("CellBridge.removeFailedSpaceTree cancels every subscription and forge
     false,
   );
   assertEquals(internals.entityProjectionUseOrder.has(entityIno), false);
+  assertEquals(internals.entityProjectionLookupRefs.has(entityIno), false);
   assertEquals(internals.pendingEntityRemovals.has(entityIno), false);
   assertEquals(internals.pendingPieceHydrations.has("home"), false);
   assertEquals(internals.pieceSyncs.has("home"), false);
@@ -3100,9 +3099,15 @@ Deno.test("CellBridge queues piece prop rebuilds for the same prop", async () =>
     const state = buildTestSpace(bridge, "home", []);
     const pieceIno = tree.addDir(state.piecesIno, "queued");
     const enqueue = bridge.accessForTestingOnly.enqueuePiecePropRebuild;
+    // More entries than one tree-builder batch (`BUILD_BATCH_SIZE` in
+    // `tree-builder.ts`), so the build yields once mid-way.
+    const entriesPerValue = 250;
     const wide = (label: string) =>
       Object.fromEntries(
-        Array.from({ length: 250 }, (_, i) => [`k${i}`, `${label}-${i}`]),
+        Array.from(
+          { length: entriesPerValue },
+          (_, i) => [`k${i}`, `${label}-${i}`],
+        ),
       );
     const job = (label: string) => {
       const value = wide(label);
@@ -3140,8 +3145,9 @@ Deno.test("CellBridge queues piece prop rebuilds for the same prop", async () =>
     await time.runMicrotasks();
     assertEquals(events, ["start-first"]);
 
-    // Fire each yield the rebuilds schedule, one at a time: a bulk run would
-    // look for the next timer before the microtasks that schedule it.
+    // Each yield is scheduled by microtasks that run only after the previous
+    // one fires, so the timers are fired one at a time with a microtask drain
+    // between.
     while (await time.nextAsync()) {
       // The loop body is the firing.
     }
