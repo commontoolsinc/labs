@@ -29,7 +29,14 @@ import type { MemorySpace } from "@commonfabric/memory/interface";
 import { SlugResolutionError } from "@commonfabric/piece";
 import type { PiecesController } from "@commonfabric/piece/ops";
 
-import { LINK_MARKER_KEY } from "../lib/cell-selection.ts";
+import { UI } from "@commonfabric/runner";
+
+import { pieceDataCommand } from "../commands/piece.ts";
+import {
+  type CellSelection,
+  LINK_MARKER_KEY,
+  parseCellSelectionOptions,
+} from "../lib/cell-selection.ts";
 import type {
   GetCellValueOptions,
   PieceConfig,
@@ -37,6 +44,9 @@ import type {
 } from "../lib/piece.ts";
 import { HeldConnection } from "../lib/shuttle/connection.ts";
 import { CurrentPlace, operandForChild } from "../lib/shuttle/place.ts";
+import { ShuttleSession } from "../lib/shuttle/session.ts";
+import { ASSUMED_ROWS } from "../lib/shuttle/page.ts";
+import { renderValue } from "../lib/shuttle/value.ts";
 import { moved } from "./shuttle-place-helpers.ts";
 import {
   type Outcome,
@@ -124,7 +134,7 @@ const READS_NOTHING: VerbDeps = {
     listPieces: () => {
       throw new Error("The pieces were read.");
     },
-    listCellKeys: () => {
+    getCellValue: () => {
       throw new Error("The cell was listed.");
     },
   },
@@ -139,6 +149,7 @@ function shuttleIn(pieces: PiecesController = PIECES): Shuttle {
     config: CONFIG,
     place: new CurrentPlace(SPACE),
     connection: new HeldConnection({ kind: "borrowed", pieces }),
+    session: new ShuttleSession(),
   };
 }
 
@@ -256,11 +267,31 @@ function collectionAt(slug: string): VerbDeps {
 
 /** Helper for the cases below, which stands `keys` in for a cell's keys. */
 function cellKeys(keys: string[]): VerbDeps {
+  return listedCell(Object.fromEntries(keys.map((key) => [key, "a value"])));
+}
+
+/** Helper for the cases below, which is the sentinel a stream reads as. */
+const STREAM = { $stream: true };
+
+/**
+ * Helper for the cases below, which reports a terminal `rows` rows tall and
+ * `columns` wide to `deps`, which is what bounds the page a verb writes.
+ *
+ * The width defaults wide enough that nothing a case writes wraps at it, so a
+ * case about the height states only the height. A case about the width states
+ * one narrow enough to wrap what it writes.
+ */
+function screen(rows: number, deps: VerbDeps, columns = 200): VerbDeps {
+  return { ...deps, rows: () => rows, columns: () => columns };
+}
+
+/** Helper for the cases below, which stands `value` in for a listed cell. */
+function listedCell(value: unknown): VerbDeps {
   return {
     ...READS_NOTHING,
     listing: {
       ...READS_NOTHING.listing,
-      listCellKeys: () => Promise.resolve(keys),
+      getCellValue: () => Promise.resolve(value),
     },
   };
 }
@@ -284,6 +315,19 @@ function wishing(result: unknown, error?: string): VerbDeps {
  */
 function addressed(link: string): VerbDeps {
   return wishing({ [LINK_MARKER_KEY]: link });
+}
+
+/**
+ * Helper for the cases below, which is the outcome `get` returns for a cell
+ * holding `value`.
+ *
+ * `get` writes its own rendering rather than handing the value back, because
+ * the rendering is what a page is cut from. The form is `renderValue`'s and is
+ * pinned where that lives; asking it here is what keeps one question with one
+ * answer.
+ */
+function writtenAs(value: unknown): Outcome {
+  return { kind: "text", text: renderValue(value) };
 }
 
 /** Helper for the cases below, which is the text `outcome` composed. */
@@ -315,6 +359,7 @@ const VERB_ARITY: readonly (readonly [
   ["get", "optional"],
   ["help", "optional"],
   ["ls", "none"],
+  ["more", "none"],
   ["pwd", "none"],
   ["where", "none"],
   ["wish", "required"],
@@ -333,6 +378,26 @@ const NEEDS_ONE: ReadonlyMap<string, string> = new Map([
 /** Helper for the cases below, which is every verb, in that same order. */
 const VERB_WORDS = VERB_ARITY.map(([word]) => word);
 
+/**
+ * Helper for the case that runs every verb, which is a line naming each: the
+ * verb, and whatever operand it needs to get past the dispatch's arity.
+ *
+ * It is a map rather than a list so that the case can be held to
+ * {@link VERB_WORDS}, which is itself held to the table. A verb added without
+ * a line here is a verb that case does not run, and the lookup is what says
+ * so.
+ */
+const LINE_PER_VERB: ReadonlyMap<string, string> = new Map([
+  ["cd", "cd .."],
+  ["get", "get"],
+  ["help", "help"],
+  ["ls", "ls"],
+  ["more", "more"],
+  ["pwd", "pwd"],
+  ["where", "where"],
+  ["wish", "wish #favorites"],
+]);
+
 describe("verbs", () => {
   describe("the dispatch", () => {
     it("returns nothing for a line naming no verb", async () => {
@@ -345,7 +410,7 @@ describe("verbs", () => {
       expect(await runLine("frob x", shuttleIn(), READS_NOTHING)).toEqual({
         kind: "refused",
         reason: "`frob` is not a verb. The verbs are `cd`, `get`, `help`, " +
-          "`ls`, `pwd`, `where`, and `wish`.",
+          "`ls`, `more`, `pwd`, `where`, and `wish`.",
       });
     });
 
@@ -371,7 +436,7 @@ describe("verbs", () => {
         expect(await runLine(word, shuttleIn(), READS_NOTHING)).toEqual({
           kind: "refused",
           reason: `\`${word}\` is not a verb. The verbs are \`cd\`, \`get\`, ` +
-            "`help`, `ls`, `pwd`, `where`, and `wish`.",
+            "`help`, `ls`, `more`, `pwd`, `where`, and `wish`.",
         });
       }
     });
@@ -406,21 +471,16 @@ describe("verbs", () => {
         const answers: VerbDeps = {
           getCellValue: () => Promise.resolve("a"),
           readWish: () => Promise.resolve({ result: "b" }),
-          listing: { listCellKeys: () => Promise.resolve(["title"]) },
+          listing: { getCellValue: () => Promise.resolve({ title: "a" }) },
         };
         const shuttle = atPiece();
-        for (
-          const line of [
-            "pwd",
-            "where",
-            "ls",
-            "get",
-            "wish #favorites",
-            "cd ..",
-            "help",
-          ]
-        ) {
-          await runLine(line, shuttle, answers);
+        for (const word of VERB_WORDS) {
+          const line = LINE_PER_VERB.get(word);
+          // A verb added without a line here fails rather than going unrun,
+          // which is what makes "whichever verb the line names" a claim over
+          // the table rather than over a list somebody kept up.
+          expect(line).toBeDefined();
+          await runLine(line!, shuttle, answers);
         }
       } finally {
         Deno.stdout.writeSync = stdout;
@@ -588,7 +648,7 @@ describe("verbs", () => {
       expect(reasonOf(await runLine("help frob", shuttleIn(), READS_NOTHING)))
         .toBe(
           "`frob` is not a verb. The verbs are `cd`, `get`, `help`, `ls`, " +
-            "`pwd`, `where`, and `wish`.",
+            "`more`, `pwd`, `where`, and `wish`.",
         );
     });
   });
@@ -785,6 +845,7 @@ describe("verbs", () => {
             kind: "borrowed",
             pieces: lookingUp(false),
           }),
+          session: new ShuttleSession(),
         };
         moved(shuttle.place, `/${HANDLE}`);
         const outcome = await runLine(
@@ -1375,7 +1436,7 @@ describe("verbs", () => {
         // shows that none was asked for.
 
         expect(await runLine("get title", atPiece(), cellValue("read")))
-          .toEqual({ kind: "value", value: "read" });
+          .toEqual(writtenAs("read"));
       });
     });
 
@@ -1654,11 +1715,11 @@ describe("verbs", () => {
   });
 
   describe("ls", () => {
-    it("returns the listing at the place, rendered", async () => {
+    it("returns the listing at the place, rendered and numbered", async () => {
       expect(await runLine("ls", atPiece(), cellKeys(["title", "body"])))
         .toEqual({
           kind: "text",
-          text: "title\nbody",
+          text: "%1 title\n%2 body",
         });
     });
 
@@ -1683,6 +1744,264 @@ describe("verbs", () => {
       await expect(runLine("ls", atPiece(), READS_NOTHING)).rejects.toThrow(
         "The cell was listed.",
       );
+    });
+
+    it("records the rows it numbered, with the place they stand in", async () => {
+      // The handle table B2's `call %4` reads. It is minted where the rows
+      // are, so a row's kind and its receiver come off one listing rather
+      // than off a second read taken later.
+
+      const shuttle = atPiece();
+      await runLine("ls", shuttle, listedCell({ "add-reply": STREAM }));
+      expect(shuttle.session.handles?.rows).toEqual([{
+        name: "add-reply",
+        kind: "callable",
+        operand: "add-reply",
+      }]);
+      expect(shuttle.session.handles?.place).toEqual(shuttle.place.place);
+    });
+
+    it("records the newest listing's rows, a listing resetting the numbering", async () => {
+      const shuttle = atPiece();
+      await runLine("ls", shuttle, cellKeys(["title"]));
+      await runLine("ls", shuttle, cellKeys(["topics"]));
+      expect(shuttle.session.handles?.rows.map((row) => row.name))
+        .toEqual(["topics"]);
+    });
+
+    it("writes one page of the listing and holds the rest", async () => {
+      const shuttle = atPiece();
+      const outcome = await runLine(
+        "ls",
+        shuttle,
+        screen(4, cellKeys(["a", "b", "c", "d", "e"])),
+      );
+      expect(textOf(outcome)).toBe(
+        "%1 a\n%2 b\n<3 lines not shown — more continues>",
+      );
+      expect(shuttle.session.continuation?.lines)
+        .toEqual(["%3 c", "%4 d", "%5 e"]);
+    });
+
+    it("numbers every row, page or no page, so a continuation keeps the numbering", async () => {
+      const shuttle = atPiece();
+      await runLine("ls", shuttle, screen(4, cellKeys(["a", "b", "c", "d"])));
+      expect(shuttle.session.handles?.rows.map((row) => row.name))
+        .toEqual(["a", "b", "c", "d"]);
+    });
+
+    it("holds nothing where the whole listing fit", async () => {
+      const shuttle = atPiece();
+      shuttle.session.holding({ lines: ["stale"] });
+      await runLine("ls", shuttle, screen(24, cellKeys(["a", "b"])));
+      expect(shuttle.session.continuation).toBeUndefined();
+    });
+
+    it("writes as many rows as `--limit` names, whatever the screen shows", async () => {
+      // The limit overrides the height rather than capping it: a person who
+      // asked for three rows on a screen showing twenty asked for three, and
+      // one who asked for three on a screen showing two asked for three.
+
+      for (const rows of [2, 24]) {
+        expect(
+          textOf(
+            await runLine(
+              "ls --limit 3",
+              atPiece(),
+              screen(rows, cellKeys(["a", "b", "c", "d"])),
+            ),
+          ),
+        ).toBe("%1 a\n%2 b\n%3 c\n<1 line not shown — more continues>");
+      }
+    });
+
+    it("writes as many rows as `--limit` names beside a listing that carries a bound", async () => {
+      // The bound is not a row of the listing, so it is not one of the rows a
+      // limit asks for. Counted among them, `ls --limit 1` at `slugs/` spent
+      // its whole allowance on the bound and printed no numbered row at all.
+
+      const shuttle = shuttleIn();
+      moved(shuttle.place, "slugs");
+      const written = textOf(
+        await runLine("ls --limit 1", shuttle, {
+          ...READS_NOTHING,
+          listing: {
+            ...READS_NOTHING.listing,
+            listSpaceSlugs: () =>
+              Promise.resolve([
+                { slug: "alpha", piece: HANDLE },
+                { slug: "beta", piece: BOARD },
+              ]),
+          },
+        }),
+      ).split("\n");
+      expect(written[0]).toBe(
+        "<the space's slug index names these, and a slug it never recorded " +
+          "still resolves>",
+      );
+      expect(written[1]).toBe("%1 alpha");
+      expect(written[2]).toBe("<1 line not shown — more continues>");
+    });
+
+    it("refuses a `--limit` that is no whole number of rows above zero", async () => {
+      // The parser's type test is what a number is, not what a count is, so
+      // the range is the verb's own. Each of these parses and none of them
+      // names a page.
+
+      for (const limit of ["0", "-1", "1.5"]) {
+        expect(
+          reasonOf(
+            await runLine(
+              `ls --limit ${limit}`,
+              atPiece(),
+              cellKeys(["a"]),
+            ),
+          ),
+        ).toBe(
+          "`ls --limit` takes a whole number of rows above zero, and was " +
+            `given ${limit}.`,
+        );
+      }
+    });
+
+    it("reads nothing for a `--limit` it refuses", async () => {
+      // The refusal is a fact about the line, so it is made before the read
+      // rather than after one: `READS_NOTHING` throws if the listing is
+      // reached.
+
+      expect(
+        (await runLine("ls --limit 0", atPiece(), READS_NOTHING)).kind,
+      ).toBe("refused");
+    });
+
+    it("bounds the page at the height the deps report", async () => {
+      // The height is read per line rather than once, so the number a case
+      // supplies is the number the page is cut to.
+
+      const outcome = await runLine(
+        "ls",
+        atPiece(),
+        screen(3, cellKeys(["a", "b", "c"])),
+      );
+      expect(textOf(outcome).split("\n").length).toBe(2);
+    });
+
+    it("says so where one row is taller than the whole page", async () => {
+      // The rule that something is always shown may not buy silence. A single
+      // name wider than the screen is shown whole — a truncated name is not
+      // one `cd` takes back — and the page says it ran over. The fixture
+      // straddles the budget: one row of 203 columns is three rows of an
+      // eighty-column screen, against a page of two.
+
+      const outcome = await runLine(
+        "ls",
+        atPiece(),
+        screen(3, cellKeys(["k".repeat(200)]), 80),
+      );
+      expect(textOf(outcome).split("\n").at(-1))
+        .toBe("<what is above fills more than the screen>");
+    });
+
+    it("says nothing of the sort where the row fits the page", async () => {
+      // The other side of that boundary: a name the page has room for is
+      // written with no status line at all.
+
+      const outcome = await runLine(
+        "ls",
+        atPiece(),
+        screen(3, cellKeys(["k".repeat(50)]), 80),
+      );
+      expect(textOf(outcome)).toBe(`%1 ${"k".repeat(50)}`);
+    });
+
+    it("bounds a listing whose rows wrap onto more than one row each", async () => {
+      // The same arithmetic through the other verb: four names each wider
+      // than the terminal is four rows of listing and eight rows of screen,
+      // and a page that counted lines let all four through.
+
+      const wide = ["a", "b", "c", "d"].map((name) => name.repeat(60));
+      const outcome = await runLine(
+        "ls",
+        atPiece(),
+        screen(6, cellKeys(wide), 40),
+      );
+      expect(textOf(outcome).split("\n").at(-1))
+        .toContain("not shown — more continues");
+    });
+
+    it("bounds the page at the assumed height where nothing says how tall the screen is", async () => {
+      // A verb driven with nothing behind it still bounds what it writes, and
+      // so does one whose terminal will not measure itself: a report that is
+      // no count of rows leads to the assumption rather than into arithmetic
+      // over it.
+
+      const names = Array.from({ length: 100 }, (_, index) => `k${index}`);
+      for (const rows of [undefined, () => 0, () => Number.NaN]) {
+        const outcome = await runLine("ls", atPiece(), {
+          ...cellKeys(names),
+          ...(rows === undefined ? {} : { rows }),
+        });
+        expect(textOf(outcome).split("\n").length).toBe(ASSUMED_ROWS - 1);
+      }
+    });
+  });
+
+  describe("more", () => {
+    it("writes the next page of a listing, under the numbers it already gave", async () => {
+      const shuttle = atPiece();
+      await runLine("ls", shuttle, screen(4, cellKeys(["a", "b", "c", "d"])));
+      expect(textOf(await runLine("more", shuttle, screen(4, READS_NOTHING))))
+        .toBe("%3 c\n%4 d");
+    });
+
+    it("writes the page after that one, and stops holding what it wrote", async () => {
+      const shuttle = atPiece();
+      await runLine(
+        "ls",
+        shuttle,
+        screen(3, cellKeys(["a", "b", "c", "d", "e"])),
+      );
+      expect(textOf(await runLine("more", shuttle, screen(3, READS_NOTHING))))
+        .toBe("%2 b\n<3 lines not shown — more continues>");
+      expect(textOf(await runLine("more", shuttle, screen(3, READS_NOTHING))))
+        .toBe("%3 c\n<2 lines not shown — more continues>");
+    });
+
+    it("leaves the handles the listing numbered where they were", async () => {
+      const shuttle = atPiece();
+      await runLine("ls", shuttle, screen(3, cellKeys(["a", "b", "c"])));
+      await runLine("more", shuttle, screen(3, READS_NOTHING));
+      expect(shuttle.session.handles?.rows.map((row) => row.name))
+        .toEqual(["a", "b", "c"]);
+    });
+
+    it("refuses where the last rendering fit whole", async () => {
+      const shuttle = atPiece();
+      await runLine("ls", shuttle, screen(24, cellKeys(["a"])));
+      expect(reasonOf(await runLine("more", shuttle, READS_NOTHING))).toBe(
+        "`more` writes the rest of a listing or a value that did not fit " +
+          "on one page, and nothing is waiting.",
+      );
+    });
+
+    it("refuses where no line has written a rendering at all", async () => {
+      expect(reasonOf(await runLine("more", atPiece(), READS_NOTHING)))
+        .toContain("nothing is waiting");
+    });
+
+    it("continues a value, carrying the offer the read made beside it", async () => {
+      // One mechanism and two producers: what a page held back is lines
+      // either way. The hint rides the continuation so that every page of one
+      // rendering makes the same offer, rather than the first page alone.
+
+      const shuttle = atPiece();
+      await runLine(
+        "get",
+        shuttle,
+        screen(4, cellValue({ a: 1, b: 2, c: 3, d: 4, e: 5 })),
+      );
+      expect(textOf(await runLine("more", shuttle, screen(4, READS_NOTHING))))
+        .toContain("--select narrows the read");
     });
   });
 
@@ -1732,6 +2051,7 @@ describe("verbs", () => {
           record: CONFIG,
           open: () => Promise.reject(new Error("The server refused.")),
         }),
+        session: new ShuttleSession(),
       };
       expect(textOf(await runLine("where", shuttle, READS_NOTHING)))
         .toBe(
@@ -1752,6 +2072,7 @@ describe("verbs", () => {
         config: { ...CONFIG, space: SPACE_NAME },
         place: new CurrentPlace(SPACE),
         connection: new HeldConnection({ kind: "borrowed", pieces: PIECES }),
+        session: new ShuttleSession(),
       };
       expect(textOf(await runLine("where", shuttle, READS_NOTHING))).toContain(
         `space     ${SPACE_NAME}\nposition  @${SPACE}/`,
@@ -1767,6 +2088,7 @@ describe("verbs", () => {
         config: { ...CONFIG, space: "boa\u009brd", identity: "/k\u007fey" },
         place: new CurrentPlace(SPACE),
         connection: new HeldConnection({ kind: "borrowed", pieces: PIECES }),
+        session: new ShuttleSession(),
       };
       const text = textOf(await runLine("where", shuttle, READS_NOTHING));
       expect(text).toContain("space     boa␦rd");
@@ -1778,9 +2100,7 @@ describe("verbs", () => {
   describe("get", () => {
     it("returns the value at the cell where shuttle stands", async () => {
       expect(await runLine("get", atPiece(), cellValue({ title: "a" })))
-        .toEqual(
-          { kind: "value", value: { title: "a" } },
-        );
+        .toEqual(writtenAs({ title: "a" }));
     });
 
     it("reads the piece the place stands on", async () => {
@@ -1937,7 +2257,7 @@ describe("verbs", () => {
           },
         },
       );
-      expect(outcome).toEqual({ kind: "value", value: "read" });
+      expect(outcome).toEqual(writtenAs("read"));
       expect(config?.piece).toBe(HANDLE);
     });
 
@@ -2041,6 +2361,274 @@ describe("verbs", () => {
         "A cell was read.",
       );
     });
+
+    describe("the projection options", () => {
+      // Decision 7 makes these `cf`'s own, so each case asks the parser `cf
+      // cell get` reads its flags through for what the read should have been
+      // handed, rather than restating a parsed shape here. A projection whose
+      // meaning changed on one surface reds these on the other.
+
+      /**
+       * Helper for the cases below, which is the selection the read was
+       * handed for `line`, and nothing where it was handed none.
+       */
+      async function selected(
+        line: string,
+      ): Promise<CellSelection | undefined> {
+        let selection: CellSelection | undefined;
+        await runLine(line, atPiece(), {
+          ...READS_NOTHING,
+          getCellValue: (_config, _path, options) => {
+            selection = options?.selection;
+            return Promise.resolve(null);
+          },
+        });
+        return selection;
+      }
+
+      it("hands the read the selection `--filter` parses to", async () => {
+        expect(await selected("get --filter .active"))
+          .toEqual(await parseCellSelectionOptions({ filter: ".active" }));
+      });
+
+      it("hands the read the selection `--select` parses to", async () => {
+        expect(await selected("get --select id,title"))
+          .toEqual(await parseCellSelectionOptions({ select: "id,title" }));
+      });
+
+      it("hands the read the selection `--schema` parses to", async () => {
+        expect(await selected(`get --schema '{"type":"object"}'`))
+          .toEqual(
+            await parseCellSelectionOptions({ schema: '{"type":"object"}' }),
+          );
+      });
+
+      it("hands the read a selection carrying both where the line wrote both", async () => {
+        expect(await selected("get --filter .active --select id"))
+          .toEqual(
+            await parseCellSelectionOptions({
+              filter: ".active",
+              select: "id",
+            }),
+          );
+      });
+
+      it("hands the read no selection where the line wrote none", async () => {
+        expect(await selected("get")).toBeUndefined();
+      });
+
+      it("refuses `--select` and `--schema` written together, as `cf cell get` does", async () => {
+        expect(
+          reasonOf(
+            await runLine(
+              "get --select a --schema b",
+              atPiece(),
+              READS_NOTHING,
+            ),
+          ),
+        )
+          .toContain('Option "--schema" conflicts with option "--select".');
+      });
+
+      it("raises what the parser threw that is no fact about the line", async () => {
+        // The arm beside the refusal, and the reason there are two. A
+        // selection the parser refuses is a fact about the line and comes
+        // back as a refusal in the parser's own sentence; anything else it
+        // throws is a fault in the parser, and a fault reported as a refusal
+        // would tell a person their line was wrong when it was not. Only a
+        // stand-in can produce one, the real parser wrapping even a missing
+        // `@file` as a selection error.
+
+        await expect(runLine("get --select title", atPiece(), {
+          ...READS_NOTHING,
+          parseCellSelectionOptions: () => {
+            throw new TypeError("The parser is broken.");
+          },
+        })).rejects.toThrow("The parser is broken.");
+      });
+
+      it("refuses a projection the parser will not take, in the parser's own words", async () => {
+        // A predicate that will not parse is a fact about the line, so it is
+        // refused rather than raised — and refused before the read, which
+        // `READS_NOTHING` is what shows.
+
+        expect(
+          reasonOf(
+            await runLine("get --filter '   '", atPiece(), READS_NOTHING),
+          ),
+        ).toBe("--filter predicate must not be empty");
+      });
+
+      it("writes JSON a program can parse, at a width that would wrap it", async () => {
+        // The flag's whole point, and the boundary it sits on: a hundred
+        // characters at eighty columns is a line the page would break, and a
+        // break inside a JSON string is not JSON at all — `JSON.parse`
+        // refuses a raw newline there. Nothing was paginated and nothing is
+        // waiting; the rewrite alone was enough to make it unreadable.
+
+        const held = "x".repeat(100);
+        const written = textOf(
+          await runLine(
+            "get --json",
+            atPiece(),
+            screen(24, cellValue(held), 80),
+          ),
+        );
+        expect(written.includes("\n")).toBe(false);
+        expect(JSON.parse(written)).toBe(held);
+      });
+
+      it("writes the whole value under `--json`, with nothing held back", async () => {
+        const shuttle = atPiece();
+        const held = Object.fromEntries(
+          Array.from({ length: 40 }, (_, index) => [`k${index}`, index]),
+        );
+        const written = textOf(
+          await runLine("get --json", shuttle, screen(6, cellValue(held), 80)),
+        );
+        expect(JSON.parse(written)).toEqual(held);
+        expect(shuttle.session.continuation).toBeUndefined();
+      });
+
+      it("clears what `more` was continuing, there being nothing to continue", async () => {
+        // A `--json` read writes no page, so it holds nothing back — and a
+        // `more` after it must not continue the line before it.
+
+        const shuttle = atPiece();
+        await runLine(
+          "get",
+          shuttle,
+          screen(4, cellValue({ a: 1, b: 2, c: 3 })),
+        );
+        expect(shuttle.session.continuation?.lines.length).toBeGreaterThan(0);
+        await runLine("get --json", shuttle, screen(4, cellValue({ a: 1 })));
+        expect(shuttle.session.continuation).toBeUndefined();
+      });
+
+      it("writes the `$UI` node under `--json`, which is a form nothing stands in for", async () => {
+        // The elision writes a string where an object was, which reads back
+        // as a value the fabric does not hold. A person reading is served by
+        // it; a program is misled by it.
+
+        const held = { [UI]: { type: "v" }, title: "a" };
+        const written = textOf(
+          await runLine("get --json", atPiece(), screen(24, cellValue(held))),
+        );
+        expect(JSON.parse(written)).toEqual(held);
+      });
+
+      it("takes `--json`, and writes what it writes without it", async () => {
+        // The flag says the output is machine-readable, which it is either
+        // way, exactly as on `cf cell get`. It is declared because a data
+        // verb takes `cf`'s read options, and a flag refused here and
+        // accepted there is the drift decision 7 exists to stop.
+
+        const value = { title: "a" };
+        expect(await runLine("get --json", atPiece(), cellValue(value)))
+          .toEqual(await runLine("get", atPiece(), cellValue(value)));
+        expect(await runLine("get --json", atPiece(), cellValue(value)))
+          .toEqual(writtenAs(value));
+      });
+
+      it("declares each option `cf cell get` declares under that name", async () => {
+        // The anti-drift half of decision 7, over the four this verb takes:
+        // a flag that stopped being `cf cell get`'s stops being one a shuttle
+        // page can promise means the same thing.
+
+        const declared = pieceDataCommand("get").getOptions()
+          .flatMap((option) => option.flags);
+        const page = textOf(
+          await runLine("get --help", atPiece(), READS_NOTHING),
+        );
+        for (const flag of ["--filter", "--select", "--schema", "--json"]) {
+          expect(declared).toContain(flag);
+          expect(page).toContain(flag);
+        }
+      });
+
+      it("writes the `$UI` node where the line named the fields it wants", async () => {
+        const held = { [UI]: { type: "v" } };
+        expect(
+          textOf(
+            await runLine("get --select '$UI'", atPiece(), cellValue(held)),
+          ),
+        )
+          .toBe(renderValue(held, { ui: true }));
+      });
+
+      it("stands in for the node where the line wrote a filter alone", async () => {
+        // A filter says which elements come back rather than what each holds,
+        // so it is not the line naming the fields it wants. The boundary the
+        // elision draws is the projection, and this is the side of it a
+        // `--filter` falls on.
+
+        expect(
+          textOf(
+            await runLine("get --filter .a", atPiece(), cellValue({ [UI]: 1 })),
+          ),
+        )
+          .toContain("<elided");
+      });
+
+      it("stands in for the node where the line wrote no option at all", async () => {
+        expect(textOf(await runLine("get", atPiece(), cellValue({ [UI]: 1 }))))
+          .toContain("<elided");
+      });
+    });
+
+    describe("the page a value is written on", () => {
+      it("writes one page of the value and holds the rest", async () => {
+        const shuttle = atPiece();
+        const outcome = await runLine(
+          "get",
+          shuttle,
+          screen(4, cellValue({ a: 1, b: 2, c: 3 })),
+        );
+        expect(textOf(outcome)).toBe(
+          '{\n  "a": 1,\n<3 lines not shown — more continues, or --select ' +
+            "narrows the read>",
+        );
+        expect(shuttle.session.continuation?.lines)
+          .toEqual(['  "b": 2,', '  "c": 3', "}"]);
+      });
+
+      it("bounds a value that is one long line, which wraps onto many rows", async () => {
+        // Finding 5's own case, at the shape that counting lines missed. A
+        // piece result that is one long string is one line and twenty-six
+        // rows on an eighty-column terminal: a page that counted lines wrote
+        // the whole of it and said nothing about a continuation, which floods
+        // the screen exactly as two hundred lines of vnode tree did.
+
+        const shuttle = atPiece();
+        const outcome = await runLine(
+          "get",
+          shuttle,
+          screen(24, cellValue("x".repeat(2000)), 80),
+        );
+        const written = textOf(outcome).split("\n");
+        expect(written.at(-1)).toContain("not shown — more continues");
+        expect(shuttle.session.continuation?.lines.length).toBeGreaterThan(0);
+      });
+
+      it("holds nothing where the whole value fit", async () => {
+        const shuttle = atPiece();
+        shuttle.session.holding({ lines: ["stale"] });
+        await runLine("get", shuttle, screen(24, cellValue({ a: 1 })));
+        expect(shuttle.session.continuation).toBeUndefined();
+      });
+
+      it("numbers no rows, a value being no listing", async () => {
+        // The two session objects are reset by different lines: a value that
+        // did not fit takes over what `more` continues and leaves `%3` naming
+        // the row the listing minted it for.
+
+        const shuttle = atPiece();
+        await runLine("ls", shuttle, screen(24, cellKeys(["a"])));
+        await runLine("get", shuttle, screen(3, cellValue({ a: 1, b: 2 })));
+        expect(shuttle.session.handles?.rows.map((row) => row.name))
+          .toEqual(["a"]);
+      });
+    });
   });
 
   describe("wish", () => {
@@ -2132,6 +2720,13 @@ describe("verbs", () => {
     // `ctrl-c` really arrives — while something is in flight. A signal
     // aborted before the line starts is the one case that does not need a
     // read to arrange it.
+    //
+    // A place is not the only thing a line adopts. The session beside it —
+    // what the last listing numbered, and what `more` writes next — is shared
+    // between lines just as the place is, so writing it after an await is an
+    // adoption and answers to the same check. The two cases at the end of
+    // this block are that: they let a cancelled read answer late and ask what
+    // it did to a session a newer line already owns.
 
     /** Helper for the cases below, which is a signal already aborted. */
     function cancelled(): AbortSignal {
@@ -2158,7 +2753,7 @@ describe("verbs", () => {
       "resolvePieceReference",
       "listSpaceSlugs",
       "listPieces",
-      "listCellKeys",
+      "listing.getCellValue",
       "entityIdExists",
     ] as const;
 
@@ -2247,9 +2842,9 @@ describe("verbs", () => {
             note("listPieces");
             return Promise.resolve([]);
           },
-          listCellKeys: () => {
-            note("listCellKeys");
-            return Promise.resolve([]);
+          getCellValue: () => {
+            note("listing.getCellValue");
+            return Promise.resolve({});
           },
         },
         signal: stopper.signal,
@@ -2309,7 +2904,7 @@ describe("verbs", () => {
       ["wish #favorites", atRoot, "readWish"],
       ["ls", atFacet("slugs"), "listSpaceSlugs"],
       ["ls", atFacet("pieces"), "listPieces"],
-      ["ls", onPiece, "listCellKeys"],
+      ["ls", onPiece, "listing.getCellValue"],
     ];
 
     it("issues no read after the cancel, on any line and from any read", async () => {
@@ -2332,7 +2927,7 @@ describe("verbs", () => {
      * with every read standing in as a throw, so a verb listed here that
      * reaches one fails instead of being excused by this list.
      */
-    const READS_NOTHING_AT_ALL = ["help", "pwd", "where"];
+    const READS_NOTHING_AT_ALL = ["help", "more", "pwd", "where"];
 
     it("cancels a line of every verb, or says why the verb has no read", async () => {
       // What closes the set of verbs, which is the gap the rows above had:
@@ -2355,10 +2950,14 @@ describe("verbs", () => {
         .toEqual([...new Set([...suspended, ...READS_NOTHING_AT_ALL])].sort());
 
       // And the excused ones are excused truthfully: every read throws, so a
-      // verb that reached one would raise rather than answer.
+      // verb that reached one would raise rather than answer. What each of
+      // them answers with is its own — `more` with nothing waiting refuses,
+      // where the other three write — so what is asserted is that the verb
+      // answered at all, which is what reaching no read buys it.
       for (const verb of READS_NOTHING_AT_ALL) {
         const outcome = await runLine(verb, shuttleIn(), READS_NOTHING);
-        expect({ verb, kind: outcome.kind }).toEqual({ verb, kind: "text" });
+        expect({ verb, answered: outcome.kind !== "interrupted" })
+          .toEqual({ verb, answered: true });
       }
     });
 
@@ -2437,6 +3036,118 @@ describe("verbs", () => {
       expect(read).toBe(0);
     });
 
+    /**
+     * Helper for the two cases below, which is a read a case starts and
+     * answers, and the event either side of it.
+     *
+     * The window these cases are about opens *after* a read is sent and
+     * closes when it answers: the guard in front of the read has already let
+     * it through, so what stops the answer taking effect is the guard on the
+     * adoption. A case that cancelled before the read started would be caught
+     * by the first guard and would say nothing about the second — which is
+     * what the first spelling of these cases did, and what the mutation on
+     * the adoption guard caught by surviving it.
+     */
+    function inFlight<T>(): {
+      started: Promise<void>;
+      answer(value: T): void;
+      read(): Promise<T>;
+    } {
+      const started = Promise.withResolvers<void>();
+      const answered = Promise.withResolvers<T>();
+      return {
+        started: started.promise,
+        answer: (value) => answered.resolve(value),
+        read: () => {
+          started.resolve();
+          return answered.promise;
+        },
+      };
+    }
+
+    /**
+     * Helper for the case below, which is a signal that reports itself
+     * un-aborted for the first `reads` questions and aborted after that.
+     *
+     * The window it stands for is the one a real `AbortController` cannot be
+     * made to show on demand: a cancel arriving between the dispatch's check
+     * and the guard's, which today are two questions with no suspension
+     * between them. `guarded`'s whole argument is that the next author cannot
+     * know which two statements those are — an await added in front of the
+     * read opens the window for real — so the arm behind it is driven here
+     * rather than left for that edit to discover.
+     */
+    function abortingAfter(reads: number): AbortSignal {
+      let asked = 0;
+      return {
+        get aborted() {
+          return asked++ >= reads;
+        },
+      } as unknown as AbortSignal;
+    }
+
+    it("numbers nothing where its guarded read came back cancelled", async () => {
+      // The arm the guard exists to have: a read it would not send comes back
+      // interrupted, and the verb stops there — no rows numbered, and the
+      // interruption handed on rather than tested for.
+
+      const shuttle = atPiece();
+      const outcome = await runLine("ls", shuttle, {
+        ...cellKeys(["a"]),
+        signal: abortingAfter(1),
+      });
+      expect(outcome).toEqual({ kind: "interrupted" });
+      expect(shuttle.session.handles).toBeUndefined();
+    });
+
+    it("numbers nothing where the listing it read was cancelled", async () => {
+      // The race the guard exists for, run in the order it really happens: a
+      // first `ls` is left in flight and cancelled, a second completes and
+      // owns the session, and only then does the first read answer. Unguarded
+      // the late answer wrote its rows over the newer ones, and `%1` named a
+      // row nobody could see.
+
+      const shuttle = atPiece();
+      const stopper = new AbortController();
+      const gate = inFlight<Record<string, string>>();
+      const first = runLine("ls", shuttle, {
+        ...READS_NOTHING,
+        listing: { ...READS_NOTHING.listing, getCellValue: gate.read },
+        signal: stopper.signal,
+      });
+      await gate.started;
+      stopper.abort();
+      await runLine("ls", shuttle, screen(24, cellKeys(["new"])));
+      expect(shuttle.session.handles?.rows.map((row) => row.name))
+        .toEqual(["new"]);
+      gate.answer({ old: "a value" });
+      expect((await first).kind).toBe("interrupted");
+      expect(shuttle.session.handles?.rows.map((row) => row.name))
+        .toEqual(["new"]);
+    });
+
+    it("holds nothing back where the value it read was cancelled", async () => {
+      // The same race through the other verb that writes the session. A
+      // cancelled `get` answering late replaced what `more` continues, so the
+      // next `more` wrote the tail of a value the person had abandoned.
+
+      const shuttle = atPiece();
+      const stopper = new AbortController();
+      const gate = inFlight<unknown>();
+      const first = runLine("get", shuttle, {
+        ...READS_NOTHING,
+        getCellValue: gate.read,
+        signal: stopper.signal,
+      });
+      await gate.started;
+      stopper.abort();
+      await runLine("get", shuttle, screen(24, cellValue({ a: 1 })));
+      expect(shuttle.session.continuation).toBeUndefined();
+      gate.answer({ b: 1, c: 2, d: 3, e: 4, f: 5, g: 6, h: 7, i: 8 });
+      expect((await first).kind).toBe("interrupted");
+      expect(shuttle.session.continuation).toBeUndefined();
+    });
+
     it("still refuses a line that was wrong, cancelled or not", async () => {
       // The reading of the words happens before the check, and it is worth
       // making either way: a line that named no verb is not a verb that was
@@ -2451,7 +3162,7 @@ describe("verbs", () => {
       ).toEqual({
         kind: "refused",
         reason: "`frob` is not a verb. The verbs are `cd`, `get`, `help`, " +
-          "`ls`, `pwd`, `where`, and `wish`.",
+          "`ls`, `more`, `pwd`, `where`, and `wish`.",
       });
     });
 

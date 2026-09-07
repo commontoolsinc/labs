@@ -22,7 +22,8 @@ import { announcingOutput } from "./announce.ts";
 import { type ConnectionOpener, HeldConnection } from "./connection.ts";
 import { CurrentPlace } from "./place.ts";
 import { runPrompt } from "./prompt.ts";
-import { withPromptTerminal } from "./terminal.ts";
+import { ShuttleSession } from "./session.ts";
+import { consoleColumns, consoleRows, withPromptTerminal } from "./terminal.ts";
 import type { Shuttle } from "./verbs.ts";
 
 /** What a run reaches the world through, so that a case can stand for it. */
@@ -68,7 +69,16 @@ export async function runShuttle(
       config,
       place: new CurrentPlace(pieces.getSpace()),
       connection,
+      session: new ShuttleSession(),
     };
-    await runPrompt(shuttle, terminal);
+    // How big the screen is arrives as functions rather than numbers, so a
+    // window resized mid-session bounds the next line at the size it has then.
+    // Both dimensions ride the deps bag because that is what already reaches
+    // every verb, and a verb writing a page is where both are wanted: a page
+    // is measured in rows, and a line becomes rows at the width.
+    await runPrompt(shuttle, terminal, {
+      rows: consoleRows,
+      columns: consoleColumns,
+    });
   });
 }

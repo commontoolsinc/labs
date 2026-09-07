@@ -137,21 +137,33 @@ differently from the rest of `cf`, which takes those two as ordinary slugs;
 [#6992](https://github.com/commontoolsinc/labs/issues/6992) retires the
 difference by refusing them as slug values.
 
-| Verb            | What it does                                                                                                                                                                                                                              |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cd <ref>`      | Moves the place, once the fabric says it is there. Takes relative segments, `..`, `-`, `/`, `.` for where you stand, `./<ref>` for a member and `.@scope` for the scope, rooted and complete references, slugs, and `#name` entry points. |
-| `ls`            | Lists what stands where you are: a space root's facets, the slugs the index records, the space's pieces, or the keys under a cell.                                                                                                        |
-| `pwd`           | The complete address of the place, both dimensions.                                                                                                                                                                                       |
-| `get [<ref>]`   | Reads the value at a cell, defaulting to where you stand. A trailing `#argument` reads the piece's arguments cell.                                                                                                                        |
-| `wish <#name>`  | Resolves a named entry point, exactly as `cf wish` does.                                                                                                                                                                                  |
-| `where`         | The whole ambient record: the connection, and the place `pwd` prints.                                                                                                                                                                     |
-| `help [<verb>]` | Lists the verbs, or writes one verb's page. `<verb> --help` writes the same page.                                                                                                                                                         |
+| Verb            | What it does                                                                                                                                                                                                                                                                   |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `cd <ref>`      | Moves the place, once the fabric says it is there. Takes relative segments, `..`, `-`, `/`, `.` for where you stand, `./<ref>` for a member and `.@scope` for the scope, rooted and complete references, slugs, and `#name` entry points.                                      |
+| `ls`            | Lists what stands where you are: a space root's facets, the slugs the index records, the space's pieces, or the keys under a cell. Rows are numbered, a row that is one of the piece's callables says so, and one screenful is written. `--limit <rows>` overrides the height. |
+| `pwd`           | The complete address of the place, both dimensions.                                                                                                                                                                                                                            |
+| `get [<ref>]`   | Reads the value at a cell, defaulting to where you stand. A trailing `#argument` reads the piece's arguments cell. Takes `cf cell get`'s read options — `--filter`, `--select`, `--schema`, `--json` — and writes one screenful of JSON, or the whole value under `--json`.    |
+| `wish <#name>`  | Resolves a named entry point, exactly as `cf wish` does.                                                                                                                                                                                                                       |
+| `more`          | Writes the next page of a listing or a value that did not fit, a listing continuing under the numbers it already gave its rows.                                                                                                                                                |
+| `where`         | The whole ambient record: the connection, and the place `pwd` prints.                                                                                                                                                                                                          |
+| `help [<verb>]` | Lists the verbs, or writes one verb's page. `<verb> --help` writes the same page.                                                                                                                                                                                              |
 
 A line is split POSIX-style — whitespace separates, quotes group — so a value
 holding a space is one operand when it is quoted, and anything shuttle prints as
 an operand is quoted where it has to be. Every refusal carries its reason. A
 read that failed is different: it is reported and the prompt reads the next
 line, since a shell whose server went away is still a shell.
+
+`ls` and `get` each write one page and hold the rest, because a listing of a
+populated space and the result of a piece are both larger than a screen. The
+page is the terminal's height less the prompt's own row, less one more for the
+status line saying how many lines were held back; `more` writes the next one.
+The bound is in screen rows rather than in lines, so a line wider than the
+terminal costs the rows it wraps onto — a value that is one long string is
+bounded as readily as one that is two hundred lines. A piece's `$UI` node is
+stood in for rather than written out, unless the line names the fields it wants
+— it is a vnode tree with data URIs in it, and `--select '$UI'` is what reads
+it.
 
 The keys are read while a line is running, so a slow server holds up neither the
 keyboard nor the screen. What you type during the wait is drawn as you type it,
@@ -190,11 +202,14 @@ The code is `lib/shuttle/`: `run.ts` composes a session, `place.ts` holds the
 place and what `cd` refuses, `connection.ts` the one `PiecesController` a
 process holds, `line.ts` the split and the printing that inverts it,
 `options.ts` the option grammar over the tokens after a verb, `listing.ts` what
-`ls` reads, `verbs.ts` the dispatch — which writes nothing — `help.ts` the form
-a verb's account of itself prints in, `prompt.ts` the loop that reads keys and
-runs a line beside them, `announce.ts` what a connection and a pattern write
-onto that loop's out-of-band line, `record.ts` the form `where` and `pwd` share,
-and `paint.ts` and `terminal.ts` the escape sequences and the raw mode under it.
+`ls` reads and what each row turns out to be, `verbs.ts` the dispatch — which
+writes nothing — `help.ts` the form a verb's account of itself prints in,
+`page.ts` how much of a rendering one page holds, `value.ts` how a value the
+fabric holds is written, `session.ts` what the last listing numbered and what
+`more` writes next, `prompt.ts` the loop that reads keys and runs a line beside
+them, `announce.ts` what a connection and a pattern write onto that loop's
+out-of-band line, `record.ts` the form `where` and `pwd` share, and `paint.ts`
+and `terminal.ts` the escape sequences and the raw mode under it.
 
 ## Cell references
 

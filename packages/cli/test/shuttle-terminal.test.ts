@@ -29,7 +29,8 @@ import {
   repaint,
 } from "../lib/shuttle/paint.ts";
 import type { PromptTerminal } from "../lib/shuttle/prompt.ts";
-import { withPromptTerminal } from "../lib/shuttle/terminal.ts";
+import { ASSUMED_ROWS } from "../lib/shuttle/page.ts";
+import { consoleRows, withPromptTerminal } from "../lib/shuttle/terminal.ts";
 import type { Key } from "../lib/view/keys.ts";
 
 /** The members a case stands in for. */
@@ -650,6 +651,78 @@ describe("terminal", () => {
         for await (const key of terminal.keys) keys.push(key);
       });
       expect(keys).toEqual([{ name: "up" }]);
+    });
+  });
+
+  describe("consoleRows()", () => {
+    // The height a page is bounded by, asked the way the width is: what the
+    // terminal says, then what the environment declares, then an assumption.
+    // Every source is stood in for, so the case says which one was read
+    // rather than what this machine's terminal happens to be.
+
+    /**
+     * Helper for the cases below, which is the rows read with `size` standing
+     * in for the terminal's own report and `lines` for `LINES`.
+     */
+    function rowsWith(
+      size: () => { columns: number; rows: number },
+      lines?: string,
+    ): number {
+      const priorSize = Deno.consoleSize;
+      const priorLines = Deno.env.get("LINES");
+      Deno.consoleSize = size;
+      if (lines === undefined) Deno.env.delete("LINES");
+      else Deno.env.set("LINES", lines);
+      try {
+        return consoleRows();
+      } finally {
+        Deno.consoleSize = priorSize;
+        if (priorLines === undefined) Deno.env.delete("LINES");
+        else Deno.env.set("LINES", priorLines);
+      }
+    }
+
+    /** Helper for the cases below, which is a terminal that will not answer. */
+    function silent(): never {
+      throw new Deno.errors.NotFound("No console.");
+    }
+
+    it("returns the rows the terminal reports", () => {
+      expect(rowsWith(() => ({ columns: 80, rows: 40 }), "12")).toBe(40);
+    });
+
+    it("returns what `LINES` declares where the terminal will not answer", () => {
+      expect(rowsWith(silent, "12")).toBe(12);
+    });
+
+    it("returns what `LINES` declares where the terminal reports no rows", () => {
+      // A terminal that cannot measure itself reports zero, which is no count
+      // of rows: a page bounded by it would write a line at a time forever.
+
+      expect(rowsWith(() => ({ columns: 80, rows: 0 }), "12")).toBe(12);
+    });
+
+    it("returns the assumed height where the environment declares no number", () => {
+      expect(rowsWith(silent, "tall")).toBe(ASSUMED_ROWS);
+    });
+
+    it("returns the assumed height where nothing says at all", () => {
+      expect(rowsWith(silent)).toBe(ASSUMED_ROWS);
+    });
+
+    it("reads `LINES` rather than `COLUMNS`", () => {
+      // The two dimensions read two variables, and the shared helper is where
+      // one could be read for the other. `COLUMNS` is set to a number this
+      // case would notice.
+
+      const priorColumns = Deno.env.get("COLUMNS");
+      Deno.env.set("COLUMNS", "99");
+      try {
+        expect(rowsWith(silent, "12")).toBe(12);
+      } finally {
+        if (priorColumns === undefined) Deno.env.delete("COLUMNS");
+        else Deno.env.set("COLUMNS", priorColumns);
+      }
     });
   });
 });

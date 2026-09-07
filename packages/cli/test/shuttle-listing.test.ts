@@ -32,11 +32,13 @@ import { HeldConnection } from "../lib/shuttle/connection.ts";
 import { splitLine } from "../lib/shuttle/line.ts";
 import { readsAsOption } from "../lib/shuttle/options.ts";
 import {
+  handleFor,
   type Listing,
   type ListingDeps,
+  listingLines,
   type ListingRow,
   listPlace,
-  renderListing,
+  type RowKind,
 } from "../lib/shuttle/listing.ts";
 import { CurrentPlace, type Facet, type Place } from "../lib/shuttle/place.ts";
 import { moved } from "./shuttle-place-helpers.ts";
@@ -59,7 +61,7 @@ const READS_NOTHING: ListingDeps = {
   listPieces: () => {
     throw new Error("The pieces were read.");
   },
-  listCellKeys: () => {
+  getCellValue: () => {
     throw new Error("The cell was read.");
   },
 };
@@ -112,9 +114,26 @@ function spacePieces(rows: { id: string; error?: string }[]): ListingDeps {
   return { ...READS_NOTHING, listPieces: () => Promise.resolve(rows) };
 }
 
-/** Helper for the cases below, which stands `keys` in for a cell's keys. */
+/**
+ * Helper for the cases below, which stands a cell holding `keys` in for the
+ * one a listing reads, each key holding an ordinary value.
+ *
+ * A listing reads the level's value rather than a list of names, so a case
+ * stands in a value: `keysOf` is what names the rows off it, which is the same
+ * seam `listCellKeys` names its own off.
+ */
 function cellKeys(keys: string[]): ListingDeps {
-  return { ...READS_NOTHING, listCellKeys: () => Promise.resolve(keys) };
+  return cellHolding(Object.fromEntries(keys.map((key) => [key, "a value"])));
+}
+
+/** Helper for the cases below, which stands `value` in for a cell's value. */
+function cellHolding(value: unknown): ListingDeps {
+  return { ...READS_NOTHING, getCellValue: () => Promise.resolve(value) };
+}
+
+/** Helper for the cases below, which is `names` with no name written twice. */
+function unique(names: readonly string[]): string[] {
+  return [...new Set(names)];
 }
 
 /** Helper for the cases below, which lists `place` over `deps`. */
@@ -152,9 +171,9 @@ describe("listing", () => {
             reads++;
             return Promise.resolve([]);
           },
-          listCellKeys: () => {
+          getCellValue: () => {
             reads++;
-            return Promise.resolve([]);
+            return Promise.resolve({});
           },
         });
         expect(reads).toBe(0);
@@ -196,6 +215,7 @@ describe("listing", () => {
         );
         expect(listing.rows).toEqual([{
           name: "board",
+          kind: "slug",
           operand: "board",
           error: "Slug redirects to no piece.",
         }]);
@@ -220,7 +240,7 @@ describe("listing", () => {
           inFacet("slugs"),
           slugIndex([{ slug: "Board", piece: HANDLE }]),
         );
-        expect(listing.rows).toEqual([{ name: "Board" }]);
+        expect(listing.rows).toEqual([{ name: "Board", kind: "slug" }]);
       });
 
       it("returns a bound saying the index is what was listed", async () => {
@@ -259,6 +279,7 @@ describe("listing", () => {
         );
         expect(listing.rows).toEqual([{
           name: HANDLE,
+          kind: "piece",
           operand: HANDLE,
           error: "The piece would not load.",
         }]);
@@ -290,9 +311,9 @@ describe("listing", () => {
         let piece: string | undefined;
         await list(place, {
           ...READS_NOTHING,
-          listCellKeys: (config) => {
+          getCellValue: (config) => {
             piece = config.piece;
-            return Promise.resolve([]);
+            return Promise.resolve({});
           },
         });
         expect(piece).toBe("board");
@@ -304,9 +325,9 @@ describe("listing", () => {
         let scope: string | undefined;
         await list(place, {
           ...READS_NOTHING,
-          listCellKeys: (config) => {
+          getCellValue: (config) => {
             scope = config.pieceScope;
-            return Promise.resolve([]);
+            return Promise.resolve({});
           },
         });
         expect(scope).toBe("session");
@@ -316,9 +337,9 @@ describe("listing", () => {
         let path: (string | number)[] | undefined;
         await list(atPiece("topics", "3"), {
           ...READS_NOTHING,
-          listCellKeys: (config) => {
-            path = config.piecePath;
-            return Promise.resolve([]);
+          getCellValue: (_config, given) => {
+            path = given;
+            return Promise.resolve({});
           },
         });
         expect(path).toEqual(["topics", 3]);
@@ -327,6 +348,90 @@ describe("listing", () => {
       it("returns no bound, a cell's keys being all of them", async () => {
         const listing = await list(atPiece(), cellKeys(["title"]));
         expect(listing.bound).toBeUndefined();
+      });
+    });
+
+    describe("what a row turned out to be", () => {
+      // A row's kind is recorded where the row is made, which is what lets a
+      // handle minted off a listing say what it stands for. Each case drives
+      // the read that produces the kind rather than constructing a row, so
+      // what is pinned is the classification and not the type.
+
+      it("returns a facet row as a container", async () => {
+        const listing = await list(atSpaceRoot(), READS_NOTHING);
+        expect(listing.rows.map((row) => row.kind)).toEqual([
+          "container",
+          "container",
+        ]);
+      });
+
+      it("returns an index row as a slug", async () => {
+        const listing = await list(
+          inFacet("slugs"),
+          slugIndex([{ slug: "board", piece: HANDLE }]),
+        );
+        expect(listing.rows[0].kind).toBe("slug");
+      });
+
+      it("returns a piece row as a piece", async () => {
+        const listing = await list(
+          inFacet("pieces"),
+          spacePieces([{
+            id: HANDLE,
+          }]),
+        );
+        expect(listing.rows[0].kind).toBe("piece");
+      });
+
+      it("returns a key by what the cell holds at it", async () => {
+        // The boundary the classification draws, from both sides at once: a
+        // stream is the piece's callable, an array and an object are walked
+        // into, and everything else is where a path ends. `null` is the pair
+        // that straddles the object test, being an object to `typeof` and not
+        // a container to anything else.
+
+        const listing = await list(
+          atPiece(),
+          cellHolding({
+            "add-reply": { $stream: true },
+            topics: [1, 2],
+            author: { name: "a" },
+            title: "a",
+            replies: 14,
+            done: false,
+            nothing: null,
+          }),
+        );
+        expect(
+          Object.fromEntries(listing.rows.map((row) => [row.name, row.kind])),
+        ).toEqual({
+          "add-reply": "callable",
+          topics: "container",
+          author: "container",
+          title: "value",
+          replies: "value",
+          done: "value",
+          nothing: "value",
+        });
+      });
+
+      it("returns a key holding a `$stream` that is not the marker as a container", async () => {
+        // The sentinel is the whole marker and not the key: a stored object
+        // that happens to carry the name is data, and calling it a callable
+        // would mint a handle `call` cannot use. `isStreamValue` is what
+        // draws that line, and this is the value on the far side of it.
+
+        const listing = await list(
+          atPiece(),
+          cellHolding({ notes: { $stream: "later" } }),
+        );
+        expect(listing.rows[0].kind).toBe("container");
+      });
+
+      it("returns an array's indices as rows of what each element is", async () => {
+        const listing = await list(atPiece(), cellHolding([{ a: 1 }, "b"]));
+        expect(listing.rows.map((row) => [row.name, row.kind]))
+          .toEqual([["0", "container"], ["1", "value"]]);
       });
     });
 
@@ -366,9 +471,9 @@ describe("listing", () => {
         let loaded: PiecesController | undefined;
         await listPlace(CONFIG, atPiece().place, held.connection, {
           ...READS_NOTHING,
-          listCellKeys: async (config, _path, _options, deps) => {
+          getCellValue: async (config, _path, _options, deps) => {
             loaded = await deps?.loadPieces?.(config);
-            return [];
+            return {};
           },
         });
         expect(loaded).toBe(held.pieces);
@@ -384,32 +489,107 @@ describe("listing", () => {
     });
   });
 
-  describe("renderListing()", () => {
+  describe("listingLines()", () => {
+    // A row's line opens with the handle a person types to name it again and
+    // the name comes next, so every expectation here reads the two together.
+    // What the handle is written as is `handleFor`'s, read from the module
+    // rather than restated, so a case pins the layout and not the spelling.
+
+    /**
+     * Helper for the cases below, which is the row lines `listing` prints as.
+     * The bound comes back beside them and the cases that care ask for it.
+     */
+    function lines(listing: Listing): readonly string[] {
+      return listingLines(listing).rows;
+    }
+
+    /** Helper for the cases below, which is a row of `kind` called `name`. */
+    function row(
+      name: string,
+      kind: RowKind = "value",
+      rest: Partial<ListingRow> = {},
+    ): ListingRow {
+      return { name, kind, operand: name, ...rest };
+    }
+
     it("returns one line per row", () => {
-      expect(renderListing({
-        rows: [
-          { name: "title", operand: "title" },
-          { name: "body", operand: "body" },
-        ],
-      })).toBe("title\nbody");
+      expect(lines({ rows: [row("title"), row("body")] }))
+        .toEqual(["%1 title", "%2 body"]);
     });
 
-    it("returns the operand as the line, not the name", () => {
-      expect(renderListing({
-        rows: [{ name: "..", operand: "/@space/of:fid1:x@space/.." }],
-      })).toBe("/@space/of:fid1:x@space/..");
+    it("returns the rows numbered from one, in the order listed", () => {
+      // The numbers are written out rather than read back from `handleFor`,
+      // which is what keeps the case able to fail: a numbering that started
+      // at zero, or ran backwards, would move both sides of an assertion
+      // that asked the module what it numbers by.
+
+      const listing = { rows: ["a", "b", "c"].map((name) => row(name)) };
+      expect(lines(listing).map((line) => line.split(" ")[0]))
+        .toEqual(["%1", "%2", "%3"]);
+    });
+
+    it("numbers a row by the handle `handleFor` spells", () => {
+      // The other half, and the one that may read the module: what a listing
+      // numbers with is the spelling B2 reads `%n` back through, so the two
+      // are held to one another rather than each to a literal of its own.
+
+      const listing = { rows: [row("a")] };
+      expect(lines(listing)[0]).toBe(`${handleFor(1)} a`);
+    });
+
+    it("returns every handle in a column the widest of them sets", () => {
+      // Ten rows is where the widest handle grows a character, so the names
+      // of the first nine start one column further right than they would in
+      // a listing of nine. A column measured off the count rather than off
+      // each handle is what puts them all in one place.
+
+      const listing = { rows: Array.from({ length: 10 }, () => row("a")) };
+      expect(lines(listing)[0]).toBe(" %1 a");
+      expect(lines(listing)[9]).toBe("%10 a");
+    });
+
+    it("returns the operand as the name, not the name itself", () => {
+      expect(lines({
+        rows: [{
+          name: "..",
+          kind: "value",
+          operand: "/@space/of:fid1:x@space/..",
+        }],
+      })).toEqual(["%1 /@space/of:fid1:x@space/.."]);
     });
 
     it("returns a marker in place of a name for a row with no operand", () => {
-      expect(renderListing({ rows: [{ name: "#b" }] })).toBe(
-        "<no operand: '#b'>",
-      );
+      expect(lines({ rows: [{ name: "#b", kind: "value" }] }))
+        .toEqual(["%1 <no operand: '#b'>"]);
     });
 
     it("returns a marker that writes no name where the name holds a line break", () => {
-      expect(renderListing({ rows: [{ name: "a\nb" }] })).toBe(
-        "<no operand: a name holding a line break>",
-      );
+      expect(lines({ rows: [{ name: "a\nb", kind: "value" }] }))
+        .toEqual(["%1 <no operand: a name holding a line break>"]);
+    });
+
+    it("returns a callable row annotated as callable, after its name", () => {
+      expect(lines({ rows: [row("add-reply", "callable")] }))
+        .toEqual(["%1 add-reply <callable>"]);
+    });
+
+    it("returns no annotation on a row of any other kind", () => {
+      // A projection over every kind rather than a spot check: the module
+      // annotates from a table closed against `RowKind`, and this is the
+      // reading of that table from outside. A kind added without a decision
+      // reds the module; a kind that started being annotated reds this.
+
+      const annotated: Record<RowKind, boolean> = {
+        container: false,
+        value: false,
+        callable: true,
+        piece: false,
+        slug: false,
+      };
+      for (const [kind, marked] of Object.entries(annotated)) {
+        expect(lines({ rows: [row("a", kind as RowKind)] })[0])
+          .toBe(marked ? "%1 a <callable>" : "%1 a");
+      }
     });
 
     it("returns a row's error with each acted-on character shown as its glyph", () => {
@@ -417,25 +597,23 @@ describe("listing", () => {
       // merely inert: nothing is dropped and nothing is described away. This
       // is the live one — an error is the fabric's text, not shuttle's.
 
-      const line = renderListing({
-        rows: [{
-          name: "board",
-          operand: "board",
+      const line = lines({
+        rows: [row("board", "slug", {
           error: "gone\u001b[31m: \u007f and \u009b too",
-        }],
-      });
-      expect(line).toBe("board <error: gone␛[31m: ␡ and ␦ too>");
+        })],
+      })[0];
+      expect(line).toBe("%1 board <error: gone␛[31m: ␡ and ␦ too>");
       expect(/\p{Cc}/u.test(line)).toBe(false);
     });
 
     it("returns a bound with one shown the same way", () => {
       // No bound the module builds can hold one — `SLUG_INDEX_BOUND` is a
       // constant — so this case is constructed rather than found. What it
-      // guards is `renderListing`'s contract, which takes any listing a caller
+      // guards is `listingLines`'s contract, which takes any listing a caller
       // hands it, rather than the one call the module makes.
 
-      const line = renderListing({ rows: [], bound: "412 items\u001b[31m" });
-      expect(line).toBe("<412 items␛[31m>");
+      expect(listingLines({ rows: [], bound: "412 items\u001b[31m" }).bound)
+        .toBe("<412 items␛[31m>");
     });
 
     it("returns an error's angle brackets as they stand", () => {
@@ -443,9 +621,8 @@ describe("listing", () => {
       // is that brackets delimit for a reader and not for a parser. A payload
       // may hold one, and this stays true beside the escaping.
 
-      expect(renderListing({
-        rows: [{ name: "board", operand: "board", error: "<gone>" }],
-      })).toBe("board <error: <gone>>");
+      expect(lines({ rows: [row("board", "slug", { error: "<gone>" })] }))
+        .toEqual(["%1 board <error: <gone>>"]);
     });
 
     it("returns a message holding a line break with it written as a space", () => {
@@ -453,9 +630,8 @@ describe("listing", () => {
       // so a message stays one row, where the rest become glyphs so a message
       // cannot instruct the terminal.
 
-      expect(renderListing({
-        rows: [{ name: "board", operand: "board", error: "two\nlines" }],
-      })).toBe("board <error: two lines>");
+      expect(lines({ rows: [row("board", "slug", { error: "two\nlines" })] }))
+        .toEqual(["%1 board <error: two lines>"]);
     });
 
     it("returns a marker that writes no name where the name holds a control character", () => {
@@ -464,21 +640,16 @@ describe("listing", () => {
       // Writing it there would put back on the screen exactly what refusing
       // the name kept off it.
 
-      const line = renderListing({ rows: [{ name: "ti\u001b[31mtle" }] });
-      expect(line).toBe("<no operand: a name holding a control character>");
+      const line =
+        lines({ rows: [{ name: "ti\u001b[31mtle", kind: "value" }] })[0];
+      expect(line).toBe("%1 <no operand: a name holding a control character>");
       expect(line.includes("\u001b")).toBe(false);
     });
 
     it("returns a row's error after its name", () => {
-      expect(renderListing({
-        rows: [{ name: "board", operand: "board", error: "No piece there." }],
-      })).toBe("board <error: No piece there.>");
-    });
-
-    it("returns an error's line breaks written as spaces", () => {
-      expect(renderListing({
-        rows: [{ name: "board", operand: "board", error: "No piece.\nboard" }],
-      })).toBe("board <error: No piece. board>");
+      expect(lines({
+        rows: [row("board", "slug", { error: "No piece there." })],
+      })).toEqual(["%1 board <error: No piece there.>"]);
     });
 
     it("returns a bound's line breaks written as spaces", () => {
@@ -488,16 +659,28 @@ describe("listing", () => {
       // what it holds is that a bound answers to the same one-line rule an
       // error does.
 
-      expect(renderListing({ rows: [], bound: "Two lines.\nboard" })).toBe(
-        "<Two lines. board>",
-      );
+      expect(listingLines({ rows: [], bound: "Two lines.\nboard" }).bound)
+        .toBe("<Two lines. board>");
     });
 
-    it("returns the bound on a line of its own, after the rows", () => {
-      expect(renderListing({
-        rows: [{ name: "board", operand: "board" }],
+    it("returns the bound beside the rows rather than among them", () => {
+      // Beside rather than among, because a page treats the two differently:
+      // it cuts rows and always shows the bound, and `--limit` counts rows
+      // and never counts the bound. A bound folded in with the rows was one
+      // a limit of one spent its whole allowance on.
+
+      expect(listingLines({
+        rows: [row("board", "slug")],
         bound: "these are the ones the index names",
-      })).toBe("board\n<these are the ones the index names>");
+      })).toEqual({
+        bound: "<these are the ones the index names>",
+        rows: ["%1 board"],
+      });
+    });
+
+    it("returns no bound where the listing carries none", () => {
+      expect(listingLines({ rows: [row("board", "slug")] }))
+        .toEqual({ rows: ["%1 board"] });
     });
   });
 
@@ -507,22 +690,23 @@ describe("listing", () => {
     // row it has no operand for prints no name at all, so nothing on the
     // surface invites a reader to type a string that reaches somewhere else.
     //
-    // A named row's line never opens with `<`, which is what keeps a name and
-    // a marker apart on one surface. `quoteToken` is the whole of that
+    // A named row's name column never opens with `<`, which is what keeps a
+    // name and a marker apart on one surface. `quoteToken` is the whole of that
     // mechanism and it lives a module away: `<` is one of the characters the
     // grammar reserves, so a name holding one is printed quoted and can never
     // open with it. Nothing in this module would notice if that stopped being
     // true, which is why the assertion is here and the mutation that reds it
     // is in `line.ts`.
     //
-    // The property is over the front of a printed line and not over the whole
-    // of it. A row that carries an error prints the name and then a marker, so
-    // the two are one string for some rows and not for others; and an error is
-    // text the fabric wrote, which may hold an odd quote and leave the line as
-    // a whole refusing to split. What holds of every named row is that the
-    // line opens with the name, that the name is one token `cd` takes back to
-    // the row, and that anything after it is separated from it — which is what
-    // "copied off the front" means and all it can mean.
+    // The property is over the name column of a printed line and not over the
+    // whole of it. A line opens with the row's handle, and a row that carries
+    // an error prints a marker after the name, so the name is the whole of the
+    // line for no row at all; and an error is text the fabric wrote, which may
+    // hold an odd quote and leave the line as a whole refusing to split. What
+    // holds of every named row is that the name column holds one token `cd`
+    // takes back to the row, and that anything after it is separated from it —
+    // which is what "copied out of the name column" means and all it can
+    // mean.
     //
     // A name is read twice on the way back, and both readings are asked. The
     // option grammar reads it first — a token opening with `-` reaches a verb
@@ -652,7 +836,12 @@ describe("listing", () => {
        * Helper for this case, which holds the property over one row and the
        * line it printed, `standing` being a place at the row's own level.
        */
-      function check(standing: CurrentPlace, row: ListingRow, line: string) {
+      function check(
+        standing: CurrentPlace,
+        row: ListingRow,
+        line: string,
+        handle: string,
+      ) {
         // Everything true of every line goes above the branch. A row's error
         // is printed whether or not the row has an operand, and this branch
         // has twice been where a dimension reached one arm and not the other:
@@ -662,15 +851,21 @@ describe("listing", () => {
         expect(/ <error: [^\n]*>$/.test(line)).toBe(row.error !== undefined);
         if (row.error !== undefined) reported++;
 
+        // The handle column comes off first, and the property is over what is
+        // left. Reading it off the line rather than assuming its width is what
+        // makes the case say the same thing at every listing length.
+        expect(line.startsWith(`${handle} `)).toBe(true);
+        const printed = line.slice(handle.length + 1);
+
         if (row.operand === undefined) {
-          expect(line.startsWith("<")).toBe(true);
+          expect(printed.startsWith("<")).toBe(true);
           unnamed++;
           if (row.error !== undefined) reportedWithoutOperand++;
           return;
         }
-        expect(line.startsWith("<")).toBe(false);
-        expect(line.startsWith(row.operand)).toBe(true);
-        const rest = line.slice(row.operand.length);
+        expect(printed.startsWith("<")).toBe(false);
+        expect(printed.startsWith(row.operand)).toBe(true);
+        const rest = printed.slice(row.operand.length);
         expect(rest === "").toBe(row.error === undefined);
         if (rest !== "") expect(rest.startsWith(" <")).toBe(true);
         const from = standing.place;
@@ -708,14 +903,18 @@ describe("listing", () => {
           names: candidates(HANDLE.slice(0, 10), HANDLE.slice(10)),
         },
         {
+          // A cell holds each name once, so the candidates are deduplicated
+          // for the two sources that stand names in as a cell's keys. The
+          // property is over each name rather than over the list, so a name
+          // written twice adds nothing to it either way.
           standing: () => atPiece(),
           deps: (names) => cellKeys(names),
-          names: candidates("b", "c"),
+          names: unique(candidates("b", "c")),
         },
         {
           standing: () => atPiece("topics"),
           deps: (names) => cellKeys(names),
-          names: candidates("b", "c"),
+          names: unique(candidates("b", "c")),
         },
       ];
 
@@ -724,13 +923,19 @@ describe("listing", () => {
           source.standing(),
           source.deps(source.names),
         );
-        const lines = renderListing(listing).split("\n");
+        const lines = listingLines(listing).rows;
+        expect(new Set(listing.rows.map((row) => row.name)))
+          .toEqual(new Set(source.names));
         expect(listing.rows.length).toBe(source.names.length);
-        expect(lines.length).toBe(
-          listing.rows.length + (listing.bound === undefined ? 0 : 1),
-        );
+        expect(lines.length).toBe(listing.rows.length);
+        const column = handleFor(listing.rows.length).length;
         for (const [index, row] of listing.rows.entries()) {
-          check(source.standing(), row, lines[index]);
+          check(
+            source.standing(),
+            row,
+            lines[index],
+            handleFor(index + 1).padStart(column),
+          );
         }
       }
 

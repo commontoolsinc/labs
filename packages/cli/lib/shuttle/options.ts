@@ -21,6 +21,12 @@
  * `--help` is added to every table here rather than declared by each verb,
  * which is what makes it an option every verb takes rather than one each verb
  * remembered to offer.
+ *
+ * What the parse hands back is a record of names, since that is what a parser
+ * reading a table at run time can hand back. {@link optionString} and the two
+ * beside it are how a verb reads one: each collects the promise the
+ * declaration made about a type, so a verb writes the option's name once and
+ * casts nowhere.
  */
 
 import { type FlagOptions, parseFlags, ValidationError } from "@cliffy/flags";
@@ -47,8 +53,38 @@ const HELP_OPTION: FlagOptions = {
   standalone: true,
 };
 
-/** What one option a verb declares looks like, which is what `cf` declares. */
-export type VerbOption = FlagOptions;
+/**
+ * What one option a verb declares looks like: what `cf` declares, so the
+ * parse is the same one, plus the two things a page needs and a parse does
+ * not.
+ *
+ * `description` is what the verb's page writes beside the option, and it is
+ * required rather than optional because an option nothing describes is one a
+ * reader of the page learns the spelling of and nothing else.
+ * `placeholder` names the value on that page — `--filter <predicate>` rather
+ * than `--filter <string>` — and is absent for an option that takes none,
+ * which is exactly the options `type` is absent for.
+ */
+export type VerbOption = FlagOptions & {
+  /** What the option does, in the line the verb's page writes for it. */
+  readonly description: string;
+
+  /** What the option's value is called on that page. */
+  readonly placeholder?: string;
+};
+
+/**
+ * What the options a line set came back as: each declared option by name,
+ * carrying whatever the parser read for it.
+ *
+ * It is the parser's own record rather than a shape per verb, because the
+ * types in it are the declaration's promise and not this type's: an option
+ * declared `type: "number"` arrives a number or does not arrive.
+ * {@link optionString} and the two beside it are where that promise is
+ * collected, so a verb reads a value at the type it declared and nothing
+ * casts.
+ */
+export type VerbOptions = Readonly<Record<string, unknown>>;
 
 /** What reading a verb's tokens produced. */
 export type OptionReading =
@@ -57,7 +93,7 @@ export type OptionReading =
   /** The options the line set, by name, and the operands after them. */
   | {
     readonly kind: "read";
-    readonly options: Readonly<Record<string, unknown>>;
+    readonly options: VerbOptions;
     readonly operands: readonly string[];
   }
   /** The line is refused, for the reason given. */
@@ -123,4 +159,71 @@ export function readOptions(
  */
 export function readsAsOption(token: string): boolean {
   return token.startsWith("-") && token !== "-";
+}
+
+/**
+ * What an option named `name` in `options` holds, where the verb declared it
+ * `type: "string"`, and nothing where the line did not write it.
+ *
+ * @throws Error if it holds anything else, which is a fault in the verb's
+ * table rather than in what was typed: the parser refuses a value of the
+ * wrong type before it ever gets here, so the only way to reach this is to
+ * declare one type and read another.
+ */
+export function optionString(
+  options: VerbOptions,
+  name: string,
+): string | undefined {
+  return declaredAs(options, name, "string") as string | undefined;
+}
+
+/**
+ * What an option named `name` in `options` holds, where the verb declared it
+ * with no value at all: whether the line wrote it.
+ *
+ * @throws Error under {@link optionString}'s condition, for the same reason.
+ */
+export function optionFlag(options: VerbOptions, name: string): boolean {
+  return declaredAs(options, name, "boolean") === true;
+}
+
+/**
+ * What an option named `name` in `options` holds, where the verb declared it
+ * `type: "number"`, and nothing where the line did not write it.
+ *
+ * What comes back is a number and not a count: the parser takes a negative and
+ * a fraction as readily as a whole one, so a verb wanting a count says so
+ * itself and refuses the rest in its own words.
+ *
+ * @throws Error under {@link optionString}'s condition, for the same reason.
+ */
+export function optionNumber(
+  options: VerbOptions,
+  name: string,
+): number | undefined {
+  return declaredAs(options, name, "number") as number | undefined;
+}
+
+/**
+ * Helper for the three readers above, which is what `name` holds in `options`
+ * once it is `type` or absent.
+ *
+ * The three share one check because they make one claim, differing only in
+ * which type the verb promised. Stating it once is what keeps a fourth reader
+ * from being a fourth place the promise could be worded differently.
+ *
+ * @throws Error if the value is neither, naming the option and both types, so
+ * that a table and a reading that disagree say which two they are.
+ */
+function declaredAs(
+  options: VerbOptions,
+  name: string,
+  type: "string" | "boolean" | "number",
+): unknown {
+  const held = options[name];
+  if (held === undefined || typeof held === type) return held;
+  throw new Error(
+    `The option \`--${name}\` is declared to hold a ${type} and holds a ` +
+      `${typeof held}.`,
+  );
 }

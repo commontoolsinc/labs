@@ -14,6 +14,7 @@
  */
 
 import { decodeKeys, type Key } from "../view/keys.ts";
+import { ASSUMED_COLUMNS, ASSUMED_ROWS } from "./page.ts";
 import {
   above,
   finish,
@@ -25,9 +26,6 @@ import type { PromptTerminal } from "./prompt.ts";
 
 /** How many bytes one read off the keyboard takes at a time. */
 const READ_SIZE = 1024;
-
-/** The width assumed where nothing will say how wide the terminal is. */
-const ASSUMED_COLUMNS = 80;
 
 /**
  * The signals that end a run, and the status each one reports.
@@ -212,25 +210,10 @@ class StandardTerminal implements PromptTerminal {
    * Helper for the writes, which is how wide the terminal is.
    *
    * It is asked per drawing rather than once, so a window resized between two
-   * keystrokes is drawn at the width it has now. Three sources in the order
-   * the pager (`lib/view/pager.ts`) asks them in: the terminal, then
-   * `COLUMNS`, then an assumption. A width is taken only where it is a finite
-   * count of columns, so a terminal reporting none — which one that cannot
-   * measure itself does — leads to the next source rather than into arithmetic
-   * that divides by it.
+   * keystrokes is drawn at the width it has now.
    */
   #columns(): number {
-    try {
-      const { columns } = Deno.consoleSize();
-      if (Number.isFinite(columns) && columns > 0) return columns;
-    } catch {
-      // A terminal that will not answer is one of the ways of not knowing,
-      // and the sources below are the rest.
-    }
-    const declared = Number.parseInt(Deno.env.get("COLUMNS") ?? "", 10);
-    return Number.isFinite(declared) && declared > 0
-      ? declared
-      : ASSUMED_COLUMNS;
+    return consoleColumns();
   }
 
   /**
@@ -256,6 +239,61 @@ class StandardTerminal implements PromptTerminal {
       offset += written;
     }
   }
+}
+
+/**
+ * How wide the terminal is: what it says, then `COLUMNS`, then an assumption.
+ *
+ * It is what a drawing is composed against, since a line wider than the
+ * terminal occupies more rows than one and the redrawing has to know how many.
+ */
+export function consoleColumns(): number {
+  return measured(
+    (size) => size.columns,
+    "COLUMNS",
+    ASSUMED_COLUMNS,
+  );
+}
+
+/**
+ * How tall the terminal is: what it says, then `LINES`, then an assumption.
+ *
+ * It is what a page is bounded by (`page.ts`), so that a listing of a
+ * populated space leaves the prompt and the rows above it on the screen. The
+ * environment variable is `LINES`, which is the name the shell exports the
+ * height under beside the `COLUMNS` the width goes by.
+ */
+export function consoleRows(): number {
+  return measured((size) => size.rows, "LINES", ASSUMED_ROWS);
+}
+
+/**
+ * Helper for the two above, which is the dimension `pick` reads: what the
+ * terminal says, then what `variable` declares, then `assumed`.
+ *
+ * The three sources are the ones the pager (`lib/view/pager.ts`) asks in that
+ * order, and a dimension is taken only where it is a finite count above zero,
+ * so a terminal reporting none — which one that cannot measure itself does —
+ * leads to the next source rather than into arithmetic over it. Each
+ * dimension is decided on its own here, where the pager decides both on the
+ * pair: a terminal answering with one usable dimension and one zero gives the
+ * width from itself and the height from the environment, rather than both
+ * from the environment.
+ */
+function measured(
+  pick: (size: { columns: number; rows: number }) => number,
+  variable: string,
+  assumed: number,
+): number {
+  try {
+    const measurement = pick(Deno.consoleSize());
+    if (Number.isFinite(measurement) && measurement > 0) return measurement;
+  } catch {
+    // A terminal that will not answer is one of the ways of not knowing,
+    // and the sources below are the rest.
+  }
+  const declared = Number.parseInt(Deno.env.get(variable) ?? "", 10);
+  return Number.isFinite(declared) && declared > 0 ? declared : assumed;
 }
 
 /**

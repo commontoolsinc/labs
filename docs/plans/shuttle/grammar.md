@@ -171,6 +171,15 @@ one layer up. What a listing offers and what can be typed are two questions:
 ending the options, and what a listing prints is the name rather than the
 route.
 
+A verb's page lists the options it declares, read off the table the parse
+reads. That is one record rather than two: an option added is an option the
+page describes, and one the page describes is one the parse takes. What a
+page carries past the table is a description per option, in shuttle's own
+words — a page here speaks about the place a verb reads from, where `cf`'s
+speaks about `--cell` and a path positional — while the spelling, the value,
+the default and the conflicts are the `cf` command's, since those are what
+decide whether a line means the same thing on both surfaces.
+
 ## Place resolution
 
 A reference on the line resolves against the place, right-anchored, exactly
@@ -550,18 +559,27 @@ a key called `..` or `-`, one holding the separator, one beginning with `@` or
 with `-` — prints the reference that names it instead, which reads none of
 them and unescapes `~1`.
 
-The name is the first thing on its line, and the whole of it where the row
-has nothing else to report. What a reader copies off the front is therefore
-what `cd` takes, and that is the claim rather than anything about the whole
-line: an error written after a name is text the fabric produced, and an odd
-quote in it leaves the line as a whole refusing to split.
+A line opens with the row's handle, in a column the widest of them sets, and
+the name comes next. What a reader copies out of the name column is
+therefore what `cd` takes, and that is the claim rather than anything about
+the whole line: an error written after a name is text the fabric produced,
+and an odd quote in it leaves the line as a whole refusing to split. The
+handle column is the other half of the same claim — a numbered handle is a
+reference too, so both columns of a listed line are things to type.
 
-A row with no name prints a marker in its place, and says no more than that:
-a key whose first character is `#` is reached by a route, as above, and a
+A row that is one of the piece's callables is annotated as one, and no other
+kind is annotated. That is the promise the facets section makes: a callable
+surfaces inline in the listing rather than behind a reserved name. The other
+kinds carry the annotation nowhere because it would be on every row and
+would say what the next `ls` says anyway — a container lists, and a value
+does not.
+
+A row with no name prints a marker in the name column, and says no more than
+that: a key whose first character is `#` is reached by a route, as above, and a
 listing prints names rather than routes. Everything on a listed line that is
 not a name is written between angle brackets. A name holding an angle bracket
-is printed quoted, the grammar reserving it, so a line opening with `<` carries
-no name — while a marker's own payload is not escaped, those brackets
+is printed quoted, the grammar reserving it, so a name column opening with `<`
+carries no name — while a marker's own payload is not escaped, those brackets
 delimiting for a reader and not for a parser. Nothing parses a listed line.
 
 A row is one line, and the lines are separated by a newline, so a name holding
@@ -588,13 +606,66 @@ than for a parser.
 
 Large collections appear everywhere (a space's pieces, an array of
 thousands). `ls` prints one height-fit page — what the terminal shows
-minus chrome, `--limit` overriding — plus a status line
-(`412 items — more, or browse`), and never takes the screen over
-uninvited, so piped output stays clean by construction. `more` continues
-the same listing and its numbering (`%39`…`%76`); backward at the prompt
-is scrollback's job, and real two-way navigation is `browse`'s.
+minus the prompt's own row, and one row less again where the rows do not
+all fit, that row going to a status line
+(`<389 lines not shown — more continues>`). A page is bounded in *rows*
+and composed of lines, and the two are not the same: a line wider than
+the terminal wraps onto as many rows as it takes, and that is what it
+costs against the bound — a status line that wraps included. `--limit`
+overrides the height rather than capping it, since a person who asked for
+forty rows on a screen showing twenty asked for forty; it counts rows of
+the listing, so neither the bound line nor the status line is one of
+them. It never takes the screen over uninvited, so piped
+output stays clean by construction. The status
+line counts what was held back rather than what the listing holds, which
+is what makes the same sentence true on the first page and on every
+continuation. `more` continues the same listing and its numbering
+(`%39`…`%76`); backward at the prompt is scrollback's job, and real
+two-way navigation is `browse`'s.
 A `search <query>` verb at any place is designed and deferred past v1
 ([`futures.md`](futures.md)); pipes over `ls` cover the interim.
+
+The bound a listing carries is shown whatever the page cuts, and opens it:
+a listing longer than the screen is cut from the end, so a bound written
+last is the first thing a page would drop, and what it says — that these
+rows are not everything standing here — is what a reader of a partial
+listing most needs.
+
+**A read is bounded the same way.** `get` at a piece root returns
+everything the piece computed, which is larger than a screen for the
+simplest pattern, so the value is written as one page with the same status
+line and `more` continues it. A value has no unit finer than the screen's
+own, so it is broken at the width before the page cuts it: one long
+string is one line and a screenful of rows, and unbroken there would be
+nowhere for the page to cut and nothing for `more` to continue — the status line offering `--select` beside
+`more`, the two answering different questions: `more` writes the rest of
+what was read, and a projection reads less. And a piece's `$UI` node is
+stood in for rather than written out, unless the line named the fields it
+wants: it is a vnode tree with data URIs in it, and it is the piece's
+picture of itself rather than state an operator debugs at this layer.
+`--select '$UI'` names that key and gets what it holds, which is what
+keeps the node reachable rather than merely narrower. A `--filter` alone
+is not asking — it says which elements come back rather than what each
+holds — so it leaves the standing-in where it was.
+
+**`--json` is the machine-readable form, and that reaches past spelling.**
+Every bound above rewrites the text: a break inserted at the width is a
+character the value did not hold, and inside a JSON string it is not even
+legal; a page holds part of a value back; the elision writes a string
+where an object was. A program reading the output would have to undo all
+three, or could not. So the flag turns them off and hands back the value
+whole — no wrapping, no page, no standing-in — which is what
+`cf cell get --json` hands back, and what decision 7 means by a data verb
+taking `cf`'s read options.
+
+The bound is in *rows*, and a row is what the terminal gives a character
+rather than what a character count says: a double-width character takes
+two columns, so a line of them is twice the rows a count of characters
+would predict. Measuring the count would undercount, and undercounting is
+the direction that overflows. Nothing `ls` or `get` writes exceeds the
+screen without saying so — and where one row is taller than the whole
+page, it is shown whole, because a truncated name is not one `cd` takes
+back, and the status line says the page ran over.
 
 Listings number their rows, and numbered handles are references: `%1`,
 `%2`, … stay valid until the next new listing resets them (`more`
@@ -604,10 +675,18 @@ next command without the view being a place; an interactive picker can
 layer on later and produce the same handles.
 
 A handle carries structure rather than a string. The listing records each
-row's kind as it mints one, and for a callable row the receiver and the
-verb name it stands for — which is what lets `call %4` invoke without a
-hand-split reference, and lets arity resolve locally (the "Calling a verb"
-section below).
+row's kind as it mints one — container, value, callable, piece or slug —
+and for a callable row the receiver and the verb name it stands for, which
+is the place the listing was read at paired with the row's own name. That
+is what lets `call %4` invoke without a hand-split reference, and lets
+arity resolve locally (the "Calling a verb" section below).
+
+A link is not one of those kinds, and its absence is a fact about the read
+rather than a gap in the vocabulary: a cell read resolves a link on the way
+past, so what a listing is handed at a position holding one is what it
+points at. Marking such a row is the open question
+[`pathref.md`](pathref.md) leaves for `ls`, and answering it means a read
+that stops before a crossing rather than another kind.
 
 **A view is not necessarily a place.** A page of results, a search hit
 list, a filtered projection — these are things to look at and pick from,

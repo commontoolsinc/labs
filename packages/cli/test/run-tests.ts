@@ -52,6 +52,7 @@ const SERIAL_TESTS = [
   "test/main-command.test.ts",
   "test/runtime-creation.test.ts",
   "test/shuttle-command.test.ts",
+  "test/shuttle-run.test.ts",
   "test/shuttle-terminal.test.ts",
   "test/shuttle-verbs.test.ts",
   "test/test-runner-compile-byte-cache.test.ts",
