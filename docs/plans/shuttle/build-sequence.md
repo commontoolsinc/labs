@@ -122,7 +122,8 @@ Landed:
 - **B1a — the place value and its owner module**
   (`packages/cli/lib/shuttle/place.ts`). The whole pair, position *and* scope,
   because scope is half of what a place is (decision 20): `cd` over relative
-  segments, `..`, `-`, `/`, a scope-only `@scope`, and rooted and complete
+  segments, `..`, `-`, `/`, `.` and the `.@scope` qualifier, and rooted and
+  complete
   references; the `slugs/` and `pieces/` facets a space root reserves, and
   nothing else there; the rendering `pwd` prints of both halves, the position
   line carrying the scope so that it denotes one cell wherever it is read; and
@@ -288,9 +289,10 @@ Landed:
   The prompt carries the place short, and the only shortening it does is
   leaving the space out: one connection serves one space, so that part is the
   same on every line of a run and `where` prints it. Nothing else is
-  abbreviated, which leaves decision 13's checked names and the shortened-id
-  question they raise exactly where [`grammar.md`](grammar.md) has them — the
-  prompt is no address, and `pwd` is what to copy.
+  abbreviated. A piece with no checked name prints its handle whole, which is
+  decision 13's rule and not a gap in it: a prefix is spelled exactly as a
+  whole handle is, so it would read as an address and name nothing, and a
+  prefix worth printing is a unique one, which is an index read per line.
 
   The launcher is decision 19's pair. `cf sh` is a command in the `cf`
   tree, with the three flags every command taking a space and an identity
@@ -335,6 +337,64 @@ Landed:
   `cd -- -x` reaches such a key — and what a listing owes is the name rather
   than the route. `operandForChild` asks the option grammar rather than making
   the move, that reading being one layer above a place.
+
+- **B1e — `cd` settles against the fabric, and the place holds the piece.**
+  A shell's `cd` is the one verb whose success means something, so a move
+  that reaches a piece comes back from `place.ts` pending and `verbs.ts`
+  reads before the place is adopted: the slug resolved through
+  `resolvePieceReference`, which is the resolution a read makes and given the
+  same path, so a slug naming a collection reaches its member and `cd` cannot
+  refuse a reference `get` accepts; the handle looked up through
+  `entityIdExists` — the
+  space's own identifier index, which a value read cannot stand in for, an
+  absent piece reading as nothing and an empty one reading the same — and the
+  path found by one read of the level already stood at, walked segment by
+  segment. None of the three is asked where there is no question. A move that
+  spells the piece already stood on, at the scope it was settled at, resolves
+  and looks up nothing, that piece having come through a settle of its own —
+  and what the skip rests on is a projection the compiler closes, so a field
+  added to a position cannot widen the decision without widening the key; a slug needs no lookup, its
+  resolution having reached the document; and a move that adds no segment to a
+  level already confirmed reads nothing. What the settle costs is one identifier
+  lookup on a `cd` onto a piece named by handle, on top of the path read, and
+  nothing on any other move. The refusal a path that is not there gets is
+  shuttle's own and carries the keys that are — the runtime's
+  `Available keys:` hint said in the shell's words, at the command that was
+  wrong rather than at the next one. It is the two-step protocol B1a left for
+  a `#name` target and a space written as a name, with a third spelling on
+  it; the recursion is two deep at most, since a settled space-named move is
+  a place standing on a piece and a confirmed piece lands or refuses.
+
+  The place holds the piece the slug resolved to, and the slug stands beside
+  it as the name. A slug is a redirect, so a place holding one moves when the
+  index is repointed and B2's `set` writes where it points now; a place
+  holding the piece cannot move, and `samePosition` compares pieces, so two
+  arrivals at one cell are one position as [`grammar.md`](grammar.md)
+  promises. The name is decision 13's checked name: the prompt shows it
+  because a read confirmed it, and `pwd` prints the piece — a resolution
+  answers with a piece's own id, which is the form `namesResolvedParts` takes
+  for a durable link. `enter` is the one door
+  that lands a piece without a read, the fabric having resolved the target
+  already, and it refuses an address naming its piece by slug so that the
+  place holds a piece whichever door reached it.
+
+  The facet names are reserved in a rooted reference too, so `/slugs/todo`
+  is the walk `cd /` and `cd slugs/todo` make. Decision 11 and
+  [`grammar.md`](grammar.md) carry the rule and what it costs. It closes the
+  gap the short form left open: the prompt writes a facet as `/slugs/`, and
+  the claim that the leading separator reads as the walk down from the root
+  was one only the rule makes true. The rooted spelling is the canonical
+  reference grammar rather than shuttle's, and it resolves a piece by slug,
+  so the reservation is a divergence from what `cf` reads — at two slug
+  values and no others. Issue
+  [#6992](https://github.com/commontoolsinc/labs/issues/6992) retires it by
+  refusing those two as slugs at `set-slug`.
+
+  `get` settles nothing, and that is the same asymmetry `#argument` has.
+  `CurrentPlace.aim` and `CurrentPlace.resolveNamedSpace` answer where an
+  operand points, so neither hands back a pending move: a `cd` waits because
+  the prompt would go on promising the place, and a read of a cell that is
+  not there fails on its own account and in its own words.
 
 Still to come:
 

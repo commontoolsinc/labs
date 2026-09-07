@@ -39,6 +39,7 @@ import {
   renderListing,
 } from "../lib/shuttle/listing.ts";
 import { CurrentPlace, type Facet, type Place } from "../lib/shuttle/place.ts";
+import { moved } from "./shuttle-place-helpers.ts";
 
 const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;
 const HANDLE = "of:fid1:abcdefghijklmnop";
@@ -71,15 +72,15 @@ function atSpaceRoot(): CurrentPlace {
 /** Helper for the cases below, which stands inside `facet`. */
 function inFacet(facet: Facet): CurrentPlace {
   const place = atSpaceRoot();
-  place.cd(facet);
+  moved(place, facet);
   return place;
 }
 
 /** Helper for the cases below, which stands at a piece, at `path` inside it. */
 function atPiece(...path: string[]): CurrentPlace {
   const place = atSpaceRoot();
-  place.cd(`/${HANDLE}`);
-  for (const segment of path) place.cd(segment);
+  moved(place, `/${HANDLE}`);
+  for (const segment of path) moved(place, segment);
   return place;
 }
 
@@ -285,7 +286,7 @@ describe("listing", () => {
         // the slug — which is what makes a name typed back off a listing reach
         // the piece it names, the read resolving it the way `--cell` does.
         const place = inFacet("slugs");
-        place.cd("board");
+        moved(place, "board");
         let piece: string | undefined;
         await list(place, {
           ...READS_NOTHING,
@@ -299,7 +300,7 @@ describe("listing", () => {
 
       it("reads at the scope the place reads through", async () => {
         const place = atPiece();
-        place.cd("@session");
+        moved(place, ".@session");
         let scope: string | undefined;
         await list(place, {
           ...READS_NOTHING,
@@ -678,7 +679,7 @@ describe("listing", () => {
         const tokens = split.kind === "split" ? split.tokens : [];
         expect(tokens.length).toBe(1);
         expect(readsAsOption(tokens[0])).toBe(false);
-        expect(standing.cd(tokens[0]).kind).toBe("moved");
+        expect(moved(standing, tokens[0]).kind).toBe("moved");
         expect(standing.place).toEqual(childOf(from, row.name));
         named++;
       }

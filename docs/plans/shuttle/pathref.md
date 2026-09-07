@@ -187,9 +187,10 @@ walking and for saying where you are while you walk.
 Three couplings are worth stating so they are not discovered later:
 
 - **The renderer.** `renderPosition` is the single function in shuttle that
-  composes a reference. A route's rendering must go through the same seam
-  rather than compose its own, or the two forms drift and the migration to
-  `//<space>/` has two places to visit instead of one.
+  composes a reference, and what it writes is described in
+  [`grammar.md`](grammar.md) with the migration that reaches it. A route's
+  rendering must go through the same seam rather than compose its own, or the
+  two forms drift and that migration has two places to visit instead of one.
 - **The round trip.** The property that every name a listing prints is one `cd`
   takes back to that row must extend over routes, not just addresses. It is the
   test that would prove a route's spelling correct, and it exists already.

@@ -78,7 +78,8 @@ quoted wherever in the value it sits — a printer is handed a value and no
 position, so it quotes on the character rather than on the reading.
 
 The characters an operand writes an address with — the `/` between segments,
-the `@` of a scope suffix, `-`, `..` — are deliberately not in that set, and
+the `@` of a scope qualifier, `-`, `..` — are deliberately not in that set,
+and
 that exclusion is what makes the output rule worth having rather than a
 detail of it. Those characters are read inside a token by the place
 resolution below rather than by the split, so quoting on them would buy the
@@ -178,7 +179,9 @@ as the canonical grammar's context rule already works:
 - `/of:…` — a **rooted** reference: it names the piece and path from the
   root, so no part of the position is read from the place — but it omits
   the space and the scope, and the place supplies both. Rooted is not
-  place-independent.
+  place-independent. A rooted operand whose first segment names a facet is
+  the walk down from the space root instead, the facet names being
+  reserved there too (below).
 - `/@did:key:…/of:…` — a **complete** reference: piece, path and space are
   its own, and the scope is still the place's. It is place-independent in
   one dimension and not in the other, so the same string read at `@user`
@@ -193,11 +196,20 @@ as the canonical grammar's context rule already works:
   link should be, and it is what `pwd` prints, for that reason.
 
   The scope a complete reference omits is not a hole in it. Canonically an
-  absent suffix *means* the base, which is why the serializer writes none
+  absent qualifier *means* the base, which is why the serializer writes none
   for a base-scoped link. The two layers read the same absence differently
   — canonical says base, shuttle fills it from the place, the way a shell
   reads a relative path — and that difference is why `pwd` writes the
-  suffix rather than trusting it to be inferred.
+  qualifier rather than trusting it to be inferred.
+
+  Shuttle composes the space prefix itself, in `renderPosition`
+  (`packages/cli/lib/shuttle/place.ts`), writing `@<space>` as a segment of
+  the pointer. That spelling is the alias form under
+  [#6814](https://github.com/commontoolsinc/labs/issues/6814), whose writer
+  step replaces it with `//<space>/` and after which no writer emits the
+  alias — it stays readable for strings already rendered into harness refs,
+  stored messages and markdown. `renderPosition` is the one place shuttle
+  writes a reference, so that step has a single site to visit here.
 - `#…` — a wish target (entry point), resolvable from anywhere within
   the connected space. A target anchored elsewhere — profile and
   favorites resolve against the reading identity's home space regardless
@@ -220,13 +232,21 @@ one; it is the piece and path it fixes, not the space.
 How a reading is matched says where it holds.
 `-` and a lone `/` are matched against the whole operand exactly, so
 neither governs a segment: a key named `-` is reachable relatively
-wherever it is not the whole operand. `@scope` and a lone leading `#` are
-matched against the operand's head, and each takes the whole operand with
-it: `cd @user/board` refuses rather than moving the scope and descending,
-and `cd #favorites/topics` hands on the whole string as one target. So
-each is an ordinary data character in every later segment that is data —
-inside a piece. A later segment naming a piece is read by the canonical
-grammar instead, so a scope suffix there moves the scope. A fragment there
+wherever it is not the whole operand. `.` alone is matched that way as well, being
+the context's own cell. `./` and `.@` are **heads** rather than whole
+operands: each is read before the walk splits what follows, and governs it
+— `./items@user` is the key `items@user` and never a walk through a key
+called `.`, and `.@user` moves the scope. So a key named `.` has no bare
+spelling, the trade `-` and `/` already make, and keeps the two that
+matter: `./.` reaches it, and so does the reference a listing prints for
+it. A lone leading `#` is matched
+against the operand's head too and takes the whole operand with it:
+`cd #favorites/topics` hands on the whole string as one target. So `#` is
+an ordinary data character in every later segment that is data — inside a
+piece — and so is `@` in every segment that is data. Where a qualifier is
+read is where a segment names a cell: the `.` head, and a segment naming a
+piece, which the canonical grammar reads and which therefore takes the
+qualifier `board@session` carries. A fragment there
 is refused too, but by shuttle rather than by that grammar, which carries
 the `#argument` suffix on a piece designation and would take one. `..` is
 matched segment by segment as the walk splits them, so it is reserved in
@@ -258,11 +278,12 @@ since what a person copies off the screen is what the terminal did with it.
 terminal prints them, and the printer quotes them, being whitespace to the
 split.
 
-Of what a rendering loses, only the newline reaches a piece that has one. The scope suffix the
+Of what a rendering loses, only the newline reaches a piece that has one. The
+scope qualifier the
 rendering always writes sits between the piece and the end of the string,
-so the trim takes the suffix rather than the piece, and the parse's split
-at the last `@` takes the suffix's own. An empty piece is the exception,
-and one fact generates it: its rendered id segment is the suffix and
+so the trim takes the qualifier rather than the piece, and the parse's split
+at the last `@` takes the qualifier's own. An empty piece is the exception,
+and one fact generates it: its rendered id segment is the qualifier and
 nothing else, so the split finds no id in front of it and the parse refuses
 the whole reference rather than handing anything back.
 
@@ -287,8 +308,8 @@ is the canonical parse's own — `validatePieceSegment`
 (`packages/cli/lib/llm-friendly-ref.ts`), called rather than copied, so that a
 name in neither vocabulary is refused with one sentence whichever door read
 it. The doors are the reference, a walk into a piece, a target the fabric
-resolved, and a settled move, which is every door a piece reaches a place
-through:
+resolved, a settled move, and the piece a read resolved, which is every door
+a piece reaches a place through:
 `cd slugs/Board` is refused, and the reason it gives is the reason `cd /Board`
 gives. That is what makes a listing's job possible: a name printed as an
 operand is one `cd` takes, and a name the rule refuses is one nothing offers
@@ -340,6 +361,94 @@ reached per operand instead — `get topics/3#argument`, and `--input` on
 the `cf` verbs that take it — so the choice is one visible token at each
 use.
 
+## What `cd` reads before it moves
+
+A shell's `cd` is the one verb whose success means something, so a move
+that reaches a piece is asked of the fabric before the place is adopted,
+and the refusal a place that is not there gets is shuttle's own rather
+than the runtime error whichever verb read next would have raised.
+
+Three questions, each asked only where there is one to ask:
+
+- **The piece**, where the move reaches one it is not already standing on.
+  A slug resolves through the space's index (`resolvePieceReference`,
+  `packages/piece/src/slugs.ts`) — the same resolution a read makes, given
+  the same path, so a slug naming a *collection* spends leading segments
+  reaching its member and `cd /tasks/first/title` lands where
+  `get /tasks/first/title` reads. Two verbs disagreeing about whether a
+  reference names anything would be worse than either answer. The place
+  takes the path the resolution left and the scope it was reached through,
+  a member held through a narrowed link being a different document from
+  the one its id alone names. **The place holds the piece it resolved
+  to**, with the slug beside it as the name the prompt shows —
+  decision 13's checked name, read once at the move rather than trusted
+  per command. A slug is a redirect: a place holding one would follow the
+  index to another piece without moving, and B2's `set` would write where
+  the index points now. A place holding the piece cannot move. A slug the
+  index names nothing for is refused here, carrying the resolution's own
+  sentence. A move that spells the piece already stood on — a key under
+  it, or a reference naming it — resolves nothing: that piece came through
+  a settle of its own, so the question is answered, and the move changes
+  the path rather than the piece. What counts as already settled is the
+  place and not the position: a move to the same path at another scope is
+  a move to another document, and reads again.
+
+  The place a settle adopts is the route's as well as the destination's. A
+  trail is made of positions `..` walks back through and `-` restores, so
+  every one of them is a place shuttle can stand at, and each is landed
+  with the piece the resolution answered. Where the resolution spent
+  segments, the levels it walked *through* are levels of the collection
+  rather than of what it held and go with it; the level the member itself
+  sits at is the member's, and lands with the member's piece. A route
+  records how shuttle reached a place, so `cd a/b/c` and `cd a/b` then
+  `cd c` are one walk written two ways and leave the same route.
+- **The handle**, where the resolution reached one without proving it. A
+  handle is a spelling and not a lookup — the resolution hands one
+  straight back, `isPieceHandle` being a length rule — so the space's own
+  identifier index is asked whether it holds that piece (`entityIdExists`,
+  `PiecesController`, which tests one identifier without selecting a
+  stored value). A value read cannot stand in for it: a piece the space
+  does not hold reads as nothing, and so does an empty one. A slug needs
+  no such lookup, its resolution having reached the document to take an id
+  from it, and neither does the piece a move already stands on.
+- **The path.** One read of the cell at the deepest level already stood
+  at, walked segment by segment through the value it returned. The first
+  segment that is not a key of the level above it is refused by name, with
+  the keys that are — the sentence the runtime's `Available keys:` hint
+  carries, in shuttle's words and as a refusal rather than as a failure.
+
+What that costs is one identifier lookup on a `cd` onto a piece named by
+handle, on top of the path read, and nothing on any other move: not on a
+slug, whose resolution is its own proof; not on a key under the piece
+already stood on; not on a move that reaches a container. The lookup reads
+an index rather than a value, which is what makes it affordable at a
+prompt.
+
+The read is aimed one level above the destination and never at it, and
+that is what keeps every miss a refusal. A read aimed at a path the fabric
+does not hold raises, which is what tells a server that went away from a
+line that was wrong; aimed one level up it reads a cell that is there, and
+what it finds is data.
+
+The lookup is a server capability, and there the promise stops. A server
+that does not advertise it (`entityIdLookup`, `packages/memory/v2.ts`)
+answers neither yes nor no, and a handle read against one is taken as
+written — the one spelling `cd` adopts without having settled it. Every
+current server advertises the lookup; the bound is what an older one
+leaves.
+
+A move that reaches no piece waits on nothing: a facet is a closed set of
+names, and `..`, `-` and `/` each reach a place already stood at. A scope
+on its own is not among them and settles like any other move onto a piece:
+it leaves the position where it was and changes which document that
+position's id names, so the place it reaches is one nothing has read.
+
+`get` waits on nothing either, though its operand goes through the same
+readings: where an operand points is a fact about the operand, and a read
+of a cell that is not there fails on its own account and in its own words.
+That asymmetry is the same one `#argument` has — the two doors differ
+exactly where standing somewhere differs from reading it.
+
 ## The space root and facets
 
 A space root lists **facets**, never pieces directly — a populated space is
@@ -352,13 +461,67 @@ A `fuse/` facet mirroring the FUSE layout is designed and deferred past v1
 ([`futures.md`](futures.md)); shuttle leverages `packages/fuse`'s naming
 and hydration work regardless of when that facet lands.
 
-Facet names are reserved segments at the space root only; inside a piece
-no name is reserved at all, and a facet name is an ordinary data key
-there. The readings above are spellings rather than names, and are what
-they are wherever a piece's path admits them. A piece's callables need
-no reserved name: they surface inline in listings, annotated as
-callable, exactly as the FUSE layout marks a handler an executable file
-inside the piece's tree (and the `verbs` verb lists them on demand).
+Facet names are reserved wherever a walk from the root begins: as a
+segment at the space root, and as the first segment of a **rooted**
+reference, so `/slugs/todo` names what `cd /` then `cd slugs/todo`
+names. Inside a piece no name is reserved at all, and a facet name is an
+ordinary data key there. The readings above are spellings rather than
+names, and are what they are wherever a piece's path admits them. A
+piece's callables need no reserved name: they surface inline in
+listings, annotated as callable, exactly as the FUSE layout marks a
+handler an executable file inside the piece's tree (and the `verbs` verb
+lists them on demand).
+
+What the reservation buys is the property every rendering here is held
+to. The prompt writes a facet as `/slugs/` and the shell teaches
+`cd slugs` in its first minute, so the rooted spelling is the one a
+person reaches for next; read as a reference it would name a piece one
+character from the facet rendering, and read as a walk it names the facet
+the prompt printed.
+
+**What it costs is a divergence from the canonical grammar, at two slug
+values.** The rooted spelling is not shuttle's own. `/[@space/]<piece>…`
+is the canonical way to name a cell — the runner's `parseReferenceParts`,
+the same structure in patterns, in the shell and at every `cf` intake
+seam — and this CLI, which opens a session before it reads anything,
+resolves that piece segment by slug as well as by handle
+(`packages/cli/lib/llm-friendly-ref.ts`). `slugs/` and `pieces/` are the
+shuttle-only half: facets, a browsing overlay on the space root. So a
+rooted reference whose first segment is a slug is the canonical grammar
+and predates shuttle, and reserving two values in that position means
+shuttle reads `/slugs/x` and `/pieces/x` differently from the way `cf`
+reads the same strings — and identically for every other slug. Issue
+[#6992](https://github.com/commontoolsinc/labs/issues/6992) retires the
+divergence by having `set-slug` refuse those two values as slugs, after
+which no piece can carry them and the two grammars agree everywhere.
+
+The reservation reaches the rooted form and no further. A complete
+reference carries its own space and is the canonical grammar's outright,
+so `/@did:key:…/slugs/todo` still names a piece slugged `slugs` — which
+is what leaves such a piece nameable at all until #6992 lands, beside its
+handle. The root already paid the same cost: `cd slugs` at the root has
+never reached a piece by that name.
+
+The reading is matched against the operand as written, as every reading
+above is, and **an operand that would be rooted only once its leading
+whitespace came off is refused**. Such an operand has two readings that
+name different cells: as written it is a relative walk whose first segment
+is whitespace, and to the reference grammar — which trims the string it is
+given (`isReference`, `packages/cli/lib/llm-friendly-ref.ts`) — it is
+rooted. Left to fall through, the rooted reading takes it, and the facet
+names a rooted spelling reserves are not reserved in that one, so
+`cd " /slugs/todo"` would reach a piece slugged `slugs`. Reaching it is
+not what the refusal is for; reaching it *silently* is. A wrong place a
+`cd` adopts is a promise the prompt goes on making, which is the thing
+decision 11 ends, and a refusal cannot make it.
+
+The rule is exactly that wide. Leading whitespace costs a name nothing
+anywhere else — `cd " foo"` reaches the key `" foo"` — so only an operand
+that trimming would *root* is refused, and one that trimming leaves
+relative is read as it is written. A rooted operand carrying trailing
+whitespace is rooted as written and is read that way: the walk keeps its
+edges, so `cd "/slugs/todo "` is refused for a piece ending in whitespace,
+by the rule any part ending in whitespace answers to.
 
 The facet set stays deliberately small; growing it is a design decision,
 not a convenience.
@@ -469,46 +632,59 @@ no computation, stored reads labeled — is designed and deferred past v1
 
 A cell can carry per-identity overlays — `@user`, `@session` — so the same
 piece reads differently per identity (`cf inspect scopes <space>` shows that
-ground truth offline). Scope is a way of seeing every place, not a
-location, so the cwd is a **pair**: position and scope. Both stick while
-you navigate, both render in the prompt, and `pwd` prints both.
+ground truth offline). A scope applies at every place rather than nesting
+inside one, so the cwd is a **pair**: position and scope. Both stick while
+you navigate, both render in the prompt, and `pwd` prints both — and each
+decides which cell the pair names, one id under two scopes being two
+documents.
 
 `cd` is the door to both dimensions, applying whatever components its
 operand carries: `cd board@session` is a full reference and moves position
-and scope in one step, `cd topics/3` moves position alone, and `cd @session`
-moves scope alone. There is no separate scope verb; the general door is
-`where scope …`, like any other ambient dimension. The active scope fills
-the omitted `@scope` of every reference as the place fills omitted
-position levels, and an explicit suffix on an operand overrides it for
-that operand alone.
+and scope in one step, `cd topics/3` moves position alone, and
+`cd .@session` moves scope alone. There is no separate scope verb; the
+general door is `where scope …`, like any other ambient dimension. The
+active scope fills the omitted qualifier of every reference as the place
+fills omitted position levels, and an explicit one on an operand overrides
+it for that operand alone.
 
-A scope-only `@scope` is shuttle **navigation syntax**, not a reference. It
-sits with `/`, `..` and `-`: spellings that `cd` accepts to move the cwd,
-and that the canonical grammar does not parse. `parseScopedIdSegment`
-(`packages/runner/src/link-types.ts`) requires an id in front of the
-suffix and throws without one, so `@session` alone addresses nothing, and
-`parseReferenceParts` in the same module throws on a lone `/`, which names
-no piece handle, so the space root has no canonical spelling either. The
-no-growth rule holds because the scope spelling never leaves the verbs that
-move and print the cwd — `cd`, `where`, and `pwd`: an operand and a full
-reference always carry an id, no link endpoint can hold a scope-only
-suffix, and nothing serializes one. Setting the ambient scope
-is all `cd @session` does, and ordinary references pick it up from there.
+A scope on its own is written `.@scope`, which is the reference grammar's
+own relative spelling rather than a navigation word of shuttle's: `.` is
+the context's own cell, and `.` at the head of a relative reference is
+where that reference takes a member or a qualifier
+([#6814](https://github.com/commontoolsinc/labs/issues/6814)) — `./items`
+the member, `.@user` the qualifier. The head is read before the walk
+splits what follows it, so it governs the rest rather than standing as a
+segment. So `@` carries one meaning, a qualifier on the piece, and is an
+ordinary character everywhere else — `cd @session` reaches a key called
+`@session`, and `cd ./items@user` a key called `items@user`, the `@` there
+sitting on `items` rather than on the head.
 
-The canonical grammar bounds what a suffix on a reference can say
+That the bare word is data is what the reading costs and what it buys. A
+key named for a scope word was unreachable while the bare form was
+navigation, and is reachable now; in exchange a person who types
+`cd @session` meaning the scope is told so, the refusal naming `.@session`
+where the operand named no key and the word is a scope word. The offer is
+a hint on a refusal and never a reading: a place that holds the key lands
+on it and says nothing.
+
+The spelling tracks #6814, which is proposed rather than merged. Shuttle
+conforms to it now because migrating a navigation spelling later costs
+more than adopting it early.
+
+The canonical grammar bounds what a qualifier on a reference can say
 (verified against `parseScopedIdSegment` in
 `packages/runner/src/link-types.ts`):
 
-- The suffix is a `CellScope` word — `@space`, `@user`, `@session` — with
+- The qualifier is a `CellScope` word — `@space`, `@user`, `@session` — with
   no identity component; those are never spelled in a reference. `@session`
   and `@user` therefore mean the **reading identity's own** overlays,
   composed with the caller's identity at resolution.
 - `@space` is a canonical scope value, not shuttle's addition:
   `CELL_SCOPE_VALUES` holds it beside `user` and `session`, the parser's
   rejection text names all three, and `piece1@space/path` parses to
-  `scope: "space"` distinct from an omitted suffix
+  `scope: "space"` distinct from an omitted qualifier
   (`packages/cli/test/piece.test.ts`). The base is therefore nameable, and
-  `cd @space` sets the ambient scope back to it.
+  `cd .@space` sets the ambient scope back to it.
 - The serializer never emits `@space` (the base renders as a bare id), so
   the prompt and `pwd` render the scope dimension themselves rather than
   round-tripping through the reference serializer.
@@ -535,21 +711,28 @@ merely seed the initial record.
 ## Prompt
 
 The prompt shows the position with checked names only: a space by the name
-fabric knows it by, a piece by its slug when the slug index confirms it, a
-shortened unique id otherwise, then the path. Shuttle uses the naming
+fabric knows it by, a piece by its slug when the slug index confirms it,
+the whole handle otherwise, then the path. Shuttle uses the naming
 mechanisms the fabric supports and introduces none of its own; user-managed
 legible space names arrive when the fabric grows them.
 
-A shortened id is a prefix rather than an address, and it is spelled the
-way a whole handle is, so nothing in it says which it is. A prompt meant to
-be pasteable has to make that fallback visibly distinct, or leave it out.
+The space is the only thing the prompt shortens, and a handle prints whole.
+A prefix of one is spelled exactly as a whole handle is, so nothing in it
+says which it is, and what a reader copies off the screen would look like
+an address and name nothing — the same silent wrongness the reserved facet
+names above are there to end. A prefix is also only useful where it is
+unique, and knowing that is knowing every other handle in the space: an
+index read, on every line the prompt draws. The name beside a handle costs
+no such read, being the one the `cd` that adopted the place confirmed, and
+the handle costs none at all.
 
 `pwd` is the complete address and has no short form. It writes the scope
 even when it is the base, so what it prints denotes one cell wherever it is
-read, where an omitted suffix would denote whatever the reader's own scope
+read, where an omitted qualifier would denote whatever the reader's own scope
 selects — shuttle writes absolutely and reads ambiently, the asymmetry a
-shell has between `pwd` and a relative path. Emitting the suffix only for a
-non-base scope would leave the common case contextual, since a suffix-less
+shell has between `pwd` and a relative path. Emitting the qualifier only for
+a non-base scope would leave the common case contextual, since an
+unqualified
 address read in a `@session` shuttle lands at session. The prompt is the
 short surface and is on screen continuously; what `pwd` is for is the thing
 you copy, so a form that cannot be pasted is the one output it should not
@@ -662,9 +845,8 @@ spelling reaches any of them. Adding one item to a collection is therefore
 first-class to avoid.
 
 **The `@` sigil carries two meanings.** It is the space slot of a reference
-and the scope suffix on a piece: `@user` alone is the scope word,
-`/@user/<handle>` is a space *named* user, and `/@user/<handle>@session` is
-both at once — and space names are unvalidated, so the collision is live
+and the qualifier on a piece: `/@user/<handle>` is a space *named* user,
+and `/@user/<handle>@session` is both at once — and space names are unvalidated, so the collision is live
 rather than hypothetical. Shuttle cannot resolve it: decision 13 forbids
 inventing a spelling, and a second scope spelling would be worse than the
 ambiguity. Issue
@@ -673,11 +855,7 @@ v1 a space named by name is refused unless it resolves to the connected
 space, which is what keeps it dormant; multi-space sessions are where it
 wakes.
 
-**A shortened id is not an address.** The prompt falls back to one where no
-slug is confirmed, and it is spelled exactly as a whole handle is, so
-nothing in it says which it is. Whether the prompt stays pasteable, and how
-that fallback is marked if it does, is open — see the Prompt section above.
-
-The base-overlay spelling is settled above. One further open item for
-shuttle overall (shallow-sink expressibility) lives in
-[`views.md`](views.md).
+The base-overlay spelling is settled above, and so is what the prompt shows
+where no slug is confirmed: the whole handle, for the reasons the Prompt
+section carries. One further open item for shuttle overall (shallow-sink
+expressibility) lives in [`views.md`](views.md).

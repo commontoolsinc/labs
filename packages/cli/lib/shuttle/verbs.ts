@@ -13,17 +13,32 @@
  * connection through `deps.loadPieces`, which is the seam a held connection
  * fills.
  *
- * Two spellings come back off a `cd` or a `get` unsettled, because settling
- * them is a read: a `#name` target, which the fabric resolves to an address,
- * and a space written as a name, which the connection is asked about. Settling
- * each and asking the place again is what this module adds to `place.ts`,
- * which decides everything about a place that a value can decide and stops
- * exactly there.
+ * Three spellings come back off a `cd` unsettled, because settling each is a
+ * read: a `#name` target, which the fabric resolves to an address; a space
+ * written as a name, which the connection is asked about; and a place standing
+ * on a piece, which the fabric is asked to resolve and to find. Settling each
+ * and asking the place again is what this module adds to `place.ts`, which
+ * decides everything about a place that a value can decide and stops exactly
+ * there.
+ *
+ * The last of those is what makes `cd` worth its name. A shell's `cd` is the
+ * one verb whose success says something, so the slug, the handle and the path
+ * are each asked about before the place moves, and each refused in shuttle's
+ * own words rather than left for the next verb to report in the runtime's.
+ * What the prompt promises after it is exactly those three answers; the one
+ * that can come back unanswered is the handle lookup, against a server that
+ * does not advertise it. `get` waits on nothing: where an operand points is the
+ * operand's own fact, and a read of a cell that is not there says so.
  */
 
 import { isDID } from "@commonfabric/identity";
 import type { MemorySpace } from "@commonfabric/memory/interface";
+import {
+  resolvePieceReference,
+  SlugResolutionError,
+} from "@commonfabric/piece";
 
+import { keysOf } from "../cell-listing.ts";
 import {
   LINK_MARKER_KEY,
   parseCellSelectionOptions,
@@ -37,12 +52,19 @@ import { splitLine } from "./line.ts";
 import { type ListingDeps, listPlace, renderListing } from "./listing.ts";
 import { readOptions } from "./options.ts";
 import {
+  type Aimed,
   CurrentPlace,
   type FacetPosition,
   messageOf,
   type Move,
+  type PathSegment,
+  type PendingMove,
+  type PiecePlace,
+  type PiecePosition,
   type Place,
+  type ResolvedPlace,
   type ResolvedTarget,
+  scopeMoveHint,
   type SpaceRootPosition,
 } from "./place.ts";
 import { renderRecord } from "./record.ts";
@@ -94,6 +116,13 @@ export interface VerbDeps {
   /** Resolves a named entry point, for `wish` and for `cd` into one. */
   readonly readWish?: typeof readWish;
 
+  /**
+   * Resolves the piece and path an operand named, which is what `cd` settles.
+   * It is the resolution a read makes too (`pieceReferenceResolver`,
+   * `lib/piece.ts`), so the two verbs reach the same cell for one reference.
+   */
+  readonly resolvePieceReference?: typeof resolvePieceReference;
+
   /** The reads `ls` composes. */
   readonly listing?: ListingDeps;
 }
@@ -115,10 +144,11 @@ export interface VerbDeps {
  * here and no verb states one of its own.
  *
  * A refusal is a fact about the line — a verb nobody defined, an option nobody
- * declared, an operand a place will not take, a target that resolves elsewhere
- * — and every one carries the reason. A read that failed is a different fact
- * and is not one of these: it raises, so that a server that cannot be reached
- * is told apart from a line that was wrong.
+ * declared, an operand a place will not take, a target that resolves
+ * elsewhere, a place the fabric does not hold — and every one carries the
+ * reason. A read that failed is a different fact and is not one of these: it
+ * raises, so that a server that cannot be reached is told apart from a line
+ * that was wrong.
  *
  * @throws Whatever a read throws — an unreachable server, an identity that
  * will not load, a path the piece refuses.
@@ -195,10 +225,12 @@ interface VerbEntry extends VerbHelp {
 /**
  * Moves the place as `operands` say, and returns where shuttle now stands.
  *
- * The operand is `place.ts`'s to read, and the two spellings it hands back
- * unsettled are settled here: a `#name` target resolves against the fabric,
- * and a space written as a name is held against the name the connection was
- * opened under.
+ * The operand is `place.ts`'s to read, and the spellings it hands back
+ * unsettled are settled here: a `#name` target resolves against the fabric, a
+ * space written as a name is held against the name the connection was opened
+ * under, and a place standing on a piece is asked of the fabric before it is
+ * adopted — the slug resolved to the handle the place then holds, and the path
+ * found or refused with the keys that are there.
  */
 async function cd(
   shuttle: Shuttle,
@@ -357,11 +389,18 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
     summary: "Moves the place, which fills in what a reference omits.",
     detail:
       "The operand is a relative segment, `..` for one level up, `-` for " +
-      "the\nprevious place, `/` for the space root, a scope-only `@scope`, " +
+      "the\nprevious place, `/` for the space root, `.` for where you " +
+      "stand, `./<ref>`\nfor a member and `.@scope` for the scope, " +
       "a rooted\nor complete reference, a slug, or a `#name` entry " +
-      "point.\n\nA target carrying `#argument` is refused: a place roots at " +
-      "a result, and\n`get <ref>#argument` is how an operand reads a " +
-      "piece's arguments cell.",
+      "point.\n\nA move onto a piece is read before it is taken: the slug " +
+      "resolved, the\nhandle looked up in the space's index, and the path " +
+      "found. A slug that\nnames nothing, a handle the index says the space " +
+      "does not hold, and a path\nthat is not there are each refused here " +
+      "rather than one command later, the\npath with the keys that are. A " +
+      "server that does not answer the handle\nlookup leaves that one " +
+      "unsettled.\n\nA target carrying `#argument` is refused: a place " +
+      "roots at a result, and\n`get <ref>#argument` is how an operand reads " +
+      "a piece's arguments cell.",
   }],
   ["get", {
     run: get,
@@ -433,10 +472,13 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
 /**
  * Helper for {@link cd}, which finishes `move`.
  *
- * A landing and a refusal are the answer already. The two arms only a read can
- * settle are settled and the place asked again, which answers: a resolved
- * target and a confirmed space each land or refuse, so neither second ask
- * comes back with another arm to settle.
+ * A landing and a refusal are the answer already. The arms only a read can
+ * settle are settled and the place asked again, which answers or hands back
+ * the one arm a settled one can still reach: a resolved target lands or
+ * refuses, and a settled space name is a place standing on a piece, which is
+ * settled the way any other is. A confirmed piece lands or refuses, so this
+ * calls itself twice at most, and a space named by name is the operand that
+ * takes both.
  */
 async function landing(
   shuttle: Shuttle,
@@ -464,6 +506,14 @@ async function landing(
         deps,
       );
     }
+    case "pending": {
+      const settled = await settlePiece(shuttle, move, deps);
+      return settled.kind === "refused" ? settled : await landing(
+        shuttle,
+        shuttle.place.confirm(move, settled.place),
+        deps,
+      );
+    }
   }
 }
 
@@ -481,6 +531,329 @@ type Targeting =
   /** The target resolved to the address `target` names. */
   | { readonly kind: "target"; readonly target: ResolvedTarget }
   | Refusal;
+
+/** What settling a place against the fabric produced. */
+type Settling =
+  /** The fabric holds the place, as `place` resolved it. */
+  | { readonly kind: "settled"; readonly place: ResolvedPlace }
+  | Refusal;
+
+/** What the piece and path a pending move spelled turned out to be. */
+type Resolved =
+  | {
+    /** Names this arm of {@link Resolved}. */
+    readonly kind: "piece";
+
+    /** Where the move lands, as the resolution answered it. */
+    readonly place: ResolvedPlace;
+
+    /**
+     * Whether reaching it proved the space holds it. A slug reached its piece
+     * through the index and a place already stood on one was settled before,
+     * so both are held; a handle is a spelling and proves nothing on its own.
+     */
+    readonly held: boolean;
+  }
+  | Refusal;
+
+/**
+ * Helper for {@link landing}, which asks the fabric whether it holds the place
+ * `move` reached, and is the handle its piece resolved to where it does.
+ *
+ * Two questions, and each is asked only where there is one. The piece is
+ * {@link resolvedPiece}'s. Then the path: one read of the cell at the deepest
+ * level already stood at, walked segment by segment through the value it
+ * returned, which names the first segment that is not there and the keys that
+ * are — and no read at all where the move added no segment to a level already
+ * confirmed, there being nothing left to look for.
+ *
+ * The read is the level above, never the destination, and that is what makes
+ * every miss a refusal rather than a throw. A read aimed at a path the fabric
+ * does not hold raises — that is what `get` reports and what tells a server
+ * that went away from a line that was wrong — so a check aimed there would
+ * report a wrong operand as a failed read. Aimed one level up it reads a cell
+ * that is there, and what it finds is data rather than an error.
+ *
+ * A piece the resolution reached without proving — a handle, which is a
+ * spelling and not a lookup — is looked up. `entityIdExists`
+ * (`PiecesController`) tests one identifier against the space's own index
+ * without selecting a stored value, which is what makes it affordable here,
+ * and it is the same call `packages/fuse` asks before it projects an entity a
+ * path named. A value read cannot stand in for it: a piece the space does not
+ * hold reads as `undefined`, which is what an empty one reads as too.
+ *
+ * The lookup is a server capability and answers `undefined` where the server
+ * does not advertise it (`entityIdLookup`, `packages/memory/v2.ts`). Then
+ * nothing was learned and the move goes on, which is the one case left where
+ * a handle the space does not hold is adopted — the bound `grammar.md`
+ * records.
+ *
+ * @throws Whatever the read throws — an unreachable server, an identity that
+ * will not load. A slug that names nothing is not one of those: it is a fact
+ * about the line, so it comes back as a refusal.
+ */
+async function settlePiece(
+  shuttle: Shuttle,
+  move: PendingMove,
+  deps: VerbDeps,
+): Promise<Settling> {
+  const resolved = await resolvedPiece(shuttle, move, deps);
+  if (resolved.kind === "refused") return resolved;
+  const place = resolved.place;
+  const settled: Settling = { kind: "settled", place };
+  if (!resolved.held) {
+    const pieces = await shuttle.connection.pieces();
+    if (await pieces.entityIdExists(place.piece) === false) {
+      return refuse(
+        `\`${move.operand}\` reaches no piece: this space holds none by the ` +
+          `handle \`${place.piece}\`.`,
+      );
+    }
+  }
+  const path = place.path;
+  const scope = place.scope ?? move.place.scope;
+  const from = alreadyStoodAt(shuttle.place.place, {
+    position: { ...move.place.position, piece: place.piece, path },
+    scope,
+  });
+  if (from.length === path.length) return settled;
+  let level = await (deps.getCellValue ?? getCellValue)(
+    { ...shuttle.config, piece: place.piece, pieceScope: scope },
+    [...from],
+    {},
+    { loadPieces: () => shuttle.connection.pieces() },
+  );
+  for (const segment of path.slice(from.length).map(String)) {
+    const keys = keysOf(level);
+    if (!keys.includes(segment)) {
+      return refuse(noSuchKey(move.operand, segment, keys));
+    }
+    level = (level as Record<string, unknown>)[segment];
+  }
+  return settled;
+}
+
+/**
+ * Helper for {@link settlePiece}, which is the piece `move` reached.
+ *
+ * A move that reaches the cell shuttle already stands at has no piece to
+ * resolve, and none to look up either: that piece came through a settle of its
+ * own. What counts as the same cell is {@link sameCell}'s, so the scope bears
+ * on it as much as the id — a move to the same id under another scope is a
+ * document nothing has asked about, and it resolves and looks up like any
+ * other. A move spelling that same cell again, a key under it or a reference
+ * naming it, moves the path and leaves the piece where it was.
+ *
+ * What the skip saves is a question rather than a round trip, and the
+ * difference is worth stating because the cost argument for settling at all
+ * was a read per `cd`. `resolvePieceReference` reads nothing for a handle: a
+ * slug is a token with no colon in it, so the resolution hands a handle
+ * straight back without reaching the runtime (`packages/piece/src/slugs.ts`).
+ * The saving is that the seam is not reached where it has nothing to do —
+ * which is a fact a caller standing its own resolution in can see, and one
+ * this module should not make such a caller work around.
+ *
+ * Every other move resolves: a slug is a name the space's index holds, and
+ * `resolvePieceReference` is what turns one into the piece it points at, given
+ * the path so a slug naming a collection reaches its member — the resolution
+ * every read here already makes per command, made once at the move instead, so
+ * that what the place adopts is a piece the index cannot repoint underneath
+ * it.
+ */
+async function resolvedPiece(
+  shuttle: Shuttle,
+  move: PendingMove,
+  deps: VerbDeps,
+): Promise<Resolved> {
+  const spelled = move.place.position.piece;
+  const path = move.place.position.path;
+  const standing = shuttle.place.place;
+  if (
+    standing.position.kind === "piece" &&
+    sameCell({ position: standing.position, scope: standing.scope }, move.place)
+  ) {
+    return { kind: "piece", place: { piece: spelled, path }, held: true };
+  }
+  let reference;
+  try {
+    reference = await (deps.resolvePieceReference ?? resolvePieceReference)(
+      await shuttle.connection.pieces(),
+      spelled,
+      path,
+    );
+  } catch (thrown) {
+    if (!(thrown instanceof SlugResolutionError)) throw thrown;
+    return refuse(
+      `\`${move.operand}\` reaches no piece: ${messageOf(thrown)}`,
+    );
+  }
+  return {
+    kind: "piece",
+    place: {
+      piece: reference.piece,
+      path: reference.pathAfter,
+      ...(reference.scope === undefined ? {} : { scope: reference.scope }),
+    },
+    // The two differ exactly where a slug resolved, a handle being handed back
+    // as it stands — so what the resolution reached is also what it proved.
+    held: reference.piece !== spelled,
+  };
+}
+
+/**
+ * How one field of a place bears on whether a read has already confirmed it.
+ *
+ * Three roles rather than two, because the settle asks two questions of one
+ * key and they divide the fields differently: whether the destination is the
+ * *same cell* shuttle stands at, which decides that its piece needs no lookup,
+ * and how much of its *path* is already read, which decides where the read
+ * starts. A field is classified once and both questions pick it up.
+ */
+type Bearing =
+  /** Equal, or the two are different cells. */
+  | "same"
+  /** The standing one must be a prefix of the destination's. */
+  | "prefix"
+  /** Neither: two places differing only here are one place. */
+  | "neither";
+
+/**
+ * Which parts of a place decide that a read has already confirmed it.
+ *
+ * Every field of a piece position is classified here and the `satisfies` is
+ * what makes that exhaustive: a field added to {@link PiecePosition} without a
+ * line here does not compile. A key naming fewer fields than the decision
+ * rests on calls two different places one, and the skip it drives then hands
+ * back a place nothing read — which is the failure this whole settle exists to
+ * end. Classifying one `false` is a decision a reviewer sees rather than an
+ * absence nobody notices.
+ *
+ * - `kind` — a container is no place a piece's path descends from.
+ * - `space` — one connection fixes it for a run, and every door refuses a
+ *   position outside it, so a comparison could only ever hold.
+ * - `piece` — which piece the path is inside. Two ids are two documents.
+ * - `name` — not a level. A piece reached by slug and the same piece reached
+ *   by handle are one cell, which is what resolving before adopting is for.
+ * - `path` — how far in. This is the one field the comparison reads as a
+ *   prefix rather than for equality, the destination being truncated to the
+ *   standing depth before the two keys are built.
+ */
+const CONFIRMED_BY_POSITION = {
+  kind: "same",
+  space: "neither",
+  piece: "same",
+  name: "neither",
+  path: "prefix",
+} satisfies Record<keyof Required<PiecePosition>, Bearing>;
+
+/**
+ * The same classification for the place around the position, closed the same
+ * way against {@link Place}.
+ *
+ * - `position` — expanded by {@link CONFIRMED_BY_POSITION}.
+ * - `scope` — which document the piece's id names. One id at `@space` and the
+ *   same id at `@session` are two, so a place confirmed at one is not
+ *   confirmed at the other and the read has to happen again.
+ */
+const CONFIRMED_BY_PLACE = {
+  position: "byField",
+  scope: "same",
+} satisfies Record<keyof Place, Bearing | "byField">;
+
+/**
+ * Helper for {@link settlePiece}, which is the deepest path a read may start
+ * from: where shuttle stands, where `reached` extends it, and the piece's own
+ * root otherwise.
+ *
+ * Where shuttle stands is a place a read already confirmed — every position
+ * came through one — so the levels it names need no second read, and a `cd`
+ * one key deeper reads that key's own level rather than the whole piece. A
+ * move to another piece, to another scope, or one that went up before it came
+ * down has nothing confirmed under it and starts at the root, which is where a
+ * rooted reference has to start anyway.
+ *
+ * The prefix is tested by truncating the destination to the standing depth and
+ * comparing the two keys, so every part of the decision is one the projections
+ * classify and none of it is a comparison written out beside them.
+ */
+function alreadyStoodAt(
+  standing: Place,
+  reached: PiecePlace,
+): readonly PathSegment[] {
+  const from = standing.position;
+  if (from.kind !== "piece") return [];
+  const stood: PiecePlace = { position: from, scope: standing.scope };
+  if (!sameCell(stood, reached)) return [];
+  // The `prefix` fields. A standing longer than the destination's meets an
+  // `undefined` where a segment would be, and no segment is one.
+  const prefix = (Object.keys(CONFIRMED_BY_POSITION) as PositionField[])
+    .filter((field) => CONFIRMED_BY_POSITION[field] === "prefix")
+    .every((field) => {
+      const one = from[field] as readonly PathSegment[];
+      const other = reached.position[field] as readonly PathSegment[];
+      return one.length <= other.length &&
+        one.every((segment, index) => segment === other[index]);
+    });
+  return prefix ? from.path : [];
+}
+
+/**
+ * Helper for {@link settlePiece} and {@link alreadyStoodAt}, which is whether
+ * two places are the same cell by the fields the projections mark `same`.
+ *
+ * It is the question the piece's own lookup rests on. A destination that is
+ * the cell shuttle already stands at was settled when shuttle arrived, so its
+ * piece needs no second lookup; one that differs anywhere the projections call
+ * decisive — the piece, the scope — is a document nothing has asked about.
+ */
+function sameCell(standing: PiecePlace, reached: PiecePlace): boolean {
+  return confirmedKey(standing) === confirmedKey(reached);
+}
+
+/** The fields {@link CONFIRMED_BY_POSITION} classifies. */
+type PositionField = keyof Required<PiecePosition>;
+
+/**
+ * Helper for {@link sameCell}, which is `place` reduced to the parts the
+ * projections mark `same`, in a fixed order.
+ */
+function confirmedKey(place: PiecePlace): string {
+  const parts: unknown[] = [];
+  if (CONFIRMED_BY_PLACE.position === "byField") {
+    const position = place.position;
+    parts.push(
+      (Object.keys(CONFIRMED_BY_POSITION) as PositionField[])
+        .sort()
+        .filter((field) => CONFIRMED_BY_POSITION[field] === "same")
+        .map((field) => [field, position[field]]),
+    );
+  }
+  if (CONFIRMED_BY_PLACE.scope === "same") parts.push(place.scope);
+  return JSON.stringify(parts);
+}
+
+/**
+ * Helper for {@link settlePiece}, which is the reason `segment` reaches no
+ * cell, `keys` being what the level above it holds.
+ *
+ * Shuttle's own sentence rather than the runtime's, which the read one level
+ * further down would have raised. What it says is what the runtime's says —
+ * the key is not there, and here is what is — in the words the rest of the
+ * shell refuses a line in, and as a refusal rather than as a failure, because
+ * a place that is not there is a fact about the operand.
+ */
+function noSuchKey(
+  operand: string,
+  segment: string,
+  keys: readonly string[],
+): string {
+  return `\`${operand}\` reaches no cell: \`${segment}\` is no key of the ` +
+    `cell above it, ` +
+    (keys.length === 0
+      ? `which holds no keys at all.`
+      : `whose keys are ${listed(keys)}.`) +
+    scopeMoveHint(operand);
+}
 
 /**
  * Helper for {@link get}, which finishes `move` without moving.
@@ -502,7 +875,7 @@ type Targeting =
  */
 async function reading(
   shuttle: Shuttle,
-  move: Move,
+  move: Aimed,
   deps: VerbDeps,
 ): Promise<Reading> {
   switch (move.kind) {
@@ -610,7 +983,7 @@ async function resolveTarget(
     };
   }
   const carried = reference.scope !== undefined
-    ? `an \`@${reference.scope}\` suffix`
+    ? `an \`@${reference.scope}\` qualifier`
     : reference.input === true
     ? "the `#argument` suffix"
     : undefined;

@@ -118,19 +118,34 @@ shuttle board @space> get title
 
 The prompt names shuttle rather than the command, the product being what a
 prompt says it is. It is the short surface: it leaves the space out, since one
-shuttle serves one space for its whole run, and shortens nothing else. `pwd` is
-the complete address — every level, the scope written even when it is the base —
-which is what to copy.
+shuttle serves one space for its whole run, and shortens nothing else. A piece
+shows by the name the space's index confirmed for it, and by its handle where no
+name was confirmed. `pwd` is the complete address — every level, the piece by
+handle, the scope written even when it is the base — which is what to copy.
 
-| Verb            | What it does                                                                                                                                      |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cd <ref>`      | Moves the place. Takes relative segments, `..`, `-`, `/`, a scope-only `@scope`, rooted and complete references, slugs, and `#name` entry points. |
-| `ls`            | Lists what stands where you are: a space root's facets, the slugs the index records, the space's pieces, or the keys under a cell.                |
-| `pwd`           | The complete address of the place, both dimensions.                                                                                               |
-| `get [<ref>]`   | Reads the value at a cell, defaulting to where you stand. A trailing `#argument` reads the piece's arguments cell.                                |
-| `wish <#name>`  | Resolves a named entry point, exactly as `cf wish` does.                                                                                          |
-| `where`         | The whole ambient record: the connection, and the place `pwd` prints.                                                                             |
-| `help [<verb>]` | Lists the verbs, or writes one verb's page. `<verb> --help` writes the same page.                                                                 |
+`cd` reads before it moves: a slug resolves to the piece it names, a handle is
+looked up in the space's identifier index, and a path that is not there is
+refused with the keys that are. A scope on its own is read the same way — the
+same id under two scopes is two documents, so `cd .@session` is a move onto a
+place like any other. `@` is data off that head, so `cd @session` reaches a key
+of that name, and a refusal that finds none offers `.@session`. The place holds
+the piece rather than the slug, so a slug repointed mid-session moves the name
+and never the place. `slugs` and `pieces` are reserved as the first segment of a
+rooted reference as well as at the root, so `cd /slugs/board` is the same as
+`cd /` then `cd slugs/board`. That is the one place the shell reads a reference
+differently from the rest of `cf`, which takes those two as ordinary slugs;
+[#6992](https://github.com/commontoolsinc/labs/issues/6992) retires the
+difference by refusing them as slug values.
+
+| Verb            | What it does                                                                                                                                                                                                                              |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cd <ref>`      | Moves the place, once the fabric says it is there. Takes relative segments, `..`, `-`, `/`, `.` for where you stand, `./<ref>` for a member and `.@scope` for the scope, rooted and complete references, slugs, and `#name` entry points. |
+| `ls`            | Lists what stands where you are: a space root's facets, the slugs the index records, the space's pieces, or the keys under a cell.                                                                                                        |
+| `pwd`           | The complete address of the place, both dimensions.                                                                                                                                                                                       |
+| `get [<ref>]`   | Reads the value at a cell, defaulting to where you stand. A trailing `#argument` reads the piece's arguments cell.                                                                                                                        |
+| `wish <#name>`  | Resolves a named entry point, exactly as `cf wish` does.                                                                                                                                                                                  |
+| `where`         | The whole ambient record: the connection, and the place `pwd` prints.                                                                                                                                                                     |
+| `help [<verb>]` | Lists the verbs, or writes one verb's page. `<verb> --help` writes the same page.                                                                                                                                                         |
 
 A line is split POSIX-style — whitespace separates, quotes group — so a value
 holding a space is one operand when it is quoted, and anything shuttle prints as

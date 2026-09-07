@@ -167,7 +167,7 @@ const BINDINGS: ReadonlyMap<string, (buffer: EditBuffer) => void> = new Map([
  *
  * So the prompt is not an address, and `pwd` is what to copy. The two halves
  * are separated by a space rather than joined, which is what keeps each of
- * them a word of its own: the scope suffix sits last on every form here,
+ * them a word of its own: the scope qualifier sits last on every form here,
  * where a reference carries it on the piece, because a prompt wants it in the
  * same column on every line and a reference wants it where its grammar puts
  * it.
