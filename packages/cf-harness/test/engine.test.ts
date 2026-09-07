@@ -10,6 +10,7 @@ import { createHarnessPolicyEvent } from "../src/contracts/policy.ts";
 import { CFC_PROMPT_SLOT_BOUND_ATOM_TYPE } from "../src/contracts/prompt-slot.ts";
 import type { HarnessSkillResourceReads } from "../src/contracts/skill.ts";
 import { createToolOutputId } from "../src/contracts/tool-result.ts";
+import { HarnessControlError } from "../src/control-errors.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import {
@@ -481,16 +482,17 @@ Deno.test("CfHarnessEngine refuses to resume under a harness CFC enforcement dia
   }).getRunState();
   assertEquals(runState.cfcEnforcementMode, "observe");
 
-  assertThrows(
+  const stated = assertThrows(
     () =>
       new CfHarnessEngine({
         workspaceHostPath: "/host/project",
         runState,
         cfcEnforcementModeOverride: "disabled",
       }),
-    Error,
+    HarnessControlError,
     "resumed run CFC enforcement mode observe does not match requested CFC enforcement mode disabled",
   );
+  assertEquals(stated.code, "provider-mismatch");
 
   // The configured dial the override stands in front of, refused the same
   // way: what the resume states is what it asked the run to enforce at.
@@ -597,7 +599,7 @@ Deno.test("CfHarnessEngine refuses a run state recorded before the CFC enforceme
   // The resume reads the recorded mode to resolve against, so a run state too
   // old to carry one is refused for what it is, rather than reported as a
   // mismatch against a mode it never named.
-  assertThrows(
+  const legacy = assertThrows(
     () =>
       new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
@@ -612,9 +614,111 @@ Deno.test("CfHarnessEngine refuses a run state recorded before the CFC enforceme
           failureRecords: [],
         } as unknown as HarnessRunState,
       }),
-    Error,
+    HarnessControlError,
     "run state is missing cfcEnforcementMode; older cf-harness runs cannot be resumed",
   );
+  assertEquals(legacy.code, "provider-mismatch");
+});
+
+Deno.test("a refused resume names the dials without publishing the posture record", () => {
+  // The refusal message leaves the harness — a host that asks for structured
+  // failures puts it on stderr and in an HTTP response body — while the
+  // posture record lists every sink the runtime governs and every deviation
+  // it publishes, and a read ceiling's clauses name spaces. So the message
+  // names those without printing them, and names outright the dials an
+  // operator can move. Every session dial pinned below is read back by the
+  // assertion on the message it produces.
+
+  const posturedSession = {
+    apiUrl: "https://toolshed.example/",
+    identityKeyPath: "/keys/agent.pkcs8",
+    space: "my-space",
+    cfcPosture: "max-enforcement",
+  } as const;
+  const runState = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: posturedSession,
+  }).getRunState();
+
+  const dials = assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        fabricSession: {
+          apiUrl: posturedSession.apiUrl,
+          identityKeyPath: posturedSession.identityKeyPath,
+          space: posturedSession.space,
+        },
+        runState,
+      }),
+    HarnessControlError,
+    "posture bundle (max-enforcement against none)",
+  );
+  assertEquals(dials.code, "provider-mismatch");
+  assertEquals(dials.message.includes("policyDigest"), false);
+
+  const drifted = structuredClone(runState) as {
+    fabricSessionCfc?: { record?: { writeFloor: { rung: string } } };
+  } & typeof runState;
+  drifted.fabricSessionCfc!.record!.writeFloor.rung = "off";
+  const record = assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        fabricSession: posturedSession,
+        runState: drifted,
+      }),
+    HarnessControlError,
+    "the runtime posture record the dials resolve to",
+  );
+  assertEquals(record.code, "provider-mismatch");
+  assertEquals(record.message.includes("writeFloor"), false);
+
+  const ceilinged = new CfHarnessEngine({
+    workspaceHostPath: "/host/project",
+    fabricSession: {
+      ...posturedSession,
+      cfcReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+    },
+  }).getRunState();
+  const ceiling = assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        fabricSession: {
+          ...posturedSession,
+          cfcReadMaxConfidentiality: ["did:key:zOwner"],
+        },
+        runState: ceilinged,
+      }),
+    HarnessControlError,
+    "read ceiling (2 clauses against 1 clause)",
+  );
+  assertEquals(ceiling.code, "provider-mismatch");
+  assertEquals(ceiling.message.includes("did:key:"), false);
+});
+
+Deno.test("a run recorded without a working directory is refused, not reported as a fault", () => {
+  // The refusal is deliberate — such a run predates what a resume needs — so
+  // the operator is told that, rather than that the harness broke.
+
+  const runState = new CfHarnessEngine({ workspaceHostPath: "/host/project" })
+    .getRunState();
+  const legacy = structuredClone(runState) as
+    & Omit<HarnessRunState, "currentDir">
+    & { currentDir?: string };
+  delete legacy.currentDir;
+
+  const refusal = assertThrows(
+    () =>
+      new CfHarnessEngine({
+        workspaceHostPath: "/host/project",
+        runState: legacy as HarnessRunState,
+      }),
+    HarnessControlError,
+    "run state is missing currentDir",
+  );
+  assertEquals(refusal.code, "provider-mismatch");
 });
 
 Deno.test("CfHarnessEngine grants no well-known handles without a fabric session", async () => {
@@ -1753,7 +1857,7 @@ Deno.test("CfHarnessEngine keeps a resumed run's recorded provider authoritative
         credentialOwnerKey: "loom:user-2",
       }),
     Error,
-    "credential owner does not match",
+    "credential owner key does not match",
   );
   assertThrows(
     () =>

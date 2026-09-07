@@ -18,3 +18,14 @@ export class HarnessControlError extends Error {
     this.name = "HarnessControlError";
   }
 }
+
+/**
+ * Refuses a resume that cannot be reconciled with the run it names: a
+ * requested setting contradicts the recorded one, or the record lacks
+ * something a resume needs. Both tiers of resume checking raise this — the
+ * CLI's, and the engine constructor's — so that a host reading a structured
+ * failure is told which setting was refused wherever the check that refused
+ * it lives, and tells a refusal apart from a host that broke.
+ */
+export const harnessResumeRefusal = (message: string): HarnessControlError =>
+  new HarnessControlError("provider-mismatch", message);

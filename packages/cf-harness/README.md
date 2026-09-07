@@ -547,9 +547,13 @@ someone to act before a retry means anything, so it stays unset, as does a host
 that broke unexpectedly and cannot say. A failure is `invalid-request` only
 while the argv and the recorded binding are still being checked; once a run
 starts being built, an infrastructure fault reports `internal-error`, so a host
-can keep a retry policy keyed on the code. Run state, manifests, reports, child
-manifests, and structured batch results record only provider, the non-secret
-auth-source label, and the fixed owner reference.
+can keep a retry policy keyed on the code. A resume that cannot be reconciled
+with the run it names is neither of those — a requested setting contradicts the
+recorded one, or the record lacks something a resume needs — and reports
+`provider-mismatch`, with a message naming what was refused, whether the CLI
+refused it or the engine did. Run state, manifests, reports, child manifests,
+and structured batch results record only provider, the non-secret auth-source
+label, and the fixed owner reference.
 
 Hosted or multi-user Loom must not reuse this single-user adapter. A trusted
 multi-user host must instead:
