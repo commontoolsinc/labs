@@ -48,9 +48,7 @@ export class Runner {
     );
   }
 
-  /**
-   * Runs all tests in the browser, returning whether all of them passed.
-   */
+  /** Runs all tests in the browser, returning whether all of them passed. */
   async run(): Promise<boolean> {
     this.reporter.onRunStart();
 

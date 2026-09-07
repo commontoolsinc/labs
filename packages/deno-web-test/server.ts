@@ -7,7 +7,7 @@ export class TestServer {
 
   /**
    * Constructs an instance which serves the static content under
-   * `manifest.serverDir`, for the package rooted at `manifest.projectDir`.
+   * `manifest.serverDir`.
    */
   constructor(manifest: Manifest) {
     this.#server = null;

@@ -2038,9 +2038,9 @@ export class CiJobHistoryCollector {
   /**
    * Returns the subset of `entries` whose step detail reads back, without
    * keeping any of it. An attempt counts as drawable only when its detail
-   * parses, so one
-   * that cannot be read — a format this version does not recognize, a damaged
-   * file — is collected from GitHub again like one that was never stored.
+   * parses, so one that cannot be read — a format this version does not
+   * recognize, a damaged file — is collected from GitHub again like one that
+   * was never stored.
    */
   async #drawableGanttRuns(
     source: CiHistorySource,

@@ -102,9 +102,9 @@ function parseDetailName(name: string): ParsedName | null {
 
 export class CiGanttDetailStore {
   /**
-   * The dashboard cache directory, or a function returning it. A function
-   * defers reading the directory until the first request, the way the run
-   * index defers reading its own file name.
+   * The dashboard cache directory, a function returning it, or `undefined`
+   * for the default. A function defers reading the directory until the first
+   * request, the way the run index defers reading its own file name.
    */
   #directory: string | (() => string) | undefined;
 
