@@ -1324,11 +1324,17 @@ export const runPatternTool: HarnessToolDefinition<
       if (propertySchema === undefined || !isObjectNotArray(propertySchema)) {
         return propertySchema;
       }
-      const defs = selectReferencedCfcSchemaDefs(propertySchema, argumentDefs);
-      return defs === undefined ? propertySchema : {
-        ...propertySchema,
-        $defs: defs,
-      };
+      // A position the argument declares `asCell` — `Cell<T>` and `SqliteDb`,
+      // which is a cell variant — reads back as the handle rather than as the
+      // value, and a handle is not what the rest of the schema describes. This
+      // read is for the value the input holds, so it drops the handle
+      // declaration and keeps the description of the contents. `asStream` is
+      // the other half of that vocabulary and is left alone: no input reaches
+      // this pre-flight declaring one, so what dropping it would read back is
+      // unmeasured.
+      const { asCell: _asCell, ...valueSchema } = propertySchema;
+      const defs = selectReferencedCfcSchemaDefs(valueSchema, argumentDefs);
+      return defs === undefined ? valueSchema : { ...valueSchema, $defs: defs };
     };
     for (const { key, cell } of liveCellInputs) {
       const readSchema = readSchemaForKey(key);

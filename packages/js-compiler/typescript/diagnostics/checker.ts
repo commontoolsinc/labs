@@ -27,6 +27,7 @@ const KNOWN_EXPORTED_SYMBOLS = [
   "CELL_INNER_TYPE",
   "DEFAULT_MARKER",
   "SCOPE_BRAND",
+  "SQLITE_DB_BRAND",
 ];
 
 // TS2578 "Unused '@ts-expect-error' directive." must not fail STORED-source

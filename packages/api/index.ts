@@ -2712,14 +2712,21 @@ export type DataFileFunction = (path: string) => string;
 // SQLite builtins (docs/specs/sqlite-builtin)
 //
 
-declare const __sqliteDb: unique symbol;
+/**
+ * Brand symbol keying {@link SqliteDatabase}, so a handle value is nominal
+ * rather than an empty object any value satisfies. Exported because a pattern
+ * naming `SqliteDb` in an exported signature emits a declaration that refers
+ * to it, and declaration emit cannot name a symbol the pattern's module has
+ * no route to.
+ */
+export declare const SQLITE_DB_BRAND: unique symbol;
 
 /**
  * Database handle. Empty to pattern code; a cell reference to the runtime
  * via the `toCell` back-pointer. Patterns only ever *forward* it (to sqliteQuery
  * / sqliteExecute / reactOn), never read it.
  */
-export type SqliteDatabase = { readonly [__sqliteDb]: true };
+export type SqliteDatabase = { readonly [SQLITE_DB_BRAND]: true };
 
 /** Imperative write on a SqliteDb handle: records a SQLite write onto the
  *  current transaction so it commits atomically with surrounding cell writes
