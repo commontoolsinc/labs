@@ -36,10 +36,10 @@ interface Gate {
   /** The record kind, which is `gate` for all but formatting and linting. */
   kind: string;
 
-  /** The task that runs it. */
-  task: string;
+  /** What runs it, as the arguments Deno takes beyond its own path. */
+  run: readonly string[];
 
-  /** Arguments the task takes beyond its own. */
+  /** Arguments the run takes beyond its own. */
   args?: (context: { baseRef: string }) => string[];
 
   /** Where it runs, repository-relative, when that is not the root. */
@@ -48,68 +48,98 @@ interface Gate {
 
 /** The gates that read nothing but the working tree. */
 const WORKING_TREE_GATES: readonly Gate[] = [
-  { name: "deno-fmt", kind: "format", task: "fmt", args: () => ["--check"] },
-  { name: "deno-lint", kind: "lint", task: "lint" },
-  { name: "check-test-topology", kind: "gate", task: "check-test-topology" },
-  { name: "check-skill-facts", kind: "gate", task: "check-skill-facts" },
-  { name: "check-tripwires", kind: "gate", task: "check-tripwires" },
-  { name: "check-docs", kind: "gate", task: "check-docs" },
+  { name: "deno-fmt", kind: "format", run: ["fmt", "--check"] },
+  { name: "deno-lint", kind: "lint", run: ["lint"] },
+  {
+    name: "check-test-topology",
+    kind: "gate",
+    run: ["task", "check-test-topology"],
+  },
+  {
+    name: "check-skill-facts",
+    kind: "gate",
+    run: ["task", "check-skill-facts"],
+  },
+  { name: "check-tripwires", kind: "gate", run: ["task", "check-tripwires"] },
+  { name: "check-docs", kind: "gate", run: ["task", "check-docs"] },
   {
     name: "check-docs-history-index",
     kind: "gate",
-    task: "check-docs-history-index",
+    run: ["task", "check-docs-history-index"],
   },
-  { name: "check-no-waitfor", kind: "gate", task: "check-no-waitfor" },
+  { name: "check-no-waitfor", kind: "gate", run: ["task", "check-no-waitfor"] },
   {
     name: "check-conflict-markers",
     kind: "gate",
-    task: "check-conflict-markers",
+    run: ["task", "check-conflict-markers"],
   },
   {
     name: "check-control-characters",
     kind: "gate",
-    task: "check-control-characters",
+    run: ["task", "check-control-characters"],
   },
   {
     name: "check-verb-session-sync",
     kind: "gate",
-    task: "check-verb-session-sync",
+    run: ["task", "check-verb-session-sync"],
   },
-  { name: "check-pattern-tiers", kind: "gate", task: "check-pattern-tiers" },
-  { name: "check-unused-deps", kind: "gate", task: "check-unused-deps" },
-  { name: "check-deno-pins", kind: "gate", task: "check-deno-pins" },
-  { name: "check-action-pins", kind: "gate", task: "check-action-pins" },
+  {
+    name: "check-pattern-tiers",
+    kind: "gate",
+    run: ["task", "check-pattern-tiers"],
+  },
+  {
+    name: "check-unused-deps",
+    kind: "gate",
+    run: ["task", "check-unused-deps"],
+  },
+  { name: "check-deno-pins", kind: "gate", run: ["task", "check-deno-pins"] },
+  {
+    name: "check-action-pins",
+    kind: "gate",
+    run: ["task", "check-action-pins"],
+  },
   {
     name: "check-single-copy-deps",
     kind: "gate",
-    task: "check-single-copy-deps",
+    run: ["task", "check-single-copy-deps"],
   },
-  { name: "check-package-cycles", kind: "gate", task: "check-package-cycles" },
-  { name: "check-local-program", kind: "gate", task: "check-local-program" },
+  {
+    name: "check-package-cycles",
+    kind: "gate",
+    run: ["task", "check-package-cycles"],
+  },
+  {
+    name: "check-local-program",
+    kind: "gate",
+    run: ["task", "check-local-program"],
+  },
   {
     name: "check-completion-slots",
     kind: "gate",
-    task: "check-completion-slots",
+    run: ["task", "check-completion-slots"],
   },
-  { name: "check-command-docs", kind: "gate", task: "check-command-docs" },
-  { name: "check-action-pins", kind: "gate", task: "check-action-pins" },
-  { name: "check-pattern-tiers", kind: "gate", task: "check-pattern-tiers" },
+  {
+    name: "check-command-docs",
+    kind: "gate",
+    run: ["task", "check-command-docs"],
+  },
   {
     name: "check-cfc-types",
     kind: "gate",
-    task: "check-cfc-types",
+    run: ["task", "check-cfc-types"],
     cwd: "packages/static",
   },
   {
     name: "check-commonfabric-types",
     kind: "gate",
-    task: "check-commonfabric-types",
+    run: ["task", "check-commonfabric-types"],
     cwd: "packages/static",
   },
   {
     name: "check-withheld-globals",
     kind: "gate",
-    task: "check-withheld-globals",
+    run: ["task", "check-withheld-globals"],
     cwd: "packages/static",
   },
 ];
@@ -123,13 +153,13 @@ const HISTORY_GATES: readonly Gate[] = [
   {
     name: "check-baselines-append-only",
     kind: "gate",
-    task: "check-baselines-append-only",
+    run: ["task", "check-baselines-append-only"],
     args: ({ baseRef }) => [baseRef],
   },
   {
     name: "check-test-aliases",
     kind: "gate",
-    task: "check-test-aliases",
+    run: ["task", "check-test-aliases"],
     args: ({ baseRef }) => [baseRef],
   },
 ];
@@ -176,8 +206,7 @@ function gateSuite(
             gate.name,
             "--",
             Deno.execPath(),
-            "task",
-            gate.task,
+            ...gate.run,
             ...gate.args?.({ baseRef }) ?? [],
           ],
           cwd: gate.cwd === undefined
