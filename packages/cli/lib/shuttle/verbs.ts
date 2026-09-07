@@ -892,6 +892,18 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
 ]);
 
 /**
+ * Every verb, by the word that names one, read for what it says about itself
+ * rather than for what running it does.
+ *
+ * It is {@link VERBS} under the half of its type a reader outside the dispatch
+ * needs. `tasks/check-command-docs.ts` is that reader: it holds each verb to a
+ * live document naming it, and a gate that could reach `run` could call one.
+ * Every verb is here because it is the same map — a verb added to the table is
+ * a verb the gate asks about, with no second list to keep in step.
+ */
+export const VERB_HELP: ReadonlyMap<string, VerbHelp> = VERBS;
+
+/**
  * Helper for {@link cd}, which finishes `move`.
  *
  * A landing and a refusal are the answer already. The arms only a read can
