@@ -5,7 +5,6 @@ import { createSession, Identity } from "@commonfabric/identity";
 import {
   getPatternIdentityRef,
   getPieceSourceRevisions,
-  type Pattern,
   Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
@@ -240,27 +239,18 @@ describe("setsrc commit receipt", () => {
       { space: pieces.getSpace() },
     );
     const candidateRef = runtime.patternManager.getArtifactEntryRef(candidate);
-    const runnerInternals = runtime.runner as unknown as {
-      syncCellsForRunningPattern(
-        resultCell: unknown,
-        pattern: Pattern,
-        inputs?: unknown,
-      ): Promise<boolean>;
-    };
-    const originalSync = runnerInternals.syncCellsForRunningPattern.bind(
-      runtime.runner,
-    );
     let syncCount = 0;
-    runnerInternals.syncCellsForRunningPattern = async (
+    runtime.runner.accessForTestingOnly.dependencySyncer = async (
       resultCell,
       pattern,
       inputs,
+      sync,
     ) => {
       syncCount++;
       if (syncCount === 2) {
         throw new Error("injected runner post-commit failure");
       }
-      return await originalSync(resultCell, pattern, inputs);
+      return await sync(resultCell, pattern, inputs);
     };
 
     try {
@@ -272,7 +262,7 @@ describe("setsrc commit receipt", () => {
       )).rejects.toThrow("injected runner post-commit failure");
       expect(getPatternIdentityRef(piece.getCell())).toEqual(candidateRef);
     } finally {
-      runnerInternals.syncCellsForRunningPattern = originalSync;
+      runtime.runner.accessForTestingOnly.dependencySyncer = undefined;
     }
   });
 

@@ -1922,26 +1922,17 @@ describe("setup/start", () => {
       resultCell,
     );
 
-    const runner = runtime.runner as unknown as {
-      syncCellsForRunningPattern(
-        resultCell: unknown,
-        pattern: Pattern,
-        inputs?: unknown,
-      ): Promise<boolean>;
-    };
-    const originalSync = runner.syncCellsForRunningPattern.bind(
-      runtime.runner,
-    );
     const postCommitFailure = new Error("injected post-commit failure");
     let syncCount = 0;
-    runner.syncCellsForRunningPattern = async (
+    runtime.runner.accessForTestingOnly.dependencySyncer = async (
       resultCell,
       executable,
       inputs,
+      sync,
     ) => {
       syncCount++;
       if (syncCount === 2) throw postCommitFailure;
-      return await originalSync(resultCell, executable, inputs);
+      return await sync(resultCell, executable, inputs);
     };
 
     try {
@@ -1964,7 +1955,7 @@ describe("setup/start", () => {
         receiptSourceSnapshot(runtime, resultCell).pattern,
       );
     } finally {
-      runner.syncCellsForRunningPattern = originalSync;
+      runtime.runner.accessForTestingOnly.dependencySyncer = undefined;
     }
   });
 
@@ -2282,27 +2273,18 @@ describe("setup/start", () => {
     );
     const previous = receiptSourceSnapshot(runtime, resultCell).pattern;
 
-    const runner = runtime.runner as unknown as {
-      syncCellsForRunningPattern(
-        resultCell: unknown,
-        pattern: Pattern,
-        inputs?: unknown,
-      ): Promise<boolean>;
-    };
-    const originalSync = runner.syncCellsForRunningPattern.bind(
-      runtime.runner,
-    );
     let syncCount = 0;
-    runner.syncCellsForRunningPattern = async (
+    runtime.runner.accessForTestingOnly.dependencySyncer = async (
       resultCell,
       executable,
       inputs,
+      sync,
     ) => {
       syncCount++;
       if (syncCount === 2) {
         throw new Error("injected legacy post-commit failure");
       }
-      return await originalSync(resultCell, executable, inputs);
+      return await sync(resultCell, executable, inputs);
     };
 
     try {
@@ -2313,7 +2295,7 @@ describe("setup/start", () => {
         { expectedPatternIdentity: previous },
       )).rejects.toThrow("injected legacy post-commit failure");
     } finally {
-      runner.syncCellsForRunningPattern = originalSync;
+      runtime.runner.accessForTestingOnly.dependencySyncer = undefined;
     }
   });
 
@@ -2911,27 +2893,18 @@ describe("setup/start", () => {
     const currentIdentity = receiptSourceSnapshot(runtime, resultCell).pattern;
 
     const boundTx = runtime.edit();
-    const runner = runtime.runner as unknown as {
-      syncCellsForRunningPattern(
-        resultCell: unknown,
-        pattern: Pattern,
-        inputs?: unknown,
-      ): Promise<boolean>;
-    };
-    const originalSync = runner.syncCellsForRunningPattern.bind(
-      runtime.runner,
-    );
     let syncCount = 0;
-    runner.syncCellsForRunningPattern = async (
+    runtime.runner.accessForTestingOnly.dependencySyncer = async (
       resultCell,
       executable,
       inputs,
+      sync,
     ) => {
       syncCount++;
       if (syncCount === 2) {
         throw new Error("transaction-bound post-setup failure");
       }
-      return await originalSync(resultCell, executable, inputs);
+      return await sync(resultCell, executable, inputs);
     };
 
     try {
@@ -2942,7 +2915,7 @@ describe("setup/start", () => {
         { expectedPatternIdentity: currentIdentity },
       )).rejects.toThrow("transaction-bound post-setup failure");
     } finally {
-      runner.syncCellsForRunningPattern = originalSync;
+      runtime.runner.accessForTestingOnly.dependencySyncer = undefined;
       boundTx.abort();
     }
   });
@@ -3968,17 +3941,16 @@ describe("runner utils", () => {
       // used to allow duplicate starts for the same result cell.
       runtime.runner.accessForTestingOnly.locallyPreparedResults.clear();
 
-      // Replaced by assignment below, which only a TypeScript-private member
-      // allows, so it is reached the old way.
-      const runner = runtime.runner as unknown as {
-        syncCellsForRunningPattern: (...args: any[]) => Promise<boolean>;
-      };
       let dependencySyncRuns = 0;
-      const originalSync = runner.syncCellsForRunningPattern.bind(runner);
-      runner.syncCellsForRunningPattern = async (...args: any[]) => {
+      runtime.runner.accessForTestingOnly.dependencySyncer = async (
+        resultCell,
+        executable,
+        inputs,
+        sync,
+      ) => {
         dependencySyncRuns++;
         await clock.settle();
-        return originalSync(...args);
+        return sync(resultCell, executable, inputs);
       };
 
       try {
@@ -3999,7 +3971,7 @@ describe("runner utils", () => {
 
         expect(resultCell.key("value").get()).toBe(1);
       } finally {
-        runner.syncCellsForRunningPattern = originalSync;
+        runtime.runner.accessForTestingOnly.dependencySyncer = undefined;
       }
     });
 

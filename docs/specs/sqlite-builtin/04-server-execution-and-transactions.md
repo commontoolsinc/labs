@@ -11,7 +11,7 @@ and `session.watch.*`.
   ([`packages/memory/v2/engine.ts`](../../../packages/memory/v2/engine.ts),
   `open()` → `engine.database`), cached one-per-space by the server
   ([`packages/memory/v2/server.ts`](../../../packages/memory/v2/server.ts),
-  `openEngine(space)`).
+  `Server.#openEngine()`).
 - The space websocket is served at `/api/storage/memory?space=<did>`
   ([`packages/toolshed/routes/storage/memory/memory.routes.ts`](../../../packages/toolshed/routes/storage/memory/memory.routes.ts)),
   authorized via UCAN on session open.
