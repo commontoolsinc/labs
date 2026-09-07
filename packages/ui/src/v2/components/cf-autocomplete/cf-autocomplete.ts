@@ -378,8 +378,10 @@ export class CFAutocomplete extends BaseElement {
   declare multiple: boolean;
   declare disabled: boolean;
 
-  // Cell controller for value binding
-  // Note: Don't call requestUpdate() in onChange - cell controller already does it
+  /**
+   * Cell controller for value binding. `requestUpdate()` is not called in
+   * `onChange`, since the cell controller already does it.
+   */
   private _cellController = createCellController<string | string[]>(this, {
     timing: { strategy: "debounce", delay: 50 },
     onChange: (newValue, oldValue) => {
@@ -387,7 +389,10 @@ export class CFAutocomplete extends BaseElement {
     },
   });
 
-  // Cell controller for items binding - allows reactive items from lift()
+  /**
+   * Cell controller for items binding, which allows reactive items from
+   * `lift()`.
+   */
   private _itemsCellController = createCellController<AutocompleteItem[]>(
     this,
     {
@@ -416,13 +421,16 @@ export class CFAutocomplete extends BaseElement {
   private _input: HTMLInputElement | null = null;
   private _dropdown: HTMLElement | null = null;
 
-  // Pre-processed search index for fast filtering
+  /** Pre-processed search index for fast filtering. */
   private _processedItems: ProcessedItem[] = [];
 
-  // Throttle flag for scroll/resize position updates
+  /** Throttle flag for scroll/resize position updates. */
   private _positionUpdateScheduled = false;
 
-  // Debounce timer - setTimeout(0) defers to next task, letting input render first
+  /**
+   * Debounce timer. `setTimeout(0)` defers to the next task, letting the input
+   * render first.
+   */
   private _debounceTimer: number | null = null;
 
   constructor() {
@@ -436,7 +444,7 @@ export class CFAutocomplete extends BaseElement {
     this.disabled = false;
   }
 
-  // Theme consumption
+  /** The theme, consumed from the provider. */
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
   accessor theme: CFTheme = defaultTheme;
@@ -473,7 +481,10 @@ export class CFAutocomplete extends BaseElement {
     }
   }
 
-  // Throttle scroll/resize updates to RAF to prevent layout thrashing
+  /**
+   * Handler which throttles scroll/resize updates to `requestAnimationFrame`,
+   * to prevent layout thrashing.
+   */
   private _handleScrollOrResize = () => {
     if (this._isOpen && !this._positionUpdateScheduled) {
       this._positionUpdateScheduled = true;
@@ -531,7 +542,10 @@ export class CFAutocomplete extends BaseElement {
     this._updateFilteredItemsCache();
   }
 
-  // Memoized filter computation - only runs when inputs actually change
+  /**
+   * Recomputes the memoized filter results, only when the inputs actually
+   * change.
+   */
   private _updateFilteredItemsCache() {
     const currentSelectedValues = this._getSelectedValuesSet();
     const queryChanged = this._query !== this._lastQuery;
@@ -652,23 +666,23 @@ export class CFAutocomplete extends BaseElement {
     }
   }
 
-  // Helper to get current value from cell controller
+  /** Returns the current value from the cell controller. */
   private _getCurrentValue(): string | readonly string[] | undefined {
     return this._cellController.getValue();
   }
 
-  // Helper to get resolved items (either from Cell or direct array)
+  /** The resolved items, either from the cell or the direct array. */
   private get _resolvedItems(): readonly AutocompleteItem[] {
     return this._itemsCellController.getValue() || [];
   }
 
-  // Helper to get display label for a value
+  /** Returns the display label for `value`. */
   private _getLabelForValue(value: string): string {
     const item = this._resolvedItems.find((i) => i.value === value);
     return item?.label || value;
   }
 
-  // Get the display value for the input in single-select mode
+  /** The display value for the input in single-select mode. */
   private get _displayValue(): string {
     // If in multi-select mode, always show the query (user is always searching)
     if (this.multiple) {
@@ -690,8 +704,11 @@ export class CFAutocomplete extends BaseElement {
     return "";
   }
 
-  // Helper to check if a processed item matches the search query
-  // Uses pre-indexed words with startsWith for O(words) instead of O(chars*aliases)
+  /**
+   * Returns whether a processed item matches the search query. Uses
+   * pre-indexed words with `startsWith` for O(words) instead of
+   * O(chars*aliases).
+   */
   private _processedItemMatchesQuery(
     processed: ProcessedItem,
     queryWords: string[],
@@ -715,7 +732,7 @@ export class CFAutocomplete extends BaseElement {
     return this._cachedShowCustomOption;
   }
 
-  // Computed: total selectable items (limited to what's actually rendered)
+  /** Total selectable items, limited to what is actually rendered. */
   private get _totalSelectableItems(): number {
     const maxRender = this.maxVisible + 4;
     const filteredCount = Math.min(this._filteredItems.length, maxRender);
@@ -1074,7 +1091,7 @@ export class CFAutocomplete extends BaseElement {
     }
   }
 
-  // Remove an item from the selected values (multi-select only)
+  /** Removes an item from the selected values (multi-select only). */
   private _removeItem(item: AutocompleteItem) {
     if (!this.multiple) return;
 
@@ -1131,7 +1148,7 @@ export class CFAutocomplete extends BaseElement {
     this.emit("cf-close", {});
   }
 
-  // Dropdown positioning
+  /** Updates the dropdown's position. */
   private _updateDropdownPosition() {
     if (!this._input) return;
 

@@ -201,12 +201,15 @@ export class CFChat extends BaseElement {
   @property({ type: Object })
   accessor theme: any = {}; // Accept any theme object (partial or full)
 
-  // Consume theme from provider (preferred). If no direct theme prop, use this.
+  /**
+   * The theme consumed from the provider (preferred). This is used when there
+   * is no direct `theme` prop.
+   */
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
   accessor parentTheme: CFTheme = defaultTheme;
 
-  // Internal computed theme for applying CSS variables locally
+  /** Internal computed theme, for applying CSS variables locally. */
   @property({ type: Object, attribute: false })
   accessor _computedTheme: CFTheme = defaultTheme;
 

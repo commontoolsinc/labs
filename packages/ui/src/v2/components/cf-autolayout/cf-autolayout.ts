@@ -443,8 +443,10 @@ export class CFAutoLayout extends BaseElement {
     globalThis.removeEventListener("keydown", this._onKeydown);
   }
 
-  // Keep attributes/props as the single source of truth and
-  // enforce mobile exclusivity even when set programmatically.
+  /**
+   * Keeps attributes/props as the single source of truth and enforces mobile
+   * exclusivity even when set programmatically.
+   */
   override updated(changed: Map<string, unknown>) {
     if (changed.has("leftOpen") || changed.has("rightOpen")) {
       // Enforce exclusivity on mobile when both become true.

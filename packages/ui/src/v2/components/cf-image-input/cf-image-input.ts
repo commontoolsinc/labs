@@ -98,20 +98,24 @@ export class CFImageInput extends CFFileInput {
   @property({ type: Boolean })
   accessor extractExif = false;
 
-  // Alias maxImages to maxFiles for backward compatibility
+  /** Alias of `maxFiles`, for backward compatibility. */
   get maxImages(): number | undefined {
     return this.maxFiles;
   }
+
   set maxImages(value: number | undefined) {
     this.maxFiles = value;
   }
 
-  // Override: Images should be compressed if maxSizeBytes is set and exceeded
+  /**
+   * Returns whether `file` should be compressed: an image is, when
+   * `maxSizeBytes` is set and exceeded.
+   */
   protected override shouldCompressFile(file: File): boolean {
     return !!(this.maxSizeBytes && file.size > this.maxSizeBytes);
   }
 
-  // Override: Use image compression utility
+  /** Compresses `file` with the image compression utility. */
   protected override async compressFile(file: File): Promise<Blob> {
     if (!this.maxSizeBytes) return file;
 
@@ -139,20 +143,20 @@ export class CFImageInput extends CFFileInput {
     return result.blob;
   }
 
-  // Override: Extract image dimensions and EXIF
+  /** Processes `file`, extracting image dimensions and EXIF. */
   protected override async processFile(file: File): Promise<ImageData> {
     const dimensions = await readImageDimensions(file);
     return await this.storeFile(file, dimensions) as ImageData;
   }
 
-  // Override: Always use <img> for images (we know they're images)
+  /** Renders the preview, always with `<img>`, these being images. */
   protected override renderPreview(file: ImageData): TemplateResult {
     return html`
       <img src="${file.url}" alt="${file.name}" />
     `;
   }
 
-  // Override: Add capture attribute to file input
+  /** Renders the file input, adding the `capture` attribute. */
   protected override renderFileInput(): TemplateResult {
     const captureAttr = this.capture !== false ? this.capture : undefined;
 
@@ -168,7 +172,7 @@ export class CFImageInput extends CFFileInput {
     `;
   }
 
-  // Override render to keep "Processing images..." text
+  /** Renders the element, keeping the `Processing images...` text. */
   override render() {
     return html`
       <div class="container">
@@ -181,13 +185,13 @@ export class CFImageInput extends CFFileInput {
     `;
   }
 
-  // Internal handler that calls parent's protected handler
+  /** Internal handler which calls the parent's protected handler. */
   private _handleFileChangeInternal = (event: Event) => {
     // Call parent's protected _handleFileChange method
     super._handleFileChange(event);
   };
 
-  // Override emit to add image-specific event details
+  /** Emits an event, adding image-specific event details. */
   protected override emit<T = any>(
     eventName: string,
     detail?: T,
