@@ -30,6 +30,47 @@ describe("the pattern and package suites", () => {
     expect(invocation!.junit?.[0]?.scope).toBe("patterns");
   });
 
+  it("gives every suite that runs a pattern somewhere to report it", async () => {
+    // Authored-pattern coverage is LCOV the instrumentation writes for
+    // itself rather than a V8 profile the lane converts, so it needs a
+    // directory of its own. It is the only source of coverage for the
+    // pattern files, and a suite that ran one and reported nowhere would
+    // take that coverage out of the repository-wide figure with nothing
+    // saying so.
+    const measured = {
+      root,
+      outputDir: await outputDir(),
+      coverageDir: "/cov",
+      patternCoverageDir: "/pattern",
+    };
+    for (
+      const id of [
+        "pattern-integration",
+        "pattern-integration-opposite",
+        "pattern-unit",
+        "pattern-reload",
+      ]
+    ) {
+      const suite = byId(id);
+      const [invocation] = await suite.command(
+        [{ unit: suite.units[0]!, skip: [] }],
+        measured,
+      );
+      expect(invocation!.env?.CF_PATTERN_COVERAGE_DIR).toBe("/pattern");
+      expect(invocation!.env?.DENO_COVERAGE_DIR).toBeDefined();
+    }
+  });
+
+  it("leaves the pattern report out where nothing measures the batch", async () => {
+    const suite = byId("pattern-unit");
+    const [invocation] = await suite.command(
+      [{ unit: suite.units[0]!, skip: [] }],
+      { root, outputDir: await outputDir() },
+    );
+    expect(invocation!.env?.CF_PATTERN_COVERAGE_DIR).toBeUndefined();
+    expect(invocation!.env?.DENO_COVERAGE_DIR).toBeUndefined();
+  });
+
   it("runs the opposite arm with an explicit define and history", async () => {
     const opposite = serverExecutionCiLane("opposite");
     const suite = byId("pattern-integration-opposite");

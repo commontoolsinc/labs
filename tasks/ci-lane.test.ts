@@ -7,13 +7,18 @@ import {
 } from "@commonfabric/test-support/records";
 import { loadTopology } from "./test-topology.ts";
 
+import { join } from "@std/path";
 import {
   batchesOf,
   changedFiles,
+  convertCoverage,
+  COVERAGE_PROFILE_DIR,
+  COVERAGE_REPORT_DIR,
   describeConflicts,
   describePlan,
   describeWithheld,
   fullLanes,
+  keepLogs,
   main,
   manifestMoment,
   parseLaneArgs,
@@ -816,6 +821,78 @@ describe("running a lane's work", () => {
     await Deno.remove(workDir, { recursive: true });
   });
 
+  it("gives a measured batch a coverage directory of its suite's name", async () => {
+    // The suites write each producer's profiles into a directory named
+    // for the member or part it belongs to, under one named for the
+    // suite. That is the split the per-package gate reads, and it only
+    // exists because the lane hands the suite somewhere to put it.
+    const workDir = await Deno.makeTempDir({ prefix: "lane-coverage-" });
+    const seen: (string | undefined)[] = [];
+    const watching = suite({
+      id: "measured",
+      units: ["one"],
+      command: (_units, context) => {
+        seen.push(context.coverageDir);
+        return Promise.resolve([{
+          command: [Deno.execPath(), "eval", "0"],
+          cwd: context.root,
+        }]);
+      },
+    });
+
+    await runBatch(
+      { suite: watching, units: [], repeats: 1 },
+      lane,
+      workDir,
+      undefined,
+      {},
+    );
+    await runBatch(
+      { suite: watching, units: [], repeats: 1 },
+      lane,
+      workDir,
+      undefined,
+      {},
+      true,
+    );
+
+    expect(seen[0]).toBeUndefined();
+    expect(seen[1]).toBe(
+      join(REPOSITORY, COVERAGE_PROFILE_DIR, "measured"),
+    );
+    await Deno.remove(workDir, { recursive: true });
+  });
+
+  it("converts what the batches measured into one report per producer", async () => {
+    const root = await Deno.makeTempDir({ prefix: "lane-convert-" });
+    try {
+      const profiles = join(root, COVERAGE_PROFILE_DIR, "workspace-unit");
+      await Deno.mkdir(join(profiles, "memory"), { recursive: true });
+      await Deno.writeTextFile(join(profiles, "memory", "empty.json"), "");
+
+      await convertCoverage(root);
+
+      expect(
+        await Deno.readTextFile(
+          join(root, COVERAGE_REPORT_DIR, "workspace-unit", "memory.lcov"),
+        ),
+      ).toBe("");
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("has nothing to convert where no batch measured anything", async () => {
+    const root = await Deno.makeTempDir({ prefix: "lane-convert-" });
+    try {
+      await convertCoverage(root);
+      await expect(Deno.stat(join(root, COVERAGE_REPORT_DIR))).rejects
+        .toThrow();
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
   it("keeps the records a batch's producers wrote", async () => {
     // Each execution writes into a spool of its own and is gathered
     // before another can reuse a runner-owned path.
@@ -1160,6 +1237,46 @@ describe("planning a lane the manifest chose", () => {
     const printed = lines.join("\n");
     expect(printed).toContain("the store is gone");
     expect(printed).toContain("workspace-unit");
+  });
+});
+
+describe("what a failing lane leaves behind", () => {
+  it("keeps the logs a capability wrote before it gave up", async () => {
+    // A Toolshed server that refuses to start writes the only account of
+    // why into the lane's working directory, and that directory goes when
+    // the lane ends. The account is worth having in exactly the case where
+    // nothing else says anything.
+    const from = await Deno.makeTempDir({ prefix: "lane-logs-from-" });
+    const to = await Deno.makeTempDir({ prefix: "lane-logs-to-" });
+    try {
+      await Deno.writeTextFile(join(from, "toolshed-8000.log"), "refused");
+      await Deno.writeTextFile(join(from, "notes.txt"), "not a log");
+
+      await keepLogs(from, join(to, "kept"));
+
+      expect(await Deno.readTextFile(join(to, "kept", "toolshed-8000.log")))
+        .toBe("refused");
+      await expect(Deno.stat(join(to, "kept", "notes.txt"))).rejects.toThrow();
+    } finally {
+      await Deno.remove(from, { recursive: true });
+      await Deno.remove(to, { recursive: true });
+    }
+  });
+
+  it("says so rather than raising when it cannot keep them", async () => {
+    // This runs while the lane is already failing, and losing the logs
+    // told plainly is a better outcome than a second error on top of the
+    // first.
+    const errors: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => errors.push(args.join(" "));
+    try {
+      await keepLogs("/nowhere-at-all", "/nowhere-either");
+    } finally {
+      console.error = original;
+    }
+    expect(errors.length).toBe(1);
+    expect(errors[0]).toContain("cannot keep the lane's logs");
   });
 });
 
@@ -1656,6 +1773,58 @@ describe("what a lane does with the batches it was given", () => {
     // A lane reports what it measured: the batch ran and went red, so
     // the lane is red, and nothing about that is a crash or a timeout.
     expect(await run([Deno.execPath(), "eval", "Deno.exit(1)"])).toBe(false);
+  });
+
+  it("runs every batch it was given, past a failure in one", async () => {
+    // One failing batch must not hide the batches after it. A lane that
+    // stopped there would leave units it was given unrun while reporting
+    // only that something failed, and nothing downstream could tell the
+    // two apart.
+    const ran: string[] = [];
+    const runners = (ids: readonly string[]) => () =>
+      Promise.resolve(ids.map((id) =>
+        suite({
+          id,
+          units: [`packages/${id}/test/a.test.ts`],
+          command: (_units, context) => {
+            ran.push(id);
+            return Promise.resolve([{
+              command: [
+                Deno.execPath(),
+                "eval",
+                id === "runner-unit" ? "Deno.exit(1)" : "0",
+              ],
+              cwd: context.root,
+            }]);
+          },
+        })
+      ));
+
+    const log = console.log;
+    console.log = () => {};
+    let ok = true;
+    try {
+      ok = await runLane(
+        {
+          lane: 1,
+          of: 1,
+          full: true,
+          dryRun: false,
+          laneCount: false,
+          root: REPOSITORY,
+          at: "2026-09-01T00:00:00Z",
+        },
+        {
+          manifest: () => Promise.resolve({ absent: "none here" }),
+          topology: runners(["runner-unit", "workspace-unit"]),
+        },
+      );
+    } finally {
+      console.log = log;
+    }
+
+    expect(ok).toBe(false);
+    expect(ran.sort()).toEqual(["runner-unit", "workspace-unit"]);
   });
 
   it("says it could not date the tree it is testing", async () => {

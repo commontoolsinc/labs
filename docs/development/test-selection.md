@@ -58,9 +58,11 @@ read them.
 ### `coverage`
 
 Every workspace member, whether it carries the per-package coverage gate,
-the reason beside it when it does not, and the baseline the newest
-manifest holds for it. This is what answers "why is my package not gated?"
-and "what am I being compared against?".
+and the reason beside it when it does not. This is what answers "why is my
+package not gated?". What a gated member is compared against is a question
+about one pull request: the gate reads the newest run on the default
+branch that is an ancestor of the merge base, so this names where the
+figure comes from rather than what it is.
 
 ### `plan --dry-run [--lane N]`
 
@@ -330,6 +332,51 @@ nothing has been recorded twice with no unit.
 A run folding into an empty aggregate has nothing to compare against, and
 says neither.
 
+## What continuous integration runs
+
+A pull request runs five jobs and nothing else. Each is one lane of
+`tasks/ci-lane.ts`, and each resolves the same manifest, reads the same
+working tree against it, and computes the same packing, so five lanes
+agree about what the run holds without a job ahead of them to tell them.
+A lane then takes its own share and runs it.
+
+A push to the default branch runs everything. One small job asks
+`ci-lane.ts` how many lanes the corpus needs and emits that integer; the
+lanes consume it and each works out its own share the way a pull
+request's lanes do. An integer is the whole of what passes between them,
+so nothing about which tests run travels through a job output and there
+is no second planner to disagree with the lanes.
+
+Label a pull request `ci: full` and it runs those same two jobs against
+its own tree, so opting out of selection runs exactly what the default
+branch runs rather than an approximation of it. The five lanes do not run
+then: one path or the other, never both. `Status` requires that one of
+them succeeded, so a pull request cannot go green having run neither.
+
+The natural users of the label are a change nobody wants to be wrong
+about, a change to the topology or to the test machinery itself, and the
+moment somebody wants to know whether a lane failure is real.
+
+## The per-package coverage gate
+
+Coverage across the repository is measured on the default branch and
+gates nothing; it is a trend on the wall.
+[The coverage guide](COVERAGE.md) has the whole of it. One narrower
+measurement still gates a pull request, and this is where selection
+decides who is under it.
+
+A change that touches a covered package makes every item of that
+package's own measured test set mandatory, and those items run once with
+coverage on. `Status` adds up what the lanes measured, scores each
+package against the nearest ancestor run on the default branch, and fails
+on a rise. `deno task test-selection coverage` says which packages are
+covered and what each one's baseline is.
+
+Three things turn the gate into a report rather than a failure: a package
+with no baseline yet, a run in which some test failed, and a change that
+touches more covered packages than the cap allows. The job summary says
+which of the three happened.
+
 ## What the wall shows
 
 Two tiles read the newest manifest. The flake tile reports how many tests
@@ -505,5 +552,16 @@ of the identity being the reported name:
   most tests have never caught anything; a rename of a test that has is
   worth the line.
 
-A new test *surface* — a new job, script, or harness — needs wiring, which
+A new test *surface* is a new suite rather than a new job. Declare it in a
+module under `tasks/test-topology/`, saying what setup it needs, how to
+list the things its runner can be pointed at, how to recognize its own
+records, and what command runs a chosen subset. Nothing in
+`.github/workflows/deno.yml` changes: the full run's lane count is
+computed from the topology, and the lanes read the working tree through
+it. `deno task check-test-topology` is what makes that a checked property
+— one half walks the tree for things that look like tests and fails on
+any that no suite claims, and the other reads a run's records and fails
+on any identity no suite recognizes.
+
+What the suite records still has to reach the store, which
 [the record guide](test-records.md#covering-a-new-test-surface) covers.

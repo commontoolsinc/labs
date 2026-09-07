@@ -281,6 +281,7 @@ describe("opening a capability on a machine that answers", () => {
         dryRun: false,
         workDir: root,
         exec: m.exec,
+        verify: () => Promise.resolve(),
       }, CAPABILITIES);
       await opened.close();
       return { opened, root };
@@ -352,6 +353,49 @@ describe("opening a capability on a machine that answers", () => {
     // that it does not throw.
   });
 
+  it("holds a server it started to the arm it started it for", async () => {
+    // A server on the other arm answers every request the suites make
+    // and passes, so the run reports that the arm it named works when
+    // nothing exercised it. The probe is what turns that into a failure,
+    // and the roles are what it holds each server to.
+    const roles: string[] = [];
+    const m = machine({ "index.ts": "listening (pid 999999). Logs: x\n" });
+    const root = await Deno.makeTempDir({ prefix: "capability-" });
+    try {
+      const opened = await openCapabilities(["toolshed"], {
+        root,
+        dryRun: false,
+        workDir: root,
+        exec: m.exec,
+        verify: (role) => {
+          roles.push(role);
+          return Promise.resolve();
+        },
+      }, CAPABILITIES);
+      await opened.close();
+    } finally {
+      await Deno.remove(root, { recursive: true }).catch(() => {});
+    }
+    expect(roles).toEqual(["default"]);
+  });
+
+  it("refuses a server serving the other arm", async () => {
+    const m = machine({ "index.ts": "listening (pid 999999). Logs: x\n" });
+    const root = await Deno.makeTempDir({ prefix: "capability-" });
+    try {
+      await expect(openCapabilities(["toolshed"], {
+        root,
+        dryRun: false,
+        workDir: root,
+        exec: m.exec,
+        verify: () =>
+          Promise.reject(new Error("default lane publishes serverExecution")),
+      }, CAPABILITIES)).rejects.toThrow("publishes serverExecution");
+    } finally {
+      await Deno.remove(root, { recursive: true }).catch(() => {});
+    }
+  });
+
   it("refuses a launch that names no process to kill later", async () => {
     // A server nobody can kill outlives the lane and holds its port
     // against the next one.
@@ -384,6 +428,7 @@ describe("opening a capability on a machine that answers", () => {
         dryRun: false,
         workDir: root,
         exec: m.exec,
+        verify: () => Promise.resolve(),
       }, CAPABILITIES);
       await opened.close();
       await Deno.remove(root, { recursive: true });
@@ -413,6 +458,7 @@ describe("opening a capability on a machine that answers", () => {
         dryRun: false,
         workDir: root,
         exec: m.exec,
+        verify: () => Promise.resolve(),
       }, CAPABILITIES);
       await opened.close();
       await Deno.remove(root, { recursive: true });

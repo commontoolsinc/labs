@@ -232,6 +232,31 @@ describe("running a member that cannot be handed a subset", () => {
     expect(invocation!.env?.[SKIP_LIST_VARIABLE]).toBeDefined();
   });
 
+  it("accounts for the files the Deno-only half declines", async () => {
+    // A member that splits its halves by a name keeps the browser files
+    // out of the `deno test` run, and the browser half is one unit
+    // whatever it holds. Without saying so, those files would be test
+    // files no suite claims, and the drift guard would fail on them.
+    const root = await workspace({
+      "./packages/bakery": {
+        tasks: {
+          test: { dependencies: ["deno-test", "browser-test"] },
+          "deno-test": "deno test --allow-read --ignore='**/*.browser.test.ts'",
+          "browser-test": "deno run -A ../deno-web-test/cli.ts oven.test.ts",
+        },
+        files: ["test/glaze.test.ts", "test/oven.browser.test.ts"],
+      },
+    });
+    const suite = workspaceUnit(await loadUnitSuites(root));
+    expect(suite.units).toContain("packages/bakery/test/glaze.test.ts");
+    expect(suite.units).not.toContain(
+      "packages/bakery/test/oven.browser.test.ts",
+    );
+    expect(suite.sources).toEqual([
+      "packages/bakery/test/oven.browser.test.ts",
+    ]);
+  });
+
   it("runs the browser half through the task that owns it", async () => {
     const root = await workspace({
       "./packages/bakery": {

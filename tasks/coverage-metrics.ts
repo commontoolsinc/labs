@@ -55,6 +55,14 @@ export interface CoverageDebtMetricsFromLcovOptions {
    * {@link collectCoverageDebtMetricsFromLcov}.
    */
   unlaunchedMembers?: Iterable<string>;
+
+  /**
+   * Score only the source under this repository-relative directory. Used
+   * to charge one workspace member for what its own tests reached, which
+   * is a different quantity from what the whole repository reached in
+   * that member's files and is never compared against it.
+   */
+  within?: string;
 }
 
 export interface CoverageDebtMetric {
@@ -122,9 +130,12 @@ export async function collectCoverageDebtMetricsFromLcov(
   options: CoverageDebtMetricsFromLcovOptions,
 ): Promise<CoverageDebtMetric[]> {
   const unscored = unscoredMetricGroups(options.unlaunchedMembers ?? []);
-  const sourceFiles = (await collectSourceFiles(options.rootDir)).filter(
-    (source) => !unscored.has(source.metricGroup),
-  );
+  const sourceFiles = (await collectSourceFiles(options.rootDir))
+    .filter((source) => !unscored.has(source.metricGroup))
+    .filter((source) =>
+      options.within === undefined ||
+      source.relativePath.startsWith(`${options.within}/`)
+    );
   const lcovCoverage = parseLcov(options.lcov);
 
   let workspaceUncovered = 0;

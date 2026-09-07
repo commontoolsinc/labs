@@ -135,10 +135,7 @@ Deno.test("coverage baseline files round-trip compile cache states", () => {
       },
     ],
   ]);
-  const states: CompileCacheStates = {
-    "generated-patterns": "cold",
-    "pattern-unit": "warm",
-  };
+  const states: CompileCacheStates = { lane: "cold" };
 
   const serialized = JSON.stringify(serializeCoverageBaseline(metrics, states));
 
@@ -168,44 +165,36 @@ Deno.test("parseCoverageBaselineDetailed drops invalid compile cache states", ()
     generatedAt: "2026-01-01T00:00:00Z",
     metrics: [],
     compileCacheStates: {
-      "generated-patterns": "lukewarm",
+      "lane": "lukewarm",
       "runner": "cold",
-      "pattern-unit": "warm",
     },
   });
 
-  assertEquals(parseCoverageBaselineDetailed(file).compileCacheStates, {
-    "pattern-unit": "warm",
-  });
+  assertEquals(parseCoverageBaselineDetailed(file).compileCacheStates, {});
 });
 
 Deno.test("cache state aggregation treats any restore hit as warm", () => {
   const records = parseCacheStateFiles([
-    '{"family":"generated-patterns","shard":"1","matchedKey":"compile-abc-1","exactHit":true}',
+    '{"family":"lane","shard":"1","matchedKey":"compile-abc-1","exactHit":true}',
     // A restore-key hit (exactHit false) still implies an unchanged compiler
     // fingerprint, so the family is warm.
-    '{"family":"generated-patterns","shard":"2","matchedKey":"compile-abc","exactHit":false}',
-    '{"family":"pattern-integration","shard":"1","matchedKey":"compile-abc-1","exactHit":true}',
+    '{"family":"lane","shard":"2","matchedKey":"compile-abc","exactHit":false}',
   ]);
   assertExists(records);
 
-  // pattern-unit has no records, so its state stays absent (unknown).
-  assertEquals(aggregateCacheStates(records), {
-    "generated-patterns": "warm",
-    "pattern-integration": "warm",
-  });
+  assertEquals(aggregateCacheStates(records), { lane: "warm" });
 });
 
 Deno.test("cache state aggregation marks a family cold on any full miss", () => {
   const records = parseCacheStateFiles([
-    '{"family":"pattern-unit","shard":"1","matchedKey":"compile-abc-1","exactHit":true}',
-    '{"family":"pattern-unit","shard":"2","matchedKey":"","exactHit":false}',
-    // A warm shard after the miss must not flip the family back to warm.
-    '{"family":"pattern-unit","shard":"3","matchedKey":"compile-abc-3","exactHit":true}',
+    '{"family":"lane","shard":"1","matchedKey":"compile-abc-1","exactHit":true}',
+    '{"family":"lane","shard":"2","matchedKey":"","exactHit":false}',
+    // A warm lane after the miss must not flip the family back to warm.
+    '{"family":"lane","shard":"3","matchedKey":"compile-abc-3","exactHit":true}',
   ]);
   assertExists(records);
 
-  assertEquals(aggregateCacheStates(records), { "pattern-unit": "cold" });
+  assertEquals(aggregateCacheStates(records), { lane: "cold" });
 });
 
 Deno.test("cache state parsing poisons the collection on any bad record", () => {
@@ -241,14 +230,12 @@ Deno.test("cache state parsing keeps valid unknown-family records inert", () => 
 
   const records = parseCacheStateFiles([
     '{"family":"runner","shard":"1","matchedKey":"","exactHit":false}',
-    '{"family":"pattern-integration","shard":"2","matchedKey":"compile-abc","exactHit":false}',
+    '{"family":"lane","shard":"2","matchedKey":"compile-abc","exactHit":false}',
   ]);
   assertExists(records);
   assertEquals(records.length, 2);
 
-  assertEquals(aggregateCacheStates(records), {
-    "pattern-integration": "warm",
-  });
+  assertEquals(aggregateCacheStates(records), { lane: "warm" });
 });
 
 Deno.test("coverage debt metrics format and parse line units", () => {
@@ -312,16 +299,26 @@ Deno.test("baseline override parser rejects a metric name in place of a group", 
   );
 });
 
-Deno.test("baseline override parser rejects a name no source group could have", () => {
-  assertThrows(
-    () =>
-      parseBaselineOverrides("ACCEPT_COVERAGE_DEBT: packages/a/b/c +7 lines"),
-    Error,
-    "name a coverage source group",
+Deno.test("baseline override parser takes a workspace member at any depth", () => {
+  // The per-package gate scores a workspace member, and the workspace puts
+  // a member at whatever depth it likes, so an acceptance has to be able to
+  // name one. The gate prints the line to paste, and a line it printed that
+  // the parser then refused would be a gate asking for something it will
+  // not take.
+  const nested = parseBaselineOverrides(
+    "ACCEPT_COVERAGE_DEBT: packages/connectors/github +7 lines",
   );
+  assertEquals(
+    nested.metrics.get(
+      coverageMetricForGroup("packages/connectors/github"),
+    ),
+    7,
+  );
+});
 
-  // Only `packages` splits into a second level, so a path below any other
-  // top-level directory names nothing the collection rolls a file up to.
+Deno.test("baseline override parser rejects a name no source group could have", () => {
+  // Only `packages` splits below its top level, so a path under any other
+  // top-level directory names nothing that is measured.
   assertThrows(
     () => parseBaselineOverrides("ACCEPT_COVERAGE_DEBT: tasks/foo +7 lines"),
     Error,

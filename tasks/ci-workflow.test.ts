@@ -2,9 +2,10 @@ import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { parse as parseYaml } from "@std/yaml";
 import { getBinary } from "@astral/astral";
 import { phaseOf } from "./ci-step-phases.ts";
-import { EXPECTED_COVERAGE_ARTIFACT_NAMES } from "./coverage-check.ts";
-import { PATTERN_INTEGRATION_SHARD_COUNT } from "./select-pattern-integration-files.ts";
-import { UNLAUNCHED_MEMBERS_FILE } from "./unlaunched-members.ts";
+import { expectedCoverageArtifactNames } from "./coverage-check.ts";
+import { CACHE_DIR } from "./ci-capabilities.ts";
+import { LOG_DIR } from "./ci-lane.ts";
+import { FULL_RUN_LABEL, LANES } from "./test-selection/policy.ts";
 
 function jobBlock(workflow: string, jobId: string): string {
   const jobsStart = workflow.indexOf("jobs:\n");
@@ -98,6 +99,9 @@ function neededJobIds(job: string): string[] {
 }
 
 const workflowDirectory = new URL("../.github/workflows/", import.meta.url);
+
+/** The two jobs that run tests. Everything either does is the same code. */
+const LANE_JOBS = ["full-tests", "pr-tests"] as const;
 
 async function workflow(name: string): Promise<string> {
   return await Deno.readTextFile(new URL(name, workflowDirectory));
@@ -245,47 +249,41 @@ Deno.test("CI browser tests use the runner's installed Chrome", async () => {
   }
 });
 
-Deno.test("Check preserves a native crash from Deno lint", async () => {
+Deno.test("a lane keeps what a failure leaves behind", async () => {
+  // Two things a failing lane leaves: a core file, where something crashed
+  // natively the way Deno's lint has before, and the logs of whatever
+  // servers the lane started. Nothing in the workflow knows which of the
+  // lane's batches wrote either, so the core pattern and the raised limit
+  // sit around the whole lane and everything it spawns inherits them, and
+  // the logs come out of the lane's own working directory into one place
+  // the upload step can name.
   const contents = await workflow("deno.yml");
-  const check = jobBlock(contents, "check");
-  const lint = stepBlock(check, "🧹 Lint codebase");
-  const describe = stepBlock(check, "📋 Describe Deno lint core dump");
-  const upload = stepBlock(check, "📤 Upload Deno lint core dump");
+  for (const jobId of LANE_JOBS) {
+    const job = jobBlock(contents, jobId);
+    const run = stepBlock(job, "🧪 Run the lane");
+    assertStringIncludes(run, "ulimit -c unlimited");
+    assertStringIncludes(
+      run,
+      'sudo sysctl -w kernel.core_pattern="$GITHUB_WORKSPACE/deno-core.%p"',
+    );
 
-  assertStringIncludes(lint, "ulimit -c unlimited");
-  assertStringIncludes(
-    lint,
-    'sudo sysctl -w kernel.core_pattern="$GITHUB_WORKSPACE/deno-core.%p"',
-  );
-  assertStringIncludes(
-    lint,
-    "deno task run-recorded lint repo deno-lint -- deno lint",
-  );
-  assertStringIncludes(describe, "if: ${{ failure() }}");
-  assertStringIncludes(describe, 'file "$core"');
-  assertStringIncludes(upload, "if: ${{ failure() }}");
-  assertStringIncludes(upload, "uses: actions/upload-artifact@");
-  assertStringIncludes(
-    upload,
-    "name: deno-lint-core-a${{ github.run_attempt }}",
-  );
-  assertStringIncludes(upload, "path: deno-core.*");
-  assertStringIncludes(upload, "if-no-files-found: ignore");
-  assert(
-    check.indexOf("🧹 Lint codebase") <
-        check.indexOf("📋 Describe Deno lint core dump") &&
-      check.indexOf("📋 Describe Deno lint core dump") <
-        check.indexOf("📤 Upload Deno lint core dump") &&
-      check.indexOf("📤 Upload Deno lint core dump") <
-        check.indexOf("🔎 Type check codebase"),
-    "the lint crash report must run immediately after the lint step",
-  );
+    const upload = stepBlock(job, "📋 Upload what a failed lane left behind");
+    assertStringIncludes(upload, "if: failure()");
+    assertStringIncludes(upload, "uses: actions/upload-artifact@");
+    assertStringIncludes(upload, "deno-core.*");
+    assertStringIncludes(upload, LOG_DIR);
+    assertStringIncludes(upload, "if-no-files-found: ignore");
+  }
 });
 
 Deno.test("Status waits for every pull request validation job", async () => {
   const contents = await workflow("deno.yml");
   const gate = jobBlock(contents, "status");
   const pushOnlyJobs = new Set([
+    "build-toolshed",
+    "build-bg-piece-service",
+    "build-cf",
+    "coverage-check",
     "attest-binaries",
     "deploy-rapids",
     "deploy-shell-staging",
@@ -302,8 +300,53 @@ Deno.test("Status waits for every pull request validation job", async () => {
     "if: ${{ always() && github.event_name == 'pull_request' }}",
   );
   assertStringIncludes(gate, "JOB_RESULTS: ${{ toJSON(needs) }}");
-  assertStringIncludes(gate, 'select(.value.result != "success")');
-  assertStringIncludes(gate, "permissions: {}");
+  assertStringIncludes(
+    gate,
+    'select(.value.result != "success" and .value.result != "skipped")',
+  );
+  // The gate below reads the artifacts the lanes uploaded and the runs on
+  // the default branch it compares against, and nothing else. A fork's
+  // token is read-only here regardless, which is why the comment it
+  // writes goes to an artifact for the reporter to post.
+  const permissions = gate.match(/^ {4}permissions:\n((?: {6}.+\n)+)/m);
+  assert(permissions, "Status declares no permissions");
+  assertEquals(permissions[1].trim().split("\n").map((line) => line.trim()), [
+    "contents: read",
+    "actions: read",
+  ]);
+
+  // The second clause. A pull request where both test paths skipped ran no
+  // tests at all, and "nothing failed" alone reports that green. Nothing
+  // else in this design fails silently, and this is the one place it could.
+  assertStringIncludes(
+    gate,
+    '[.["pr-tests"].result, .["full-tests"].result]',
+  );
+  assertStringIncludes(gate, "ran no tests");
+
+  // The per-package coverage gate joins what the lanes measured. It is
+  // the only job in a position to, and it has to exist regardless.
+  const scoring = stepBlock(gate, "📊 Score the packages this change touched");
+  // The verdict comes last and runs whatever the gate did: a run whose
+  // lanes failed is one the gate reports on rather than gates, so it has
+  // to have had its turn before the job ends.
+  assert(
+    gate.indexOf("📊 Score the packages this change touched") <
+      gate.indexOf("🔎 Verify pull request jobs"),
+    "the coverage gate must run before the verdict that ends the job",
+  );
+  assertStringIncludes(
+    stepBlock(gate, "🔎 Verify pull request jobs"),
+    "if: always()",
+  );
+  assertStringIncludes(scoring, "deno run -A tasks/coverage-gate.ts");
+  assertStringIncludes(scoring, "BASE_REF: origin/${{ github.base_ref }}");
+  // A pull request labelled `ci: full` measures every package rather than
+  // the ones the change touched, so the gate scores it from the full run's
+  // reports. The label opts out of selection, not out of the gate.
+  assertStringIncludes(scoring, "needs.pr-tests.result == 'success' ||");
+  assertStringIncludes(scoring, "needs.full-tests.result == 'success'");
+  assertStringIncludes(scoring, "needs.full-tests.result != 'skipped'");
 
   // A path filter would leave the required check pending on a pull request
   // that touches none of the listed paths.
@@ -353,6 +396,21 @@ Deno.test("every step we name carries a phase marker", async () => {
     [],
     "these steps start with no marker from docs/development/CI_PERFORMANCE.md",
   );
+});
+
+Deno.test("every bound the workflow declares is one a job reads", async () => {
+  // An anchor nothing aliases is a bound holding nothing to anything, and
+  // the deletion that stranded it left no other trace. The check below only
+  // asks that every bound is an alias, which a stranded anchor satisfies by
+  // not being a bound at all.
+  const contents = await workflow("deno.yml");
+  const declared = [...contents.matchAll(/^ {2}\w+: &([\w-]+) \d+$/gm)]
+    .map((match) => match[1]);
+  assert(declared.length > 0, "no anchored bound found");
+  const unused = declared.filter((anchor) =>
+    !contents.includes(`timeout-minutes: *${anchor}`)
+  );
+  assertEquals(unused, [], "these anchors are aliased by no job or step");
 });
 
 Deno.test("every work step is bounded before its job is", async () => {
@@ -455,146 +513,155 @@ Deno.test("the run report checks out the commit it reports on", async () => {
   assertStringIncludes(comment, "fetch-depth: 2");
 });
 
-Deno.test("coverage requirements follow sharded test matrices", async () => {
+Deno.test("exactly one of the two test paths runs", async () => {
+  // Running both would contradict the five-job contract and would not be an
+  // opt-out at all: a pull request could still be blocked by the selection
+  // path it had just asked to be excused from.
   const contents = await workflow("deno.yml");
-  const jobs = [
-    ["test", "coverage-profile-workspace-", "shard"],
-    ["runner-test", "coverage-profile-runner-", "shard"],
-    [
-      "generated-patterns-integration-test",
-      "coverage-profile-generated-patterns-",
-      "shard",
-    ],
-    [
-      "pattern-integration-test",
-      "coverage-profile-pattern-integration-",
-      "shard",
-    ],
-    ["pattern-unit-test", "coverage-profile-pattern-unit-", "chunk"],
-  ] as const;
+  const label = FULL_RUN_LABEL;
 
-  for (const [jobId, artifactPrefix, dimension] of jobs) {
-    const job = jobBlock(contents, jobId);
-    const shardMatch = job.match(
-      new RegExp(`^ {8}${dimension}: \\[([0-9, ]+)\\]$`, "m"),
-    );
-    const totalMatch = job.match(/^ {8}total: \[(\d+)\]$/m);
-    assert(shardMatch, `${jobId} ${dimension} matrix not found`);
-    assert(totalMatch, `${jobId} total matrix not found`);
-
-    const shards = shardMatch[1].split(",").map((value) =>
-      Number(value.trim())
-    );
-    const total = Number(totalMatch[1]);
-    if (jobId === "pattern-integration-test") {
-      assertEquals(
-        total,
-        PATTERN_INTEGRATION_SHARD_COUNT,
-        "pattern integration matrix must use its measured weight profile",
-      );
-    }
-    assertEquals(
-      shards,
-      Array.from({ length: total }, (_, index) => index + 1),
-      `${jobId} must list every ${dimension} exactly once`,
-    );
-    assertStringIncludes(
-      job,
-      `name: ${artifactPrefix}\${{ matrix.${dimension} }}`,
-    );
-    assertEquals(
-      EXPECTED_COVERAGE_ARTIFACT_NAMES.filter((name) =>
-        name.startsWith(artifactPrefix)
-      ),
-      shards.map((shard) => `${artifactPrefix}${shard}`),
-      `${jobId} coverage requirements must match its matrix`,
-    );
-  }
-});
-
-Deno.test("every workspace test job uploads its unlaunched-package record", async () => {
-  // The record is written only by a run that stopped early, so a job that
-  // leaves it out of its artifact looks exactly like a job that never left
-  // one, and the coverage gate scores the packages that job never started.
-  const contents = await workflow("deno.yml");
-  const runners = jobIds(contents).filter((jobId) =>
-    stepBlocks(jobBlock(contents, jobId)).some((step) =>
-      /^ +run: deno task test$/m.test(step.body)
-    )
+  const lanes = jobBlock(contents, "pr-tests");
+  assertStringIncludes(lanes, "github.event_name == 'pull_request' &&");
+  assertStringIncludes(
+    lanes,
+    `!contains(github.event.pull_request.labels.*.name, '${label}')`,
+  );
+  assertStringIncludes(
+    lanes,
+    `lane: [${
+      Array.from({ length: LANES }, (_, index) => index + 1).join(", ")
+    }]`,
   );
 
-  assertEquals(runners, ["test"], "jobs running the workspace test runner");
-  for (const jobId of runners) {
+  // A label decides which path a pull request takes, so the workflow has
+  // to run when one is added. The default activity types do not include
+  // that, and a label added to an open pull request would otherwise
+  // change nothing until the next push.
+  const triggers = workflowTriggers(contents);
+  assertStringIncludes(triggers, "      - labeled\n");
+  assertStringIncludes(triggers, "      - unlabeled\n");
+  for (const type of ["opened", "synchronize", "reopened"]) {
+    assertStringIncludes(
+      triggers,
+      `      - ${type}\n`,
+      `naming any activity type drops the defaults, and ${type} is one`,
+    );
+  }
+
+  const planner = jobBlock(contents, "plan-full");
+  assertStringIncludes(planner, "github.event_name == 'push' ||");
+  assertStringIncludes(
+    planner,
+    `contains(github.event.pull_request.labels.*.name, '${label}')`,
+  );
+
+  // The full lanes carry no condition of their own: a job whose planner
+  // skipped skips with it, and one condition cannot disagree with itself.
+  const full = jobBlock(contents, "full-tests");
+  assertEquals(/^ {4}if:/m.test(full), false);
+  assertStringIncludes(full, 'needs: ["plan-full"]');
+  assertStringIncludes(
+    full,
+    "lane: ${{ fromJSON(needs.plan-full.outputs.lanes) }}",
+  );
+});
+
+Deno.test("an integer is the whole of what the planner passes the lanes", async () => {
+  // A planning job that emitted the packing would be a second planner, and
+  // the two would drift into running different sets of tests in the two
+  // places that are meant to agree. Each lane reads the same tree against
+  // the same manifest and takes its own share instead.
+  const contents = await workflow("deno.yml");
+  const planner = jobBlock(contents, "plan-full");
+  const count = stepBlock(planner, "🔢 Count the lanes the full run needs");
+
+  assertStringIncludes(
+    count,
+    "deno run -A tasks/ci-lane.ts --full --lane-count",
+  );
+  assertStringIncludes(count, "^[1-9][0-9]*$");
+  assertStringIncludes(planner, "lanes: ${{ steps.count.outputs.lanes }}");
+  assertStringIncludes(planner, "count: ${{ steps.count.outputs.count }}");
+
+  const full = jobBlock(contents, "full-tests");
+  assertStringIncludes(full, "--of ${{ needs.plan-full.outputs.count }}");
+  assertStringIncludes(full, "deno run -A tasks/ci-lane.ts --full");
+});
+
+Deno.test("every lane uploads the coverage report the check asks for", async () => {
+  const contents = await workflow("deno.yml");
+  for (const jobId of LANE_JOBS) {
     const upload = stepBlock(
       jobBlock(contents, jobId),
       "📤 Upload coverage report",
     );
-    assertStringIncludes(upload, `coverage/lcov/${UNLAUNCHED_MEMBERS_FILE}\n`);
+    assertStringIncludes(
+      upload,
+      "name: coverage-profile-lane-${{ matrix.lane }}",
+    );
   }
+
+  // What the check asks for follows the lanes the run had, and the count
+  // reaches it from the planning job rather than from a list kept in step
+  // with a job matrix by hand.
+  assertEquals(expectedCoverageArtifactNames(3), [
+    "coverage-profile-lane-1",
+    "coverage-profile-lane-2",
+    "coverage-profile-lane-3",
+  ]);
+  assertStringIncludes(
+    jobBlock(contents, "coverage-check"),
+    "COVERAGE_LANES: ${{ needs.plan-full.outputs.count }}",
+  );
 });
 
-Deno.test("sharded pattern caches follow their shard topology", async () => {
-  const contents = await workflow("deno.yml");
-  for (
-    const [jobId, selector, dimension] of [
-      [
-        "generated-patterns-integration-test",
-        "'tasks/select-generated-pattern-files.ts'",
-        "shard",
-      ],
-      [
-        "pattern-integration-test",
-        "'tasks/select-pattern-integration-files.ts'",
-        "shard",
-      ],
-      ["pattern-unit-test", "'tasks/integration.ts'", "chunk"],
-    ] as const
-  ) {
-    const job = jobBlock(contents, jobId);
-    const topology = `-\${{ matrix.total }}-\${{ matrix.${dimension} }}-`;
-    assertEquals(job.split(topology).length - 1, 2);
-    const key = job.match(/^ {10}key: (.+)$/m);
-    assert(key, `${jobId} cache key not found`);
-    assertStringIncludes(key[1], selector);
-    const restoreKeys = job.match(/restore-keys: \|\n((?: {12}.+\n)+)/);
-    assert(restoreKeys, `${jobId} restore prefixes not found`);
-    assertEquals(restoreKeys[1].trim().split("\n").length, 1);
-  }
-});
-
-Deno.test("pattern shard selection fails loudly instead of running an empty shard", async () => {
-  // `mapfile -t X < <(deno run … select-pattern-integration-files.ts …)`
-  // discards the selector's exit status: a selector failure leaves the
-  // array empty WITHOUT failing the step, and the step then runs ZERO test
-  // files and exits green — a silently empty shard. The selector itself
-  // throws on an empty selection (every shard carries the
-  // internally-sharded files), so empty output is only ever a failure; the
-  // exit status is the discriminator, and only a plain command
-  // substitution propagates it under `bash -e`.
-
+Deno.test("what a lane keeps between runs is restored by fixed steps", async () => {
+  // Everything a lane keeps sits under one directory, in two subdirectories
+  // with two different answers to what a hit may be. Neither step varies
+  // with what the lane turns out to run, which is what keeps the workflow
+  // independent of the topology.
+  //
+  // A binary is used as built, so its key is exact: a partial-match restore
+  // would put a server compiled from other sources in front of this tree's
+  // tests. The compile byte cache keys its own entries by the compiler's
+  // fingerprint, so an older file is safe to read and a restore prefix is
+  // what keeps the bytes for every pattern the change did not touch.
   const contents = withoutComments(await workflow("deno.yml"));
-  for (
-    // Both stable pattern roles use the same selector contract.
-    const jobId of [
-      "pattern-integration-test",
-      "pattern-integration-test-server-execution-opposite",
-    ]
-  ) {
+  for (const jobId of LANE_JOBS) {
     const job = jobBlock(contents, jobId);
-    assert(
-      !/mapfile[^\n]*<\s*<\([^\n]*select-pattern-integration-files/.test(job),
-      `${jobId}: the shard selector must not feed mapfile through a ` +
-        `process substitution — that discards its exit status, and a ` +
-        `selector failure then runs an empty shard green`,
+
+    const binaries = stepBlock(job, "♻️ Restore the built-binary cache");
+    assertStringIncludes(binaries, `path: ${CACHE_DIR}/binaries`);
+    assertStringIncludes(binaries, "'tasks/build-binaries.ts'");
+    // A binary compiled by another toolchain is a different binary, and
+    // the Deno pin is in neither the lock file nor the workspace manifest.
+    assertStringIncludes(binaries, "'mise.toml'");
+    assertEquals(
+      binaries.includes("restore-keys"),
+      false,
+      `${jobId}: a restore prefix would put a binary built from other ` +
+        "sources in front of this tree's tests",
     );
-    assertStringIncludes(
-      job,
-      "SELECTED_FILES=$(deno run --allow-read " +
-        "../../tasks/select-pattern-integration-files.ts",
+
+    const compile = stepBlock(job, "♻️ Restore the pattern compile byte cache");
+    assertStringIncludes(compile, `path: ${CACHE_DIR}/compile`);
+    assertStringIncludes(compile, "restore-keys:");
+    // The key rotates when a pattern changes rather than on every commit.
+    // One that could never hit exactly would write a new entry from every
+    // lane of every run, and the repository's cache is a fixed size that
+    // the binaries above share.
+    assertEquals(
+      compile.includes("github.sha") || compile.includes("github.run_id"),
+      false,
+      `${jobId}: a per-run key can never hit, so it only ever writes`,
     );
+    assertStringIncludes(compile, "'packages/patterns/**/*.tsx'");
     assertStringIncludes(
-      job,
-      "::error::select-pattern-integration-files.ts selected no files",
+      stepBlock(
+        job,
+        "🧾 Record the compile cache state for the Coverage Check",
+      ),
+      "exact-hit: ${{ steps.compile-cache.outputs.cache-hit }}",
     );
   }
 });
@@ -923,41 +990,37 @@ Deno.test("every test-records artifact name is store-safe and unique", async () 
   }
   // The count pins the search itself: zero found steps would mean the
   // extraction broke, not that the repository stopped shipping records.
-  assert(shipSteps >= 14, `only ${shipSteps} ship steps found`);
+  assert(shipSteps >= 5, `only ${shipSteps} ship steps found`);
 });
 
-Deno.test("every deno.yml JUnit job spools and ships test records", async () => {
+Deno.test("the lanes ship what they recorded and name no suite", async () => {
+  // The last piece of per-suite knowledge to leave the workflow. A lane may
+  // hold default and non-default batches at once, so a job-wide variant
+  // cannot describe one, and the JUnit outputs a batch writes are described
+  // by the suite that wrote them. The lane runner gathers each execution
+  // before the next can reuse a path a runner owns, and the ship step only
+  // packages the spool that left behind.
   const contents = withoutComments(await workflow("deno.yml"));
-  const missing: string[] = [];
-  let junitJobs = 0;
-  for (const jobId of jobIds(contents)) {
+  for (const jobId of LANE_JOBS) {
     const job = jobBlock(contents, jobId);
-    if (!job.includes("--junit-path=")) continue;
-    junitJobs++;
-    if (!job.includes("uses: ./.github/actions/test-records-ship")) {
-      missing.push(
-        `${jobId}: writes a JUnit file but has no test-records-ship step`,
-      );
-    } else {
-      const ship = stepBlock(job, "📤 Ship test records");
-      if (!ship.includes("if: always()")) {
-        missing.push(`${jobId}: does not ship test records after a failure`);
-      }
-      if (!ship.includes("junit:")) {
-        missing.push(`${jobId}: does not gather its JUnit file`);
-      }
-    }
-    if (!job.includes("CF_TEST_RECORDS_DIR:")) {
-      missing.push(
-        `${jobId}: runs tests without CF_TEST_RECORDS_DIR — the spool ` +
-          "half of the records is never written",
-      );
-    }
+    assertStringIncludes(job, "CF_TEST_RECORDS_DIR:");
+    const ship = stepBlock(job, "📤 Ship test records");
+    assertStringIncludes(ship, "if: always()");
+    assertEquals(
+      ship.includes("junit:"),
+      false,
+      `${jobId}: a JUnit specification here is a suite the workflow knows`,
+    );
+    assertEquals(
+      ship.includes("variant:"),
+      false,
+      `${jobId}: a lane holds batches of both kinds, so no job-wide ` +
+        "variant can describe it",
+    );
   }
-  assertEquals(missing, []);
-  // Pin the search itself: zero junit jobs would mean the extraction
-  // broke, not that the repository stopped writing JUnit files.
-  assert(junitJobs >= 7, `only ${junitJobs} JUnit-writing jobs found`);
+  // Nothing else in the workflow runs tests, so nothing else describes the
+  // files one would write.
+  assertEquals(contents.includes("--junit-path="), false);
 });
 
 Deno.test("test-records-ship forwards its optional variant input", async () => {
@@ -976,251 +1039,28 @@ Deno.test("test-records-ship forwards its optional variant input", async () => {
   assertStringIncludes(action, 'args+=(--variant "$RESOLVED_VARIANT")');
 });
 
-Deno.test("server-execution records follow the stable default and opposite roles", async () => {
-  // The default continues the unmarked history. The opposite role exports the
-  // actual implementation arm as CF_TEST_RECORDS_VARIANT, which the shipping
-  // action consumes without hard-coding ON or OFF in the workflow.
+Deno.test("the workflow names no server-execution arm", async () => {
+  // Which posture a suite runs under, and which server it needs to run
+  // under it, are the topology's to say: `package-integration-opposite` and
+  // `pattern-integration-opposite` carry the arm and the variant, and the
+  // capability that starts a server holds it to the arm it was started for.
+  // An arm named here as well would be a second answer, and a flip of the
+  // default would have to be made in both places or leave a mixed posture
+  // nobody meant.
   const contents = withoutComments(await workflow("deno.yml"));
-  const packageJob = jobBlock(
-    contents,
-    "package-integration-test-server-execution-opposite",
-  );
-  const patternJob = jobBlock(
-    contents,
-    "pattern-integration-test-server-execution-opposite",
-  );
-  assertStringIncludes(
-    packageJob,
-    "--junit-path=../../test-results/${JUNIT_NAME}.xml",
-  );
-  assertStringIncludes(packageJob, "JUNIT_NAME: ${{ matrix.junit_name }}");
-  assertStringIncludes(
-    stepBlock(packageJob, "📤 Ship test records"),
-    "glob=test-results/${{ matrix.junit_name }}.xml",
-  );
-  assertStringIncludes(
-    patternJob,
-    "--junit-path=../../test-results/patterns-server-execution-opposite-${{ matrix.shard }}.xml",
-  );
-  assertStringIncludes(
-    stepBlock(patternJob, "📤 Ship test records"),
-    "glob=test-results/patterns-server-execution-opposite-${{ matrix.shard }}.xml",
-  );
-
   for (
-    const jobId of ["package-integration-test", "pattern-integration-test"]
-  ) {
-    const ship = stepBlock(jobBlock(contents, jobId), "📤 Ship test records");
-    assert(
-      !ship.includes("variant:"),
-      `${jobId}: the default configuration must remain unmarked`,
-    );
-  }
-
-  for (
-    const jobId of [
-      "package-integration-test-server-execution-opposite",
-      "pattern-integration-test-server-execution-opposite",
-    ]
-  ) {
-    const job = jobBlock(contents, jobId);
-    assertStringIncludes(
-      stepBlock(job, "🧭 Resolve opposite server-execution posture"),
-      "tasks/server-execution-ci-command.ts env opposite",
-    );
-    const ship = stepBlock(job, "📤 Ship test records");
-    assert(
-      !ship.includes("variant:"),
-      `${jobId}: the arm variant must come from the shared role resolver`,
-    );
-  }
-});
-
-Deno.test("server-execution CI uses stable default and opposite roles", async () => {
-  // Both roles resolve from one helper. The default keeps the flag unset; the
-  // opposite build, server, and test processes inherit its explicit inverse.
-  const contents = await workflow("deno.yml");
-
-  for (
-    const jobId of ["package-integration-test", "pattern-integration-test"]
-  ) {
-    const job = jobBlock(contents, jobId);
-    assertStringIncludes(
-      job,
-      "tasks/server-execution-ci-command.ts env default",
-      `${jobId}: the default lane must resolve from the shared helper`,
-    );
-    assertStringIncludes(
-      job,
-      "tasks/server-execution-ci-command.ts probe default",
-      `${jobId}: the default lane must use the shared posture probe`,
-    );
-    assertStringIncludes(
-      job,
+    const naming of [
+      "EXPERIMENTAL_SERVER_EXECUTION",
+      "SERVER_EXECUTION_ENABLED",
+      "server-execution-ci-command.ts",
       "server-execution-on-skips.ts",
-      `${jobId}: the lane must be able to carry the ON-arm skip list`,
-    );
-    assertStringIncludes(
-      job,
-      '[ "$SERVER_EXECUTION_ENABLED" = "true" ]',
-      `${jobId}: the skip list must apply only when this role is ON`,
-    );
-  }
-
-  // The opposite job resolves its role once into the job environment. Both
-  // the toolshed and test steps inherit it; no step may pin today's inverse
-  // value independently and turn a future flip into a mixed posture.
-  for (
-    const { jobId, runStep } of [
-      {
-        jobId: "package-integration-test-server-execution-opposite",
-        runStep: "🧪 Run ${{ matrix.step_name }} (opposite posture)",
-      },
-      {
-        jobId: "pattern-integration-test-server-execution-opposite",
-        runStep:
-          "🧩 Run end-to-end patterns integration tests (opposite posture)",
-      },
+      "CF_TEST_RECORDS_VARIANT",
     ]
   ) {
-    const job = jobBlock(contents, jobId);
-    assertStringIncludes(
-      job,
-      "tasks/server-execution-ci-command.ts env opposite",
-    );
-    assertStringIncludes(
-      job,
-      "tasks/server-execution-ci-command.ts probe opposite",
-    );
-    for (
-      const stepName of [
-        "🔌 Start Toolshed server for testing (opposite posture)",
-        runStep,
-      ]
-    ) {
-      // The selecting steps exist under these names and, like every other
-      // step (asserted over the whole workflow below), carry no literal arm.
-      stepBlock(job, stepName);
-    }
-    assertStringIncludes(
-      job,
-      '[ "$SERVER_EXECUTION_ENABLED" = "true" ]',
-      `${jobId}: the ON-arm skip list follows the resolved posture`,
-    );
-    assertStringIncludes(
-      job,
-      "binary-toolshed-opposite",
-      `${jobId}: the opposite lane runs the opposite-built binary`,
+    assertEquals(
+      contents.includes(naming),
+      false,
+      `deno.yml names ${naming}, which the topology decides`,
     );
   }
-
-  // No step anywhere selects an arm by literal: every assignment of the flag
-  // is the resolve step's output, so a flip of the default moves both roles
-  // together and a value pinned by hand cannot turn a flip into a mixed
-  // posture. Every assignment form counts — a YAML `env:` entry in either
-  // quote style, a shell `NAME=value`, and the shell default-assignment
-  // `${NAME:=value}`. Comments are stripped so a note naming a value is not
-  // read as setting it; the CLI lane's `${EXPERIMENTAL_SERVER_EXECUTION:-…}`
-  // is a read, not an assignment, and does not match.
-  const literal = withoutComments(contents).match(
-    /EXPERIMENTAL_SERVER_EXECUTION\s*(?::=|[:=])\s*['"]?(?:true|false)\b/,
-  );
-  assert(
-    literal === null,
-    `deno.yml selects a server-execution arm by literal: ${literal?.[0]}`,
-  );
-
-  const buildOpposite = jobBlock(contents, "build-toolshed-opposite");
-  assertStringIncludes(
-    buildOpposite,
-    "tasks/server-execution-ci-command.ts env opposite",
-    "the opposite build must bake the posture resolved by the shared helper",
-  );
-
-  // The real bg-piece-service binary and cf-harness fabric session are always
-  // exercised at the first-party default resolution.
-  const gate = jobBlock(contents, "deployed-topology-gate");
-  assertStringIncludes(gate, "binary-bg-piece-service");
-  assertStringIncludes(gate, "integration/posture-gate.test.ts");
-  assertStringIncludes(gate, "integration/fabric-session-posture-gate.test.ts");
-  assertStringIncludes(
-    gate,
-    "tasks/server-execution-ci-command.ts env default",
-  );
-  assertStringIncludes(
-    gate,
-    "tasks/server-execution-ci-command.ts probe default",
-  );
-});
-
-Deno.test("the CLI lane follows the default and refuses a mixed posture", async () => {
-  // `cf` is a deployed CLIENT: it ADOPTS the arm the server publishes on
-  // /api/meta (experimentalOptionsForDeployedClient, authority "server")
-  // unless an explicit EXPERIMENTAL_SERVER_EXECUTION overrides it. A
-  // serving loop therefore proves only the SERVER's half — the review's
-  // finding-7 mixed posture (a client on the other arm) would still read
-  // as a passing ON exercise. The probe has to compare both arms and fail
-  // on a disagreement, which is what this pins.
-  const contents = await workflow("deno.yml");
-  const job = jobBlock(contents, "cli-integration-test");
-  const probe = stepBlock(
-    job,
-    "✅ Verify the default server-execution posture and cf adoption",
-  );
-
-  assertStringIncludes(
-    probe,
-    "tasks/server-execution-ci-command.ts probe default",
-    "the CLI probe must verify the resolved default server posture",
-  );
-  assertStringIncludes(
-    probe,
-    ".experimental.serverExecution",
-    "the CLI probe must read the posture the server PUBLISHES, which is what cf adopts",
-  );
-  assertStringIncludes(
-    probe,
-    'CLIENT_ARM="${EXPERIMENTAL_SERVER_EXECUTION:-$SERVER_ARM}"',
-    "the CLI probe must resolve the client arm the way cf does: an explicit env wins, else the published posture",
-  );
-  assertStringIncludes(
-    probe,
-    '[ "$CLIENT_ARM" != "$SERVER_ARM" ]',
-    "the CLI probe must fail on a client/server arm disagreement",
-  );
-  assertStringIncludes(
-    probe,
-    'if .experimental.serverExecution == null then "unpublished"',
-    "the CLI probe must preserve a published JSON false rather than treating it as absent",
-  );
-});
-
-Deno.test("both server-execution pattern roles upload failure logs", async () => {
-  const contents = await workflow("deno.yml");
-  const patternJob = jobBlock(
-    contents,
-    "pattern-integration-test-server-execution-opposite",
-  );
-  const upload = stepBlock(patternJob, "📋 Upload toolshed log on failure");
-
-  assertStringIncludes(upload, "if: failure()");
-  assertStringIncludes(upload, "uses: actions/upload-artifact@");
-  assertStringIncludes(
-    upload,
-    "name: toolshed-log-pattern-integration-server-execution-opposite-${{ matrix.shard }}",
-  );
-  assertStringIncludes(upload, "path: ${{ runner.temp }}/toolshed.log");
-  assertStringIncludes(upload, "retention-days: 14");
-  assertStringIncludes(upload, "if-no-files-found: ignore");
-
-  const defaultJob = jobBlock(contents, "pattern-integration-test");
-  const defaultUpload = stepBlock(
-    defaultJob,
-    "📋 Upload toolshed log on failure",
-  );
-  assertStringIncludes(defaultUpload, "if: failure()");
-  assertStringIncludes(
-    defaultUpload,
-    "name: toolshed-log-pattern-integration-${{ matrix.shard }}",
-  );
 });

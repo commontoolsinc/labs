@@ -234,9 +234,12 @@ describe("coverageLines()", () => {
     ]);
   });
 
-  it("says so when a member has no baseline yet", () => {
+  it("names where a baseline the manifest does not carry comes from", () => {
     const lines = coverageLines(sampleManifest(), ["packages/memory"]);
-    expect(lines).toEqual(["packages/memory  gated, against no baseline yet"]);
+    expect(lines).toEqual([
+      "packages/memory  gated, against the newest ancestor run on the " +
+      "default branch",
+    ]);
   });
 
   it("gives the reason for a member the gate leaves alone", () => {
@@ -479,7 +482,7 @@ describe("dispatch()", () => {
     });
     expect(result.code).toBe(0);
     expect(result.out).toContain("packages/memory");
-    expect(result.out).toContain("no baseline yet");
+    expect(result.out).toContain("the newest ancestor run on the default");
   });
 
   it("stops when explain is given no identity, or a bad one", async () => {

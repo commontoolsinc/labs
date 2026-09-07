@@ -127,8 +127,12 @@ export function coverageLines(
       return `${pad(member, width)}  not gated: ${excluded}`;
     }
     const baseline = baselines.get(member);
+    // A manifest carries a baseline only where the publisher has one. The
+    // gate reads the rest out of the newest run on the default branch that
+    // is an ancestor of what the change is measured against, which is a
+    // question about a pull request and cannot be answered from here.
     const against = baseline === undefined
-      ? "no baseline yet"
+      ? "the newest ancestor run on the default branch"
       : `${baseline.uncoveredLines} uncovered lines at ${baseline.commit}`;
     return `${pad(member, width)}  gated, against ${against}`;
   });

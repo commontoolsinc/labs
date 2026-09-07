@@ -7,8 +7,9 @@ name: Pull Request Comments
 # read-only token there. Each job names the workflow it follows, because
 # both triggers reach both jobs.
 #
-# The coverage comment carries what the Coverage Check gate found on the
-# pull request's own run, handed over as the `coverage-comment` artifact.
+# The coverage comment carries what the per-package coverage gate found on
+# the pull request's own run. The gate runs inside the `Status` job, which
+# hands the comment over as the `coverage-comment` artifact.
 #
 # The run report carries what a later run on the default branch found that
 # the pull request's own run could not have found for itself: a test that

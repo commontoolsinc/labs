@@ -42,9 +42,7 @@ Deno.test("pathTouchesCompileCacheKey matches directory-tree globs", () => {
 Deno.test("pathTouchesCompileCacheKey matches exact-file entries exactly", () => {
   assert(pathTouchesCompileCacheKey("deno.lock"));
   assert(pathTouchesCompileCacheKey("deno.jsonc"));
-  assert(
-    pathTouchesCompileCacheKey("packages/runner/src/pattern-coverage.ts"),
-  );
+  assert(pathTouchesCompileCacheKey("packages/runner/src/pattern-coverage.ts"));
   // hashFiles('deno.lock') matches only the workspace-root file, and an
   // exact-file entry must not swallow name-prefixed siblings.
   assert(!pathTouchesCompileCacheKey("packages/toolshed/deno.lock"));
@@ -109,69 +107,19 @@ Deno.test("classifyRunAgainstPredecessor fails open to unknown", async () => {
   );
 });
 
-Deno.test("COMPILE_CACHE_KEY_GLOBS matches the cc-* cache keys in deno.yml", async () => {
-  // The drift guard: COMPILE_CACHE_KEY_GLOBS mirrors the FIRST hashFiles(...)
-  // argument list of every cc-* compile-cache key in the workflow. If this
-  // fails, update the constant and the workflow together (and matcherForGlob if
-  // a new glob shape appeared).
-
+Deno.test("COMPILE_CACHE_KEY_GLOBS matches the cc-lane cache key in deno.yml", async () => {
+  // A glob added to the workflow key and not here would leave a run recorded
+  // warm that recompiled everything.
   const workflow = await Deno.readTextFile(
     new URL("../.github/workflows/deno.yml", import.meta.url),
   );
-  const keyLines = workflow.split("\n").filter((line) =>
-    line.includes("cc-") && line.includes("hashFiles(")
-  );
-  assert(
-    keyLines.length >= 3,
-    `expected at least 3 cc-* cache key lines in deno.yml, found ${keyLines.length}`,
-  );
-
-  const expected = [...COMPILE_CACHE_KEY_GLOBS].sort();
-  for (const line of keyLines) {
-    const firstGroup = line.match(/hashFiles\(([^)]*)\)/);
-    assert(firstGroup, `no hashFiles(...) group in: ${line.trim()}`);
-    const globs = [...firstGroup[1].matchAll(/'([^']+)'/g)]
-      .map((match) => match[1])
-      .sort();
-    assertEquals(
-      globs,
-      expected,
-      `compile-cache key inputs drifted from COMPILE_CACHE_KEY_GLOBS in:\n${line.trim()}`,
-    );
-  }
-});
-
-Deno.test("pattern integration cache follows sources and shard selector", async () => {
-  const workflow = await Deno.readTextFile(
-    new URL("../.github/workflows/deno.yml", import.meta.url),
-  );
-  const start = workflow.indexOf("  pattern-integration-test:\n");
-  const end = workflow.indexOf("\n  pattern-reload-integration-test:", start);
-  assert(start >= 0 && end > start, "pattern integration job not found");
-
-  const job = workflow.slice(start, end);
-  assert(
-    job.includes(
-      "hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'tasks/select-pattern-integration-files.ts', 'tasks/weighted-shards.ts')",
-    ),
-    "pattern integration cache must rotate when source or file assignment changes",
-  );
-});
-
-Deno.test("pattern unit cache follows sources and shard selector", async () => {
-  const workflow = await Deno.readTextFile(
-    new URL("../.github/workflows/deno.yml", import.meta.url),
-  );
-  const start = workflow.indexOf("  pattern-unit-test:\n");
-  const end = workflow.indexOf("\n  # ---", start);
-  assert(start >= 0 && end > start, "pattern unit job not found");
-
-  const job = workflow.slice(start, end);
-  assert(
-    job.includes(
-      "hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'packages/connectors/agents/debug-view/**/*.ts', 'packages/connectors/agents/debug-view/**/*.tsx', 'packages/connectors/github/activity-view/**/*.ts', 'packages/connectors/github/activity-view/**/*.tsx', 'packages/connectors/pattern-sources.ts', 'tasks/integration.ts', 'tasks/pattern-files.ts')",
-    ),
-    "pattern unit cache must rotate when source or file assignment changes",
+  const keys = [...workflow.matchAll(/cc-lane-\$\{\{ hashFiles\(([^)]*)\)/g)]
+    .map((match) => match[1].replaceAll(/\s+/g, " ").trim());
+  assert(keys.length > 0, "no cc-lane cache key found in the workflow");
+  assertEquals(
+    new Set(keys),
+    new Set([COMPILE_CACHE_KEY_GLOBS.map((glob) => `'${glob}'`).join(", ")]),
+    "the compile cache key and COMPILE_CACHE_KEY_GLOBS must name the same files",
   );
 });
 
@@ -299,19 +247,22 @@ Deno.test("inferCurrentRunFallbackState fails open when the baseline is missing 
 Deno.test("fillMissingFamiliesFromFingerprint fills only unknown families, only when cold", async () => {
   // Recorded states win: an already-recorded family (even warm) is untouched;
   // only families with no recorded state are filled cold.
-  const recorded: CompileCacheStates = { "pattern-unit": "warm" };
+  const recorded: CompileCacheStates = {};
   let filled = -1;
   const logs = await captureLogs(() => {
     filled = fillMissingFamiliesFromFingerprint(recorded, "cold");
   });
 
-  assertEquals(recorded["pattern-unit"], "warm");
-  assertEquals(recorded["pattern-integration"], "cold");
-  assertEquals(recorded["generated-patterns"], "cold");
-
   const allFamilies = [...COMPILE_CACHE_FAMILIES].sort();
+  for (const family of allFamilies) assertEquals(recorded[family], "cold");
   assertEquals(Object.keys(recorded).sort(), allFamilies);
-  assertEquals(filled, allFamilies.length - 1);
+  assertEquals(filled, allFamilies.length);
+
+  const already: CompileCacheStates = {};
+  for (const family of allFamilies) already[family] = "warm";
+  assertEquals(fillMissingFamiliesFromFingerprint(already, "cold"), 0);
+  for (const family of allFamilies) assertEquals(already[family], "warm");
+
   // A non-zero fill is announced in the transcript, with the count.
   assertEquals(logs.length, 1);
   assert(logs[0]!.includes(String(filled)));
@@ -320,13 +271,13 @@ Deno.test("fillMissingFamiliesFromFingerprint fills only unknown families, only 
 
 Deno.test("fillMissingFamiliesFromFingerprint is a no-op (and silent) for warm and unknown verdicts", async () => {
   for (const verdict of ["warm", "unknown"] as const) {
-    const recorded: CompileCacheStates = { "pattern-unit": "warm" };
+    const recorded: CompileCacheStates = { lane: "warm" };
     let filled = -1;
     const logs = await captureLogs(() => {
       filled = fillMissingFamiliesFromFingerprint(recorded, verdict);
     });
     assertEquals(filled, 0);
-    assertEquals(recorded, { "pattern-unit": "warm" });
+    assertEquals(recorded, { lane: "warm" });
     assertEquals(logs.length, 0);
   }
 });

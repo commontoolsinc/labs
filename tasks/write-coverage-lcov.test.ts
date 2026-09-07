@@ -10,9 +10,11 @@ import {
   collectCoverageProfileFiles,
   copyUnlaunchedMembers,
   isTrackedFile,
+  memberProfileDirectories,
   normalizeLcovInstancePaths,
   parseFilesMissingTranspiledSource,
   parseFilesWithNoSource,
+  writeMemberLcovReports,
 } from "./write-coverage-lcov.ts";
 import { isTrackedSourcePath } from "./coverage-metrics.ts";
 import {
@@ -481,6 +483,50 @@ Deno.test("write-coverage-lcov succeeds when the file left out is outside the re
 // That leaves two answers to the same question, and this is what stops them
 // drifting: every path below goes to both, and they must agree.
 //
+
+Deno.test("the profiles under a directory are converted one producer at a time", async () => {
+  // The split is already on disk: every producer writes into a directory
+  // named for the member or part it belongs to. Converting each of them on
+  // its own is where the split stops being thrown away, and is what makes
+  // a package's own coverage a thing anybody can read.
+  const root = await Deno.makeTempDir({ prefix: "write-lcov-" });
+  try {
+    const profileDir = join(root, "raw");
+    for (const member of ["memory", "connectors__github"]) {
+      await Deno.mkdir(join(profileDir, member), { recursive: true });
+      await Deno.writeTextFile(join(profileDir, member, "empty.json"), "");
+    }
+    // A file beside the directories is not a producer and is left alone.
+    await Deno.writeTextFile(join(profileDir, "stray.json"), "");
+
+    assertEquals(await memberProfileDirectories(profileDir), [
+      "connectors__github",
+      "memory",
+    ]);
+
+    const reports = join(root, "lcov");
+    assertEquals(await writeMemberLcovReports(profileDir, reports), true);
+    assertEquals(
+      [...Deno.readDirSync(reports)].map((entry) => entry.name).sort(),
+      ["connectors__github.lcov", "memory.lcov"],
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("a profile root that does not exist yields no members", async () => {
+  const root = await Deno.makeTempDir({ prefix: "write-lcov-" });
+  try {
+    assertEquals(await memberProfileDirectories(join(root, "absent")), []);
+    assertEquals(
+      await writeMemberLcovReports(join(root, "absent"), join(root, "out")),
+      true,
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
 
 Deno.test("isTrackedFile gives the same answer as the coverage metric", () => {
   const paths = [

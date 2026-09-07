@@ -32,6 +32,24 @@ counts for nothing.
 
 `packages/utils/deno.jsonc` is a correct minimal example.
 
+## A package with a browser half names it `deno-test`
+
+A member that mixes Deno-only tests with tests needing a browser writes them
+as two tasks rather than as one string joining a `deno test` and a browser run
+with `&&`. Name the Deno-only half `deno-test`, the browser half
+`browser-test`, and have `test` depend on both. `packages/static/deno.jsonc`
+is the shape.
+
+The per-package coverage gate measures `deno-test` where a member defines one
+and `test` otherwise, so the split is what lets such a package keep a gate over
+the half a `deno test` can measure. Adding a browser test to it is then an edit
+to `browser-test` that the gate does not notice.
+`docs/development/COVERAGE.md` has the gate.
+
+Both halves still route by name: the browser files carry `.browser.test.ts`,
+`deno-test` keeps them out with `--ignore`, and `browser-test` hands the same
+glob to the browser runner.
+
 ## A new package is three edits
 
 Adding the directory is not enough. The package path also goes into the

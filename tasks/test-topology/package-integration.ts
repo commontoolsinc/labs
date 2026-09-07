@@ -13,6 +13,7 @@
 
 import {
   SERVER_EXECUTION_ON_SKIPS,
+  type ServerExecutionOnSkip,
   type ServerExecutionSuite,
 } from "../server-execution-on-skips.ts";
 import { serverExecutionCiLane } from "../server-execution-ci.ts";
@@ -59,6 +60,8 @@ async function integrationFiles(
 export async function loadPackageIntegrationSuites(
   root: string,
   defaultEnabled = serverExecutionCiLane("default").enabled,
+  skips: Record<ServerExecutionSuite, readonly ServerExecutionOnSkip[]> =
+    SERVER_EXECUTION_ON_SKIPS,
 ): Promise<Suite[]> {
   const defaults: FilePart[] = [];
   const opposites: FilePart[] = [];
@@ -69,10 +72,7 @@ export async function loadPackageIntegrationSuites(
     const files = await integrationFiles(root, packageDir);
     const junit = { kind: "integration", scope, filePrefix: packageDir };
     const env: Record<string, string> = headless ? { HEADLESS: "1" } : {};
-    const on = unavailableFrom(
-      SERVER_EXECUTION_ON_SKIPS[scope],
-      packageDir,
-    );
+    const on = unavailableFrom(skips[scope], packageDir);
     defaults.push({
       packageDir,
       flags: ["-A"],

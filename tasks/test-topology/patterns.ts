@@ -15,6 +15,7 @@ import { PATTERN_TREES } from "../pattern-files.ts";
 import { SERVER_EXECUTION_ON_SKIPS } from "../server-execution-on-skips.ts";
 import { serverExecutionCiLane } from "../server-execution-ci.ts";
 import {
+  type CommandContext,
   fileSuite,
   type Invocation,
   type Location,
@@ -94,6 +95,7 @@ async function patternIntegrationSuites(
     fileSuite({
       id: "pattern-integration",
       needs: ["deno", "toolshed", "browser", "compile-cache"],
+      patternCoverage: true,
       parts: [{
         packageDir,
         flags,
@@ -108,6 +110,7 @@ async function patternIntegrationSuites(
     fileSuite({
       id: "pattern-integration-opposite",
       variant: oppositeLane.recordVariant,
+      patternCoverage: true,
       needs: [
         "deno",
         "toolshed-baked-opposite",
@@ -137,6 +140,31 @@ async function patternIntegrationSuites(
  * hard-codes the directory it runs, so a lane can ask for the suite or
  * not ask for it, and nothing finer.
  */
+/**
+ * Where a suite that builds its own invocation puts what it measures.
+ *
+ * Two streams, and they are not the same shape. Deno writes V8 profiles
+ * into `DENO_COVERAGE_DIR`, which the lane converts afterwards; the
+ * authored-pattern instrumentation writes LCOV straight into
+ * `CF_PATTERN_COVERAGE_DIR`, which the lane only has to carry. A suite
+ * whose runner is `deno test` over a file list gets both from
+ * `fileSuite`; these two build their own command lines, so they say it
+ * here.
+ */
+function coverageEnv(
+  context: CommandContext,
+  slug: string,
+): Record<string, string> {
+  return {
+    ...(context.coverageDir === undefined
+      ? {}
+      : { DENO_COVERAGE_DIR: path.join(context.coverageDir, slug) }),
+    ...(context.patternCoverageDir === undefined
+      ? {}
+      : { CF_PATTERN_COVERAGE_DIR: context.patternCoverageDir }),
+  };
+}
+
 function patternReloadSuite(): Suite {
   const unit = "packages/patterns/integration/reload";
   return {
@@ -164,7 +192,10 @@ function patternReloadSuite(): Suite {
           "patterns-reload",
         ],
         cwd: context.root,
-        env: { HEADLESS: "1" },
+        env: {
+          HEADLESS: "1",
+          ...coverageEnv(context, "patterns"),
+        },
         junit: [{
           path: path.join(context.outputDir, "patterns-reload.xml"),
           kind: "integration",
@@ -217,6 +248,7 @@ async function patternUnitSuite(root: string): Promise<Suite> {
           "pattern-tests",
         ],
         cwd: context.root,
+        env: coverageEnv(context, "patterns"),
       }];
     },
   };

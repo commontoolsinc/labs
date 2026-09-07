@@ -4,6 +4,7 @@ import {
   assertFalse,
   assertRejects,
   assertStringIncludes,
+  assertThrows,
 } from "@std/assert";
 import * as path from "@std/path";
 import {
@@ -25,7 +26,9 @@ import {
   collectCurrentCacheStates,
   combinedLcovFromArtifacts,
   copyCoverageArtifactFiles,
+  coverageLaneCount,
   currentWorkflowRunFromEvent,
+  extractCoverageDebtSamples,
   fetchAncestorRanks,
   fetchArtifactsForRunBestEffort,
   fetchBaselineRunsForCheck,
@@ -413,9 +416,9 @@ Deno.test("invalid merged PR baseline override metadata is ignored", () => {
   const overrides = parseMergedBaselineOverrides(
     {
       number: 123,
-      // A directory below the group level names no source group, so accepting
-      // it throws.
-      body: "ACCEPT_COVERAGE_DEBT: packages/runner/src +7 lines",
+      // A directory under a top level that does not split names nothing
+      // that is measured, so accepting it throws.
+      body: "ACCEPT_COVERAGE_DEBT: tasks/selection +7 lines",
     },
     (message) => warnings.push(message),
   );
@@ -859,7 +862,7 @@ Deno.test("githubApiOrSkip writes the stamped artifact and exits on rate limits"
         githubApiOrSkip(
           "collecting test data",
           () => Promise.reject(new Error("rate limit exceeded")),
-          { metrics, compileCacheStates: { "pattern-unit": "cold" } },
+          { metrics, compileCacheStates: { lane: "cold" } },
         ).then(() => {})
       )
     );
@@ -874,7 +877,7 @@ Deno.test("githubApiOrSkip writes the stamped artifact and exits on rate limits"
     assertEquals(file.metrics[0].name, "job: Check");
     // The skip path carries the compile cache stamp, so a later run reading
     // this artifact still sees that this run was cold.
-    assertEquals(file.compileCacheStates, { "pattern-unit": "cold" });
+    assertEquals(file.compileCacheStates, { lane: "cold" });
   } finally {
     await Deno.remove("perf-metrics.json").catch(() => {});
   }
@@ -1181,7 +1184,7 @@ Deno.test("buildBaselineRunContext collects artifacts and PRs", async () => {
 Deno.test("parseCoverageBaselineFromArtifacts uses newest coverage baseline artifact", async () => {
   const parsed = {
     metrics: new Map<string, BaselineSample>([["job: Check", makeSample()]]),
-    compileCacheStates: { "pattern-unit": "warm" as const },
+    compileCacheStates: { lane: "warm" as const },
   };
   let parsedArtifactId = 0;
 
@@ -1220,22 +1223,89 @@ function cacheStateJson(
   });
 }
 
-Deno.test("collectCurrentCacheStates aggregates shard records per family", async () => {
+Deno.test("a lane count that was said and cannot be read stops the check", () => {
+  // Nothing said is a tool run outside a job, which has no run to count
+  // the lanes of. A value that was said and is unreadable is a job that
+  // meant to say how many and did not, and reading that as "no particular
+  // artifact" would quietly turn the per-lane check off.
+  assertEquals(coverageLaneCount(() => undefined), 0);
+  assertEquals(coverageLaneCount(() => ""), 0);
+  assertEquals(coverageLaneCount(() => "5"), 5);
+  for (const said of ["0", "-1", "two", "3.5"]) {
+    assertThrows(
+      () => coverageLaneCount(() => said),
+      Error,
+      "not a count of lanes",
+    );
+  }
+});
+
+Deno.test("a lane that measured nothing is named, not failed on", async () => {
+  // Several lanes measure nothing by construction: one holding only the
+  // repository gates, the type-check groups, or the binary compiles runs
+  // no test that writes a coverage profile. Failing the run for those
+  // would turn an ordinary packing into a red default branch.
+  const root = await Deno.makeTempDir({ prefix: "coverage-lanes-" });
+  try {
+    await Deno.mkdir(path.join(root, "coverage-profile-lane-1"));
+    await Deno.writeTextFile(
+      path.join(root, "coverage-profile-lane-1", "memory.lcov"),
+      "SF:packages/memory/src/a.ts\nDA:1,1\nend_of_record\n",
+    );
+
+    const captured = await captureConsoleAsync(() =>
+      extractCoverageDebtSamples(
+        makeRun(1, SHA_C),
+        [makeArtifact(1, "coverage-profile-lane-1")],
+        root,
+        3,
+      )
+    );
+    assertStringIncludes(
+      captured.logs.join("\n"),
+      "Lanes that measured nothing: coverage-profile-lane-2, " +
+        "coverage-profile-lane-3.",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("a run in which no lane measured anything is a failure", async () => {
+  // Not a run that had nothing to measure — a run in which the measuring
+  // broke, which is worth saying rather than carrying a hole in the trend.
+  const root = await Deno.makeTempDir({ prefix: "coverage-lanes-" });
+  try {
+    await assertRejects(
+      () =>
+        extractCoverageDebtSamples(
+          makeRun(1, SHA_C),
+          [],
+          root,
+          3,
+        ),
+      Error,
+      "No coverage profile artifact arrived",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("collectCurrentCacheStates aggregates lane records per family", async () => {
   const contentsById: Record<number, string[]> = {
-    1: [cacheStateJson("generated-patterns", "1", "")],
-    2: [cacheStateJson("generated-patterns", "2", "compile-abc")],
-    3: [cacheStateJson("pattern-integration", "1", "compile-abc")],
+    1: [cacheStateJson("lane", "1", "")],
+    2: [cacheStateJson("lane", "2", "compile-abc")],
   };
   const downloaded: number[] = [];
 
   const states = await collectCurrentCacheStates(
     [
-      makeArtifact(1, "cache-state-generated-patterns-1"),
-      makeArtifact(2, "cache-state-generated-patterns-2"),
-      makeArtifact(3, "cache-state-pattern-integration-1"),
+      makeArtifact(1, "cache-state-lane-1"),
+      makeArtifact(2, "cache-state-lane-2"),
       // Not cache-state artifacts, or expired — never downloaded.
-      makeArtifact(4, "test-timing-pattern-unit-1"),
-      makeArtifact(5, "cache-state-pattern-unit-1", true),
+      makeArtifact(4, "test-timing-lane-1"),
+      makeArtifact(5, "cache-state-lane-3", true),
     ],
     (artifactId) => {
       downloaded.push(artifactId);
@@ -1243,13 +1313,10 @@ Deno.test("collectCurrentCacheStates aggregates shard records per family", async
     },
   );
 
-  // One full-miss shard makes generated-patterns cold; pattern-integration is
-  // warm; pattern-unit has no usable records and stays unknown.
-  assertEquals(states, {
-    "generated-patterns": "cold",
-    "pattern-integration": "warm",
-  });
-  assertEquals(downloaded.sort((a, b) => a - b), [1, 2, 3]);
+  // One lane whose cache missed entirely makes the family cold, because
+  // that lane recompiled everything it was given.
+  assertEquals(states, { lane: "cold" });
+  assertEquals(downloaded.sort((a, b) => a - b), [1, 2]);
 });
 
 Deno.test("collectCurrentCacheStates keeps only the newest re-run duplicate", async () => {
@@ -1259,22 +1326,18 @@ Deno.test("collectCurrentCacheStates keeps only the newest re-run duplicate", as
     [
       // A re-run uploads a same-named artifact; the newest one wins, and a
       // re-run is genuinely warm (the cold first attempt saved the cache).
-      makeArtifact(1, "cache-state-pattern-unit-1"),
-      makeArtifact(9, "cache-state-pattern-unit-1"),
+      makeArtifact(1, "cache-state-lane-1"),
+      makeArtifact(9, "cache-state-lane-1"),
     ],
     (artifactId) => {
       downloaded.push(artifactId);
       return Promise.resolve([
-        cacheStateJson(
-          "pattern-unit",
-          "1",
-          artifactId === 9 ? "compile-abc" : "",
-        ),
+        cacheStateJson("lane", "1", artifactId === 9 ? "compile-abc" : ""),
       ]);
     },
   );
 
-  assertEquals(states, { "pattern-unit": "warm" });
+  assertEquals(states, { lane: "warm" });
   assertEquals(downloaded, [9]);
 });
 
@@ -1282,13 +1345,13 @@ Deno.test("collectCurrentCacheStates degrades to unknown on download failure", a
   const captured = await captureConsoleAsync(() =>
     collectCurrentCacheStates(
       [
-        makeArtifact(1, "cache-state-generated-patterns-1"),
-        makeArtifact(2, "cache-state-pattern-integration-1"),
+        makeArtifact(1, "cache-state-lane-1"),
+        makeArtifact(2, "cache-state-lane-2"),
       ],
       (artifactId) =>
         Promise.resolve(
           artifactId === 1
-            ? [cacheStateJson("generated-patterns", "1", "compile-abc")]
+            ? [cacheStateJson("lane", "1", "compile-abc")]
             : null,
         ),
     )
@@ -1306,13 +1369,13 @@ Deno.test("collectCurrentCacheStates degrades to unknown on a malformed record",
   const captured = await captureConsoleAsync(() =>
     collectCurrentCacheStates(
       [
-        makeArtifact(1, "cache-state-generated-patterns-1"),
-        makeArtifact(2, "cache-state-generated-patterns-2"),
+        makeArtifact(1, "cache-state-lane-1"),
+        makeArtifact(2, "cache-state-lane-2"),
       ],
       (artifactId) =>
         Promise.resolve(
           artifactId === 1
-            ? [cacheStateJson("generated-patterns", "1", "compile-abc")]
+            ? [cacheStateJson("lane", "1", "compile-abc")]
             : ["not json {"],
         ),
     )
@@ -1328,10 +1391,8 @@ Deno.test("collectCurrentCacheStates degrades to unknown on a malformed record",
 });
 
 Deno.test("formatCompileCacheStates shows every family, absent as unknown", () => {
-  assertEquals(
-    formatCompileCacheStates({ "generated-patterns": "cold" }),
-    "generated-patterns=cold, pattern-integration=unknown, pattern-unit=unknown",
-  );
+  assertEquals(formatCompileCacheStates({ lane: "cold" }), "lane=cold");
+  assertEquals(formatCompileCacheStates({}), "lane=unknown");
 });
 
 Deno.test("main reports no coverage data and exits cleanly without coverage artifacts", async () => {
@@ -1403,7 +1464,7 @@ Deno.test("main reports no coverage data and exits cleanly without coverage arti
     assertEquals(captured.result, 0);
     assertStringIncludes(
       output,
-      "Compile cache states: generated-patterns=unknown, pattern-integration=unknown, pattern-unit=unknown",
+      "Compile cache states: lane=unknown",
     );
     assertStringIncludes(
       captured.errors.join("\n"),

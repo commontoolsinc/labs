@@ -2,8 +2,29 @@
 
 This repository measures code coverage in two different ways, because it runs
 two different kinds of code. Keeping the two apart is the key to reading the
-numbers correctly and to deciding which test job should collect which kind of
+numbers correctly and to deciding which suite should collect which kind of
 coverage.
+
+## What gates, and what only reports
+
+A pull request runs a chosen part of the corpus, so it measures a
+corresponding part of the coverage. The repository-wide number therefore
+cannot gate one: the two sides of that comparison are no longer measuring the
+same thing, and no threshold rescues it.
+
+So the repository-wide number is measured on the default branch, from the full
+run, and gates nothing — not there either, where a red build for one uncovered
+line would make the branch's color mean nothing. It is a trend on the wall
+instead: the count of uncovered lines, and under it what a median day does to
+that count, which is the part somebody can act on. A rise the trend picks up is
+reported back to the change that caused it.
+
+One narrower measurement still gates a pull request, and it keeps its teeth
+because both sides of it measure the same thing. Take a package that owns its
+own unit tests, score only that package's source, and count as covered only
+what those tests reached. A change touching that package runs every one of its
+tests, so the measurement is complete whatever selection did anywhere else in
+the run. "The per-package gate" below has the whole of it.
 
 ## Two kinds of code, two coverage mechanisms
 
@@ -172,19 +193,18 @@ reads the same variable to decide whether to turn worker coverage on and where t
 write the merged LCOV it pulls back from the browser (see "How the integration
 jobs collect authored-pattern coverage").
 
-## How the two feed the coverage gate
+## How the two feed the repository-wide number
 
-The Coverage Check job downloads every `coverage-profile-*` artifact with
-`actions/download-artifact`. The action checks each artifact's recorded digest.
-`tasks/coverage-check.ts` verifies that every expected artifact is present. It
-joins all the downloaded LCOV files together and hands them to
-`tasks/coverage-metrics.ts`. That code walks the tracked source files under
-`packages` and `tasks`. For each file, it counts how many lines no test covered.
-The top-level `scripts` directory is excluded from this gate. The counts roll up
-into
-`coverage-debt: <group> uncovered lines` metrics, for example
-`coverage-debt: packages/patterns uncovered lines`, and the coverage check
-gates a pull request on them.
+The Coverage Check job runs on a push to the default branch and downloads every
+`coverage-profile-*` artifact with `actions/download-artifact`. The action
+checks each artifact's recorded digest. `tasks/coverage-check.ts` verifies that
+the run's lanes each uploaded one. It joins all the downloaded LCOV files
+together and hands them to `tasks/coverage-metrics.ts`. That code walks the
+tracked source files under `packages` and `tasks`. For each file, it counts how
+many lines no test covered. The top-level `scripts` directory is left out. The
+counts roll up into `coverage-debt: <group> uncovered lines` metrics, for
+example `coverage-debt: packages/patterns uncovered lines`, and the trend tile
+reads them.
 
 Authored pattern files under `packages/patterns` are tracked source files, so
 their uncovered lines count toward `coverage-debt: packages/patterns`. Every
@@ -271,6 +291,13 @@ file, and the ratchet is what holds it to its tests.
 
 ### A package a run never started is not scored at all
 
+This is a property of the root workspace walk, which is `deno task test` and
+what somebody runs at a workstation. Continuous integration does not use it:
+each lane runs a member's own test task directly and attempts every unit it
+was given whatever any of them did, so no member goes unstarted and no lane
+writes the record below. What follows is the walk, and the check goes on
+reading any record a report it is given carries.
+
 `deno task test` stops handing packages to its workers as soon as one of them
 fails, and the packages already running finish. What a failing run measured is
 therefore whatever was in flight rather than a prefix anyone chose, and the
@@ -284,10 +311,9 @@ So the runner records the members it selected and never started, writing
 `unlaunched-members.txt` into the run's coverage profile directory
 ([`tasks/unlaunched-members.ts`](../../tasks/unlaunched-members.ts) owns the
 file). `tasks/write-coverage-lcov.ts` copies that record beside the LCOV report
-it writes, the workspace test job uploads the two together as one artifact, and
-`tasks/coverage-check.ts` reads the union of the records every artifact
-carries. One job selects each member, so a member any record names is one that
-nothing in the run measured against its own tests.
+it writes, so the two travel together, and `tasks/coverage-check.ts` reads the
+union of the records every artifact carries. One walk selects each member, so a
+member any record names is one that nothing measured against its own tests.
 
 A run that started everything it selected removes any record it finds rather
 than leaving one, in the profile directory and beside the report alike, so that
@@ -312,9 +338,9 @@ group goes unscored rather than the unlaunched member's files alone: one member
 going unmeasured leaves the group's count short by whatever that member's tests
 would have covered, with nothing in the report to say by how much, so the
 members that did run are no more scorable than the one that did not. That
-reaches a package measured by more than one job — `packages/shell` is covered
-by both the workspace unit run and its own integration job — where the
-workspace run skipping it is enough on its own to leave the group unscored.
+reaches a package measured by more than one suite — `packages/shell` is covered
+by both its own unit tests and the package integration suite — where the walk
+skipping it is enough on its own to leave the group unscored.
 
 ## Coverage must not depend on the execution environment
 
@@ -692,26 +718,62 @@ different line in each report and no comparison is possible. When the baseline
 run's coverage artifacts cannot be read — expired, or the download failed — the
 check falls back to the ordinary regression comment.
 
-## Ratchet baselines and accepting debt
+## The per-package gate
 
-The ratchet applies per source group and only to the groups a PR changes: for
-each such group the uncovered-line count must not rise above the count from the
-`main` run for the base-branch commit the PR is merged with, or the nearest
-ancestor of it that has one (see "Which `main` run the ratchet compares
-against"). Debt in unchanged groups is still reported, but does not block the
-PR.
+`tasks/coverage-gate.ts` is the gate a pull request still has to clear, and it
+runs inside the `Status` job because that is the only job in a position to add
+up what the lanes measured.
 
-Accept one group's increase with the narrow per-group marker in the PR
-description, on a line of its own and flush against the left margin:
+Every workspace member under `packages/` carries it, at whatever depth the
+member sits, apart from the members `EXCLUDED_FROM_COVERAGE_GATE` in
+`tasks/test-selection/policy.ts` names, each with the reason it is there.
+`deno task test-selection coverage` prints that list and each covered member's
+baseline.
+
+A change that touches a covered package makes every item of that package's own
+measured test set mandatory. Those items run once, with coverage on, packed
+across the lanes like any other mandatory items. Each lane uploads one report
+per producer; `Status` joins the reports for the package, scores the package's
+own source against them, and compares the result with the nearest run on the
+default branch that is an ancestor of the merge base.
+
+The gate measures a member's `deno-test` task where the member defines one and
+its `test` task otherwise. A package that mixes Deno-only tests with tests that
+need a browser therefore keeps the gate over its Deno-only half, and adding a
+browser test to it is an edit to `browser-test` that the gate does not notice.
+
+Three cases report rather than fail, and the job summary says which happened:
+
+- **A package with no baseline yet.** The first change to touch a new package
+  should not inherit the whole of that package's debt.
+- **A run in which a test failed.** Coverage measured through a failing suite
+  says nothing about whether the change was tested, and the failure is the
+  thing to fix.
+- **A change touching more than `LOCAL_COVERAGE_MAX_PACKAGES` covered
+  packages.** The gate is off for that pull request entirely, rather than
+  gating some of them and quietly ignoring the rest. An author can tell from
+  the diff whether it applies.
+
+A coverage failure says in the summary that it is a coverage failure, so it is
+never mistaken for a test failure.
+
+## Accepting debt
+
+The ratchet holds a covered package's uncovered-line count to the count from
+the run on the default branch for the base-branch commit the pull request is
+merged with, or the nearest ancestor of it that has one (see "Which `main` run
+the ratchet compares against").
+
+Accept one package's increase with the marker in the pull request description,
+on a line of its own and flush against the left margin:
 
 ```text
-ACCEPT_COVERAGE_DEBT: packages/runner +12 lines
+ACCEPT_COVERAGE_DEBT: packages/memory +12 lines
 ```
 
-The marker names the source group — `workspace`, a top-level directory such as
-`tasks`, or a package as `packages/runner` — rather than the metric that group's
-lines are counted in. Only `packages` splits into a second level, because that is
-where the collection stops rolling a file up; `tasks/foo` names no group.
+The marker names the package the gate scored rather than the metric its lines
+are counted in. The gate prints the line to paste with the rise already filled
+in, so this is normally copied rather than written.
 
 A name can have the shape of a group and still name none — a package that is not
 there, or a misspelling of one that is. Nothing would ever consult such a line,
@@ -733,11 +795,10 @@ difference when it uncovered some, which fails the pull request for debt it did
 not add. A rise says the same thing against every baseline, so the marker keeps
 accepting exactly the debt its author accepted and no more.
 
-The check prints the line to paste, with the rise it measured already filled in,
-under `---BEGIN COPY-PASTE---` at the end of the Coverage Check job's log. A line
-that starts with `ACCEPT_COVERAGE_DEBT:` and that the check cannot read fails the
-job and says what form to write instead, rather than being passed over as though
-it were not there.
+The gate prints the line to paste, with the rise it measured already filled in,
+in the `Status` job's summary. A line that starts with `ACCEPT_COVERAGE_DEBT:`
+and that the gate cannot read fails the job and says what form to write instead,
+rather than being passed over as though it were not there.
 
 An accepted group keeps its attribution. The gate keeps one comment on the pull
 request and rewrites it in place as the answer changes, and the comment an
@@ -837,8 +898,8 @@ followed by `git stash pop`.
 
 ## Compile cache state and cold runs
 
-The pattern test jobs restore a compile byte cache keyed on a fingerprint hash
-over the compiler packages. A PR that changes that fingerprint runs cold: every
+A lane restores a compile byte cache keyed on a fingerprint hash over the
+compiler packages. A pull request that changes that fingerprint runs cold: every
 pattern compiles from scratch. A cold run covers compile branches that only
 execute on a cold cache, which lowers its coverage debt, so ratcheting a warm PR
 against a cold `main` run would fail it with phantom uncovered lines.
@@ -851,12 +912,13 @@ create. A custom runtime in this suite must do the same. Setting
 bytes; a runtime uses those bytes only when it receives the cache through its
 `moduleByteCache` option.
 
-To tell cold from warm, each pattern job uploads a small `cache-state-*`
-artifact recording its cache restore result. The coverage check aggregates those
-into `compileCacheStates` in `perf-metrics.json`. A job family is cold when
-any of its shards had a full cache miss, detected as the cache file being absent
-after the restore step (the combined `actions/cache` action does not expose the
-matched key). A partial hit through a restore key counts as warm: both key forms
+To tell cold from warm, each lane uploads a small `cache-state-*` artifact
+recording its cache restore result. The coverage check aggregates those into
+`compileCacheStates` in `perf-metrics.json`. There is one family, `lane`,
+because one cache step covers everything a lane keeps between runs and every
+pattern suite in that lane reads the one file. The family is cold when any lane
+had a full cache miss, detected as the cache file being absent after the restore
+step (the combined `actions/cache` action does not expose the matched key). A partial hit through a restore key counts as warm: both key forms
 start with the fingerprint hash, so any restore means the compiled bytes are
 current. The ratchet skips a cold sample when choosing among the
 base-branch commit and its ancestors, so a cold `main` run cannot lower the
@@ -865,7 +927,7 @@ baseline that warm PRs are held to.
 Every run stamps its own `perf-metrics.json`, so a baseline run's coldness is
 read straight off the artifact that run published. Before writing the stamp, a
 run fills in any family whose cache-state artifact did not arrive, using the
-compile fingerprint: `tasks/compile-cache-state.ts` mirrors the `cc-*` key globs
+compile fingerprint: `tasks/compile-cache-state.ts` mirrors the `cc-lane-` key globs
 (drift-guarded by a test that parses the workflow) and compares the run's commit
 against the commit whose cache it would have restored — the pull request's own
 changed files, or the previous `main` run for a push. A family with no recorded
@@ -941,18 +1003,25 @@ To download the report for a given commit:
 gsutil cp gs://commontools-build-artifacts/workspace-artifacts/labs-<commit-sha>.lcov .
 ```
 
-## Which job collects which coverage
+## Which suite collects which coverage
 
-| Job | Runtime (V8) coverage | Authored-pattern coverage |
+| Suite | Runtime (V8) coverage | Authored-pattern coverage |
 | --- | --- | --- |
-| `pattern-unit-test` | yes | yes (`cf test` with `CF_PATTERN_COVERAGE_DIR`) |
-| `pattern-integration-test` | yes | yes (browser worker collector) |
-| `pattern-reload-integration-test` | yes | yes (browser worker collector) |
+| `pattern-unit` | yes | yes (`cf test` with `CF_PATTERN_COVERAGE_DIR`) |
+| `pattern-integration` | yes | yes (browser worker collector) |
+| `pattern-reload` | yes | yes (browser worker collector) |
 
-The pattern unit job runs each `packages/patterns/**/*.test.tsx` file through
-`cf test` in-process. The two integration jobs run browser-driven `deno test`
+The pattern unit suite runs each `packages/patterns/**/*.test.tsx` file through
+`cf test` in-process. The two integration suites run browser-driven `deno test`
 files against a running Toolshed server. Both kinds of authored-pattern coverage
-feed the same gated metric.
+feed the same repository-wide metric.
+
+A lane hands each batch a coverage directory named for its suite, and each
+producer inside it writes into a directory named for the member or part it
+belongs to. `tasks/write-coverage-lcov.ts` converts each of those directories on
+its own, so the reports a lane uploads are one per producer rather than one per
+lane. That split is what the per-package gate reads, and the repository-wide
+figure is the union of all of them.
 
 The compile byte cache is available to `cf test` through
 `CF_COMPILE_CACHE_FILE`. Coverage and non-coverage compiles use different cache

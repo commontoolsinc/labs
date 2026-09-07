@@ -92,6 +92,8 @@ const WORKING_TREE_GATES: readonly Gate[] = [
     task: "check-completion-slots",
   },
   { name: "check-command-docs", kind: "gate", task: "check-command-docs" },
+  { name: "check-action-pins", kind: "gate", task: "check-action-pins" },
+  { name: "check-pattern-tiers", kind: "gate", task: "check-pattern-tiers" },
   {
     name: "check-cfc-types",
     kind: "gate",

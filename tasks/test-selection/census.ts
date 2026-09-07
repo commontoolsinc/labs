@@ -22,6 +22,7 @@ import {
   type Manifest,
   type ManifestEntry,
 } from "./manifest.ts";
+import { measuredUnits } from "./coverage.ts";
 import type { SelectionReason } from "./plan.ts";
 import { UNMEASURED_COST_SECONDS, VALUE_FLOOR } from "./policy.ts";
 
@@ -119,16 +120,20 @@ export interface Census {
 /**
  * Reads the working tree against a manifest.
  *
- * Two rules make a unit mandatory: the change touched what it covers, or
- * no manifest has ever seen it. The second is the rule the test-record
- * spec requires of any consumer that selects which tests run. A selector
- * that never runs the unselected starves its own data, and a renamed test
- * is an unknown identity until an alias lands.
+ * Three rules make a unit mandatory: the change touched what it covers,
+ * no manifest has ever seen it, or it is part of the measured set of a
+ * package the coverage gate covers. The second is the rule the
+ * test-record spec requires of any consumer that selects which tests run.
+ * A selector that never runs the unselected starves its own data, and a
+ * renamed test is an unknown identity until an alias lands. The third is
+ * what makes the per-package gate honest: a package is scored against the
+ * default branch only where every one of its own tests ran.
  */
 export function census(
   suites: readonly Suite[],
   manifest: Manifest | undefined,
   changed: ReadonlySet<string>,
+  measured: ReadonlySet<string> = new Set(),
 ): Census {
   // Everything below writes into the manifest this returns. What it does
   // not touch is what a manifest says about its own publication rather
@@ -170,10 +175,15 @@ export function census(
         ? suite.unitsForChange(changed)
         : suite.units.filter((unit) => changed.has(unit)),
     );
+    const gated = new Set<string>(
+      measuredUnits(suite.id, suite.units, measured),
+    );
     for (const unit of suite.units) {
       if (unavailable.has(unit)) continue;
       const reason: SelectionReason | undefined = touched.has(unit)
         ? "changed"
+        : gated.has(unit)
+        ? "coverage-gate"
         : undefined;
       const recorded = inUnit.get(`${suite.id}\t${unit}`);
       if (recorded === undefined) {

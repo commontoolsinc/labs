@@ -52,13 +52,13 @@ fewer than ten minutes below its job's.
 Every job that runs tests sets `CF_TEST_RECORDS_DIR` to a workspace spool
 and ends with a `📤 Ship test records` step using the
 `./.github/actions/test-records-ship` composite action, `if: always()`,
-with the job's display name, its matrix leg in `artifact:`, and a
-`--junit` specification when the job produces JUnit XML. Command-level
-steps wrap their command in `deno task run-recorded <kind> <scope> <name>
---`. The contract is `docs/specs/test-records.md`; the wiring recipe is
-"Covering a new test surface" in `docs/development/test-records.md`. A job
-without the ship step runs fine and records nothing — which is how a new
-job silently falls out of the flake and duration history.
+with the job's display name and its matrix leg in `artifact:`.
+Command-level steps wrap their command in `deno task run-recorded <kind>
+<scope> <name> --`. The contract is `docs/specs/test-records.md`; the
+wiring recipe is "Covering a new test surface" in
+`docs/development/test-records.md`. A job without the ship step runs fine
+and records nothing — which is how a new job silently falls out of the
+flake and duration history.
 
 A job whose every test another workflow already records against the same
 commit is the exception, and it records nothing: no spool directory, no
@@ -76,8 +76,26 @@ because it reads the coverage artifacts of every test job in its own run.
 A gate comparing against a base ref is not this: `check-baselines-append-only`
 and `check-test-aliases` each resolve a merge base, and both record.
 
-## Before splitting or rebalancing jobs
+The lanes are the exception to the `--junit` half of that. A lane holds
+batches of several suites at once, and each suite describes the JUnit
+files its own command writes, so the lane runner gathers each execution
+before the next can reuse a runner-owned path and the ship step only
+packages what it left. A `junit:` or `variant:` input on a lane's ship
+step would be per-suite knowledge back in the workflow.
 
-`docs/development/CI_PERFORMANCE.md` says when that work is worth starting and,
-more usefully, when to stop. Read it first; the answer is often that the jobs
-are already close enough.
+## Adding a test surface is not adding a job
+
+`.github/workflows/deno.yml` names no test surface. A pull request runs
+five lanes of `tasks/ci-lane.ts` and a push to the default branch runs the
+whole corpus over as many lanes as the planner asks for; what either runs
+comes from `tasks/test-topology.ts`. So a new suite is a module under
+`tasks/test-topology/`, and the workflow does not change.
+`docs/development/test-selection.md` is the guide, and
+`deno task check-test-topology` is what fails when a test surface no suite
+claims appears in the tree.
+
+## Before reaching for a new job
+
+`docs/development/CI_PERFORMANCE.md` says what is still worth optimizing
+and what the lanes have taken out of anybody's hands. Read it first; the
+answer is usually that the layout is not yours to rebalance.

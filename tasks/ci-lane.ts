@@ -46,6 +46,7 @@ import {
   type UnitRequest,
 } from "./test-topology/suite.ts";
 import { collectRecords } from "./test-records-gather.ts";
+import { writeMemberLcovReports } from "./write-coverage-lcov.ts";
 import { fetchManifest, type ManifestFetch } from "./test-selection/store.ts";
 import {
   fullLaneCount,
@@ -54,6 +55,12 @@ import {
   type SelectionReason,
 } from "./test-selection/plan.ts";
 import { type Census, census } from "./test-selection/census.ts";
+import {
+  type CoverageGate,
+  coverageGate,
+  UNIT_SUITES,
+} from "./test-selection/coverage.ts";
+import { readWorkspaceMembers } from "./workspace-tests.ts";
 import type { Manifest, WithheldReason } from "./test-selection/manifest.ts";
 import { LANES } from "./test-selection/policy.ts";
 import {
@@ -345,6 +352,34 @@ export async function runInvocation(
 }
 
 /**
+ * Where a lane leaves the coverage profiles its batches wrote, relative
+ * to the repository root, and where the reports converted from them go.
+ *
+ * Each batch writes under a directory of its own suite's name, and each
+ * producer inside it under one named for the member or the part it
+ * belongs to. The split is what the per-package gate reads: a member's
+ * own tests are the only thing that wrote into that member's directory,
+ * so converting it on its own yields exactly the coverage those tests
+ * produced.
+ */
+export const COVERAGE_PROFILE_DIR = "coverage/raw/lane";
+
+/** Where the reports the job uploads are written, from the root. */
+export const COVERAGE_REPORT_DIR = "coverage/lcov";
+
+/**
+ * Where a producer that writes its own report puts it, under the reports
+ * the job uploads. The authored-pattern instrumentation writes LCOV
+ * rather than a V8 profile, so there is nothing to convert and the lane
+ * only has to give it somewhere the upload will find it.
+ *
+ * Under a directory of its own rather than beside the converted reports,
+ * because the per-package gate reads a report by the suite directory it
+ * sits in and one of these is not a member's own tests.
+ */
+export const PATTERN_COVERAGE_DIR = `${COVERAGE_REPORT_DIR}/pattern-runtime`;
+
+/**
  * A record measuring the lane machinery rather than a test. The publisher
  * fits `setupCost`, `suiteOverhead` and `correction` from these, so they
  * travel as ordinary records through the machinery that already exists
@@ -396,6 +431,7 @@ export async function runBatch(
   workDir: string,
   spool: string | undefined,
   env: Record<string, string>,
+  coverage = false,
 ): Promise<{
   ok: boolean;
   records: TestRecord[];
@@ -414,6 +450,20 @@ export async function runBatch(
       root: options.root,
       outputDir,
       ...(options.base === undefined ? {} : { baseRef: options.base }),
+      ...(coverage
+        ? {
+          coverageDir: path.join(
+            options.root,
+            COVERAGE_PROFILE_DIR,
+            batch.suite.id,
+          ),
+          patternCoverageDir: path.join(
+            options.root,
+            PATTERN_COVERAGE_DIR,
+            batch.suite.id,
+          ),
+        }
+        : {}),
     });
     for (const invocation of invocations) {
       const outcome = await runInvocation(invocation, {
@@ -458,6 +508,38 @@ export async function runBatch(
     ]);
   }
   return { ok, records, conflicts, seconds };
+}
+
+/**
+ * Where a failed lane leaves the logs its servers wrote, relative to the
+ * repository root. The lane's own working directory goes at the end of
+ * the run, and a Toolshed server that refused to start writes the only
+ * account of why into a file inside it.
+ */
+export const LOG_DIR = "ci-lane-logs";
+
+/**
+ * Copies the logs a lane's capabilities wrote out of the working
+ * directory, so that the job's upload step can carry them.
+ *
+ * A failure to copy is reported and never raised: this runs while the
+ * lane is already failing, and losing the logs is a worse outcome told
+ * plainly than a second error on top of the first.
+ */
+export async function keepLogs(from: string, to: string): Promise<void> {
+  try {
+    const logs: string[] = [];
+    for await (const entry of Deno.readDir(from)) {
+      if (entry.isFile && entry.name.endsWith(".log")) logs.push(entry.name);
+    }
+    if (logs.length === 0) return;
+    await Deno.mkdir(to, { recursive: true });
+    for (const name of logs) {
+      await Deno.copyFile(path.join(from, name), path.join(to, name));
+    }
+  } catch (error) {
+    console.error(`ci-lane: cannot keep the lane's logs: ${error}`);
+  }
 }
 
 /** Says something both on the lane's output and in the job summary. */
@@ -606,6 +688,55 @@ export function describePlan(
   say(lines);
 }
 
+/**
+ * Whether a batch runs with coverage on.
+ *
+ * The full run measures everything, because the repository-wide figure
+ * and every package's baseline come out of it. A pull request measures
+ * only where the gate has something to score, and only in the suites a
+ * member's own tests run in: coverage makes tests slower, and a lane
+ * that measured what nothing reads would spend its budget on it.
+ */
+export function measuring(
+  options: LaneOptions,
+  gate: CoverageGate,
+  batch: Batch,
+): boolean {
+  if (options.full) return true;
+  return gate.members.length > 0 && UNIT_SUITES.includes(batch.suite.id);
+}
+
+/**
+ * Says which packages this change puts under the per-package coverage
+ * gate, or why none of them are.
+ *
+ * `Status` decides this again for itself, over the same diff, rather than
+ * trusting what a lane reported. This is the lane accounting for the
+ * tests it ran that nothing else in the plan asked for.
+ */
+export function describeGate(
+  options: LaneOptions,
+  gate: CoverageGate,
+): void {
+  if (options.full) return;
+  if (gate.off !== undefined) {
+    say([`Coverage gate: off, because ${gate.off}.`]);
+    return;
+  }
+  if (gate.members.length === 0) {
+    say([
+      "Coverage gate: nothing to score, the change touches no covered " +
+      "package.",
+    ]);
+    return;
+  }
+  say([
+    `Coverage gate: ${gate.members.join(", ")}. Every one of those ` +
+    "packages' own tests runs once, with coverage on, so `Status` can " +
+    "score the package whole against the default branch.",
+  ]);
+}
+
 /** What the lane reaches for beyond its own arguments. */
 export interface LaneDeps {
   /**
@@ -625,10 +756,32 @@ export interface LaneDeps {
   topology?: (root: string) => Promise<Suite[]>;
 }
 
+/**
+ * The workspace members this tree holds, or none where it holds no
+ * workspace manifest to read them from.
+ */
+async function workspaceMembersOf(
+  root: string,
+  say: (line: string) => void,
+): Promise<string[]> {
+  try {
+    return await readWorkspaceMembers(path.join(root, "deno.jsonc"));
+  } catch (error) {
+    say(
+      `ci-lane: no workspace manifest here, so no package is under the ` +
+        `coverage gate: ${error}`,
+    );
+    return [];
+  }
+}
+
 /** What reading this tree against its manifest came to. */
 interface Reading {
   seen: Census;
   fetched: { objectName?: string; absent?: string };
+
+  /** Which packages this change puts under the per-package gate. */
+  gate: CoverageGate;
 }
 
 /**
@@ -656,8 +809,16 @@ async function read(
   const changed = options.full
     ? new Set<string>()
     : await changedFiles(options.root, options.base);
+  // The full run measures every package, so it needs no gate to decide
+  // which of them to run whole: it runs all of them either way. A tree
+  // with no workspace manifest has no members, so it has nothing to gate
+  // and the lane goes on with the rest of what it was asked to do.
+  const gate = options.full
+    ? { members: [] }
+    : coverageGate(await workspaceMembersOf(options.root, say), changed);
   return {
-    seen: census(suites, manifest.manifest, changed),
+    seen: census(suites, manifest.manifest, changed, new Set(gate.members)),
+    gate,
     fetched: {
       ...(manifest.objectName === undefined
         ? {}
@@ -753,13 +914,58 @@ export async function fullLanes(
   });
 }
 
+/**
+ * Turns the profiles the batches wrote into one report per producer.
+ *
+ * The reports go beside one another under the suite each came from, so
+ * that a member's own unit tests stay separate from every other run of
+ * the same source. `Status` adds the per-member reports up to score a
+ * covered package, and the repository-wide figure is the union of all of
+ * them, which is what the coverage check on the default branch reads.
+ *
+ * A conversion that leaves a tracked file out is reported and does not
+ * fail the lane. Coverage is a measurement rather than a test, and a lane
+ * that ran every test it was given passed whatever the measurement did.
+ */
+export async function convertCoverage(root: string): Promise<void> {
+  const profiles = path.join(root, COVERAGE_PROFILE_DIR);
+  const reports = path.join(root, COVERAGE_REPORT_DIR);
+  let suites: string[] = [];
+  try {
+    for await (const entry of Deno.readDir(profiles)) {
+      if (entry.isDirectory) suites.push(entry.name);
+    }
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+    return;
+  }
+  suites = suites.sort();
+  for (const suite of suites) {
+    const complete = await writeMemberLcovReports(
+      path.join(profiles, suite),
+      path.join(reports, suite),
+    );
+    if (!complete) {
+      console.error(
+        `ci-lane: the coverage reports for ${suite} are incomplete, so the ` +
+          `figures drawn from them understate what this lane covered`,
+      );
+    }
+  }
+}
+
 /** Runs one lane, and says whether everything in it passed. */
 export async function runLane(
   options: LaneOptions,
   deps: LaneDeps = {},
 ): Promise<boolean> {
   const suites = await (deps.topology ?? loadTopology)(options.root);
-  const { seen, fetched } = await read(options, suites, deps, console.log);
+  const { seen, fetched, gate } = await read(
+    options,
+    suites,
+    deps,
+    console.log,
+  );
   const laid = packing(options, suites, seen);
   const mine = laid.lanes.find((lane) => lane.lane === options.lane);
   if (mine === undefined) {
@@ -806,40 +1012,64 @@ export async function runLane(
     seen.manifest.entries.length,
   );
   describeWithheld(laid.withheld, seen.mandatory);
+  describeGate(options, gate);
   if (options.dryRun) return true;
 
   const workDir = await Deno.makeTempDir({ prefix: "ci-lane-" });
   const spool = recordsDir();
-  const opened = await openCapabilities([...needs], {
-    root: options.root,
-    dryRun: false,
-    workDir,
-  });
-  if (spool !== undefined) {
-    spoolRecords(
-      spool,
-      opened.timings.map((timing) =>
-        timingRecord(
-          `${LANE_MEASUREMENT_PREFIX}setup ${timing.capability}`,
-          timing.seconds,
-          true,
-        )
-      ),
-    );
-  }
   let ok = true;
   const conflicts: TestRecord[] = [];
   try {
-    for (const batch of batches) {
-      // A failure never stops the lane: one failing batch would otherwise
-      // hide every batch and every repeat after it, and the point of a
-      // lane is what it measured.
-      const result = await runBatch(batch, options, workDir, spool, opened.env);
-      if (!result.ok) ok = false;
-      conflicts.push(...result.conflicts);
+    // Opening the capabilities is inside this, because a server that
+    // refuses to start writes the only account of why into the working
+    // directory, and the account is worth having in exactly the case
+    // where nothing else says anything.
+    const opened = await openCapabilities([...needs], {
+      root: options.root,
+      dryRun: false,
+      workDir,
+    });
+    if (spool !== undefined) {
+      spoolRecords(
+        spool,
+        opened.timings.map((timing) =>
+          timingRecord(
+            `${LANE_MEASUREMENT_PREFIX}setup ${timing.capability}`,
+            timing.seconds,
+            true,
+          )
+        ),
+      );
     }
+    try {
+      for (const batch of batches) {
+        // A failure never stops the lane: one failing batch would
+        // otherwise hide every batch and every repeat after it, and the
+        // point of a lane is what it measured.
+        const result = await runBatch(
+          batch,
+          options,
+          workDir,
+          spool,
+          opened.env,
+          measuring(options, gate, batch),
+        );
+        if (!result.ok) ok = false;
+        conflicts.push(...result.conflicts);
+      }
+      if (options.full || gate.members.length > 0) {
+        await convertCoverage(options.root);
+      }
+    } finally {
+      await opened.close();
+    }
+  } catch (error) {
+    // A lane that could not start is a lane that failed, and what it
+    // left behind is kept on the way out like any other failure.
+    ok = false;
+    throw error;
   } finally {
-    await opened.close();
+    if (!ok) await keepLogs(workDir, path.join(options.root, LOG_DIR));
     // The lane owns this directory and nothing outside the lane reads
     // it, so it goes whether the batches passed, failed, or never ran.
     await Deno.remove(workDir, { recursive: true }).catch(() => {});

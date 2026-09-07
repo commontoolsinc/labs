@@ -172,7 +172,7 @@ Either comes back the moment the change edits the test itself, or its
 suite maps the change onto its unit, since that is very likely a fix and
 has to be allowed to prove itself.
 
-Two rules force a test in.
+Three rules force a test in.
 
 - **An identity with no records must run.** This is required of any
   consumer that selects which tests run, by
@@ -185,6 +185,41 @@ Two rules force a test in.
   a binary, is one its suite maps the change onto, because only the suite
   knows what its unit covers. Nothing else about a changed source file
   forces a test in. Which tests run for it is what the score decides.
+- **A covered package the change touches runs whole.** Every item of that
+  package's own measured test set is mandatory, which is what makes the
+  per-package coverage measurement complete and therefore comparable
+  against the default branch.
+
+A mandatory identity runs exactly once. A repeat covers nothing a first
+run did not, and a measured item run twice would be measured twice.
+
+## The one coverage comparison a selected run can still make
+
+Gating on the repository's whole coverage number cannot survive
+selection: a run of part of the corpus measures part of the coverage, and
+the two sides of the comparison stop being the same thing. One narrower
+comparison survives, because both of its sides run the same complete set
+of tests over the same package.
+
+The unit is the workspace member. Every member under `packages/` is
+covered, at whatever depth it sits, apart from those a named exclusion
+list holds, each entry carrying its reason. A member's own coverage is
+what its Deno-only test task produced over that member's own source, and
+it is a different quantity from what the whole repository reached in that
+member's files. The two are kept under distinct series names and are never
+compared with each other.
+
+A change touching a covered package puts that package under the gate,
+unless the change touches more covered packages than the cap allows, in
+which case the gate is off for that change entirely rather than gating
+some of them. What is gated is the count of lines the package's own tests
+left untested, against the same count from the nearest run on the default
+branch that is an ancestor of the merge base.
+
+Three states report rather than fail: a package with no baseline, a run in
+which a test failed, and a change over the cap. A consumer says which of
+the three it is in, and says that a coverage failure is a coverage failure
+rather than a test failure.
 
 ## The manifest
 

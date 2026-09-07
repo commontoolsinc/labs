@@ -29,6 +29,7 @@ export const PHASE_MARKERS: [string, Phase][] = [
   ["🗃️", "setup"], // restore a cached native library
   ["🧮", "setup"], // compute a cache identity
   // work: the job's actual purpose.
+  ["🔢", "work"], // work out how much work there is
   ["🔎", "work"], // checks (format, type, patterns, attestations)
   ["🚧", "work"], // guard that fails the build on a banned pattern
   ["🩹", "work"], // check for unresolved merge-conflict markers

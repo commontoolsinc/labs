@@ -176,15 +176,16 @@ export interface MetricRecord {
 
 /**
  * Job families that restore a pattern compile byte cache (`actions/cache`
- * keyed on the compiler fingerprint). A fingerprint-changing PR runs these
- * jobs with a cold cache, which inflates their timing metrics and shifts
- * their coverage profiles.
+ * keyed on the sources the cache's contents are built from). A key-changing
+ * pull request runs with a cold cache, which inflates its timing metrics and
+ * shifts its coverage profiles.
+ *
+ * One family, because one cache step now covers everything a lane keeps
+ * between runs and every pattern suite in that lane reads the one file. The
+ * shape stays a list: a second thing a lane restores would be a second
+ * family, and the states are already recorded and read per family.
  */
-export const COMPILE_CACHE_FAMILIES = [
-  "generated-patterns",
-  "pattern-integration",
-  "pattern-unit",
-] as const;
+export const COMPILE_CACHE_FAMILIES = ["lane"] as const;
 
 export type CompileCacheFamily = (typeof COMPILE_CACHE_FAMILIES)[number];
 
@@ -1655,12 +1656,19 @@ const COVERAGE_ACCEPTANCE_TERMS =
   /^ACCEPT_COVERAGE_DEBT:[ \t]*(\S+)[ \t]*\+[ \t]*(\d+)[ \t]*lines?\b/;
 
 /**
- * A coverage source group. Metric collection rolls a file up to its top-level
- * directory, `packages` excepted, where the package directory below it carries
- * the group. So `workspace` and `tasks` are groups and `packages/runner` is
- * one, while `tasks/foo` is not — nothing measures a group at that depth.
+ * A name an acceptance may carry. Two things are measured under names of
+ * this shape, and an acceptance names either.
+ *
+ * The repository-wide metric rolls a file up to its top-level directory,
+ * `packages` excepted, where the package directory below it carries the
+ * group: `workspace`, `tasks`, `packages/runner`. The per-package gate
+ * scores a workspace member, which sits at whatever depth the workspace
+ * puts it: `packages/connectors/github` as readily as `packages/memory`.
+ * So anything under `packages/` is a name, at any depth, and a single
+ * segment is one anywhere.
  */
-const COVERAGE_GROUP_NAME = /^(?:[A-Za-z0-9._-]+|packages\/[A-Za-z0-9._-]+)$/;
+const COVERAGE_GROUP_NAME =
+  /^(?:[A-Za-z0-9._-]+|packages(?:\/[A-Za-z0-9._-]+)+)$/;
 
 /**
  * Parse a PR body for coverage-debt overrides.
@@ -1737,7 +1745,8 @@ export function parseBaselineOverrides(
     if (!COVERAGE_GROUP_NAME.test(group)) {
       throw new Error(
         `Invalid ACCEPT_COVERAGE_DEBT acceptance for "${group}": name a ` +
-          "coverage source group, such as `packages/runner`, `tasks`, or " +
+          "coverage source group or a workspace member, such as " +
+          "`packages/runner`, `packages/connectors/github`, `tasks`, or " +
           "`workspace`.",
       );
     }

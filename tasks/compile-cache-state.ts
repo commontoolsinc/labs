@@ -33,9 +33,9 @@ import {
 export type CacheKeyState = "cold" | "warm";
 
 /**
- * Mirror of the FIRST hashFiles(...) argument list of every `cc-*` compile
- * cache key in .github/workflows/deno.yml. compile-cache-state.test.ts parses
- * the workflow and asserts set equality, so the two cannot drift silently.
+ * Mirror of the hashFiles(...) argument list of the `cc-lane-` compile cache
+ * key in .github/workflows/deno.yml. compile-cache-state.test.ts parses the
+ * workflow and asserts set equality, so the two cannot drift silently.
  */
 export const COMPILE_CACHE_KEY_GLOBS = [
   "packages/ts-transformers/**",

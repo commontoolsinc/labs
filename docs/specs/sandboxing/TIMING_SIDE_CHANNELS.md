@@ -356,8 +356,8 @@ Landing order, smallest and safest first. Each is its own commit/PR.
       no `TimeCapabilityError` escapes. Only a `TimeCapabilityError` fails a
       pattern; a pattern that cannot instantiate offline for an unrelated reason is
       reported as skipped, not a finding. The file is auto-discovered by the CI
-      shard selector (`tasks/select-pattern-integration-files.ts` reads the
-      `integration/` directory), so it runs in the normal pattern-integration CI.
+      topology (the `pattern-integration` suite reads the `integration/`
+      directory), so it runs in the normal pattern-integration CI.
       Result of the run: **41 clean** (this now includes the games
       battleship/card-piles/scrabble AND the Google/Gmail patterns, whose lifts
       materialize offline without the network); **0 unexpected violations**; with

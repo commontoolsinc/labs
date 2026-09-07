@@ -17,7 +17,11 @@
  */
 
 import * as path from "@std/path";
-import { serverExecutionCiLane } from "./server-execution-ci.ts";
+import {
+  serverExecutionCiLane,
+  type ServerExecutionCiRole,
+  verifyServerExecutionPosture,
+} from "./server-execution-ci.ts";
 
 /** Every piece of setup a suite may ask for. */
 export type CapabilityId =
@@ -70,6 +74,14 @@ export interface CapabilityContext {
    * without a machine that has neither.
    */
   exec?: Exec;
+
+  /**
+   * How a capability checks that a server it started is serving the arm
+   * it was started for. A caller that supplies one is saying what the
+   * server would have answered, the way `exec` says what the machine
+   * would have answered.
+   */
+  verify?: (role: ServerExecutionCiRole, baseUrl: string) => Promise<void>;
 }
 
 /** A capability that has been opened. */
@@ -281,6 +293,14 @@ interface ToolshedOptions {
 
   /** Environment beyond the port, such as the server-execution define. */
   env: Record<string, string>;
+
+  /**
+   * The server-execution role this server is meant to be serving. The
+   * suites that need a server are the ones a wrong arm would mislead:
+   * they would pass against a server on the other arm and report that
+   * the arm they named works.
+   */
+  role: ServerExecutionCiRole;
 }
 
 /** The process identifier a background launch reports having detached. */
@@ -336,14 +356,23 @@ async function startToolshed(
   if (pid === undefined) {
     throw new Error(`the toolshed launch named no process:\n${output}`);
   }
+  const stop = () => {
+    try {
+      Deno.kill(pid, "SIGTERM");
+    } catch {
+      // Already gone, which is the state this was after.
+    }
+  };
+  try {
+    await (context.verify ?? verifyServerExecutionPosture)(options.role, url);
+  } catch (error) {
+    stop();
+    throw error;
+  }
   return {
     env,
     close: () => {
-      try {
-        Deno.kill(pid, "SIGTERM");
-      } catch {
-        // Already gone, which is the state the close was after.
-      }
+      stop();
       return Promise.resolve();
     },
   };
@@ -376,6 +405,7 @@ const toolshed: Capability = {
       command: [Deno.execPath(), "run", "--unstable-otel", "-A", "index.ts"],
       cwd: path.join(context.root, "packages", "toolshed"),
       env: {},
+      role: "default",
     }),
 };
 
@@ -433,6 +463,7 @@ const toolshedBakedOpposite: Capability = {
       command: [binary],
       cwd: context.root,
       env: { EXPERIMENTAL_SERVER_EXECUTION: experimentalValue },
+      role: "opposite",
     });
   },
 };

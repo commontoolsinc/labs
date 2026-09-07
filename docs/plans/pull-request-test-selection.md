@@ -1,9 +1,8 @@
 # Choosing which tests a pull request runs
 
 Status: in progress. Part one is built apart from the one-off bootstrap
-dispatch; part two is built apart from its continuous-integration
-configuration and the coverage work; part three has the reporter and
-nothing else. [The work](#the-work) carries the detail. The record store
+dispatch. Part two is built. Part three is built.
+[The work](#the-work) carries the detail. The record store
 this plan consumes is live and holds the data the design needs; the gaps
 it does not yet hold are listed under [What the store is
 missing](#what-the-store-is-missing) and closed by the first part of the
@@ -3348,27 +3347,35 @@ exercised on the branch on its own.
       JUnit paths, gathers it before any repeat, and combines all records
       into the unmarked lane spool. It also includes `--full`, `--dry-run`,
       and repeats.
-- [ ] `deno.yml`: `plan-full` and `full-tests` on push, with the build,
+- [x] `deno.yml`: `plan-full` and `full-tests` on push, with the build,
       attestation, coverage and deploy jobs repointed at them.
-- [ ] Repository-wide coverage measurement moves to the full run and stops
-      failing anything.
-- [ ] `tasks/write-coverage-lcov.ts` converts each workspace member's
+- [x] Repository-wide coverage measurement moves to the full run and stops
+      failing anything. `tasks/coverage-check.ts` is already informational
+      wherever no pull-request number reaches it, so being push-only is the
+      whole of what stops it failing.
+- [x] `tasks/write-coverage-lcov.ts` converts each workspace member's
       coverage directory on its own as well as merging them, so the full
       run yields a per-package own-tests figure beside the existing
-      per-shard report. No test changes how it runs.
-- [ ] Delete the hand-maintained sharding: `tasks/test-timing-weights.ts`,
+      per-shard report. No test changes how it runs. The lane runner calls
+      it once per suite directory.
+- [x] Delete the hand-maintained sharding: `tasks/test-timing-weights.ts`,
       `tasks/select-runner-test-files.ts`,
       `tasks/run-sharded-test-files.ts`, `INTERNALLY_SHARDED_PACKAGES` and
       the shard environment variables the packages' own runners read, and
       `TEST_DISABLED_PACKAGES: runner` with the separate `Runner Tests`
-      matrix. `tasks/weighted-shards.ts` stays and the lane packer calls
-      it. Nothing may be balanced by a transcribed number afterwards, and
-      `check-test-topology` is what proves the items are all still there.
-- [ ] `tasks/workspace-tests.ts` gives a member's `deno-test` task, where
-      it defines one, a coverage directory separate from the rest of its
-      `test` task, and `packages/ui` and `packages/iframe-sandbox` split
-      their one-string test tasks the way `packages/static` already writes
-      the same split.
+      matrix. Nothing may be balanced by a transcribed number afterwards,
+      and `check-test-topology` is what proves the items are all still
+      there. `tasks/weighted-shards.ts` and `tasks/shard-utils.ts` go with
+      them: the lane packer places items by marginal cost against a
+      per-lane budget rather than by longest-processing-time assignment,
+      so nothing calls either. The pattern integration tests' own in-file
+      shard filter goes too, having nothing left to activate it.
+- [x] `packages/ui` and `packages/iframe-sandbox` split their one-string
+      test tasks the way `packages/static` already writes the same split.
+      Nothing was needed in `tasks/workspace-tests.ts`: the unit suites run
+      a member's `deno-test` task directly, so the lane already points the
+      Deno-only half at a coverage directory of its own, and the workspace
+      walk is no longer on any coverage path CI reads.
 - [ ] The publisher carries each covered member's own-tests figure and its
       commit in the manifest, along with the exclusion list it used and
       the batches it found expensive.
@@ -3390,10 +3397,11 @@ exercised on the branch on its own.
 
 ### Part three — the pull-request path
 
-- [ ] `deno.yml`: five `pr-tests` lanes replace every pull-request job;
+- [x] `deno.yml`: five `pr-tests` lanes replace every pull-request job;
       `Status` depends on `pr-tests` and `full-tests`, with `skipped`
       counting as success for the latter.
-- [ ] The `ci: full` label.
+- [x] The `ci: full` label, in the workflow. Creating the label itself is
+      a repository setting rather than a change here.
 - [x] `coverage-comment.yml` generalized into the reporter, with the
       first-failure attribution, the selected-or-not line, the coverage
       note, the per-package rise note naming which of the three routes let
@@ -3418,13 +3426,12 @@ exercised on the branch on its own.
       `ownTestsCoverageMetric` builds, so it reads the quantity the gate
       compares rather than the source group of the same name that a
       selected run only samples. The gate publishes that figure, so the
-      note is silent until the gate lands and needs nothing further
-      then.
-- [ ] The per-package coverage gate, in two halves. `tasks/ci-lane.ts`
+      note has what it reads.
+- [x] The per-package coverage gate, in two halves. `tasks/ci-lane.ts`
       makes every item of a covered package the diff touches mandatory,
       keeps those items out of later passes and out of repeats, and
       uploads one coverage report per workspace member. `Status`
-      downloads the five, adds them per member, walks the manifest for the
+      downloads the five, adds them per member, walks for the
       nearest-ancestor baseline, checks for a rise, and reads
       `ACCEPT_COVERAGE_DEBT` from the pull request's description. `Status`
       works out which packages the gate covers by running the same
@@ -3432,9 +3439,14 @@ exercised on the branch on its own.
       report. A coverage failure names itself as one, a package with a
       failing test is reported rather than gated, and a change over the
       cap turns the gate off with a line saying so.
-- [ ] `tasks/ci-workflow.test.ts` updated for the new anchors and shapes,
+      The baselines come from each `main` run's `perf-metrics` artifact
+      rather than from the manifest: putting them in the manifest would
+      mean giving the credentialed publisher a GitHub token and the code
+      to read artifacts with, where `Status` already walks those runs and
+      the machinery to do it is the ratchet's own.
+- [x] `tasks/ci-workflow.test.ts` updated for the new anchors and shapes,
       including that the shared lane ship step carries no job-wide variant.
-- [ ] Documentation, in the same pull request rather than after it:
+- [x] Documentation, in the same pull request rather than after it:
       `docs/specs/test-selection.md` for the contract,
       `docs/development/test-selection.md` for the operating guide, the
       trust-boundary amendment and new dataset area in

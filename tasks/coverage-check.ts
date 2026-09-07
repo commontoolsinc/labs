@@ -87,6 +87,9 @@ import {
   parseUnlaunchedMembers,
   UNLAUNCHED_MEMBERS_FILE,
 } from "./unlaunched-members.ts";
+import { ownCoverageMetric, ownCoverageMetrics } from "./coverage-gate.ts";
+import { coveredMembers } from "./test-selection/coverage.ts";
+import { readWorkspaceMembers } from "./workspace-tests.ts";
 
 /** How many recent main-branch runs to scan for the coverage baseline. */
 const BASELINE_RUNS = 20;
@@ -981,23 +984,44 @@ export async function collectCurrentCacheStates(
   }
 }
 
-export const EXPECTED_COVERAGE_ARTIFACT_NAMES = [
-  ...[1, 2, 3, 4, 5, 6, 7, 8].map((shard) =>
-    `coverage-profile-workspace-${shard}`
-  ),
-  ...[1, 2, 3, 4, 5, 6, 7, 8].map((shard) =>
-    `coverage-profile-runner-${shard}`
-  ),
-  ...[1, 2].map((shard) => `coverage-profile-generated-patterns-${shard}`),
-  "coverage-profile-package-runner",
-  "coverage-profile-package-runtime-client",
-  "coverage-profile-package-shell",
-  ...[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((shard) =>
-    `coverage-profile-pattern-integration-${shard}`
-  ),
-  "coverage-profile-pattern-reload",
-  ...[1, 2, 3, 4].map((chunk) => `coverage-profile-pattern-unit-${chunk}`),
-];
+/**
+ * The coverage reports one run produces: one per lane. How many lanes a
+ * run has is decided by how much work the tree holds, so the count
+ * arrives from the run's own planning job rather than being written down
+ * here. A list here would be a second answer to a question the planner
+ * has already answered, and the two would drift the moment the corpus
+ * grew.
+ */
+export function expectedCoverageArtifactNames(lanes: number): string[] {
+  return Array.from(
+    { length: lanes },
+    (_, index) => `${COVERAGE_PROFILE_ARTIFACT_PREFIX}lane-${index + 1}`,
+  );
+}
+
+/**
+ * How many lanes the run being checked had, from the environment the job
+ * sets.
+ *
+ * Nothing said means nothing asked for: a tool run outside a job has no
+ * run to count the lanes of, and asking for a lane it invented would fail
+ * on every one. A value that was said and cannot be read is a different
+ * thing — the job meant to say how many and did not — and reading it as
+ * "no particular artifact" would quietly turn the per-lane check off.
+ */
+export function coverageLaneCount(
+  env: (name: string) => string | undefined = Deno.env.get,
+): number {
+  const raw = env("COVERAGE_LANES");
+  if (raw === undefined || raw.length === 0) return 0;
+  const lanes = Number(raw);
+  if (!Number.isInteger(lanes) || lanes <= 0) {
+    throw new Error(
+      `COVERAGE_LANES is "${raw}", which is not a count of lanes.`,
+    );
+  }
+  return lanes;
+}
 
 function sampleForRun(
   run: WorkflowRun,
@@ -1439,23 +1463,37 @@ export function unscoredGroupsReport(
     `measurement of ${groups.join(", ")} and does not score them.`;
 }
 
-async function extractCoverageDebtSamples(
+export async function extractCoverageDebtSamples(
   run: WorkflowRun,
   artifacts: Artifact[],
   coverageArtifactsDir?: string,
+  lanes: number = coverageLaneCount(),
 ): Promise<{ samples: Map<string, BaselineSample>; lcov: string }> {
   const metrics = new Map<string, BaselineSample>();
   const coverageArtifacts = coverageProfileArtifacts(artifacts);
   const coverageArtifactNames = new Set(
     coverageArtifacts.map((artifact) => artifact.name),
   );
-  const missingArtifacts = EXPECTED_COVERAGE_ARTIFACT_NAMES.filter((name) =>
+  // A lane that measured nothing uploads nothing, and several do: a lane
+  // holding only the repository gates, the type-check groups, or the
+  // binary compiles runs no test that writes a coverage profile. So an
+  // absent lane is named rather than failed on. What is failed on is a run
+  // in which no lane at all reported, which is not a run that had nothing
+  // to measure — it is a run in which the measuring broke.
+  const missingArtifacts = expectedCoverageArtifactNames(lanes).filter((name) =>
     !coverageArtifactNames.has(name)
   );
 
-  if (missingArtifacts.length > 0) {
+  if (coverageArtifacts.length === 0) {
     throw new Error(
-      `Missing coverage profile artifact(s): ${missingArtifacts.join(", ")}`,
+      `No coverage profile artifact arrived from any of the run's ${lanes} ` +
+        `lanes, so nothing measured any coverage.`,
+    );
+  }
+
+  if (missingArtifacts.length > 0) {
+    console.log(
+      `Lanes that measured nothing: ${missingArtifacts.join(", ")}.`,
     );
   }
 
@@ -2062,6 +2100,28 @@ export async function main() {
       currentMetrics.set(name, sample);
     }
     coverageLcov = coverage.lcov;
+
+    // Each covered package's own-tests figure, which is the baseline the
+    // per-package gate on a pull request compares against. It is a
+    // different quantity from the group figure of the same name — that
+    // one sums every job that loads the package's files — so it is kept
+    // under a series of its own and the two are never compared.
+    const artifactsDir = Deno.env.get("COVERAGE_ARTIFACTS_DIR");
+    if (artifactsDir !== undefined) {
+      const members = coveredMembers(await readWorkspaceMembers());
+      for (
+        const [member, uncovered] of await ownCoverageMetrics(
+          Deno.cwd(),
+          artifactsDir,
+          members,
+        )
+      ) {
+        currentMetrics.set(
+          ownCoverageMetric(member),
+          sampleForRun(currentRunInfo, uncovered),
+        );
+      }
+    }
   } catch (e) {
     coverageDataError = e;
     console.error(
