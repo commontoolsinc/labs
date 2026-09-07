@@ -369,8 +369,8 @@ Mike's call, after S4.
    `packages/piece/src/schema-compatibility.ts` refuses. Expect it for a new
    per-member demand property generally. The flag is
    held behind explicit team authorization by `skills/topics/SKILL.md`, so this
-   step now carries a decision it did not carry before, and what the forced
-   deploy leaves behind is itself unmeasured.
+   step carries a decision it did not carry before. What the forced deploy
+   leaves behind is measured, in the 2026-09-06 rerun below.
 
    **Why the gates said otherwise.** `deno task pattern-compat` and
    `deno task pattern-vintage` are both clean and neither can see this: the
