@@ -6554,6 +6554,126 @@ Deno.test("CLI resume keeps the corpus the run recorded and refuses a differing 
   ]);
 });
 
+Deno.test("CLI resume keeps the CFC enforcement mode the run recorded and refuses a differing one", async () => {
+  const transcript = [{ role: "user" as const, content: "Ask" }];
+  const readRunArtifacts = () =>
+    Promise.resolve({
+      runRoot: "/tmp/project/.cf-harness-artifacts/run-cfc-resume",
+      runStatePath:
+        "/tmp/project/.cf-harness-artifacts/run-cfc-resume/run-state.json",
+      transcriptPath:
+        "/tmp/project/.cf-harness-artifacts/run-cfc-resume/transcript.json",
+      runState: {
+        runId: "run-cfc-resume",
+        status: "failed" as const,
+        createdAt: "2026-09-04T12:00:00.000Z",
+        updatedAt: "2026-09-04T12:00:01.000Z",
+        cfcEnforcementMode: "observe" as const,
+        currentDir: "/workspace",
+        model: "gpt-5.4",
+        modelProvider: "openai-compatible-gateway" as const,
+        policyEvents: [],
+        toolOutputs: [],
+      },
+      transcript,
+    });
+
+  // A resume that states no dial runs at the mode the run recorded, rather
+  // than at the harness default the flag would otherwise fall to.
+  const { io, stderr } = createIoBuffers();
+  let resumedMode: unknown;
+  let resumedModeSource: unknown;
+  assertEquals(
+    await runCfHarnessCli(
+      ["--resume-run", "/tmp/project/.cf-harness-artifacts/run-cfc-resume"],
+      {
+        io,
+        cwd: "/tmp/project",
+        env: { CF_HARNESS_API_KEY: "gateway-key" },
+        readRunArtifacts,
+        createPromptLoop: (options) => {
+          resumedMode = options.engine?.config.cfcEnforcementMode;
+          resumedModeSource = options.engine?.config.cfcEnforcementModeSource;
+          return {
+            runPrompt: () => Promise.reject(new Error("unexpected prompt")),
+            runTranscript: () =>
+              Promise.resolve(completedCliResult("run-cfc-resume")),
+          };
+        },
+      },
+    ),
+    0,
+  );
+  assertEquals(stderr, []);
+  assertEquals(resumedMode, "observe");
+  assertEquals(resumedModeSource, "inherited");
+
+  // A fleet's environment pin names the posture for the runs it starts, not a
+  // decision about this one, so a resume ignores it and runs at the recorded
+  // mode — the reading `CF_HARNESS_MODEL` already gets.
+  const pinnedIo = createIoBuffers();
+  let pinnedMode: unknown;
+  assertEquals(
+    await runCfHarnessCli(
+      ["--resume-run", "/tmp/project/.cf-harness-artifacts/run-cfc-resume"],
+      {
+        io: pinnedIo.io,
+        cwd: "/tmp/project",
+        env: {
+          CF_HARNESS_API_KEY: "gateway-key",
+          CF_CFC_MODE: "enforce-strict",
+        },
+        readRunArtifacts,
+        createPromptLoop: (options) => {
+          pinnedMode = options.engine?.config.cfcEnforcementMode;
+          return {
+            runPrompt: () => Promise.reject(new Error("unexpected prompt")),
+            runTranscript: () =>
+              Promise.resolve(completedCliResult("run-cfc-resume")),
+          };
+        },
+      },
+    ),
+    0,
+  );
+  assertEquals(pinnedIo.stderr, []);
+  assertEquals(pinnedMode, "observe");
+
+  // A dial the run cannot move to is refused, naming both modes, and refused
+  // before the run reaches a model client.
+  const mismatchIo = createIoBuffers();
+  let modelClientsCreated = 0;
+  assertEquals(
+    await runCfHarnessCli([
+      "--resume-run",
+      "/tmp/project/.cf-harness-artifacts/run-cfc-resume",
+      "--cfc-enforcement-mode",
+      "disabled",
+    ], {
+      io: mismatchIo.io,
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_API_KEY: "gateway-key" },
+      readRunArtifacts,
+      createModelClient: () => {
+        modelClientsCreated += 1;
+        return {
+          providerId: "openai-compatible-gateway",
+          complete: () => Promise.reject(new Error("must not run")),
+        };
+      },
+      createPromptLoop: () => ({
+        runPrompt: () => Promise.reject(new Error("must not run")),
+        runTranscript: () => Promise.reject(new Error("must not run")),
+      }),
+    }),
+    1,
+  );
+  assertEquals(modelClientsCreated, 0);
+  assertEquals(mismatchIo.stderr, [
+    "resumed run CFC enforcement mode observe does not match requested CFC enforcement mode disabled\n",
+  ]);
+});
+
 Deno.test("top-level CLI resume rejects subagent lineage before creating a model client", async () => {
   const { io, stderr } = createIoBuffers();
   let modelClientsCreated = 0;
