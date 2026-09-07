@@ -92,9 +92,13 @@ export class CellHandle<T = unknown> {
   #ref: CellRef;
   #value: T | undefined;
   #cfcLabel: CfcLabelView | undefined;
-  // Whether any subscriber asked for the CFC label. Sticky: once a label-aware
-  // subscription exists on this handle, label changes also fire its callbacks.
+
+  /**
+   * Whether any subscriber asked for the CFC label. Sticky: once a label-aware
+   * subscription exists on this handle, label changes also fire its callbacks.
+   */
   #wantsCfcLabel = false;
+
   #callbacks = new Map<
     number,
     (value: Readonly<T>, cfcLabel: CfcLabelView | undefined) => void
@@ -102,9 +106,12 @@ export class CellHandle<T = unknown> {
   #nextCallbackId = 0;
   #schemaWarned = false;
   #updateGeneration = 0;
-  // Monotonic invocation order for local value mutations on this handle.
-  // Async read and strict-write responses use it to avoid replacing a later
-  // optimistic value while their remote operations remain FIFO-serialized.
+
+  /**
+   * Monotonic invocation order for local value mutations on this handle. Async
+   * read and strict-write responses use it to avoid replacing a later
+   * optimistic value while their remote operations remain FIFO-serialized.
+   */
   #writeGeneration = 0;
 
   constructor(worker: RuntimeClient, cellRef: CellRef, value?: T) {
@@ -421,9 +428,12 @@ export class CellHandle<T = unknown> {
     return child;
   }
 
-  // A push publishes an invocation-time local snapshot, but sends only the
-  // appended members. The runtime owns the authoritative mergeable append, so
-  // an equivalent handle's stale private cache cannot replace committed data.
+  /**
+   * Appends `values` to the array this handle holds. A push publishes an
+   * invocation-time local snapshot, but sends only the appended members. The
+   * runtime owns the authoritative mergeable append, so an equivalent handle's
+   * stale private cache cannot replace committed data.
+   */
   push<U>(
     this: CellHandle<U[]>,
     ...values: T extends (infer U)[] ? U[] : never
@@ -822,8 +832,10 @@ export class CellHandle<T = unknown> {
     });
   }
 
-  // Called when cell has been updated from the backend with
-  // a raw value that may contain CellRefs.
+  /**
+   * Handles an update of the cell from the backend, whose raw value may
+   * contain `CellRef`s.
+   */
   [$onCellUpdate](
     value: unknown,
     labelUpdate?: { cfcLabel: CfcLabelView | undefined },
@@ -978,9 +990,12 @@ export class CellHandle<T = unknown> {
     return CellHandle.#serialize(value, "ref") as FabricValue;
   }
 
-  // The sigil form is the same canonical traversal with hydratable links. It
-  // snapshots local values through applyValue() without confusing an ordinary
-  // record that happens to resemble a CellRef or replacing a live CellHandle.
+  /**
+   * Serializes `value` for the wire, converting each `CellHandle` to a link
+   * in `linkFormat`: a `CellRef` (`ref`) or a hydratable sigil link (`sigil`).
+   * An ordinary record that happens to resemble a `CellRef` is walked as data,
+   * and a live `CellHandle` is never replaced in place.
+   */
   static #serialize(
     value: ClientCellValue,
     linkFormat: "ref" | "sigil" = "ref",

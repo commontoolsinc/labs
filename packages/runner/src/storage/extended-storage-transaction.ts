@@ -333,51 +333,73 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   >();
   #statusOverride?: StorageTransactionStatus;
   #commitCallbacksDispatched = false;
-  // Verdict callbacks fire when the commit's fate is sealed — the accept
-  // verdict or the rejection receipt — BEFORE the coverage / read-repair
-  // waits the commit promise (and commit callbacks) additionally sit out.
+
+  /**
+   * Verdict callbacks, which fire when the commit's fate is sealed — the accept
+   * verdict or the rejection receipt — _before_ the coverage and read-repair
+   * waits the commit promise (and commit callbacks) additionally sit out.
+   */
   #verdictCallbacks = new Set<
     (
       tx: IExtendedStorageTransaction,
       result: Result<Unit, CommitError>,
     ) => void
   >();
+
   #verdictCallbacksDispatched = false;
-  // Post-commit effects this transaction staged and then discarded, held for
-  // the moment the code that owns its retries stops retrying it — a decision no
-  // rejection carries on its own, since a refusal one attempt cannot get past
-  // is often one a later attempt can. Effects handed to a seal destination are
-  // not here: that clears the outbox too, and it is a handover rather than an
-  // ending.
+
+  /**
+   * Post-commit effects this transaction staged and then discarded, held for
+   * the moment the code that owns its retries stops retrying it — a decision no
+   * rejection carries on its own, since a refusal one attempt cannot get past
+   * is often one a later attempt can. Effects handed to a seal destination are
+   * not here: that clears the outbox too, and it is a handover rather than an
+   * ending.
+   */
   #abandonableEffects: PostCommitSideEffect[] = [];
+
   #abandonDispatched = false;
-  // Set when a commit of this transaction succeeded. Abandonment is what the
-  // staged work hears instead of a commit, so a transaction that committed has
-  // nothing to abandon, and saying otherwise would report a request as never
-  // sent after the outbox flushed it.
+
+  /**
+   * Whether a commit of this transaction succeeded. Abandonment is what the
+   * staged work hears instead of a commit, so a transaction that committed has
+   * nothing to abandon, and saying otherwise would report a request as never
+   * sent after the outbox flushed it.
+   */
   #committed = false;
-  // The verdict-time effect run of the current commit(): verdict callbacks
-  // plus the CFC outbox flush. What settled()-style barriers wait on in
-  // place of the commit promise, whose resolution additionally waits for
-  // view coverage.
+
+  /**
+   * The verdict-time effect run of the current `commit()`: verdict callbacks
+   * plus the CFC outbox flush. What `settled()`-style barriers wait on in place
+   * of the commit promise, whose resolution additionally waits for view
+   * coverage.
+   */
   #postCommitEffects?: Promise<void>;
+
   #commitPreparationCrash: string | undefined;
-  // The transaction's fate, resolved exactly when the verdict callbacks
-  // dispatch — every fate path (commit verdict, rejection receipt, abort,
-  // pre-storage rejection, internal commit rejection) funnels through that
-  // dispatch.
+
+  /**
+   * The transaction's fate, resolved exactly when the verdict callbacks
+   * dispatch — every fate path (commit verdict, rejection receipt, abort,
+   * pre-storage rejection, internal commit rejection) funnels through that
+   * dispatch.
+   */
   readonly #verdict = Promise.withResolvers<Result<Unit, CommitError>>();
+
   #commitPreconditions = new Map<MemorySpace, CommitPrecondition[]>();
   #createOnlyMarks = new Map<MemorySpace, Set<string>>();
   #outboxIdempotencyKeys = new Set<string>();
   #readOnlySource?: string;
   #narrowestReadScope: CellScope = "space";
-  // ECMAScript-private (#), like #privilegedSystemWriteDepth below: the CFC
-  // state is the enforcement substrate (dials, pins, relevance, trigger
-  // reads, policy inputs, prepare status), and handler code reaching the tx
-  // via `(cell.tx as any)` must not be able to grab the raw object and
-  // mutate it. Reads go through getCfcState(), which returns a read-only
-  // view (see readOnlyCfcView).
+
+  /**
+   * The CFC state. ECMAScript-private (`#`), like `#privilegedSystemWriteDepth`
+   * below: the CFC state is the enforcement substrate (dials, pins, relevance,
+   * trigger reads, policy inputs, prepare status), and handler code reaching
+   * the tx via `(cell.tx as any)` must not be able to grab the raw object and
+   * mutate it. Reads go through `getCfcState()`, which returns a read-only view
+   * (see `readOnlyCfcView`).
+   */
   #cfcState: CfcTxState = {
     relevant: false,
     enforcementMode: DEFAULT_CFC_ENFORCEMENT_MODE,
@@ -404,94 +426,137 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     labelMetadataObservations: [],
     refusalDetails: [],
   };
+
   #reportedCfcRelevant = false;
   #reportedCfcPrepared = false;
-  // The pins below are ECMAScript-private for the same reason as #cfcState:
-  // a TS-`private` pin could be cleared via `(cell.tx as any)` and the dial
-  // then legally weakened through its setter.
-  // Highest enforcing strictness ever set on this tx; mode cannot drop below it.
+
+  /**
+   * Highest enforcing strictness ever set on this tx; the mode cannot drop
+   * below it. This pin and the ones below are ECMAScript-private for the same
+   * reason as `#cfcState`: a TS-`private` pin could be cleared via
+   * `(cell.tx as any)` and the dial then legally weakened through its setter.
+   */
   #cfcEnforcementFloor = 0;
-  // Once flow-label persistence is on for this tx it cannot be turned back
-  // off — same shape as the enforcement floor (audit S3): code holding a
-  // Cell must not disable propagation mid-transaction to launder a value.
+
+  /**
+   * Whether flow-label persistence is pinned on for this tx. Once on it cannot
+   * be turned back off — the same shape as the enforcement floor (audit S3):
+   * code holding a `Cell` must not disable propagation mid-transaction to
+   * launder a value.
+   */
   #cfcFlowLabelsPinned = false;
+
   #cfcWriteFloorPinned = false;
   #cfcTriggerReadGatingPinned = false;
   #cfcPolicyEvaluationPinned = false;
   #cfcLabelMetadataProtectionPinned = false;
   #cfcDeclaredMonotonicityPinned = false;
-  // Write-once pin for the deployment policy snapshot. Distinct from the
-  // slot's value being defined: the Runtime configures MANY tx with NO
-  // policies (`undefined`), and that "no policies" state must be just as
-  // write-once as a configured one — otherwise handler code reaching the
-  // concrete tx via `(cell.tx as any)` could install an attacker-supplied
-  // snapshot after the Runtime's `undefined` call left the slot open
-  // (codex P1 on #4562). Set on the FIRST call (always the Runtime's, in
-  // edit()), regardless of value.
+
+  /**
+   * Write-once pin for the deployment policy snapshot. Distinct from the slot's
+   * value being defined: the `Runtime` configures _many_ tx with _no_ policies
+   * (`undefined`), and that no-policies state must be just as write-once as a
+   * configured one — otherwise handler code reaching the concrete tx via
+   * `(cell.tx as any)` could install an attacker-supplied snapshot after the
+   * `Runtime`'s `undefined` call left the slot open. Set on the _first_ call
+   * (always the `Runtime`'s, in `edit()`), regardless of value.
+   */
   #cfcPolicySnapshotPinned = false;
-  // Write-once pin for the deployment trust config. Distinct from the slot's
-  // value being defined: the Runtime configures many tx with NO trust config
-  // (`undefined`), and that "no config; every concept guard fails closed"
-  // state must be just as write-once as a configured one — otherwise handler
-  // code reaching the concrete tx via `(cell.tx as any)` could install an
-  // arbitrary config before the concept guards read it (codex P2 on #4563).
-  // Set on the FIRST call (always the Runtime's, in edit()), regardless of
-  // value.
+
+  /**
+   * Write-once pin for the deployment trust config. Distinct from the slot's
+   * value being defined: the `Runtime` configures many tx with _no_ trust
+   * config (`undefined`), and that state (no config; every concept guard fails
+   * closed) must be just as write-once as a configured one. Otherwise handler
+   * code reaching the concrete tx via `(cell.tx as any)` could install an
+   * arbitrary config before the concept guards read it. Set on the _first_ call
+   * (always the `Runtime`'s, in `edit()`), regardless of value.
+   */
   #cfcTrustConfigPinned = false;
+
   #cfcModuleDelegationsPinned = false;
-  // Depth of the runtime's privileged system-write scope. The runtime's own
-  // label/schema persistence (prepareBoundaryCommit) runs inside it; any write
-  // to a protected system path outside it is recorded as unprivileged (S18).
-  // ECMAScript-private (#) so handler code reaching cell.tx cannot enter the
-  // scope via `(cell.tx as any)` — `as any` cannot touch a `#private` member.
+
+  /**
+   * Depth of the runtime's privileged system-write scope. The runtime's own
+   * label/schema persistence (`prepareBoundaryCommit()`) runs inside it; any
+   * write to a protected system path outside it is recorded as unprivileged
+   * (S18). ECMAScript-private (`#`) so handler code reaching `cell.tx` cannot
+   * enter the scope via `(cell.tx as any)` — `as any` cannot touch a `#private`
+   * member.
+   */
   #privilegedSystemWriteDepth = 0;
 
-  // The write-policy inputs the runtime recorded, by reference to the frozen
-  // record. `#`-private, so nothing outside this class can add to it; the one
-  // writer is `recordCfcWritePolicyInput` handed the runtime's mark.
+  /**
+   * The write-policy inputs the runtime recorded, by reference to the frozen
+   * record. `#`-private, so nothing outside this class can add to it; the one
+   * writer is `recordCfcWritePolicyInput()` handed the runtime's mark.
+   */
   #runtimeWritePolicyInputs = new WeakSet<WritePolicyInput>();
-  // The stores the runtime owns that a marker named on THIS transaction, by
-  // {@link runtimeOwnedStoreKey}. A store the runtime mints and fills in one
-  // go needs no more than this.
+
+  /**
+   * The stores the runtime owns that a marker named on _this_ transaction, by
+   * {@link runtimeOwnedStoreKey}. A store the runtime mints and fills in one go
+   * needs no more than this.
+   */
   #markedOwnedStores = new Set<string>();
-  // The stores the runtime owns that outlive the transaction that minted them,
-  // shared with every other transaction of the same runtime (`Runtime.edit`
-  // hands the same object to each). Absent on a transaction the runtime did
-  // not configure, which leaves only this transaction's own markers.
+
+  /**
+   * The stores the runtime owns that outlive the transaction that minted them,
+   * shared with every other transaction of the same runtime (`Runtime.edit()`
+   * hands the same object to each). Absent on a transaction the runtime did not
+   * configure, which leaves only this transaction's own markers.
+   */
   #runtimeOwnedStores: RuntimeOwnedStores | undefined;
-  // Per-transaction cache of `Cell.get()` results, keyed by stable cell view.
-  // Replaced wholesale on any write (see `#invalidateReadResultCache`), so a hit
-  // is only ever served when nothing has been written since the cached read.
-  // This is a Map rather than a WeakMap, but the transaction owns it and writes
-  // drop it wholesale, bounding retention to reads-without-writes in one tx.
+
+  /**
+   * Per-transaction cache of `Cell.get()` results, keyed by stable cell view.
+   * Replaced wholesale on any write (see `#invalidateReadResultCache()`), so a
+   * hit is only ever served when nothing has been written since the cached
+   * read. This is a `Map` rather than a `WeakMap`, but the transaction owns it
+   * and writes drop it wholesale, bounding retention to reads-without-writes in
+   * one tx.
+   */
   #readResultCache = new Map<string, Map<string, { value: unknown }>>();
+
   #readResultCacheHits = 0;
   #readResultCacheMisses = 0;
   #readResultCacheSets = 0;
-  // Per-transaction memo for derivations that read only this snapshot -- link
-  // resolution and CFC label views, each under its own key prefix. Dropped on
-  // any write alongside the read cache above, and bounded the same way: it
-  // retains only what was derived since this transaction's last write.
+
+  /**
+   * Per-transaction memo for derivations that read only this snapshot — link
+   * resolution and CFC label views, each under its own key prefix. Dropped on
+   * any write alongside the read cache above, and bounded the same way: it
+   * retains only what was derived since this transaction's last write.
+   */
   #snapshotMemo = new Map<string, unknown>();
 
-  // The seal destination (server-execution v2, serving-loop.md §3d): when
-  // installed, commit() closes by sealing into it instead of committing to
-  // the store — one abstraction, two destinations. ECMAScript-private with a
-  // write-once pin, same shape as #cfcPolicySnapshotPinned: the Runtime
-  // configures every tx exactly once in edit() (usually with `undefined` —
-  // every client, and the OFF arm always), and that state must be just as
-  // write-once as an installed destination, or handler code reaching the
-  // concrete tx via `(cell.tx as any)` could hijack the commit path.
+  /**
+   * The seal destination (`serving-loop.md` §3d): when installed, `commit()`
+   * closes by sealing into it instead of committing to the store — one
+   * abstraction, two destinations. ECMAScript-private with a write-once pin,
+   * the same shape as `#cfcPolicySnapshotPinned`: the `Runtime` configures
+   * every tx exactly once in `edit()` (usually with `undefined` — every client,
+   * and the server-execution OFF arm always), and that state must be just as
+   * write-once as an installed destination, or handler code reaching the
+   * concrete tx via `(cell.tx as any)` could hijack the commit path.
+   */
   #sealDestination: TransactionSealDestination | undefined;
+
   #sealDestinationPinned = false;
 
-  // Stage C tuning T1 (see IExtendedStorageTransaction.probeFlowLabelWork):
-  // the activity epoch counts every journaled read, write, dereference
-  // trace and trigger read; the memo holds the last NEGATIVE probe verdict
-  // with the epoch it was taken at (stamped AFTER the probe, whose own
-  // metadata reads are internal-verifier reads that never change the
-  // verdict but do move the epoch).
+  /**
+   * The activity epoch (see
+   * `IExtendedStorageTransaction.probeFlowLabelWork()`), which counts every
+   * journaled read, write, dereference trace, and trigger read.
+   */
   #cfcActivityEpoch = 0;
+
+  /**
+   * The last _negative_ flow-label probe verdict, with the activity epoch it
+   * was taken at (stamped _after_ the probe, whose own metadata reads are
+   * internal-verifier reads that never change the verdict but do move the
+   * epoch).
+   */
   #flowLabelProbeMemo: { epoch: number } | undefined;
 
   #cfcInstrumentation: CfcInstrumentationHooks;
@@ -606,10 +671,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcInstrumentation.onSinkReleaseReject?.(info);
   }
 
-  // Append-only diagnostics seam for the CFC machinery outside this class
-  // (prepare's observe-mode notes). getCfcState() is a read-only view, so
-  // this is the one sanctioned write path; diagnostics are advisory text and
-  // never feed an enforcement decision, so exposing append is harmless.
+  /**
+   * Appends a diagnostic, as the one seam for the CFC machinery outside this
+   * class (prepare's observe-mode notes). `getCfcState()` is a read-only view,
+   * so this is the one sanctioned write path; diagnostics are advisory text and
+   * never feed an enforcement decision, so exposing append is harmless.
+   */
   noteCfcDiagnostic(message: string): void {
     this.#cfcState.diagnostics.push(message);
   }
@@ -873,10 +940,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
-  // Per-sink confidentiality ceilings, set once by the Runtime at tx creation
-  // (before any handler code runs). Write-once: a later call is ignored, so
-  // code holding a Cell can't relax a configured ceiling mid-transaction. Not
-  // on the public tx interface for the same reason (audit S3 posture).
+  /**
+   * Sets the per-sink confidentiality ceilings, once, by the `Runtime` at tx
+   * creation (before any handler code runs). Write-once: a later call is
+   * ignored, so code holding a `Cell` can't relax a configured ceiling
+   * mid-transaction. Not on the public tx interface for the same reason (audit
+   * S3 posture).
+   */
   setCfcSinkMaxConfidentiality(map: SinkMaxConfidentiality): void {
     if (this.#cfcState.sinkMaxConfidentiality !== undefined) return;
     // Deep-freeze on store so the ceiling is immutable regardless of caller —
@@ -886,13 +956,16 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.sinkMaxConfidentiality = deepFreeze(map);
   }
 
-  // set once by the Runtime at tx creation. Write-once, off the public tx
-  // interface, deep-frozen on store. The pin (not the slot value) is what
-  // enforces write-once: the FIRST call — always the Runtime's, even when it
-  // configures no policies (`undefined`) — pins the slot, so a later
-  // `(cell.tx as any).setCfcPolicySnapshot(attackerSnapshot)` is ignored.
-  // (`buildCfcPolicySnapshot` already froze a configured snapshot; this
-  // deepFreeze is the cheap short-circuiting backstop for any other caller.)
+  /**
+   * Sets the deployment policy snapshot, once, by the `Runtime` at tx creation.
+   * Write-once, off the public tx interface, deep-frozen on store. The pin (not
+   * the slot value) is what enforces write-once: the _first_ call — always the
+   * `Runtime`'s, even when it configures no policies (`undefined`) — pins the
+   * slot, so a later `(cell.tx as any).setCfcPolicySnapshot(attackerSnapshot)`
+   * is ignored. (`buildCfcPolicySnapshot()` already froze a configured
+   * snapshot; this `deepFreeze()` is the cheap short-circuiting backstop for
+   * any other caller.)
+   */
   setCfcPolicySnapshot(snapshot: PolicySnapshot | undefined): void {
     if (this.#cfcPolicySnapshotPinned) return;
     this.#cfcPolicySnapshotPinned = true;
@@ -901,11 +974,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       : deepFreeze(snapshot);
   }
 
-  // Deployment trust config for concept-guard satisfaction (Epic B3). The pin
-  // (not the slot value) enforces write-once: the FIRST call — always the
-  // Runtime's, even when it configures no trust (`undefined`) — pins the slot,
-  // so a later `(cell.tx as any).setCfcTrustConfig(attackerConfig)` is
-  // ignored and the "no config; concept guards fail closed" state holds.
+  /**
+   * Sets the deployment trust config for concept-guard satisfaction. The pin
+   * (not the slot value) enforces write-once: the _first_ call — always the
+   * `Runtime`'s, even when it configures no trust (`undefined`) — pins the
+   * slot, so a later `(cell.tx as any).setCfcTrustConfig(attackerConfig)` is
+   * ignored and the state where there is no config and concept guards fail
+   * closed holds.
+   */
   setCfcTrustConfig(config: CfcTrustConfig | undefined): void {
     if (this.#cfcTrustConfigPinned) return;
     this.#cfcTrustConfigPinned = true;
@@ -914,9 +990,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       : deepFreeze(config);
   }
 
-  // Module-update authority is runtime-learned trust state. Snapshot and pin
-  // it once at transaction creation: later module loads affect future
-  // transactions, never an authorization decision already in flight.
+  /**
+   * Sets the module-update delegations, which are runtime-learned trust state.
+   * Snapshotted and pinned once at transaction creation: later module loads
+   * affect future transactions, never an authorization decision already in
+   * flight.
+   */
   setCfcModuleDelegations(
     delegations: ReadonlyMap<
       MemorySpace,
@@ -950,15 +1029,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
-  // Runs `fn` with writes to protected system paths (a document's ["cfc"]
-  // label-map) permitted. The runtime's own label/schema persistence in
-  // prepareBoundaryCommit is the only legitimate such writer; `prepareCfc`
-  // wraps that call in this scope via `this`. ECMAScript-private (#) and absent
-  // from IExtendedStorageTransaction, so handler code reaching `cell.tx` cannot
-  // enter the scope — `(cell.tx as any).#runPrivilegedSystemWrite` is a
-  // TypeError, not a bypass (audit S18 review). Tests that need stored ["cfc"]
-  // metadata seed it instead via an ungated path-[] full-document write (the
-  // same shape hydration delivers), never through this scope.
+  /**
+   * Runs `fn` with writes to protected system paths (a document's `["cfc"]`
+   * label-map) permitted. The runtime's own label/schema persistence in
+   * `prepareBoundaryCommit()` is the only legitimate such writer;
+   * `prepareCfc()` wraps that call in this scope via `this`. ECMAScript-private
+   * (`#`) and absent from `IExtendedStorageTransaction`, so handler code
+   * reaching `cell.tx` cannot enter the scope —
+   * `(cell.tx as any).#runPrivilegedSystemWrite` is a `TypeError`, not a bypass
+   * (audit S18). Tests that need stored `["cfc"]` metadata seed it instead via
+   * an ungated path-`[]` full-document write (the same shape hydration
+   * delivers), never through this scope.
+   */
   #runPrivilegedSystemWrite<T>(fn: () => T): T {
     this.#privilegedSystemWriteDepth += 1;
     try {
@@ -968,20 +1050,22 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
-  // Record a write that reaches a document's ["cfc"] label map from outside
-  // the privileged scope, whether by naming that path or by replacing the
-  // whole document envelope. Such a write forges or erases the metadata that
-  // drives CFC derivation for OTHER writes, bypassing the commit-boundary
-  // derivation + mint-gating (audit S18). prepareBoundaryCommit turns each
-  // recorded address into a fail-closed reason, so the violation surfaces
-  // uniformly with every other CFC reason (enforce rejects, observe
-  // diagnoses). Recording (and relevance marking) is deliberately
-  // unconditional on the enforcement mode, like every other CFC signal:
-  // setCfcEnforcementMode permits raising the mode mid-transaction
-  // (disabled/observe impose no floor), so a forgery in a disabled window must
-  // still be on record when a later escalation evaluates it. A transaction
-  // still `disabled` at commit never runs prepareBoundaryCommit, so the record
-  // stays inert there.
+  /**
+   * Records a write that reaches a document's `["cfc"]` label map from outside
+   * the privileged scope, whether by naming that path or by replacing the whole
+   * document envelope. Such a write forges or erases the metadata that drives
+   * CFC derivation for _other_ writes, bypassing the commit-boundary derivation
+   * and mint-gating (audit S18). `prepareBoundaryCommit()` turns each recorded
+   * address into a fail-closed reason, so the violation surfaces uniformly with
+   * every other CFC reason (enforce rejects, observe diagnoses).
+   *
+   * Recording (and relevance marking) is deliberately unconditional on the
+   * enforcement mode, like every other CFC signal: `setCfcEnforcementMode()`
+   * permits raising the mode mid-transaction (disabled/observe impose no
+   * floor), so a forgery in a disabled window must still be on record when a
+   * later escalation evaluates it. A transaction still `disabled` at commit
+   * never runs `prepareBoundaryCommit()`, so the record stays inert there.
+   */
   #noteSystemWrite(
     address: IMemorySpaceAddress,
     value?: FabricValue,
@@ -1093,61 +1177,63 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     );
   }
 
-  // Record a path-[] whole-document write that erases the stored ["cfc"] label
-  // map. Such a write replaces every sibling of `value`, so an envelope that
-  // leaves the document without a label map erases the one it held, and a
-  // labeled document reads afterwards as an unlabeled one. That is the
-  // downgrade the ["cfc"]-path arm above catches, reached by omission rather
-  // than by overwrite, so it lands in the same record and yields the same
-  // fail-closed reason.
-  //
-  // Both halves ask `cfcMetadataPresent`, the reader's own account of what
-  // presents a label map, so the arm fires on the change a reader would see
-  // rather than on the presence of a key. An envelope carrying `cfc: null`, or
-  // any other value the reader reports as absent, erases the map as surely as
-  // one carrying no `cfc` at all. A stored value the reader reports as absent
-  // is not a map to erase.
-  //
-  // What this does NOT reach is a root write that leaves a label map behind
-  // but not the stored one — minting a map where the document had none, or
-  // substituting one for another. Both are the S18 forgery this seam still
-  // stands open on, and the CFC test suite seeds stored label state through
-  // exactly those shapes, so closing them means giving those fixtures another
-  // way to seed first.
-  //
-  // The arm fires only when a map is there to erase: creating a document, and
-  // replacing one that carries no label map, pass through. Hydration passes
-  // through as well — an envelope delivered from storage carries the `cfc` it
-  // was stored with — and the runtime's own root writes (`cid:` schema
-  // documents) return at the privileged-scope check above before reaching
-  // here.
-  //
-  // The read carries no weight of its own, the way the meta seam's guard read
-  // above carries none. It goes through the inner transaction, so it stays out
-  // of the outer transaction's reactivity log and flow join; it names the
-  // ["cfc"] member rather than the document root, so it does not widen what
-  // the transaction counts as consumed; and `ignoreReadForCommit` keeps it out
-  // of the conflict set, so a blind root write stays blind rather than
-  // becoming a read-modify-write that loses the race against any advance of
-  // the document it replaces. `internalVerifierRead` says what the read is:
-  // the runtime resolving a label, the same mark `readStoredCfcMetadata`
-  // carries.
-  //
-  // That read is transaction-local, and it bounds what this arm establishes. A
-  // transaction whose view does not hold the document answers the same "no map
-  // here" that a document with no map answers, so a writer that has not synced
-  // the document erases its label map and commits. There is no race in that:
-  // the map is present throughout, and the writer simply never looked. What
-  // the arm establishes is that a root envelope write cannot erase a label map
-  // THIS TRANSACTION HAS LOADED, which is narrower than the seam needs.
-  // Closing the rest means forcing the document into view before deciding —
-  // the read-modify-write this design declines — or making the commit boundary
-  // establish what the space holds. `cfc-privileged-system-write.test.ts` pins
-  // the bypass, so it fails when either lands.
+  /**
+   * Records a path-`[]` whole-document write that erases the stored `["cfc"]`
+   * label map. Such a write replaces every sibling of `value`, so an envelope
+   * that leaves the document without a label map erases the one it held, and a
+   * labeled document reads afterwards as an unlabeled one. That is the
+   * downgrade the `["cfc"]`-path arm of `#noteSystemWrite()` catches, reached
+   * by omission rather than by overwrite, so it lands in the same record and
+   * yields the same fail-closed reason.
+   *
+   * Both halves ask `cfcMetadataPresent()`, the reader's own account of what
+   * presents a label map, so the arm fires on the change a reader would see
+   * rather than on the presence of a key. An envelope carrying `cfc: null`, or
+   * any other value the reader reports as absent, erases the map as surely as
+   * one carrying no `cfc` at all. A stored value the reader reports as absent
+   * is not a map to erase.
+   *
+   * What this does _not_ reach is a root write that leaves a label map behind
+   * but not the stored one — minting a map where the document had none, or
+   * substituting one for another. Both are the S18 forgery this seam still
+   * stands open on, and the CFC test suite seeds stored label state through
+   * exactly those shapes, so closing them means giving those fixtures another
+   * way to seed first.
+   *
+   * The guard read is transaction-local, and it bounds what this arm
+   * establishes. A transaction whose view does not hold the document answers
+   * the same no-map-here that a document with no map answers, so a writer that
+   * has not synced the document erases its label map and commits. There is no
+   * race in that: the map is present throughout, and the writer simply never
+   * looked. What the arm establishes is that a root envelope write cannot erase
+   * a label map _this transaction has loaded_, which is narrower than the seam
+   * needs. Closing the rest means forcing the document into view before
+   * deciding — the read-modify-write this design declines — or making the
+   * commit boundary establish what the space holds.
+   * `cfc-privileged-system-write.test.ts` pins the bypass, so it fails when
+   * either lands.
+   */
   #noteRootEnvelopeWrite(
     address: IMemorySpaceAddress,
     value: FabricValue | undefined,
   ): void {
+    // The arm fires only when a map is there to erase: creating a document,
+    // and replacing one that carries no label map, pass through. Hydration
+    // passes through as well — an envelope delivered from storage carries the
+    // `cfc` it was stored with — and the runtime's own root writes (`cid:`
+    // schema documents) return at the privileged-scope check above before
+    // reaching here.
+    //
+    // The read carries no weight of its own, the way the meta seam's guard
+    // read above carries none. It goes through the inner transaction, so it
+    // stays out of the outer transaction's reactivity log and flow join; it
+    // names the `["cfc"]` member rather than the document root, so it does not
+    // widen what the transaction counts as consumed; and `ignoreReadForCommit`
+    // keeps it out of the conflict set, so a blind root write stays blind
+    // rather than becoming a read-modify-write that loses the race against
+    // any advance of the document it replaces. `internalVerifierRead` says
+    // what the read is: the runtime resolving a label, the same mark
+    // `readStoredCfcMetadata()` carries.
     const carried = isObjectOrArray(value)
       ? (value as { cfc?: unknown }).cfc
       : undefined;
@@ -1164,16 +1250,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.#cfcState.unprivilegedSystemWrites.push(`${address.id}/cfc`);
   }
 
-  // Capture the implementation identity active at this write into the per-tx
-  // uniformity summary (§8.9.3 TransformedBy — see `CfcTxState.writeIdentity`).
-  // The flow join is one per-tx label, so derivation provenance is minted only
-  // when every non-privileged write was authored under the same defined
-  // identity: identities are captured at write time, like
-  // `recordCfcWritePolicyInput()` does, so a later run in the same transaction
-  // cannot lend its identity to earlier writes (and an unattributed write
-  // cannot borrow a later one). Privileged persistence writes (label maps,
-  // `cid:` schema docs) are bookkeeping, not authorship, and are skipped —
-  // also keeping the summary stable across prepare/invalidate/re-prepare.
+  /**
+   * Captures the implementation identity active at this write into the per-tx
+   * uniformity summary (§8.9.3 TransformedBy — see `CfcTxState.writeIdentity`).
+   * The flow join is one per-tx label, so derivation provenance is minted only
+   * when every non-privileged write was authored under the same defined
+   * identity: identities are captured at write time, like
+   * `recordCfcWritePolicyInput()` does, so a later run in the same transaction
+   * cannot lend its identity to earlier writes (and an unattributed write
+   * cannot borrow a later one). Privileged persistence writes (label maps,
+   * `cid:` schema docs) are bookkeeping, not authorship, and are skipped — also
+   * keeping the summary stable across prepare, invalidate, and re-prepare.
+   */
   #noteWriteIdentity(): void {
     if (this.#privilegedSystemWriteDepth > 0) return;
     const summary = this.#cfcState.writeIdentity;
@@ -1210,10 +1298,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
-  // Ambient metadata merged into every read issued inside a
-  // runWithAmbientReadMeta scope. Used by scheduler dependency seeding to
-  // tag its materialization reads without threading meta through every
-  // cell/traverse API in between.
+  /**
+   * Ambient metadata merged into every read issued inside a
+   * `runWithAmbientReadMeta()` scope. Used by scheduler dependency seeding to
+   * tag its materialization reads without threading meta through every
+   * cell/traverse API in between.
+   */
   #ambientReadMeta?: Metadata;
 
   runWithAmbientReadMeta<T>(meta: Metadata, fn: () => T): T {
@@ -1275,9 +1365,11 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.tx.exitReadEpoch?.(previous);
   }
 
-  // Mirrors the epoch pushed down to the storage transaction, so the caches
-  // this class owns can tell whether the value they are about to keep, or
-  // hand out, describes the current state or an earlier one.
+  /**
+   * Mirrors the epoch pushed down to the storage transaction, so the caches
+   * this class owns can tell whether the value they are about to keep, or hand
+   * out, describes the current state or an earlier one.
+   */
   #readEpoch: number | undefined;
 
   noteSchemaRefusal(refusal: unknown): void {
@@ -1957,10 +2049,12 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     };
   }
 
-  // `"<space>|<hash>"` pairs this transaction has already materialized (or
-  // decided it cannot), so repeat passes never re-call writeOrThrow — a
-  // repeat write, even an elided one, would invalidate a prepared CFC
-  // digest (`write-after-prepare`).
+  /**
+   * `"<space>|<hash>"` pairs this transaction has already materialized (or
+   * decided it cannot), so repeat passes never re-call `writeOrThrow()` — a
+   * repeat write, even an elided one, would invalidate a prepared CFC digest
+   * (`write-after-prepare`).
+   */
   #ensuredSchemaDocs = new Set<string>();
 
   /**
@@ -3103,11 +3197,13 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     return this.#wrapped.tx;
   }
 
-  // Effect-completion writebacks can be marked through a wrapper
-  // (markEffectCompletion calls these on whatever tx shape it is
-  // handed). Forward both, or a wrapped completion silently skips
-  // authoritative mode and the F2 no-op-elision wedge reopens for
-  // exactly those paths (stage-G round-2 thread 18).
+  /**
+   * Forwards to the wrapped transaction, as `isAuthoritativeWrites()` below
+   * does. `markEffectCompletion()` marks whatever tx shape it is handed, and
+   * the write path asks that same shape whether the mark is on, so a wrapper
+   * forwarding only one of the two silently skips authoritative mode and
+   * reopens the no-op-elision wedge for exactly those paths.
+   */
   markAuthoritativeWrites(): void {
     this.#wrapped.markAuthoritativeWrites?.();
   }

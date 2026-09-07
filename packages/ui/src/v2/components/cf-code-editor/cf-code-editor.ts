@@ -426,61 +426,105 @@ export class CFCodeEditor extends BaseElement {
   private _autofocusFrame: number | null = null;
   private _autofocusIntersectionObserver: IntersectionObserver | null = null;
   private _autofocusResizeObserver: ResizeObserver | null = null;
-  // Track previous backlink names to detect changes for syncing to piece NAME
+
+  /**
+   * Previous backlink names, kept to detect changes for syncing to the piece
+   * `NAME`.
+   */
   private _previousBacklinkNames = new Map<string, string>();
-  // Track subscriptions to piece NAME cells for bidirectional sync
+
+  /** Subscriptions to piece `NAME` cells, for bidirectional sync. */
   private _pieceNameSubscriptions = new Map<string, () => void>();
-  // Cache of resolved piece cell IDs: index in mentionable array → stable piece cell ID.
-  // Populated asynchronously when mentionable changes via resolveAsCell().
+
+  /**
+   * Cache of resolved piece cell ids: index in the mentionable array → stable
+   * piece cell id. Populated asynchronously when the mentionable changes, via
+   * `resolveAsCell()`.
+   */
   private _resolvedPieceIds = new Map<number, string>();
-  // The resolved cell behind each mentionable entry, which a reference stores
-  // directly rather than by id. Populated by the same pass.
+
+  /**
+   * The resolved cell behind each mentionable entry, which a reference stores
+   * directly rather than by id. Populated by the same pass.
+   */
   private _resolvedPieceCells = new Map<number, CellHandle<Mentionable>>();
-  // Which resolution pass may publish its maps. The mentionable HANDLE stays
-  // identical when its contents change, so identity alone cannot stop an
-  // older pass finishing late and overwriting a newer pass's ordering.
+
+  /**
+   * Which resolution pass may publish its maps. The mentionable _handle_ stays
+   * identical when its contents change, so identity alone cannot stop an older
+   * pass finishing late and overwriting a newer pass's ordering.
+   */
   private _resolveGeneration = 0;
-  // `$mentioned` cannot be reconciled while an index row has no piece id.
-  // Calls made during that window leave the latest content for the current
-  // resolution pass to reconcile when it publishes.
+
+  /**
+   * Whether `$mentioned` reconciliation is deferred. It cannot be reconciled
+   * while an index row has no piece id; calls made during that window leave
+   * the latest content for the current resolution pass to reconcile when it
+   * publishes.
+   */
   private _mentionResolutionPending = false;
+
   private _deferredMentionedContent: string | null = null;
-  // A completion source that withheld a matching index row asks the current
-  // resolution pass to query it again once the row has a usable identity.
+
+  /**
+   * Whether a completion source withheld a matching index row and asks the
+   * current resolution pass to query it again once the row has a usable
+   * identity.
+   */
   private _completionAwaitingResolution = false;
+
   private _referencesUnsub: (() => void) | null = null;
-  // Label text last seen for each reference key, to detect a user's edit.
+
+  /** Label text last seen for each reference key, to detect a user's edit. */
   private _previousRefLabels = new Map<string, string>();
-  // Subscriptions to each referenced destination, carrying the identity they
-  // were opened against so a key repointed at a different piece resubscribes
-  // rather than keeping the old one alive.
+
+  /**
+   * Subscriptions to each referenced destination, carrying the identity they
+   * were opened against so a key repointed at a different piece resubscribes
+   * rather than keeping the old one alive.
+   */
   private _refDestinationSubscriptions = new Map<
     string,
     { id: string; unsub: () => void }
   >();
-  // Each referenced destination's name, as its subscription last delivered it.
+
+  /**
+   * Each referenced destination's name, as its subscription last delivered it.
+   */
   private _refNames = new Map<string, string>();
-  // Each referenced destination's own short name, from the same subscription.
-  // A key is absent while its destination publishes none, which is what a
-  // pill with no number beside its label means.
+
+  /**
+   * Each referenced destination's own short name, from the same subscription. A
+   * key is absent while its destination publishes none, which is what a pill
+   * with no number beside its label means.
+   */
   private _refShortNames = new Map<string, string>();
-  // Whether a publication of those names is already waiting to run.
+
+  /** Whether a publication of those names is already waiting to run. */
   private _refShortNamesPublishPending = false;
-  // Keys the document held when it loaded, plus those this editor minted.
-  // Collection only removes entries from this set, so a key another client
-  // added while this one was open is never swept away. Null until the
-  // document has loaded, which is what keeps an empty editor from collecting
-  // the whole map.
+
+  /**
+   * Keys the document held when it loaded, plus those this editor minted.
+   * Collection only removes entries from this set, so a key another client
+   * added while this one was open is never swept away. `null` until the
+   * document has loaded, which is what keeps an empty editor from collecting
+   * the whole map.
+   */
   private _refKeysAtLoad: Set<string> | null = null;
-  // Signature of the last `$mentioned` write in reference mode; null forces
-  // the next attempt, which is how an unresolved key gets retried.
+
+  /**
+   * Signature of the last `$mentioned` write in reference mode; `null` forces
+   * the next attempt, which is how an unresolved key gets retried.
+   */
   private _lastMentionedSignature: string | null = null;
 
-  // Transaction annotation to mark Cell-originated updates.
-  // This is the idiomatic CodeMirror 6 way to distinguish programmatic
-  // changes from user input. The updateListener checks this annotation
-  // and skips setValue for Cell-originated changes, preventing the
-  // feedback loop: Cell → Editor → updateListener → setValue → Cell...
+  /**
+   * Transaction annotation marking cell-originated updates. This is the
+   * idiomatic CodeMirror 6 way to distinguish programmatic changes from user
+   * input. The update listener checks this annotation and skips `setValue()`
+   * for cell-originated changes, preventing the feedback loop: cell → editor
+   * → update listener → `setValue()` → cell...
+   */
   private static _cellSyncAnnotation = Annotation.define<boolean>();
 
   private _cellController = createStringCellController(this, {

@@ -399,15 +399,18 @@ export class SourceMapParser {
     capacity: MAX_SOURCE_MAP_CACHE_SIZE,
   });
   #consumers = new WeakMap<SourceMap, SourceMapConsumer>();
-  // Deferred registrations (CT-1819): the boot path registers a PROVIDER
-  // instead of composing eagerly; the first lookup that needs the filename
-  // materializes it. One-shot — the provider is dropped as soon as it runs,
-  // so its captured inputs are released after first use. LRU-bounded like
-  // `sourceMaps`: a provider whose filename is NEVER looked up (its eval never
-  // errored) would otherwise be retained until dispose — one per eval, an
-  // unbounded leak on long-lived runners — so cap it and evict the oldest.
-  // Evicting an unused provider only means a later error in that (old) eval
-  // goes unmapped, exactly as when the composed-map LRU evicts a stale entry.
+
+  /**
+   * Deferred registrations: the boot path registers a _provider_ instead of
+   * composing eagerly; the first lookup that needs the filename materializes
+   * it. One-shot — the provider is dropped as soon as it runs, so its captured
+   * inputs are released after first use. LRU-bounded like `#sourceMaps`: a
+   * provider whose filename is _never_ looked up (its eval never errored)
+   * would otherwise be retained until dispose — one per eval, an unbounded
+   * leak on long-lived runners — so this caps it and evicts the oldest.
+   * Evicting an unused provider only means a later error in that (old) eval
+   * goes unmapped, exactly as when the composed-map LRU evicts a stale entry.
+   */
   #pendingProviders = new LRUCache<
     string,
     () => SourceMap | undefined
@@ -452,9 +455,11 @@ export class SourceMapParser {
     this.#pendingProviders.clear();
   }
 
-  // Fixes stack traces to use source map from eval. Strangely, both Deno and
-  // Chrome at least only observe `sourceURL` but not the source map, so we can
-  // use the former to find the right source map and then apply this.
+  /**
+   * Fixes stack traces to use source map from eval. Strangely, both Deno and
+   * Chrome at least only observe `sourceURL` but not the source map, so we can
+   * use the former to find the right source map and then apply this.
+   */
   parse(stack: string): string {
     return stack.split("\n").map((line) => {
       const match = line.match(stackTracePattern);
@@ -522,8 +527,10 @@ export class SourceMapParser {
     return `    at ${name} (${originalPosition.source}:${originalPosition.line}:${originalPosition.column})`;
   }
 
-  // Map a single position to its original source location.
-  // More efficient than parse() when you only need one position.
+  /**
+   * Maps a single position to its original source location. More efficient
+   * than `parse()` when only one position is needed.
+   */
   mapPosition(
     filename: string,
     line: number,

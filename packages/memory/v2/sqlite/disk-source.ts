@@ -27,18 +27,25 @@ export type DiskSourceDescriptor = {
  *  or hijacking the reads of — a handle id resolved in another space. */
 export class DiskSourceRegistry {
   #byKey = new Map<string, DiskSourceDescriptor>();
-  // Cap total entries so a client looping `sqlite.register-disk-source` with
-  // distinct ids cannot grow server memory without bound. Re-registering an
-  // existing `(space, id)` is always allowed (idempotent); only NEW keys past
-  // the cap are rejected — a clear error rather than silent eviction (which
-  // would drop a legitimate source and silently fall back to the cell-db).
+
+  /**
+   * Cap on total entries, so a client looping `sqlite.register-disk-source`
+   * with distinct ids cannot grow server memory without bound. Re-registering
+   * an existing `(space, id)` is always allowed (idempotent); only _new_ keys
+   * past the cap are rejected — a clear error rather than silent eviction
+   * (which would drop a legitimate source and silently fall back to the
+   * cell-db).
+   */
   readonly #maxEntries: number;
 
   constructor(maxEntries = 4096) {
     this.#maxEntries = maxEntries;
   }
 
-  // NUL-separated composite key (`\0` cannot appear in a DID or entity id).
+  /**
+   * Returns the NUL-separated composite key for `space` and `id` (`\0` cannot
+   * appear in a DID or entity id).
+   */
   #key(space: string, id: string): string {
     return `${space}\x00${id}`;
   }

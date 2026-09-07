@@ -109,8 +109,10 @@ export class CFHelpers {
     );
   }
 
-  // Returns an QualifiedName of the requested
-  // helper name e.g. `__cfHelpers.JSONSchema`.
+  /**
+   * Returns a `QualifiedName` for the requested helper name, e.g.
+   * `__cfHelpers.JSONSchema`.
+   */
   getHelperQualified(
     name: string,
   ): ts.QualifiedName {

@@ -169,11 +169,15 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   #nextMsgId = 0;
   #timeoutMs = DEFAULT_TIMEOUT_MS;
   #initialized = false;
-  // The connection's lifetime. dispose() aborts it; every consumer registers
-  // its teardown against this signal and every in-flight request settles
-  // through it, so there is no disposed state to special-case beyond
-  // `signal.aborted`.
+
+  /**
+   * The connection's lifetime. `dispose()` aborts it; every consumer registers
+   * its teardown against this signal and every in-flight request settles
+   * through it, so there is no disposed state to special-case beyond
+   * `signal.aborted`.
+   */
   #lifetime = new AbortController();
+
   #transport: RuntimeTransport;
   #subscribed = new Map<string, Set<CellHandle>>();
   #subscriptionDiagnostics = new Map<string, SubscriptionCounterTotals>();
@@ -385,8 +389,11 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     return deferred.promise;
   }
 
-  // Remove a pending request's bookkeeping: clear its timeout and detach its
-  // abort listener. Returns the entry so the caller can settle its deferred.
+  /**
+   * Removes a pending request's bookkeeping: clears its timeout and detaches
+   * its abort listener. Returns the entry so the caller can settle its
+   * deferred.
+   */
   #settle(msgId: number): PendingRequest | undefined {
     const pending = this.#pendingRequests.get(msgId);
     if (!pending) return undefined;

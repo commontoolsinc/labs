@@ -853,10 +853,12 @@ export class CommonFabricFormatter implements TypeFormatter {
       : undefined;
   }
 
-  // Detects the "opaque" cell brand, carried by OpaqueCell<T>. Named for the
-  // brand it matches, not the `Reactive` annotation spelling: that is an
-  // identity alias for T (no runtime wrapper, no brand), so it cannot be
-  // detected structurally here — only OpaqueCell can.
+  /**
+   * Detects the opaque cell brand, carried by `OpaqueCell<T>`. Named for the
+   * brand it matches, not the `Reactive` annotation spelling: that is an
+   * identity alias for `T` (no runtime wrapper, no brand), so it cannot be
+   * detected structurally here — only `OpaqueCell` can.
+   */
   #isOpaqueCellType(type: ts.Type, checker: ts.TypeChecker): boolean {
     return isCellBrand(type, checker, "opaque");
   }

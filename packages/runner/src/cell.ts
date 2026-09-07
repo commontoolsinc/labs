@@ -923,18 +923,21 @@ export class CellImpl<T extends FabricValue>
   >();
   #cleanup: Cancel | undefined;
 
-  // Each cell has its own link (space, path, schema)
+  /** The cell's own link (space, path, schema). */
   #_link: NormalizedLink;
 
-  // Shared container for entity ID and cause - siblings share the same instance
+  /**
+   * Shared container for entity ID and cause; siblings share the same instance.
+   */
   #causeContainer: CauseContainer;
 
   #frame: Frame | undefined;
 
   #kind: CellKind;
 
-  // Self-reference for pattern SELF symbol support
+  /** Self-reference, for pattern `SELF` symbol support. */
   #selfRef?: Reactive<any>;
+
   #viewRefHashCache?: {
     link: NormalizedFullLink;
     cfcLabelView: CfcLabelView | undefined;
@@ -2555,11 +2558,13 @@ export class CellImpl<T extends FabricValue>
     this.tx.recordMergeableOp?.(resolvedLink, { op: "increment", by });
   }
 
-  // Remove every element of this array equal to `ref` by stored value. A cell
-  // ref matches by its (deterministic) link, so the membership entry is removed
-  // without depending on the list's prior contents — concurrent removes of
-  // distinct entries merge. The optimistic local filter and the committed op
-  // both match by the stored value.
+  /**
+   * Removes every element of this array equal to `ref` by stored value. A cell
+   * ref matches by its (deterministic) link, so the membership entry is removed
+   * without depending on the list's prior contents — concurrent removes of
+   * distinct entries merge. The optimistic local filter and the committed op
+   * both match by the stored value.
+   */
   removeByValue(
     ref: T extends (infer U)[] ? (U | AnyCell<U>) : never,
   ): void {
@@ -2636,12 +2641,15 @@ export class CellImpl<T extends FabricValue>
     }
   }
 
-  // Returns a cell for the entity deterministically derived from this array and
-  // `idKey` — the entity a keyed element of this array is identified by. The
-  // derivation is content-only (no per-event cause), so the same `idKey` always
-  // resolves to the same entity. This lets a handler read/edit one keyed element
-  // (e.g. "my vote for this option") and add or remove its membership via
-  // addUnique / removeByValue, without ever reading the whole array.
+  /**
+   * Returns a cell for the entity deterministically derived from this array and
+   * `idKey` — the entity a keyed element of this array is identified by. The
+   * derivation is content-only (no per-event cause), so the same `idKey` always
+   * resolves to the same entity. This lets a handler read/edit one keyed
+   * element (e.g. "my vote for this option") and add or remove its membership
+   * via `addUnique()` / `removeByValue()`, without ever reading the whole
+   * array.
+   */
   elementById(idKey: string, schema?: JSONSchema): Cell<any> {
     const tx = this.runtime.readTx(this.tx);
     const resolvedLink = resolveLink(this.runtime, tx, this.#link, "value", {

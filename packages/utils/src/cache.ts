@@ -105,10 +105,14 @@ export class BoundedKeyMap<K, V> implements ReadonlyMap<K, V> {
     this.#entries.clear();
   }
 
-  // The read side is the standard `ReadonlyMap` surface, so a consumer that
-  // only reads takes `ReadonlyMap` and accepts either this or a plain `Map`.
+  //
+  // Traversals
+  //
   // Every traversal runs oldest first, which is the order entries are dropped
-  // in.
+  // in. Together with `.size`, `has()`, and `get()` above, these are the
+  // standard `ReadonlyMap` surface, so a consumer that only reads takes
+  // `ReadonlyMap` and accepts either this or a plain `Map`.
+  //
 
   /** @inheritDoc */
   entries(): MapIterator<[K, V]> {

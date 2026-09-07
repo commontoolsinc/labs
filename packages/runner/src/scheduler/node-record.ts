@@ -63,14 +63,20 @@ export class NodeRegistry {
   #all = new Set<SchedulerNode>();
   #activeEffects = new Set<Action>();
   #activeComputations = new Set<Action>();
-  // Active nodes whose status is `invalid` or `never-ran` — i.e. the nodes
-  // `isInvalidOrNeverRan` would match. Maintained incrementally through
-  // setStatus/activate/remove so the event-preflight gate (decision 15) and
-  // the pull seed scans can iterate the (small) invalid set instead of every
-  // registered node. Membership tracks both status AND active membership:
-  // a removed node drops out even though its record persists in `#records`.
+
+  /**
+   * Active nodes whose status is `invalid` or `never-ran` — i.e. the nodes
+   * `isInvalidOrNeverRan()` would match. Maintained incrementally through
+   * `setStatus()`/`activate()`/`remove()` so the event-preflight gate and the
+   * pull seed scans can iterate the (small) invalid set instead of every
+   * registered node. Membership tracks both status _and_ active membership: a
+   * removed node drops out even though its record persists in `#records`.
+   */
   #invalidNodes = new Set<Action>();
-  // Source of monotonic registration ordinals (see SchedulerNode.ordinal).
+
+  /**
+   * Source of monotonic registration ordinals (see `SchedulerNode.ordinal`).
+   */
   #nextOrdinal = 0;
 
   readonly effects: ReadonlySet<Action> = this.#activeEffects;

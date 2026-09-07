@@ -76,17 +76,21 @@ class FakeSocket {
     this.closed = true;
   }
 
-  // Deliver a gateway frame the way the real socket would: JSON in a string.
+  /**
+   * Delivers a gateway frame the way the real socket would: JSON in a string.
+   */
   deliver(frame: unknown) {
     this.onmessage!({ data: JSON.stringify(frame) });
   }
 
-  // Deliver whatever is given, untouched, for the frames that are not JSON.
+  /**
+   * Delivers whatever is given, untouched, for the frames that are not JSON.
+   */
   raw(data: unknown) {
     this.onmessage!({ data });
   }
 
-  // The parsed frames the tile sent back up the socket.
+  /** Returns the parsed frames the tile sent back up the socket. */
   frames(): { op: number; d?: unknown }[] {
     return this.sent.map((s) => JSON.parse(s));
   }

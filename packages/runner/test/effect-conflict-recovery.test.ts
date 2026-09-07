@@ -40,11 +40,14 @@ const signer = await Identity.fromPassphrase("effect-conflict-recovery");
 const space = signer.did();
 
 class SuppressibleStorageManager extends EmulatedStorageManager {
-  // When set, forward storage notifications to subscribers with their `changes`
-  // emptied, so they raise no reader-dirty — a deterministic stand-in for a
-  // "dataless catch-up" (a conflict whose catch-up carries no diff). Off by
-  // default: a transparent passthrough that leaves the other tests unaffected.
+  /**
+   * Whether to forward storage notifications to subscribers with their
+   * `changes` emptied, so they raise no reader-dirty — a deterministic stand-in
+   * for a dataless catch-up (a conflict whose catch-up carries no diff). Off by
+   * default: a transparent passthrough that leaves the other tests unaffected.
+   */
   suppressReaderDirty = false;
+
   override subscribe(subscription: IStorageNotification): void {
     super.subscribe({
       next: (n: StorageNotification) =>

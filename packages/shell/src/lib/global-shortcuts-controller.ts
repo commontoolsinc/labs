@@ -20,9 +20,11 @@ type ReactiveAppHost = ReactiveControllerHost & BaseView & { app: AppState };
 export class GlobalShortcutsController implements ReactiveController {
   #host: ReactiveAppHost;
 
-  // Whether the platform's primary shortcut modifier is Command rather than
-  // Control. Read when the host connects, since it depends on `navigator`.
-  // No current binding branches on it; a Cmd/Ctrl shortcut is what does.
+  /**
+   * Whether the platform's primary shortcut modifier is Command rather than
+   * Control. Read when the host connects, since it depends on `navigator`. No
+   * current binding branches on it; a Cmd/Ctrl shortcut is what does.
+   */
   #usesCommandKey = false;
 
   constructor(host: ReactiveAppHost) {

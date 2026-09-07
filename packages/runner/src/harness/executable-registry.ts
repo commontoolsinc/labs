@@ -15,26 +15,32 @@ import type { HarnessedFunction } from "./types.ts";
  * pseudo-modules below.)
  */
 export class ExecutableRegistry {
-  // Content-addressed implementation index: module identity → symbol → the
-  // implementation function recorded by `Engine.#recordModuleProvenance` during
-  // a verified evaluation (and by `trustHostValue` for host pseudo-modules).
-  // Deliberately STRONG and session-unbounded: a serialized module carries
-  // ONLY `$implRef` (no body when the writer proved this index admits the
-  // ref), so resolution must never lose an implementation whose module
-  // evaluated this session. Retention is bounded by the set of DISTINCT
-  // verified implementations evaluated per session.
+  /**
+   * Content-addressed implementation index: module identity → symbol → the
+   * implementation function recorded by `Engine.#recordModuleProvenance()`
+   * during a verified evaluation (and by `trustHostValue()` for host
+   * pseudo-modules). Deliberately _strong_ and session-unbounded: a serialized
+   * module carries _only_ `$implRef` (no body when the writer proved this index
+   * admits the ref), so resolution must never lose an implementation whose
+   * module evaluated this session. Retention is bounded by the set of
+   * _distinct_ verified implementations evaluated per session.
+   */
   readonly #verifiedImplementationsByEntryRef = new Map<
     string,
     Map<string, HarnessedFunction>
   >();
-  // Host pseudo-modules (identity E5, design §5): each `trustHostValue` call
-  // mints a UNIQUE `host:<n>` identity — uniqueness over content-derivation,
-  // deliberately: host functions are closure-bearing, so two with identical
-  // bytes are NOT interchangeable. Host values are in-session only (a live
-  // closure never survives a session), so a session-scoped counter is exactly
-  // the right lifetime, and the session-lifetime index above is exactly the
-  // right resolution home.
+
+  /**
+   * Counter for host pseudo-module identities: each `trustHostValue()` call
+   * mints a _unique_ `host:<n>` identity — uniqueness over content-derivation,
+   * deliberately: host functions are closure-bearing, so two with identical
+   * bytes are _not_ interchangeable. Host values are in-session only (a live
+   * closure never survives a session), so a session-scoped counter is exactly
+   * the right lifetime, and the session-lifetime index above is exactly the
+   * right resolution home.
+   */
   #nextHostModuleId = 0;
+
   readonly #hostRegisteredFunctions = new WeakSet<HarnessedFunction>();
 
   /** The implementation index, which a test reads directly. */

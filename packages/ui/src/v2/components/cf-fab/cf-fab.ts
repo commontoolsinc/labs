@@ -438,7 +438,7 @@ export class CFFab extends BaseElement {
   @property({ type: Object, attribute: false })
   accessor previewMessage: CellHandle<string> | string | undefined = undefined;
 
-  // The resolved value from `previewMessage`
+  /** The resolved value from `previewMessage`. */
   @state()
   accessor _resolvedPreviewMessage: string | undefined = undefined;
 

@@ -280,8 +280,10 @@ export class ShellIntegration {
     return this.#page!;
   }
 
-  // Browser-level CDP websocket endpoint, for attaching a second CDP client
-  // (e.g. `CdpWorkerProfiler`).
+  /**
+   * Returns the browser-level CDP websocket endpoint, for attaching a second
+   * CDP client (e.g. `CdpWorkerProfiler`).
+   */
   wsEndpoint(): string {
     this.#checkIsOk();
     return this.#browser!.wsEndpoint();
@@ -307,7 +309,7 @@ export class ShellIntegration {
     });
   }
 
-  // Login to the initialized app with provided identity.
+  /** Logs in to the initialized app with the provided `identity`. */
   async login(identity: Identity): Promise<void> {
     await login(this.page(), identity);
   }
@@ -316,12 +318,14 @@ export class ShellIntegration {
     await this.#disposePageRuntime();
   }
 
-  // Wait for the shell's app state to hold this view, and this identity where
-  // one is given. Throws if the wait runs out.
-  //
-  // The view is matched whole, field for field: a state matches when its view
-  // holds the same fields this one holds. A view naming only a space is
-  // matched by the state of a space with no piece open.
+  /**
+   * Waits for the shell's app state to hold this view, and this identity
+   * where one is given. Throws if the wait runs out.
+   *
+   * The view is matched whole, field for field: a state matches when its view
+   * holds the same fields this one holds. A view naming only a space is matched
+   * by the state of a space with no piece open.
+   */
   async waitForState(
     params: {
       view: AppView;
@@ -374,17 +378,17 @@ export class ShellIntegration {
     return state;
   }
 
-  // Navigates to the URL represented by `frontendUrl`,
-  // `spaceName`, and `pieceId`. Waits for state to settle
-  // reflecting these properties.
-  //
-  // `urlPath` sends a different spelling of the same address: the rooted path
-  // to navigate to, where the caller is checking a form the shell reads but
-  // does not write. `view` remains the state this waits for, so such a caller
-  // states what it sends and what that has to reach as two separate things.
-  //
-  // If `identity` provided, logs in with the identity
-  // after navigation.
+  /**
+   * Navigates to the URL that `frontendUrl` and `view` represent, and waits
+   * for state to settle reflecting `view`.
+   *
+   * `urlPath` sends a different spelling of the same address: the rooted path
+   * to navigate to, where the caller is checking a form the shell reads but
+   * does not write. `view` remains the state this waits for, so such a caller
+   * states what it sends and what that has to reach as two separate things.
+   *
+   * If `identity` is provided, logs in with the identity after navigation.
+   */
   async goto(
     { frontendUrl, view, urlPath, identity }: {
       frontendUrl: string;

@@ -164,7 +164,7 @@ export class CFRadioGroup extends BaseElement {
     this.removeEventListener("keydown", this.handleKeydown);
   }
 
-  // Theme consumption
+  /** The theme, consumed from the provider. */
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
   accessor theme: CFTheme = defaultTheme;

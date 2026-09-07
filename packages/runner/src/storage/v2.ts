@@ -905,40 +905,56 @@ export class StorageManager implements IStorageManager {
   readonly id: string;
   readonly as: Signer;
 
-  // One authenticated session identity is shared by every space opened during
-  // a manager lifecycle. close() invalidates those server sessions, so a later
-  // sequential Runtime reusing this manager must start a fresh identity rather
-  // than attempting to resurrect an invalidated token.
+  /**
+   * The one authenticated session identity, shared by every space opened during
+   * a manager lifecycle. `close()` invalidates those server sessions, so a
+   * later sequential `Runtime` reusing this manager must start a fresh identity
+   * rather than attempting to resurrect an invalidated token.
+   */
   #sessionId: string;
+
   #settings: IRemoteStorageProviderSettings;
   #providers = new Map<MemorySpace, Provider>();
   #subscription = SubscriptionManager.create();
   #crossSpacePromises = new Set<Promise<void>>();
-  // Schema-registry retention lease: held for the manager's open lifetime,
-  // released on close (idempotent), re-acquired when a closed manager is
-  // reused through open(). Last lease out clears the realm's registry — the
-  // session-lifetime retention contract in schema-registry.ts.
+
+  /**
+   * Schema-registry retention lease: held for the manager's open lifetime,
+   * released on close (idempotent), re-acquired when a closed manager is reused
+   * through `open()`. Last lease out clears the realm's registry — the
+   * session-lifetime retention contract in `schema-registry.ts`.
+   */
   #schemaRegistryLease?: () => void;
-  // Docs already offered a link-target pull via shouldPullDoc. One entry per
-  // (space, scope, id) for the manager's lifetime: the first pull registers a
-  // server-side watch that keeps the doc flowing afterwards, so a second kick
-  // is never needed — and never re-kicking is what keeps reads of genuinely
-  // absent targets (dangling links, deleted docs) from churning the
-  // cross-space convergence loop on every read.
+
+  /**
+   * Docs already offered a link-target pull via `shouldPullDoc()`. One entry
+   * per (space, scope, id) for the manager's lifetime: the first pull registers
+   * a server-side watch that keeps the doc flowing afterwards, so a second kick
+   * is never needed — and never re-kicking is what keeps reads of genuinely
+   * absent targets (dangling links, deleted docs) from churning the cross-space
+   * convergence loop on every read.
+   */
   #docPullKicks = new Set<string>();
-  // Data URIs whose linked targets this manager has already pulled, keyed by a
-  // hash of the URI, schema, path, space, and scope. Per manager rather than
-  // per process: a hit skips the pull, and a manager that inherited another
-  // manager's hit would leave its own replica without those documents.
+
+  /**
+   * Data URIs whose linked targets this manager has already pulled, keyed by a
+   * hash of the URI, schema, path, space, and scope. Per manager rather than
+   * per process: a hit skips the pull, and a manager that inherited another
+   * manager's hit would leave its own replica without those documents.
+   */
   #dataURISyncs = new BoundedKeyMap<string, Promise<void>>(
     DATA_URI_SYNC_CACHE_MAX,
   );
-  // In-flight commits, registered synchronously by the transaction layer at
-  // commit() entry (see IStorageManager.trackPendingCommit). This is the
-  // write-durability barrier: distinct from #crossSpacePromises, which also
-  // carries cross-space READ work (link-target loads) and so must not gate
-  // "are there unconfirmed writes" questions.
+
+  /**
+   * In-flight commits, registered synchronously by the transaction layer at
+   * `commit()` entry (see `IStorageManager.trackPendingCommit()`). This is the
+   * write-durability barrier: distinct from `#crossSpacePromises`, which also
+   * carries cross-space _read_ work (link-target loads) and so must not gate
+   * questions of whether there are unconfirmed writes.
+   */
   #pendingCommits = new Set<Promise<unknown>>();
+
   #pendingCommitsSubscribers = new Set<(pending: boolean) => void>();
   #sessionFactory: SessionFactory;
   #eventAppendQueueStore?: EventAppendQueueStore;
@@ -1014,16 +1030,18 @@ export class StorageManager implements IStorageManager {
   /** Late-bound marker sink (the Runtime's telemetry bus); see setTelemetry. */
   #telemetry?: TelemetrySink;
 
-  // In-flight document loads keyed `space/scope_key/id` (the scheduler's
-  // entityKey format — one entry per scope INSTANCE, key-vocabulary.md §1
-  // site 7: two instances of one doc are two loads, and collapsing them
-  // would make one waiter observe another's failure). Keys are BUILT with
-  // entityKey so the strings cross-match the scheduler's
-  // (collectPendingLoadParkKeys correlates the two maps); both sides
-  // resolve against this manager's own session identity.
-  // Refcounted: concurrent syncCell calls for the same
-  // document share one entry. Waiters resolve when the count returns to zero
-  // — whether the load produced a value or found the document absent.
+  /**
+   * In-flight document loads keyed `space/scope_key/id` (the scheduler's
+   * `entityKey` format — one entry per scope _instance_, `key-vocabulary.md` §1
+   * site 7: two instances of one doc are two loads, and collapsing them would
+   * make one waiter observe another's failure). Keys are _built_ with
+   * `entityKey()` so the strings cross-match the scheduler's
+   * (`collectPendingLoadParkKeys()` correlates the two maps); both sides
+   * resolve against this manager's own session identity. Refcounted: concurrent
+   * `syncCell()` calls for the same document share one entry. Waiters resolve
+   * when the count returns to zero — whether the load produced a value or found
+   * the document absent.
+   */
   #pendingLoads = new Map<string, {
     count: number;
     generation: number;
@@ -1036,12 +1054,16 @@ export class StorageManager implements IStorageManager {
     failure: unknown;
     waiters: Set<(failure: unknown) => void>;
   }>();
-  // A positive recovery signal is key-specific: successful settlement of a
-  // new generation for one doc names that doc's stable failed boundary. Only a
-  // durable checkpoint carrying the same boundary wakes, so unrelated loads
-  // remain inert. The boundary is stable across manager recreation; the
-  // replacement epoch remains unique.
+
+  /**
+   * The next pending-load generation. A positive recovery signal is
+   * key-specific: successful settlement of a new generation for one doc names
+   * that doc's stable failed boundary. Only a durable checkpoint carrying the
+   * same boundary wakes, so unrelated loads remain inert. The boundary is
+   * stable across manager recreation; the replacement epoch remains unique.
+   */
   #nextPendingLoadGeneration = 1;
+
   readonly #loadRecoveryIdentity = crypto.randomUUID();
   #loadRecoveryObserver:
     | ((recovery: {
@@ -1049,13 +1071,19 @@ export class StorageManager implements IStorageManager {
       recoveryEpoch: string;
     }) => void)
     | undefined = undefined;
-  // Sync failures already logged, keyed by (space, error identity). A denied
-  // space repeats the identical failure for every doc pulled from it; one line
-  // per distinct failure keeps the surfacing readable. Bounded: at the cap the
-  // set resets, trading a repeated line for an unbounded set.
+
+  /**
+   * Sync failures already logged, keyed by (space, error identity). A denied
+   * space repeats the identical failure for every doc pulled from it; one line
+   * per distinct failure keeps the surfacing readable. Bounded: at the cap the
+   * set resets, trading a repeated line for an unbounded set.
+   */
   #loggedSyncFailures = new Set<string>();
-  // The syncer a test supplies in place of the CFC schema document sync;
-  // undefined means the manager's own.
+
+  /**
+   * The syncer a test supplies in place of the CFC schema document sync;
+   * `undefined` means the manager's own.
+   */
   #cfcSchemaDocumentSyncer: CfcSchemaDocumentSyncer | undefined = undefined;
 
   /**
@@ -2616,15 +2644,19 @@ type TelemetrySink = { submit(marker: RuntimeTelemetryMarker): void };
 
 class Provider implements IStorageProvider, IOperationStorageCapability {
   replica: SpaceReplica;
-  // Registered reads to replay when a provisional replica is replaced, keyed
-  // by document and then by the normalized selector. A normalized selector is
-  // either the shared rejecting selector or an interned canonical instance,
-  // and the entry holds it, so structurally equal selectors are the same
-  // object here and identity separates them exactly.
+
+  /**
+   * Registered reads to replay when a provisional replica is replaced, keyed by
+   * document and then by the normalized selector. A normalized selector is
+   * either the shared rejecting selector or an interned canonical instance, and
+   * the entry holds it, so structurally equal selectors are the same object
+   * here and identity separates them exactly.
+   */
   #syncRequests = new Map<
     string,
     Map<SchemaPathSelector, ProviderSyncRequest>
   >();
+
   #destroyed = false;
   #routeAbort = new AbortController();
   #operationSubscriptions = new Set<ProviderOperationSubscription>();
@@ -3139,38 +3171,55 @@ export class SpaceReplica
   readonly #docs = new Map<string, DocumentRecord>();
   readonly #syncTasks = new Map<string, SyncTask>();
   readonly #commitPromises = new Set<Promise<unknown>>();
-  // Issued-but-unsettled commits that carry pending reads, keyed by localSeq.
-  // Scanned by cascadeDroppedDependency when a dependency's optimistic writes
-  // are dropped. See the InFlightCommit doc for why zero-pending-read commits
-  // are never registered.
+
+  /**
+   * Issued-but-unsettled commits that carry pending reads, keyed by `localSeq`.
+   * Scanned by `#cascadeDroppedDependency()` when a dependency's optimistic
+   * writes are dropped. See the `InFlightCommit` doc for why zero-pending-read
+   * commits are never registered.
+   */
   readonly #inFlightCommits = new Map<number, InFlightCommit>();
-  // Commits whose rejection verdict is known but whose optimistic layer is
-  // still standing in `record.pending`, because finalizeRejection holds the
-  // drop until the conflict read repair completes. buildReads names every
-  // layer it finds, so a commit minted in that window names a layer the
-  // server will never resolve. Maps the dead localSeq to a promise that
-  // settles when its drop completes: the pre-send checkpoint rejects such a
-  // commit locally and gates its retry on that promise, so the retry rebuilds
-  // against the repaired base rather than the dead one.
+
+  /**
+   * Commits whose rejection verdict is known but whose optimistic layer is
+   * still standing in `record.pending`, because `#finalizeRejection()` holds
+   * the drop until the conflict read repair completes. `buildReads()` names
+   * every layer it finds, so a commit minted in that window names a layer the
+   * server will never resolve. Maps the dead `localSeq` to a promise that
+   * settles when its drop completes: the pre-send checkpoint rejects such a
+   * commit locally and gates its retry on that promise, so the retry rebuilds
+   * against the repaired base rather than the dead one.
+   */
   readonly #rejectedPendingLayers = new Map<number, Promise<void>>();
-  // Every unsettled commit's outcome promise, keyed by localSeq (a superset
-  // of #inFlightCommits: zero-read commits appear here too). The old-server
-  // scalarization hold awaits these for the OMITTED lower dependencies —
-  // entries are removed on settlement, so an absent key means "settled".
+
+  /**
+   * Every unsettled commit's outcome promise, keyed by `localSeq` (a superset
+   * of `#inFlightCommits`: zero-read commits appear here too). The old-server
+   * scalarization hold awaits these for the _omitted_ lower dependencies —
+   * entries are removed on settlement, so an absent key means settled.
+   */
   readonly #commitOutcomeBySeq = new Map<
     number,
     Promise<unknown>
   >();
-  // Server verdict promises superseded by a local rejection. Kept OUT of
-  // #commitPromises so synced() never blocks on a verdict the server may
-  // withhold indefinitely; close()/closeNow() drain the set after client
-  // teardown rejects every in-flight request.
+
+  /**
+   * Server verdict promises superseded by a local rejection. Kept _out_ of
+   * `#commitPromises` so `synced()` never blocks on a verdict the server may
+   * withhold indefinitely; `close()`/`closeNow()` drain the set after client
+   * teardown rejects every in-flight request.
+   */
   readonly #suppressedVerdicts = new Set<Promise<void>>();
+
   readonly #syncPromises = new Set<Promise<Result<Unit, PullError>>>();
-  // Schema-hash hydration dedupe (hydrateArrivedCfcSchemaRefs): hashes
-  // whose cid: pull is in flight or has succeeded; a failed pull removes
-  // its entry so a later frame can retry.
+
+  /**
+   * Schema-hash hydration dedupe (`#hydrateArrivedCfcSchemaRefs()`): hashes
+   * whose `cid:` pull is in flight or has succeeded; a failed pull removes its
+   * entry so a later frame can retry.
+   */
   readonly #kickedCfcSchemaPulls = new Set<string>();
+
   readonly #updatePromises = new Set<Promise<void>>();
   readonly #sinks = new Map<
     string,
@@ -3182,26 +3231,33 @@ export class SpaceReplica
   >();
   readonly #operationWatchRemovals = new Map<string, Promise<void>>();
   #watchView: MemoryV2Client.WatchView | null = null;
-  // The specific view instance that `#consumeUpdates` is iterating. This can
-  // diverge from `#watchView` (the client may hand back a fresh view instance
-  // on a later refresh while the original consumer keeps running), so teardown
-  // must close *this* view to settle the consumer's pending `next()`. Closing
-  // only `#watchView` can leave the consumer's view open, hanging dispose() on
-  // `Promise.allSettled([...#updatePromises])`.
+
+  /**
+   * The specific view instance that `#consumeUpdates()` is iterating. This can
+   * diverge from `#watchView` (the client may hand back a fresh view instance
+   * on a later refresh while the original consumer keeps running), so teardown
+   * must close _this_ view to settle the consumer's pending `next()`. Closing
+   * only `#watchView` can leave the consumer's view open, hanging `dispose()`
+   * on `Promise.allSettled([...#updatePromises])`.
+   */
   #subscribedWatchView: MemoryV2Client.WatchView | null = null;
+
   #watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
     () => this.#scopeKeyIdentity(),
   );
   #watchedIds = new Set<string>();
-  // The last SessionSync snapshot ABSORBED for each watched key — its
-  // address as the frame named it and the seq and deletedness it carried —
-  // kept so the replica can DECLARE its holdings on a reconnect
-  // (`holdings()`). Delivery-backed on purpose: `record.confirmed` also
-  // advances by local promotion (`#confirmPending`, an own accepted write
-  // extrapolated over the pending base), and a holding declared at a
-  // promoted seq would let the server elide the authoritative snapshot at
-  // that seq — a `patch` head's merged foreign content the promotion
-  // cannot reproduce. Only a frame this replica absorbed writes here.
+
+  /**
+   * The last `SessionSync` snapshot _absorbed_ for each watched key — its
+   * address as the frame named it and the seq and deletedness it carried — kept
+   * so the replica can _declare_ its holdings on a reconnect (`holdings()`).
+   * Delivery-backed on purpose: `record.confirmed` also advances by local
+   * promotion (`#confirmPending()`, an own accepted write extrapolated over the
+   * pending base), and a holding declared at a promoted seq would let the
+   * server elide the authoritative snapshot at that seq — a `patch` head's
+   * merged foreign content the promotion cannot reproduce. Only a frame this
+   * replica absorbed writes here.
+   */
   readonly #delivered = new Map<
     string,
     {
@@ -3213,6 +3269,7 @@ export class SpaceReplica
       deleted: boolean;
     }
   >();
+
   #nextLocalSeq = 1;
 
   /** The Phase-3 event-intent queue (events.md §5, LT9), created on the
@@ -3232,15 +3289,18 @@ export class SpaceReplica
   readonly #closeSignal = Promise.withResolvers<void>();
   #getTelemetry: () => TelemetrySink | undefined;
   #caughtUpLocalSeq = 0;
-  // Accepted verdicts PARKED until marker coverage (CT-1927): the server
-  // stages a `caughtUpLocalSeq` obligation for every accept, and the client
-  // holds the commit's promotion — pending overlay to confirmed mirror —
-  // until a frame's marker covers it, so promotion extrapolates over a base
-  // that reflects the foreign novelty the accept was applied on top of
-  // instead of minting a confirmed state from a stale mirror. Verdicts
-  // return inline (the fan-out stays batched); only their state application
-  // waits. Applied in ascending localSeq order by noteCaughtUpLocalSeq;
-  // cleared on reset (the re-pull re-derives the durable state).
+
+  /**
+   * Accepted verdicts _parked_ until marker coverage: the server stages a
+   * `caughtUpLocalSeq` obligation for every accept, and the client holds the
+   * commit's promotion — pending overlay to confirmed mirror — until a frame's
+   * marker covers it, so promotion extrapolates over a base that reflects the
+   * foreign novelty the accept was applied on top of instead of minting a
+   * confirmed state from a stale mirror. Verdicts return inline (the fan-out
+   * stays batched); only their state application waits. Applied in ascending
+   * `localSeq` order by `noteCaughtUpLocalSeq()`; cleared on reset (the re-pull
+   * re-derives the durable state).
+   */
   #parkedAccepts = new Map<number, {
     operations: NativeCommitOperation[];
     applied: AppliedCommit;
@@ -3250,74 +3310,89 @@ export class SpaceReplica
      * subscribed view as one reflecting the committed write. */
     settled: PromiseWithResolvers<void>;
   }>();
-  // Waiters on a parked accept's APPLICATION (server-execution v2 stage
-  // G's read-consistency barrier — see `whenApplied`). Resolved when the
-  // parked accept promotes (marker coverage, marker-channel death) or
-  // dies with the parked set (reset/close — the re-pull re-derives the
-  // durable state, so "applied" is moot and the waiter must not hang).
+
+  /**
+   * Waiters on a parked accept's _application_ (the read-consistency barrier —
+   * see `whenApplied()`). Resolved when the parked accept promotes (marker
+   * coverage, marker-channel death) or dies with the parked set (reset/close —
+   * the re-pull re-derives the durable state, so applied is moot and the waiter
+   * must not hang).
+   */
   #appliedWaiters = new Map<number, PromiseWithResolvers<void>>();
-  // Foreign novelty whose VISIBILITY is still shadowed by own pending
-  // writes (server-execution v2 Phase 2's settle input barrier — see
-  // `unappliedForeignSeqFloor` on ISpaceReplica): docKey -> the set of
-  // shadowed inbound seqs. A SET, not one extremum (review thread
-  // r3739139487): the floor must be the doc's LOWEST hidden seq —
-  // every derivation in the wave read the view from before the
-  // EARLIEST hidden input, so W may not pass it even when later hidden
-  // updates superseded its value (the previous per-doc max let W skip
-  // the earlier one) — while the own-echo verdict repair must remove
-  // EXACTLY its own mis-recorded seq without disturbing genuine
-  // foreign shadows folded around it (a single min would be deleted
-  // whole, losing them). A shadowed REMOVE records the sentinel 1 —
-  // the wire carries no seq for removes, so the floor holds W entirely
-  // until the shadow clears. Entries are pruned lazily when the doc's
-  // pending set empties (promotion, drop, rollback); cleared whole on
-  // reset.
+
+  /**
+   * Foreign novelty whose _visibility_ is still shadowed by own pending writes
+   * (the settle input barrier — see `unappliedForeignSeqFloor()` on
+   * `ISpaceReplica`): docKey → the set of shadowed inbound seqs. A _set_, not
+   * one extremum: the floor must be the doc's _lowest_ hidden seq — every
+   * derivation in the wave read the view from before the _earliest_ hidden
+   * input, so W may not pass it even when later hidden updates superseded its
+   * value — while the own-echo verdict repair must remove _exactly_ its own
+   * mis-recorded seq without disturbing genuine foreign shadows folded around
+   * it (a single min would be deleted whole, losing them). A shadowed _remove_
+   * records the sentinel 1 — the wire carries no seq for removes, so the floor
+   * holds W entirely until the shadow clears. Entries are pruned lazily when
+   * the doc's pending set empties (promotion, drop, rollback); cleared whole on
+   * reset.
+   */
   readonly #shadowedForeignSeqs = new Map<string, Set<number>>();
-  // The settle input barrier's WAKE (ISpaceReplica.shadowFlipObserver):
-  // invoked synchronously whenever a confirmPending promotion touched a
-  // doc with a standing shadow (flag ON — the flip checkout's own
-  // condition), value diff or not: the FLOOR lifts either way, and the
-  // floor is what the wake exists for. The SpaceServer installs it at
-  // activation so a clamped-then-quiet space's catch-up wave runs at
-  // the flip instead of waiting out the idle window — the flip is the
-  // one input whose dirtiness arrives WITHOUT a new admitted commit on
-  // the host feed (the commit was drained waves ago; only its
-  // VISIBILITY changed).
-  // Initialized EXPLICITLY (`= undefined`), as are the two overlay wakes
-  // below: the browser worker bundle compiles class fields without define
-  // semantics, so an UNINITIALIZED field is dropped from the class body and
-  // an `"observer" in replica` probe reads false — the overlay's install
-  // silently returned and the wake never fired in browsers (found while
-  // landing stage C tuning T2's arrival wake; the ack wake had the same
-  // shape). The overlay now probes by capability method instead, and the
-  // initializers keep the fields visible either way.
+
+  /**
+   * The settle input barrier's _wake_ (`ISpaceReplica.shadowFlipObserver`):
+   * invoked synchronously whenever a `#confirmPending()` promotion touched a
+   * doc with a standing shadow (flag ON — the flip checkout's own condition),
+   * value diff or not: the _floor_ lifts either way, and the floor is what the
+   * wake exists for. The `SpaceServer` installs it at activation so a
+   * clamped-then-quiet space's catch-up wave runs at the flip instead of
+   * waiting out the idle window — the flip is the one input whose dirtiness
+   * arrives _without_ a new admitted commit on the host feed (the commit was
+   * drained waves ago; only its _visibility_ changed).
+   *
+   * Initialized _explicitly_ (`= undefined`), as are the two overlay wakes
+   * below: the browser worker bundle compiles class fields without define
+   * semantics, so an _uninitialized_ field is dropped from the class body and
+   * an `"observer" in replica` probe reads false — the overlay's install would
+   * silently return and the wake never fire in browsers. The overlay probes by
+   * capability method instead, and the initializers keep the fields visible
+   * either way.
+   */
   shadowFlipObserver: (() => void) | undefined = undefined;
-  // localSeq -> the store seq its accept committed at (server-execution
-  // v2 Phase 2, speculation.md §4): the overlay destination's retirement
-  // floor is "the origin ACKED and W ≥ that commit's seq", and the ack
-  // seq is otherwise consumed by promotion. Bounded (insertion-ordered,
-  // oldest pruned) — the overlay only ever asks about recent origins.
+
+  /**
+   * `localSeq` → the store seq its accept committed at (`speculation.md` §4):
+   * the overlay destination's retirement floor is that the origin _acked_ and W
+   * ≥ that commit's seq, and the ack seq is otherwise consumed by promotion.
+   * Bounded (insertion-ordered, oldest pruned) — the overlay only ever asks
+   * about recent origins.
+   */
   readonly #ackedSeqsByLocalSeq = new Map<number, number>();
+
   static readonly #MAX_RETAINED_ACK_SEQS = 4096;
-  // localSeqs of live SPECULATIVE sealed commits (server-execution v2
-  // Phase 2, speculation.md §1/§6): overlay entries exist only in this
-  // process — the client never pushes them — so a PUSHED commit whose
-  // read basis names one can NEVER have that dependency resolve
-  // server-side. commitOperations refuses such an export loudly
-  // (RULED 2026-08-13); membership ends when the speculative commit
-  // settles (retirement/withdrawal drops its pending layers first, so
-  // no stack names a seq after it leaves this set).
+
+  /**
+   * `localSeq`s of live _speculative_ sealed commits (`speculation.md` §1/§6):
+   * overlay entries exist only in this process — the client never pushes them —
+   * so a _pushed_ commit whose read basis names one can _never_ have that
+   * dependency resolve server-side. `#commitOperations()` refuses such an
+   * export loudly; membership ends when the speculative commit settles
+   * (retirement/withdrawal drops its pending layers first, so no stack names a
+   * seq after it leaves this set).
+   */
   readonly #speculativeLocalSeqs = new Set<number>();
-  // The overlay destination's retirement WAKE for origin accepts
-  // (ISpaceReplica.speculationAckObserver, speculation.md §4): fired
-  // when a pushed commit's accept records its ack seq. Without it, an
-  // entry whose sweep ran while its origin's verdict was still in
-  // flight (blocked on the unacked layer) — and whose covering
-  // watermark event therefore passed — stayed pending forever on a
-  // then-quiet space: rejected origins cascade into the entry, but
-  // ACCEPTED origins had no client-side wake. Guarded at the call
-  // site — an observer throw must not corrupt accept settlement.
+
+  /**
+   * The overlay destination's retirement _wake_ for origin accepts
+   * (`ISpaceReplica.speculationAckObserver`, `speculation.md` §4): fired when a
+   * pushed commit's accept records its ack seq. Without it, an entry whose
+   * sweep ran while its origin's verdict was still in flight (blocked on the
+   * unacked layer) — and whose covering watermark event therefore passed —
+   * would stay pending forever on a then-quiet space: rejected origins cascade
+   * into the entry, but _accepted_ origins have no other client-side wake.
+   * Guarded at the call site — an observer throw must not corrupt accept
+   * settlement.
+   */
   speculationAckObserver: (() => void) | undefined = undefined;
+
   #speculationArrivalObserver:
     | ((arrived: readonly { id: URI; scope?: CellScope }[]) => void)
     | undefined = undefined;
@@ -3325,25 +3400,37 @@ export class SpaceReplica
     localSeq: number;
     pending: PromiseWithResolvers<void>;
   }[] = [];
-  // docKey -> required caughtUpLocalSeq. An entry means "this id conflicted and
-  // is stale until we observe caughtUpLocalSeq >= value". Pruned as the runner
-  // catches up; only populated while conflict admission control is enabled.
+
+  /**
+   * docKey → required `caughtUpLocalSeq`. An entry means this id conflicted and
+   * is stale until we observe `caughtUpLocalSeq >= value`. Pruned as the runner
+   * catches up; only populated while conflict admission control is enabled.
+   */
   #staleFloor = new Map<string, number>();
+
   #queuedWatchRefresh: WatchRefreshBatch | null = null;
   #queuedWatchRefreshScheduled = false;
-  // Number of watch-refresh round trips currently awaiting a response. Capped
-  // at `#maxWatchRefreshInFlight()` (1 = single-flight; the concurrent window
-  // otherwise) so a large incrementally-discovered wave cannot put an unbounded
-  // number of requests on the wire.
+
+  /**
+   * Number of watch-refresh round trips currently awaiting a response. Capped
+   * at `#maxWatchRefreshInFlight()` (1 = single-flight; the concurrent window
+   * otherwise) so a large incrementally-discovered wave cannot put an unbounded
+   * number of requests on the wire.
+   */
   #watchRefreshInFlight = 0;
-  // The current PERMANENT authorization denial for this space (an ACL shortfall,
-  // an audience or protocol mismatch), or null when the space is authorized. A
-  // non-retriable AuthorizationError from a watch refresh sets it; a successful
-  // refresh clears it; a retriable auth race and a transient transport error
-  // leave it untouched, so a blip or token-refresh window does not register as a
-  // denial. `authorizationError()` reports it as a throwable error; `synced()`
-  // stays silent so a denied cross-space link remains a silent absent read.
+
+  /**
+   * The current _permanent_ authorization denial for this space (an ACL
+   * shortfall, an audience or protocol mismatch), or `null` when the space is
+   * authorized. A non-retriable `AuthorizationError` from a watch refresh sets
+   * it; a successful refresh clears it; a retriable auth race and a transient
+   * transport error leave it untouched, so a blip or token-refresh window does
+   * not register as a denial. `authorizationError()` reports it as a throwable
+   * error; `synced()` stays silent so a denied cross-space link remains a
+   * silent absent read.
+   */
   #lastAuthorizationError: IAuthorizationError | null = null;
+
   readonly #routeState: ProviderRouteState;
   readonly #routeGeneration: number;
   #replacementRead:
@@ -6124,9 +6211,12 @@ export class SpaceReplica
     return { ok: {} };
   }
 
-  // Shared rejection tail for both real conflicts and pre-empted commits: wait
-  // for the caught-up read-repair, drop the optimistic pending write, and emit
-  // the revert notification reflecting repaired confirmed state.
+  /**
+   * Finalizes a rejection, the shared tail for both real conflicts and
+   * pre-empted commits: waits for the caught-up read-repair, drops the
+   * optimistic pending write, and emits the revert notification reflecting
+   * repaired confirmed state.
+   */
   async #finalizeRejection(
     localSeq: number,
     operations: NativeCommitOperation[],
@@ -7146,9 +7236,11 @@ export class SpaceReplica
     }
   }
 
-  // Mark every id this conflicted commit touched (reads + writes) stale until
-  // the runner observes caughtUpLocalSeq >= the commit's localSeq — the seq the
-  // server stages as the post-conflict catch-up point for these ids.
+  /**
+   * Marks every id this conflicted commit touched (reads and writes) stale
+   * until the runner observes `caughtUpLocalSeq >= localSeq` — the seq the
+   * server stages as the post-conflict catch-up point for these ids.
+   */
   #recordStaleFloor(commit: ClientCommit, localSeq: number): void {
     const mark = (id: string, scope?: CellScope) => {
       const key = this.#docKeyOf({ id: id as URI, scope });
@@ -7169,10 +7261,12 @@ export class SpaceReplica
     }
   }
 
-  // If any of this commit's reads are still stale (a recorded floor above our
-  // current caught-up seq), return the highest such floor — the seq we must
-  // reach before a retry can succeed. Only reads gate admission: a stale read
-  // precondition is what the server rejects.
+  /**
+   * Returns the highest stale floor among this commit's reads (a recorded floor
+   * above our current caught-up seq) — the seq we must reach before a retry can
+   * succeed — or `undefined` when none is stale. Only reads gate admission: a
+   * stale read precondition is what the server rejects.
+   */
   #preemptThreshold(commit: ClientCommit): number | undefined {
     if (this.#staleFloor.size === 0) {
       return undefined;
@@ -7218,14 +7312,16 @@ export class SpaceReplica
     };
   }
 
-  // Locally-fabricated rejection for a commit whose doom is provable
-  // client-side (dropped pending dependency, dependency rejected but not yet
-  // dropped, or replica reset). Modeled on makePreemptRejection.
-  // `readyToRetry` defaults to resolving immediately, which is right once the
-  // PRIMARY rejection's finalizeRejection has awaited its read repair (or
-  // reset wiped the replica outright): the victim adds no wait of its own.
-  // A commit rejected against a layer whose repair is still running passes
-  // that repair's completion here instead.
+  /**
+   * Makes a locally-fabricated rejection for a commit whose doom is provable
+   * client-side (dropped pending dependency, dependency rejected but not yet
+   * dropped, or replica reset). Modeled on `#makePreemptRejection()`.
+   * `readyToRetry` defaults to resolving immediately, which is right once the
+   * _primary_ rejection's `#finalizeRejection()` has awaited its read repair
+   * (or reset wiped the replica outright): the victim adds no wait of its own.
+   * A commit rejected against a layer whose repair is still running passes that
+   * repair's completion here instead.
+   */
   #makeLocalRejection(
     commit: ClientCommit,
     message: string,
@@ -7273,15 +7369,17 @@ export class SpaceReplica
     return [...named].sort((left, right) => left - right);
   }
 
-  // The loud export refusal (speculation.md §6; RULED 2026-08-13): an
-  // authored/pushed commit whose read basis names a speculative overlay
-  // layer fails OUTRIGHT — terminal, never retried. Only the client can
-  // make this call: it knows which of its layers are speculative, while
-  // the server cannot distinguish a dependency that is never coming
-  // from one that has not arrived yet. Modeled on toRejectedError's
-  // terminal-name arm (RowLabelCommitError): a TransactionError shape
-  // whose name is in TERMINAL_REJECTION_NAMES, so the scheduler's
-  // disposition is `terminal` instead of a doomed backoff window.
+  /**
+   * Makes the loud export refusal (`speculation.md` §6): an authored/pushed
+   * commit whose read basis names a speculative overlay layer fails _outright_
+   * — terminal, never retried. Only the client can make this call: it knows
+   * which of its layers are speculative, while the server cannot distinguish a
+   * dependency that is never coming from one that has not arrived yet. Modeled
+   * on `toRejectedError()`'s terminal-name arm (`RowLabelCommitError`): a
+   * `TransactionError` shape whose name is in `TERMINAL_REJECTION_NAMES`, so
+   * the scheduler's disposition is `terminal` instead of a doomed backoff
+   * window.
+   */
   #makeSpeculativeBasisRefusal(
     commit: ClientCommit,
     speculativeLayers: readonly number[],
@@ -7509,16 +7607,18 @@ export class SpaceReplica
     record.pending.push(pendingVersion(localSeq, pending));
   }
 
-  // CT-1927 client half: an accept's promotion waits for marker coverage.
-  // Immediate application remains for a marker already observed before this
-  // replica begins settlement and for servers that predate per-verdict markers
-  // (verdictCatchUpMarkers absent: an older server stamps markers only for
-  // conflicts, so parking would hang).
-  //
-  // PUSHED (socket) commits only: sealed commits — engine-plane commits by
-  // the co-hosted executor — settle through settleSealedCommit, which
-  // confirms immediately (F1a there explains why parking them wedged
-  // permanently: no marker is ever staged for an engine-plane commit).
+  /**
+   * Settles an accept verdict. An accept's promotion waits for marker coverage.
+   * Immediate application remains for a marker already observed before this
+   * replica begins settlement and for servers that predate per-verdict markers
+   * (`verdictCatchUpMarkers` absent: an older server stamps markers only for
+   * conflicts, so parking would hang).
+   *
+   * _Pushed_ (socket) commits only: sealed commits — engine-plane commits by
+   * the co-hosted executor — settle through `#settleSealedCommit()`, which
+   * confirms immediately (no marker is ever staged for an engine-plane commit,
+   * so parking them would wedge permanently).
+   */
   #settleAccept(
     localSeq: number,
     operations: NativeCommitOperation[],
@@ -7616,9 +7716,11 @@ export class SpaceReplica
     return settled.promise;
   }
 
-  // The marker channel died (the subscribed view closed): apply everything
-  // parked immediately — the legacy verdict-time semantics — so promotions
-  // never wait on frames that can no longer arrive.
+  /**
+   * Applies everything parked immediately, for when the marker channel died
+   * (the subscribed view closed), so promotions never wait on frames that can
+   * no longer arrive.
+   */
   #applyParkedAcceptsNow(): void {
     if (this.#parkedAccepts.size === 0) {
       return;

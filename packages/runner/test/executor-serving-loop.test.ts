@@ -51,9 +51,11 @@ import { waitUntil } from "./support/wait-until.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 class SharedServerStorageManager extends EmulatedStorageManager {
-  // Delegate to the base connectTo (shared-harness extraction, CT-1962):
-  // `new this` gives back this subclass, and the base clears server
-  // ownership so closing this manager never closes the shared server.
+  /**
+   * Delegates to the base `connectTo()`: `new this` gives back this subclass,
+   * and the base clears server ownership so closing this manager never closes
+   * the shared server.
+   */
   static override connectTo(
     server: MemoryV2Server.Server,
     options: Omit<Options, "memoryHost" | "spaceHostMap">,

@@ -162,6 +162,8 @@ export class XDeviceLinkView extends LitElement {
   private accessor guarded = true;
 
   #answered = false;
+
+  /** Timer which releases the tap-through guard on the accept button. */
   // `setTimeout` is typed as Node's `Timeout` under this config, not `number`.
   #guardTimer: ReturnType<typeof setTimeout> | undefined;
 

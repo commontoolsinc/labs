@@ -79,8 +79,12 @@ class UnregisteredInstance extends BaseFabricInstance {
     return "Unregistered@1";
   }
 
-  // The encode-side mandate guard fires before any of these are reached, so
-  // they are throwing stubs.
+  //
+  // Unreached stubs
+  //
+  // The encode-side mandate guard fires before any of these are reached.
+  //
+
   [DEEP_FREEZE](_subFreeze: (value: FabricValue) => FabricValue): FabricValue {
     throw new Error("not implemented");
   }

@@ -1401,35 +1401,50 @@ export class Server {
   #queryEvaluationCaches = new Map<string, QueryEvaluationCache>();
 
   #engines = new Map<string, Promise<Engine.Engine>>();
-  // The resolved-engine index for the SYNC cross-engine lease lookup
-  // (server-execution v2 Phase 5; see `#openEngine()` and
-  // `#liveCoHostedLeaseSpaceFor()`).
+
+  /**
+   * The resolved-engine index for the synchronous cross-engine lease lookup
+   * in `#liveCoHostedLeaseSpaceFor()`; `#openEngine()` populates it.
+   */
   #resolvedEngines = new Map<string, Engine.Engine>();
-  // The opener a test supplies around the engine open; undefined means the
-  // server's own.
+
+  /**
+   * The opener a test supplies around the engine open; `undefined` means the
+   * server's own.
+   */
   #engineOpener: EngineOpener | undefined = undefined;
 
   /** Holds `documentCacheTotalBudgetBytes` across this server's engines and
    * keeps their recency; every engine this server opens reports to it. */
   #documentCacheCoordinator: Engine.DocumentCacheCoordinator;
-  // Synthesized session state for direct out-of-band document writes, such as blob uploads.
+
+  /**
+   * Synthesized session id for direct out-of-band document writes, such as
+   * blob uploads.
+   */
   #directSessionId = `server:${crypto.randomUUID()}`;
+
+  /** Local sequence counter for the synthesized direct-write session. */
   #directLocalSeq = 0;
+
   #dirtySpaces = new Set<string>();
   #dirtyDocsBySpace = new Map<string, Set<string>>();
   #dirtyOriginsBySpace = new Map<string, Map<string, DirtyOrigin>>();
-  // Push priority (Phase 6, protocol.md §3): the subset of each space's
-  // dirty keys whose LATEST novelty came from a `derived` commit — a
-  // PARALLEL annotation, deliberately not a `DirtyOrigin` field: the
-  // origin record is load-bearing for own-echo suppression and is
-  // DELETED on mixed provenance (CT-1927), which must not erase the
-  // priority class. Populated only by `noteExecutorCommit` (the wave
-  // commits), consumed and cleared with the dirty batch, re-merged by
-  // the requeue arm on fan-out failure. A key later re-dirtied by an
-  // authored commit stays in the set — the doc still carries derived
-  // novelty the subscriber has not seen, and priority is best-effort
-  // ordering, never a correctness gate.
+
+  /**
+   * Push priority (`protocol.md` §3): the subset of each space's dirty keys
+   * whose _latest_ novelty came from a `derived` commit — a _parallel_
+   * annotation, deliberately not a `DirtyOrigin` field: the origin record is
+   * load-bearing for own-echo suppression and is _deleted_ on mixed
+   * provenance, which must not erase the priority class. Populated only by
+   * `noteExecutorCommit()` (the wave commits), consumed and cleared with the
+   * dirty batch, re-merged by the requeue arm on fan-out failure. A key later
+   * re-dirtied by an authored commit stays in the set — the doc still carries
+   * derived novelty the subscriber has not seen, and priority is best-effort
+   * ordering, never a correctness gate.
+   */
   #derivedDirtyBySpace = new Map<string, Set<string>>();
+
   #pushPriorityStats: PushPriorityStats = {
     prioritizedSessions: 0,
     followerSessions: 0,
@@ -1437,44 +1452,66 @@ export class Server {
   };
   #refreshTurn: ArmedTurn | null = null;
   #refreshing: Promise<void> | null = null;
-  // Transactions and fan-out share one publication turn per space. A verdict
-  // is sent while its transaction owns the turn, so a sync frame cannot expose
-  // the decision first. Different spaces retain independent turns.
+
+  /**
+   * The publication turn per space, which transactions and fan-out share. A
+   * verdict is sent while its transaction owns the turn, so a sync frame
+   * cannot expose the decision first. Different spaces retain independent
+   * turns.
+   */
   #publicationBySpace = new Map<string, Promise<void>>();
+
   #lastRefreshDurationMs = 0;
-  // The ExecutorHost's in-process observer (serving-loop.md §1 planes
-  // (b)/(d)); undefined until a host attaches. One observer: there is one
-  // host per process.
+
+  /**
+   * The `ExecutorHost`'s in-process observer (`serving-loop.md` §1, planes (b)
+   * and (d)); `undefined` until a host attaches. One observer: there is one
+   * host per process.
+   */
   #serverExecutionObserver: ServerExecutionObserver | undefined;
-  // Per-frame delivery record: the wire strips instance keys (frames
-  // carry scope NAMES), so a delivery rollback cannot recover WHICH
-  // instances a frame carried from the frame alone — a lease holder's
-  // explicit foreign instances would mis-resolve to its own. Keyed by
-  // the frame object (in-process only, never serialized), populated at
-  // frame build, consumed by rollbackUndeliveredSync; a WeakMap so
-  // delivered frames cost nothing.
+
+  /**
+   * Per-frame delivery record: the wire strips instance keys (frames carry
+   * scope _names_), so a delivery rollback cannot recover _which_ instances a
+   * frame carried from the frame alone — a lease holder's explicit foreign
+   * instances would mis-resolve to its own. Keyed by the frame object
+   * (in-process only, never serialized), populated at frame build, consumed by
+   * `rollbackUndeliveredSync()`; a `WeakMap` so delivered frames cost nothing.
+   */
   #deliveredFrameEntries = new WeakMap<SessionEffectMessage, {
     upserts: SessionCacheEntry[];
     removes: SessionCacheEntry[];
   }>();
+
   #store?: URL;
   #operationCodecs: OperationCodecRegistry;
-  // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
-  // registered id is attached read-only from its descriptor path instead of the
-  // cell-derived per-(space,id) file. v1 in-memory; persistence is deferred (see
-  // docs/specs/sqlite-builtin/plans/on-disk-source.md).
+
+  /**
+   * Injected on-disk SQLite sources, keyed by handle cell id. A registered id
+   * is attached read-only from its descriptor path instead of the cell-derived
+   * per-(space, id) file. In-memory only: a registration does not survive a
+   * restart.
+   */
   #diskSources = new DiskSourceRegistry();
-  // Pooled read-only connections (keyed by canonical file path) for SQLite
-  // reads — injected on-disk sources and cell-derived dbs alike run here,
-  // unattached, instead of attach/detach-per-op on the engine connection.
+
+  /**
+   * Pooled read-only connections (keyed by canonical file path) for SQLite
+   * reads — injected on-disk sources and cell-derived dbs alike run here,
+   * unattached, instead of attach/detach-per-op on the engine connection.
+   */
   #readPool = new ReadConnectionPool();
-  // Schemas already created on the write path, keyed by `(space, id, schema)`.
-  // `ensureTables` (additive `CREATE TABLE IF NOT EXISTS` per declared table)
-  // runs only the first time a given schema is seen for a cell-db, not on every
-  // write. Bounded LRU; a miss (eviction / restart) just re-runs ensureTables,
-  // which is idempotent. Keyed by the full schema JSON so a changed declaration
-  // re-ensures (additive migration) with no hash-collision risk.
+
+  /**
+   * Schemas already created on the write path, keyed by `(space, id, schema)`.
+   * `ensureTables()` (additive `CREATE TABLE IF NOT EXISTS` per declared
+   * table) runs only the first time a given schema is seen for a cell-db, not
+   * on every write. Bounded LRU; a miss (eviction or restart) just re-runs
+   * `ensureTables()`, which is idempotent. Keyed by the full schema JSON so a
+   * changed declaration re-ensures (additive migration) with no hash-collision
+   * risk.
+   */
   #ensuredSchemas = new Map<string, true>();
+
   #ensuredSchemasMax = 4096;
 
   #recordSchemaEnsured(key: string): void {
@@ -2020,8 +2057,10 @@ export class Server {
     return null;
   }
 
-  // Writer sessions that de-authorized themselves in a commit: their
-  // session/revoked is held until after the transact verdict goes out.
+  /**
+   * Writer sessions that de-authorized themselves in a commit: their
+   * `session/revoked` is held until after the transact verdict goes out.
+   */
   #deferredSelfRevocations = new Map<string, string | null>();
 
   deliverDeferredSelfRevocation(space: string, sessionId: string): void {

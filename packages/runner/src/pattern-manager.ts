@@ -378,152 +378,200 @@ type ParkedReplication = {
 
 export class PatternManager {
   #runtime: Runtime;
-  // Maps each storage slot written during this PatternManager session to its
-  // complete module set. One slot can hold only one closure shape at a time.
+
+  /**
+   * Maps each storage slot written during this `PatternManager` session to its
+   * complete module set. One slot can hold only one closure shape at a time.
+   */
   readonly #persistedCompileCacheClosures = new Map<string, string>();
-  // Writes to one storage slot are serialized. Requests for the same closure
-  // share the write that is already running.
+
+  /**
+   * In-flight writes by storage slot. Writes to one storage slot are
+   * serialized, and requests for the same closure share the write that is
+   * already running.
+   */
   #inProgressCompileCacheWrites = new Map<
     string,
     { closureSignature: string; persistence: Promise<void> }
   >();
-  // The writer a test supplies in place of the compile-cache write-back;
-  // undefined means the manager's own.
+
+  /**
+   * The writer a test supplies in place of the compile-cache write-back;
+   * `undefined` means the manager's own.
+   */
   #compileCacheWriter: CompileCacheWriter | undefined = undefined;
-  // A best-effort identity recovery that failed to persist skips the in-memory
-  // artifact shortcuts on the next load so storage recovery runs again.
+
+  /**
+   * Identities whose best-effort recovery failed to persist. Such an identity
+   * skips the in-memory artifact shortcuts on the next load so storage recovery
+   * runs again.
+   */
   #failedCompileCacheRecoveries = new Set<string>();
-  // Single-flight dedup + in-memory result cache for `compileOrGetPattern`,
-  // keyed by a content hash of the program (NOT a cell id, NOT the retired
-  // patternId) so identical source returns one shared, already-compiled pattern
-  // instance. The hash is computed with `createRef` purely as a stable digest
-  // function — no `pattern:` cell is ever minted. Bounded FIFO to cap memory.
+
+  /**
+   * Single-flight dedup and in-memory result cache for `compileOrGetPattern()`,
+   * keyed by a content hash of the program (_not_ a cell id, _not_ the retired
+   * `patternId`) so identical source returns one shared, already-compiled
+   * pattern instance. The hash is computed with `createRef()` purely as a
+   * stable digest function — no `pattern:` cell is ever minted. Bounded FIFO to
+   * cap memory.
+   */
   readonly #inProgressCompilations = new Map<string, Promise<Pattern>>();
-  // Single-flight dedup for the expensive tail of `loadPatternByIdentity`
-  // (storage closure read + SES evaluation), keyed by `${space}\0${identity}`.
-  // Boot references the same entry several times at once (one load per
-  // referencing piece/system pattern); without this every concurrent miss ran
-  // its own full closure evaluation — measured as 4 identical 9-module SES
-  // evals per cold worker boot, the multiplier behind most of the per-module
-  // boot-floor buckets. Followers await the leader and then resolve their own
-  // symbol from the indexes the leader's evaluation populated — the same path
-  // a load arriving after completion takes.
+
+  /**
+   * Single-flight dedup for the expensive tail of `loadPatternByIdentity()`
+   * (storage closure read plus SES evaluation), keyed by
+   * `${space}\0${identity}`. Boot references the same entry several times at
+   * once (one load per referencing piece or system pattern); without this every
+   * concurrent miss would run its own full closure evaluation. Followers await
+   * the leader and then resolve their own symbol from the indexes the leader's
+   * evaluation populated — the same path a load arriving after completion
+   * takes.
+   */
   readonly #inProgressByIdentityLoads = new Map<
     string,
     Promise<Pattern | undefined>
   >();
-  // Session-local negative memo for compile failures that are deterministic
-  // over a fully loaded, Merkle-verified source closure. Verification failure,
-  // absent/incomplete storage, resolution, and evaluation remain retryable.
-  // Keyed by `${space}\0${entryIdentity}` and runtimeVersion so a version bump
-  // re-opens the attempt. Bounded FIFO to cap memory.
+
+  /**
+   * Session-local negative memo for compile failures that are deterministic
+   * over a fully loaded, Merkle-verified source closure. Verification failure,
+   * absent or incomplete storage, resolution, and evaluation remain retryable.
+   * Keyed by `${space}\0${entryIdentity}` and `runtimeVersion` so a version
+   * bump re-opens the attempt. Bounded FIFO to cap memory.
+   */
   #coldLoadNegativeMemo = new ColdLoadNegativeMemo();
-  // Content-hash → { compiled pattern, the space its closure was first written
-  // into }. The space is tracked so a cross-space cache hit can replicate the
-  // source/compiled closure into the requested space (see compileOrGetPattern):
-  // identical source dedupes the expensive TS compile, but every space holding
-  // a piece that points at the pattern still needs the closure persisted there
-  // to reload by { identity, symbol } in a fresh runtime.
+
+  /**
+   * Content hash → the compiled pattern and the space its closure was first
+   * written into. The space is tracked so a cross-space cache hit can replicate
+   * the source/compiled closure into the requested space (see
+   * `compileOrGetPattern()`): identical source dedupes the expensive TS
+   * compile, but every space holding a piece that points at the pattern still
+   * needs the closure persisted there to reload by `{ identity, symbol }` in a
+   * fresh runtime.
+   */
   #compiledByContent = new Map<
     string,
     { pattern: Pattern; space?: MemorySpace }
   >();
-  // The forward value → {identity, symbol} map lives module-level in
-  // builder/pattern-metadata.ts (`setArtifactEntryRef`/`getArtifactEntryRef`)
-  // so builder-layer copy sites can carry refs onto derived copies without a
-  // PatternManager handle.
-  // THE in-memory reverse index for content-addressed builder artifacts: module
-  // identity -> (symbol -> live value). The single source for
-  // `artifactFromIdentitySync` (the inverse of the forward `valueToEntryRef`),
-  // populated by ONE path (`#indexArtifact`) from BOTH a module's `__cfReg`
-  // registrations (hoists + non-exported top-level) AND its exports — so callers
-  // never look in two places. SESSION-LIFETIME, deliberately unbounded (design
-  // § Open questions 2, resolved): the sync resolution the list builtins and
-  // refs-only pattern JSON depend on must never lose an artifact whose module
-  // evaluated this session. Entries are live builder artifacts of evaluated
-  // modules — the same order of retention the engine's strong implementation
-  // index (E1) already committed to for their implementation functions.
+
+  /**
+   * _The_ in-memory reverse index for content-addressed builder artifacts:
+   * module identity → (symbol → live value). The single source for
+   * `artifactFromIdentitySync()` (the inverse of the forward
+   * `valueToEntryRef()`), populated by _one_ path (`#indexArtifact()`) from
+   * _both_ a module's `__cfReg` registrations (hoists and non-exported
+   * top-level) _and_ its exports — so callers never look in two places.
+   * Session-lifetime, deliberately unbounded: the sync resolution the list
+   * builtins and refs-only pattern JSON depend on must never lose an artifact
+   * whose module evaluated this session. Entries are live builder artifacts of
+   * evaluated modules — the same order of retention the engine's strong
+   * implementation index already committed to for their implementation
+   * functions.
+   *
+   * The forward value → `{identity, symbol}` map lives at module level in
+   * `builder/pattern-metadata.ts`
+   * (`setArtifactEntryRef()`/`getArtifactEntryRef()`) so builder-layer copy
+   * sites can carry refs onto derived copies without a `PatternManager` handle.
+   */
   readonly #addressableByIdentity = new Map<string, Map<string, unknown>>();
-  // Bound for the module-NAMESPACE cache below (`#modulesByIdentity`) only; its
-  // misses recover through the async storage-backed load. Instance field so
-  // tests can shrink it.
+
+  /**
+   * Bound for the module-_namespace_ cache (`#modulesByIdentity`) only; its
+   * misses recover through the async storage-backed load. An instance field so
+   * tests can shrink it.
+   */
   #maxEvaluatedModuleCacheSize = MAX_EVALUATED_MODULE_CACHE_SIZE;
-  // ESM content-addressed compile-cache instrumentation.
+
+  /** ESM content-addressed compile-cache instrumentation. */
   #esmCacheStats = { hits: 0, misses: 0, byIdentityHits: 0 };
-  // In-memory identity -> module-namespace cache (CT-1623). Populated for EVERY
-  // module of an evaluated ESM bundle (keyed by prefix-free content identity),
-  // so a by-identity load of a sub-pattern reuses the already-live module from
-  // its parent's bundle instead of re-reading the closure from storage and
-  // re-evaluating it in SES. Content-addressed, so a hit is always the same
-  // bytes — never stale. Bounded (FIFO) to cap memory.
+
+  /**
+   * In-memory identity → module-namespace cache. Populated for _every_ module
+   * of an evaluated ESM bundle (keyed by prefix-free content identity), so a
+   * by-identity load of a sub-pattern reuses the already-live module from its
+   * parent's bundle instead of re-reading the closure from storage and
+   * re-evaluating it in SES. Content-addressed, so a hit is always the same
+   * bytes — never stale. Bounded (FIFO) to cap memory.
+   */
   readonly #modulesByIdentity = new Map<string, { exports: Exports }>();
-  // In-flight compiled-cache write-backs; awaited by flushCompileCacheWrites()
-  // for graceful shutdown / deterministic tests. Cold compile write-backs are
-  // awaited by compilePattern; recovery/replication paths may still run in the
-  // background.
+
+  /**
+   * In-flight compiled-cache write-backs; awaited by
+   * `flushCompileCacheWrites()` for graceful shutdown and deterministic tests.
+   * Cold compile write-backs are awaited by `compilePattern()`; recovery and
+   * replication paths may still run in the background.
+   */
   readonly #compileCacheWrites = new Set<Promise<unknown>>();
-  // Closure write-backs that replication must observe before reading its
-  // origin space. Tracked separately because the replication promise also
-  // lives in `#compileCacheWrites` and cannot await itself.
+
+  /**
+   * Closure write-backs that replication must observe before reading its origin
+   * space. Tracked separately because the replication promise also lives in
+   * `#compileCacheWrites` and cannot await itself.
+   */
   readonly #pendingCacheWriteBacks = new Set<Promise<unknown>>();
-  // In-flight replications keyed by TARGET space, ordered by a monotonic
-  // ticket. A replication's origin may itself be mid-supply by an earlier
-  // replication INTO it (e.g. the content-cache hit's fire-and-forget
-  // sibling ahead of the runner's cross-space child replication in one
-  // handler run); a one-shot origin read would then fail with nothing
-  // ever re-issuing it, and the target space's demanded roots park
-  // `pattern-unloadable` forever (verification-coverage.md OW45, the
-  // lunch forever-park — the incident evidence lives there). The sibling
-  // lives in `#compileCacheWrites`, the one set the origin read must NOT
-  // await wholesale (it would await itself), so replications also
-  // register HERE and the read awaits only the STRICTLY OLDER entries
-  // targeting its origin — registration order keeps the await graph
-  // acyclic (no from/to mutual wait), and genuine absence still throws
-  // loudly after the awaited siblings settle.
+
+  /**
+   * In-flight replications keyed by _target_ space, ordered by a monotonic
+   * ticket. A replication's origin may itself be mid-supply by an earlier
+   * replication _into_ it (e.g. the content-cache hit's fire-and-forget sibling
+   * ahead of the runner's cross-space child replication in one handler run); a
+   * one-shot origin read would then fail with nothing ever re-issuing it, and
+   * the target space's demanded roots would park `pattern-unloadable` forever
+   * (`verification-coverage.md` OW45 carries the incident evidence). The
+   * sibling lives in `#compileCacheWrites`, the one set the origin read must
+   * _not_ await wholesale (it would await itself), so replications also
+   * register _here_ and the read awaits only the _strictly older_ entries
+   * targeting its origin — registration order keeps the await graph acyclic (no
+   * from/to mutual wait), and genuine absence still throws loudly after the
+   * awaited siblings settle.
+   */
   #replicationsIntoSpace = new Map<
     MemorySpace,
     Set<{ ticket: number; settled: Promise<unknown> }>
   >();
+
   #nextReplicationTicket = 0;
-  // Spaces this manager DURABLY persisted an entry's closure into
-  // (recorded at the two tracked persists' success; session-lifetime,
-  // record-only — a later slot invalidation forces a re-verify on read,
-  // and the fallback read below re-verifies fail-closed anyway, so a
-  // stale record costs one failed read, never a wrong copy). These are
-  // `replicateClosures`' FALLBACK ORIGINS: the caller-named origin is a
-  // provenance heuristic — the in-memory artifact index serves patterns
-  // with no per-space persist, so a running piece's space can lack the
-  // closure entirely — while the closure is content-addressed, so any
-  // recorded persist target holds byte-identical, integrity-gated docs
-  // (verification-coverage.md OW45 carries the incident evidence).
-  // Growth: monotonic for the session, bounded by the module identities ×
-  // spaces this manager actually persisted (strings + small DID sets) —
-  // negligible today; revisit with an eviction policy only if serving
-  // sessions get very long-lived.
+
+  /**
+   * Spaces this manager _durably_ persisted an entry's closure into (recorded
+   * at the two tracked persists' success; session-lifetime, record-only — a
+   * later slot invalidation forces a re-verify on read, and the fallback read
+   * re-verifies fail-closed anyway, so a stale record costs one failed read,
+   * never a wrong copy). These are `replicateClosures()`' _fallback origins_:
+   * the caller-named origin is a provenance heuristic — the in-memory artifact
+   * index serves patterns with no per-space persist, so a running piece's space
+   * can lack the closure entirely — while the closure is content-addressed, so
+   * any recorded persist target holds byte-identical, integrity-gated docs
+   * (`verification-coverage.md` OW45 carries the incident evidence). Growth:
+   * monotonic for the session, bounded by the module identities × spaces this
+   * manager actually persisted (strings plus small DID sets).
+   */
   #persistedClosureSpaces = new Map<string, Set<MemorySpace>>();
-  // Failed replications PARKED for event-driven re-supply (the ruled 3b
-  // close — verification-coverage.md OW45, RULING 2026-08-28: the one
-  // supplier-timing geometry no await can see is a supplier that has not
-  // STARTED by consult time, so the failure parks and the supply's own
-  // RECORD re-issues it). Keyed by the WANTED identity — the identity
-  // whose READ failed, which for a dependency-recursion frame is the
-  // DEPENDENCY's identity, not the entry's: the dependency's supplier
-  // records the dependency's own module identities, so an entry-keyed
-  // registry would miss exactly that record event. The inner map keys by
-  // (entry, from, to) so a re-registration after a failed re-issue
-  // REPLACES its predecessor instead of accumulating. Entries drop at
-  // wake time — one wake per matching persist event; a re-issue that
-  // fails again re-parks and waits for the NEXT record, so there is no
-  // self-clocking loop — and otherwise die with the session. Growth:
-  // FIFO-capped at MAX_PARKED_FAILED_REPLICATIONS wanted keys (loud
-  // eviction); a stale park costs one wasted loud re-issue on a matching
-  // record, never a wrong copy (the re-issue re-runs the full verified,
-  // fail-closed read). The cap bounds WANTED KEYS only — the inner
-  // (entry, from, to) map is deliberately not capped in its own right
-  // (cubic PM-2 on #6528, adjudicated LOW): filling one takes that many
-  // DISTINCT real supply failures for a single identity, each carrying
-  // its own loud failure + park line, and ONE matching record wakes the
-  // whole set at once.
+
+  /**
+   * Failed replications _parked_ for event-driven re-supply
+   * (`verification-coverage.md` OW45: the one supplier-timing geometry no await
+   * can see is a supplier that has not _started_ by consult time, so the
+   * failure parks and the supply's own _record_ re-issues it). Keyed by the
+   * _wanted_ identity — the identity whose _read_ failed, which for a
+   * dependency-recursion frame is the _dependency_'s identity, not the entry's:
+   * the dependency's supplier records the dependency's own module identities,
+   * so an entry-keyed registry would miss exactly that record event. The inner
+   * map keys by (entry, from, to) so a re-registration after a failed re-issue
+   * _replaces_ its predecessor instead of accumulating. Entries drop at wake
+   * time — one wake per matching persist event; a re-issue that fails again
+   * re-parks and waits for the _next_ record, so there is no self-clocking loop
+   * — and otherwise die with the session. Growth: FIFO-capped at
+   * `MAX_PARKED_FAILED_REPLICATIONS` wanted keys (loud eviction); a stale park
+   * costs one wasted loud re-issue on a matching record, never a wrong copy
+   * (the re-issue re-runs the full verified, fail-closed read). The cap bounds
+   * _wanted keys_ only — the inner (entry, from, to) map is deliberately not
+   * capped in its own right: filling one takes that many _distinct_ real supply
+   * failures for a single identity, each carrying its own loud failure and park
+   * line, and _one_ matching record wakes the whole set at once.
+   */
   #parkedFailedReplications = new Map<
     string,
     Map<string, ParkedReplication>
@@ -945,16 +993,17 @@ export class PatternManager {
    */
   keylessMintAnomalies = 0;
 
-  // Session-side resolution hints for KEYLESS list-builtin ops, keyed by the
-  // node's immutable inputs-doc address (`<space>\0<id>`). A keyless op's
-  // durable inputs carry its full embedded graph (the never-durable contract
-  // forbids the `keyless:` `$patternRef` sentinel there — L3(a), RULED
-  // 2026-08-27), but the embedded round-trip corrupts nested output-alias
-  // defer levels (CT-1812/CT-1811), so the SAME session that instantiated the
-  // node resolves the pristine artifact through this map instead. Entries are
-  // session-lifetime like the artifact index; a fresh session re-instantiates
-  // the node and re-registers. Content-addressed key, so two structurally
-  // identical nodes share one (equally valid) entry.
+  /**
+   * Session-side resolution hints for _keyless_ list-builtin ops, keyed by the
+   * node's immutable inputs-doc address (`<space>\0<id>`). A keyless op's
+   * durable inputs carry its full embedded graph (the never-durable contract
+   * forbids the keyless `$patternRef` sentinel there), but the embedded
+   * round-trip corrupts nested output-alias defer levels, so the _same_ session
+   * that instantiated the node resolves the pristine artifact through this map
+   * instead. Entries are session-lifetime like the artifact index; a fresh
+   * session re-instantiates the node and re-registers. Content-addressed key,
+   * so two structurally identical nodes share one (equally valid) entry.
+   */
   #keylessOpRefsByInputsDoc = new Map<
     string,
     { identity: string; symbol: string }
@@ -2927,14 +2976,16 @@ export class PatternManager {
     this.#runtime.registerModuleDelegations(space, committedModuleDelegations);
   }
 
-  // Write-target pre-syncs carry the one-hop edge selector (CT-1848): a
-  // schema-less sync delivers only the root doc, leaving the per-edge element
-  // docs unknown to the replica, so a re-write of pre-existing docs touches
-  // them blind and conflicts one engine round per edge (the CT-1824 loop).
-  // With the edge docs materialized up front the write-back diffs against
-  // true state and commits on the first attempt; the retry budget in
-  // `#writeBackCompileCache` remains as a backstop. Same-microtask syncs batch
-  // into a single server round trip.
+  /**
+   * Pre-syncs the write targets, carrying the one-hop edge selector: a
+   * schema-less sync delivers only the root doc, leaving the per-edge element
+   * docs unknown to the replica, so a re-write of pre-existing docs touches
+   * them blind and conflicts one engine round per edge. With the edge docs
+   * materialized up front the write-back diffs against true state and commits
+   * on the first attempt; the retry budget in `#writeBackCompileCache()`
+   * remains as a backstop. Same-microtask syncs batch into a single server
+   * round trip.
+   */
   async #syncSourceCacheWriteTargets(
     space: MemorySpace,
     modules: readonly CacheableModule[],
@@ -2971,7 +3022,7 @@ export class PatternManager {
     );
   }
 
-  // Resolve a Pattern from an evaluate result.
+  /** Resolves a `Pattern` from an evaluate result. */
   #patternFromEvaluation(
     result: EvaluateResult,
     program: RuntimeProgram,

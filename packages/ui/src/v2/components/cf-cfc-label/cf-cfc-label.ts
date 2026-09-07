@@ -295,8 +295,11 @@ export class CFCFCLabel extends BaseElement {
     this.requestUpdate("cfcLabel", previous);
   }
 
-  // Fallback for a value that exposes getCfcLabel but not subscribe (no live
-  // channel). Subscribable values get their label reactively via observeValue.
+  /**
+   * Refreshes the label, as the fallback for a value that exposes
+   * `getCfcLabel()` but not `subscribe()` (no live channel). Subscribable
+   * values get their label reactively via `observeValue()`.
+   */
   async refreshLabel(): Promise<void> {
     const requestId = ++this._labelRequestId;
     if (hasLabelSubscription(this.value) || !hasLabelQuery(this.value)) {

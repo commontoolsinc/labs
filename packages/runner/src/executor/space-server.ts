@@ -447,10 +447,13 @@ export class SpaceServer implements TransactionSealDestination {
   #sealChain: Promise<unknown> = Promise.resolve();
   #feed: AdmittedCommitNotice[] = [];
   #feedArrived: PromiseWithResolvers<void> | undefined;
-  // A shadow flip that fired while no input waiter was installed
-  // (r3739416418): consumed by the next #waitForInput so the wake is
-  // never dropped between cycles.
+
+  /**
+   * Whether a shadow flip fired while no input waiter was installed; consumed
+   * by the next `#waitForInput()` so the wake is never dropped between cycles.
+   */
   #pendingShadowFlipWake = false;
+
   #inputHead = 0;
 
   /** Highest NON-self-echo seq drained — the watermark's advance
@@ -566,15 +569,18 @@ export class SpaceServer implements TransactionSealDestination {
    * next #waitForInput. */
   #pendingDemandWake = false;
 
-  // MINOR-1: a monotonic demand-note generation, bumped on every
-  // `noteDemandChanged` (watch OR push-growth). A pass snapshots it at its
-  // row read; if a note lands AFTER that snapshot but while the pass is
-  // still in flight (a straddling pass — the note's change is invisible to
-  // the rows this pass already read), the pass's `.finally` re-latches
-  // `#pendingDemandWake` so the NEXT wait runs a FRESH pass instead of
-  // sleeping out the idle window. Bounded: only a note arriving mid-pass
-  // costs one extra pass; steady state (no notes) never re-latches.
+  /**
+   * A monotonic demand-note generation, bumped on every `noteDemandChanged()`
+   * (watch or push-growth). A pass snapshots it at its row read; if a note
+   * lands _after_ that snapshot but while the pass is still in flight (a
+   * straddling pass — the note's change is invisible to the rows this pass
+   * already read), the pass's `.finally` re-latches `#pendingDemandWake` so the
+   * _next_ wait runs a _fresh_ pass instead of sleeping out the idle window.
+   * Bounded: only a note arriving mid-pass costs one extra pass; steady state
+   * (no notes) never re-latches.
+   */
   #demandNoteGeneration = 0;
+
   #passDemandNoteGen = 0;
 
   /** The demand wake's grace timer (see noteDemandChanged). */
@@ -598,22 +604,33 @@ export class SpaceServer implements TransactionSealDestination {
     { id: string; scopeKey: string }
   >();
 
-  // (d′) — server-settle instrumentation (design §6 W4's
-  // metric; §2.8 (c)). Per authored input: admission (the feed notice's
-  // arrival, `enqueueCommit`) → COVERAGE (the wave commit whose
-  // derivedThrough ≥ seq = the value-only settle) → and, when a
-  // push-growth demand wake fires after coverage (the one-push-late
-  // structural-growth path, §2.3), the NEXT derived commit = the
-  // structural-growth landing. Attribution of a growth wake to an input
-  // is by adjacency (the most recently covered input), stated as such.
+  /**
+   * Count of push-growth demand wakes, bumped once per
+   * `noteDemandChanged("push-growth")`, snapshotted into each settle record at
+   * admission and differenced at coverage.
+   *
+   * It is part of the server-settle instrumentation (design §6 W4's metric;
+   * §2.8 (c)). Per authored input: admission (the feed notice's arrival,
+   * `enqueueCommit()`) → _coverage_ (the wave commit whose `derivedThrough` ≥
+   * seq = the value-only settle) → and, when a push-growth demand wake fires
+   * after coverage (the one-push-late structural-growth path, §2.3), the _next_
+   * derived commit = the structural-growth landing. Attribution of a growth
+   * wake to an input is by adjacency (the most recently covered input), stated
+   * as such.
+   */
   #growthWakeCounter = 0;
-  // MINOR-2 / obligation (iii): the last-folded demand-root enter/leave
-  // counter values, so the space-lived accumulators fold the FULL delta
-  // since the last fold (capturing between-pass hook transitions), not a
-  // pass-start snapshot. Reset to 0 when the runtime is replaced (its
-  // counters zero on a fresh runtime).
+
+  /**
+   * The last-folded demand-root enter counter value, so the space-lived
+   * accumulators fold the _full_ delta since the last fold (capturing
+   * between-pass hook transitions), not a pass-start snapshot. Reset to 0 when
+   * the runtime is replaced (its counters zero on a fresh runtime).
+   */
   #lastFoldedDemandEnters = 0;
+
+  /** Like `#lastFoldedDemandEnters`, for the leave counter. */
   #lastFoldedDemandLeaves = 0;
+
   #cycleCounter = 0;
   #wavesCommitted = 0;
   readonly #pendingSettles = new Map<number, {
@@ -624,10 +641,13 @@ export class SpaceServer implements TransactionSealDestination {
     growthAtAdmit: number;
     eventAppend: boolean;
   }>();
-  // NIT-1: the internal growth bookkeeping (`growthWakeAt`,
-  // `wavesAtCoverage`) lives on this WRAPPER, not on the series entry, so
-  // it never leaks into the stats JSON; `entry` is the (clean) series row
-  // that `#recordGrowthLanding` promotes in place.
+
+  /**
+   * The most recently covered input. The internal growth bookkeeping
+   * (`growthWakeAt`, `wavesAtCoverage`) lives on this _wrapper_, not on the
+   * series entry, so it never leaks into the stats JSON; `entry` is the (clean)
+   * series row that `#recordGrowthLanding()` promotes in place.
+   */
   #lastCovered:
     | {
       entry: ServingLoopStats["settle"]["series"][number];
@@ -635,6 +655,7 @@ export class SpaceServer implements TransactionSealDestination {
       wavesAtCoverage: number;
     }
     | undefined;
+
   #growthAwaitingLanding = false;
 
   /** Wave-bound seals CHAINED but not yet applied (the F4 fix, as a

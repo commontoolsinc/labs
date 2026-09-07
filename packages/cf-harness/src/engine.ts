@@ -1651,12 +1651,14 @@ export class CfHarnessEngine {
     }
   }
 
-  // Fail fast before any sandbox execution under enforcement on a sandbox that
-  // lacks the CFC sidecar transports — capability probes included, since they
-  // run scripts inside the same sandbox (not just builtin tools). Checked at
-  // run start rather than construction so an engine can be built and inspected
-  // (config threading, --describe-capabilities) without a live CFC wiring.
-  // Idempotent so the cost is paid once per run.
+  /**
+   * Fails fast before any sandbox execution under enforcement on a sandbox
+   * that lacks the CFC sidecar transports — capability probes included, since
+   * they run scripts inside the same sandbox (not just builtin tools). Checked
+   * at run start rather than construction so an engine can be built and
+   * inspected (config threading, `--describe-capabilities`) without a live CFC
+   * wiring. Idempotent so the cost is paid once per run.
+   */
   #assertCfcTransportReady(): void {
     if (this.#cfcTransportChecked || this.#ownedRunscConfig === undefined) {
       return;

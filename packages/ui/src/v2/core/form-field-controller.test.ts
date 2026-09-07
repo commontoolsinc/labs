@@ -41,7 +41,7 @@ class MockHost {
     this.updateCount++;
   }
 
-  // Simulate being an HTMLElement for the host type
+  /** Tag name, simulating an `HTMLElement` for the host type. */
   tagName = "MOCK-HOST";
 }
 
@@ -78,7 +78,7 @@ class MockCellController<T> implements CellControllerLike<T> {
     return this._cell;
   }
 
-  // For testing - directly set value without tracking
+  /** Sets the value directly, without tracking, for a test's use. */
   _setValueDirect(value: T): void {
     this._value = value;
   }
