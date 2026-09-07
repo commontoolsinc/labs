@@ -2730,9 +2730,13 @@ export type DataFileFunction = (path: string) => string;
 export declare const SQLITE_DB_BRAND: unique symbol;
 
 /**
- * Database handle. Empty to pattern code; a cell reference to the runtime
- * via the `toCell` back-pointer. Patterns only ever *forward* it (to sqliteQuery
- * / sqliteExecute / reactOn), never read it.
+ * Database handle. Nominal to pattern code — the brand is the whole of the
+ * type — and a cell reference to the runtime via the `toCell` back-pointer.
+ * A pattern normally just *forwards* it (to `db.query` / `db.exec` /
+ * `sqliteQuery` / `reactOn`). Its readable value is the descriptor
+ * `{ id, tables, rev }` (docs/specs/sqlite-builtin/01-api.md), which is what
+ * the compiler emits for a `SqliteDb` position, so a pattern that wants the
+ * declared columns can read `tables`.
  */
 export type SqliteDatabase = { readonly [SQLITE_DB_BRAND]: true };
 
