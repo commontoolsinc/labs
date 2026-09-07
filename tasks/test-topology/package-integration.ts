@@ -135,7 +135,10 @@ export async function loadPackageIntegrationSuites(
   return [
     fileSuite({
       id: "package-integration",
-      needs: ["deno", "toolshed", "browser"],
+      // The baked server rather than one run from source: the shell's
+      // tests drive a browser at it, and the shell is a bundle inside
+      // the binary.
+      needs: ["deno", "toolshed-baked", "browser"],
       parts: defaults,
     }),
     fileSuite({

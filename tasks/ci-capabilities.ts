@@ -31,6 +31,7 @@ export type CapabilityId =
   | "browser"
   | "git-history"
   | "toolshed"
+  | "toolshed-baked"
   | "toolshed-baked-opposite"
   | "bg-piece-service-binary"
   | "cf"
@@ -449,57 +450,83 @@ const toolshed: Capability = {
  * binary from the Actions cache before the runner starts; building it here is
  * what happens when that cache missed.
  */
-const toolshedBakedOpposite: Capability = {
-  id: "toolshed-baked-opposite",
-  description: "a Toolshed server with the opposite posture in its baked shell",
-  needs: ["deno"],
-  async open(context) {
-    const opposite = serverExecutionCiLane("opposite");
-    const experimentalValue = String(opposite.enabled);
-    const binary = path.join(
-      context.root,
-      BINARY_CACHE_DIR,
-      `toolshed-baked-${experimentalValue}`,
-    );
-    if (!context.dryRun) {
-      let present = true;
-      try {
-        await Deno.stat(binary);
-      } catch {
-        // The workflow's cache step found nothing to restore, so the
-        // binary is built here instead. That is the slow path — about
-        // forty seconds against seventeen for a restore — and it is what
-        // the first run after a change to the sources pays.
-        present = false;
-      }
-      if (!present) {
-        await execOf(context)(
-          Deno.execPath(),
-          ["task", "build-binaries", "toolshed"],
-          {
-            cwd: context.root,
-            env: {
-              ...Deno.env.toObject(),
-              EXPERIMENTAL_SERVER_EXECUTION: experimentalValue,
+/**
+ * A Toolshed server from a compiled binary, at a stated server-execution
+ * role.
+ *
+ * A binary rather than a source run, because the browser shell is a
+ * bundle baked into it: a source run answers the API and serves no shell,
+ * and a test that drives a browser at one is told "Shell app not
+ * available" rather than seeing the product. The opposite role needs a
+ * binary for a second reason — its posture is a compile-time define baked
+ * into that same shell, which a source run cannot reproduce at all.
+ *
+ * The lane's workflow restores these from the Actions cache before the
+ * runner starts; building one here is what happens when that cache
+ * missed. That is the slow path — about forty seconds against seventeen
+ * for a restore — and it is what the first run after a change to the
+ * sources pays.
+ */
+function bakedToolshed(role: ServerExecutionCiRole): Capability {
+  const lane = serverExecutionCiLane(role);
+  // The default role leaves the flag unset, and a binary built with it
+  // unset is a different binary from one built with it either way, so the
+  // role names the file rather than the value doing it.
+  const value = lane.experimentalValue;
+  return {
+    id: role === "default" ? "toolshed-baked" : "toolshed-baked-opposite",
+    description:
+      `a Toolshed server with the ${role} posture in its baked shell`,
+    needs: ["deno"],
+    async open(context) {
+      const binary = path.join(
+        context.root,
+        BINARY_CACHE_DIR,
+        `toolshed-baked-${role}`,
+      );
+      if (!context.dryRun) {
+        let present = true;
+        try {
+          await Deno.stat(binary);
+        } catch {
+          present = false;
+        }
+        if (!present) {
+          await execOf(context)(
+            Deno.execPath(),
+            ["task", "build-binaries", "toolshed"],
+            {
+              cwd: context.root,
+              env: {
+                ...Deno.env.toObject(),
+                ...(value === undefined
+                  ? {}
+                  : { EXPERIMENTAL_SERVER_EXECUTION: value }),
+              },
             },
-          },
-        );
-        await Deno.mkdir(path.dirname(binary), { recursive: true });
-        await Deno.copyFile(
-          path.join(context.root, "dist", "toolshed"),
-          binary,
-        );
+          );
+          await Deno.mkdir(path.dirname(binary), { recursive: true });
+          await Deno.copyFile(
+            path.join(context.root, "dist", "toolshed"),
+            binary,
+          );
+        }
+        await Deno.chmod(binary, 0o755);
       }
-      await Deno.chmod(binary, 0o755);
-    }
-    return await startToolshed(context, {
-      command: [binary],
-      cwd: context.root,
-      env: { EXPERIMENTAL_SERVER_EXECUTION: experimentalValue },
-      role: "opposite",
-    });
-  },
-};
+      return await startToolshed(context, {
+        command: [binary],
+        cwd: context.root,
+        env: value === undefined
+          ? {}
+          : { EXPERIMENTAL_SERVER_EXECUTION: value },
+        role,
+      });
+    },
+  };
+}
+
+const toolshedBaked = bakedToolshed("default");
+const toolshedBakedOpposite = bakedToolshed("opposite");
 
 /**
  * The compiled background-piece-service binary used by its deployed-topology
@@ -603,6 +630,7 @@ export const CAPABILITIES: ReadonlyMap<CapabilityId, Capability> = new Map(
     browser,
     gitHistory,
     toolshed,
+    toolshedBaked,
     toolshedBakedOpposite,
     bgPieceServiceBinary,
     cf,

@@ -10,7 +10,6 @@ import {
   pidOfBackgroundLaunch,
   resolveCapabilities,
 } from "./ci-capabilities.ts";
-import { serverExecutionCiLane } from "./server-execution-ci.ts";
 
 describe("ci capabilities", () => {
   it("opens what a capability is built on before the capability", () => {
@@ -62,6 +61,7 @@ describe("ci capabilities", () => {
       "jq",
       "local-dev-servers",
       "toolshed",
+      "toolshed-baked",
       "toolshed-baked-opposite",
     ]);
   });
@@ -455,8 +455,7 @@ describe("opening a capability on a machine that answers", () => {
   });
 
   it("builds the server-execution binary only when none was restored", async () => {
-    const opposite = serverExecutionCiLane("opposite");
-    const binaryName = `toolshed-baked-${opposite.experimentalValue}`;
+    const binaryName = "toolshed-baked-opposite";
     const answers = {
       [binaryName]: "listening (pid 999999). Logs: x\n",
     };

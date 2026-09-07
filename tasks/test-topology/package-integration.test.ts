@@ -36,7 +36,13 @@ describe("the package integration suites", () => {
     // it needs without either the workflow or the other suites knowing
     // that there are two.
     const suites = await suitesWith(serverExecutionCiLane("default").enabled);
-    expect(byId(suites, "package-integration").needs).toContain("toolshed");
+    // Both arms take a compiled binary. The shell's tests drive a browser
+    // at the server, and the shell is a bundle inside the binary; the
+    // opposite arm needs one for a second reason, its posture being a
+    // define baked into that same shell.
+    expect(byId(suites, "package-integration").needs).toContain(
+      "toolshed-baked",
+    );
     expect(byId(suites, "package-integration-opposite").needs).toContain(
       "toolshed-baked-opposite",
     );

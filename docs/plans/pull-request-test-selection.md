@@ -1017,31 +1017,41 @@ batches.
 | `jq` | `jq` | about 2 seconds |
 | `browser` | Relaxes the AppArmor user-namespace restriction | under a second |
 | `git-history` | Unshallows the checkout | 3–10 seconds |
-| `toolshed` | A Toolshed server listening on an allocated port | see below |
+| `toolshed` | A Toolshed server from source, listening on an allocated port | see below |
 | `local-dev-servers` | The whole local dev stack, brought up by `deno task integration` on a chosen port offset | 15–20 seconds |
-| `toolshed-baked-opposite` | The same, from a binary whose shell carries the server-execution define opposite the default | 42 seconds to build, or 17 to restore |
+| `toolshed-baked` | The same from a compiled binary, which is the only one that serves the browser shell | 42 seconds to build, or 17 to restore |
+| `toolshed-baked-opposite` | The same again, from a binary whose shell carries the server-execution define opposite the default | 42 seconds to build, or 17 to restore |
 | `bg-piece-service-binary` | The compiled background service used by its deployed-topology gate | about 30 seconds to build, or under a second to restore |
 | `cf` | The `cf` command-line tool on the path | as above |
 | `compile-cache` | Restores a pattern compile byte cache | 3 seconds |
 
-Two capabilities are worth explaining, because the choice made for them is
-what keeps the five-minute budget reachable.
+The three Toolshed capabilities are worth explaining, because what
+separates them is what a test needs the server to be.
 
-**`toolshed` runs from source.** Today a job that needs a server downloads
-a compiled binary produced by a separate build job. On a pull request that
-costs a build job on the critical path — 58 seconds, including its own
-setup — plus 17 seconds of download in each consumer. Running the server
-from source with `deno run` skips both. The dependency graph is already in
-the Deno cache that the `deno` capability restores, so starting from
-source costs a few seconds. The full run on `main` keeps the
+**`toolshed` runs from source.** A job that needs a server used to
+download a compiled binary produced by a separate build job. On a pull
+request that costs a build job on the critical path — 58 seconds,
+including its own setup — plus 17 seconds of download in each consumer.
+Running the server from source with `deno run` skips both. The dependency
+graph is already in the Deno cache that the `deno` capability restores, so
+starting from source costs a few seconds. The full run on `main` keeps the
 compiled-binary path, because it needs the binary anyway for attestation
 and deployment.
 
-**`toolshed-baked-opposite` cannot.** The server-execution opposite arm depends
-on a compile-time define baked into the browser shell inside the binary, and a
-source run cannot reproduce that. So that capability has a different
-provider: restore the binary from the Actions cache if the key hits, and
-build it in place if it does not. The lane workflow carries one fixed
+**A suite that drives a browser cannot take it.** The browser shell is a
+bundle baked into the binary, so a server run from source answers the API
+and serves no shell: a test that navigates at one is told "Shell app not
+available" rather than seeing the product. So the package and pattern
+integration suites take `toolshed-baked`, which is the same server from a
+compiled binary. What is left on the source path is the suites that reach
+the API without a browser — the command line's, and the deployed-topology
+gate's.
+
+**`toolshed-baked-opposite` has a second reason.** The server-execution
+opposite arm depends on a compile-time define baked into that same shell,
+which a source run cannot reproduce at all. Both baked capabilities have
+the same provider: restore the binary from the Actions cache if the key
+hits, and build it in place if it does not. The lane workflow carries one fixed
 `actions/cache` step covering `.ci-cache`, keyed on a hash of the sources
 the binaries are built from. Everything a lane wants to keep between runs
 sits under that one directory — the built binaries, and the pattern

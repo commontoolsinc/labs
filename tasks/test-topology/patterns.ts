@@ -94,7 +94,10 @@ async function patternIntegrationSuites(
   return [
     fileSuite({
       id: "pattern-integration",
-      needs: ["deno", "toolshed", "browser", "compile-cache"],
+      // The baked server rather than one run from source: these drive a
+      // browser at the shell, and the shell is a bundle inside the
+      // binary. A source run answers the API and serves no shell.
+      needs: ["deno", "toolshed-baked", "browser", "compile-cache"],
       patternCoverage: true,
       parts: [{
         packageDir,
