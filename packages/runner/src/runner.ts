@@ -1324,7 +1324,7 @@ export type DependencySyncer = (
 export type DeferredStartCommit = () => Promise<Result<Unit, CommitError>>;
 
 /**
- * The commit a test supplies in place of `Runner`'s own step for a
+ * The committer a test supplies around `Runner`'s own commit of a
  * commit-gated start's transaction. It receives that step as `commit`, so
  * it can refuse the transaction in its stead, mark it before the store sees
  * it, or observe its verdict; `resultCell` is the piece the start is for.

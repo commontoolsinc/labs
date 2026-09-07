@@ -6104,8 +6104,8 @@ supply; OW29/OW32/OW34 closed):
     that registration, still current, is handed off — because a
     COMPETING start can install into the registry the recovery's
     entry emptied with no stop and so no generation bump
-    (`Runner.#startCore()`'s
-    unconditional install; the only bump sites live in stopResult),
+    (`Runner.#startCore()`'s unconditional install; the only bump
+    sites live in stopResult),
     and the walk's already-started returns report it as success; on
     a foreign registration the recovery YIELDS exactly as
     `Runner.#startWithTx()` yields on an owned key (the piece runs under the
