@@ -715,10 +715,14 @@ export class RuntimeProcessor {
   #identity: Identity;
   #isDisposed = false;
   #disposingPromise: Promise<void> | undefined;
-  // Cell subscriptions, by the subscribing client's scoped cell key. Two
-  // clients watching one cell are two subscriptions, so that one client's
-  // unsubscribe stops its own feed and no one else's.
+
+  /**
+   * Cell subscriptions, by the subscribing client's scoped cell key. Two
+   * clients watching one cell are two subscriptions, so that one client's
+   * unsubscribe stops its own feed and no one else's.
+   */
   #subscriptions = new Map<string, Cancel>();
+
   #operationSubscriptions = new Map<
     string,
     {
@@ -734,36 +738,55 @@ export class RuntimeProcessor {
     { token: string; prepared: PreparedPieceSourceChange }
   >();
   #telemetry: RuntimeTelemetry;
-  // Whom this runtime acts as and under which enforcement configuration,
-  // fixed by the client that initialized it. A runtime carries exactly one,
-  // and every client attached to it is checked against this one.
+
+  /**
+   * Whom this runtime acts as and under which enforcement configuration, fixed
+   * by the client that initialized it. A runtime carries exactly one, and every
+   * client attached to it is checked against this one.
+   */
   readonly #securityContext: RuntimeSecurityContext;
+
   #telemetryEnabled = false;
   #intentOutcomeCancel: Cancel | undefined;
 
-  // VDOM mounts, by the mounting client's scoped mount id. A mount id comes
-  // from a counter that starts at 1 in each client's own document, so the id
-  // alone names a mount only while there is one client.
+  /**
+   * VDOM mounts, by the mounting client's scoped mount id. A mount id comes
+   * from a counter that starts at 1 in each client's own document, so the id
+   * alone names a mount only while there is one client.
+   */
   #vdomMounts = new Map<
     string,
     { reconciler: WorkerReconciler; cancel: Cancel; client: WorkerClient }
   >();
+
   #vdomBatchIdCounter = 0;
-  // Render-boundary declassification policy applied to every mount's
-  // reconciler, from the initialization data; `allow` when it names none.
+
+  /**
+   * Render-boundary declassification policy applied to every mount's
+   * reconciler, from the initialization data; `allow` when it names none.
+   */
   #renderDeclassificationPolicy: RenderDeclassificationPolicy = "allow";
-  // Host-supplied default render ceiling applied to every mount's
-  // reconciler; undefined when the host set none.
+
+  /**
+   * Host-supplied default render ceiling applied to every mount's reconciler;
+   * `undefined` when the host set none.
+   */
   #renderConfidentialityCeiling?: RenderConfidentialityCeiling;
-  // Runner-side display-boundary resolver, built once from the runtime's
-  // trust config and acting principal when a ceiling is in force. Rewrites a
-  // cell's label through the exchange rules so `Space(...)`-via-`HasRole`
-  // principal forms resolve before the reconciler's ceiling fit.
+
+  /**
+   * Runner-side display-boundary resolver, built once from the runtime's trust
+   * config and acting principal when a ceiling is in force. Rewrites a cell's
+   * label through the exchange rules so `Space(...)`-via-`HasRole` principal
+   * forms resolve before the reconciler's ceiling fit.
+   */
   #renderConfidentialityResolver?: RenderConfidentialityResolver;
-  // The membership provider shared with the resolver above and handed to
-  // every mount's reconciler, so a `Space(X)`-labeled cell blocked before X's
-  // ACL synced re-renders once the ACL grants READ (§4.9.3). Undefined when
-  // no ceiling is in force.
+
+  /**
+   * The membership provider shared with the resolver above and handed to every
+   * mount's reconciler, so a `Space(X)`-labeled cell blocked before X's ACL
+   * synced re-renders once the ACL grants READ (§4.9.3). `undefined` when no
+   * ceiling is in force.
+   */
   #renderMembershipProvider?: SpaceMembershipProvider;
 
   private constructor(
@@ -1273,10 +1296,12 @@ export class RuntimeProcessor {
     return { value: result.ok };
   }
 
-  // A `CellHandle.set` is a blind leaf overwrite (last-write-wins);
-  // `CellHandle.push` sends only appended members and uses Cell.push's native
-  // mergeable operation. The decision is made by METHOD, never by inspecting
-  // the value's shape.
+  /**
+   * Handles a `CellSetRequest`. A `CellHandle.set()` is a blind leaf overwrite
+   * (last-write-wins); `CellHandle.push()` sends only appended members and
+   * uses `Cell.push()`'s native mergeable operation. The decision is made by
+   * _method_, never by inspecting the value's shape.
+   */
   handleCellSet(request: CellSetRequest): void | Promise<void> {
     const commit = this.applyCellSet(request);
     if (request.awaitCommit) return this.#requireCellCommit(commit);
@@ -1556,10 +1581,13 @@ export class RuntimeProcessor {
     };
   }
 
-  // A CellSet is the blind, last-write-wins arm. Runtime.commitUiCellWrite owns
-  // its structural precondition, retry policy, and per-address supersede lane.
-  // Ordinary UI writes remain fire-and-forget, while strict capability writes
-  // can await the same outcome through handleCellSet.
+  /**
+   * Applies a `CellSetRequest`, the blind, last-write-wins arm.
+   * `Runtime.commitUiCellWrite()` owns its structural precondition, retry
+   * policy, and per-address supersede lane. Ordinary UI writes remain
+   * fire-and-forget, while strict capability writes can await the same outcome
+   * through `handleCellSet()`.
+   */
   applyCellSet(request: CellSetRequest) {
     const cell = getCell(this.#runtime, request.cell);
     const value = mapCellRefsToSigilLinks(request.value);
@@ -2003,9 +2031,11 @@ export class RuntimeProcessor {
     return { resolution: result.resolution };
   }
 
-  // Persistence durability, distinct from handleIdle's reactive quiescence:
-  // awaits in-flight compile-cache write-backs so a subsequent load reads the
-  // freshly-written entry instead of recompiling.
+  /**
+   * Awaits in-flight compile-cache write-backs, so a subsequent load reads the
+   * freshly-written entry instead of recompiling. This is persistence
+   * durability, distinct from `handleIdle()`'s reactive quiescence.
+   */
   async handleFlushCompileCacheWrites(): Promise<void> {
     await this.#runtime.patternManager.flushCompileCacheWrites();
   }
@@ -2090,17 +2120,19 @@ export class RuntimeProcessor {
     };
   }
 
-  // Resolves a redirect here rather than through the runner's slug
-  // resolution, which `handleSlugResolve` uses. Do not copy the bare
-  // `parseLink` below into a new caller: a slug cell can be written by a
-  // foreign client over the memory protocol, and `parseSlugRedirect` in
-  // `packages/runner/src/slug-resolution.ts` exists to fold the TypeError a
-  // sigil-shaped payload with broken internals throws into a typed refusal.
-  // These are one walk with two implementations, and this is the copy to
-  // retire.
-  //
-  // TODO(danfuzz): Refuse a cell that is not a piece cell in the surviving
-  // walk, once `parseSlugRedirect` is the one copy.
+  /**
+   * Handles a `PieceGetRequest`. Resolves a redirect here rather than through
+   * the runner's slug resolution, which `handleSlugResolve()` uses. Do not copy
+   * the bare `parseLink()` below into a new caller: a slug cell can be written
+   * by a foreign client over the memory protocol, and `parseSlugRedirect()` in
+   * `packages/runner/src/slug-resolution.ts` exists to fold the `TypeError` a
+   * sigil-shaped payload with broken internals throws into a typed refusal.
+   * These are one walk with two implementations, and this is the copy to
+   * retire.
+   *
+   * TODO(danfuzz): Refuse a cell that is not a piece cell in the surviving
+   * walk, once `parseSlugRedirect` is the one copy.
+   */
   async handlePieceGet(
     request: PieceGetRequest,
   ): Promise<PieceResponse> {

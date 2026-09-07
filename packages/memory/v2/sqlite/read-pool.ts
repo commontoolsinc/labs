@@ -44,8 +44,11 @@ export class ReadConnectionPool {
     this.#max = max;
   }
 
-  // Keyed by mode as well as path: the two modes return different JS values
-  // for the same stored row, so one connection cannot serve both.
+  /**
+   * Returns the pooled connection for `path` in the given mode. Keyed by mode
+   * as well as path: the two modes return different JS values for the same
+   * stored row, so one connection cannot serve both.
+   */
   #connection(path: string, int64: boolean): Database {
     const key = int64 ? `int64\n${path}` : `plain\n${path}`;
     const existing = this.#byPath.get(key);

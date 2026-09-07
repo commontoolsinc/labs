@@ -196,12 +196,16 @@ export class Client {
   #cancelReconnectDelay: (() => void) | null = null;
   #connected = false;
   #closed = false;
-  // Set when a reconnect handshake fails for a reason retrying cannot change (a
-  // protocol-flag mismatch — the transport is fundamentally incompatible). The
-  // client stops reconnecting and fails every further request with it, instead
-  // of looping forever. A per-session authorization denial does NOT land here:
-  // it terminates only that session (see SpaceSession.restore), leaving sessions
-  // for other spaces on this client alive.
+
+  /**
+   * The error that ended reconnection, set when a reconnect handshake fails
+   * for a reason retrying cannot change (a protocol-flag mismatch — the
+   * transport is fundamentally incompatible). The client stops reconnecting
+   * and fails every further request with it, instead of looping forever. A
+   * per-session authorization denial does _not_ land here: it terminates only
+   * that session (see `SpaceSession.restore()`), leaving sessions for other
+   * spaces on this client alive.
+   */
   #fatalError: Error | null = null;
 
   /**
@@ -691,11 +695,13 @@ export class Client {
     }
   }
 
-  // The reconnect attempt is event-driven: `hello()` awaits the transport's
-  // real open/error/close. The pause between a failed attempt and the next
-  // runs on a timer, since a returning server raises no event to await. The
-  // delay bounds the retry rate, and `close()` ends it through the stored
-  // canceller.
+  /**
+   * Waits `delayMs` between a failed reconnect attempt and the next. The
+   * reconnect attempt itself is event-driven: `hello()` awaits the transport's
+   * real open/error/close. The pause runs on a timer, since a returning server
+   * raises no event to await. The delay bounds the retry rate, and `close()`
+   * ends it through the stored canceller.
+   */
   #waitForReconnectDelay(delayMs: number): Promise<void> {
     if (this.#closed) {
       return Promise.resolve();
@@ -751,20 +757,28 @@ export class SpaceSession {
   #ackScheduled = false;
   #ackFlushing = false;
   #background = new Set<Promise<void>>();
-  // Watch-mutation ordering. `#watchApply` serializes the APPLICATION of watch
-  // responses (the `#watchSpecs` / `#watchView` mutations) in call order.
-  // `#watchIssue` serializes REQUEST ISSUE in call order and, in concurrent
-  // mode, advances as soon as a request has been *sent* (not answered), so
-  // multiple watch round trips overlap on the wire while application stays
-  // ordered. In single-flight mode `#watchIssue` is unused and each mutation's
-  // request+apply run together on `#watchApply` (byte-identical to the pre-
-  // concurrency behavior).
+
+  /**
+   * Watch-mutation ordering: serializes the _application_ of watch responses
+   * (the `#watchSpecs` / `#watchView` mutations) in call order. `#watchIssue`
+   * serializes request _issue_ in call order and, in concurrent mode, advances
+   * as soon as a request has been _sent_ (not answered), so multiple watch
+   * round trips overlap on the wire while application stays ordered. In
+   * single-flight mode `#watchIssue` is unused and each mutation's request and
+   * apply run together on `#watchApply`.
+   */
   #watchApply: Promise<void> = Promise.resolve();
+
   #watchIssue: Promise<void> = Promise.resolve();
-  // Per-session (default off): allow watch-refresh round trips to overlap.
-  // Set by the runner from the `experimentalConcurrentWatchRefresh` storage
-  // setting; see docs/development/EXPERIMENTAL_OPTIONS.md. NOT a process global.
+
+  /**
+   * Whether watch-refresh round trips may overlap (default off). Per-session,
+   * _not_ a process global. Set by the runner from the
+   * `experimentalConcurrentWatchRefresh` storage setting; see
+   * `docs/development/EXPERIMENTAL_OPTIONS.md`.
+   */
   #concurrentWatchRefresh = false;
+
   #closed = false;
   #closeError: Error | null = null;
   #readyOnConnection = true;
@@ -788,12 +802,16 @@ export class SpaceSession {
    * session at restore rather than silently degrading (see `restore`). */
   holdingsProvider: (() => SessionHolding[] | undefined) | undefined;
 
-  // Highest caughtUpLocalSeq already pushed into the WatchView (via a real sync
-  // or a synthetic forward). Subscribers such as runner storage only advance
-  // their own caught-up seq from emitted syncs, so a resume that promotes
-  // caughtUpLocalSeq via the top-level SessionOpenResult field (no sync) must
-  // be forwarded explicitly or their conflict-retry waiters strand.
+  /**
+   * Highest `caughtUpLocalSeq` already pushed into the `WatchView` (via a real
+   * sync or a synthetic forward). Subscribers such as runner storage only
+   * advance their own caught-up seq from emitted syncs, so a resume that
+   * promotes `caughtUpLocalSeq` via the top-level `SessionOpenResult` field
+   * (no sync) must be forwarded explicitly or their conflict-retry waiters
+   * strand.
+   */
   #forwardedCaughtUpLocalSeq = 0;
+
   #caughtUpLocalSeqWaiters: {
     localSeq: number;
     pending: PromiseWithResolvers<void>;
@@ -1570,11 +1588,13 @@ export class SpaceSession {
     }
   }
 
-  // Forward a caught-up marker to WatchView subscribers when it was delivered
-  // out-of-band (top-level SessionOpenResult.caughtUpLocalSeq on resume) rather
-  // than via a sync they already observed. Emits an empty caught-up sync so
-  // downstream waiters (notably runner storage's read-repair gate) resolve
-  // instead of stranding after a reconnect.
+  /**
+   * Forwards a caught-up marker to `WatchView` subscribers when it was
+   * delivered out-of-band (the top-level `SessionOpenResult.caughtUpLocalSeq`
+   * on resume) rather than via a sync they already observed. Emits an empty
+   * caught-up sync so downstream waiters (notably runner storage's read-repair
+   * gate) resolve instead of stranding after a reconnect.
+   */
   #forwardCaughtUpLocalSeqToWatchers(
     localSeq: number | undefined,
   ): void {
