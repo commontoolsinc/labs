@@ -927,7 +927,7 @@ export class CellImpl<T extends FabricValue>
   #_link: NormalizedLink;
 
   /**
-   * Shared container for entity id and cause; siblings share the same instance.
+   * Shared container for entity ID and cause; siblings share the same instance.
    */
   #causeContainer: CauseContainer;
 

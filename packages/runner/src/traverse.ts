@@ -842,12 +842,14 @@ export function resolveSchemaRefsCanonical(
  */
 export class MapSet<K, V> {
   /**
-   * The hash-based store, used when `hashFunction` is set: key → (hash →
-   * value). When unset, `#setMap` holds a plain set per key instead.
+   * The hash-based store, used when `#hashFunction` is set: key → (hash →
+   * value).
    */
   #hashMap?: Map<K, Map<string, V>>;
 
+  /** The plain-set store, used when no hash function is set: key → values. */
   #setMap?: Map<K, Set<V>>;
+
   #hashFunction?: (value: V) => string;
 
   // Instrumentation counters (kept for diagnostics)
@@ -2000,7 +2002,7 @@ export abstract class BaseObjectTraverser {
   }
 
   /**
-   * Wrapper for `getAtPath()` that provides all the parameters that are class
+   * Helper for `getAtPath()`, which supplies the parameters that are class
    * fields.
    */
   protected getDocAtPath(

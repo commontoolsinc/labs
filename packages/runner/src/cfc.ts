@@ -812,7 +812,10 @@ export class ContextualFlowControl {
     return cfcSchemaIsFalse(schema);
   }
 
-  /** Handles the `asCell` array tag. */
+  /**
+   * Returns the `asCell` entries of `schema`, or none when it has no `asCell`
+   * array.
+   */
   static getAsCellValues(
     schema: JSONSchema | undefined,
   ): readonly AsCellEntry[] {

@@ -605,13 +605,18 @@ export class SpaceServer implements TransactionSealDestination {
   >();
 
   /**
-   * Server-settle instrumentation (design §6 W4's metric; §2.8 (c)). Per
-   * authored input: admission (the feed notice's arrival, `enqueueCommit()`) →
-   * _coverage_ (the wave commit whose `derivedThrough` ≥ seq = the value-only
-   * settle) → and, when a push-growth demand wake fires after coverage (the
-   * one-push-late structural-growth path, §2.3), the _next_ derived commit =
-   * the structural-growth landing. Attribution of a growth wake to an input is
-   * by adjacency (the most recently covered input), stated as such.
+   * Count of push-growth demand wakes, bumped once per
+   * `noteDemandChanged("push-growth")`, snapshotted into each settle record at
+   * admission and differenced at coverage.
+   *
+   * It is part of the server-settle instrumentation (design §6 W4's metric;
+   * §2.8 (c)). Per authored input: admission (the feed notice's arrival,
+   * `enqueueCommit()`) → _coverage_ (the wave commit whose `derivedThrough` ≥
+   * seq = the value-only settle) → and, when a push-growth demand wake fires
+   * after coverage (the one-push-late structural-growth path, §2.3), the _next_
+   * derived commit = the structural-growth landing. Attribution of a growth
+   * wake to an input is by adjacency (the most recently covered input), stated
+   * as such.
    */
   #growthWakeCounter = 0;
 
@@ -623,7 +628,9 @@ export class SpaceServer implements TransactionSealDestination {
    */
   #lastFoldedDemandEnters = 0;
 
+  /** Like `#lastFoldedDemandEnters`, for the leave counter. */
   #lastFoldedDemandLeaves = 0;
+
   #cycleCounter = 0;
   #wavesCommitted = 0;
   readonly #pendingSettles = new Map<number, {

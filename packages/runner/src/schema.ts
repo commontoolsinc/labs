@@ -1502,8 +1502,8 @@ class TransformObjectCreator
   }
 
   /**
-   * Adds an optional property. This controls the behavior when `properties` is
-   * specified but `additionalProperties` is not.
+   * Does nothing: when `properties` is specified but `additionalProperties` is
+   * not, a property outside the map is excluded rather than stored.
    */
   addOptionalProperty(
     _obj: Record<string, FabricValue>,
