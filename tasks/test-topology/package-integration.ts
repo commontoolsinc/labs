@@ -71,7 +71,13 @@ export async function loadPackageIntegrationSuites(
     const packageDir = `packages/${scope}`;
     const files = await integrationFiles(root, packageDir);
     const junit = { kind: "integration", scope, filePrefix: packageDir };
-    const env: Record<string, string> = headless ? { HEADLESS: "1" } : {};
+    // `LOG_LEVEL` is what each package's own `integration` task runs
+    // these with, and running them at the default level is running them
+    // differently from the way they are meant to run.
+    const env: Record<string, string> = {
+      LOG_LEVEL: "warn",
+      ...(headless ? { HEADLESS: "1" } : {}),
+    };
     const on = unavailableFrom(skips[scope], packageDir);
     defaults.push({
       packageDir,

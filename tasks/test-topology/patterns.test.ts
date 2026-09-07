@@ -71,6 +71,21 @@ describe("the pattern and package suites", () => {
     expect(invocation!.env?.DENO_COVERAGE_DIR).toBeUndefined();
   });
 
+  it("runs an integration suite the way its own task runs it", async () => {
+    // Each package's `integration` task sets the log level, and running
+    // the same files at the default level is running them differently
+    // from the way they are meant to run.
+    for (const id of ["pattern-integration", "pattern-integration-opposite"]) {
+      const suite = byId(id);
+      const [invocation] = await suite.command(
+        [{ unit: suite.units[0]!, skip: [] }],
+        { root, outputDir: await outputDir() },
+      );
+      expect(invocation!.env?.LOG_LEVEL).toBe("warn");
+      expect(invocation!.env?.HEADLESS).toBe("1");
+    }
+  });
+
   it("runs the opposite arm with an explicit define and history", async () => {
     const opposite = serverExecutionCiLane("opposite");
     const suite = byId("pattern-integration-opposite");

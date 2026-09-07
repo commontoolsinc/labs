@@ -88,6 +88,11 @@ async function patternIntegrationSuites(
     scope: "patterns",
     filePrefix: packageDir,
   };
+  // What the package's own `integration` task runs these with. Running
+  // them at the default level is running them differently from the way
+  // they are meant to run, and a browser suite at that level writes a
+  // great deal of it.
+  const env = { HEADLESS: "1", LOG_LEVEL: "warn" };
   const on = unavailableFrom(SERVER_EXECUTION_ON_SKIPS.patterns, packageDir);
   const defaultLane = serverExecutionCiLane("default", defaultEnabled);
   const oppositeLane = serverExecutionCiLane("opposite", defaultEnabled);
@@ -102,7 +107,7 @@ async function patternIntegrationSuites(
       parts: [{
         packageDir,
         flags,
-        env: { HEADLESS: "1" },
+        env,
         junit,
         files: defaultLane.enabled
           ? files.filter((file) => !on.whole.has(file))
@@ -124,7 +129,7 @@ async function patternIntegrationSuites(
         packageDir,
         flags,
         env: {
-          HEADLESS: "1",
+          ...env,
           EXPERIMENTAL_SERVER_EXECUTION: String(oppositeLane.enabled),
         },
         junit,
