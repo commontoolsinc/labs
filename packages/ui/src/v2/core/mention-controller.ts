@@ -82,7 +82,7 @@ export class MentionController implements ReactiveController {
   private host: ReactiveControllerHost;
   private config: Required<MentionControllerConfig>;
 
-  // Mention state
+  /** The mention state. */
   private _state: MentionState = {
     showing: false,
     query: "",

@@ -97,11 +97,17 @@ export class CFSubmitInput extends BaseElement {
   declare buttonText: string;
   declare inputId: string;
   declare disabled: boolean;
-  // Optional one-time seed for the field text, copied into `value` on first
-  // render. The field is uncontrolled after that.
+
+  /**
+   * Optional one-time seed for the field text, copied into `value` on first
+   * render. The field is uncontrolled after that.
+   */
   declare initialValue: string;
-  // Mirrors the field text. Read on the host as event.target.value when the
-  // submit button is clicked.
+
+  /**
+   * Mirrors the field text. Read on the host as `event.target.value` when the
+   * submit button is clicked.
+   */
   declare value: string;
 
   constructor() {
@@ -116,18 +122,22 @@ export class CFSubmitInput extends BaseElement {
 
   private _seeded = false;
 
-  // Set while a submit is in flight, between the click and the deferred
-  // field-clear. A second submit that arrives in that window — whether a button
-  // click or an Enter keypress — is a duplicate (the field still holds the
-  // submitted text), so its propagation to the host is stopped to suppress a
-  // second create. The flag is reset when the clear runs, including the case
-  // where the clear is skipped because the value changed, so a later submit is
-  // never blocked.
+  /**
+   * Whether a submit is in flight, between the click and the deferred
+   * field-clear. A second submit that arrives in that window — whether a button
+   * click or an Enter keypress — is a duplicate (the field still holds the
+   * submitted text), so its propagation to the host is stopped to suppress a
+   * second create. The flag is reset when the clear runs, including the case
+   * where the clear is skipped because the value changed, so a later submit is
+   * never blocked.
+   */
   private _submitting = false;
 
-  // Copy `initialValue` into the editable `value` once, the first time it is
-  // present. Later `initialValue` changes and the user's own typing are left
-  // alone, so the field stays uncontrolled.
+  /**
+   * Copies `initialValue` into the editable `value` once, the first time it is
+   * present. Later `initialValue` changes and the user's own typing are left
+   * alone, so the field stays uncontrolled.
+   */
   override willUpdate(changed: PropertyValues) {
     super.willUpdate(changed);
     if (!this._seeded && this.initialValue) {
@@ -144,10 +154,12 @@ export class CFSubmitInput extends BaseElement {
     this.value = (event.target as HTMLInputElement).value;
   }
 
-  // True when a click's composed path runs through a control that means "submit"
-  // — the visible cf-button, or the hidden native submit button the browser
-  // clicks for implicit form submission on Enter. Clicks on the field (to
-  // focus/edit) or the surrounding gap are not submits.
+  /**
+   * Returns whether a click's composed path runs through a control that means
+   * submit — the visible `cf-button`, or the hidden native submit button the
+   * browser clicks for implicit form submission on Enter. Clicks on the field
+   * (to focus/edit) or the surrounding gap are not submits.
+   */
   private _isSubmitGesture(event: Event): boolean {
     return event.composedPath().some((node) => {
       const element = node as Element & { type?: string };
@@ -156,10 +168,12 @@ export class CFSubmitInput extends BaseElement {
     });
   }
 
-  // Single click handler for the form. The visible button's click and the
-  // Enter-driven implicit-submission click both bubble through here on their way
-  // to the host, so it is the one place the create gesture is gated and the
-  // in-flight guard is enforced — Enter and a click cannot each fire a create.
+  /**
+   * Handles every click on the form. The visible button's click and the
+   * Enter-driven implicit-submission click both bubble through here on their
+   * way to the host, so it is the one place the create gesture is gated and the
+   * in-flight guard is enforced — Enter and a click cannot each fire a create.
+   */
   private _onClick(event: Event) {
     // Only a submit gesture should reach the host's onClick (the create). Stop
     // field/gap clicks at the shadow boundary so they fire no spurious create.
@@ -202,9 +216,12 @@ export class CFSubmitInput extends BaseElement {
     }, 0);
   }
 
-  // Enter in the field triggers implicit form submission. The trusted click on
-  // the hidden submit button is what carries the create to the host; the form's
-  // own navigation is cancelled so the page does not reload.
+  /**
+   * Handles the form's submit event, which Enter in the field triggers as
+   * implicit form submission. The trusted click on the hidden submit button is
+   * what carries the create to the host; the form's own navigation is
+   * cancelled so the page does not reload.
+   */
   private _onFormSubmit(event: Event) {
     event.preventDefault();
   }
