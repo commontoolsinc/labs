@@ -73,12 +73,16 @@ const cacheFiles = new WeakMap<ProcessModuleByteCache, string>();
  * instances. A byte cap bounds the total retained JS and evicts oldest-first.
  */
 export class ProcessModuleByteCache implements ModuleByteCache {
-  // Keyed by `${runtimeVersion}\0${identity}`. Map insertion order gives FIFO
-  // eviction (recency-refreshed on read, so eviction is ~LRU).
+  /**
+   * The cached artifacts, keyed by `${runtimeVersion}\0${identity}`. Map
+   * insertion order gives FIFO eviction (recency-refreshed on read, so
+   * eviction is ~LRU).
+   */
   readonly #entries = new Map<
     string,
     { artifact: CompiledModuleArtifact; size: number }
   >();
+
   #totalBytes = 0;
   readonly #maxBytes: number;
 

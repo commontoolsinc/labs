@@ -203,26 +203,36 @@ export class WorkerReconciler {
   #pendingOps: VDomOp[] = [];
   #flushScheduled = false;
 
-  // Track the actual root child node (not the container)
+  /** The actual root child node (not the container). */
   #rootChildId: number | null = null;
+
   #rootCancel: Cancel | null = null;
 
   readonly #onOps: (ops: VDomOp[]) => number | void;
   readonly #onError?: (error: Error) => void;
   readonly #renderDeclassificationPolicy: RenderDeclassificationPolicy;
 
-  // Root-of-tree render policy: the host's default ceiling when configured
-  // (spec §8.10.6), otherwise the historical unbounded policy. Authored
-  // boundaries can only narrow from here.
+  /**
+   * Root-of-tree render policy: the host's default ceiling when configured
+   * (spec §8.10.6), otherwise the unbounded policy. Authored boundaries can
+   * only narrow from here.
+   */
   readonly #rootRenderPolicy: RenderPolicy;
-  // Runner-side display-boundary resolver (Epic H3b): rewrites a cell's
-  // confidentiality label through the exchange rules before the ceiling fit,
-  // admitting `Space(...)`-via-`HasRole` principal forms. Undefined = H3a
-  // exact-match behavior.
+
+  /**
+   * Runner-side display-boundary resolver, which rewrites a cell's
+   * confidentiality label through the exchange rules before the ceiling fit,
+   * admitting `Space(...)`-via-`HasRole` principal forms. When `undefined`,
+   * the label is fit by exact match.
+   */
   readonly #resolveRenderConfidentiality?: RenderConfidentialityResolver;
-  // §4.9.3 Stage 2: the membership provider whose `subscribe` lets a gated
-  // `Space(X)`-labeled cell re-render when X's ACL syncs/changes. Undefined =
-  // no reactive upgrade (the Stage-1 sync snapshot still gates soundly).
+
+  /**
+   * The membership provider (spec §4.9.3) whose `subscribe()` lets a gated
+   * `Space(X)`-labeled cell re-render when `X`'s ACL syncs or changes. When
+   * `undefined`, there is no reactive upgrade, and the sync snapshot still
+   * gates soundly.
+   */
   readonly #membershipProvider?: SpaceMembershipProvider;
 
   constructor(options: WorkerReconcilerOptions) {

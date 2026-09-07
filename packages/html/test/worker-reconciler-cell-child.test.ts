@@ -131,14 +131,18 @@ Deno.test("worker reconciler - cell child optimization", async (t) => {
       return false;
     }
 
-    // A mock carries no metadata, and the inherited read throws on a
-    // link-less cell.
+    /**
+     * Returns `undefined`: a mock carries no metadata, and the inherited read
+     * throws on a link-less cell.
+     */
     getMetaRaw(): undefined {
       return undefined;
     }
 
-    // A mock names no link, so it resolves to itself; a step that needs
-    // otherwise overrides it on the instance.
+    /**
+     * Resolves to itself, since a mock names no link; a step that needs
+     * otherwise overrides it on the instance.
+     */
     resolveAsCell(): MockCell | Cell<unknown> {
       return this;
     }

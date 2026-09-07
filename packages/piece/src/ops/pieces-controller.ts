@@ -777,11 +777,14 @@ export class PiecesController<T = unknown> {
     await timePiecePhase("add.synced", () => this.synced());
   }
 
-  // `pieceListSchema` gives its items no shape — they are `unknown` — so
-  // neither the value the caller receives nor the query behind it has anywhere
-  // to descend inside a piece, and no field a piece labels is ever selected.
-  // `asCell` alone would not be enough for that: it bounds the runtime's own
-  // walk, while the memory query walks through it.
+  /**
+   * Syncs the piece list held in `cell`. `pieceListSchema` gives its items no
+   * shape — they are `unknown` — so neither the value the caller receives nor
+   * the query behind it has anywhere to descend inside a piece, and no field a
+   * piece labels is ever selected. `asCell` alone would not be enough for
+   * that: it bounds the runtime's own walk, while the memory query walks
+   * through it.
+   */
   syncPieces(cell: Cell<Cell<unknown>[]>) {
     return cell.asSchema(pieceListSchema).pull();
   }
@@ -1255,7 +1258,9 @@ export class PiecesController<T = unknown> {
     return cell;
   }
 
-  // Return Cell with argument content, loading the pattern if needed.
+  /**
+   * Returns the `Cell` with argument content, loading the pattern if needed.
+   */
   getArgument<T = unknown>(
     piece: Cell<unknown | T>,
   ): Cell<T> {
@@ -1385,16 +1390,18 @@ export class PiecesController<T = unknown> {
     return piece;
   }
 
-  // Consistently return the `Cell<Piece>` of piece with
-  // id `pieceId`, applies the provided `pattern` (which may be
-  // its current pattern -- useful when we are only updating inputs),
-  // and optionally applies `inputs` if provided.
-  //
-  // Reports a failure as itself, whether it happened before or after the
-  // setup transaction committed. `runPatternUpdate` below runs the same
-  // post-commit work and differs precisely here: it issues a receipt, so it
-  // reports a post-commit failure as a `PatternSetupPostCommitError` carrying
-  // that receipt. Callers classifying failures by message want this one.
+  /**
+   * Consistently returns the `Cell<Piece>` of the piece with id `pieceId`,
+   * applying the provided `pattern` (which may be its current pattern — useful
+   * when we are only updating inputs), and optionally applying `inputs` if
+   * provided.
+   *
+   * Reports a failure as itself, whether it happened before or after the setup
+   * transaction committed. `runPatternUpdate()` below runs the same post-commit
+   * work and differs precisely here: it issues a receipt, so it reports a
+   * post-commit failure as a `PatternSetupPostCommitError` carrying that
+   * receipt. Callers classifying failures by message want this one.
+   */
   async runWithPattern(
     pattern: Pattern | Module,
     pieceId: string,
@@ -1698,8 +1705,10 @@ export class PiecesController<T = unknown> {
     await entity.sync();
   }
 
-  // Returns the piece from our active piece list if it is present,
-  // or undefined if it is not
+  /**
+   * Returns the piece from our active piece list if it is present, or
+   * `undefined` if it is not.
+   */
   async getActivePiece(pieceCell: Cell<unknown>) {
     const piecesCell = await this.getPieceRegistry();
     const resolved = pieceCell.resolveAsCell();

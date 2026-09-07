@@ -458,7 +458,8 @@ export class RuntimeInternals extends EventTarget {
   > = new Map();
   // TODO(runtime-worker-refactor)
   #telemetryMarkers: RuntimeTelemetryMarkerResult[] = [];
-  // Optional OTel sink (browser telemetry enabled). Inert when undefined.
+
+  /** Optional OTel sink (browser telemetry enabled). Inert when `undefined`. */
   #telemetrySink?: RuntimeTelemetrySink;
 
   constructor(
