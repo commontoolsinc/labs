@@ -520,8 +520,8 @@ export class CellBridge {
 
   /**
    * The synchronization and hydration tables, the entity-projection tables,
-   * the disconnection state, and the tree-building steps this bridge keeps to
-   * itself, which a test drives directly.
+   * the disconnection state, and the tree-building and failed-connection
+   * cleanup steps this bridge keeps to itself, which a test drives directly.
    */
   get accessForTestingOnly(): {
     readonly pieceSyncs: Map<string, Promise<void>>;
@@ -539,6 +539,7 @@ export class CellBridge {
     disconnected: boolean;
     reconnectTimer: ReturnType<typeof setTimeout> | null;
     attemptReconnect(): Promise<void>;
+    removeFailedSpaceTree(spaceName: string, state: SpaceState): void;
     enqueuePiecePropRebuild(args: PropRebuildJob): Promise<void>;
     hydratePieceProp(
       pieceIno: bigint,
@@ -626,6 +627,8 @@ export class CellBridge {
         outerThis.#reconnectTimer = value;
       },
       attemptReconnect: () => this.#attemptReconnect(),
+      removeFailedSpaceTree: (spaceName, state) =>
+        this.#removeFailedSpaceTree(spaceName, state),
       enqueuePiecePropRebuild: (args) => this.#enqueuePiecePropRebuild(args),
       hydratePieceProp: (pieceIno, propName, retries) =>
         this.#hydratePieceProp(pieceIno, propName, retries),
