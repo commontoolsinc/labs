@@ -327,7 +327,7 @@ export class CFSelect extends BaseElement {
     }
   }
 
-  // Theme consumption
+  /** The theme, consumed from the provider. */
   @consume({ context: cfThemeContext, subscribe: true })
   @property({ attribute: false })
   accessor theme: CFTheme = defaultTheme;

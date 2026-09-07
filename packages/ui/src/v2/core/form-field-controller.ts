@@ -94,20 +94,28 @@ export class FormFieldController<T> implements ReactiveController {
   private _cellController: CellControllerLike<T>;
   private _validate: () => ValidationResult;
 
-  // Form context consumer - automatically subscribes to context
+  /** Form context consumer, which automatically subscribes to the context. */
   private _formContextConsumer: ContextConsumer<
     typeof formContext,
     ReactiveControllerHost & HTMLElement
   >;
 
-  // Buffer state (only used when in form context)
+  /** The buffered value, only used when in a form context. */
   private _buffer: T | undefined;
-  // Flag to track if buffer has been set (allows undefined as a valid buffered value)
+
+  /**
+   * Whether the buffer has been set, which allows `undefined` as a valid
+   * buffered value.
+   */
   private _hasBuffer = false;
-  // Original value captured when form field is registered - used for reset
+
+  /**
+   * Original value, captured when the form field is registered and used for
+   * reset.
+   */
   private _originalValue: T | undefined;
 
-  // Form registration cleanup function
+  /** Cleanup function for the form registration. */
   private _formUnregister?: () => void;
 
   constructor(

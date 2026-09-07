@@ -174,7 +174,7 @@ export class CFMap extends BaseElement {
   declare fitToBounds: boolean;
   declare interactive: boolean;
 
-  // Leaflet map instance
+  /** The Leaflet map instance. */
   private _map: L.Map | null = null;
 
   // Layer groups for organized management
@@ -182,28 +182,31 @@ export class CFMap extends BaseElement {
   private _circleLayer: L.LayerGroup | null = null;
   private _polylineLayer: L.LayerGroup | null = null;
 
-  // Track markers for drag events
+  /** The markers, tracked for drag events. */
   private _leafletMarkers: L.Marker[] = [];
 
-  // Track circles for click events
+  /** The circles, tracked for click events. */
   private _leafletCircles: L.Circle[] = [];
 
-  // Track polylines for cleanup
+  /** The polylines, tracked for cleanup. */
   private _leafletPolylines: L.Polyline[] = [];
 
-  // RAF ID for map initialization (prevent race condition on disconnect)
+  /**
+   * `requestAnimationFrame` id for map initialization, which prevents a race
+   * condition on disconnect.
+   */
   private _rafId: number | null = null;
 
-  // ResizeObserver for automatic map resize when container changes
+  /** `ResizeObserver` for automatic map resize when the container changes. */
   private _resizeObserver: ResizeObserver | null = null;
 
-  // Timeout ID for debounced resize handling
+  /** Timeout id for debounced resize handling. */
   private _resizeTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
-  // Flag to prevent echo loops during programmatic updates
+  /** Whether a programmatic update is in progress; this prevents echo loops. */
   private _isUpdatingFromCell = false;
 
-  // Flag to track pending click events deferred during animations
+  /** A pending click event deferred during an animation, if any. */
   private _pendingClickEvent: L.LeafletMouseEvent | null = null;
 
   // Pending updates deferred during animations
@@ -251,7 +254,7 @@ export class CFMap extends BaseElement {
     },
   });
 
-  // Bound event handler for cleanup
+  /** Bound keydown handler, held so it can be removed on cleanup. */
   private _boundHandleKeydown = this._handleKeydown.bind(this);
 
   constructor() {
