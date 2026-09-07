@@ -26,8 +26,11 @@ of the graft `2a116f1d73` (#6937). The two fixes under test are `377f4df404`
 reads its board's mention index and never writes it). Estuary was not
 contacted, read-only calls included; every store below is local.
 
-Every command quoted was run and every fenced block is real output, trimmed
-only where a JSON envelope is longer than the field carrying the finding.
+Every command quoted was run and every fenced block is real output. Two kinds
+of trim are used and are named at the point of use: a JSON envelope longer than
+the field carrying the finding, and a repeated line elided from a loop's output
+with the elision stated. Where a number appears in prose or a table, the output
+it was read from is quoted beside it.
 
 The first rehearsal's convention about mechanisms is kept: where a passage says
 WHY something happened, the reason is read from the named source file and cited
@@ -152,8 +155,15 @@ wrote to space graft-rerun
 Committed source update for piece fid1:2cz27KUxVbq9sO19J6fkG_G0H4CfUnhaopw4udwjEHM (Pattern Ref: cf:module/66CmHEvcyTfppRFstfeUuTFnFM3DJ0IPd6vM6vjaDac#default, Revision: 58166910-b33d-4b60-8606-2691451901ee)
 ```
 
-Exit zero, 15.5 s wall. The verdict, strict and again with
-`--expect-migration`, which printed the same block:
+with the loop's own instrumentation around that single command reporting
+
+```
+setsrc exit=0
+wall seconds: 15.546458000
+```
+
+The verdict, strict and again with `--expect-migration`, which printed the same
+block:
 
 ```
 baseline   intact
@@ -237,9 +247,11 @@ says.**
 [`../../development/space-clone-rehearsal.md`](../../development/space-clone-rehearsal.md)
 says argument cells "are not owned by a piece and land here [`free-cell`], so a
 changed one is a clobber rather than a migration." Two halves of that fail
-here. Every one of this clone's four argument cells is classified `owned-cell`,
-so the tally hides them; and the single changed `free-cell` is a derived view
-node that legitimately went to null, so the tally raises an alarm about it.
+here. The board's argument cell is in the list above as `owned-cell`, not as a
+`free-cell`, so the tally hides it; and the single changed `free-cell` is a
+derived view node that legitimately went to null, so the tally raises an alarm
+about it. The other three argument cells are classified the same way once they
+move, which the annotated list under "Final state of the clone" below shows.
 What found the truth was diffing each argument cell by name — resolved through
 `cf inspect piece`, exactly as the document says to — rather than reading the
 kinds. No run here established why the classification differs from the
@@ -277,8 +289,22 @@ what a genuine pre-graft clone reports too. The older blocker is not gone from
 the world; it is gone from the path a migration takes, and it is still what a
 Topic left on pre-graft source is held to.
 
-**One forced update per Topic, and what each costs.** Counts are `cf space
-verify` immediately before and immediately after each single command:
+**One forced update per Topic, and what each costs.** The three were forced by
+one loop that ran `cf space verify` immediately before and immediately after
+each single command and printed its counts. Its output, with the three
+`Committed source update …` lines elided:
+
+```
+before-any-topic: removed 0 changed 9  (5 owned-cell, 2 module, 1 piece, 1 free-cell) added 132 commits 167 → 203 revisions 741 → 944
+--- TA exit=0 wall=1.192797000s
+after-TA: removed 0 changed 11  (6 owned-cell, 2 piece, 2 module, 1 free-cell) added 142 commits 167 → 214 revisions 741 → 1042
+--- TB exit=0 wall=1.318465000s
+after-TB: removed 0 changed 13  (7 owned-cell, 3 piece, 2 module, 1 free-cell) added 148 commits 167 → 225 revisions 741 → 1136
+--- TC exit=0 wall=1.238639000s
+after-TC: removed 0 changed 15  (8 owned-cell, 4 piece, 2 module, 1 free-cell) added 154 commits 167 → 236 revisions 741 → 1230
+```
+
+which reads as:
 
 | Topic | commits | revisions | added | changed | wall |
 | --- | --- | --- | --- | --- | --- |
@@ -366,9 +392,24 @@ $ cf cell get --cell "$TB" shortName --step
 Cannot read piece result at "shortName": stored data is present, but its schema could not resolve all required values. The piece was stepped, but the required value still did not materialize.
 ```
 
-After all three: `A: "1"`, `B: "2"`, `C: "3"`. Each bind cost six commits and
-six revisions, and 0.92 s, 0.81 s and 0.89 s of wall time — measured by `cf
-space verify` bracketing the single command. The first rehearsal reported one
+After all three: `A: "1"`, `B: "2"`, `C: "3"`. The same bracketing loop, with
+the three `Linked …` lines elided:
+
+```
+before bind: commits 167 → 254 revisions 741 → 1285
+bind TA wall=.917068000s
+after bind TA: commits 167 → 260 revisions 741 → 1291
+before TB: commits 167 → 263 revisions 741 → 1294
+bind TB wall=.813192000s
+after TB: commits 167 → 269 revisions 741 → 1300
+before TC: commits 167 → 269 revisions 741 → 1300
+bind TC wall=.891357000s
+after TC: commits 167 → 275 revisions 741 → 1306
+```
+
+Six commits and six revisions per bind, and 0.92 s, 0.81 s and 0.89 s of wall
+time. The three commits between `after bind TA` and `before TB` are the two
+`shortName` reads quoted above, not the bind. The first rehearsal reported one
 commit and one revision per bind, measured differently (`cf inspect churn
 --bucket 5` over a bracketing window on a freshly deployed piece); the two
 numbers are not comparable and neither was re-measured the other's way.
@@ -381,9 +422,15 @@ $ cf inspect value-at "$DB" of:fid1:5AolZ… --json | jq -c '.value.boardNames'
 ```
 
 A second `backfillNames` returns `{"assigned": []}` and leaves the map
-identical. It is not free: the call itself moved the store by one commit and
-one revision (450 from 449). No run here attributed that commit, and nothing
-about the names map changed.
+identical. It is not free, bracketed the same way:
+
+```
+before second backfill: commits 167 → 449 revisions 741 → 1873
+after second backfill: commits 167 → 450 revisions 741 → 1874
+```
+
+One commit and one revision for a call that assigned nothing. No run here
+attributed that commit, and the names map read back unchanged afterwards.
 
 Member addressing, after `cf piece set-slug top "$BOARD/names"`:
 
@@ -428,14 +475,132 @@ The last suggestion was not taken; #6965 is what it costs.
 reduced copy of the collection-naming exemplar — its `addItem`, `backfillNames`
 and index over `packages/patterns/collection-naming/item.tsx`, without the
 mention universe or the body — plus one verb the exemplar has no equivalent of,
-`removeItem`, which drops the member at a position. The two differ in exactly
-one function: the first calls `backfillNames` from
-`packages/patterns/collection-naming/naming.ts`, and the second calls a locally
-vendored copy of the pre-#6987 walk — `members.key(index)` where the current one
-has `members.key(index).resolveAsCell()`. The second is the negative control,
-and it exists so that a passing result on the first means something. Neither
-file is in the tree; both lived in the throwaway worktree the rehearsal ran
-from.
+`removeItem`, which drops the member at a position. The second is the negative
+control, and it exists so that a passing result on the first means something.
+
+Neither file is in the tree; both lived in the throwaway worktree the rehearsal
+ran from, so the whole of what separates them is quoted here rather than
+asserted. This is `diff -u board-with-remove.tsx board-slot-names.tsx`, entire:
+
+```diff
+@@ -1,13 +1,15 @@
+ /**
+- * A rehearsal instrument: the collection-naming exemplar board with one extra
+- * verb, `removeItem`, which drops the member at a position so the list shifts
+- * under the namespace. Nothing deployed has such a verb, and the removal case
+- * is what this rehearsal has to reach at runtime rather than in a unit test.
++ * The negative control for the removal test: the same board as
++ * `board-with-remove.tsx`, except that its backfill stores the cell AT a list
++ * position instead of the member the position holds. That is the defect
++ * #6987 fixed, vendored here so the rehearsal can show its instrument
++ * distinguishes the two.
+  */
+ 
+ import {
+   action,
+   Default,
++  equals,
+   NAME,
+   pattern,
+   Stream,
+@@ -19,13 +21,34 @@
+ import Item from "../packages/patterns/collection-naming/item.tsx";
+ import {
+   assignName,
+-  backfillNames,
+   type NamesMap,
++  type NamesMapCell,
+   namesTable,
+   type NamesTableRow,
++  nextNameAmong,
+ } from "../packages/patterns/collection-naming/naming.ts";
+ 
+-/** One row of the board's index. */
++/** The pre-#6987 walk: it names the POSITION, not the member in it. */
++function backfillNamesBySlot(
++  members: { get(): readonly unknown[]; key(index: number): object },
++  names: NamesMapCell,
++): string[] {
++  const map = names.get() ?? {};
++  const named = Object.values(map) as (object | undefined)[];
++  const count = members.get().length;
++  const written: string[] = [];
++  let next = nextNameAmong(Object.keys(map));
++  for (let index = 0; index < count; index++) {
++    const member = members.key(index);
++    if (named.some((other) => equals(member, other))) continue;
++    names.key(next).set(member);
++    written.push(next);
++    named.push(member);
++    next = String(Number(next) + 1);
++  }
++  return written;
++}
++
+ export interface ItemIndexRow {
+   title: string | Default<"">;
+   createdAt: number;
+@@ -58,15 +81,11 @@
+   assigned: string[];
+ }
+ 
+-/** What `removeItem` takes: the position to drop. */
+ export interface RemoveItemEvent {
+-  /** Zero-based position in filing order. */
+   position: number;
+ }
+ 
+-/** What `removeItem` returns. */
+ export interface RemoveItemResult {
+-  /** How many members the board holds afterwards. */
+   remaining: number;
+ }
+ 
+@@ -116,7 +135,7 @@
+       if (!(agentName ?? "").trim()) {
+         reject("backfillNames", "agentName must be non-blank");
+       }
+-      return { assigned: backfillNames(items, names) };
++      return { assigned: backfillNamesBySlot(items, names) };
+     },
+   );
+ 
+@@ -130,11 +149,11 @@
+   });
+ 
+   return {
+-    [NAME]: `Items (${itemCount})`,
++    [NAME]: `Slot-named items (${itemCount})`,
+     [UI]: (
+       <cf-screen>
+         <cf-vstack gap="2" padding="4">
+-          <cf-heading level={3}>Items</cf-heading>
++          <cf-heading level={3}>Slot-named items</cf-heading>
+           {items.map((item) => (
+             <cf-card>
+               <cf-hstack gap="3" align="center">
+```
+
+Read as a list of differences that is complete because the diff is: the control
+drops the `backfillNames` import and adds `equals`, `NamesMapCell` and
+`nextNameAmong`; it carries `backfillNamesBySlot`, which is the pre-#6987 walk
+with `members.key(index)` where the current one has
+`members.key(index).resolveAsCell()` and its own `incrementName` inlined as
+`String(Number(next) + 1)`, since that helper is not exported; its `backfill`
+action calls that function instead of the imported one; and it renames itself
+in two display strings, `[NAME]` and the `cf-heading` text. Everything else —
+the input and output types, `addItem`, `assignName`, `namesTable`,
+`removeItem`, the index, the item pattern each composes — is character for
+character the same. Three doc comments the first carries were not copied into
+the second, which the diff also shows.
+
+So this is not a one-difference claim: it is one behavioral difference plus two
+display strings, and the vendored walk is a reconstruction of the pre-#6987
+code rather than its bytes — `incrementName` is module-private in `naming.ts`,
+so the copy spells that step itself. What rules the display strings out as the
+cause is not an argument about `[NAME]`: it is that the two boards' names maps
+below differ in exactly the way the vendored walk predicts, and in no other
+way.
 
 Four items were filed on each, the names map was cleared so the backfill had to
 write every entry, and `backfillNames` was run once. The two maps, read out of
@@ -513,9 +678,18 @@ per-member reads. So a `--step` read of the board does not step its members,
 and a member's `shortName` on the board's index can be behind what the member
 itself would report. The first rehearsal's rule — read
 twice before concluding a bind failed — does not cover this: two identical
-reads were both stale, and what moved the value was stepping the member. The
-fixed board's index was read three times across the same sequence and returned
-`2, 3, 4` every time.
+reads were both stale, and what moved the value was stepping the member.
+
+The fixed board's index was read across the same sequence and did not move. Its
+third read, taken in the same command as the control's third read above:
+
+```
+[
+  { "shortName": "2", "title": "Item two" },
+  { "shortName": "3", "title": "Item three" },
+  { "shortName": "4", "title": "Item four" }
+]
+```
 
 No run here attributed the staleness to a mechanism.
 
@@ -546,14 +720,26 @@ revisions  741 → 759
 ```
 
 Attribution came from a separate experiment on a different piece in the same
-store, one command at a time, counting with `cf space verify` between:
+store, one command at a time, counting with `cf space verify` between. First,
+the piece's own current source and then a different source that had already
+been deployed elsewhere in the space, with the two `… can replace the source
+for piece …` lines elided:
 
-- `--check` of the piece's own current source: `commits 167 → 448`,
-  `added 578` — unchanged, zero writes.
-- `--check` of a different source that had already been deployed elsewhere in
-  the space: unchanged again, zero writes.
-- `--check` of a source that differed from the first by one string literal, so
-  its compiled module set was new: `commits 448 → 449`, `added 578 → 586`.
+```
+before: added 578 commits 167 → 448 revisions 741 → 1865
+after own-source check: added 578 commits 167 → 448 revisions 741 → 1865
+after new-source check: added 578 commits 167 → 448 revisions 741 → 1865
+```
+
+Neither wrote anything, which is why the second is labelled with the source
+being new to the PIECE rather than to the store. Then a source that differed
+from the first by one string literal, so its compiled module set was new to the
+store:
+
+```
+before: added 578 commits 167 → 448 revisions 741 → 1865
+after check of a never-stored source: added 586 commits 167 → 449 revisions 741 → 1873
+```
 
 So what a check costs is the compiled module set it has to store, and a check
 whose candidate is already in the space's content store costs nothing. The pair
@@ -600,9 +786,85 @@ commits    167 → 467
 revisions  741 → 1933
 ```
 
-Churn settles: the last commit is at `07:44` and the window observed through
-`07:45` reports that minute at zero. The peak minute is 56 commits, which is
-not a plateau.
+The eighteen, by kind and id. The parenthetical labels are not part of the
+output: they were substituted in from the ids `cf inspect piece` had already
+resolved for the board and the three Topics.
+
+```
+free-cell	of:fid1:MscuyM1Fu6C0-R_lMStp2nxPWJA2dmO0xdqjrnGMYxI
+module	of:fid1:B1qoTCLCReRnzGjMrffTbyjfncQS5noIzXU17dEi3jY
+module	of:fid1:jR-EjijuUI72pIM1u_pICPObJ7l6FY267vQsQ5HOaEs
+owned-cell	computed:fid1:Djt2mteUsPM7xYqzyAbcQZEwUhUFRtNcUu_dL2GyxUs
+owned-cell	computed:fid1:i4ZalHeHb337sViE2wiIW34dBbroXoPTovKvc5OqcHA
+owned-cell	of:fid1:-Cl3XnGLsdTrHsdAQ-9R6m4foFt431o10d9fhW_y084
+owned-cell	of:fid1:5AolZAculFDcxqYkHZTO6UMxPmSAo6RoSzoxA6-2c04 (TOPIC A ARGUMENT)
+owned-cell	of:fid1:b0fYSlQ-xsKvh7wH-QHo0t3OObzDzO2PKd9t9cyCzwc
+owned-cell	of:fid1:iAMIggyBsc1OmpE2D48UOz_Dj4vVXMEXGT1XhgGRCm8 (TOPIC B ARGUMENT)
+owned-cell	of:fid1:l4f2HUA0VXPjf1g2J_fCPGLxFLmdaoxW5cKPNK6gAnc (TOPIC C ARGUMENT)
+owned-cell	of:fid1:LaFtomRzChrcyFJg156LkWLHrOAFm7cADdbMT1Uj-O8
+owned-cell	of:fid1:N3Vh4v1lXM44HYZs2AyfejeTsdOrlIGZU2RiMg2W8UU
+owned-cell	of:fid1:r4omHfXbUOtoPW4MjZkLJdeD5DDaoQJQTVY4bYlrINY
+owned-cell	of:fid1:XerVoLrsD0mNSKAo1aMA-Av1N2rFjajN1tlg86uw8BE (BOARD ARGUMENT)
+piece	of:fid1:2cz27KUxVbq9sO19J6fkG_G0H4CfUnhaopw4udwjEHM (BOARD PIECE)
+piece	of:fid1:MY1hlV9P4dSvnc4IsBHVfgcMycsUw6V9NAwaF0yaB_0 (TOPIC A PIECE)
+piece	of:fid1:YRns-lbzx9QKDUN8LJKyGAwnNmc1V82H6A0Zo2Nvonk (TOPIC C PIECE)
+piece	of:fid1:zB92OJBKdC4t8cu8WKBtX-pXI--dzTe0F4W4FAnd-38 (TOPIC B PIECE)
+```
+
+All four argument cells are `owned-cell`, which is the classification claim
+Finding 2 makes. The seven unlabelled `owned-cell` rows were looked up in
+`cf inspect entities`, whose label column for them reads:
+
+```
+of:fid1:-Cl3Xn…   owned-cell [3]
+of:fid1:b0fYSl…   owned-cell [3]
+of:fid1:LaFtom…   owned-cell [3]
+of:fid1:N3Vh4v…   owned-cell [3]
+of:fid1:r4omHf…   owned-cell [3]
+computed:fid1:Djt2mt…   owned-cell "Space Home (3)"
+computed:fid1:i4ZalH…   owned-cell false
+```
+
+— five three-element lists, a name and a boolean, so no changed entity in this
+store is authored content. The instrument boards
+and their items are not here: they were created after the baseline, so they
+are counted in `added`, not `changed`.
+
+Churn over the whole run, `--bucket 60`, with `--until` set past the last
+write so the trailing quiet minute is inside the window:
+
+```
+2026-09-06 07:29:00	 0 commits	0 revisions
+2026-09-06 07:30:00	29 commits	174 revisions
+2026-09-06 07:31:00	 0 commits	0 revisions
+2026-09-06 07:32:00	34 commits	306 revisions
+2026-09-06 07:33:00	14 commits	31 revisions
+2026-09-06 07:34:00	10 commits	33 revisions
+2026-09-06 07:35:00	26 commits	38 revisions
+2026-09-06 07:36:00	 0 commits	0 revisions
+2026-09-06 07:37:00	 0 commits	0 revisions
+2026-09-06 07:38:00	 0 commits	0 revisions
+2026-09-06 07:39:00	56 commits	199 revisions ←peak
+2026-09-06 07:40:00	19 commits	63 revisions
+2026-09-06 07:41:00	55 commits	180 revisions
+2026-09-06 07:42:00	24 commits	80 revisions
+2026-09-06 07:43:00	 7 commits	7 revisions
+2026-09-06 07:44:00	26 commits	81 revisions
+2026-09-06 07:45:00	 0 commits	0 revisions
+
+300 commits / 1192 revisions over 17 × 60s
+peak 2026-09-06 07:39:00: 56.0 commits/min
+last commit 2026-09-06 07:44:00, observed through 2026-09-06 07:45:00
+```
+
+That is the settle: `last commit 2026-09-06 07:44:00, observed through
+2026-09-06 07:45:00`, and that minute reported at zero. The busiest minute is
+56 commits at 07:39, the minute before it is zero and the minute after it 19,
+so there is no plateau — the shape is spikes with quiet between them. The 07:32
+through 07:35 band is the three forced Topic updates and the binds; 07:39
+through 07:44 is the removal instrument and the `setsrc --check` attribution,
+which are this rehearsal's own machinery rather than anything a migration would
+do.
 
 ## What this rehearsal did not cover
 
@@ -619,7 +881,8 @@ not a plateau.
   tests attached; the three Topic updates were not, because a board-composed
   child carries no test package of its own. What a `--test`-carrying Topic
   deploy would cost is unmeasured.
-- **Scale.** Three Topics, not 125. The per-Topic costs above are what a board
+- **Scale.** Three Topics, against the roughly 125 the first rehearsal counted
+  for the Estuary board. The per-Topic costs above are what a board
   the size of the Estuary one would multiply, and the bulk-CLI shape
   [`../topics-board-migration-2026-08-28.md`](../topics-board-migration-2026-08-28.md)
   found unreliable from a laptop is unchanged by anything here.
