@@ -3413,13 +3413,13 @@ export class SpaceReplica
       buildReads: (source, localSeq, identity) =>
         this.#buildReads(source, localSeq, identity),
       consumeUpdates: (iterator) => this.#consumeUpdates(iterator),
-      // The next three forward to TypeScript-private members so that a test
+      // The next two forward to TypeScript-private members so that a test
       // which replaces one by assignment is honored here too.
       refreshWatchSet: (entries, type, watchBranch) =>
         this.refreshWatchSet(entries, type, watchBranch),
       applySessionSync: (sync, type) => this.applySessionSync(sync, type),
       waitForConflictReadRepair: (rejection) =>
-        this.waitForConflictReadRepair(rejection),
+        this.#waitForConflictReadRepair(rejection),
     };
   }
 
@@ -6163,7 +6163,7 @@ export class SpaceReplica
           this.#scopeKeyIdentity(),
         )
         : undefined;
-      await this.waitForConflictReadRepair(rejection);
+      await this.#waitForConflictReadRepair(rejection);
       this.#dropPending(localSeq);
       // Every drop funnels through here (server conflict, preempt, cascade,
       // reset — this is dropPending's only call site), so scanning right
@@ -7406,11 +7406,10 @@ export class SpaceReplica
   }
 
   /**
-   * TypeScript-private rather than a `#` name, because
-   * `test/memory-v2-subscription.test.ts` replaces this member by
-   * assignment, which a `#` method does not allow.
+   * Waits out the read repair a server conflict names, so that a retry of
+   * the rejected commit starts from the repaired base.
    */
-  private async waitForConflictReadRepair(
+  async #waitForConflictReadRepair(
     rejection: StorageTransactionRejected,
   ): Promise<void> {
     if (rejection.name !== "ConflictError") {

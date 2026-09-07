@@ -113,6 +113,13 @@ class WatchAddRemoveTransport extends ScriptedSessionTransport {
 class FailFirstWatchRemovalTransport extends ScriptedSessionTransport {
   watchRemovalAttempts = 0;
   onWatchAdded?: () => void;
+
+  /**
+   * How many successful removal responses to send without their `sync`,
+   * which the session's apply then throws on; a client-side apply failure
+   * rather than a wire refusal.
+   */
+  malformedRemovalSyncs = 0;
   readonly #failuresBeforeSuccess: number;
   readonly #precedingId?: URI;
   #serverSeq = 1;
@@ -157,6 +164,15 @@ class FailFirstWatchRemovalTransport extends ScriptedSessionTransport {
       }
       case "session.watch.set":
         this.watchRemovalAttempts++;
+        if (this.malformedRemovalSyncs > 0) {
+          this.malformedRemovalSyncs--;
+          this.respond({
+            type: "response",
+            requestId: message.requestId!,
+            ok: { serverSeq: this.#serverSeq },
+          });
+          return;
+        }
         if (this.watchRemovalAttempts <= this.#failuresBeforeSuccess) {
           this.respond({
             type: "response",
@@ -395,21 +411,9 @@ Deno.test("absence reconciliation retries when applying a watch removal sync fai
     storageManager,
   });
   const provider = storageManager.open(space);
-  // The member is replaced by assignment, which its `private` rather than
-  // `#` name allows; the cast reaches only it, typed as the class types it.
-  const replica = provider.replica as unknown as {
-    applySessionSync: SpaceReplica["accessForTestingOnly"]["applySessionSync"];
-  };
-  const originalApply = replica.applySessionSync.bind(replica);
-  let applyCalls = 0;
-  replica.applySessionSync = (sync, type) => {
-    applyCalls++;
-    if (applyCalls === 2) {
-      replica.applySessionSync = originalApply;
-      throw new Error("synthetic watch removal apply failure");
-    }
-    originalApply(sync, type);
-  };
+  // The first removal's response arrives without its `sync`, so applying it
+  // fails on the client side after the wire accepted it.
+  transport.malformedRemovalSyncs = 1;
   const tx = runtime.edit();
   tx.read({
     space,
@@ -423,7 +427,6 @@ Deno.test("absence reconciliation retries when applying a watch removal sync fai
     assertEquals(await provider.loadUnexaminedAbsences!(tx.tx), 0);
     assertEquals(transport.watchRemovalAttempts, 2);
   } finally {
-    replica.applySessionSync = originalApply;
     tx.abort("inspection only");
     await runtime.dispose();
     await storageManager.close();

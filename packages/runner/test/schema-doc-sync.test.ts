@@ -666,33 +666,16 @@ describe("schema-doc-sync", () => {
   it("the background consumer survives a frame that fails to apply and keeps consuming", async () => {
     const provider = readerStorage.open(space);
     const replica = provider.replica as SpaceReplica;
-    // Throw once from applySessionSync itself (any non-validation apply
-    // bug), self-restoring: the belt in consumeUpdates must swallow it,
-    // keep the loop alive, and apply the NEXT frame. The member is replaced
-    // by assignment, which its `private` rather than `#` name allows; the
-    // cast reaches only it.
-    const stubbed = replica as unknown as {
-      applySessionSync(sync: SessionSync, type: "pull" | "integrate"): void;
-    };
-    const original = stubbed.applySessionSync.bind(stubbed);
-    stubbed.applySessionSync = () => {
-      stubbed.applySessionSync = original;
-      throw new Error("synthetic apply failure");
-    };
+    // The first frame has no `upserts`, which the apply reads at once and
+    // throws on: the belt in consumeUpdates must swallow that, keep the loop
+    // alive, and apply the NEXT frame.
     const frames: SessionSync[] = [
       {
         type: "sync",
         fromSeq: 600_000,
         toSeq: 600_001,
-        upserts: [{
-          branch: "",
-          id: "of:survivor-1",
-          scope: "space",
-          seq: 1,
-          doc: { value: { n: 1 } },
-        }],
         removes: [],
-      },
+      } as unknown as SessionSync,
       {
         type: "sync",
         fromSeq: 600_001,

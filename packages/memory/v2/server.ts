@@ -1611,13 +1611,20 @@ export class Server {
   }
 
   /**
-   * The timer-driven refresh pass, which a test drives directly.
+   * The timer-driven refresh pass and the per-space publication lock, which
+   * a test drives directly.
    */
   get accessForTestingOnly(): {
     flushScheduledSessions(): Promise<void>;
+    withSpacePublicationLock<T>(
+      space: string,
+      run: () => Promise<T>,
+    ): Promise<T>;
   } {
     return {
       flushScheduledSessions: () => this.#flushScheduledSessions(),
+      withSpacePublicationLock: (space, run) =>
+        this.#withSpacePublicationLock(space, run),
     };
   }
 
@@ -2194,7 +2201,7 @@ export class Server {
     id: string,
     value: EntityDocument["value"],
   ): Promise<Engine.AppliedCommit> {
-    return await this.withSpacePublicationLock(space, async () => {
+    return await this.#withSpacePublicationLock(space, async () => {
       const engine = await this.openEngine(space);
       if (this.#aclMode() !== "off") {
         if (id === aclDocId(space)) {
@@ -3234,7 +3241,7 @@ export class Server {
     publishVerdict?: PublishTransactVerdict,
   ): Promise<ResponseMessage<Engine.AppliedCommit>> {
     const requestedAt = performance.now();
-    return await this.withSpacePublicationLock(message.space, async () => {
+    return await this.#withSpacePublicationLock(message.space, async () => {
       const lockWaitMs = performance.now() - requestedAt;
       let outcome = "threw";
       try {
@@ -3289,7 +3296,7 @@ export class Server {
   async resolveEventAttention(
     message: EventAttentionResolveRequest,
   ): Promise<ResponseMessage<EventAttentionResolveResult>> {
-    return await this.withSpacePublicationLock(message.space, async () => {
+    return await this.#withSpacePublicationLock(message.space, async () => {
       try {
         const session = this.#sessions.get(message.space, message.sessionId);
         if (session === null) {
@@ -6448,12 +6455,8 @@ export class Server {
    * A transaction arriving during fan-out waits for that turn to finish. Locks
    * for other spaces remain independent, so the latency coupling is local to
    * one space.
-   *
-   * TypeScript-private rather than a `#` name, because
-   * `test/v2-verdict-catchup.test.ts` replaces this member by assignment,
-   * which a `#` method does not allow.
    */
-  private async withSpacePublicationLock<T>(
+  async #withSpacePublicationLock<T>(
     space: string,
     run: () => Promise<T>,
   ): Promise<T> {
@@ -6513,7 +6516,7 @@ export class Server {
       });
 
       for (const space of spaces) {
-        await this.withSpacePublicationLock(space, async () => {
+        await this.#withSpacePublicationLock(space, async () => {
           // Removed at its own processing turn (CT-1927): pre-deleting the
           // whole selection meant a failure mid-batch stranded every
           // not-yet-processed space — dirty maps intact but the space no

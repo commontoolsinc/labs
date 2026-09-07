@@ -1102,8 +1102,8 @@ export class PatternManager {
    * the space whose cache documents attest it. The ordinary save path still
    * preserves any authenticated delegation already present in `toSpace`.
    *
-   * TypeScript-private rather than a `#` name, because `test/cell-cache.test.ts`
-   * and `test/pattern-replication-sibling-race.test.ts` replace this member by
+   * TypeScript-private rather than a `#` name, because
+   * `test/pattern-replication-sibling-race.test.ts` replaces this member by
    * assignment, which a `#` method does not allow.
    */
   private async replicateClosures(
