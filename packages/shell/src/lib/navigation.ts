@@ -48,9 +48,8 @@ export class Navigation {
   }
 
   /**
-   * Stops listening. The shell's own `Navigation` lives as long as the page,
-   * so nothing in the application calls this; a caller that builds one around
-   * a fixture needs the four global listeners back.
+   * Stops listening, removing the four global listeners the constructor
+   * added.
    */
   dispose() {
     globalThis.removeEventListener(NAVIGATE_EVENT, this.#onNavigate);

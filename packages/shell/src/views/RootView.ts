@@ -225,10 +225,10 @@ export class XRootView extends BaseView implements ShellApp {
   /**
    * The runtime task, which runs when `AppState` changes and determines if a
    * new `RuntimeInternals` must be created — only when identity or host
-   * (`apiUrl`) change; one runtime serves every space. This is manually run in
-   * `updated()` because we want to compare to previous values, leaving this
-   * task responsible for cleaning up previous runtimes, and creating a new
-   * one.
+   * (`apiUrl`) change; one runtime serves every space. This is run manually,
+   * from `updated()` and after a worker replacement, because we want to
+   * compare to previous values, leaving this task responsible for cleaning up
+   * previous runtimes, and creating a new one.
    */
   #rt = new Task<[AppState | undefined], RuntimeInternals | undefined>(
     this,
@@ -463,9 +463,9 @@ export class XRootView extends BaseView implements ShellApp {
   #spaceResolution: Promise<void> | undefined;
 
   /**
-   * Resolves once the space the current view addresses is known. A view that
-   * names its space resolves that name asynchronously, and addresses no space
-   * until the name lands.
+   * Returns a promise which resolves once the space the current view
+   * addresses is known. A view that names its space resolves that name
+   * asynchronously, and addresses no space until the name lands.
    */
   spaceResolved(): Promise<void> {
     return this.#spaceResolution ?? Promise.resolve();
