@@ -943,7 +943,7 @@ export class V2StorageTransaction implements IStorageTransaction {
    * and write attempts so their relative order (the read/write interleaving) is
    * recoverable without a journal scan — V2 journals don't support
    * `activity()`. Stamped at the two record points: the `read()` activity push
-   * and `recordPatchIntent()`. Consumed by CFC write-prefix provenance
+   * and `#recordPatchIntent()`. Consumed by CFC write-prefix provenance
    * (`docs/specs/cfc-write-prefix-provenance.md` §4/§6).
    */
   #activityClock = 0;
@@ -995,11 +995,11 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   /**
    * Whether authoritative-writes mode is on (see
-   * `IStorageTransaction.markAuthoritativeWrites` and the rationale there):
+   * `IStorageTransaction.markAuthoritativeWrites()` and the rationale there):
    * value writes are recorded and committed even when equal to the
    * currently-visible state — the no-op elision in
-   * `writeWithinBranch`/`writeBatchRun` yields, the doc-level elision in
-   * `getNativeCommit` yields, and the commit is emitted as a _whole-doc_
+   * `#writeWithinBranch()`/`#writeBatchRun()` yields, the doc-level elision
+   * in `getNativeCommit()` yields, and the commit is emitted as a _whole-doc_
    * set/delete rather than patches (a patch base extrapolated over a doomed
    * sealed overlay can name ancestors durable state never had, and `replace`
    * cannot create them). Set by effect-completion writebacks under the serving
@@ -1009,7 +1009,7 @@ export class V2StorageTransaction implements IStorageTransaction {
 
   /**
    * Whether whole-document-writes mode is on (see
-   * `IStorageTransaction.markWholeDocumentWrites`): the emission half of
+   * `IStorageTransaction.markWholeDocumentWrites()`): the emission half of
    * authoritative mode on its own — set/delete rather than patches and
    * mergeable ops — with the no-op elision left in place. Set by the client
    * speculation overlay's seal, whose entries layer their ops over a confirmed
@@ -1280,10 +1280,10 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   /**
-   * Returns the writable mergeable entry for `address`. The caller wrote
-   * through this same transaction, so the entry is writable; a missing writable
-   * entry is an invariant violation the record methods throw on rather than
-   * silently dropping the operation.
+   * Returns the writable document entry for `address`, or `undefined` when it
+   * is not writable. The caller wrote through this same transaction, so the
+   * entry is writable; a missing writable entry is an invariant violation the
+   * record methods throw on rather than silently dropping the operation.
    */
   #writableMergeableTarget(
     address: IMemorySpaceAddress,

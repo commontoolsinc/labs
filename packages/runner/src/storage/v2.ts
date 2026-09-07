@@ -948,7 +948,7 @@ export class StorageManager implements IStorageManager {
 
   /**
    * In-flight commits, registered synchronously by the transaction layer at
-   * `commit()` entry (see `IStorageManager.trackPendingCommit`). This is the
+   * `commit()` entry (see `IStorageManager.trackPendingCommit()`). This is the
    * write-durability barrier: distinct from `#crossSpacePromises`, which also
    * carries cross-space _read_ work (link-target loads) and so must not gate
    * questions of whether there are unconfirmed writes.
@@ -3174,7 +3174,7 @@ export class SpaceReplica
 
   /**
    * Issued-but-unsettled commits that carry pending reads, keyed by `localSeq`.
-   * Scanned by `cascadeDroppedDependency()` when a dependency's optimistic
+   * Scanned by `#cascadeDroppedDependency()` when a dependency's optimistic
    * writes are dropped. See the `InFlightCommit` doc for why zero-pending-read
    * commits are never registered.
    */
@@ -3182,13 +3182,13 @@ export class SpaceReplica
 
   /**
    * Commits whose rejection verdict is known but whose optimistic layer is
-   * still standing in `record.pending`, because `finalizeRejection()` holds the
-   * drop until the conflict read repair completes. `buildReads()` names every
-   * layer it finds, so a commit minted in that window names a layer the server
-   * will never resolve. Maps the dead `localSeq` to a promise that settles when
-   * its drop completes: the pre-send checkpoint rejects such a commit locally
-   * and gates its retry on that promise, so the retry rebuilds against the
-   * repaired base rather than the dead one.
+   * still standing in `record.pending`, because `#finalizeRejection()` holds
+   * the drop until the conflict read repair completes. `buildReads()` names
+   * every layer it finds, so a commit minted in that window names a layer the
+   * server will never resolve. Maps the dead `localSeq` to a promise that
+   * settles when its drop completes: the pre-send checkpoint rejects such a
+   * commit locally and gates its retry on that promise, so the retry rebuilds
+   * against the repaired base rather than the dead one.
    */
   readonly #rejectedPendingLayers = new Map<number, Promise<void>>();
 
@@ -3214,7 +3214,7 @@ export class SpaceReplica
   readonly #syncPromises = new Set<Promise<Result<Unit, PullError>>>();
 
   /**
-   * Schema-hash hydration dedupe (`hydrateArrivedCfcSchemaRefs()`): hashes
+   * Schema-hash hydration dedupe (`#hydrateArrivedCfcSchemaRefs()`): hashes
    * whose `cid:` pull is in flight or has succeeded; a failed pull removes its
    * entry so a later frame can retry.
    */
@@ -3322,7 +3322,7 @@ export class SpaceReplica
 
   /**
    * Foreign novelty whose _visibility_ is still shadowed by own pending writes
-   * (the settle input barrier — see `unappliedForeignSeqFloor` on
+   * (the settle input barrier — see `unappliedForeignSeqFloor()` on
    * `ISpaceReplica`): docKey → the set of shadowed inbound seqs. A _set_, not
    * one extremum: the floor must be the doc's _lowest_ hidden seq — every
    * derivation in the wave read the view from before the _earliest_ hidden
@@ -3339,10 +3339,10 @@ export class SpaceReplica
 
   /**
    * The settle input barrier's _wake_ (`ISpaceReplica.shadowFlipObserver`):
-   * invoked synchronously whenever a `confirmPending()` promotion touched a doc
-   * with a standing shadow (flag ON — the flip checkout's own condition), value
-   * diff or not: the _floor_ lifts either way, and the floor is what the wake
-   * exists for. The `SpaceServer` installs it at activation so a
+   * invoked synchronously whenever a `#confirmPending()` promotion touched a
+   * doc with a standing shadow (flag ON — the flip checkout's own condition),
+   * value diff or not: the _floor_ lifts either way, and the floor is what the
+   * wake exists for. The `SpaceServer` installs it at activation so a
    * clamped-then-quiet space's catch-up wave runs at the flip instead of
    * waiting out the idle window — the flip is the one input whose dirtiness
    * arrives _without_ a new admitted commit on the host feed (the commit was
@@ -3373,8 +3373,8 @@ export class SpaceReplica
    * `localSeq`s of live _speculative_ sealed commits (`speculation.md` §1/§6):
    * overlay entries exist only in this process — the client never pushes them —
    * so a _pushed_ commit whose read basis names one can _never_ have that
-   * dependency resolve server-side. `commitOperations()` refuses such an export
-   * loudly; membership ends when the speculative commit settles
+   * dependency resolve server-side. `#commitOperations()` refuses such an
+   * export loudly; membership ends when the speculative commit settles
    * (retirement/withdrawal drops its pending layers first, so no stack names a
    * seq after it leaves this set).
    */
@@ -7315,7 +7315,7 @@ export class SpaceReplica
   /**
    * Makes a locally-fabricated rejection for a commit whose doom is provable
    * client-side (dropped pending dependency, dependency rejected but not yet
-   * dropped, or replica reset). Modeled on `makePreemptRejection()`.
+   * dropped, or replica reset). Modeled on `#makePreemptRejection()`.
    * `readyToRetry` defaults to resolving immediately, which is right once the
    * _primary_ rejection's `#finalizeRejection()` has awaited its read repair
    * (or reset wiped the replica outright): the victim adds no wait of its own.
@@ -7615,7 +7615,7 @@ export class SpaceReplica
    * conflicts, so parking would hang).
    *
    * _Pushed_ (socket) commits only: sealed commits — engine-plane commits by
-   * the co-hosted executor — settle through `settleSealedCommit()`, which
+   * the co-hosted executor — settle through `#settleSealedCommit()`, which
    * confirms immediately (no marker is ever staged for an engine-plane commit,
    * so parking them would wedge permanently).
    */
