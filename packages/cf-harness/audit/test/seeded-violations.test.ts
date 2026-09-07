@@ -18,6 +18,11 @@ import { join } from "@std/path";
 
 import { inheritedCfcPostureReport } from "@commonfabric/runner/cfc";
 
+import {
+  HARNESS_CELL_LABELS_TYPE,
+  type HarnessCellLabelRecord,
+  type HarnessCellLabels,
+} from "../../src/contracts/cell-labels.ts";
 import type { HarnessCfcInvocationContext } from "../../src/contracts/cfc-invocation-context.ts";
 import type { HarnessHandleEntry } from "../../src/contracts/handle-table.ts";
 import type {
@@ -1021,6 +1026,240 @@ describe("seeded violations", () => {
       );
       expect(finding?.knownDefect?.issue).toBe("CT-2210");
       expect(finding?.message).toContain(finding?.knownDefect?.detail);
+    });
+  });
+
+  describe("AUD-25 labels across a followed link", () => {
+    /** The family with a fabric session, and `cells` as its cell-labels read. */
+    const withCellLabels = (
+      cells: HarnessCellLabelRecord[],
+      held: "both" | "state-only" = "both",
+    ): RunFamily =>
+      seeded((root) => {
+        stateOf(root).fabricSessionCfc = structuredClone(
+          CONFORMING_SESSION_POSTURE,
+        ) as DeepMutable<HarnessFabricSessionCfcPosture>;
+        const labels: HarnessCellLabels = {
+          type: HARNESS_CELL_LABELS_TYPE,
+          version: 1,
+          generatedAt: "2026-09-07T00:00:00.000Z",
+          status: "read",
+          space: { configured: "seeded", dbPath: "/dev/null" },
+          cells,
+        };
+        root.cellLabels = held === "both"
+          ? { status: "present", path: root.cellLabels.path, value: labels }
+          : { status: "absent", path: root.cellLabels.path };
+        (stateOf(root) as Mutable<HarnessRunState>).cellLabels = labels;
+      });
+
+    /** A cell record carrying one labeled row behind the link at `result/0`. */
+    const labeledRowEntry = () => ({
+      path: ["result", "0", "subject"],
+      origin: "declared",
+      source: "of:fid1:seededRow",
+      confidentiality: [{
+        type: "https://commonfabric.org/cfc/atom/Resource",
+        name: "Resource",
+        fields: { class: "email" },
+      }],
+      integrity: [],
+    });
+
+    /** The link a result cell holds at `result/0`, as the reader reports one. */
+    const linkEntry = () => ({
+      path: ["result", "0"],
+      origin: "link",
+      confidentiality: [],
+      integrity: [{
+        type: "https://commonfabric.org/cfc/atom/LinkReference",
+        name: "LinkReference",
+      }],
+    });
+
+    it("is not applicable to a run that configured no fabric session", () => {
+      // The fixture is that run: no session, so no pattern ran and no value
+      // was derived from anything. Reported as a subject that does not arise
+      // rather than as evidence nobody looked for.
+      expect(CLEAN[at("AUD-25")]).toBe("not-applicable");
+    });
+
+    it("declines a snapshot that was never read, leaving it to AUD-24", () => {
+      // A session ran, so the subject arises; the snapshot says the space was
+      // not opened. What became of that read is AUD-24's finding, so this
+      // check declines rather than putting a second finding on one fact —
+      // and declines rather than reporting the cells as unlabeled, which is
+      // the collapse the cell-labels contract forbids.
+      expect(SESSION_CLEAN[at("AUD-25")]).toBe("not-applicable");
+    });
+
+    it("warns when every link a run's cells hold leads to no label", () => {
+      // The shape a broken derivation leaves: the result cell still splits
+      // each row into its own doc and links to it, and nothing came back on
+      // the far side — with nothing in the snapshot saying the far side went
+      // unread.
+      expect(
+        verdicts(withCellLabels([{
+          entityId: "of:fid1:seededResult",
+          entries: [linkEntry()],
+        }])),
+      ).toEqual({ ...SESSION_CLEAN, [at("AUD-25")]: "warn" });
+    });
+
+    it("passes when a label sits on a cell reached through a link", () => {
+      // The derivation working, as the live Gmail probe records it: the
+      // column's own label, on the row's own entity doc, reported under the
+      // path that reached it and naming the doc it was read from.
+      expect(
+        verdicts(withCellLabels([{
+          entityId: "of:fid1:seededResult",
+          entries: [
+            linkEntry(),
+            {
+              path: ["result", "0", "subject"],
+              origin: "declared",
+              source: "of:fid1:seededRow",
+              confidentiality: [{
+                type: "https://commonfabric.org/cfc/atom/Resource",
+                name: "Resource",
+                fields: { class: "email" },
+              }],
+              integrity: [{
+                type:
+                  "https://loom.commonfabric.org/cfc/atom/ConnectorObserved",
+                name: "ConnectorObserved",
+              }],
+            },
+          ],
+        }])),
+      ).toEqual({ ...SESSION_CLEAN, [at("AUD-25")]: "pass" });
+    });
+
+    it("does not count a label sitting outside the links it counted", () => {
+      // The entry names a cell it was read from, so it crossed SOME link —
+      // but not one of the links this record holds, so it is no evidence
+      // about them. Counting it would let a label reached by an unrelated
+      // path vouch for a result that carries none.
+      expect(
+        verdicts(withCellLabels([{
+          entityId: "of:fid1:seededResult",
+          entries: [
+            linkEntry(),
+            { ...labeledRowEntry(), path: ["elsewhere", "subject"] },
+          ],
+        }])),
+      ).toEqual({ ...SESSION_CLEAN, [at("AUD-25")]: "warn" });
+    });
+
+    it("is not applicable to a snapshot that read cells holding no link", () => {
+      // The snapshot reached this run's cells and none of them references
+      // another, so no value here was derived across one. A positive reading
+      // of the artifact, not an absence of evidence.
+      expect(
+        verdicts(withCellLabels([{
+          entityId: "of:fid1:seededPlain",
+          entries: [{
+            path: ["total"],
+            origin: "declared",
+            confidentiality: [],
+            integrity: [],
+          }],
+        }])),
+      ).toEqual({ ...SESSION_CLEAN, [at("AUD-25")]: "not-applicable" });
+    });
+
+    it("reads the snapshot off the run state when the artifact is gone", () => {
+      // A run records the snapshot in both places, so a tree that lost the
+      // file still answers. AUD-24 moves too and is right to: what became of
+      // the artifact is its subject, and this check's is what the snapshot
+      // says.
+      expect(
+        verdicts(
+          withCellLabels([{
+            entityId: "of:fid1:seededResult",
+            entries: [linkEntry(), labeledRowEntry()],
+          }], "state-only"),
+        ),
+      ).toEqual({ ...SESSION_CLEAN, [at("AUD-25")]: "pass" });
+    });
+
+    it("cannot conclude anything when neither place holds a snapshot", () => {
+      // Both the artifact and the run state's copy are gone, so there is no
+      // snapshot to read at all — a different fact from one that was read and
+      // holds nothing, and reported as the absence it is.
+      expect(
+        verdicts(seeded((root) => {
+          stateOf(root).fabricSessionCfc = structuredClone(
+            CONFORMING_SESSION_POSTURE,
+          ) as DeepMutable<HarnessFabricSessionCfcPosture>;
+          root.cellLabels = { status: "absent", path: root.cellLabels.path };
+          delete stateOf(root).cellLabels;
+        })),
+      ).toEqual({
+        ...SESSION_CLEAN,
+        [at("AUD-24")]: "warn",
+        [at("AUD-25")]: "inconclusive",
+      });
+    });
+
+    it("cannot conclude anything when the reader ran out of nodes", () => {
+      // The other half of "the reader stopped": a truncation names no path,
+      // so the links it left behind are accounted for by the whole-record
+      // reason rather than by an entry for each.
+      expect(
+        verdicts(withCellLabels([{
+          entityId: "of:fid1:seededResult",
+          entries: [linkEntry()],
+          truncationReason: "node-budget-exhausted",
+        }])),
+      ).toEqual({ ...SESSION_CLEAN, [at("AUD-25")]: "inconclusive" });
+    });
+
+    it("names no detail for an unavailable snapshot that carries none", () => {
+      // `unavailableDetail` and `unavailableReason` are both optional. A
+      // snapshot carrying neither still names which status it was, in the
+      // message and in the evidence, rather than a dangling separator and an
+      // empty detail.
+      const audited = auditRunFamily(
+        seeded((root) => {
+          stateOf(root).fabricSessionCfc = structuredClone(
+            CONFORMING_SESSION_POSTURE,
+          ) as DeepMutable<HarnessFabricSessionCfcPosture>;
+          const bare = {
+            ...(stateOf(root).cellLabels as HarnessCellLabels),
+          } as Mutable<HarnessCellLabels>;
+          delete bare.unavailableDetail;
+          delete bare.unavailableReason;
+          root.cellLabels = {
+            status: "present",
+            path: root.cellLabels.path,
+            value: bare as HarnessCellLabels,
+          };
+          (stateOf(root) as Mutable<HarnessRunState>).cellLabels =
+            bare as HarnessCellLabels;
+        }),
+        RUN_CHECKS,
+      );
+      const finding = audited.find((result) =>
+        result.checkId === "AUD-25" && result.runId === FIXTURE_RUN_ID
+      );
+      expect(finding?.verdict).toBe("not-applicable");
+      expect(finding?.message).toContain("`unavailable`");
+      expect(finding?.message).not.toContain("(");
+      expect(finding?.evidence[0]?.detail).toBe("unavailable");
+    });
+
+    it("cannot conclude anything when the reader stopped at every link", () => {
+      // The same bare far side, with the snapshot saying why: the walk ran
+      // out of hops. Nothing was established, which is not the same finding
+      // as a link that led somewhere and found nothing.
+      expect(
+        verdicts(withCellLabels([{
+          entityId: "of:fid1:seededResult",
+          entries: [linkEntry()],
+          unreadPaths: [{ path: ["result", "0"], reason: "beyond-link-hops" }],
+        }])),
+      ).toEqual({ ...SESSION_CLEAN, [at("AUD-25")]: "inconclusive" });
     });
   });
 

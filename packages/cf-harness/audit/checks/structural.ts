@@ -17,6 +17,10 @@
 import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 
 import { handleTokensIn } from "../../console/steps.ts";
+import type {
+  HarnessCellLabelRecord,
+  HarnessCellLabels,
+} from "../../src/contracts/cell-labels.ts";
 import type { HarnessCfcInvocationContext } from "../../src/contracts/cfc-invocation-context.ts";
 import type { HarnessCfcModelContext } from "../../src/contracts/cfc-model-context.ts";
 import type { HarnessHandleTable } from "../../src/contracts/handle-table.ts";
@@ -1917,6 +1921,218 @@ const cellLabelsSnapshot: AuditCheck = {
 };
 
 //
+// AUD-25 labels across a followed link
+//
+
+/**
+ * The snapshot a run holds, from whichever of the two places carries it.
+ *
+ * A run writes the snapshot beside itself and records it on its state, so a
+ * tree missing one of the two can still be read. {@link cellLabelsSnapshot}
+ * accepts either as evidence that a snapshot was kept; this reads what the
+ * snapshot SAYS, so it needs the value rather than the artifact's presence.
+ */
+const cellLabelsOf = (run: RunEvidence): HarnessCellLabels | undefined =>
+  run.cellLabels.status === "present"
+    ? run.cellLabels.value
+    : runStateOf(run)?.cellLabels;
+
+/** One place a snapshot held a link, and the cell record it sat in. */
+interface FollowedLink {
+  cell: HarnessCellLabelRecord;
+  path: readonly string[];
+}
+
+/**
+ * Every path of a snapshot where the reader had a link to follow out of the
+ * cell the run addressed.
+ *
+ * `origin: "link"` is the label a reference itself carries, so a path holding
+ * one is a place the walk had a link to follow. It is the denominator of this
+ * check: a run with none reached no second document, so nothing about
+ * derivation across a link arises for it.
+ */
+const followedLinks = (
+  labels: HarnessCellLabels,
+): readonly FollowedLink[] =>
+  labels.cells.flatMap((cell) =>
+    cell.entries
+      .filter((entry) => entry.origin === "link")
+      .map((entry) => ({ cell, path: entry.path }))
+  );
+
+/** Whether `path` is `prefix` itself or sits beneath it. */
+const under = (
+  path: readonly string[],
+  prefix: readonly string[],
+): boolean =>
+  path.length >= prefix.length &&
+  prefix.every((segment, index) => segment === path[index]);
+
+/**
+ * Whether the snapshot says why the target of `link` went unread.
+ *
+ * An unread path is tested as a PREFIX of the link rather than as its equal: a
+ * reader that stopped at a path read nothing beneath it either, so a shallower
+ * entry accounts for every link under it as much as an exact one does.
+ */
+const linkAccountedFor = (link: FollowedLink): boolean =>
+  link.cell.truncationReason !== undefined ||
+  (link.cell.unreadPaths ?? []).some((unread) => under(link.path, unread.path));
+
+/**
+ * The confidentiality and integrity atoms sitting on cells the run reached
+ * THROUGH a link, named.
+ *
+ * `source` is set on exactly those entries: the label was read off another
+ * document and reported under the path that reached it. A sqlite query's
+ * result is that shape — each row splits into its own entity doc and the
+ * column's label lands there — so these atoms are the ones that crossed from
+ * a labeled source into a value the run derived from it.
+ */
+const derivedAtomNames = (
+  links: readonly FollowedLink[],
+): readonly string[] => {
+  const names = new Set<string>();
+  for (const link of links) {
+    for (const entry of link.cell.entries) {
+      if (entry.source === undefined) continue;
+      if (!under(entry.path, link.path)) continue;
+      for (const atom of [...entry.confidentiality, ...entry.integrity]) {
+        names.add(atom.name);
+      }
+    }
+  }
+  return [...names].sort();
+};
+
+/**
+ * Whether a label a run's source carried reached the value the run derived
+ * from it.
+ *
+ * A labeled column's label is re-established on the far side of the opaque
+ * SQLite boundary by the result write, and the row it lands on is its own
+ * entity doc — so from the artifact tree the evidence is an entry naming the
+ * cell it was read from. AUD-24 establishes that a snapshot was kept and says
+ * outright that what it holds is not read there; this reads it, which is what
+ * turns "the run recorded its space's labels" into "a label crossed into what
+ * the run produced".
+ *
+ * What it can and cannot tell apart is the reason it warns rather than fails.
+ * A snapshot whose followed links all lead to cells holding no label is
+ * consistent with two different runs: one that queried nothing labeled, and
+ * one where a label failed to derive. The snapshot does not carry the source
+ * contract — a database's per-column `ifc` is part of the handle's VALUE, not
+ * a label on it — so nothing here can decide between them, and a finding says
+ * so rather than picking.
+ *
+ * A run whose state records no fabric session is `not-applicable` rather than
+ * `inconclusive`, and the message says the state rather than the run: the
+ * field is also absent where a host injected its own session factory, whose
+ * runtime the harness never saw, so the artifacts cannot tell that run from
+ * one that ran no session at all.
+ *
+ * A snapshot that was never READ is `not-applicable` for a different reason,
+ * and the reason is which check owns the fact. AUD-24 already reports what
+ * became of a run's cell-labels read, failing an enforcing run whose attempt
+ * is gone; a second check restating it would put two findings on one fact and
+ * would sit at `inconclusive` — below the default threshold — for every run
+ * whose space is not a file on this host, which every ephemeral-fabric episode
+ * is. So this one declines and names the check that speaks. Declining is not
+ * the collapse the cell-labels contract warns about: nothing is asserted about
+ * any label here, where reporting the cells as unlabeled would assert one.
+ */
+const derivedCellLabels: AuditCheck = {
+  id: "AUD-25",
+  title: "labels across a followed link",
+  citations: extendsClause("SQLITE-CFC-read-labels"),
+  falsifiedBy:
+    "a run whose cell-labels snapshot followed a link and found no label on the far side of any of them, with nothing in the snapshot saying those targets went unread",
+  inspect(run) {
+    if (run.runState.status !== "present") {
+      return notReadable("run-state.json", run.runState);
+    }
+    const state = runStateOf(run)!;
+    if (state.fabricSessionCfc === undefined) {
+      return {
+        verdict: "not-applicable",
+        message:
+          "this run's state records no fabric session, so nothing in its artifacts describes a runtime a value could have been derived in",
+        evidence: [{
+          artifact: "run-state.json",
+          detail: "no `fabricSessionCfc`",
+        }],
+      };
+    }
+    if (run.cellLabels.status !== "present" && state.cellLabels === undefined) {
+      return notReadable("cell-labels.json", run.cellLabels);
+    }
+    const labels = cellLabelsOf(run)!;
+    if (labels.status !== "read") {
+      return {
+        verdict: "not-applicable",
+        message:
+          `the cell-labels snapshot is \`${labels.status}\`, so this run holds no read cell to speak about; whether that snapshot should have been readable is AUD-24's${
+            labels.unavailableDetail === undefined
+              ? ""
+              : ` (${labels.unavailableDetail})`
+          }`,
+        evidence: [{
+          artifact: "cell-labels.json",
+          detail: labels.unavailableReason ?? labels.status,
+        }],
+      };
+    }
+    const links = followedLinks(labels);
+    if (links.length === 0) {
+      return {
+        verdict: "not-applicable",
+        message:
+          "the snapshot read this run's cells and none of them holds a link, so no value here was derived across one",
+      };
+    }
+    const atoms = derivedAtomNames(links);
+    if (atoms.length > 0) {
+      return {
+        verdict: "pass",
+        message: `${
+          count(links.length, "link", "links")
+        } this run's cells hold lead to labeled cells, carrying ${
+          atoms.join(", ")
+        }`,
+        evidence: [{
+          artifact: "cell-labels.json",
+          detail: `atoms on cells reached through a link: ${atoms.join(", ")}`,
+        }],
+      };
+    }
+    if (links.every(linkAccountedFor)) {
+      return {
+        verdict: "inconclusive",
+        message: `the snapshot stopped short of every one of the ${
+          count(links.length, "link", "links")
+        } this run's cells hold, so what they lead to was never read`,
+        evidence: [{
+          artifact: "cell-labels.json",
+          detail: "every followed link is recorded unread or truncated",
+        }],
+      };
+    }
+    return {
+      verdict: "warn",
+      message: `no label crossed any of the ${
+        count(links.length, "link", "links")
+      } this run's cells hold: either nothing behind them was labeled, or a label did not reach the value derived from it`,
+      evidence: [{
+        artifact: "cell-labels.json",
+        detail:
+          `${links.length} followed link(s), 0 entries naming a cell they were read from`,
+      }],
+    };
+  },
+};
+
+//
 // The registry
 //
 
@@ -1933,6 +2149,7 @@ export const STRUCTURAL_CHECKS: readonly AuditCheck[] = [
   evidenceRetention,
   omissionAccounting,
   cellLabelsSnapshot,
+  derivedCellLabels,
 ];
 
 /**
