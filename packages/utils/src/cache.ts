@@ -109,7 +109,7 @@ export class BoundedKeyMap<K, V> implements ReadonlyMap<K, V> {
   // Traversals
   //
   // Every traversal runs oldest first, which is the order entries are dropped
-  // in. Together with `size`, `has()`, and `get()` above, these are the
+  // in. Together with `.size`, `has()`, and `get()` above, these are the
   // standard `ReadonlyMap` surface, so a consumer that only reads takes
   // `ReadonlyMap` and accepts either this or a plain `Map`.
   //

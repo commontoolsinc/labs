@@ -125,7 +125,7 @@ export class ContextShim {
   }
 
   /**
-   * Watches writes to `key`. Observers are held apart from `subscribe`'s
+   * Watches writes to `key`. Observers are held apart from `subscribe()`'s
    * callbacks so that a test watching a key does not consume a receipt id,
    * which would change the ids the guest's own subscriptions are given.
    */

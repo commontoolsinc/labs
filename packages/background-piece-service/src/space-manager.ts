@@ -333,12 +333,11 @@ export class SpaceManager {
    * occurs (e.g. outside of the graph), which may happen at any point during
    * execution. Because this can occur from a piece calling
    * `setTimeout(() => throw new Error(""), timeout)`, we cannot determine the
-   * offending piece. Because this should not occur frequently, and currently
-   * happens due to older, misbehaving pieces, this should flush out those
-   * misbehaving pieces.
+   * offending piece. Because this should not occur frequently, this should
+   * flush out misbehaving pieces.
    *
-   * Attempts to recreate the worker environment, which should only occur once
-   * per space-wide disabling.
+   * It attempts to recreate the worker environment, which should only occur
+   * once per space-wide disabling.
    */
   #onTerminalError = (event: Event) => {
     // `addEventListener` types its listener over `Event`; the narrowing

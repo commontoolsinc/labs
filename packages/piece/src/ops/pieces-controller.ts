@@ -1392,12 +1392,12 @@ export class PiecesController<T = unknown> {
 
   /**
    * Consistently returns the `Cell<Piece>` of the piece with id `pieceId`,
-   * applying the provided `pattern` (which may be its current pattern -- useful
+   * applying the provided `pattern` (which may be its current pattern — useful
    * when we are only updating inputs), and optionally applying `inputs` if
    * provided.
    *
    * Reports a failure as itself, whether it happened before or after the setup
-   * transaction committed. `runPatternUpdate` below runs the same post-commit
+   * transaction committed. `runPatternUpdate()` below runs the same post-commit
    * work and differs precisely here: it issues a receipt, so it reports a
    * post-commit failure as a `PatternSetupPostCommitError` carrying that
    * receipt. Callers classifying failures by message want this one.

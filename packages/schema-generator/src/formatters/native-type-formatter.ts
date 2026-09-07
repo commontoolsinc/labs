@@ -215,10 +215,7 @@ export class NativeTypeFormatter implements TypeFormatter {
     }) ?? false;
   }
 
-  /**
-   * Returns whether `typeName` names a native type. Exposed so that
-   * `type-utils` can skip generating `$defs` for these.
-   */
+  /** Returns whether `typeName` names a native type, which gets no `$defs`. */
   public static isNativeType(typeName: string | undefined): boolean {
     return typeName !== undefined && NATIVE_TYPE_NAMES.has(typeName);
   }

@@ -228,8 +228,8 @@ export class WorkerReconciler {
   readonly #resolveRenderConfidentiality?: RenderConfidentialityResolver;
 
   /**
-   * The membership provider (spec §4.9.3) whose `subscribe` lets a gated
-   * `Space(X)`-labeled cell re-render when X's ACL syncs or changes. When
+   * The membership provider (spec §4.9.3) whose `subscribe()` lets a gated
+   * `Space(X)`-labeled cell re-render when `X`'s ACL syncs or changes. When
    * `undefined`, there is no reactive upgrade, and the sync snapshot still
    * gates soundly.
    */

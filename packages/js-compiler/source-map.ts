@@ -404,7 +404,7 @@ export class SourceMapParser {
    * Deferred registrations: the boot path registers a _provider_ instead of
    * composing eagerly; the first lookup that needs the filename materializes
    * it. One-shot — the provider is dropped as soon as it runs, so its captured
-   * inputs are released after first use. LRU-bounded like `sourceMaps`: a
+   * inputs are released after first use. LRU-bounded like `#sourceMaps`: a
    * provider whose filename is _never_ looked up (its eval never errored)
    * would otherwise be retained until dispose — one per eval, an unbounded
    * leak on long-lived runners — so this caps it and evicts the oldest.
