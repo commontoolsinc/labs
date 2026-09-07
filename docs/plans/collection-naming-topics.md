@@ -19,7 +19,7 @@ This block is LIVE: the change that moves a stage updates it here.
 | S2b — assignment refuses by default | on main (#6898) |
 | S3 — the shell opens `/<space>/top/42` | on main (#6896) |
 | S4 — `#42` in text | on main (#6887) |
-| S6 — graft onto Topics | items 1, 2, 3, 5 on main (#6937); item 4 rehearsed 2026-09-05, and now needs a schema-flag ruling |
+| S6 — graft onto Topics | items 1, 2, 3, 5 on main (#6937); item 4 rehearsed twice and held, awaiting a demand for named Topics rather than a technical answer |
 | S5 — deferred, not scheduled | — |
 
 ## Decisions, ruled 2026-09-03
@@ -93,6 +93,30 @@ ruled. A later reversal is a decision recorded here, not a discovery.
     create must be paired with a one-time link-bind of `namesTable` onto each
     of them, the same operator step Topics states for `mentionable`. S6
     carries that step into the Topics graft.
+
+14. **Per-member wiring is restructured, and the retrofit cost is not the
+    reason not to.** Ruled 2026-09-06. A member reaches its board's derived
+    tables as an argument the board wires at creation, and a board writes a
+    member's result but never a member's argument — so each new such input
+    needs one `cf piece link` per existing member. Three inputs now do:
+    `mentionable`, `boardCrossrefs`, `boardNames`. Decision 13 accepted that
+    cost for the third on the grounds that the first had already paid it,
+    which is a coincidence used as a precedent.
+
+    The ruling is that a member taking one input naming its board, and
+    deriving the tables from it, is the design to pursue, and that the
+    expense of updating existing topics is not an argument against it:
+    topic performance is improving continuously, and a slow retrofit is a
+    cost worth paying once for a shape that ends the per-input bind.
+
+    One thing the ruling does not settle, because it is a different cost:
+    the mention-index break measured a *runtime* multiplication — 8.17 MB
+    and 6,203 documents, 82% of a topic resume frame — when a per-member
+    input reached the raw topics list. The same record names what contained
+    it: the demand shape steers the walk, not the link. So the implementation
+    must declare a board-demand that reaches only the derived tables, and
+    that narrowness has to be measured rather than assumed. That is an
+    implementation guard, not a gate on the decision.
 
 ## Gates and review
 
@@ -301,6 +325,39 @@ Mike's call, after S4.
    procedure is the "Naming the Topics that predate the namespace" section of
    `skills/topics/SKILL.md`.
 
+   **Held 2026-09-06, and not for a technical reason.** The step is rehearsed
+   twice; the second run, after the positional-link fix, is recorded at
+   `../history/plans/collection-naming-s6-backfill-rehearsal-rerun-2026-09-06.md`
+   and measured what the first could not. On a clone holding three topics, the
+   forced board deploy verified `removed 0`, moved the board's argument
+   document by one key (`names: {}`), and left those topics' titles and bodies
+   intact; the mention-index transition cost eleven commits and one written key
+   per topic. Three topics is not 125, and the record says which of its figures
+   scale and which are counts of that run. What is missing is not a measurement
+   but a demand — nobody has asked for named Topics on the deployed board.
+
+   The sequence that makes running it routine rather than a one-way door,
+   whenever consensus appears:
+
+   1. Fix #6969 first. `setsrc --check` exhausts the heap against the
+      deployed board, so today the live board cannot be inspected before it
+      is written to. That is the only step that converts this into a
+      checkable operation, and it is worth doing whether or not the graft
+      runs.
+   2. Deploy the board leg, which is refused over topics filed before the
+      namespace and needs `--dangerously-allow-incompatible-schema` until a
+      general mechanism for adding a property to existing data exists.
+   3. Backfill, then bind `namesTable` onto each topic `addTopic` did not
+      wire. Run it from a host: laptop runs died 4-6 minutes in during the
+      2026-08-28 migration. Never pass `--allow-non-existing` (#6965).
+   4. Verify by reading both the board's index and the member addresses. In
+      the rerun the fixed board's index agreed with its members at all three
+      reads; the two reads that disagreed were on the instrument board
+      carrying the walk #6987 replaced, and no run there attributed the
+      staleness to a mechanism. So the rerun establishes no divergence for the
+      code this graft deploys, and no cause for the one it saw. Reading both
+      is what would show a divergence if one appeared, and costs a command.
+
    **The board leg of the deploy needs
    `--dangerously-allow-incompatible-schema`.** `setsrc --check` refuses it over
    a board holding topics filed before the namespace, with
@@ -316,8 +373,8 @@ Mike's call, after S4.
    `packages/piece/src/schema-compatibility.ts` refuses. Expect it for a new
    per-member demand property generally. The flag is
    held behind explicit team authorization by `skills/topics/SKILL.md`, so this
-   step now carries a decision it did not carry before, and what the forced
-   deploy leaves behind is itself unmeasured.
+   step carries a decision it did not carry before. What the forced deploy
+   leaves behind is measured, in the 2026-09-06 rerun below.
 
    **Why the gates said otherwise.** `deno task pattern-compat` and
    `deno task pattern-vintage` are both clean and neither can see this: the
