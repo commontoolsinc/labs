@@ -62,7 +62,7 @@ import {
 } from "./test-selection/coverage.ts";
 import { readWorkspaceMembers } from "./workspace-tests.ts";
 import type { Manifest, WithheldReason } from "./test-selection/manifest.ts";
-import { LANES } from "./test-selection/policy.ts";
+import { FULL_RUN_LABEL, LANES } from "./test-selection/policy.ts";
 import {
   LANE_MEASUREMENT_PREFIX,
   LANE_MEASUREMENT_SURFACE,
@@ -989,11 +989,22 @@ export async function runLane(
     `${entry.cost.toFixed(0)}s, more than a lane can hold`
   );
   if (laid.overBudgetSeconds > 0) {
-    console.log(
-      `ci-lane: the mandatory set puts a lane ` +
-        `${laid.overBudgetSeconds.toFixed(0)} seconds past the ` +
-        `${laid.budgetSeconds}-second budget`,
-    );
+    // In the job summary rather than only on the output, because this is
+    // the one line that explains a lane the runner kills: a lane past its
+    // bound reports a timeout and nothing about why it had more work than
+    // it could hold.
+    const over = laid.overBudgetSeconds;
+    say([
+      `The work that must run puts a lane ${over.toFixed(0)} seconds past ` +
+      `the ${laid.budgetSeconds}-second budget.` +
+      (over < laid.budgetSeconds
+        ? ""
+        : " That is more than a lane holds, so this lane will reach the " +
+          "bound its job is killed at. What must run is what the change " +
+          "touched plus every unit no manifest has seen, and a tree whose " +
+          "unseen units outweigh a lane is one to run whole: label the " +
+          `pull request \`${FULL_RUN_LABEL}\`.`),
+    ]);
   }
 
   const needs = new Set<CapabilityId>();

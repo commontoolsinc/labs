@@ -39,6 +39,7 @@ import type { Manifest, ManifestEntry } from "./test-selection/manifest.ts";
 import {
   FULL_LANE_BOUND_SECONDS,
   FULL_LANE_BUDGET_SECONDS,
+  FULL_RUN_LABEL,
   LANE_BUDGET_SECONDS,
   UNMEASURED_COST_SECONDS,
 } from "./test-selection/policy.ts";
@@ -1237,6 +1238,52 @@ describe("planning a lane the manifest chose", () => {
     const printed = lines.join("\n");
     expect(printed).toContain("the store is gone");
     expect(printed).toContain("workspace-unit");
+  });
+});
+
+describe("a lane that cannot hold what must run", () => {
+  it("says so in the summary, and says what to do about it", async () => {
+    // A lane past its bound reports a timeout and nothing about why it
+    // had more work than it could hold. This is the one line that
+    // explains it, so it goes where somebody reading the job looks.
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      await runLane(
+        {
+          lane: 1,
+          of: 1,
+          full: false,
+          dryRun: true,
+          laneCount: false,
+          root: REPOSITORY,
+          at: "2026-09-01T00:00:00Z",
+        },
+        {
+          // Nothing has records, so every unit must run, and one unit
+          // costing more than a lane holds puts the lane past its bound.
+          manifest: () => Promise.resolve({ absent: "none here" }),
+          topology: () =>
+            Promise.resolve([
+              suite({
+                id: "workspace-unit",
+                units: Array.from(
+                  { length: 800 },
+                  (_, index) => `packages/bakery/${index}.test.ts`,
+                ),
+              }),
+            ]),
+        },
+      );
+    } finally {
+      console.log = log;
+    }
+
+    const said = lines.join("\n");
+    expect(said).toContain("past the");
+    expect(said).toContain("more than a lane holds");
+    expect(said).toContain(FULL_RUN_LABEL);
   });
 });
 
