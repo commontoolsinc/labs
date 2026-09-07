@@ -121,8 +121,10 @@ value such as a `FabricHash`.
 
 ## Wait on an event, never on a poll
 
-`deno task check-no-waitfor` fails the build when a test imports the polling
-`waitFor` from `@commonfabric/integration`. Reach for the primitive that
+`deno task check-no-waitfor` fails the build when an integration test imports
+the polling `waitFor` from `@commonfabric/integration`. Only `integration/`
+directories under `packages/` are in scope; a unit test's poll has no gate, and
+the rule below is what holds it. Reach for the primitive that
 resolves on the thing actually happening:
 
 - In a browser test: `awaitViewSettled(page)` for "the view is interactive",
