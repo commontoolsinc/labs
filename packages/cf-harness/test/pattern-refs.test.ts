@@ -14,6 +14,7 @@ import type { HarnessFetch } from "../src/contracts/http-fetch.ts";
 import { PatternIndexClient } from "../src/pattern-index/client.ts";
 import {
   checkPatternRefSpec,
+  MAX_HARNESS_PATTERN_REFS,
   patternRefsContextMessage,
   resolvePatternRefs,
 } from "../src/pattern-refs.ts";
@@ -52,6 +53,29 @@ const stubIndex = (): { client: PatternIndexClient; calls: string[] } => {
         : new Response(JSON.stringify({ error: "no such pattern" }), {
           status: 404,
         }),
+    );
+  };
+  return {
+    client: new PatternIndexClient({
+      baseUrl: "https://index.test",
+      fetchFn,
+      signer,
+    }),
+    calls,
+  };
+};
+
+/** An index holding every well-formed id, for counting rather than matching. */
+const answeringIndex = (): { client: PatternIndexClient; calls: string[] } => {
+  const calls: string[] = [];
+  const fetchFn: HarnessFetch = (input, init) => {
+    calls.push(String(input).split("/").pop() ?? "");
+    const body = JSON.parse(String(init?.body)) as { patternId?: string };
+    return Promise.resolve(
+      new Response(
+        JSON.stringify({ ...PATTERN_RECORD, patternId: body.patternId }),
+        { status: 200 },
+      ),
     );
   };
   return {
@@ -124,6 +148,48 @@ describe("pattern-refs", () => {
           { patternId: "pat-expenses" },
         ]),
       ).rejects.toThrow("names `pat-expenses` twice");
+    });
+
+    it("throws stating the bound, before any read, for more references than a task may attach", async () => {
+      // The bound is held here and not only at the surface a caller wrote to,
+      // so a library caller reaching this resolution meets the same refusal.
+      const index = stubIndex();
+
+      await expect(
+        resolvePatternRefs(
+          index.client,
+          Array.from(
+            { length: MAX_HARNESS_PATTERN_REFS + 1 },
+            (_unused, position) => ({ patternId: `pat-${position}` }),
+          ),
+        ),
+      ).rejects.toThrow(
+        `takes at most ${MAX_HARNESS_PATTERN_REFS} references, got ${
+          MAX_HARNESS_PATTERN_REFS + 1
+        }`,
+      );
+      expect(index.calls).toEqual([]);
+    });
+
+    it("resolves as many references as the bound allows", async () => {
+      // The refusal above is one reference over the bound, so this states
+      // where the bound actually falls rather than leaving it either side.
+      const index = answeringIndex();
+
+      const refs = await resolvePatternRefs(
+        index.client,
+        Array.from(
+          { length: MAX_HARNESS_PATTERN_REFS },
+          (_unused, position) => ({ patternId: `pat-${position}` }),
+        ),
+      );
+
+      expect(refs.map((ref) => ref.patternId)).toEqual(
+        Array.from(
+          { length: MAX_HARNESS_PATTERN_REFS },
+          (_unused, position) => `pat-${position}`,
+        ),
+      );
     });
 
     it("throws before any read for a value that is not an id", async () => {

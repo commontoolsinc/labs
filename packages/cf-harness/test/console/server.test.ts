@@ -1251,6 +1251,34 @@ describe("console/server", () => {
       );
     });
 
+    it("answers 400 for a pattern reference that is not an object at all", async () => {
+      // A reference is a `{ patternId }`, so a bare id in the list is a
+      // spelling the route refuses rather than one it reads through.
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "total my spending",
+        patternRefs: ["pat-expenses"],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "each pattern reference must be an object",
+      );
+    });
+
+    it("answers 400 for a `null` sitting in the reference list", async () => {
+      // Distinct from a `null` in place of the list itself, which is how a
+      // body says it attaches no patterns and starts an ordinary task.
+      const response = await server.handle(jsonRequest("/api/task", {
+        text: "total my spending",
+        patternRefs: [null],
+      }, { cookie }));
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe(
+        "each pattern reference must be an object",
+      );
+    });
+
     it("answers 400 for a pattern reference that carries no string patternId", async () => {
       const response = await server.handle(jsonRequest("/api/task", {
         text: "total my spending",
