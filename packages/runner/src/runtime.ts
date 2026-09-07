@@ -989,12 +989,16 @@ export class Runtime {
   readonly patternCoverage?: PatternCoverageCollector;
 
   readonly trustSnapshotProvider: () => TrustSnapshot | undefined;
-  // The runtime's trust revision — `<runtime id>` with the trust-config
-  // digest folded in when one is configured. The ONE composition site for
-  // every snapshot this runtime mints (the default provider and
-  // trustSnapshotForPrincipal), so a trust-config change invalidates
-  // per-run served snapshots exactly as it does ambient client ones.
+
+  /**
+   * The runtime's trust revision — `<runtime id>` with the trust-config digest
+   * folded in when one is configured. The _one_ composition site for every
+   * snapshot this runtime mints (the default provider and
+   * `trustSnapshotForPrincipal()`), so a trust-config change invalidates
+   * per-run served snapshots exactly as it does ambient client ones.
+   */
   readonly #trustRevision: string;
+
   readonly telemetry: RuntimeTelemetry;
 
   /** Resolved experimental flags (all properties present with built-in defaults). */
@@ -1016,37 +1020,51 @@ export class Runtime {
   /** Runtime-learned host hints (site table); see registerSpaceHost. */
   #dynamicHosts = new Map<string, string>();
 
-  // The transaction seal destination (server-execution v2, serving-loop.md
-  // §3d): installed only on a serving runtime under
-  // EXPERIMENTAL_SERVER_EXECUTION, by the wave machinery around each wave.
-  // While installed, every transaction edit() creates closes by sealing
-  // into it instead of committing to the store. Never installed on a
-  // client or in the OFF arm — installSealDestination throws off the flag.
+  /**
+   * The transaction seal destination (`serving-loop.md` §3d): installed only on
+   * a serving runtime under `EXPERIMENTAL_SERVER_EXECUTION`, by the wave
+   * machinery around each wave. While installed, every transaction `edit()`
+   * creates closes by sealing into it instead of committing to the store. Never
+   * installed on a client or in the OFF arm — `installSealDestination()` throws
+   * off the flag.
+   */
   #transactionSealDestination: TransactionSealDestination | undefined;
-  // The stores this runtime owns: the documents it materializes to hold a
-  // piece's machinery. Every transaction `edit()` creates gets the same
-  // object, which is what lets a write outside the transaction that minted a
-  // store still find it. See `cfc/runtime-owned-stores.ts`.
+
+  /**
+   * The stores this runtime owns: the documents it materializes to hold a
+   * piece's machinery. Every transaction `edit()` creates gets the same object,
+   * which is what lets a write outside the transaction that minted a store
+   * still find it. See `cfc/runtime-owned-stores.ts`.
+   */
   readonly #runtimeOwnedStores = new RuntimeOwnedStores();
-  // The serving loop's run stamper (installed WITH the destination): the
-  // scheduler hands it each run's durable action id + kind, and it
-  // attaches the wave run context before the tx seals.
+
+  /**
+   * The serving loop's run stamper (installed _with_ the destination): the
+   * scheduler hands it each run's durable action id and kind, and it attaches
+   * the wave run context before the tx seals.
+   */
   #serverRunStamper:
     | ((tx: IExtendedStorageTransaction, info: ServerRunInfo) => void)
     | undefined;
-  // The per-(action × instance) run-supply resolver (installed WITH the
-  // destination, stage P2-F): an action's demand roots (its piece root
-  // plus the ancestor roots that instantiated it — Phase 7) → the
-  // demanded instances the SpaceServer's registry holds for any of them.
+
+  /**
+   * The per-(action × instance) run-supply resolver (installed _with_ the
+   * destination): an action's demand roots (its piece root plus the ancestor
+   * roots that instantiated it) → the demanded instances the `SpaceServer`'s
+   * registry holds for any of them.
+   */
   #serverRunDemanderResolver:
     | ServerRunDemanderResolver
     | undefined;
-  // The client speculation overlay (server-execution v2 Phase 2,
-  // speculation.md): the DEFAULT seal destination of every runtime under
-  // the flag that has no wave destination installed. Created lazily on
-  // the first edit(); derivation-kind runs redirect their writes into
-  // the replica's pending overlay through it — the structural removal of
-  // the client derivation-commit path. Never created in the OFF arm.
+
+  /**
+   * The client speculation overlay (`speculation.md`): the _default_ seal
+   * destination of every runtime under the flag that has no wave destination
+   * installed. Created lazily on the first `edit()`; derivation-kind runs
+   * redirect their writes into the replica's pending overlay through it — the
+   * structural removal of the client derivation-commit path. Never created in
+   * the OFF arm.
+   */
   #speculationOverlay: SpeculationOverlayDestination | undefined;
 
   /** The client-effect channel (server-execution v2 Phase 4,
@@ -1061,17 +1079,21 @@ export class Runtime {
    * subscriptions). */
   #installedSpaceOpenObserver: ((space: MemorySpace) => void) | undefined;
 
-  // Whether THIS runtime explicitly set the serverExecution flag at
-  // construction (the only case its dispose participates in the
-  // process-global ambient lifecycle — see the constructor's propagation
-  // note).
+  /**
+   * Whether _this_ runtime explicitly set the `serverExecution` flag at
+   * construction (the only case its dispose participates in the process-global
+   * ambient lifecycle — see the constructor's propagation note).
+   */
   #explicitServerExecution: boolean | undefined;
-  // The enabler release for an explicitly-ENABLED runtime. The count
-  // itself lives with the flag (memory/v2.ts, shared with the
-  // ExecutorHost): dispose releases and the flag resets only when the
-  // LAST live enabler goes — a parked space's dispose must not un-claim
-  // `derived` for every other owner's in-flight wave commit (the
-  // admission plane reads the ambient value).
+
+  /**
+   * The enabler release for an explicitly-_enabled_ runtime. The count itself
+   * lives with the flag (`memory/v2.ts`, shared with the `ExecutorHost`):
+   * dispose releases and the flag resets only when the _last_ live enabler goes
+   * — a parked space's dispose must not un-claim `derived` for every other
+   * owner's in-flight wave commit (the admission plane reads the ambient
+   * value).
+   */
   #serverExecutionRelease: (() => void) | undefined;
 
   /** Serving posture (RuntimeOptions.servingPosture): true only for the
@@ -1110,13 +1132,16 @@ export class Runtime {
   #cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
   readonly #policyManifests = new Map<string, PolicyArtifactManifestV1>();
   readonly #policyManifestSpaces = new Map<string, Set<MemorySpace>>();
-  // Attesting space -> successor module identity -> direct predecessor
-  // identities whose writer authority it inherits. Entries come only from
-  // verified source closures or integrity-valid compiled closures in that same
-  // space. Transactions receive a transitive, immutable snapshot at creation
-  // so an in-flight authorization decision cannot change when another module
-  // loads, and authorization in one space can never borrow another space's
-  // delegation metadata.
+
+  /**
+   * Attesting space → successor module identity → direct predecessor identities
+   * whose writer authority it inherits. Entries come only from verified source
+   * closures or integrity-valid compiled closures in that same space.
+   * Transactions receive a transitive, immutable snapshot at creation so an
+   * in-flight authorization decision cannot change when another module loads,
+   * and authorization in one space can never borrow another space's delegation
+   * metadata.
+   */
   readonly #moduleDelegations = new Map<
     MemorySpace,
     Map<string, Set<string>>
@@ -1694,18 +1719,22 @@ export class Runtime {
     return this.scheduler.idle();
   }
 
-  // In-flight async builtin operations — the work async builtins (fetchJson,
-  // fetchProgram, llm/llmDialog, reactive sqlite queries, and navigation)
-  // perform AFTER their handler returns, from a post-commit outbox flush: a
-  // network / LLM / navigation call or a sqlite RPC, plus any result writeback.
-  // `idle()` deliberately does NOT wait for these; `settled()` does.
-  //
-  // Each entry carries the pattern run it belongs to, as the address key of the
-  // run's result cell — the `parentCell` every raw builtin is handed. Entries
-  // with no owner belong to no single run: the scheduler's commit promises,
-  // which are the barrier that a fire-and-forget builtin's outbox flush has
-  // registered its own work. `settledFor` waits for those as well as the run's
-  // own, because that handoff is how the run's work first becomes visible.
+  /**
+   * In-flight async builtin operations — the work async builtins (`fetchJson`,
+   * `fetchProgram`, `llm`/`llmDialog`, reactive sqlite queries, and navigation)
+   * perform _after_ their handler returns, from a post-commit outbox flush: a
+   * network, LLM, or navigation call or a sqlite RPC, plus any result
+   * writeback. `idle()` deliberately does _not_ wait for these; `settled()`
+   * does.
+   *
+   * Each entry carries the pattern run it belongs to, as the address key of the
+   * run's result cell — the `parentCell` every raw builtin is handed. Entries
+   * with no owner belong to no single run: the scheduler's commit promises,
+   * which are the barrier that a fire-and-forget builtin's outbox flush has
+   * registered its own work. `settledFor()` waits for those as well as the
+   * run's own, because that handoff is how the run's work first becomes
+   * visible.
+   */
   #pendingAsyncWork = new Map<Promise<unknown>, string | undefined>();
 
   /**
@@ -2451,11 +2480,13 @@ export class Runtime {
     }
   }
 
-  // (space, scope, id) triples for which a missing-link-target load has been
-  // kicked this session. The kicked sync establishes a live per-doc
-  // subscription, so a later creation of the doc still arrives — one kick per
-  // doc suffices. Scope is part of the key: scoped instances (user/session)
-  // are distinct docs, and a kick for one scope must not suppress another's.
+  /**
+   * (space, scope, id) triples for which a missing-link-target load has been
+   * kicked this session. The kicked sync establishes a live per-doc
+   * subscription, so a later creation of the doc still arrives — one kick per
+   * doc suffices. Scope is part of the key: scoped instances (user/session) are
+   * distinct docs, and a kick for one scope must not suppress another's.
+   */
   #missingDocLoadKicks = new Set<string>();
 
   /**

@@ -234,8 +234,11 @@ export class SchedulerGates {
       : undefined;
   }
 
-  // Pure query: arming happens at invalidation time (the facade's
-  // markActionInvalid → onInvalidated), never as a side effect of asking.
+  /**
+   * Returns whether a debounced computation is waiting. A pure query: arming
+   * happens at invalidation time (the facade's `markActionInvalid()` →
+   * `onInvalidated()`), never as a side effect of asking.
+   */
   isDebouncedComputationWaiting(
     action: Action,
     context: DebouncedComputationContext,

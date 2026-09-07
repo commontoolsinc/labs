@@ -276,12 +276,17 @@ export class Scheduler {
   readonly #pending = new Set<Action>();
   #dependencies = new WeakMap<Action, ReactivityLog>();
   readonly #cancels = new WeakMap<Action, Cancel>();
-  // Thunk, not a captured value: keys must always resolve against the
-  // runtime's CURRENT authenticated session (one source of truth), and a
-  // field initializer runs before constructor parameter properties assign.
+
+  /**
+   * The trigger index, handed a thunk rather than a captured value: keys must
+   * always resolve against the runtime's _current_ authenticated session (one
+   * source of truth), and a field initializer runs before constructor parameter
+   * properties assign.
+   */
   #triggerIndex = new SchedulerTriggerIndex(
     () => this.runtime.scopeKeyIdentity,
   );
+
   #actionChangeGroups = new WeakMap<Action, ChangeGroup>();
   readonly #retries = new WeakMap<Action, number>();
   #offBudgetRetries = new WeakMap<Action, number>();
@@ -294,14 +299,20 @@ export class Scheduler {
   #activePassId: number | undefined;
   #provisionalDemandThisPass = new Set<SchedulerNode>();
 
-  // Debugger breakpoints: action IDs that should trigger `debugger` before execution
+  /**
+   * Debugger breakpoints: action ids that should trigger `debugger` before
+   * execution.
+   */
   #breakpoints = new Set<string>();
 
-  // Compute time tracking for auto-debounce and diagnostics
-  // Keyed by action ID (source location) to persist stats across action recreation
+  /**
+   * Compute-time stats for auto-debounce and diagnostics, keyed by action id
+   * (source location) to persist stats across action recreation.
+   */
   readonly #actionStats = new BoundedKeyMap<string, ActionStats>(
     MAX_ACTION_STATS,
   );
+
   #actionTimingState: ActionTimingState = {
     actionStats: this.#actionStats,
     getActionId: (action) => this.#getActionId(action),
@@ -314,12 +325,17 @@ export class Scheduler {
 
   #rerunAfterCurrentExecute = false;
 
-  // Non-settling heuristic (Phase 1): detects when the system is churning
+  /** The non-settling heuristic, which detects when the system is churning. */
   #settlingTracker: SettlingTracker = createSettlingTracker();
+
   #autoTriggerDiagnosis = false;
 
-  // Idempotency diagnosis (Phase 2): captures read/write values per action run
+  /**
+   * Whether idempotency diagnosis, which captures read/write values per action
+   * run, is enabled.
+   */
   #diagnosisEnabled = false;
+
   #diagnosisTimeout: ReturnType<typeof setTimeout> | null = null;
   #diagnosisStartTime = 0;
   #diagnosisBusyTime = 0;
@@ -329,18 +345,22 @@ export class Scheduler {
   #diagnosisHistory = new Map<string, DiagnosisRecord[]>();
   #diagnosisNonIdempotent: NonIdempotentReport[] = [];
 
-  // Inline idempotency check mode: when enabled, every computation re-run
-  // in run() is followed by a second synchronous run for comparison.
+  /**
+   * Whether inline idempotency check mode is on: when it is, every computation
+   * re-run in `run()` is followed by a second synchronous run for comparison.
+   */
   #idempotencyCheckMode = false;
+
   #idempotencyViolations: NonIdempotentReport[] = [];
 
-  // Cycle detection (Phase 3): tracks causal edges between actions
+  /** Causal edges between actions, tracked for cycle detection. */
   #causalEdges: {
     writer: string;
     cell: string;
     triggered: string;
     timestamp: number;
   }[] = [];
+
   #changeGroupToActionId = new Map<ChangeGroup, string>();
   #diagnosisControlState!: SchedulerDiagnosisControlState;
 
@@ -361,11 +381,16 @@ export class Scheduler {
     () => this.runtime.scopeKeyIdentity,
   );
   #eventPreflightDependencyState!: EventPreflightDependencyState;
-  // Filter stats for diagnostics
+
+  /** Filter stats, for diagnostics. */
   #filterStats: FilterStatsState = { filtered: 0, executed: 0 };
 
-  // Settle stats for performance analysis (opt-in via enableSettleStats())
+  /**
+   * Whether to collect settle stats for performance analysis (opt-in via
+   * `enableSettleStats()`).
+   */
   #collectSettleStats = false;
+
   #lastSettleStats: SettleStats | null = null;
   #settleStatsHistory: SettleStatsHistoryEntry[] = [];
   #collectActionRunTrace = false;
@@ -375,9 +400,14 @@ export class Scheduler {
   #eventPreflightTelemetryEnabled = false;
   #eventPassDemandRefresh?: (demand: Set<Action>) => void;
   #storageNotificationState!: StorageNotificationState;
-  // Parent-child action tracking for proper execution ordering
-  // When a child action is created during parent execution, parent must run first
+
+  /**
+   * The action currently executing, tracked for parent-child ordering: when a
+   * child action is created during the parent's execution, the parent must run
+   * first.
+   */
   #executingAction: Action | null = null;
+
   #currentActionId?: string;
   #dependencyGraphState!: DependencyGraphState;
   #dependencyUpdateState!: DependencyUpdateState;
@@ -396,36 +426,49 @@ export class Scheduler {
 
   #idlePromises: (() => void)[] = [];
   #backgroundTasks = new Set<Promise<unknown>>();
-  // The single wake-shaping choke point (plan C): holds renderer-originated
-  // input events out of the event queue (W3) and shapable cell-flip wakes out
-  // of the reactive-notification path (plan B), coarsening the cadence a
-  // pattern can observe. Fed via queueEvent's shaping interception and
-  // holdShapedCellNotification() from the invalidation.ts routing of renderer
-  // $value writes and server pushes. See
-  // docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md.
+
+  /**
+   * The single wake-shaping choke point: holds renderer-originated input events
+   * out of the event queue and shapable cell-flip wakes out of the
+   * reactive-notification path, coarsening the cadence a pattern can observe.
+   * Fed via `queueEvent()`'s shaping interception and
+   * `holdShapedCellNotification()` from the `invalidation.ts` routing of
+   * renderer `$value` writes and server pushes. See
+   * `docs/specs/sandboxing/TIMING_SIDE_CHANNELS.md`.
+   */
   #wakeShaper = new WakeShaper();
-  // Head event parked on in-flight document loads (CT-1795). Keyed by event
-  // id; released by loadsSettled, which either re-queues execution on success
-  // or drops the at-most-once event on an explicit load failure.
+
+  /**
+   * Head event parked on in-flight document loads. Keyed by event id; released
+   * by `loadsSettled()`, which either re-queues execution on success or drops
+   * the at-most-once event on an explicit load failure.
+   */
   #headEventLoadPark: {
     eventId: string;
     keys: readonly string[];
     generations: ReadonlyMap<string, number>;
   } | null = null;
-  // Keys whose loads already settled while this event was head. Preflight
-  // itself kicks fire-and-forget pulls (populateDependencies cold reads), so
-  // an address can be freshly in flight on every pass; without this memo the
-  // park re-arms per pass and the event never dispatches. Once a key settled
-  // for this event its replica is warm — a refresh is an ordinary concurrent
-  // update, not a provisional snapshot.
+
+  /**
+   * Keys whose loads already settled while this event was head. Preflight
+   * itself kicks fire-and-forget pulls (`populateDependencies()` cold reads),
+   * so an address can be freshly in flight on every pass; without this memo the
+   * park re-arms per pass and the event never dispatches. Once a key settled
+   * for this event its replica is warm — a refresh is an ordinary concurrent
+   * update, not a provisional snapshot.
+   */
   #headEventLoadParkHistory: {
     eventId: string;
     generations: Map<string, number>;
   } | null = null;
-  // Generations already pending before the current event preflight. Used to
-  // distinguish a genuine concurrent refresh from a load kicked by preflight
-  // itself (the latter must not re-arm the same event forever).
+
+  /**
+   * Generations already pending before the current event preflight. Used to
+   * distinguish a genuine concurrent refresh from a load kicked by preflight
+   * itself (the latter must not re-arm the same event forever).
+   */
   #preflightPendingLoadGenerations = new Map<string, number>();
+
   readonly #errorHandlers = new Set<ErrorHandler>();
   #consoleHandler: ConsoleHandler;
   #running: Promise<unknown> | undefined = undefined;
@@ -435,11 +478,14 @@ export class Scheduler {
   #graphSnapshotState!: SchedulerGraphSnapshotState;
   #settleLoopState!: SchedulerSettleLoopState;
   #executeContinuationState!: ExecuteContinuationState;
-  // The serving posture's cooperative macrotask yield (server-execution
-  // v2 stage C tuning T3, cooperative-yield.ts): constructed ONLY for a
-  // serving runtime, so the OFF arm and flag-ON clients keep their
-  // settle loops' exact microtask shape. Its observer is the runtime's
-  // `servingYieldObserver` seam — the SpaceServer's mid-wave lease renew.
+
+  /**
+   * The serving posture's cooperative macrotask yield (`cooperative-yield.ts`):
+   * constructed _only_ for a serving runtime, so the OFF arm and flag-ON
+   * clients keep their settle loops' exact microtask shape. Its observer is the
+   * runtime's `servingYieldObserver` seam — the `SpaceServer`'s mid-wave lease
+   * renew.
+   */
   readonly #cooperativeYield: CooperativeYield | undefined;
 
   //
@@ -700,10 +746,12 @@ export class Scheduler {
     return cancel;
   }
 
-  // Hold a resumed action's initial run until its space finishes syncing. The
-  // hold is a bounded time gate (worst case the timeout releases it); the sync
-  // completing releases it early. The awaiting task joins backgroundTasks so
-  // idle() waits for the release decision.
+  /**
+   * Holds a resumed action's initial run until its space finishes syncing. The
+   * hold is a bounded time gate (worst case the timeout releases it); the sync
+   * completing releases it early. The awaiting task joins `#backgroundTasks` so
+   * `idle()` waits for the release decision.
+   */
   #holdInitialRunUntilSynced(
     action: Action,
     options: { space: MemorySpace; timeoutMs?: number },
@@ -870,19 +918,21 @@ export class Scheduler {
     return this.#waitForQuiescence(false);
   }
 
-  // Client-facing quiescence: reactive quiescence AND durability of in-flight
-  // commits. Commits are issued fire-and-forget (event handlers, direct cell
-  // writes over IPC, reactive recomputation write-backs), so plain idle()
-  // reports quiescence while a commit is still traveling to the server; a
-  // client that reads idle as a safe point to navigate or reload would then
-  // drop that write when the page and its worker are torn down. The pending
-  // set is sourced from the storage manager — the single chokepoint every
-  // commit flows through — so no write path can be forgotten. A landed commit
-  // also dirties readers of the committed write, which can re-trigger
-  // scheduler work that produces further commits, so durability and reactive
-  // quiescence are one joint fixpoint; this reuses the same recursive
-  // convergence idle() uses (no separate retry loop, no round cap) and, like
-  // idle(), never resolves for a system that genuinely never settles.
+  /**
+   * Returns a promise for client-facing quiescence: reactive quiescence _and_
+   * durability of in-flight commits. Commits are issued fire-and-forget (event
+   * handlers, direct cell writes over IPC, reactive recomputation write-backs),
+   * so plain `idle()` reports quiescence while a commit is still traveling to
+   * the server; a client that reads idle as a safe point to navigate or reload
+   * would then drop that write when the page and its worker are torn down. The
+   * pending set is sourced from the storage manager — the single chokepoint
+   * every commit flows through — so no write path can be forgotten. A landed
+   * commit also dirties readers of the committed write, which can re-trigger
+   * scheduler work that produces further commits, so durability and reactive
+   * quiescence are one joint fixpoint; this reuses the same recursive
+   * convergence `idle()` uses (no separate retry loop, no round cap) and, like
+   * `idle()`, never resolves for a system that genuinely never settles.
+   */
   idleWithPendingCommits(): Promise<void> {
     return this.#waitForQuiescence(true);
   }
@@ -1488,8 +1538,11 @@ export class Scheduler {
     });
   }
 
-  // A released shaped event re-enters the ordinary queue path; the shaper reads
-  // eventQueueState at release time, so it stays correct across state re-init.
+  /**
+   * Delivery for a released shaped event, which re-enters the ordinary queue
+   * path; the shaper reads `eventQueueState` at release time, so it stays
+   * correct across state re-init.
+   */
   #shapedEventDeliver: DeliverFn = (
     eventLink,
     event,
@@ -1511,14 +1564,16 @@ export class Scheduler {
       parentEventId: opts.parentEventId,
     });
 
-  // The owning pattern instance for an input stream, used to group a pattern's
-  // input across its several streams into one delivery-shaping window (per-pattern
-  // coalescing, W3). The wake shaper's hold() runs before the handler is
-  // resolved, so we find it here from the registered handlers; undefined when none
-  // is registered yet (the shaper then falls back to per-stream grouping). The key
-  // includes the owning space so two instances of one pattern in different spaces
-  // (same content-addressed pieceId) do not share a bucket (see
-  // shaperInstanceGroupKey).
+  /**
+   * Returns the id of the owning pattern instance for an input stream, used to
+   * group a pattern's input across its several streams into one
+   * delivery-shaping window (per-pattern coalescing). The wake shaper's
+   * `hold()` runs before the handler is resolved, so we find it here from the
+   * registered handlers; `undefined` when none is registered yet (the shaper
+   * then falls back to per-stream grouping). The key includes the owning space
+   * so two instances of one pattern in different spaces (same content-addressed
+   * `pieceId`) do not share a bucket (see `shaperInstanceGroupKey()`).
+   */
   #pieceIdForEventLink(
     eventLink: NormalizedFullLink,
   ): string | undefined {
@@ -1573,9 +1628,11 @@ export class Scheduler {
     holdShapedCell(this.#wakeShaper, groupKey, itemKey, chargeKey, deliver);
   }
 
-  // Whether any shapable cell-flip wake is currently held out of the scheduler
-  // (plan B). Exposed for tests that need to observe that a change was routed
-  // through the wake shaper's cell path before idle() drains it.
+  /**
+   * Returns whether any shapable cell-flip wake is currently held out of the
+   * scheduler. Exposed for tests that need to observe that a change was routed
+   * through the wake shaper's cell path before `idle()` drains it.
+   */
   hasPendingShapedCellNotifications(): boolean {
     return this.#wakeShaper.hasPending(CELL_GROUP_PREFIX);
   }
@@ -2233,8 +2290,10 @@ export class Scheduler {
   // State wiring
   //
 
-  // Keep state-bundle wiring explicit without making the field declarations
-  // read like one large object graph.
+  /**
+   * Wires the state bundles. Kept explicit here so the field declarations do
+   * not read like one large object graph.
+   */
   #initializeSchedulerState(): void {
     this.#diagnosisControlState = this.#createDiagnosisControlState();
     this.#writeIndex = this.#createWriteIndex();
@@ -2468,11 +2527,14 @@ export class Scheduler {
     }
   }
 
-  // A node is convergence-backoff-deferred iff its `gate.backoffUntil` is in the
-  // future. For an already-ran computation `backoffUntil` is set exclusively by
-  // the settle-cap backoff (planBudgetBackoff); the resume initial-run hold that
-  // also rides `backoffUntil` only applies to never-ran nodes. Throttle and
-  // debounce use their own gate fields, so this cleanly excludes them.
+  /**
+   * Returns whether `action` is convergence-backoff-deferred, which is so iff
+   * its `gate.backoffUntil` is in the future. For an already-ran computation
+   * `backoffUntil` is set exclusively by the settle-cap backoff
+   * (`planBudgetBackoff()`); the resume initial-run hold that also rides
+   * `backoffUntil` only applies to never-ran nodes. Throttle and debounce use
+   * their own gate fields, so this cleanly excludes them.
+   */
   #isConvergenceBackoffDeferred(action: Action): boolean {
     const backoffUntil = this.#nodes.get(action)?.gate.backoffUntil;
     return backoffUntil !== undefined && backoffUntil > performance.now();
