@@ -97,7 +97,10 @@ export class SpaceManager {
     };
   }
 
-  // Update the list of pieces to watch (removing any pieces that are no longer in the list)
+  /**
+   * Updates the list of pieces to watch, removing any pieces that are no
+   * longer in the list.
+   */
   watch(entries: Cell<BGPieceEntry>[]): Cancel {
     const [cancel, addCancel] = useCancelGroup();
 
@@ -325,16 +328,18 @@ export class SpaceManager {
     }
   }
 
-  // This is fired from `WorkerController` when an terminal error
-  // occurs (e.g. outside of the graph), and may happen at any point
-  // during execution.
-  // Because this can occur from a piece calling `setTimeout(() => throw new Error(""), timeout)`
-  // we cannot determine the offending piece. Because this should not occur frequently,
-  // and happening currently due to older, misbehaving pieces, this should flush out
-  // those misbehaving pieces.
-  //
-  // Attempt to recreate the worker environment, which should only occur once per
-  // space-wide disabling.
+  /**
+   * Handler for the event `WorkerController` fires when a terminal error
+   * occurs (e.g. outside of the graph), which may happen at any point during
+   * execution. Because this can occur from a piece calling
+   * `setTimeout(() => throw new Error(""), timeout)`, we cannot determine the
+   * offending piece. Because this should not occur frequently, and currently
+   * happens due to older, misbehaving pieces, this should flush out those
+   * misbehaving pieces.
+   *
+   * Attempts to recreate the worker environment, which should only occur once
+   * per space-wide disabling.
+   */
   #onTerminalError = (event: Event) => {
     // `addEventListener` types its listener over `Event`; the narrowing
     // recovers the controller's own event type, and anything else here is a

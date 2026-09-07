@@ -69,9 +69,11 @@ export class BuildConfig {
     return path.join(this.root, ...args);
   }
 
-  // A fresh, mutable copy of the workspace manifest, parsed from its original
-  // bytes. The build mutates this copy; the original bytes stay untouched so
-  // the revert can restore the file exactly.
+  /**
+   * Returns a fresh, mutable copy of the workspace manifest, parsed from its
+   * original bytes. The build mutates this copy; the original bytes stay
+   * untouched so the revert can restore the file exactly.
+   */
   manifest(): Record<string, any> {
     return parseJsonc(this.#manifestOriginal) as Record<string, any>;
   }

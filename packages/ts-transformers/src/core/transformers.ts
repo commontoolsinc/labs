@@ -241,9 +241,10 @@ export abstract class Transformer {
 
   abstract transform(context: TransformationContext): ts.SourceFile;
 
-  // Receives a TransformationContext, returning a boolean indicating
-  // whether a transformation should run for this source file.
-  // If not provided, always returns true.
+  /**
+   * Returns whether the transformation should run for `context`'s source
+   * file. This base implementation always returns `true`.
+   */
   filter(_context: TransformationContext): boolean {
     return true;
   }

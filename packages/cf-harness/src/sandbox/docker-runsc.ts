@@ -738,20 +738,30 @@ const cfcResultFromRunscSidecar = (
 
 export class DockerRunscSandboxRuntime implements SandboxRuntime {
   #cfcTransportReadiness?: CfcTransportReadiness;
-  // Copied once here and read from here afterwards. `config` is public, its
-  // `readonly` binds the reference rather than the fields, and `readonly` is a
-  // compile-time annotation that no longer exists at runtime — so it cannot
-  // stop a JavaScript caller, a cast, or `any`. The probe memoizes a verdict
-  // about these two directories, and a verdict must not outlive the evidence
-  // that produced it; copying the values is what makes the directories unable
-  // to move out from under it, rather than asking a type to be respected.
+
+  /**
+   * Copy of `config.cfcInvocationContextDir`, taken once here and read from
+   * here afterwards. `config` is public, its `readonly` binds the reference
+   * rather than the fields, and `readonly` is a compile-time annotation that
+   * no longer exists at runtime — so it cannot stop a JavaScript caller, a
+   * cast, or `any`. The probe memoizes a verdict about these two directories,
+   * and a verdict must not outlive the evidence that produced it; copying the
+   * values is what makes the directories unable to move out from under it,
+   * rather than asking a type to be respected.
+   */
   readonly #cfcInvocationContextDir?: string;
+
   readonly #cfcResultDir?: string;
-  // The registration reading is about a named runtime reached through a named
-  // binary, so those identify the verdict as much as the directories do.
-  // Copied for the same reason and used on every path that either probes or
-  // launches, so the runtime a verdict describes is the runtime that runs.
+
+  /**
+   * Copy of `config.runtimeName`. The registration reading is about a named
+   * runtime reached through a named binary, so those identify the verdict as
+   * much as the directories do. Copied for the same reason as
+   * `#cfcInvocationContextDir` and used on every path that either probes or
+   * launches, so the runtime a verdict describes is the runtime that runs.
+   */
   readonly #runtimeName: string;
+
   readonly #dockerBinary: string;
   readonly #extraDockerArgs: readonly string[];
   readonly #runner: ProcessRunner;

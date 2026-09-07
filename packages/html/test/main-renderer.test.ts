@@ -40,8 +40,10 @@ class MockConnection {
     return () => this.#lifetime.signal.removeEventListener("abort", teardown);
   }
 
-  // The renderer obtains VDOM capability only through attachVDom; the session
-  // delegates to the mock's recording methods below.
+  /**
+   * Attaches the VDOM capability, which is the only way the renderer obtains
+   * it; the session delegates to the mock's recording methods below.
+   */
   attachVDom(onDispose: () => void) {
     const unregister = this.onDispose(onDispose);
     return {
