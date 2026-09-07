@@ -377,13 +377,6 @@ interface PropRebuildJob {
 }
 
 export class CellBridge {
-  // Four methods below stay TypeScript-`private` rather than `#`, which is
-  // the convention elsewhere in this class: `cell-bridge.test.ts` replaces
-  // each by assignment, which a `#` method does not allow. They are
-  // `refreshPiecePatternMetadata()`, `rebuildPieceProp()`,
-  // `updateIndexJson()`, and `buildSourceTree()`, and each carries a note
-  // naming the test that replaces it.
-
   #tree: FsTree;
   #spaces: Map<string, SpaceState> = new Map();
   #knownSpaces: Map<string, string> = new Map();
@@ -658,14 +651,12 @@ export class CellBridge {
           existingIno,
           rootKind,
         ),
-      // The next four forward to TypeScript-private members so that a test
-      // which replaces one by assignment is honored here too.
       refreshPiecePatternMetadata: (state, piece, pieceIno) =>
-        this.refreshPiecePatternMetadata(state, piece, pieceIno),
-      rebuildPieceProp: (args) => this.rebuildPieceProp(args),
-      updateIndexJson: (state) => this.updateIndexJson(state),
+        this.#refreshPiecePatternMetadata(state, piece, pieceIno),
+      rebuildPieceProp: (args) => this.#rebuildPieceProp(args),
+      updateIndexJson: (state) => this.#updateIndexJson(state),
       buildSourceTree: (pieceIno, piece, state, pieceName) =>
-        this.buildSourceTree(pieceIno, piece, state, pieceName),
+        this.#buildSourceTree(pieceIno, piece, state, pieceName),
     };
   }
 
@@ -1011,12 +1002,8 @@ export class CellBridge {
 
   /**
    * Refreshes synthetic pattern metadata after an in-place pattern swap.
-   *
-   * TypeScript-private rather than a `#` name, because
-   * `cell-bridge.test.ts` replaces this member by assignment, which a `#`
-   * method does not allow.
    */
-  private async refreshPiecePatternMetadata(
+  async #refreshPiecePatternMetadata(
     state: SpaceState,
     piece: PieceController,
     pieceIno: bigint,
@@ -1134,7 +1121,7 @@ export class CellBridge {
       await this.#verifyPiecesConnection(pieces);
       state = this.#buildSpaceTree(spaceName, pieces);
 
-      this.updateIndexJson(state);
+      this.#updateIndexJson(state);
       this.#updatePiecesJson(state);
       this.#spaces.set(spaceName, state);
       this.#knownSpaces.set(spaceName, state.did);
@@ -2032,12 +2019,8 @@ export class CellBridge {
   /**
    * Rebuilds the mounted subtree of one piece prop from a new cell value, in
    * place.
-   *
-   * TypeScript-private rather than a `#` name, because
-   * `cell-bridge.test.ts` replaces this member by assignment, which a `#`
-   * method does not allow.
    */
-  private async rebuildPieceProp(args: {
+  async #rebuildPieceProp(args: {
     cell: Cell<unknown>;
     newValue: unknown;
     pieceId: string;
@@ -2313,7 +2296,7 @@ export class CellBridge {
     const previous = this.#pendingPropRebuildQueues.get(key) ??
       Promise.resolve();
     const current = previous.catch(() => {}).then(() =>
-      this.rebuildPieceProp(args)
+      this.#rebuildPieceProp(args)
     );
     this.#pendingPropRebuildQueues.set(key, current);
     try {
@@ -2530,13 +2513,13 @@ export class CellBridge {
       const state = this.#spaces.get(writePath.spaceName);
       const pieceIno = state?.pieceInos.get(writePath.pieceName);
       if (state && pieceIno !== undefined) {
-        await this.buildSourceTree(
+        await this.#buildSourceTree(
           pieceIno,
           writePath.piece,
           state,
           writePath.pieceName,
         );
-        await this.refreshPiecePatternMetadata(
+        await this.#refreshPiecePatternMetadata(
           state,
           writePath.piece,
           pieceIno,
@@ -2563,7 +2546,7 @@ export class CellBridge {
    * `undefined` is the refresh having succeeded, and reports nothing.
    *
    * The directory a caller was handed is not the one to write into after a
-   * finalize: `buildSourceTree` replaces `.src` wholesale and mints a fresh
+   * finalize: `#buildSourceTree()` replaces `.src` wholesale and mints a fresh
    * empty `error.log` inside it, so both the text written before that and the
    * inode it was written to are gone. Resolving the directory here, from the
    * state the rebuild updated, is what lets a report outlive the rebuild that
@@ -2592,7 +2575,7 @@ export class CellBridge {
    *
    * Every mutation of the log goes through here — the clear a clean write
    * performs, the diagnostic a failed one leaves, and the refresh warning
-   * above — because the file is identified by the inode `buildSourceTree`
+   * above — because the file is identified by the inode `#buildSourceTree()`
    * recorded when it minted it, never by name. A pattern is free to author a
    * source file called `error.log`, and resolving by name would find that
    * file and overwrite the mounted copy of committed source with a
@@ -3413,7 +3396,7 @@ export class CellBridge {
       "pieces",
     );
     state.pieceInos.set(name, pieceIno);
-    await this.buildSourceTree(pieceIno, piece, state, name);
+    await this.#buildSourceTree(pieceIno, piece, state, name);
     await this.#refreshPieceManifest(state, piece);
 
     const subs = await this.#subscribePiece(
@@ -3542,7 +3525,7 @@ export class CellBridge {
     }
 
     // Update index and invalidate
-    this.updateIndexJson(state);
+    this.#updateIndexJson(state);
     this.#updatePiecesJson(state);
     if (this.#onInvalidate) {
       // Invalidate child entries under pieces/
@@ -3597,12 +3580,8 @@ export class CellBridge {
 
   /**
    * Updates the `pieces/.index.json` file for a space.
-   *
-   * TypeScript-private rather than a `#` name, because
-   * `cell-bridge.test.ts` replaces this member by assignment, which a `#`
-   * method does not allow.
    */
-  private updateIndexJson(state: SpaceState): void {
+  #updateIndexJson(state: SpaceState): void {
     const existingIno = this.#tree.lookup(state.piecesIno, ".index.json");
     if (existingIno !== undefined) {
       this.#tree.clear(existingIno);
@@ -4310,7 +4289,7 @@ export class CellBridge {
             const cancelPatternRef = rootCell.sinkMeta(
               key,
               () => {
-                void this.refreshPiecePatternMetadata(
+                void this.#refreshPiecePatternMetadata(
                   state,
                   piece,
                   pieceIno,
@@ -4458,7 +4437,7 @@ export class CellBridge {
             }
 
             // Rebuild .index.json and pieces.json.
-            this.updateIndexJson(state);
+            this.#updateIndexJson(state);
             this.#updatePiecesJson(state);
 
             // Invalidate kernel cache.
@@ -4666,12 +4645,8 @@ export class CellBridge {
    * authored source files (recovered from the content-addressed
    * `pattern:<identity>` source-doc closure). Skips system pieces that have no
    * recoverable source.
-   *
-   * TypeScript-private rather than a `#` name, because
-   * `cell-bridge.test.ts` replaces this member by assignment, which a `#`
-   * method does not allow.
    */
-  private async buildSourceTree(
+  async #buildSourceTree(
     pieceIno: bigint,
     piece: PieceController,
     state: SpaceState,

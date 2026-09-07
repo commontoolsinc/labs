@@ -5480,11 +5480,12 @@ Deno.test("CellBridge.reportSourceRefreshWarning reports nothing for a refreshed
 });
 
 Deno.test("CellBridge.reportSourceRefreshWarning leaves an authored error.log alone", () => {
-  // `buildSourceTree` mints the synthetic `error.log` only when no authored
-  // source file claims that name, so a piece that ships one of its own has no
-  // synthetic file and no entry in `srcErrorLogInos`. Resolving the file by
-  // name here would find the authored one and overwrite committed source with
-  // this report; the console line is the whole report such a piece gets.
+  // `CellBridge.#buildSourceTree()` mints the synthetic `error.log` only when
+  // no authored source file claims that name, so a piece that ships one of
+  // its own has no synthetic file and no entry in `srcErrorLogInos`.
+  // Resolving the file by name here would find the authored one and
+  // overwrite committed source with this report; the console line is the
+  // whole report such a piece gets.
   const bridge = new CellBridge(new FsTree(), "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "space", []);
   const tree = bridge.tree;
