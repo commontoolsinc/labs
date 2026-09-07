@@ -53,6 +53,21 @@ export default pattern<{ orders: SqliteDb }>(({ orders }) => {
 });
 ```
 
+The call returns an envelope, not the rows:
+`{ pending, result?, error?, withheld? }`. `result` holds the rows once there
+are any, so a field typed as the rows themselves — `PerSession<Row[]>` — cannot
+take the call's value, and reading `.result` is what gets from one to the
+other. `withheld` counts the rows a read-time clearance kept from this reader,
+and is absent unless the query asked for one.
+
+Render the failure, not just the wait. A pattern that branches only on
+`pending` shows a loading view for as long as the query stays broken, because a
+query that failed is settled — `pending` is `false` and `error` holds the
+reason — and nothing further arrives to move it on. `error` reaches the pattern
+for a statement the database refuses and for a handle that does not read back
+as one, so a view that shows it is the difference between a page that says what
+went wrong and a page that spins.
+
 The `<Row>` type argument names the columns the statement projects, and is what
 turns a result into something typed. Without it the rows come back as
 `Record<string, unknown>`, and a `_cf_link` column comes back as a raw link
