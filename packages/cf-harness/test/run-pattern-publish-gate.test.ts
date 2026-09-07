@@ -277,7 +277,6 @@ describe("run_pattern publish render gate", () => {
     new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `publish-gate-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       fabricSessionFactory: () => Promise.resolve({ pieces, identity: signer }),
       patternIndexClientFactory: () =>
         Promise.resolve(
@@ -326,7 +325,6 @@ describe("run_pattern publish render gate", () => {
     const engine = new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `publish-gate-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       fabricSessionFactory: () => Promise.resolve({ pieces, identity: signer }),
     });
     expect(engine.patternIndexPublications).toBeUndefined();
@@ -358,7 +356,6 @@ describe("run_pattern publish render gate", () => {
     const engine = new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `publish-gate-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       fabricSessionFactory: () => Promise.resolve({ pieces, identity: signer }),
       patternIndexClientFactory: () =>
         Promise.resolve(
@@ -587,7 +584,6 @@ describe("run_pattern publish render gate", () => {
     new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `publish-gate-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       fabricSessionFactory: () => Promise.resolve({ pieces, identity }),
       patternIndexClientFactory: () =>
         Promise.resolve(
@@ -647,6 +643,8 @@ describe("run_pattern publish render gate", () => {
       cfcReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
       cfcReadOnExceed: "skip",
     });
+    // Registered before anything can throw: afterEach disposes it, and
+    // disposal closes the manager it owns.
     extraRuntimes.push(boundedRuntime);
     const boundedPieces = new PiecesController(
       await createSession({
@@ -658,41 +656,37 @@ describe("run_pattern publish render gate", () => {
     await boundedPieces.synced();
     const index = stubIndex();
     let probeCeiling: unknown = "never opened";
-    try {
-      const engine = new CfHarnessEngine({
-        sandboxRuntime: new FakeSandboxRuntime(),
-        runId: `publish-gate-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
-        fabricSessionFactory: () =>
-          Promise.resolve({ pieces: boundedPieces, identity: signer }),
-        patternIndexClientFactory: () =>
-          Promise.resolve(
-            new PatternIndexClient({
-              baseUrl: "https://index.test",
-              fetchFn: index.fetchFn,
-              signer,
-            }),
-          ),
-        openProbeRuntime: (_identity, _apiUrl, _mode, ceiling) => {
-          probeCeiling = ceiling;
-          return Promise.resolve(undefined);
-        },
-      });
-      const result = await engine.invokeBuiltinTool("run_pattern", {
-        sourceText: WORKING_SORTABLE_TABLE,
-        inputs: { rows: [{ name: "Avery", score: 12 }] },
-        description: "Sortable table that reads its cells",
-      });
-      const output = result.output as RunPatternToolSuccessOutput;
-      expect(output.status).toBe("ok");
-      expect(output.patternPublication?.reason).toBe("probe-failed");
-      expect(probeCeiling).toEqual({
-        cfcReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
-        cfcReadOnExceed: "skip",
-      });
-    } finally {
-      await boundedManager.close();
-    }
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: `publish-gate-${crypto.randomUUID()}`,
+      cfcEnforcementMode: "disabled",
+      fabricSessionFactory: () =>
+        Promise.resolve({ pieces: boundedPieces, identity: signer }),
+      patternIndexClientFactory: () =>
+        Promise.resolve(
+          new PatternIndexClient({
+            baseUrl: "https://index.test",
+            fetchFn: index.fetchFn,
+            signer,
+          }),
+        ),
+      openProbeRuntime: (_identity, _apiUrl, _mode, ceiling) => {
+        probeCeiling = ceiling;
+        return Promise.resolve(undefined);
+      },
+    });
+    const result = await engine.invokeBuiltinTool("run_pattern", {
+      sourceText: WORKING_SORTABLE_TABLE,
+      inputs: { rows: [{ name: "Avery", score: 12 }] },
+      description: "Sortable table that reads its cells",
+    });
+    const output = result.output as RunPatternToolSuccessOutput;
+    expect(output.status).toBe("ok");
+    expect(output.patternPublication?.reason).toBe("probe-failed");
+    expect(probeCeiling).toEqual({
+      cfcReadMaxConfidentiality: ["did:key:zOwner", "did:key:zFacet"],
+      cfcReadOnExceed: "skip",
+    });
   });
 
   it("records without a verdict when the probe fails for its own reasons", async () => {
@@ -724,7 +718,6 @@ describe("run_pattern publish render gate", () => {
     const engine = new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `publish-gate-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       fabricSessionFactory: () => Promise.resolve({ pieces }),
       patternIndexClientFactory: () =>
         Promise.resolve(
@@ -753,25 +746,6 @@ describe("run_pattern publish render gate", () => {
     // compile cannot resolve it and every composed pattern comes back
     // uncertified. Nothing tested that branch, which is why the mode was
     // missing from it in the first place.
-    // Enforcing, not disabled: the content-addressed source cache a
-    // `cf:pattern:` import resolves from is only written under an enforcing
-    // mode, for the live run and the probe alike. A disabled-mode session
-    // cannot compile a composed source at all, so this is the mode the case
-    // exists in.
-    const enforcing = new Runtime({
-      apiUrl: new URL("http://toolshed.test"),
-      storageManager,
-      cfcEnforcementMode: "enforce-explicit",
-    });
-    extraRuntimes.push(enforcing);
-    const enforcingPieces = new PiecesController(
-      await createSession({
-        identity: signer,
-        spaceName: `publish-gate-cfc-${crypto.randomUUID()}`,
-      }),
-      enforcing,
-    );
-    await enforcingPieces.synced();
     const doublerId = await entryIdentityOf(DOUBLER);
     const index = stubIndex({
       [doublerId]: {
@@ -790,9 +764,7 @@ describe("run_pattern publish render gate", () => {
     const engine = new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `publish-gate-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "enforce-explicit",
-      fabricSessionFactory: () =>
-        Promise.resolve({ pieces: enforcingPieces, identity: signer }),
+      fabricSessionFactory: () => Promise.resolve({ pieces, identity: signer }),
       patternIndexClientFactory: () =>
         Promise.resolve(
           new PatternIndexClient({

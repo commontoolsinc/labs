@@ -263,9 +263,14 @@ describe("max-enforcement CFC posture as one system (CT-2075)", () => {
         );
         const secretId = cell.getAsNormalizedFullLink().id;
         const tx = runtime.edit();
+        // The store declares the confidentiality it receives, so the write
+        // fits its own ceiling (§8.12.4) and the sink ceiling below is the
+        // gate that decides this commit. Without the declaration a strict
+        // writer-fit refuses first and the case stops reaching its subject.
         runtime.getCell<{ v: string }>(space, "posture-trigger-out", {
           type: "object",
           properties: { v: { type: "string" } },
+          ifc: { confidentiality: ["medical"] },
         }, tx).set({ v: "computed" });
         // The secret is recorded as what SCHEDULED this run; the run never
         // reads it again. Without the gating dial the consumed set would not
@@ -310,6 +315,7 @@ describe("max-enforcement CFC posture as one system (CT-2075)", () => {
           runtime.getCell<{ v: string }>(space, "posture-event-out", {
             type: "object",
             properties: { v: { type: "string" } },
+            ifc: { confidentiality: ["medical"] },
           }, tx).set({ v: "derived" });
           enqueueSinkRequestPostCommitEffect(
             tx,

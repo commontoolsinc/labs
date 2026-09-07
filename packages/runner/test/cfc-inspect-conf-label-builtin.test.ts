@@ -124,7 +124,6 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       cfcFlowLabels,
     });
     tx = runtime.edit();
@@ -158,8 +157,8 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       const result = runtime.run(tx, testPattern, { doc: source }, resultCell);
       // The blessed pre-commit chokepoint (what production runner paths call):
       // the builtin's initial run happens inside THIS tx, records the
-      // metadata observation, and marks it CFC-relevant — an unprepared
-      // commit would (correctly) reject under enforce-explicit.
+      // metadata observation, and marks it CFC-relevant, which is what lets
+      // the commit through.
       runtime.prepareTxForCommit(tx);
       tx.commit();
 
@@ -286,8 +285,8 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       const result = runtime.run(tx, testPattern, { doc: source }, resultCell);
       // The blessed pre-commit chokepoint (what production runner paths call):
       // the builtin's initial run happens inside THIS tx, records the
-      // metadata observation, and marks it CFC-relevant — an unprepared
-      // commit would (correctly) reject under enforce-explicit.
+      // metadata observation, and marks it CFC-relevant, which is what lets
+      // the commit through.
       runtime.prepareTxForCommit(tx);
       tx.commit();
 
@@ -320,8 +319,8 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       const result = runtime.run(tx, testPattern, { doc: source }, resultCell);
       // The blessed pre-commit chokepoint (what production runner paths call):
       // the builtin's initial run happens inside THIS tx, records the
-      // metadata observation, and marks it CFC-relevant — an unprepared
-      // commit would (correctly) reject under enforce-explicit.
+      // metadata observation, and marks it CFC-relevant, which is what lets
+      // the commit through.
       runtime.prepareTxForCommit(tx);
       tx.commit();
 
@@ -366,8 +365,8 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       const result = runtime.run(tx, testPattern, { doc: source }, resultCell);
       // The blessed pre-commit chokepoint (what production runner paths call):
       // the builtin's initial run happens inside THIS tx, records the
-      // metadata observation, and marks it CFC-relevant — an unprepared
-      // commit would (correctly) reject under enforce-explicit.
+      // metadata observation, and marks it CFC-relevant, which is what lets
+      // the commit through.
       runtime.prepareTxForCommit(tx);
       tx.commit();
 
@@ -397,8 +396,8 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       const result = runtime.run(tx, testPattern, { doc: source }, resultCell);
       // The blessed pre-commit chokepoint (what production runner paths call):
       // the builtin's initial run happens inside THIS tx, records the
-      // metadata observation, and marks it CFC-relevant — an unprepared
-      // commit would (correctly) reject under enforce-explicit.
+      // metadata observation, and marks it CFC-relevant, which is what lets
+      // the commit through.
       runtime.prepareTxForCommit(tx);
       tx.commit();
 
@@ -437,8 +436,8 @@ describe("inspectConfLabel builtin (inv-12 Stage 2)", () => {
       const result = runtime.run(tx, testPattern, { doc: source }, resultCell);
       // The blessed pre-commit chokepoint (what production runner paths call):
       // the builtin's initial run happens inside THIS tx, records the
-      // metadata observation, and marks it CFC-relevant — an unprepared
-      // commit would (correctly) reject under enforce-explicit.
+      // metadata observation, and marks it CFC-relevant, which is what lets
+      // the commit through.
       runtime.prepareTxForCommit(tx);
       tx.commit();
 

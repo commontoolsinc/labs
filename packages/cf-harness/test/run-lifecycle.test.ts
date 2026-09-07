@@ -9,8 +9,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
 import { normalize } from "@std/path/posix";
+import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
 
 import { readHarnessRunState } from "../src/artifacts.ts";
+import { createCliPromptSlotBinding } from "../src/contracts/prompt-slot.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessModelClient } from "../src/model/client.ts";
@@ -29,6 +31,28 @@ const SPACE_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
 const FOREIGN_REF = `/@did:key:z6MkforeignSpaceForRunLifecycleTest/of:fid1:${
   "B".repeat(43)
 }/x`;
+
+/** The mediation metadata a CFC sandbox attaches to a command's output. */
+const mediated = (stdout: string): CfcSandboxResult => ({
+  version: 1,
+  stdout: {
+    channel: "stdout",
+    policy: "observed",
+    label: { confidentiality: ["public"] },
+    segments: [{ text: stdout, label: { confidentiality: ["public"] } }],
+  },
+  stderr: {
+    channel: "stderr",
+    policy: "observed",
+    label: { confidentiality: ["public"] },
+    segments: [{ text: "", label: { confidentiality: ["public"] } }],
+  },
+  exitCode: {
+    policy: "observed",
+    label: { confidentiality: ["public"] },
+    value: 0,
+  },
+});
 
 /** A sandbox that answers the capability probe and one canned shell result. */
 class FakeSandboxRuntime implements SandboxRuntime {
@@ -69,13 +93,27 @@ class FakeSandboxRuntime implements SandboxRuntime {
           stderr: "",
           exitCode: 0,
         }
-        : { stdout: "one\n", stderr: "", exitCode: 0 },
+        : {
+          stdout: "one\n",
+          stderr: "",
+          exitCode: 0,
+          cfcResult: mediated("one\n"),
+        },
     );
   }
 }
 
 const runStatePath = (artifactRoot: string, runId: string): string =>
   join(artifactRoot, runId, "run-state.json");
+
+/**
+ * The prompt slot the command line binds a typed prompt to. The effectful
+ * tool the model calls carries its authority from this binding.
+ */
+const directCommandSlot = createCliPromptSlotBinding({
+  kernelName: "cf-harness",
+  subject: "run-lifecycle",
+});
 
 const bashCallTurn = {
   assistant: {
@@ -122,7 +160,6 @@ const loopAfterOneToolCall = (
       sandboxRuntime: new FakeSandboxRuntime(),
       runId,
       model: "test-model",
-      cfcEnforcementMode: "disabled",
     }),
   });
   return { loop, seen };
@@ -155,7 +192,10 @@ describe("run-lifecycle", () => {
             }),
         );
 
-        await loop.runPrompt({ prompt: "run one command" });
+        await loop.runPrompt({
+          prompt: "run one command",
+          promptSlotBinding: directCommandSlot,
+        });
 
         expect(seen).toHaveLength(1);
         expect(seen[0].status).toBe("running");
@@ -183,7 +223,10 @@ describe("run-lifecycle", () => {
             ),
         );
 
-        await expect(loop.runPrompt({ prompt: "run one command" })).rejects
+        await expect(loop.runPrompt({
+          prompt: "run one command",
+          promptSlotBinding: directCommandSlot,
+        })).rejects
           .toThrow("model stream returned an error event");
 
         expect(seen[0].status).toBe("running");

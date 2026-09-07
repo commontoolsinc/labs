@@ -62,7 +62,8 @@ describe("CFC resume membership taint", () => {
     new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: storageManager!,
-      cfcEnforcementMode: "observe",
+      // Persisting flow labels is what writes the structure stamp this test
+      // reads back through `structureConfidentiality`.
       cfcFlowLabels: "persist",
     });
 
@@ -87,6 +88,7 @@ describe("CFC resume membership taint", () => {
         },
       },
     });
+    rt.prepareTxForCommit(seed);
     expect((await seed.commit()).ok).toBeDefined();
     return id;
   };
@@ -106,6 +108,7 @@ describe("CFC resume membership taint", () => {
     const rtx = rt.edit();
     const id =
       keptCell.withTx(rtx).resolveAsCell().getAsNormalizedFullLink().id;
+    rt.prepareTxForCommit(rtx);
     rtx.commit();
     return id;
   };
@@ -143,6 +146,7 @@ describe("CFC resume membership taint", () => {
       tx0,
     );
     rt1.run(tx0, compiled, { items: listCell }, rc1);
+    rt1.prepareTxForCommit(tx0);
     expect((await tx0.commit()).ok).toBeDefined();
     await rc1.pull();
     await rt1.settled();
@@ -171,18 +175,21 @@ describe("CFC resume membership taint", () => {
     const rtMid = newRuntime();
     await seedLabeledDoc(rtMid, "memb-el-2", { n: -1 }, "carol-secret");
     const txMid = rtMid.edit();
-    const el2 = rtMid.getCell(space, "memb-el-2", undefined, txMid);
     const listMid = rtMid.getCell(
       space,
       LIST_CAUSE,
       { type: "array", items: { asCell: ["cell"] } },
       txMid,
     );
-    await listMid.sync();
-    listMid.withTx(txMid).set([
-      ...(listMid.get() as unknown[]),
-      el2,
+    // Each element is named by its cause, so this write states the whole
+    // membership. The labels the stored list carries reach nothing in this
+    // transaction.
+    listMid.set([
+      rtMid.getCell(space, "memb-el-0", undefined, txMid),
+      rtMid.getCell(space, "memb-el-1", undefined, txMid),
+      rtMid.getCell(space, "memb-el-2", undefined, txMid),
     ]);
+    rtMid.prepareTxForCommit(txMid);
     expect((await txMid.commit()).ok).toBeDefined();
     await storageManager.synced();
     await rtMid.dispose({ closeStorage: false });
@@ -199,6 +206,7 @@ describe("CFC resume membership taint", () => {
         compiled.resultSchema,
         tx2,
       );
+      rt2.prepareTxForCommit(tx2);
       expect((await tx2.commit()).ok).toBeDefined();
       await rc2.sync();
       expect(await rt2.start(rc2)).toBe(true);

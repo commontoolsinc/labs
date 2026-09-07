@@ -145,7 +145,6 @@ describe("chunked compile-cache write-back (interruption survivability)", () => 
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "incremental-writeback-test",
         actingPrincipal: signer.did(),

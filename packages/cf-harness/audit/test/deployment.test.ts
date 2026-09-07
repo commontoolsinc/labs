@@ -15,9 +15,13 @@ import { join } from "@std/path";
 import {
   cfcPostureReport,
   inheritedCfcPostureReport,
+  resolveCfcDials,
   RUNTIME_CFC_DIAL_DEFAULTS,
 } from "@commonfabric/runner/cfc";
-import { MAX_ENFORCEMENT_SINK_CEILINGS } from "@commonfabric/runner";
+import {
+  MAX_ENFORCEMENT_CFC_OPTIONS,
+  MAX_ENFORCEMENT_SINK_CEILINGS,
+} from "@commonfabric/runner";
 
 import { harnessFabricSessionPosture } from "../../src/cfc-posture.ts";
 import type { HarnessRunState } from "../../src/run-state.ts";
@@ -41,17 +45,12 @@ const MAX_ENFORCEMENT_RECORD = harnessFabricSessionPosture({
  * The same posture as a deployment publishes it: read off resolved runtime
  * fields rather than projected. Built through the resolved constructor rather
  * than by restamping a projection, so the suite never demonstrates the one
- * move the provenance field exists to prevent.
+ * move the provenance field exists to prevent. The dials come from the
+ * max-enforcement bundle, resolved the way a runtime resolves them, so this
+ * record carries the values a max-enforcement deployment runs at.
  */
 const ATTESTED_MAX_ENFORCEMENT_RECORD = cfcPostureReport({
-  cfcEnforcementMode: "enforce-explicit",
-  cfcFlowLabels: "persist",
-  cfcWriteFloor: "enforce",
-  cfcTriggerReadGating: true,
-  cfcDecomposedEnvelopes: false,
-  cfcPolicyEvaluation: "enforce",
-  cfcLabelMetadataProtection: "enforce",
-  cfcDeclaredMonotonicity: "enforce",
+  ...resolveCfcDials(MAX_ENFORCEMENT_CFC_OPTIONS),
   cfcPolicySnapshot: undefined,
   cfcSinkMaxConfidentiality: MAX_ENFORCEMENT_SINK_CEILINGS,
 });

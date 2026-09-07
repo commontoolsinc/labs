@@ -18,11 +18,11 @@ const signer = await Identity.fromPassphrase("runner-cfc-trigger-read-gating");
 
 // Epic H5 (§8.9.2 / SC-3): the addresses whose invalidating writes SCHEDULED a
 // reactive rerun (trigger reads) join the enforcement consumed set behind the
-// `cfcTriggerReadGating` flag (default off). Without it, a handler scheduled by
-// a secret's write can egress to a ceiling'd sink — or write a
-// requiredIntegrity-floored target — without ever re-reading that secret, and
-// pass. The tests drive each gate with the flag OFF (passes today) and ON
-// (rejected), the fail-closed direction.
+// `cfcTriggerReadGating` flag. Without it, a handler scheduled by a secret's
+// write can egress to a ceiling'd sink — or write a requiredIntegrity-floored
+// target — without ever re-reading that secret, and pass. Each case states the
+// flag it drives: OFF, where the egress passes, and ON, where it is rejected,
+// which is the fail-closed direction.
 const CONFIDENTIAL_SCHEMA = internSchema(
   {
     type: "object",
@@ -43,18 +43,34 @@ const OUT_SCHEMA = internSchema(
   true,
 );
 
+// The output of a run scheduled by the confidential cell. Its value derives
+// from the [medical] trigger read, so the document declares that
+// confidentiality.
+const DERIVED_OUT_SCHEMA = internSchema(
+  {
+    type: "object",
+    properties: { v: { type: "string" } },
+    required: ["v"],
+    ifc: { confidentiality: ["medical"] },
+  } satisfies JSONSchema,
+  true,
+);
+
 const makeRuntime = (opts: {
   storageManager: ReturnType<typeof StorageManager.emulate>;
   cfcTriggerReadGating?: boolean;
+  cfcFlowLabels?: "off" | "observe" | "persist";
   cfcSinkMaxConfidentiality?: SinkMaxConfidentiality;
 }) =>
   new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager: opts.storageManager,
-    cfcEnforcementMode: "enforce-explicit",
     cfcSinkMaxConfidentiality: opts.cfcSinkMaxConfidentiality,
     ...(opts.cfcTriggerReadGating !== undefined
       ? { cfcTriggerReadGating: opts.cfcTriggerReadGating }
+      : {}),
+    ...(opts.cfcFlowLabels !== undefined
+      ? { cfcFlowLabels: opts.cfcFlowLabels }
       : {}),
   });
 
@@ -126,18 +142,25 @@ const scheduledEgress = (
 };
 
 describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
-  it("flag OFF (default): a scheduled egress that never re-reads the secret passes", async () => {
+  it("flag OFF: a scheduled egress that never re-reads the secret passes", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({
       storageManager,
+      // Pinned: the commit below asserts no error, which is what an ungated
+      // trigger read produces.
+      cfcTriggerReadGating: false,
+      // Pinned: under flow persist the trigger reads reach the sink gate
+      // through the per-tx flow join. The channel this arm characterizes
+      // needs the flow dial off as well.
+      cfcFlowLabels: "off",
       cfcSinkMaxConfidentiality: { fetchJson: [] },
     });
     try {
       const secretId = await seedConfidential(runtime, "h5-off-secret");
       const tx = scheduledEgress(runtime, "h5-off-out", secretId);
       const result = await tx.commit();
-      // Today: the trigger read is not in the consumed set, so the public-only
-      // sink ceiling is not tripped.
+      // With gating off the trigger read is not in the consumed set, so the
+      // public-only sink ceiling is not tripped.
       expect(result.error).toBeUndefined();
     } finally {
       await runtime.dispose();
@@ -149,7 +172,12 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({
       storageManager,
+      // Pinned: the commit below asserts the "exceeds ceiling for fetchJson"
+      // rejection, which is what a gated trigger read produces.
       cfcTriggerReadGating: true,
+      // Pinned at the OFF arm's flow dial, so the gating flag is the one
+      // difference between the two arms.
+      cfcFlowLabels: "off",
       cfcSinkMaxConfidentiality: { fetchJson: [] },
     });
     try {
@@ -172,6 +200,7 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({
       storageManager,
+      // Pinned: the commit below asserts no error with the gate enabled.
       cfcTriggerReadGating: true,
       cfcSinkMaxConfidentiality: { fetchJson: [] },
     });
@@ -205,6 +234,7 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({
       storageManager,
+      // Pinned: the commit below asserts no error with the gate enabled.
       cfcTriggerReadGating: true,
       cfcSinkMaxConfidentiality: { fetchJson: [] },
     });
@@ -246,15 +276,21 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({
       storageManager,
+      // Pinned: the steps below assert that disabling the gate throws and
+      // then read the gate back as enabled.
       cfcTriggerReadGating: true,
       cfcSinkMaxConfidentiality: { fetchJson: [] },
     });
     try {
       const secretId = await seedConfidential(runtime, "h5-pin-secret");
       const tx = runtime.edit();
-      runtime.getCell(signer.did(), "h5-pin-out", OUT_SCHEMA.schema, tx).set({
-        v: "computed",
-      });
+      const out = runtime.getCell(
+        signer.did(),
+        "h5-pin-out",
+        DERIVED_OUT_SCHEMA.schema,
+        tx,
+      );
+      out.set({ v: "computed" });
       tx.addCfcTriggerReads([{
         space: signer.did(),
         id: secretId as `${string}:${string}`,
@@ -299,15 +335,21 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({
       storageManager,
+      // Pinned: the steps below read the gate back as enabled after the
+      // attempts to mutate the view.
       cfcTriggerReadGating: true,
       cfcSinkMaxConfidentiality: { fetchJson: [] },
     });
     try {
       const secretId = await seedConfidential(runtime, "h5-view-secret");
       const tx = runtime.edit();
-      runtime.getCell(signer.did(), "h5-view-out", OUT_SCHEMA.schema, tx).set({
-        v: "computed",
-      });
+      const out = runtime.getCell(
+        signer.did(),
+        "h5-view-out",
+        DERIVED_OUT_SCHEMA.schema,
+        tx,
+      );
+      out.set({ v: "computed" });
       tx.addCfcTriggerReads([{
         space: signer.did(),
         id: secretId as `${string}:${string}`,
@@ -342,7 +384,12 @@ describe("CFC trigger-read gating (H5, §8.9.2 / SC-3)", () => {
       // The Map facade forwards reads bound to the real Map and rejects
       // mutators.
       const identities = tx.getCfcState().writePolicyInputIdentities;
-      expect(identities.size).toBe(0);
+      // The out document's declared schema is the only write-policy input
+      // this transaction records, so the facade reports that one entry.
+      expect(identities.size).toBe(1);
+      expect(
+        [...identities.keys()].map((key) => (key as { kind: string }).kind),
+      ).toEqual(["schema"]);
       expect(identities.get({} as never)).toBeUndefined();
       expect(() => identities.set({} as never, {} as never)).toThrow(
         "read-only",

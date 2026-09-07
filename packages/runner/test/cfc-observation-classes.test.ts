@@ -1,7 +1,7 @@
 import { expect } from "@std/expect";
 import { afterEach, describe, it } from "@std/testing/bdd";
 
-import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import type { FabricValue } from "@commonfabric/data-model";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
@@ -22,7 +22,7 @@ const space = signer.did();
 
 type StoredEntry = {
   path: string[];
-  label: { confidentiality?: string[]; integrity?: unknown[] };
+  label: { confidentiality?: unknown[]; integrity?: unknown[] };
   origin?: string;
   observes?: string;
 };
@@ -54,11 +54,28 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // Every assertion below reads a `derived` entry out of the replica, so
+      // the flow stamp has to be persisted rather than measured.
       cfcFlowLabels: "persist",
     });
     return runtime;
   };
+
+  // A seeded confidentiality clause: a synthetic audience beside the space
+  // every document here lives in. The §8.12.4 residency clause admits a label
+  // clause listing the target's own space among its alternatives, so the
+  // transactions below stamp their join onto output documents that declare no
+  // policy of their own. Class selection reads the clause as one opaque unit,
+  // which is what the joins are asserted over.
+  const audience = (tag: string) => ({ anyOf: [tag, cfcAtom.space(space)] });
+
+  // The synthetic audience each clause of a join names, in the join's order.
+  const tagsOf = (join: readonly unknown[] | undefined): string[] | undefined =>
+    join?.map((clause) =>
+      ((clause as { anyOf: unknown[] }).anyOf.find((alternative) =>
+        typeof alternative === "string"
+      )) as string
+    );
 
   const seedDoc = async (
     rt: Runtime,
@@ -91,7 +108,7 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
   };
 
-  const derivedConfidentiality = (id: string): string[] | undefined =>
+  const derivedConfidentiality = (id: string): unknown[] | undefined =>
     entriesOf(id).find((e) => e.origin === "derived")?.label.confidentiality;
 
   const readAddress = (id: string, path: string[]) => ({
@@ -107,33 +124,37 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
   // slot (implicitly `observes:"followRef"` per the C0 §3 carve-out).
   const seedMixedDoc = (rt: Runtime, cause: string) =>
     seedDoc(rt, cause, { field: "f", slot: { "/": { "link@1": {} } } }, [
-      { path: [], label: { confidentiality: ["root-covering"] } },
+      { path: [], label: { confidentiality: [audience("root-covering")] } },
       {
         path: ["field"],
-        label: { confidentiality: ["field-derived"] },
+        label: { confidentiality: [audience("field-derived")] },
         origin: "derived",
       },
       {
         path: ["slot"],
-        label: { confidentiality: ["pointer-label"] },
+        label: { confidentiality: [audience("pointer-label")] },
         origin: "link",
       },
     ]);
 
   // Runs `observe` inside a fresh tx that also writes an output doc, then
-  // commits (prepareCfc explicitly unless `autoRelevance`), and returns the
-  // output doc's derived flow confidentiality.
+  // commits, and returns the output doc's derived flow confidentiality. With
+  // `autoRelevance` the transaction reaches its commit the way the runtime's
+  // own commit paths take it, which prepares only a transaction something
+  // marked relevant; otherwise the caller marks it by preparing directly.
   const flowJoinOf = async (
     rt: Runtime,
     outCause: string,
     observe: (tx: ReturnType<Runtime["edit"]>) => void,
     options?: { autoRelevance?: boolean },
-  ): Promise<string[] | undefined> => {
+  ): Promise<unknown[] | undefined> => {
     const tx = rt.edit();
     observe(tx);
     const out = rt.getCell(space, outCause, undefined, tx);
     out.set({ copied: true });
-    if (!options?.autoRelevance) {
+    if (options?.autoRelevance) {
+      rt.prepareTxForCommit(tx);
+    } else {
       tx.prepareCfc();
     }
     expect((await tx.commit()).ok).toBeDefined();
@@ -152,7 +173,7 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     const join = await flowJoinOf(rt, "occ-value-out", (tx) => {
       tx.readOrThrow(readAddress(id, []));
     });
-    expect(join).toEqual(["root-covering", "field-derived"]);
+    expect(tagsOf(join)).toEqual(["root-covering", "field-derived"]);
   });
 
   it("shape reads consume enumerate + covering at the node only; value-class entries are skipped", async () => {
@@ -163,29 +184,29 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
 
     const rt = makeRuntime();
     const id = await seedDoc(rt, "occ-shape-read", { field: "f" }, [
-      { path: [], label: { confidentiality: ["root-covering"] } },
+      { path: [], label: { confidentiality: [audience("root-covering")] } },
       {
         path: [],
-        label: { confidentiality: ["members-secret"] },
+        label: { confidentiality: [audience("members-secret")] },
         origin: "derived",
         observes: "enumerate",
       },
       {
         path: [],
-        label: { confidentiality: ["content-secret"] },
+        label: { confidentiality: [audience("content-secret")] },
         origin: "derived",
         observes: "value",
       },
       {
         path: ["field"],
-        label: { confidentiality: ["field-derived"] },
+        label: { confidentiality: [audience("field-derived")] },
         origin: "derived",
       },
     ]);
     const join = await flowJoinOf(rt, "occ-shape-out", (tx) => {
       tx.readOrThrow(readAddress(id, []), { nonRecursive: true });
     });
-    expect(join).toEqual(["root-covering", "members-secret"]);
+    expect(tagsOf(join)).toEqual(["root-covering", "members-secret"]);
   });
 
   it("standalone probes consume the link-origin pointer label (SC-8 widening, the new wider join)", async () => {
@@ -201,7 +222,7 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     const join = await flowJoinOf(rt, "occ-probe-out", (tx) => {
       tx.read(readAddress(id, ["slot"]), { meta: linkResolutionProbe });
     });
-    expect(join).toEqual(["pointer-label"]);
+    expect(tagsOf(join)).toEqual(["pointer-label"]);
   });
 
   it("standalone probes auto-mark flow relevance without an explicit prepareCfc", async () => {
@@ -215,14 +236,14 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     }, [
       {
         path: ["slot"],
-        label: { confidentiality: ["pointer-label"] },
+        label: { confidentiality: [audience("pointer-label")] },
         origin: "link",
       },
     ]);
     const join = await flowJoinOf(rt, "occ-probe-relevance-out", (tx) => {
       tx.read(readAddress(id, ["slot"]), { meta: linkResolutionProbe });
     }, { autoRelevance: true });
-    expect(join).toEqual(["pointer-label"]);
+    expect(tagsOf(join)).toEqual(["pointer-label"]);
   });
 
   it("probes covered by a dereference trace are machinery: no followRef consumption", async () => {
@@ -258,7 +279,7 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
       seedDoc(rt, cause, { slot: { "/": { "link@1": {} } } }, [
         {
           path: ["slot"],
-          label: { confidentiality: ["ref-secret"] },
+          label: { confidentiality: [audience("ref-secret")] },
           origin: "derived",
           observes: "followRef",
         },
@@ -274,7 +295,7 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     const probeJoin = await flowJoinOf(rt, "occ-explicit-probe-out", (tx) => {
       tx.read(readAddress(probeId, ["slot"]), { meta: linkResolutionProbe });
     });
-    expect(probeJoin).toEqual(["ref-secret"]);
+    expect(tagsOf(probeJoin)).toEqual(["ref-secret"]);
   });
 
   it("followRef observations do not participate in the hereditary integrity meet", async () => {
@@ -292,7 +313,7 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
       {
         path: [],
         label: {
-          confidentiality: ["certified-secret"],
+          confidentiality: [audience("certified-secret")],
           integrity: [certified],
         },
       },
@@ -375,7 +396,7 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
           entries: [
             {
               path: ["slot"],
-              label: { confidentiality: ["ref-secret"] },
+              label: { confidentiality: [audience("ref-secret")] },
               origin: "derived",
               observes: "followRef",
             },
@@ -386,13 +407,13 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
             // split.
             {
               path: ["v"],
-              label: { confidentiality: ["v-content"] },
+              label: { confidentiality: [audience("v-content")] },
               origin: "derived",
               observes: "value",
             },
             {
               path: ["v"],
-              label: { confidentiality: ["v-existence"] },
+              label: { confidentiality: [audience("v-existence")] },
               origin: "derived",
               observes: "shape",
             },
@@ -408,7 +429,7 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     }, { value: guarded.schema });
     expect((await seed.commit()).ok).toBeDefined();
     const taintId = await seedDoc(rt, "occ-carry-forward-taint", { n: 1 }, [
-      { path: [], label: { confidentiality: ["taint"] } },
+      { path: [], label: { confidentiality: [audience("taint")] } },
     ]);
 
     const tx = rt.edit();
@@ -423,14 +444,17 @@ describe("CFC observation classes (C1 read-shape plumbing)", () => {
     // without this the assertions below pass trivially on untouched
     // metadata.
     expect(
-      stored.find((e) => e.origin === "derived" && e.path.join("/") === "other")
-        ?.label.confidentiality,
+      tagsOf(
+        stored.find((e) =>
+          e.origin === "derived" && e.path.join("/") === "other"
+        )?.label.confidentiality,
+      ),
     ).toEqual(["taint"]);
     const slotEntry = stored.find((e) => e.path.join("/") === "slot");
     expect(slotEntry).toBeDefined();
     expect(slotEntry!.observes).toBe("followRef");
     const vClasses = stored.filter((e) => e.path.join("/") === "v")
-      .map((e) => [e.observes, ...(e.label.confidentiality ?? [])]);
+      .map((e) => [e.observes, ...(tagsOf(e.label.confidentiality) ?? [])]);
     expect(vClasses.sort()).toEqual([
       ["shape", "v-existence"],
       ["value", "v-content"],

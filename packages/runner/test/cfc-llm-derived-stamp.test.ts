@@ -71,7 +71,6 @@ describe("CFC LlmDerived stamping mechanism", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       // Model-output push: builtin identity, item schema carries the stamp.
@@ -137,7 +136,6 @@ describe("CFC LlmDerived stamping mechanism", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const modelTx = runtime.edit();
@@ -195,7 +193,6 @@ describe("CFC LlmDerived stamping mechanism", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const authorTx = runtime.edit();
@@ -248,7 +245,6 @@ describe("llmDialog LlmDerived stamping (end to end)", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     const tx = runtime.edit();
     const { commonfabric } = createTrustedBuilder(runtime);
@@ -346,6 +342,8 @@ describe("llmDialog LlmDerived stamping (end to end)", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      // The assertion below reads that the assistant message document carries
+      // no stored CFC metadata. That holds at the `disabled` rung.
       cfcEnforcementMode: "disabled",
     });
     const tx = runtime.edit();

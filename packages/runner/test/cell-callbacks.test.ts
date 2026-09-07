@@ -164,7 +164,6 @@ describe("Cell commit callbacks", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     tx = runtime.edit();
 

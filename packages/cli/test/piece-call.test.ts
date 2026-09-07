@@ -4054,8 +4054,6 @@ describe("call over a live runtime", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
-      cfcFlowLabels: "persist",
       errorHandlers: [
         (error) => runtimeErrors.push({ message: error.message }),
       ],

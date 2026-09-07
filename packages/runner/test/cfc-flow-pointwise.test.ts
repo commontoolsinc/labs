@@ -104,7 +104,13 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. Each `probe` call
+      // writes into a fresh document that declares none, and `conf0` and
+      // `conf1` read back what those writes persisted.
+      cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts those entries in the probe
+      // documents.
       cfcFlowLabels: "persist",
     });
 
@@ -131,6 +137,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       setup,
     );
     listCell.set([el0]);
+    setup.prepareCfc();
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
@@ -155,7 +162,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       { values: valuesIn },
       resultCell,
     );
-    await tx.commit();
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
 
@@ -169,6 +177,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       type: "array",
       items: { asCell: ["cell"] },
     }, grow).set([el0Again, el1]);
+    grow.prepareCfc();
     expect((await grow.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
@@ -224,7 +233,13 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The probe writes
+      // into a document that declares none, and `probeConf` reads back what
+      // that write persisted.
+      cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts that entry in the probe
+      // document.
       cfcFlowLabels: "persist",
     });
 
@@ -252,6 +267,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       setup,
     );
     listCell.set([el0, el1]);
+    setup.prepareCfc();
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
@@ -276,7 +292,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       { values: valuesIn },
       resultCell,
     );
-    await tx.commit();
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
 
@@ -313,7 +330,13 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The probe writes
+      // into a document that declares none, and `probeConf` reads back what
+      // that write persisted.
+      cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts that entry in the probe
+      // document.
       cfcFlowLabels: "persist",
     });
 
@@ -341,6 +364,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       setup,
     );
     listCell.set([el0, el1]);
+    setup.prepareCfc();
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
@@ -365,7 +389,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       { values: valuesIn },
       resultCell,
     );
-    await tx.commit();
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
 
@@ -398,7 +423,13 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The probe writes
+      // into a document that declares none, and `probeConf` reads back what
+      // that write persisted.
+      cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts that entry in the probe
+      // document.
       cfcFlowLabels: "persist",
     });
 
@@ -426,6 +457,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       setup,
     );
     listCell.set([el0, el1]);
+    setup.prepareCfc();
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
@@ -450,7 +482,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       { values: valuesIn },
       resultCell,
     );
-    await tx.commit();
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
 
@@ -475,6 +508,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     const rtx = runtime!.edit();
     const id =
       keptCell.withTx(rtx).resolveAsCell().getAsNormalizedFullLink().id;
+    rtx.prepareCfc();
     rtx.commit();
     return id;
   };
@@ -492,7 +526,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // Persisting the derived join is what puts the container's structure
+      // entry in the document, and `sc` reads that entry back.
       cfcFlowLabels: "persist",
     });
 
@@ -517,6 +552,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       setup,
     );
     listCell.set([el0, el1]);
+    setup.prepareCfc();
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
@@ -542,7 +578,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       { values: valuesIn },
       resultCell,
     );
-    await tx.commit();
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
 
@@ -564,7 +601,9 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // Persisting the derived join is what puts the container's structure
+      // entry in the document. `before`, `after` and `membershipEntries`
+      // read that entry back.
       cfcFlowLabels: "persist",
     });
 
@@ -591,6 +630,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       setup,
     );
     listCell.set([el0, el1]);
+    setup.prepareCfc();
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
@@ -610,7 +650,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       { values: valuesIn },
       resultCell,
     );
-    await tx.commit();
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
 
@@ -630,6 +671,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       gtx,
     );
     lc.set([el0, el1, el2]);
+    gtx.prepareCfc();
     expect((await gtx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
@@ -659,7 +701,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // Persisting the derived join is what puts the container's structure
+      // entry in the document, and `sc` reads that entry back.
       cfcFlowLabels: "persist",
     });
 
@@ -685,6 +728,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       setup,
     );
     listCell.set([el0, el1]);
+    setup.prepareCfc();
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
@@ -704,7 +748,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       { values: valuesIn },
       resultCell,
     );
-    await tx.commit();
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
 
@@ -728,7 +773,9 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // Persisting the derived join is what puts the container's membership
+      // and existence entries in the document. The assertions below read
+      // both back.
       cfcFlowLabels: "persist",
     });
 
@@ -757,6 +804,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       setup,
     );
     listCell.set([d0]);
+    setup.prepareCfc();
     expect((await setup.commit()).ok).toBeDefined();
 
     const collectionPattern = pattern<{ values: unknown[] }>(({ values }) => {
@@ -778,7 +826,8 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       { values: valuesIn },
       resultCell,
     );
-    await tx.commit();
+    tx.prepareCfc();
+    expect((await tx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();
 
@@ -809,6 +858,7 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
       stx,
     );
     lc.set([d1]);
+    stx.prepareCfc();
     expect((await stx.commit()).ok).toBeDefined();
     await result.pull();
     await runtime.idle();

@@ -1,6 +1,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { internSchema } from "@commonfabric/data-model-schema";
+import type { URI } from "@commonfabric/memory/interface";
+import type { JSONSchema } from "../src/builder/types.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,
@@ -31,6 +35,33 @@ const replicaEntries = (
   return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
 };
 
+const SECRET_FIELD_SCHEMA = internSchema(
+  { type: "string", ifc: { confidentiality: ["secret"] } } as JSONSchema,
+  true,
+);
+
+/**
+ * Declares the write policy covering a raw write to a seeded document's
+ * `secret` field. A schema-backed write carries this declaration from the
+ * schema it went through; a raw address write states it here instead.
+ */
+const recordSecretWritePolicy = (
+  tx: IExtendedStorageTransaction,
+  id: string,
+): void => {
+  tx.recordCfcWritePolicyInput({
+    kind: "schema",
+    target: {
+      space: signer.did(),
+      scope: "space",
+      id: id as URI,
+      path: ["value", "secret"],
+    },
+    schemaHash: SECRET_FIELD_SCHEMA.taggedHashString,
+    schema: SECRET_FIELD_SCHEMA.schema,
+  });
+};
+
 describe("CFC flow labels (default transition)", () => {
   // S16 default transition: a transaction's outputs are tainted by what it
   // read. Without this, "read labeled data, write a derived plain value to an
@@ -42,7 +73,12 @@ describe("CFC flow labels (default transition)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The derived doc declares
+      // none, and the `flowEntry` assertions below read back the entry that
+      // write persisted.
       cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts that entry in the document.
       cfcFlowLabels: "persist",
     });
     try {
@@ -114,7 +150,6 @@ describe("CFC flow labels (default transition)", () => {
       // later tx consuming B cannot write into a slot whose ceiling
       // excludes the secret.
       const egress = runtime.edit();
-      egress.setCfcEnforcementMode("enforce-explicit");
       const derivedIn = runtime.getCell(
         signer.did(),
         "cfc-flow-labels-derived",
@@ -161,7 +196,13 @@ describe("CFC flow labels (default transition)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. Neither the target
+      // doc nor the out doc declares one, and the `flowEntry` and `outEntry`
+      // assertions below read back the entries those writes persisted.
       cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts those entries in the
+      // documents.
       cfcFlowLabels: "persist",
     });
     try {
@@ -282,7 +323,13 @@ describe("CFC flow labels (default transition)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The target declares
+      // none, and the `derivedAfter` assertions below read back the entries
+      // the tainted write and the overwrite left there.
       cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts the value and shape entries
+      // in the document.
       cfcFlowLabels: "persist",
     });
     try {
@@ -389,7 +436,14 @@ describe("CFC flow labels (default transition)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The target declares
+      // none, so the first derivation's envelope write lands. The second
+      // derivation's `wroteCfc` assertion measures the skip of that same
+      // write.
       cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what makes an envelope write happen at
+      // all, and `wroteCfc` reads it back.
       cfcFlowLabels: "persist",
     });
     try {
@@ -485,7 +539,13 @@ describe("CFC flow labels (default transition)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The target declares
+      // none, so the first derivation writes the envelope that the permutation
+      // reorders and the second derivation's `wroteCfc` assertion measures the
+      // skip of.
       cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what writes that envelope.
       cfcFlowLabels: "persist",
     });
     try {
@@ -659,7 +719,9 @@ describe("CFC flow labels (default transition)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      // The assertions below read that the join is reported as a diagnostic
+      // and that neither the transaction nor the stored document carries an
+      // envelope. That holds at the `observe` rung.
       cfcFlowLabels: "observe",
     });
     try {
@@ -751,7 +813,12 @@ describe("CFC flow labels (default transition)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The out doc declares
+      // none, and the `entry` assertions below read back what that write
+      // persisted.
       cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts that entry in the document.
       cfcFlowLabels: "persist",
     });
     try {
@@ -825,7 +892,12 @@ describe("CFC flow labels (default transition)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The flag doc declares
+      // none, and the `entry` assertions below read back what the rerun's
+      // write persisted.
+      cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts that entry in the document.
       cfcFlowLabels: "persist",
     });
     try {
@@ -900,6 +972,8 @@ describe("CFC flow labels (default transition)", () => {
         id: sourceId,
         path: ["value", "secret"],
       }, "v2");
+      recordSecretWritePolicy(bump, sourceId);
+      bump.prepareCfc();
       expect((await bump.commit()).ok).toBeDefined();
       await runtime.idle();
       expect(runs).toBeGreaterThan(1);
@@ -926,7 +1000,12 @@ describe("CFC flow labels (default transition)", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // At this rung the writer-fit check flags a tainted write to a store
+      // that declares no ceiling and lets it land. The flag doc declares
+      // none, and the `entry` assertions below read back what the retry's
+      // write persisted.
+      cfcEnforcementMode: "enforce-explicit",
+      // Persisting the derived join is what puts that entry in the document.
       cfcFlowLabels: "persist",
     });
     try {
@@ -1004,6 +1083,8 @@ describe("CFC flow labels (default transition)", () => {
         id: sourceId,
         path: ["value", "secret"],
       }, "v2");
+      recordSecretWritePolicy(bump, sourceId);
+      bump.prepareCfc();
       expect((await bump.commit()).ok).toBeDefined();
       await runtime.idle();
       expect(runs).toBeGreaterThanOrEqual(3);

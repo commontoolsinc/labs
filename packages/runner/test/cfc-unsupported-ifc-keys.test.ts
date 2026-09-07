@@ -33,7 +33,6 @@ describe("CFC unsupported ifc claims fail closed", () => {
       const runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
         trustSnapshotProvider: () => ({
           id: `trust-snapshot-unsupported-${claimKey}`,
           actingPrincipal: signer.did(),

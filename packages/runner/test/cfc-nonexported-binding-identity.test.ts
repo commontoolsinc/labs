@@ -21,10 +21,10 @@ import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
 //
 // Scope: these tests assert the writer identity is REGISTERED (provenance
 // carries the bindingIdentity) and RESOLVES onto transactions while handlers
-// run — the value the CFC verifier consumes at commit — under `observe`. A
-// full enforce-mode, end-to-end "the write is accepted" assertion additionally
-// needs trust-snapshot + owner-principal + trusted-event provenance setup,
-// which profile-owner-cfc.test.ts drives via a mocked authoring identity.
+// run — the value the CFC verifier consumes at commit. An end-to-end "the
+// write is accepted" assertion additionally needs trust-snapshot +
+// owner-principal + trusted-event provenance setup, which
+// profile-owner-cfc.test.ts drives via a mocked authoring identity.
 
 const signer = await Identity.fromPassphrase("ct1665-repro");
 const space = signer.did();
@@ -110,7 +110,6 @@ describe("CT-1665: verified binding metadata for non-exported handlers", () => {
     new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
 
   beforeEach(() => {
@@ -141,6 +140,7 @@ describe("CT-1665: verified binding metadata for non-exported handlers", () => {
           tx,
         );
         const r = rt.run(tx, pattern, {}, resultCell);
+        rt.prepareTxForCommit(tx);
         await tx.commit();
         await r.pull();
 
@@ -180,6 +180,7 @@ describe("CT-1665: verified binding metadata for non-exported handlers", () => {
         tx,
       );
       const r = rt.run(tx, pattern, { initialName: "Init" }, resultCell);
+      rt.prepareTxForCommit(tx);
       await tx.commit();
       await r.pull();
 
@@ -209,6 +210,7 @@ describe("CT-1665: verified binding metadata for non-exported handlers", () => {
         tx1,
       );
       const r1 = rt1.run(tx1, cold, {}, resultCell1);
+      rt1.prepareTxForCommit(tx1);
       await tx1.commit();
       await r1.pull();
       await pm1.flushCompileCacheWrites();
@@ -222,6 +224,7 @@ describe("CT-1665: verified binding metadata for non-exported handlers", () => {
         undefined,
         tx2,
       );
+      rt2.prepareTxForCommit(tx2);
       await tx2.commit();
       await resultCell2.sync();
       await rt2.start(resultCell2);

@@ -186,6 +186,8 @@ const recordFor = (
 ) => harnessFabricSessionPosture(session);
 
 Deno.test("CfHarnessEngine records the fabric session's resolved CFC posture in run state", () => {
+  // The assertion below reads both session dials back off the run state,
+  // each marked as configured.
   const configured = new CfHarnessEngine({
     workspaceHostPath: "/host/project",
     fabricSession: {
@@ -718,7 +720,6 @@ Deno.test("CfHarnessEngine rejects direct subagent resume but permits new child 
     lineage,
     modelProvider: "openai-codex",
     credentialOwnerKey: "local",
-    cfcEnforcementMode: "disabled",
   });
   assertEquals(newChild.getRunState().lineage, lineage);
 });
@@ -819,7 +820,6 @@ Deno.test("CfHarnessEngine runs browser actions on the host with the configured 
     workspaceHostPath,
     sandboxRuntime: new FakeSandboxRuntime(),
     processRunner: runner,
-    cfcEnforcementMode: "observe",
     browserAccess: {
       type: "cf-harness.chat.browser-access-lease",
       leaseId: "lease-1",
@@ -858,7 +858,6 @@ Deno.test("CfHarnessEngine refuses browser actions when no lease is configured",
     workspaceHostPath,
     sandboxRuntime: new FakeSandboxRuntime(),
     processRunner: runner,
-    cfcEnforcementMode: "observe",
     now: () => "2026-04-29T23:20:00.000Z",
   });
 
@@ -892,7 +891,6 @@ Deno.test("CfHarnessEngine reserves artifact roots through host realpath mapping
       artifactRoot,
       sandboxRuntime: sandbox,
       processRunner: hostRunner,
-      cfcEnforcementMode: "observe",
       now: (() => {
         const timestamps = [
           "2026-05-01T17:55:00.000Z",
@@ -948,6 +946,7 @@ Deno.test("CfHarnessEngine records tool outputs into run state on success", asyn
   const engine = new CfHarnessEngine({
     sandboxRuntime: sandbox,
     runId: "run-1",
+    // The run-state assertions below read this dial back.
     cfcEnforcementMode: "observe",
     now: (() => {
       const timestamps = [
@@ -1017,7 +1016,6 @@ Deno.test("CfHarnessEngine records prompt slot binding into run state", () => {
   const engine = new CfHarnessEngine({
     sandboxRuntime: new FakeSandboxRuntime(),
     runId: "run-prompt-slot",
-    cfcEnforcementMode: "observe",
     now: (() => {
       const timestamps = [
         "2026-04-17T19:00:00.000Z",
@@ -1049,7 +1047,6 @@ Deno.test("CfHarnessEngine derives prompt-slot labels for model-authored sandbox
   const engine = new CfHarnessEngine({
     sandboxRuntime: sandbox,
     runId: "run-prompt-slot-labels",
-    cfcEnforcementMode: "observe",
     now: (() => {
       const timestamps = [
         "2026-04-17T19:05:00.000Z",
@@ -1155,7 +1152,6 @@ Deno.test("CfHarnessEngine stamps policy snapshot state changes with mutation ti
     artifactStore,
     sandboxRuntime: new FakeSandboxRuntime(),
     runId: "run-policy-time",
-    cfcEnforcementMode: "observe",
     now: (() => {
       const timestamps = [
         "2026-04-17T20:30:00.000Z",
@@ -1235,7 +1231,6 @@ Deno.test("CfHarnessEngine persists skill resource read artifacts", async () => 
     artifactStore,
     sandboxRuntime: new FakeSandboxRuntime(),
     runId: "run-skill-resource-read",
-    cfcEnforcementMode: "observe",
     now: (() => {
       const timestamps = [
         "2026-05-01T17:00:00.000Z",
@@ -1318,7 +1313,6 @@ Deno.test("CfHarnessEngine timestamps CFC invocation contexts with mutation time
       exitCode: 0,
     }]),
     runId: "run-cfc-invocation-time",
-    cfcEnforcementMode: "observe",
     now: (() => {
       const timestamps = [
         "2026-04-17T21:00:00.000Z",
@@ -1350,6 +1344,7 @@ Deno.test("CfHarnessEngine records a tool invocation error without ending the ru
   const engine = new CfHarnessEngine({
     sandboxRuntime: new FakeSandboxRuntime([], new Error("sandbox boom")),
     runId: "run-fail",
+    // The run-state assertions below read this dial back.
     cfcEnforcementMode: "observe",
     now: (() => {
       const timestamps = [
@@ -1390,7 +1385,6 @@ Deno.test("CfHarnessEngine records recoverable file-tool failures without failin
       exitCode: 10,
     }]),
     runId: "run-file-missing",
-    cfcEnforcementMode: "observe",
     now: (() => {
       const timestamps = [
         "2026-04-15T19:15:00.000Z",
@@ -1443,7 +1437,6 @@ Deno.test("CfHarnessEngine fails an interrupted run that has recorded a tool out
       { stdout: "done\n", stderr: "", exitCode: 0 },
     ]),
     runId: "run-interrupted",
-    cfcEnforcementMode: "observe",
     now: (() => {
       const timestamps = [
         "2026-04-15T19:20:00.000Z",
@@ -1679,7 +1672,6 @@ Deno.test("CfHarnessEngine records the handle table and persists run state", asy
     artifactStore,
     sandboxRuntime: new FakeSandboxRuntime(),
     runId: "run-handle-table",
-    cfcEnforcementMode: "observe",
   });
   const { table } = await mintAddressHandle(
     createHarnessHandleTable("run-handle-table"),

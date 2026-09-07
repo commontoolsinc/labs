@@ -49,6 +49,11 @@ const absent = <T>(): ArtifactState<T> => ({
   path: "built",
 });
 
+/**
+ * A run's recorded state. Its enforcement mode is the one every artifact
+ * builder below records too, and AUD-1 reads that agreement across the family.
+ * A case whose subject is a rung overrides the mode on the artifacts it names.
+ */
 const runState = (
   overrides: Partial<HarnessRunState> = {},
 ): HarnessRunState => ({
@@ -79,6 +84,10 @@ const activity = (
   ...overrides,
 });
 
+/**
+ * One recorded policy decision. Its reason code names the same mode the record
+ * claims, and AUD-2 reads that pairing.
+ */
 const decision = (
   overrides: Partial<HarnessPolicyDecisionRecord> & { toolCallId: string },
 ): HarnessPolicyDecisionRecord => ({

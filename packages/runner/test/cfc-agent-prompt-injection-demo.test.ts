@@ -159,7 +159,6 @@ async function setupDemoAgent(
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),
     storageManager,
-    cfcEnforcementMode: "enforce-explicit",
   });
 
   // Play the agent kernel binding the direct user command BEFORE the agent

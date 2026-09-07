@@ -73,7 +73,6 @@ const createEngine = (configured = true): CfHarnessEngine =>
   new CfHarnessEngine({
     sandboxRuntime: new FakeSandboxRuntime(),
     runId: `search-skills-test-${crypto.randomUUID()}`,
-    cfcEnforcementMode: "disabled",
     ...(configured
       ? {
         skillsShSearchClientFactory: () =>
@@ -131,7 +130,6 @@ describe("search-skills", () => {
     const engine = new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `search-skills-test-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       skillsShSearchClientFactory: () =>
         Promise.reject(new Error("registry offline")),
     });

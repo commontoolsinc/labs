@@ -29,6 +29,7 @@ import {
   harnessReleaseDecisionOutcome,
 } from "../src/contracts/policy-refusal.ts";
 import type { HarnessPolicyTrace } from "../src/contracts/policy-trace.ts";
+import { createCliPromptSlotBinding } from "../src/contracts/prompt-slot.ts";
 import type { HarnessTranscriptOmissions } from "../src/contracts/transcript-omissions.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
@@ -111,6 +112,10 @@ async function createStrictFabric() {
   const runtime = new Runtime({
     apiUrl: new URL("http://toolshed.test"),
     storageManager: storage,
+    // The rung and the label persistence the withheld release rests on. The
+    // seeded confidentiality reaches the pattern's read through the persisted
+    // labels, and the release boundary then refuses it, which is the
+    // `withheld` decision the test reads out of the policy trace.
     cfcEnforcementMode: "enforce-strict",
     cfcFlowLabels: "persist",
   });
@@ -222,18 +227,18 @@ describe("run_pattern release decisions in the policy trace", () => {
           sandboxRuntime: new FakeSandboxRuntime(),
           runId: "run-release-decision",
           model: "gpt-5.4",
-          // The harness's own ladder decides whether the CALL may run, and
-          // an enforcing rung there would refuse it for want of
-          // direct-command authority before the boundary under test ran. The
-          // release is decided by the fabric runtime's mode, which is
-          // `enforce-strict` above.
-          cfcEnforcementMode: "disabled",
           fabricSessionFactory: () => Promise.resolve({ pieces }),
         }),
         fetchFn,
       });
 
-      await loop.runPrompt({ prompt: "Run the pattern over the source." });
+      await loop.runPrompt({
+        prompt: "Run the pattern over the source.",
+        promptSlotBinding: createCliPromptSlotBinding({
+          kernelName: "cf-harness",
+          subject: "release-decisions",
+        }),
+      });
 
       const trace = JSON.parse(
         await Deno.readTextFile(

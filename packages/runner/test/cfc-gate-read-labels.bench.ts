@@ -87,7 +87,7 @@ const seedLabeledSources = async (
   const runtime = new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager,
-    cfcEnforcementMode: "enforce-explicit",
+    // Both arms measure a prepare that runs under persisted flow labels.
     cfcFlowLabels: "persist",
   });
   const sourceNames = Array.from(

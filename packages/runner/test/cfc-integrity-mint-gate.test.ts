@@ -25,7 +25,6 @@ describe("CFC integrity mint gate", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       // An author persists a source value with a self-attached InjectionSafe
@@ -151,7 +150,6 @@ describe("CFC integrity mint gate", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       for (const [name, atom] of Object.entries(forgedAtoms)) {

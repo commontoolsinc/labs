@@ -20,7 +20,6 @@ import {
   type CfcTrustConfigInput,
   createTrustResolver,
 } from "../src/cfc/trust.ts";
-import type { CfcEnforcementMode } from "../src/cfc/types.ts";
 import { createLLMFriendlyLink } from "../src/link-types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
@@ -336,7 +335,6 @@ describe("CFC concept-level integrity floors (D5)", () => {
       const runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
         ...(trust ? { cfcTrustConfig: trust } : {}),
       });
       try {
@@ -365,8 +363,20 @@ describe("CFC concept-level integrity floors (D5)", () => {
           "concept-sink",
           {
             type: "object",
+            // The sink holds a value derived from the sources. It declares
+            // the confidentiality those sources carry.
+            ifc: { confidentiality: ["s"] },
             properties: {
-              out: { type: "string", ifc: { requiredIntegrity: [required] } },
+              // The write mints the integrity its sources carry. That
+              // leaves the read-side gate as the only thing deciding these
+              // commits.
+              out: {
+                type: "string",
+                ifc: {
+                  requiredIntegrity: [required],
+                  addIntegrity: sources.flat(),
+                },
+              },
             },
             required: ["out"],
           } as JSONSchema,
@@ -443,7 +453,8 @@ describe("CFC concept-level integrity floors (D5)", () => {
       const runtime = new Runtime({
         apiUrl: new URL("https://example.com"),
         storageManager,
-        cfcEnforcementMode: "enforce-explicit",
+        // Two of the cases below assert the message "write floor failed".
+        // An enforcing write floor is what produces it.
         cfcWriteFloor: "enforce",
         ...(trust ? { cfcTrustConfig: trust } : {}),
       });
@@ -507,16 +518,12 @@ describe("CFC concept-level integrity floors (D5)", () => {
   describe("tool-input floor integration (llm-dialog, Epic D2)", () => {
     const KERNEL_CONCEPT_FLOOR = concept(GPS_CONCEPT);
 
-    async function setup(
-      cfcEnforcementMode: CfcEnforcementMode,
-      trust: CfcTrustConfigInput | undefined,
-    ) {
+    async function setup(trust: CfcTrustConfigInput | undefined) {
       const space = signer.did();
       const storageManager = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
-        cfcEnforcementMode,
         ...(trust ? { cfcTrustConfig: trust } : {}),
       });
       const tx = runtime.edit();
@@ -597,7 +604,7 @@ describe("CFC concept-level integrity floors (D5)", () => {
 
       const resultCell = runtime.getCell(
         space,
-        `concept-tool-${cfcEnforcementMode}-${trust ? "trust" : "notrust"}`,
+        `concept-tool-${trust ? "trust" : "notrust"}`,
         resultSchema,
         tx,
       );
@@ -680,7 +687,7 @@ describe("CFC concept-level integrity floors (D5)", () => {
     it("allows a by-reference recipient whose concrete atom is above the concept floor", async () => {
       // RED before threading the trust context into the tool-input gate: the
       // concept floor rejected the referenced concrete measurement.
-      const t = await setup("enforce-explicit", trustInput());
+      const t = await setup(trustInput());
       try {
         const ref = await t.seedConcreteRecipient(
           "concept-ok",
@@ -694,7 +701,7 @@ describe("CFC concept-level integrity floors (D5)", () => {
     });
 
     it("refuses a plain-literal recipient against a concept floor", async () => {
-      const t = await setup("enforce-explicit", trustInput());
+      const t = await setup(trustInput());
       try {
         await t.sendCall("bob@evil.org");
         expect(await t.sentRecipients()).toEqual([]);
@@ -704,7 +711,7 @@ describe("CFC concept-level integrity floors (D5)", () => {
     });
 
     it("refuses a concept floor when no trust is configured (fail closed)", async () => {
-      const t = await setup("enforce-explicit", undefined);
+      const t = await setup(undefined);
       try {
         const ref = await t.seedConcreteRecipient(
           "concept-notrust",

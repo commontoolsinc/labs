@@ -78,7 +78,6 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       cfcSinkMaxConfidentiality: { fetchJson: [] },
     });
 
@@ -163,6 +162,8 @@ describe("CFC sink ceiling on values pulled through schema-less links", () => {
     const observeRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: observeStorage,
+      // The rung under test: the commit below succeeds and the ceiling
+      // violation arrives as a diagnostic.
       cfcEnforcementMode: "observe",
       cfcSinkMaxConfidentiality: { fetchJson: [] },
     });

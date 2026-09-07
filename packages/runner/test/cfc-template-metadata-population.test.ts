@@ -2,7 +2,7 @@ import { expect } from "@std/expect";
 import { afterEach, describe, it } from "@std/testing/bdd";
 
 import type { CfcAtom } from "@commonfabric/api/cfc";
-import { CFC_ATOM_TYPE } from "@commonfabric/api/cfc";
+import { CFC_ATOM_TYPE, cfcAtom } from "@commonfabric/api/cfc";
 import type { FabricValue } from "@commonfabric/data-model";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
@@ -54,6 +54,21 @@ const caveatAtom = (source: CfcAtom = SOURCE_A) => ({
   kind: "prompt-influence",
   source,
 });
+
+/**
+ * A confidentiality clause whose alternatives include the readers of the
+ * space these fixtures store their documents in.
+ *
+ * §8.12.4 joins `Space(<the target's space>)` onto every write ceiling. A
+ * clause naming that space therefore fits a document held there. A
+ * transaction reading such a clause derives from it into a store that
+ * declares no policy of its own. The remaining alternatives ride along
+ * inside the clause, where the label-metadata mint reads their
+ * source-bearing fields.
+ */
+const residentClause = (
+  ...alternatives: readonly CfcConfClause[]
+): CfcConfClause => ({ anyOf: [cfcAtom.space(space), ...alternatives] });
 
 const metadataWith = (
   entries: CfcMetadata["labelMap"]["entries"],
@@ -113,7 +128,6 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
       cfcFlowLabels: "persist",
     });
     return runtime;
@@ -150,6 +164,26 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
   };
 
+  // The schema write-policy input a cell write records for its target. The
+  // write-policy gate asks for one on a document whose label map carries
+  // minted templates. A write addressed straight at the document records it
+  // alongside.
+  const recordSchemaInput = (
+    tx: ReturnType<Runtime["edit"]>,
+    id: string,
+  ): void => {
+    tx.recordCfcWritePolicyInput({
+      kind: "schema",
+      target: {
+        space,
+        scope: "space",
+        id: id as `${string}:${string}`,
+        path: ["value"],
+      },
+      schema: { type: "object" },
+    });
+  };
+
   const readAddress = (id: string, path: string[]) => ({
     space,
     scope: "space" as const,
@@ -184,7 +218,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
 
     const rt = makeRuntime();
     const criteriaId = await seedDoc(rt, "mp-criteria", { keep: true }, [
-      { path: [], label: { confidentiality: [caveatAtom()] } },
+      { path: [], label: { confidentiality: [residentClause(caveatAtom())] } },
     ]);
     const outId = await deriveOutDoc(rt, "mp-out", criteriaId);
 
@@ -202,7 +236,9 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
       ],
     ]);
     for (const entry of templates) {
-      expect(entry.label.confidentiality).toEqual([caveatAtom()]);
+      expect(entry.label.confidentiality).toEqual([
+        residentClause(caveatAtom()),
+      ]);
       expect(entry.label.integrity).toBeUndefined();
     }
     // Presence/type/kind stay public: NO template materializes for them
@@ -248,8 +284,8 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
         path: [],
         label: {
           confidentiality: [
-            "public-tag",
-            { kind: "authored-by", subject: "did:key:alice" },
+            residentClause("public-tag"),
+            residentClause({ kind: "authored-by", subject: "did:key:alice" }),
           ],
         },
       },
@@ -270,13 +306,19 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     // Creation under a NON-source-bearing J so the frozen shape entry never
     // contributes template atoms of its own.
     const plainId = await seedDoc(rt, "mp-criteria-plain", { keep: true }, [
-      { path: [], label: { confidentiality: ["plain-tag"] } },
+      { path: [], label: { confidentiality: [residentClause("plain-tag")] } },
     ]);
     const criteriaB = await seedDoc(rt, "mp-criteria-b", { keep: true }, [
-      { path: [], label: { confidentiality: [caveatAtom(SOURCE_A)] } },
+      {
+        path: [],
+        label: { confidentiality: [residentClause(caveatAtom(SOURCE_A))] },
+      },
     ]);
     const criteriaC = await seedDoc(rt, "mp-criteria-c", { keep: true }, [
-      { path: [], label: { confidentiality: [caveatAtom(SOURCE_B)] } },
+      {
+        path: [],
+        label: { confidentiality: [residentClause(caveatAtom(SOURCE_B))] },
+      },
     ]);
 
     const outId = await deriveOutDoc(rt, "mp-out-replace", plainId);
@@ -298,6 +340,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
       },
       { observed: "second" },
     );
+    recordSchemaInput(txB, outId);
     txB.prepareCfc();
     expect((await txB.commit()).ok).toBeDefined();
     const afterB = entriesOf(outId).filter(
@@ -305,7 +348,9 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     );
     expect(afterB.length).toBe(2);
     for (const entry of afterB) {
-      expect(entry.label.confidentiality).toContainEqual(caveatAtom(SOURCE_A));
+      expect(entry.label.confidentiality).toContainEqual(
+        residentClause(caveatAtom(SOURCE_A)),
+      );
     }
 
     // Overwrite under J = caveat(SOURCE_B): SOURCE_A leaves with its entry.
@@ -322,6 +367,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
       },
       { observed: "third" },
     );
+    recordSchemaInput(txC, outId);
     txC.prepareCfc();
     expect((await txC.commit()).ok).toBeDefined();
     const afterC = entriesOf(outId).filter(
@@ -329,9 +375,11 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     );
     expect(afterC.length).toBe(2);
     for (const entry of afterC) {
-      expect(entry.label.confidentiality).toContainEqual(caveatAtom(SOURCE_B));
+      expect(entry.label.confidentiality).toContainEqual(
+        residentClause(caveatAtom(SOURCE_B)),
+      );
       expect(entry.label.confidentiality).not.toContainEqual(
-        caveatAtom(SOURCE_A),
+        residentClause(caveatAtom(SOURCE_A)),
       );
     }
   });
@@ -342,7 +390,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
 
     const rt = makeRuntime();
     const criteriaId = await seedDoc(rt, "mp-criteria-i", { keep: true }, [
-      { path: [], label: { confidentiality: [caveatAtom()] } },
+      { path: [], label: { confidentiality: [residentClause(caveatAtom())] } },
     ]);
     const outId = await deriveOutDoc(rt, "mp-out-i", criteriaId, {
       observed: "same",
@@ -383,7 +431,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     const rt = makeRuntime();
     await seedDoc(rt, "mp-el", { n: 1 }, []);
     const criteriaId = await seedDoc(rt, "mp-criteria-list", { keep: true }, [
-      { path: [], label: { confidentiality: [caveatAtom()] } },
+      { path: [], label: { confidentiality: [residentClause(caveatAtom())] } },
     ]);
     const tx = rt.edit();
     tx.readOrThrow(readAddress(criteriaId, []));
@@ -438,7 +486,9 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
         "value",
         "0",
       ]);
-      expect([...observation.confidentiality]).toContainEqual(caveatAtom());
+      expect([...observation.confidentiality]).toContainEqual(
+        residentClause(caveatAtom()),
+      );
     }
     await inspect.commit();
   });
@@ -453,7 +503,6 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
       cfcFlowLabels: "persist",
       cfcLabelMetadataProtection: "enforce",
     });
@@ -478,7 +527,10 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
           labelMap: {
             version: 1,
             entries: [
-              { path: [], label: { confidentiality: [caveatAtom()] } },
+              {
+                path: [],
+                label: { confidentiality: [residentClause(caveatAtom())] },
+              },
             ],
           },
         },
@@ -545,7 +597,12 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     const seededId = await seedDoc(rt, "mp-guard", { x: 1 }, [
       {
         path: [],
-        label: { confidentiality: ["payload-label", caveatAtom()] },
+        label: {
+          confidentiality: [
+            residentClause("payload-label"),
+            residentClause(caveatAtom()),
+          ],
+        },
         origin: "derived",
         observes: "value",
       },
@@ -573,7 +630,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
     const joinValue = derivedConfidentiality(
       outValue.getAsNormalizedFullLink().id,
     );
-    expect(joinValue).toContainEqual("payload-label");
+    expect(joinValue).toContainEqual(residentClause("payload-label"));
     expect(joinValue).not.toContainEqual("tmpl-only-atom");
 
     // Shape probe (nonRecursive) at the root.
@@ -686,7 +743,7 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
 
     const rt = makeRuntime();
     const criteriaId = await seedDoc(rt, "mp-criteria-obs", { keep: true }, [
-      { path: [], label: { confidentiality: [caveatAtom()] } },
+      { path: [], label: { confidentiality: [residentClause(caveatAtom())] } },
     ]);
     await deriveOutDoc(rt, "mp-out-obs", criteriaId);
 
@@ -703,14 +760,15 @@ describe("CFC template metadata population (Stage B): persist-seam mints", () =>
       (observation) => [...observation.target.path].join("/"),
     ).sort();
     // The out doc carries the derived shape + value entries at [] (stored in
-    // that canonical order), each with the caveat clause: per matching atom,
-    // one field consultation and one whole-atom projection, at concrete
-    // clause indices across the concatenated per-entry clause lists.
+    // that canonical order), each with one clause: per matching atom, one
+    // field consultation and one whole-atom projection, at concrete clause
+    // indices across the concatenated per-entry clause lists. The caveat is
+    // the second alternative of its clause, so the alternative index is 1.
     expect(paths).toEqual([
-      "cfc/labels/value/confidentiality/clauses/0/alternatives/0",
-      "cfc/labels/value/confidentiality/clauses/0/alternatives/0/source",
-      "cfc/labels/value/confidentiality/clauses/1/alternatives/0",
-      "cfc/labels/value/confidentiality/clauses/1/alternatives/0/source",
+      "cfc/labels/value/confidentiality/clauses/0/alternatives/1",
+      "cfc/labels/value/confidentiality/clauses/0/alternatives/1/source",
+      "cfc/labels/value/confidentiality/clauses/1/alternatives/1",
+      "cfc/labels/value/confidentiality/clauses/1/alternatives/1/source",
     ]);
     await inspect.commit();
   });
@@ -847,7 +905,6 @@ describe("CFC template metadata population (Stage B): evaluator resolution", () 
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
       cfcFlowLabels: "persist",
     });
     try {

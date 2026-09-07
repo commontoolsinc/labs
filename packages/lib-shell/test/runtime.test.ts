@@ -856,6 +856,8 @@ describe("RuntimeInternals", () => {
     const options = createRuntimeClientOptions({
       session,
       apiUrl: new URL("http://shell.test/"),
+      // The assertions below read `options.cfcEnforcementMode` and
+      // `options.cfcFlowLabels` back as these values.
       cfcEnforcementMode: "observe",
       cfcFlowLabels: "off",
       trustSnapshot,

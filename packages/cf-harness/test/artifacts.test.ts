@@ -190,6 +190,8 @@ Deno.test({
           { stdout: "hello\n", stderr: "", exitCode: 0 },
         ]),
         runId: "run-artifacts",
+        // The persisted run state and the invocation context beside it are both
+        // asserted to record this rung.
         cfcEnforcementMode: "observe",
         now: (() => {
           const timestamps = [
@@ -1071,7 +1073,6 @@ Deno.test({
             source: "loom",
             credentialOwner,
           },
-          cfcEnforcementMode: "enforce-explicit",
         }),
         fetchFn: async (_input, init) => {
           const body = JSON.parse(String(init?.body)) as {
@@ -1339,6 +1340,8 @@ Deno.test({
           ]),
           runId: "run-subagent-sanitized-failure",
           model: "gpt-5.4",
+          // The child's second failure is the `tool_not_allowed` policy event
+          // this rung produces, and the run asserts a failure count of two.
           cfcEnforcementMode: "enforce-explicit",
         }),
         fetchFn: (_input, init) => {
@@ -1531,7 +1534,6 @@ Deno.test({
         artifactRoot,
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "run-prompt-slot",
-        cfcEnforcementMode: "observe",
       });
 
       engine.setPromptSlotBinding(promptSlotBinding);
@@ -1562,6 +1564,8 @@ Deno.test({
           sandboxRuntime: new FakeSandboxRuntime(),
           runId: "run-denied-report",
           model: "gpt-5.4",
+          // The write the run asks for is denied at this rung, and the persisted
+          // tool activity is asserted to record the denial and the rung.
           cfcEnforcementMode: "enforce-explicit",
           now: (() => {
             const timestamps = [
@@ -1764,6 +1768,8 @@ Deno.test({
           ]),
           runId: "run-missing-cfc-report",
           model: "gpt-5.4",
+          // Output mediation denies the sandbox result at this rung, which is the
+          // denial the run report is asserted to carry.
           cfcEnforcementMode: "enforce-explicit",
         }),
         fetchFn: (_input, init) => {

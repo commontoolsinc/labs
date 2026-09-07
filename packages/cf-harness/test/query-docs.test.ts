@@ -54,6 +54,13 @@ import type {
   SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
+import { directPromptSlotBindingFor } from "./support/prompt-slot-binding.ts";
+
+/**
+ * The prompt that starts the run, bound as a direct command. A tool call made
+ * under this binding is authorized at every enforcement rung.
+ */
+const directPromptSlotBinding = directPromptSlotBindingFor("query-docs");
 
 class FakeSandboxRuntime implements SandboxRuntime {
   describe(): SandboxRuntimeDescription {
@@ -133,7 +140,6 @@ describe("query-docs", () => {
     const engine = new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `query-docs-test-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       // A run wanting no corpus says so; the checkout the tests run out of
       // would otherwise supply the default.
       ...(options.corpus === false
@@ -371,7 +377,6 @@ describe("query-docs", () => {
         artifactStore,
         runId,
         model: "test-model",
-        cfcEnforcementMode: "disabled",
         docsCorpus: {
           type: "cf-harness.docs-corpus-record",
           source: "configured",
@@ -384,7 +389,10 @@ describe("query-docs", () => {
         allowedToolIds: ["query_docs"],
       });
 
-      const result = await loop.runPrompt({ prompt: "Look up glazing." });
+      const result = await loop.runPrompt({
+        prompt: "Look up glazing.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
       expect(result.totalUsage?.totalTokens).toBe(12);
       const toolMessage = result.transcript.find((message) =>
         message.role === "tool"
@@ -465,7 +473,6 @@ describe("query-docs", () => {
           sandboxRuntime: new FakeSandboxRuntime(),
           runId: `query-docs-down-${crypto.randomUUID()}`,
           model: "test-model",
-          cfcEnforcementMode: "disabled",
           docsCorpus: {
             type: "cf-harness.docs-corpus-record",
             source: "configured",
@@ -476,7 +483,10 @@ describe("query-docs", () => {
         allowedToolIds: ["query_docs"],
       });
 
-      const result = await loop.runPrompt({ prompt: "Look up glazing." });
+      const result = await loop.runPrompt({
+        prompt: "Look up glazing.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       // The model reads a tool error and carries on, which is why the count is
       // the only place the run says its documentation channel was down.
@@ -550,7 +560,6 @@ describe("query-docs", () => {
           sandboxRuntime: new FakeSandboxRuntime(),
           runId: `query-docs-child-down-${crypto.randomUUID()}`,
           model: "test-model",
-          cfcEnforcementMode: "disabled",
           docsCorpus: {
             type: "cf-harness.docs-corpus-record",
             source: "configured",
@@ -562,7 +571,10 @@ describe("query-docs", () => {
         allowedSubagentProfiles: ["pattern-author"],
       });
 
-      const result = await loop.runPrompt({ prompt: "Delegate a lookup." });
+      const result = await loop.runPrompt({
+        prompt: "Delegate a lookup.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       // The delegation failed, so the success path never ran; the count still
       // reaches the parent, and exactly once.
@@ -720,7 +732,6 @@ describe("query-docs", () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `query-docs-default-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
       });
       engine.setExploreQueryRunner((request) =>
         Promise.resolve({
@@ -763,7 +774,6 @@ describe("query-docs", () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `query-docs-record-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
       });
 
       expect(engine.getRunState().docsCorpus).toEqual({
@@ -784,7 +794,6 @@ describe("query-docs", () => {
     const resumedEngine = (runState: Record<string, unknown>) =>
       new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
-        cfcEnforcementMode: "disabled",
         runState: {
           ...createHarnessRunState({
             runId: "run-resumed",

@@ -26,6 +26,8 @@ describe("CFC transaction control guard", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // Pinned: the steps below read the mode back as "enforce-explicit", then
+      // raise it to "enforce-strict" and read that back too.
       cfcEnforcementMode: "enforce-explicit",
     });
     try {
@@ -79,6 +81,9 @@ describe("CFC transaction control guard", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // Pinned: the steps below start from a non-enforcing mode and assert that
+      // moving between "observe" and "disabled" is accepted until the first
+      // enforcing mode sets the floor.
       cfcEnforcementMode: "disabled",
     });
     try {
@@ -100,6 +105,9 @@ describe("CFC transaction control guard", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
+      // The steps below ask the transaction to weaken to "disabled" and
+      // expect the guard to refuse, then commit a violation and expect a
+      // rejection. Both need the transaction to start from an enforcing rung.
       cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-tx-control-guard",

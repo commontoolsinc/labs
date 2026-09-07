@@ -201,8 +201,8 @@ Deno.test("resolveCfcEnforcementMode follows a fabric session raised to strict",
     "override",
   );
 
-  // Only strict raises: the session's preset pins enforce-explicit whether
-  // asked for or not, and a weaker loop under it is an ordinary configuration.
+  // A session that states no mode of its own does not raise the harness dial,
+  // so the override stands.
   assertEquals(
     resolveCfcEnforcementMode({
       fabricSession: { ...strictSession, cfcEnforcementMode: undefined },

@@ -3215,7 +3215,6 @@ describe("runtime-processor", () => {
           rootSchema,
         );
         const tx = runtime.edit() as any;
-        tx.setCfcEnforcementMode("enforce-explicit");
         (root.withTx(tx) as any).set({
           messages: [{ piece: { id: "alice", body: "hello" } }],
         });
@@ -3356,13 +3355,11 @@ describe("runtime-processor", () => {
         );
 
         const seed = runtime.edit();
-        seed.setCfcEnforcementMode("enforce-explicit");
         root.withTx(seed).set({ messages: [] });
         seed.prepareCfc();
         expect((await seed.commit()).ok).toBeDefined();
 
         const tx = runtime.edit();
-        tx.setCfcEnforcementMode("enforce-explicit");
         root.withTx(tx).key("messages").push({
           piece: {
             id: "alice-message",

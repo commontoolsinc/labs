@@ -32,16 +32,24 @@ const signer = await Identity.fromPassphrase("runner-cfc-prefix-provenance");
 // (docs/specs/cfc-write-prefix-provenance.md) narrows the gated-read set
 // versus the pre-D4 transaction-global gate. Measurement only — every
 // scenario here pairs its counter assertions with the UNCHANGED enforcement
-// outcome, and the hook-absent default is pinned byte-identical (all-zero
-// stats, same decision).
+// outcome, and the hook-absent run is pinned byte-identical (all-zero stats,
+// same decision).
 
 const FLOOR_ATOM = "prefix-endorsed";
 const OTHER_ATOM = "prefix-unrelated";
 
+// The sink mints the integrity atom its own floor requires. A write through
+// this schema therefore carries the endorsement the write floor checks for.
 const SINK_SCHEMA = {
   type: "object",
   properties: {
-    out: { type: "string", ifc: { requiredIntegrity: [FLOOR_ATOM] } },
+    out: {
+      type: "string",
+      ifc: {
+        requiredIntegrity: [FLOOR_ATOM],
+        addIntegrity: [FLOOR_ATOM],
+      },
+    },
   },
   required: ["out"],
 } as const satisfies JSONSchema;
@@ -53,7 +61,6 @@ const makeRuntime = (options: {
   new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager: options.storageManager,
-    cfcEnforcementMode: "enforce-explicit",
     ...(options.cfcPrefixProvenanceStats !== undefined
       ? { cfcPrefixProvenanceStats: options.cfcPrefixProvenanceStats }
       : {}),
@@ -110,6 +117,8 @@ describe("CFC prefix-provenance precision counters (Stage 0, doc §6)", () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({
       storageManager,
+      // The prefix-gated and transaction-global counts compared below are
+      // collected only while this is on.
       cfcPrefixProvenanceStats: true,
     });
     try {
@@ -166,6 +175,8 @@ describe("CFC prefix-provenance precision counters (Stage 0, doc §6)", () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({
       storageManager,
+      // The bound-source counters read below are collected only while this
+      // is on.
       cfcPrefixProvenanceStats: true,
     });
     try {
@@ -216,6 +227,8 @@ describe("CFC prefix-provenance precision counters (Stage 0, doc §6)", () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({
       storageManager,
+      // The S7 exemption counter read below is collected only while this is
+      // on.
       cfcPrefixProvenanceStats: true,
     });
     try {
@@ -264,8 +277,8 @@ describe("CFC prefix-provenance precision counters (Stage 0, doc §6)", () => {
 
   it("hook absent: no summary, and the enforcement outcome is identical to hook present", async () => {
     // The §3 re-attempt rejection from the D4 suite, run twice: counters off
-    // (the default) and on. Same reason either way — measurement must be
-    // byte-identical on decisions — and the disabled run reports no summary.
+    // and counters on. The rejection reason is the same either way. The run
+    // with counters off reports no summary.
     const runScenario = async (
       cfcPrefixProvenanceStats: boolean,
     ): Promise<
@@ -338,6 +351,8 @@ describe("CFC prefix-provenance precision counters (Stage 0, doc §6)", () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime({
       storageManager,
+      // With collection on, the zero summary count asserted below says the
+      // gate walked no floored entry.
       cfcPrefixProvenanceStats: true,
     });
     try {
@@ -459,7 +474,13 @@ describe("CFC prefix-provenance summary (direct gate probes)", () => {
         properties: Object.fromEntries(
           Array.from({ length: width }, (_, i) => [
             `f${i}`,
-            { type: "string", ifc: { requiredIntegrity: [FLOOR_ATOM] } },
+            {
+              type: "string",
+              ifc: {
+                requiredIntegrity: [FLOOR_ATOM],
+                addIntegrity: [FLOOR_ATOM],
+              },
+            },
           ]),
         ),
       } as JSONSchema;
@@ -517,7 +538,10 @@ describe("CFC prefix-provenance summary (direct gate probes)", () => {
         properties: {
           [trickyField]: {
             type: "string",
-            ifc: { requiredIntegrity: [FLOOR_ATOM] },
+            ifc: {
+              requiredIntegrity: [FLOOR_ATOM],
+              addIntegrity: [FLOOR_ATOM],
+            },
           },
         },
       } as JSONSchema;

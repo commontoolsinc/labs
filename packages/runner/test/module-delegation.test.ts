@@ -68,7 +68,6 @@ describe("module identity delegation", () => {
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
   });
 

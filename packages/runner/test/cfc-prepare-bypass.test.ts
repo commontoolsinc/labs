@@ -27,7 +27,6 @@ describe("CFC prepareCfc verification bypass", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-prepare-bypass",
         actingPrincipal: signer.did(),

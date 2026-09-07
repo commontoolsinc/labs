@@ -27,13 +27,10 @@ describe("CFC external-ingest provenance mint (split-mint)", () => {
   // The Vouched Ingest Channel split-mint: a builtin-authored ExternalIngest
   // provenance mark, derived only from the verified channel metadata stamped on
   // the tx, that survives the runtime-minted gate while a copy smuggled into
-  // the payload is stripped. The toolshed/operator runtime runs CFC *disabled*,
-  // so the headline case proves the mark is still minted there.
+  // the payload is stripped.
 
   const makeRuntime = (
     overrides: {
-      cfcEnforcementMode?: string;
-      cfcFlowLabels?: string;
       cfcWriteFloor?: string;
     } = {},
   ) => {
@@ -42,12 +39,12 @@ describe("CFC external-ingest provenance mint (split-mint)", () => {
       {
         apiUrl: new URL("https://example.com"),
         storageManager,
-        // Explicitly-disabled mode — the mint's hardest case (nothing else
-        // marks the tx relevant) — unless a test overrides it. Not any shipped
-        // host's posture: toolshed passes no CFC options and runs the
-        // enforce-explicit Runtime default.
+        // Disabled enforcement is the mint's hardest case: the ingest stamp is
+        // the only thing marking the transaction CFC-relevant. It also commits
+        // a transaction that recorded a refusal reason, which is the
+        // `expect(error).toBeUndefined()` that both "persists the mark even
+        // when the payload fails ..." tests turn on.
         cfcEnforcementMode: "disabled",
-        cfcFlowLabels: "off",
         ...overrides,
       } as ConstructorParameters<typeof Runtime>[0],
     );
@@ -139,9 +136,7 @@ describe("CFC external-ingest provenance mint (split-mint)", () => {
   });
 
   it("mints fetch provenance without a vouched channel or audience", async () => {
-    const { storageManager, runtime } = makeRuntime({
-      cfcEnforcementMode: "enforce-explicit",
-    });
+    const { storageManager, runtime } = makeRuntime();
     try {
       const id = runtime.getCell(space, "fetch-ingest-a")
         .getAsNormalizedFullLink().id;
@@ -343,6 +338,8 @@ describe("CFC external-ingest provenance mint (split-mint)", () => {
     // declared policy label is dropped. Exercises the floor's ingest-target
     // branch (ingestVerificationFailed instead of skipping the mint).
     const { storageManager, runtime } = makeRuntime({
+      // The floor rejects the unendorsed payload, which is the rejection the
+      // mark has to survive.
       cfcWriteFloor: "enforce",
     });
     try {

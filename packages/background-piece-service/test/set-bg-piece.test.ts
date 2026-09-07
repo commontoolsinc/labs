@@ -32,7 +32,6 @@ describe("setBGPiece() registration is an upsert", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "disabled",
     });
     // A distinct cause per test, so one test's registrations cannot be read by
     // the next.

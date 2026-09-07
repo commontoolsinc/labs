@@ -135,7 +135,6 @@ const setTrustedProfileWriter = (
   tx: IExtendedStorageTransaction,
   actingPrincipal?: string,
 ) => {
-  tx.setCfcEnforcementMode("enforce-explicit");
   if (actingPrincipal !== undefined) {
     tx.setCfcTrustSnapshot({
       id: `profile-trust-${actingPrincipal}`,
@@ -409,7 +408,6 @@ describe("profile owner CFC policy", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot(undefined);
       tx.setCfcImplementationIdentity({
         kind: "builtin",
@@ -440,7 +438,6 @@ describe("profile owner CFC policy", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot({
         id: "profile-trust-untrusted",
         actingPrincipal: alice.did(),
@@ -473,7 +470,6 @@ describe("profile owner CFC policy", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot({
         id: "profile-trust-owner-without-integrity",
         actingPrincipal: alice.did(),
@@ -625,7 +621,6 @@ describe("profile owner CFC policy", () => {
     try {
       const profileHomePattern = await compileProfileHomePattern(runtime);
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot({
         id: "pattern-create",
         actingPrincipal: alice.did(),
@@ -768,7 +763,6 @@ describe("profile owner CFC policy", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot({
         id: "setup-projection",
         actingPrincipal: alice.did(),
@@ -832,7 +826,6 @@ describe("profile owner CFC policy", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot({ id: "no-marker", actingPrincipal: alice.did() });
       tx.setCfcImplementationIdentity({
         kind: "builtin",
@@ -875,7 +868,6 @@ describe("profile owner CFC policy", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot({ id: "per-path", actingPrincipal: alice.did() });
       const cell = runtime.getCell(
         alice.did(),
@@ -916,7 +908,6 @@ describe("profile owner CFC policy", () => {
     const { runtime, storageManager } = createRuntime();
     try {
       const tx = runtime.edit();
-      tx.setCfcEnforcementMode("enforce-explicit");
       tx.setCfcTrustSnapshot({
         id: "per-path-neg",
         actingPrincipal: alice.did(),

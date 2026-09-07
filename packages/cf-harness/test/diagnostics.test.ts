@@ -727,7 +727,6 @@ Deno.test("collectHarnessCapabilitySnapshot reads the CFC transport before captu
     sandbox,
     "/workspace",
     "2026-04-30T00:00:00.000Z",
-    { cfcEnforcementMode: "enforce-explicit" },
   );
 
   // What this test pins: the reading is taken BEFORE the description is

@@ -15,7 +15,6 @@ export async function initializeCapabilityGateController(
     ),
     storageManager: StorageManager.emulate({ as: session.as }),
     moduleByteCache,
-    cfcEnforcementMode: "enforce-explicit",
     trustSnapshotProvider: () => ({
       id: `principal:${session.as.did()}`,
       actingPrincipal: session.as.did(),

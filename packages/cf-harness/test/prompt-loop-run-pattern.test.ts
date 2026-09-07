@@ -34,6 +34,11 @@ import type {
 } from "../src/sandbox/types.ts";
 import { scrubBareFabricIdentifiers } from "../src/fabric-identifier-scrub.ts";
 import { responsesBodyFromChatFixture } from "./support/responses-fixture.ts";
+import { directPromptSlotBindingFor } from "./support/prompt-slot-binding.ts";
+
+// Marks each prompt below as one a person typed. `run_pattern` and
+// `assign_slug` dispatch under that authorization.
+const directPromptSlotBinding = directPromptSlotBindingFor("run-pattern");
 
 class FakeSandboxRuntime implements SandboxRuntime {
   describe(): SandboxRuntimeDescription {
@@ -231,13 +236,15 @@ describe("prompt-loop run_pattern model boundary", () => {
           sandboxRuntime: new FakeSandboxRuntime(),
           runId,
           model: "gpt-5.4",
-          cfcEnforcementMode: "disabled",
           fabricSessionFactory: () => Promise.resolve({ pieces }),
         }),
         fetchFn,
       });
 
-      const result = await loop.runPrompt({ prompt: "Run the pattern." });
+      const result = await loop.runPrompt({
+        prompt: "Run the pattern.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       // One handle: the result reference, carrying the shape compilation
       // already knew, so the token is checkable without reading the cell.
@@ -374,13 +381,15 @@ describe("prompt-loop run_pattern model boundary", () => {
           sandboxRuntime: new FakeSandboxRuntime(),
           runId: "run-pattern-registration",
           model: "gpt-5.4",
-          cfcEnforcementMode: "disabled",
           fabricSessionFactory: () => Promise.resolve({ pieces }),
         }),
         fetchFn,
       });
 
-      const result = await loop.runPrompt({ prompt: "Publish the pattern." });
+      const result = await loop.runPrompt({
+        prompt: "Publish the pattern.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       const toolMessages = result.transcript.filter(
         (message) => message.role === "tool",
@@ -447,14 +456,16 @@ describe("prompt-loop run_pattern model boundary", () => {
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: "assign-slug-scrub",
         model: "gpt-5.4",
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () =>
           Promise.reject(new Error(`authorization denied for ${did}`)),
       }),
       fetchFn,
     });
 
-    const result = await loop.runPrompt({ prompt: "Name the piece." });
+    const result = await loop.runPrompt({
+      prompt: "Name the piece.",
+      promptSlotBinding: directPromptSlotBinding,
+    });
 
     const toolMessage = result.transcript.find(
       (message) => message.role === "tool",
@@ -531,13 +542,15 @@ describe("prompt-loop run_pattern model boundary", () => {
           artifactStore,
           runId,
           model: "gpt-5.4",
-          cfcEnforcementMode: "disabled",
           fabricSessionFactory: () => Promise.resolve({ pieces }),
         }),
         fetchFn,
       });
 
-      const result = await loop.runPrompt({ prompt: "Run the pattern." });
+      const result = await loop.runPrompt({
+        prompt: "Run the pattern.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       const toolMessage = result.transcript.find(
         (message) => message.role === "tool",
@@ -641,13 +654,15 @@ describe("prompt-loop run_pattern model boundary", () => {
           artifactStore,
           runId,
           model: "gpt-5.4",
-          cfcEnforcementMode: "disabled",
           fabricSessionFactory: () => Promise.resolve({ pieces }),
         }),
         fetchFn,
       });
 
-      const result = await loop.runPrompt({ prompt: "Run the pattern." });
+      const result = await loop.runPrompt({
+        prompt: "Run the pattern.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       const contents = result.transcript
         .filter((message) => message.role === "tool")
@@ -807,13 +822,15 @@ describe("prompt-loop run_pattern model boundary", () => {
           artifactStore,
           runId,
           model: "gpt-5.4",
-          cfcEnforcementMode: "disabled",
           fabricSessionFactory: () => Promise.resolve({ pieces }),
         }),
         fetchFn,
       });
 
-      const result = await loop.runPrompt({ prompt: "Run the pattern." });
+      const result = await loop.runPrompt({
+        prompt: "Run the pattern.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       const sourcesIn = (
         transcript: readonly HarnessTranscriptMessage[],
@@ -946,13 +963,15 @@ describe("prompt-loop run_pattern model boundary", () => {
           artifactStore,
           runId,
           model: "gpt-5.4",
-          cfcEnforcementMode: "disabled",
           fabricSessionFactory: () => Promise.resolve({ pieces }),
         }),
         fetchFn,
       });
 
-      const result = await loop.runPrompt({ prompt: "Run the patterns." });
+      const result = await loop.runPrompt({
+        prompt: "Run the patterns.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       const sources = result.transcript
         .filter((message) => message.role === "assistant")
@@ -1056,13 +1075,15 @@ describe("prompt-loop run_pattern model boundary", () => {
           artifactStore,
           runId,
           model: "gpt-5.4",
-          cfcEnforcementMode: "disabled",
           fabricSessionFactory: () => Promise.resolve({ pieces }),
         }),
         fetchFn,
       });
 
-      const result = await loop.runPrompt({ prompt: "Run the patterns." });
+      const result = await loop.runPrompt({
+        prompt: "Run the patterns.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       const sources = result.transcript
         .filter((message) => message.role === "assistant")
@@ -1143,13 +1164,15 @@ describe("prompt-loop run_pattern model boundary", () => {
           sandboxRuntime: new FakeSandboxRuntime(),
           runId: "run-pattern-no-store",
           model: "gpt-5.4",
-          cfcEnforcementMode: "disabled",
           fabricSessionFactory: () => Promise.resolve({ pieces }),
         }),
         fetchFn,
       });
 
-      const result = await loop.runPrompt({ prompt: "Run the pattern." });
+      const result = await loop.runPrompt({
+        prompt: "Run the pattern.",
+        promptSlotBinding: directPromptSlotBinding,
+      });
 
       // Nothing holds the drafts but the transcript, so the transcript keeps
       // them: a marker here would name an artifact nobody wrote.

@@ -45,7 +45,15 @@ describe("CFC declared observation classes (C5)", () => {
     runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "observe",
+      // A strict writer-fit refuses a tainted write to a store that declares
+      // no ceiling. Every output document below declares none, and the
+      // assertions on their `derived` and `structure` entries read the labels
+      // those writes persisted, so the suite holds the strongest rung that
+      // still lets them land.
+      cfcEnforcementMode: "enforce-explicit",
+      // Persisting flow labels is what puts the declared and derived entries
+      // in the documents. Every assertion that goes through `entriesOf` reads
+      // one of them.
       cfcFlowLabels: "persist",
     });
     return runtime;

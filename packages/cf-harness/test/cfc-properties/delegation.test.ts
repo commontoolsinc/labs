@@ -152,7 +152,6 @@ const runDelegationEpisode = async (
       sandboxRuntime: sandbox,
       runId,
       model: "gpt-5.4",
-      cfcEnforcementMode: "enforce-explicit",
       inputCells: [
         { name: "bound", ref: boundRefInput },
         { name: "withheld", ref: withheldRefInput },

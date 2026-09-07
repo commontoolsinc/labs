@@ -91,7 +91,6 @@ describe("CFC LlmDerived stamping — result-field stamp mechanism", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       // Model-output write: builtin identity + the stamp schema at ["result"].
@@ -169,7 +168,6 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     tx = runtime.edit();
     ({ commonfabric: builder } = createTrustedBuilder(runtime));
@@ -570,6 +568,8 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     const disabledRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: disabledStorage,
+      // The assertion below reads that `result` carries no LlmDerived atom.
+      // That holds at the `disabled` rung.
       cfcEnforcementMode: "disabled",
     });
     const disabledTx = disabledRuntime.edit();
@@ -619,6 +619,8 @@ describe("CFC LlmDerived stamping — llm builtins (end to end)", () => {
     const disabledRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager: disabledStorage,
+      // The assertion below reads that `result` carries no LlmDerived atom.
+      // That holds at the `disabled` rung.
       cfcEnforcementMode: "disabled",
     });
     const disabledTx = disabledRuntime.edit();

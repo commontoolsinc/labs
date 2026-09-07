@@ -37,7 +37,9 @@ const newRuntime = (
   new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager,
-    cfcEnforcementMode: "enforce-explicit",
+    // Every assertion below reads back `derived` and `structure` entries of a
+    // stored label map. The persisting rung of the flow-label dial is what
+    // writes those entries.
     cfcFlowLabels: "persist",
   });
 
@@ -163,13 +165,15 @@ describe("CFC redundant entry collapse", () => {
   it("keeps a stamp carrying a clause the declared component does not", async () => {
     // The join of an append that also read an unrelated labeled source
     // carries a clause the element declaration does not, so the stamp is
-    // the only place that clause is recorded at the appended index.
+    // the only place that clause is recorded at the appended index. The
+    // source's clause names the space every document here lives in, which
+    // §8.12.4 residency admits into the list's write ceiling.
 
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = newRuntime(storageManager);
     try {
       await seedSource(runtime, "collapse-foreign-source", [
-        cfcAtom.resource("Other"),
+        cfcAtom.space(signer.did()),
       ]);
 
       const seeded = runtime.edit();
@@ -212,7 +216,7 @@ describe("CFC redundant entry collapse", () => {
       expect(stamped.length).toBeGreaterThan(0);
       for (const entry of stamped) {
         expect(entry.label.confidentiality).toContainEqual(
-          cfcAtom.resource("Other"),
+          cfcAtom.space(signer.did()),
         );
       }
     } finally {
@@ -492,13 +496,15 @@ describe("CFC redundant entry collapse", () => {
   it("keeps the root stamps a wildcard child declaration does not reach", async () => {
     // A declared entry at `["*"]` covers the children and not the container
     // node they hang off, so the stamps recording what the container's own
-    // write derived from stay where they are.
+    // write derived from stay where they are. The source's clause names the
+    // space every document here lives in, which §8.12.4 residency admits into
+    // the map's write ceiling.
 
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = newRuntime(storageManager);
     try {
       await seedSource(runtime, "collapse-container-source", [
-        cfcAtom.resource("Outer"),
+        cfcAtom.space(signer.did()),
       ]);
 
       const tx = runtime.edit();
@@ -538,7 +544,7 @@ describe("CFC redundant entry collapse", () => {
       expect(rootStamps.length).toBeGreaterThan(0);
       for (const entry of rootStamps) {
         expect(entry.label.confidentiality).toContainEqual(
-          cfcAtom.resource("Outer"),
+          cfcAtom.space(signer.did()),
         );
       }
     } finally {

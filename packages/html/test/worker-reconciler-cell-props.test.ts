@@ -41,7 +41,6 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
   const runtime = new Runtime({
     storageManager,
     apiUrl: new URL("http://localhost"),
-    cfcEnforcementMode: "observe",
   });
 
   try {
@@ -994,6 +993,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           },
           children: [],
         });
+        runtime.prepareTxForCommit(tx);
         const commitResult = await tx.commit();
         assertEquals(commitResult.ok !== undefined, true);
 
@@ -1074,6 +1074,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
           props: {},
           children: [linkedChild.getAsLink({ keepAsCell: KeepAsCell.All })],
         });
+        runtime.prepareTxForCommit(tx);
         const commitResult = await tx.commit();
         assertEquals(commitResult.ok !== undefined, true);
 
@@ -1142,6 +1143,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
             ],
           }],
         });
+        runtime.prepareTxForCommit(tx);
         const commitResult = await tx.commit();
         assertEquals(commitResult.ok !== undefined, true);
 
@@ -1518,7 +1520,6 @@ Deno.test(
     const runtime = new Runtime({
       storageManager,
       apiUrl: new URL("http://localhost"),
-      cfcEnforcementMode: "observe",
     });
     let tx = runtime.edit();
 

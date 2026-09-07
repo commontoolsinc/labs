@@ -34,7 +34,6 @@ describe("CFC builtin implementation identity", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
 
     const captured: Array<unknown> = [];
@@ -74,7 +73,6 @@ describe("CFC builtin implementation identity", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
 
     const captured: Array<unknown> = [];
@@ -123,7 +121,6 @@ describe("CFC builtin implementation identity", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
 
     // The name is what the policy identity is read from, and it stays out of
@@ -164,7 +161,6 @@ describe("CFC builtin implementation identity", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
 
     const captured: Array<unknown> = [];
@@ -205,7 +201,6 @@ describe("CFC builtin implementation identity", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "observe",
     });
 
     const captured: Array<unknown> = [];

@@ -183,11 +183,15 @@ describe("generateText outbox mechanism", () => {
 
     try {
       const rejectedTx = runtime.edit();
-      rejectedTx.setCfcEnforcementMode("enforce-explicit");
-      rejectedTx.markCfcRelevant("generateText retry regression");
       action(rejectedTx);
+      // Advancing the inputs document after the action has read it makes the
+      // staged transaction's commit fail, which is the rejection the outbox
+      // has to survive.
+      const conflictTx = runtime.edit();
+      inputsCell.withTx(conflictTx).set({ prompt, maxTokens: 128 });
+      expect((await conflictTx.commit()).ok).toBeDefined();
       const rejectedResult = await rejectedTx.commit();
-      expect(rejectedResult.error).toBeDefined();
+      expect(rejectedResult.error?.name).toBe("StorageTransactionInconsistent");
       await runtime.idle();
       expect(sendRequestCalls).toEqual([]);
 
@@ -260,11 +264,18 @@ describe("generateText outbox mechanism", () => {
 
     try {
       const rejectedTx = runtime.edit();
-      rejectedTx.setCfcEnforcementMode("enforce-explicit");
-      rejectedTx.markCfcRelevant("llm retry regression");
       action(rejectedTx);
+      // Advancing the inputs document after the action has read it makes the
+      // staged transaction's commit fail, which is the rejection the outbox
+      // has to survive.
+      const conflictTx = runtime.edit();
+      inputsCell.withTx(conflictTx).set({
+        messages: [{ role: "user", content: prompt }],
+        maxTokens: 128,
+      });
+      expect((await conflictTx.commit()).ok).toBeDefined();
       const rejectedResult = await rejectedTx.commit();
-      expect(rejectedResult.error).toBeDefined();
+      expect(rejectedResult.error?.name).toBe("StorageTransactionInconsistent");
       await runtime.idle();
       expect(sendRequestCalls).toEqual([]);
 

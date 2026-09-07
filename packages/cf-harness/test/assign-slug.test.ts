@@ -140,7 +140,6 @@ describe("assign-slug", () => {
     return new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `assign-slug-test-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       fabricSessionFactory: () => Promise.resolve({ pieces }),
     });
   }
@@ -624,7 +623,6 @@ describe("assign-slug", () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `assign-slug-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () => Promise.resolve({ pieces: didPieces }),
       });
       const created = await engine.invokeBuiltinTool("run_pattern", {
@@ -735,7 +733,6 @@ describe("assign-slug", () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `assign-slug-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
       });
       const result = await engine.invokeBuiltinTool("assign_slug", {
         token: "/of:fid1:abc",
@@ -845,7 +842,6 @@ describe("assign-slug", () => {
       const engine = new CfHarnessEngine({
         sandboxRuntime: new FakeSandboxRuntime(),
         runId: `assign-slug-test-${crypto.randomUUID()}`,
-        cfcEnforcementMode: "disabled",
         fabricSessionFactory: () =>
           Promise.reject(new Error("authorization denied")),
       });

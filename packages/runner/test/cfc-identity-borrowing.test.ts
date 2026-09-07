@@ -22,7 +22,6 @@ describe("CFC write-policy identity borrowing", () => {
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       trustSnapshotProvider: () => ({
         id: "trust-snapshot-identity-borrowing",
         actingPrincipal: signer.did(),

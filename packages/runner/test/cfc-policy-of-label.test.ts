@@ -37,7 +37,6 @@ describe("PolicyOf label-time binding", () => {
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
   });
 
@@ -375,7 +374,6 @@ describe("PolicyOf label-time binding", () => {
     const coldRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const coldTx = coldRuntime.edit();
@@ -454,7 +452,6 @@ describe("PolicyOf label-time binding", () => {
     const coldRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const tx = coldRuntime.edit();
@@ -541,7 +538,6 @@ describe("PolicyOf label-time binding", () => {
     const coldRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
     });
     try {
       const coldTx = coldRuntime.edit();
@@ -654,7 +650,9 @@ describe("PolicyOf label-time binding", () => {
     const sinkRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      // The sink gate resolves module policy manifests against the
+      // destination space in this mode, which is the lookup the rejection
+      // below turns on.
       cfcPolicyEvaluation: "enforce",
       cfcSinkMaxConfidentiality: { fetchJson: [] },
     });
@@ -709,7 +707,9 @@ describe("PolicyOf label-time binding", () => {
     const sinkRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
+      // The sink gate binds every consumed manifest origin into the commit in
+      // this mode, which is what the tampering below has to disturb for the
+      // commit to reject.
       cfcPolicyEvaluation: "enforce",
       cfcSinkMaxConfidentiality: { fetchJson: [] },
     });

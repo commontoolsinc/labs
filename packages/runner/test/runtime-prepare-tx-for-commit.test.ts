@@ -40,7 +40,6 @@ describe("Runtime.prepareTxForCommit()", () => {
     const runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       ...(cfcFlowLabels === undefined ? {} : { cfcFlowLabels }),
     });
     started.push({ runtime, storageManager });

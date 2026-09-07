@@ -23,7 +23,6 @@ describe("CFC label-metadata protection dial (inv-12 Stage 1)", () => {
     return new Runtime({
       apiUrl: new URL("https://example.com"),
       storageManager,
-      cfcEnforcementMode: "enforce-explicit",
       ...(mode !== undefined ? { cfcLabelMetadataProtection: mode } : {}),
     });
   };
@@ -65,7 +64,7 @@ describe("CFC label-metadata protection dial (inv-12 Stage 1)", () => {
   });
 
   it("allows raising below the pin and pins at the first enforce", () => {
-    const runtime = makeRuntime();
+    const runtime = makeRuntime("off");
     const tx = runtime.edit();
     // off → observe → off: no pin yet, juggling allowed.
     tx.setCfcLabelMetadataProtectionMode("observe");
@@ -80,7 +79,7 @@ describe("CFC label-metadata protection dial (inv-12 Stage 1)", () => {
   it("delegates through TransactionWrapper to the wrapped transaction", () => {
     // The wrapper forwards every dial setter; the new one must reach the
     // wrapped tx (and its pin) identically.
-    const runtime = makeRuntime();
+    const runtime = makeRuntime("off");
     const tx = runtime.edit();
     const wrapper = new TransactionWrapper(tx);
     wrapper.setCfcLabelMetadataProtectionMode("enforce");
@@ -92,7 +91,7 @@ describe("CFC label-metadata protection dial (inv-12 Stage 1)", () => {
   });
 
   it("invalidates a prepared transaction on a real mode change", () => {
-    const runtime = makeRuntime();
+    const runtime = makeRuntime("off");
     const tx = runtime.edit();
     tx.markCfcRelevant("test");
     tx.prepareCfc();

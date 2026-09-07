@@ -13,6 +13,7 @@ import {
 import type { JSONSchema } from "../src/builder/types.ts";
 import { type CfcConfClause, clausesEqual } from "../src/cfc/clause.ts";
 import { evaluateExchangeRules } from "../src/cfc/exchange-eval.ts";
+import { commitmentAwareEquals } from "../src/cfc/label-representation.ts";
 import type { IFCLabel } from "../src/cfc/mod.ts";
 import {
   buildCfcPolicySnapshot,
@@ -82,7 +83,6 @@ const makeRuntime = (
   new Runtime({
     apiUrl: new URL("https://example.com"),
     storageManager,
-    cfcEnforcementMode: "enforce-explicit",
   });
 
 // Seed a doc's stored CFC metadata directly (an ungated path-[] full-document
@@ -111,10 +111,16 @@ const seedLabeledDoc = async (
   return docId;
 };
 
+// An address a `LinkReference` endorsement carries: the plaintext address, or
+// the digest marker standing in for it.
+type EndorsementAddress =
+  | { space: string; id: string; path: string[] }
+  | { digestOf: string };
+
 const isLinkReference = (atom: unknown): atom is {
   type: string;
-  source: { space: string; id: string; path: string[] };
-  target: { space: string; id: string; path: string[] };
+  source: EndorsementAddress;
+  target: EndorsementAddress;
 } =>
   typeof atom === "object" && atom !== null &&
   (atom as { type?: unknown }).type ===
@@ -222,13 +228,19 @@ describe("CFC cross-space integrity", () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = makeRuntime(storageManager);
     try {
-      await seedLabeledDoc(runtime, spaceA, "s1c-src", "37.77,-122.41", [{
-        path: [],
-        label: {
-          integrity: ["gps-reading"],
-          confidentiality: ["space-a-secret"],
-        },
-      }]);
+      const srcId = await seedLabeledDoc(
+        runtime,
+        spaceA,
+        "s1c-src",
+        "37.77,-122.41",
+        [{
+          path: [],
+          label: {
+            integrity: ["gps-reading"],
+            confidentiality: ["space-a-secret"],
+          },
+        }],
+      );
 
       const tx = runtime.edit();
       const src = runtime.getCell(spaceA, "s1c-src", undefined, tx);
@@ -246,22 +258,34 @@ describe("CFC cross-space integrity", () => {
       tx.prepareCfc();
       expect((await tx.commit()).error).toBeUndefined();
 
-      const doc = readDoc(
-        storageManager,
-        spaceB,
-        parseLink(sink.getAsLink()).id!,
-      );
+      const sinkId = parseLink(sink.getAsLink()).id!;
+      const doc = readDoc(storageManager, spaceB, sinkId);
       const entries = entriesFor(doc, ["ref"]);
       expect(entries).toHaveLength(1);
       const entry = entries[0];
       expect(entry.origin).toBe("link");
       // Source integrity preserved…
       expect(entry.label.integrity).toContain("gps-reading");
-      // …plus the endorsement recording the A→B edge.
+      // …plus the endorsement recording the edge from space A to space B.
+      // The endorsement addresses are commitment-classified fields, so
+      // `commitmentAwareEquals` reads the plaintext address and the digest
+      // marker standing in for it alike.
       const linkRef = (entry.label.integrity ?? []).find(isLinkReference);
       expect(linkRef).toBeDefined();
-      expect(linkRef!.source.space).toBe(spaceA);
-      expect(linkRef!.target.space).toBe(spaceB);
+      expect(
+        commitmentAwareEquals(linkRef!.source, {
+          space: spaceA,
+          id: srcId,
+          path: [],
+        }),
+      ).toBe(true);
+      expect(
+        commitmentAwareEquals(linkRef!.target, {
+          space: spaceB,
+          id: sinkId,
+          path: ["ref"],
+        }),
+      ).toBe(true);
       // Source confidentiality carried across the space boundary.
       expect(entry.label.confidentiality).toContain("space-a-secret");
     } finally {

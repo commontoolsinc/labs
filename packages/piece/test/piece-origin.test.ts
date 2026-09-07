@@ -988,6 +988,7 @@ describe("reading a piece's source state", () => {
       origin: DEFAULT_APP_PATTERN_PATH,
       expected,
     });
+    runtime.prepareTxForCommit(tx);
     await tx.commit();
 
     const state = await readPieceSourceState(runtime, cell);

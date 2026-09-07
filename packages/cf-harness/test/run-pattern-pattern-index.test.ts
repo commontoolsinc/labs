@@ -399,7 +399,6 @@ describe("run-pattern over the pattern index", () => {
     new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `run-pattern-index-test-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
       fabricSessionFactory: () =>
         Promise.resolve({
           pieces: options.startFailure === undefined
