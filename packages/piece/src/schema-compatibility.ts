@@ -14,6 +14,15 @@ import {
   validateSchemaValue,
 } from "@commonfabric/runner/cfc";
 import { isFabricPrimitiveSchemaType } from "@commonfabric/api";
+import { isPlainObject } from "@commonfabric/utils/types";
+import {
+  ARRAY_SUBSCHEMA_KEYS,
+  DEFS_KEYS,
+  RECORD_SUBSCHEMA_KEYS,
+  SINGLE_SUBSCHEMA_KEYS,
+  UNUSED_RECORD_SUBSCHEMA_KEYS,
+  UNUSED_SINGLE_SUBSCHEMA_KEYS,
+} from "@commonfabric/runner/schema-walk";
 import { internSchema } from "@commonfabric/data-model-schema";
 import { type FabricValue, valueEqual } from "@commonfabric/data-model";
 
@@ -147,6 +156,46 @@ const SEMANTIC_EXTENSION_KEYS = [
   "writeOnly",
 ] as const;
 
+/**
+ * The keywords whose value is one nested schema. Together with
+ * {@link SUBSCHEMA_LIST_KEYS} and {@link SUBSCHEMA_MAP_KEYS} these are the
+ * edges a walk follows to reach every schema written inside another one.
+ *
+ * The vocabulary comes from `@commonfabric/runner/schema-walk`, which is where
+ * this repository keeps it. Both walks here need it complete rather than
+ * limited to what the generator emits: a schema reaching this gate may have
+ * been written into a space by anything, and `validateSchemaDefinition` accepts
+ * every keyword named below. So both tiers of the shared vocabulary are taken,
+ * the ones the generator emits and the ones it does not.
+ *
+ * `definitions`, the pre-2019 spelling of `$defs`, is the one addition. The
+ * shared vocabulary leaves it out because nothing in this repository writes it;
+ * {@link ANNOTATION_KEYS} classifies it and `resolveCfcSchemaRefs` resolves
+ * through it, so a schema that arrives carrying one is read here.
+ */
+const SUBSCHEMA_KEYS: ReadonlySet<string> = new Set<string>([
+  ...SINGLE_SUBSCHEMA_KEYS,
+  ...UNUSED_SINGLE_SUBSCHEMA_KEYS,
+]);
+
+/** The keywords whose value is an array of nested schemas. */
+const SUBSCHEMA_LIST_KEYS: ReadonlySet<string> = new Set<string>(
+  ARRAY_SUBSCHEMA_KEYS,
+);
+
+/** The keywords whose value is a record of nested schemas. */
+const SUBSCHEMA_MAP_KEYS: ReadonlySet<string> = new Set<string>([
+  ...RECORD_SUBSCHEMA_KEYS,
+  ...UNUSED_RECORD_SUBSCHEMA_KEYS,
+  ...DEFS_KEYS,
+  "definitions",
+]);
+
+/** Whether a keyword leads to a nested schema, in any of the three shapes. */
+const holdsSubschemas = (key: string): boolean =>
+  SUBSCHEMA_KEYS.has(key) || SUBSCHEMA_LIST_KEYS.has(key) ||
+  SUBSCHEMA_MAP_KEYS.has(key);
+
 const fabricAwareEqual = (left: unknown, right: unknown): boolean => {
   try {
     return valueEqual(left as FabricValue, right as FabricValue);
@@ -210,12 +259,11 @@ const WRITER_IDENTITY_VOLATILE_KEYS: ReadonlySet<string> = new Set([
  * `writeAuthorizedBy` names trusted builtins rather than a compiled module, so
  * it carries no writer identity and is returned unchanged.
  *
- * This runs where the `ifc` extension is compared as a semantic-extension key,
- * which the per-node recursion reaches for a claim placed directly on a
- * property, behind a `$defs` reference, or in an `anyOf` branch. A claim
- * reached only through a composite keyword (`allOf`, `oneOf`, `if`/`then`,
- * `not`) is compared by whole-value equality instead, so its volatile identity
- * still participates and a recompile there is reported as a change.
+ * This runs wherever an `ifc` is compared, which `keywordValuesEqual` makes one
+ * rule: a claim written directly on a property, one behind a `$defs`
+ * reference, and one under any keyword that holds schemas — `allOf`, `oneOf`,
+ * `if`/`then`, and `not` among them — are all read the same way, so recompiling
+ * the authoring module reads as a contract change in none of them.
  */
 const writerClaimWithoutVolatileIdentity = (claim: unknown): unknown => {
   if (typeof claim !== "object" || claim === null || Array.isArray(claim)) {
@@ -353,12 +401,10 @@ const representsPrincipalAtoms = (value: unknown): readonly unknown[] => {
  * derived per-value keys dropped, and a write authorization's volatile identity
  * normalized. Returns the input unchanged when neither applies.
  *
- * This runs where `ifc` is compared as a semantic-extension key, which the
- * per-node recursion reaches for a node written directly on a property, behind
- * a `$defs` reference, or in an `anyOf` branch. An `ifc` reached only through a
- * composite keyword (`allOf`, `oneOf`, `if`/`then`, `not`) is compared by whole
- * value instead, so a mint there still reads as a change — the same scope the
- * writer-identity normalization has.
+ * `keywordValuesEqual` calls this at every `ifc` it meets, so the reduction has
+ * the same reach whether the node is written directly on a property, sits
+ * behind a `$defs` reference, or is nested under a keyword that holds schemas —
+ * `allOf`, `oneOf`, `if`/`then`, and `not` among them.
  *
  * An extension with no keys left comes back as `undefined`, the same as no
  * extension at all, and so does one that arrived empty. A path that carried no
@@ -482,6 +528,16 @@ const comparableIfc = (ifc: unknown): unknown => {
  * the whole `uiContract` are still compared, and the runtime enforcement is
  * untouched, so this narrows nothing.
  *
+ * The reduction reaches every `ifc` in the schema, not only one written on the
+ * node being checked. A comparison that meets a keyword holding schemas —
+ * `allOf`, `oneOf`, `if`/`then`, and `not` among them — descends into it and
+ * reduces the `ifc` it finds there the same way. The schemas this gate compares
+ * do not all come from the schema generator, which emits none of those
+ * keywords: one can be written into a space by anything, and
+ * `validateSchemaDefinition` admits every keyword the walk descends. The walk
+ * stops at every keyword that holds a value rather than a schema, so a
+ * `default`, a `const`, and an `enum` entry are compared whole.
+ *
  * The `ifc` comparison drops one key as well. `addIntegrity` names the derived
  * per-value label rather than the store's declared policy, so a path gaining or
  * losing a mint is not a change to the contract between two versions of the
@@ -563,6 +619,18 @@ export function assertPatternSchemasBackwardCompatible(
  * Conservatively prove that every value described by `source` is accepted by
  * `target`. This is used for durable links: validating only their current
  * materialization is insufficient because the linked cell can change later.
+ *
+ * The `ifc` reduction {@link comparableIfc} performs applies here as well, and
+ * this entry point puts it to a different question. A pattern update compares
+ * two versions of one contract, where a changed writer identity is the same
+ * module recompiled. A link joins two separate pieces, where a differing
+ * `moduleIdentity` names a different authoring module. What holds either way is
+ * the reason the reduction exists: the runtime authorizes a write against the
+ * claim on the location being written, re-verifying the live writer's
+ * `moduleIdentity` there (`writeAuthorizedByReason`,
+ * `packages/runner/src/cfc/prepare.ts`). Proving a link neither performs that
+ * check nor stands in for it, and the binding `path` and the whole `uiContract`
+ * are compared here as they are for an update.
  */
 export function assertSchemaSubset(
   source: JSONSchema,
@@ -724,14 +792,9 @@ function schemaSubsetIssue(
       // and its resolver-dependent file spelling, which the runtime does not
       // hold fixed either — and the derived per-value label annotations, which
       // describe the label a write produces rather than the policy the store
-      // declares. `comparableIfc` removes both.
-      const sourceValue = key === "ifc"
-        ? comparableIfc(source[key])
-        : source[key];
-      const targetValue = key === "ifc"
-        ? comparableIfc(target[key])
-        : target[key];
-      if (!fabricAwareEqual(sourceValue, targetValue)) {
+      // declares. `keywordValuesEqual` applies that reduction, the same one it
+      // applies to an `ifc` nested below a composite keyword.
+      if (!keywordValuesEqual(key, source[key], target[key])) {
         return `${path}: ${key} changed`;
       }
     }
@@ -781,7 +844,7 @@ function schemaSubsetIssue(
       if (arrayIssue) return arrayIssue;
     }
 
-    return unknownKeywordIssue(source, target, path);
+    return unknownKeywordIssue(source, target, path, context);
   } finally {
     unmarkPairActive(source, target, context);
   }
@@ -1438,12 +1501,93 @@ function schemaTypes(schema: SchemaObject): readonly string[] | undefined {
   return typeof schema.type === "string" ? [schema.type] : schema.type;
 }
 
+/**
+ * Whether one keyword says the same thing on both sides.
+ *
+ * An `ifc` is compared through {@link comparableIfc}, so a nested extension
+ * carries the same reduction as one written on the node being checked: the
+ * derived per-value keys dropped, and a write authorization's volatile identity
+ * normalized. An absent `ifc` and one the reduction empties both come back as
+ * `undefined` and compare equal, which is why this keyword is the one whose
+ * presence is not compared before its value is.
+ *
+ * A keyword that holds nested schemas recurses into them. Every other keyword
+ * holds a value, and is compared as it stands. So is a keyword that names
+ * nested schemas but arrives in some other shape: an `allOf` that is not a
+ * list, or a `properties` that is not a record, is not a schema this comparison
+ * can read into.
+ */
+const keywordValuesEqual = (
+  key: string,
+  left: unknown,
+  right: unknown,
+): boolean => {
+  if (key === "ifc") {
+    return fabricAwareEqual(comparableIfc(left), comparableIfc(right));
+  }
+  if (SUBSCHEMA_KEYS.has(key)) return schemaSubtreesEqual(left, right);
+  if (
+    SUBSCHEMA_LIST_KEYS.has(key) && Array.isArray(left) && Array.isArray(right)
+  ) {
+    if (left.length !== right.length) return false;
+    for (let index = 0; index < left.length; index++) {
+      // A hole and a stored `undefined` are different values, the way
+      // `valueEqual` reads them, and the array iteration methods skip a hole
+      // rather than report it. `validateSchemaDefinition` requires a dense
+      // array for the four list keywords it names, but this walk descends
+      // keywords it has no rule for, so a hole can still arrive here.
+      if ((index in left) !== (index in right)) return false;
+      if (!schemaSubtreesEqual(left[index], right[index])) return false;
+    }
+    return true;
+  }
+  if (
+    SUBSCHEMA_MAP_KEYS.has(key) && isPlainObject(left) && isPlainObject(right)
+  ) {
+    const names = Object.keys(left);
+    return names.length === Object.keys(right).length &&
+      names.every((name) =>
+        Object.hasOwn(right, name) &&
+        schemaSubtreesEqual(left[name], right[name])
+      );
+  }
+  return fabricAwareEqual(left, right);
+};
+
+/**
+ * Whether two schemas say the same thing, reading every `ifc` either of them
+ * carries — at any depth, under any keyword — the way this comparison reads
+ * one written on the node being checked.
+ *
+ * Two schemas that are equal as they stand settle on the first line. Past that
+ * the walk descends the keywords that hold nested schemas, so an `ifc` reached
+ * only through a composite keyword (`allOf`, `oneOf`, `if`/`then`, `not`) gets
+ * the same reduction as one the per-node recursion reaches directly.
+ *
+ * The walk stops at every keyword that holds a value rather than a schema, so a
+ * `default`, a `const`, or an `enum` entry is compared whole by
+ * {@link fabricAwareEqual}, which reads a fabric value by content hash.
+ */
+function schemaSubtreesEqual(left: unknown, right: unknown): boolean {
+  if (fabricAwareEqual(left, right)) return true;
+  if (!isPlainObject(left) || !isPlainObject(right)) return false;
+  for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+    if (
+      key !== "ifc" && Object.hasOwn(left, key) !== Object.hasOwn(right, key)
+    ) {
+      return false;
+    }
+    if (!keywordValuesEqual(key, left[key], right[key])) return false;
+  }
+  return true;
+}
+
 function schemasResolveEqually(
   source: unknown,
   target: unknown,
   context: CompatibilityContext,
 ): boolean {
-  if (!fabricAwareEqual(source, target)) return false;
+  if (!schemaSubtreesEqual(source, target)) return false;
 
   const refs = new Set<string>();
   collectSchemaReferences(source, refs, new WeakSet());
@@ -1458,7 +1602,7 @@ function schemasResolveEqually(
     );
     if (
       sourceResolved === undefined || targetResolved === undefined ||
-      !fabricAwareEqual(sourceResolved, targetResolved)
+      !schemaSubtreesEqual(sourceResolved, targetResolved)
     ) {
       return false;
     }
@@ -1571,22 +1715,10 @@ function collectSchemaReferences(
   const record = value as Record<string, unknown>;
   if (typeof record.$ref === "string") refs.add(record.$ref);
 
-  for (
-    const key of [
-      "additionalProperties",
-      "contains",
-      "contentSchema",
-      "else",
-      "if",
-      "items",
-      "not",
-      "propertyNames",
-      "then",
-    ]
-  ) {
+  for (const key of SUBSCHEMA_KEYS) {
     collectSchemaReferences(record[key], refs, seen);
   }
-  for (const key of ["allOf", "anyOf", "oneOf", "prefixItems"]) {
+  for (const key of SUBSCHEMA_LIST_KEYS) {
     const children = record[key];
     if (Array.isArray(children)) {
       for (const child of children) {
@@ -1594,15 +1726,7 @@ function collectSchemaReferences(
       }
     }
   }
-  for (
-    const key of [
-      "$defs",
-      "definitions",
-      "dependentSchemas",
-      "patternProperties",
-      "properties",
-    ]
-  ) {
+  for (const key of SUBSCHEMA_MAP_KEYS) {
     const children = record[key];
     if (children !== null && typeof children === "object") {
       for (const child of Object.values(children)) {
@@ -1712,6 +1836,7 @@ function unknownKeywordIssue(
   source: SchemaObject,
   target: SchemaObject,
   path: string,
+  context: CompatibilityContext,
 ): string | undefined {
   const handled = new Set([
     ...ANNOTATION_KEYS,
@@ -1746,10 +1871,26 @@ function unknownKeywordIssue(
   const sourceRecord = source as Record<string, unknown>;
   const targetRecord = target as Record<string, unknown>;
   for (const key of keys) {
-    if (
-      !handled.has(key) &&
-      !fabricAwareEqual(sourceRecord[key], targetRecord[key])
-    ) {
+    if (handled.has(key)) continue;
+    // A keyword that holds nested schemas is compared with its references
+    // resolved, the way the constraints above are. Comparing the value alone
+    // would read two identical `$ref`s as the same constraint while the
+    // definitions they name had changed underneath, and nothing further down
+    // would look at that definition, so the update would land.
+    //
+    // For a keyword that holds no schema — the genuinely unknown one this
+    // function exists for — the comparison is exact equality, so an extension
+    // this checker cannot read is held to what it says. A reference is not
+    // resolved there either: a record that carries a `$ref` key as ordinary
+    // data is data, not a reference.
+    const equal = holdsSubschemas(key)
+      ? schemasResolveEqually(
+        { [key]: sourceRecord[key] },
+        { [key]: targetRecord[key] },
+        context,
+      )
+      : keywordValuesEqual(key, sourceRecord[key], targetRecord[key]);
+    if (!equal) {
       return `${path}: ${key} changed in a way compatibility checking cannot prove safe`;
     }
   }
