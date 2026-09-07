@@ -544,7 +544,7 @@ export class CFAutocomplete extends BaseElement {
 
   /**
    * Recomputes the memoized filter results, only when the inputs actually
-   * change.
+   * change or the cache is empty.
    */
   private _updateFilteredItemsCache() {
     const currentSelectedValues = this._getSelectedValuesSet();
@@ -706,7 +706,7 @@ export class CFAutocomplete extends BaseElement {
 
   /**
    * Returns whether a processed item matches the search query. Uses
-   * pre-indexed words with `startsWith` for O(words) instead of
+   * pre-indexed words with `startsWith()` for O(words) instead of
    * O(chars*aliases).
    */
   private _processedItemMatchesQuery(

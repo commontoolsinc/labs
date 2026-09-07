@@ -115,7 +115,10 @@ export class CFImageInput extends CFFileInput {
     return !!(this.maxSizeBytes && file.size > this.maxSizeBytes);
   }
 
-  /** Compresses `file` with the image compression utility. */
+  /**
+   * Compresses `file` with the image compression utility when `maxSizeBytes`
+   * is set, and returns it as is otherwise.
+   */
   protected override async compressFile(file: File): Promise<Blob> {
     if (!this.maxSizeBytes) return file;
 
@@ -143,7 +146,9 @@ export class CFImageInput extends CFFileInput {
     return result.blob;
   }
 
-  /** Processes `file`, extracting image dimensions and EXIF. */
+  /**
+   * Processes `file`, reading its image dimensions and storing it with them.
+   */
   protected override async processFile(file: File): Promise<ImageData> {
     const dimensions = await readImageDimensions(file);
     return await this.storeFile(file, dimensions) as ImageData;
@@ -172,7 +177,10 @@ export class CFImageInput extends CFFileInput {
     `;
   }
 
-  /** Renders the element, keeping the `Processing images...` text. */
+  /**
+   * Like the inherited `render()`, except the loading text reads
+   * `Processing images...`.
+   */
   override render() {
     return html`
       <div class="container">

@@ -457,17 +457,19 @@ export class CFCodeEditor extends BaseElement {
   private _resolveGeneration = 0;
 
   /**
-   * `$mentioned` cannot be reconciled while an index row has no piece id. Calls
-   * made during that window leave the latest content for the current resolution
-   * pass to reconcile when it publishes.
+   * Whether `$mentioned` reconciliation is deferred. It cannot be reconciled
+   * while an index row has no piece id; calls made during that window leave
+   * the latest content for the current resolution pass to reconcile when it
+   * publishes.
    */
   private _mentionResolutionPending = false;
 
   private _deferredMentionedContent: string | null = null;
 
   /**
-   * A completion source that withheld a matching index row asks the current
-   * resolution pass to query it again once the row has a usable identity.
+   * Whether a completion source withheld a matching index row and asks the
+   * current resolution pass to query it again once the row has a usable
+   * identity.
    */
   private _completionAwaitingResolution = false;
 
