@@ -36,9 +36,9 @@ wave basis-instance check in `applyWaveCommit`, both in
 the door instead of keying a storage row that later corrupts
 `/`-delimited composite addressing or throws when a serving surface
 percent-decodes it. Storage rows are keyed `(branch, id, scope_key)`
-(the `revision` and `head` primary keys in `engine.ts`), constructed
-at admission through the same shared definition
-(`applyCommitTransaction`).
+(the `head` primary key in `engine.ts`; `revision` extends it with
+`seq` and `op_index`), constructed at admission through the same
+shared definition (`applyCommitTransaction`).
 
 ## 1. The nine sites
 

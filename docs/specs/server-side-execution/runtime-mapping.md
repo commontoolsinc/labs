@@ -131,14 +131,14 @@ Status legend:
 | --- | --- | --- | --- | --- |
 | 59 | Persisted scheduler basis index: ids and seqs per (action instance, input instance), overwritten in place inside a wave's derived store transaction | table `packages/memory/v2/engine.ts` (`scheduler_basis`); writer `packages/memory/v2/scheduler-basis.ts` (`replaceSchedulerBasisRows`, from `applyWaveCommit`); rows assembled in `executor/wave.ts` (`basisInstances`) | serving-loop §3b | CHANGED |
 | 60 | Rehydration eligibility by execution-context rank (space/user/session) against `completeActionScopeSummary` | not present on main (deleted with the observation tables; N59/N60/N61) | serving-loop §8 (tripwire identifiers) | GAP |
-| 61 | `completeSchedulerScopeSummary` / `completeActionScopeSummary` emission (transformer marker; runner fills addresses) — two identifiers, one surface | `scheduler/types.ts` (`TelemetryAnnotations.completeSchedulerScopeSummary`), `runner.ts` (`Runner.#instantiateJavaScriptActionNode()`), ts-transformers (4 files) | README §5 (delete list), serving-loop §8 | CHANGED |
+| 61 | `completeSchedulerScopeSummary` / `completeActionScopeSummary` emission (transformer marker; runner fills addresses) — two identifiers, one surface | `scheduler/types.ts` (`TelemetryAnnotations.completeSchedulerScopeSummary`), `runner.ts` (`Runner.#instantiateJavaScriptActionNode()`), ts-transformers (4 files); `completeActionScopeSummary` has no occurrence on main | README §5 (delete list), serving-loop §8 | CHANGED |
 | 62 | Incremental observation adoption (adopt another client's committed run instead of re-running) | not present on main (deleted; N62); the sync-path note survives in `scheduler/invalidation.ts` above `shapableWakeGroupKey` | none | GAP |
 
 ### 1j. Protocol seams the specs assume
 
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
-| 63 | Commit classes / `derivedThrough` / `consequenceOf` metadata | `packages/memory/v2.ts` (`CommitClass`), `executor/watermark.ts` (`derivedThrough`), `packages/memory/v2/engine.ts` (commit-row `annotations`, `consequenceOf` carriage in `applyWaveCommit`) | protocol §1, §7 | COVERED |
+| 63 | Commit classes / `derivedThrough` / `consequenceOf` metadata | `packages/memory/v2.ts` (`CommitClass`), `executor/engine-wave-sink.ts` (`derivedThrough` set on the wave commit; `executor/watermark.ts` describes it), `packages/memory/v2/engine.ts` (commit-row `annotations`, `consequenceOf` carriage in `applyWaveCommit`) | protocol §1, §7 | COVERED |
 | 64 | `execution_lease` table | `packages/memory/v2/engine.ts` (the `execution_lease` DDL; the derived-class lease check in `applyCommitTransaction`) | serving-loop §Anchors, §2 | COVERED |
 | 65 | `externalSinkDisposition` / client egress suppression | not present on main; egress is CFC sink-request verification at release (`verifySinkRequestRelease` in `cfc/sink-request.ts`) | README §3.1, §3.4 | GAP |
 | 66 | Settled-ness watermark; `waitForSettled` | not present today (tests poll `settled()`/text) | protocol §4, testing §3 | COVERED |
@@ -499,33 +499,29 @@ attribution stays open (README §6).
 
 **N59/N60/N61 (persisted observations vs the basis index).** Main
 carries no payload-carrying observation rows, snapshot table, or
-replay table: `packages/memory/v2/engine.ts` drops them (its migration
-comment names the seven) and creates `scheduler_basis` — ids and seqs
-only, overwritten in place, written by `replaceSchedulerBasisRows`
-(`packages/memory/v2/scheduler-basis.ts`) from inside
-`applyWaveCommit`, with the rows assembled as `basisInstances` in
-`executor/wave.ts`. That is serving-loop §3b's shape: by its own test
-("payloads or per-run history ⇒ evidence") the observation rows were
-on the *forbidden* side of the line, and `scheduler_read_index` /
-`scheduler_action_state` were DROPPED and REPLACED by
-`scheduler_basis`, not reshaped into it (they FK'd into
-`scheduler_observation` and keyed by `process_generation`, per-process
-history where v2 overwrites in place). What v2 keeps from the pre-arc
-feature is the DECISION it made — warm start from recorded reads — not
-any of its tables. Defer to serving-loop §3b for the drop list, the
-DDL, and the no-backfill rule. The context-rank machinery (row 60) is
-gone from `scheduler/facade.ts`. `completeSchedulerScopeSummary` /
-`completeActionScopeSummary` emission (row 61) is still on main —
-`scheduler/types.ts`, `Runner.#instantiateJavaScriptActionNode()`, and
-the four ts-transformers call sites (`transformers.ts`,
-`schema-injection.ts`, `lift-applied-strategy.ts`,
-`capability-analysis.ts`) — yet it exists *only* to decide
-cross-context sharing of persisted state, and with one deriver per
-space there is nothing to share, so it deletes with D-2026-08-02. The
-tripwire list (serving-loop §8) forbids `scopeSummary`, `contextKey`,
-and the replay table; none survives on main — the Phase 0 main-surface
-audit (plan §Phase 0) should record this mapping's inventory as that
-audit.
+replay table: `packages/memory/v2/engine.ts` drops any it finds (its
+migration comment holds that history) and creates `scheduler_basis` —
+ids and seqs only, overwritten in place, written by
+`replaceSchedulerBasisRows` (`packages/memory/v2/scheduler-basis.ts`)
+from inside `applyWaveCommit`, with the rows assembled as
+`basisInstances` in `executor/wave.ts`. That is serving-loop §3b's
+shape: ids and seqs are the basis index, and payloads or per-run
+history would be the evidence log it forbids. What v2 keeps from the
+pre-arc feature is the DECISION it made — warm start from recorded
+reads — not any of its tables; serving-loop §3b holds the drop list,
+the DDL, and the no-backfill rule. The context-rank machinery (row 60)
+is gone from `scheduler/facade.ts`. `completeSchedulerScopeSummary`
+emission (row 61) is on main — `scheduler/types.ts`,
+`Runner.#instantiateJavaScriptActionNode()`, and the four
+ts-transformers call sites (`transformers.ts`, `schema-injection.ts`,
+`lift-applied-strategy.ts`, `capability-analysis.ts`) — and its
+action-side twin `completeActionScopeSummary` is not. The scheduler
+summary exists *only* to decide cross-context sharing of persisted
+state, and with one deriver per space there is nothing to share, so it
+deletes with D-2026-08-02. The tripwire list (serving-loop §8) forbids
+`scopeSummary`, `contextKey`, and the replay table; none survives on
+main — the Phase 0 main-surface audit (plan §Phase 0) should record
+this mapping's inventory as that audit.
 
 **N62 (observation adoption).** Adoption existed so N client runtimes
 didn't all re-run what one already ran — the multi-client symptom v2
@@ -565,12 +561,13 @@ speculation §2) rather than flipping an existing dial. Fix the README
 
 Directories walked for this mapping, so later readers know what "all"
 meant: every file in `scheduler/` (32 files) and `builtins/` (28);
-`runner.ts`, `runtime.ts`, `pattern-manager.ts`, `pattern-updater.ts`,
+`runner.ts`, `runtime.ts`, `pattern-manager.ts`,
+`packages/piece/src/ops/pieces-controller.ts`,
 `pattern-source-scheme.ts`, `ensure-piece-running.ts`, `cell.ts`,
 `scope.ts`, `acl-manager.ts`, `cancel.ts`, `queue.ts`,
 `reactive-dependencies.ts`; `builder/` (module/built-in/reactive/
-pattern/factory/types/builtin-replayability); storage seams touched
-by execution (`reactivity-log.ts`, `extended-storage-transaction.ts`,
+pattern/factory/types/builtin-replayability); storage seams touched by
+execution (`reactivity-log.ts`, `extended-storage-transaction.ts`,
 `interface.ts`, `rejection.ts`, `mergeable-ops.ts`, `query.ts`) and
 `packages/memory/v2/engine.ts` for the persisted-state tables.
 Value-plumbing modules (link resolution, traversal, schema walking,
