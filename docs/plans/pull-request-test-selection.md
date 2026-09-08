@@ -988,6 +988,14 @@ is either a test that never runs or a mapping that is wrong, and both are
 worth knowing about without blocking anybody. Entries in its unavailable
 list are reported separately and do not count as missing records.
 
+What the store half asks of a recorded identity holds for every record a
+run writes, including the ones no lane produced, and the answer for a
+job of the run rather than a test in it is to record none. The coverage
+gate is the case: it joins every lane's coverage report, so it can only
+start once the lanes have finished, and no lane can be asked to run it.
+It runs directly rather than through the recording wrapper, so it writes
+no identity and the guard never meets one.
+
 Together these are what make "no continuous-integration change needed" a
 checked property rather than a hope.
 
@@ -3256,15 +3264,11 @@ exercised on the branch on its own.
       would be found only on `main`.
 - [x] `tasks/check-test-topology.ts`, both halves, wired into
       `repo-gates`, with exact variant matching and one source-item claim
-      allowed per variant. Two test files under
-      `packages/cf-harness/integration/` are reached only by a package
-      task nothing dispatches; they are recorded with the reason each
-      runs nowhere and reported rather than failed on, so a new
-      unclaimed surface still fails. Eight paths that look like tests
-      and are not are declared as the fixtures they are: the five
-      projects under `packages/deno-web-test/test/` that the harness
-      drives, and the three command-line tours the verb-session gate
-      holds the documentation to rather than running.
+      allowed per variant. Eight paths that look like tests and are not
+      are declared as the fixtures they are: the five projects under
+      `packages/deno-web-test/test/` that the harness drives, and the
+      three command-line tours the verb-session gate holds the
+      documentation to rather than running.
 - [x] Extract the part of `tasks/test-records-gather.ts` that reads records,
       ingests JUnit, and applies a declared variant as the shared gather
       function. Its command-line entry point and `tasks/ci-lane.ts` both

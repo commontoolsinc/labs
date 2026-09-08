@@ -30,7 +30,11 @@ import {
   LANES,
 } from "./test-selection/policy.ts";
 import { fetchManifest } from "./test-selection/store.ts";
-import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
+import {
+  capabilitiesBySuite,
+  claimsFor,
+  loadTopology,
+} from "./test-topology.ts";
 import { type Suite, unavailableUnits } from "./test-topology/suite.ts";
 import { census } from "./test-selection/census.ts";
 import type { Manifest } from "./test-selection/manifest.ts";
@@ -175,6 +179,14 @@ export interface PlanVerdict {
   unschedulable?: boolean;
 
   /**
+   * Why nothing runs it, for an identity inside a unit its suite declares
+   * unavailable. Such a unit is never packed and never expected to
+   * record, so the rule that an identity with no history runs does not
+   * reach it.
+   */
+  unavailable?: string;
+
+  /**
    * What a lane running nothing else would pay for it: its corrected own
    * time plus every overhead and setup that lane would open. This is the
    * figure the hard bound is compared against, so it is the one to report
@@ -193,6 +205,17 @@ export function explainLines(
   const entry = manifest.entries.find(
     (candidate) => testIdentityKey(candidate.test) === key,
   );
+  // Asked before the store is, because a unit nothing runs has no record
+  // for the same reason it has no lane, and answering that it is
+  // mandatory would say the opposite of what happens.
+  if (verdict.unavailable !== undefined) {
+    return [
+      `${key}`,
+      `  Nothing runs it: ${verdict.unavailable}.`,
+      "  Its unit is one the topology declares unavailable, so no lane is",
+      "  offered it and no run is expected to record it.",
+    ];
+  }
   if (entry === undefined) {
     return [
       `${key}`,
@@ -364,7 +387,31 @@ export function verdictFor(
     verdict.unschedulable = true;
     verdict.loneSeconds = refused.cost;
   }
+  const withheld = unavailableReason(suites, test);
+  if (withheld !== undefined) verdict.unavailable = withheld;
   return verdict;
+}
+
+/**
+ * Why nothing runs an identity, where its suite declares the unit it sits
+ * in unavailable.
+ *
+ * Asked of the topology rather than of the manifest: an unavailable unit
+ * has no manifest entry to carry the reason, which is the whole of why
+ * the question needs asking somewhere else.
+ */
+function unavailableReason(
+  suites: readonly Suite[],
+  test: TestIdentity,
+): string | undefined {
+  for (const claim of claimsFor(suites, { test })) {
+    const entry = claim.suite.unavailable.find(
+      (candidate) =>
+        candidate.unit === claim.unit && candidate.leafName === undefined,
+    );
+    if (entry !== undefined) return entry.reason;
+  }
+  return undefined;
 }
 
 /** What comparing the manifest against the working tree found. */
