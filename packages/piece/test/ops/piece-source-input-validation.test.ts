@@ -347,7 +347,16 @@ export default pattern<Record<string, never>, { rows: Row[] }>(() => ({
         space: pieces.getSpace(),
       });
       const argument = pieces.getArgument(consumer.getCell());
-      await pieces.link(producer.id, ["rows"], consumer.id, ["rows"]);
+      // Seed an existing binding independently of new-link admission, so this
+      // test exercises retention of the consumer's writable projection.
+      const { error } = await runtime.editWithRetry((tx) => {
+        const input = argument.withTx(tx);
+        input.key("rows").setRawUntyped(
+          producer.getCell().withTx(tx).asSchemaFromLinks().key("rows")
+            .getAsLink({ base: input, includeSchema: true }),
+        );
+      });
+      expect(error).toBeUndefined();
       const before = argument.getRaw();
 
       const sameSource = await consumer.checkPattern(source);
