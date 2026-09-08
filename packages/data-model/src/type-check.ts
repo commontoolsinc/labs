@@ -427,6 +427,14 @@ export function isFabricPlainContainer(
 }
 
 /**
+ * Indicates whether a `FabricValue` is a `FabricArray`. This is a type
+ * predicate for `FabricArray`.
+ */
+export function isFabricArray(value: FabricValue): value is FabricArray {
+  return Array.isArray(value);
+}
+
+/**
  * Indicates whether a `FabricValue` is a plain object, an array, or a
  * `FabricSpecialObject` -- everything a `typeof value === "object"` test
  * accepts, minus `null`. The name states the array case because "object" alone
