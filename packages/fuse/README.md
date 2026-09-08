@@ -342,8 +342,9 @@ workloads.
 `cf fuse mount --cfc-mode=<mode>` selects the FUSE-side CFC guardrail mode:
 `disabled`, `observe`, `enforce-explicit`, or `enforce-strict`. `CF_CFC_MODE`
 names the mode when the flag does not. A mount that names a mode nowhere runs at
-`disabled`. A name outside those four is rejected from whichever of the two
-named it, and the mount does not start. `observe` and both enforcing modes
+`enforce-strict`, the rung the first-party presets pin: a mount is a write path
+into a real space. A name outside those four is rejected from whichever of the
+two named it, and the mount does not start. `observe` and both enforcing modes
 publish annotations automatically. `--cfc-annotations` still forces annotation
 output for local debugging even when the mode is `disabled`.
 

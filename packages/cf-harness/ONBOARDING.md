@@ -199,7 +199,7 @@ export CF_HARNESS_FABRIC_IDENTITY=<absolute-path-to-identity-keyfile>
 export CF_HARNESS_FABRIC_SPACE=<space-name>
 export CF_HARNESS_FABRIC_CFC_POSTURE=max-enforcement
 export CF_HARNESS_FABRIC_CFC_FLOW_LABELS=persist
-export CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE=enforce-explicit
+export CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE=enforce-strict
 export CF_HARNESS_RUNSC_CFC_RESULT_DIR=<absolute-host-result-directory>
 export CF_HARNESS_RUNSC_CFC_INVOCATION_CONTEXT_DIR=<absolute-host-invocation-context-directory>
 export MEMORY_DIR=<absolute-toolshed-cache-directory>
@@ -210,8 +210,8 @@ The three CFC exports are the console's defaults, written out so the posture a
 run ran under is never a guess. Success is a startup summary naming the space,
 the toolshed, `(not configured)` or a URL for the index and skills,
 `cfc:
-max-enforcement, flow labels persist, enforce-explicit`, and the two
-sidecar directories; then HTTP `200` here:
+max-enforcement, flow labels persist, enforce-strict`, and the two sidecar
+directories; then HTTP `200` here:
 
 ```sh
 curl -sS http://127.0.0.1:<free-console-port>/api/health | jq
@@ -705,7 +705,7 @@ Docker diagnosis.
 [Model attempts and transport retry](README.md#model-attempts-and-transport-retry)
 defines the bounded retry contract.
 
-**Sandbox refusal under `enforce-explicit`.** Check the startup banner,
+**Sandbox refusal under an enforcing mode.** Check the startup banner,
 `policy-trace.json`, full `tool-outputs/`, and Docker's registered runtime args.
 The harness-side directories must be the host side of runsc-cfc's
 `--cfc-result-dir` and `--cfc-invocation-context-dir`; on Docker Desktop the
