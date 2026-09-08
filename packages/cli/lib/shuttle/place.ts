@@ -1300,10 +1300,10 @@ function moveIntoPiece(
   const hash = segment.indexOf("#");
   if (hash !== -1) {
     const suffix = segment.slice(hash);
-    return suffix === "#argument" ? refuseArgumentSuffix(verb) : refuse(
+    return suffix === ARGUMENT_SUFFIX ? refuseArgumentSuffix(verb) : refuse(
       `Unknown suffix "${suffix}". The one supported suffix is ` +
-        `"#argument", which selects the piece's arguments cell the way ` +
-        `"--input" does.`,
+        `"${ARGUMENT_SUFFIX}", which selects the piece's arguments cell the ` +
+        `way "--input" does.`,
     );
   }
   if (segment.startsWith("@")) {

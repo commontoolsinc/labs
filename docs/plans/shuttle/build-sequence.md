@@ -615,6 +615,17 @@ Landed:
 
 Still to land:
 
+- **A watch on a piece's arguments cell.** `sinkCellValue` takes the cell a
+  read takes, and for an arguments path the two are not the same cell: the
+  read resolves the link stored at the member and a subscription does not, so
+  it reports the link marker and a write through that link settles nothing it
+  can see. What closes it is a resolved cell for an arguments path —
+  `PiecePropIo.get` builds one for the read and `getCell()` hands back the
+  unresolved root, so the seam is `packages/piece`'s to offer rather than
+  shuttle's to assemble. Until then `watch <ref>#argument` is refused naming
+  `get`, which reads one, and the result cell, which a watch serves; the two
+  cells are already named and keyed apart everywhere a watch is shown, so what
+  the seam costs is the refusal and nothing under it.
 - **The rest of a view's keys.** The value view answers to the motions and the
   two ways out — `q` and `ctrl-c`, `j`/`k` and the arrows, `g` and `G`. What
   the table in [`views.md`](views.md) has beyond them is this slice: `enter`

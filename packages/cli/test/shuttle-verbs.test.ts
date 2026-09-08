@@ -4675,54 +4675,25 @@ describe("verbs", () => {
         .toEqual([`/${HANDLE}@space/title`]);
     });
 
-    it("arms a watch on the arguments cell the suffix selects", async () => {
-      const shuttle = atPiece();
-      const { deps } = watching();
-      await runLine("watch title#argument", shuttle, deps);
-      expect(shuttle.session.watches.map((armed) => armed.key))
-        .toEqual([`/${HANDLE}@space/title#argument`]);
-    });
+    it("refuses a piece's arguments cell, naming the verb that reads one", async () => {
+      // A subscription there reports the link stored at the member rather than
+      // the value behind it, and a write through that link settles nothing it
+      // can see — so a watch armed on one would draw a link marker and then
+      // say nothing ever again. A refusal is what a person can act on, where a
+      // silent watch reads as a cell nobody is changing.
 
-    it("lists a piece's two cells as two rows a reader can tell apart", async () => {
-      // Both are watched, because they are two cells — and `watches` is the
-      // one verb whose job is answering what this run is watching, which two
-      // rows reading alike would leave unanswered.
-
-      const shuttle = atPiece();
-      const { deps } = watching();
-      await runLine("watch title", shuttle, deps);
-      await runLine("watch title#argument", shuttle, deps);
-      expect(textOf(await runLine("watches", shuttle, deps))).toBe(
-        `%1 ${HANDLE}/title @space\n%2 ${HANDLE}/title#argument @space`,
-      );
-    });
-
-    it("opens each of a piece's two cells with an event line naming which", async () => {
       const shuttle = atPiece();
       const { deps, watched } = watching();
-      await runLine("watch title", shuttle, deps);
-      await runLine("watch title#argument", shuttle, deps);
-      // The watch's own subscription is the first each line took; the lens's
-      // is the second.
-      for (const settle of [watched.settles[0]!, watched.settles[2]!]) {
-        settle(1);
-        settle(2);
-      }
-      expect(watched.announced).toEqual([
-        `watch ${HANDLE}/title @space: 1 → 2`,
-        `watch ${HANDLE}/title#argument @space: 1 → 2`,
-      ]);
-    });
-
-    it("names each of a piece's two cells in the ambient record", async () => {
-      const shuttle = atPiece();
-      const { deps } = watching();
-      await runLine("watch title", shuttle, deps);
-      await runLine("watch title#argument", shuttle, deps);
-      expect(textOf(await runLine("where", shuttle, deps)).split("\n").at(-1))
+      expect(reasonOf(await runLine("watch title#argument", shuttle, deps)))
         .toBe(
-          `watches   ${HANDLE}/title @space, ${HANDLE}/title#argument @space`,
+          "`watch` does not serve a piece's arguments cell, so `#argument` " +
+            "is refused here. `get <ref>#argument` reads one, and " +
+            "`watch <ref>` watches the result the pattern computes from it.",
         );
+      expect({
+        armed: shuttle.session.watches.length,
+        subscriptions: watched.settles.length,
+      }).toEqual({ armed: 0, subscriptions: 0 });
     });
 
     it("opens a lens onto the cell it armed the watch on", async () => {

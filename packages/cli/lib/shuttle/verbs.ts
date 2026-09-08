@@ -1046,10 +1046,12 @@ async function describe(
  * not. The question is asked of the cell rather than of the operand, so the
  * two spellings that reach one cell are one watch.
  *
- * The operand is read through the door `get` reads one through, the
- * `#argument` suffix included, and a container is refused for the reason `get`
- * refuses one: a space root and a facet are lists of what stands inside them
- * and hold no value to watch.
+ * The operand is read through the door `get` reads one through, and two
+ * spellings it takes are refused here. A container holds no value to watch,
+ * for the reason `get` refuses one: a space root and a facet are lists of what
+ * stands inside them. And a piece's arguments cell is not one a subscription
+ * can serve, so the `#argument` suffix is turned down naming the verb that
+ * does read one.
  *
  * @throws Whatever taking a subscription throws — an unreachable server among
  * them. Nothing is left armed by one: the session holds the watch only once
@@ -1068,6 +1070,23 @@ async function watch(
     return refuse(
       `${container(position)} is a list of what stands inside it rather ` +
         `than a cell, so there is nothing to watch. \`ls\` lists it.`,
+    );
+  }
+  if (at.input) {
+    // A subscription on a piece's arguments cell reports the link stored at
+    // the member rather than the value behind it, and a write through that
+    // link settles nothing it can see — so a watch armed there would draw a
+    // link marker and then never say another word. Refusing is what makes
+    // that visible: a silent watch is indistinguishable from a cell nobody
+    // is changing. What such a subscription needs is a resolved cell for an
+    // arguments path, which is `packages/piece`'s to offer
+    // (`docs/plans/shuttle/build-sequence.md`); the read has one already,
+    // which is why `get` takes the suffix and this does not.
+    return refuse(
+      `\`watch\` does not serve a piece's arguments cell, so ` +
+        `\`${ARGUMENT_SUFFIX}\` is refused here. ` +
+        `\`get <ref>${ARGUMENT_SUFFIX}\` reads one, and \`watch <ref>\` ` +
+        `watches the result the pattern computes from it.`,
     );
   }
   const place: PiecePlace = { ...at.place, position };
@@ -1611,9 +1630,10 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
     arity: { operands: "optional", completes: ["children"] },
     usage: "watch [<ref>]",
     summary: "Arms a watch on a cell and opens the value view onto it.",
-    detail: "The operand takes everything `get` takes, the `#argument` " +
-      "suffix included,\nand defaults to where you stand. A space root and " +
-      "a facet hold no value and\nare refused.\n\nThe two halves are " +
+    detail: "The operand takes what `get` takes and defaults to where you " +
+      "stand. A space\nroot and a facet hold no value and are refused, and " +
+      "so is the `#argument`\nsuffix: a piece's arguments cell is not one " +
+      "a watch can serve, where `get`\nreads it.\n\nThe two halves are " +
       "separable. `q` closes the view and leaves the watch\narmed, and an " +
       "armed watch writes one line above the prompt per settled\nchange — " +
       "the cell, where inside it the change landed, and the transition.\n" +
