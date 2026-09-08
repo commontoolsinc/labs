@@ -94,13 +94,10 @@ export function bodyOf(
  * untouched, so an unfamiliar overload still runs and still reports its
  * own error.
  *
- * The capture is handed in rather than looked up, because a wrapper is
- * only built where one is installed.
+ * Takes no capture: a wrapper is built only where one is installed, and
+ * tracking the chain is the whole of what this does with it.
  */
-export function wrapDescribe(
-  through: AnyFunction,
-  capture: () => RegistrationCapture,
-): AnyFunction {
+export function wrapDescribe(through: AnyFunction): AnyFunction {
   return (...args: unknown[]): unknown => {
     const name = nameOf(args);
     const found = bodyOf(args);
@@ -199,9 +196,9 @@ const capture = activeCapture();
 export const describe: typeof realDescribe = capture === undefined
   ? realDescribe
   : withEntryPoints(
-    wrapDescribe(realDescribe as unknown as AnyFunction, () => capture),
+    wrapDescribe(realDescribe as unknown as AnyFunction),
     realDescribe as unknown as AnyFunction,
-    (through) => wrapDescribe(through, () => capture),
+    wrapDescribe,
   ) as typeof realDescribe;
 
 const realIgnore = (realIt as unknown as Record<string, AnyFunction>).ignore ??
