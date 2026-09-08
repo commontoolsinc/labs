@@ -1150,9 +1150,11 @@ with one `Cell.pull()`. That pull drives the output's transitive computation and
 linked-document loads through the runtime scheduler and its manager-wide
 convergence pool, so work already active in that runtime can still share the
 wait. Declared object keys are then ordered locally from the projection before
-rendering; that step starts no graph or storage work. When isolating the read
-matters, shape the collect instead. Call plain (or `--no-wait`), then collect
-from the receipt with `cf cell get --cell <receipt id> --select …`.
+rendering, and the keys an open projection retains beyond its declaration follow
+them in the value's own order; that step starts no graph or storage work. When
+isolating the read matters, shape the collect instead. Call plain (or
+`--no-wait`), then collect from the receipt with
+`cf cell get --cell <receipt id> --select …`.
 
 Three cases follow from that:
 

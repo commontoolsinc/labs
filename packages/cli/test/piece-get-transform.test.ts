@@ -2100,6 +2100,43 @@ describe("cf cell get transforms", () => {
     }
   });
 
+  it("orders an open projection's declared keys first, then retained extras", async () => {
+    const setup = runtime.edit();
+    const source = runtime.getCell(
+      space,
+      "transform-open-projection-order-source",
+      {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "number" },
+            label: { type: "string" },
+            extra: { type: "string" },
+          },
+        },
+      },
+      setup,
+    );
+    source.set([
+      { id: 1, label: "first", extra: "kept" },
+      { id: 2, label: "second", extra: "kept" },
+    ]);
+    expect((await setup.commit()).ok).toBeDefined();
+
+    // Open (`additionalProperties: true`) and declaring `label` before `id`,
+    // against a value stored as id, label, extra: the declaration orders the
+    // keys it names, and what the projection retains beyond it follows.
+    const result = await deriveSelectedValue(runtime, space, source, {
+      projection: await parseSelectionProjection(
+        '{"type":"array","items":{"type":"object","properties":{"label":true,"id":true},"additionalProperties":true}}',
+      ),
+    });
+    expect(JSON.stringify(result)).toBe(
+      '[{"label":"first","id":1,"extra":"kept"},{"label":"second","id":2,"extra":"kept"}]',
+    );
+  });
+
   describe("the labels a selection carries", () => {
     // The two assertions here read a derived label component back out of
     // storage through `derivedConfidentiality`. Persisting flow labels

@@ -2152,11 +2152,18 @@ function projectValue(
   const properties = schema.properties ?? {};
   const projected: Record<string, unknown> = {};
   if (schema.additionalProperties !== false) {
-    for (const [key, child] of Object.entries(value)) {
+    // Declared keys first, in schema order, so an open projection renders
+    // its declared fields the way a closed one does; the keys it retains
+    // beyond the declaration follow in the value's own order.
+    const keys = [
+      ...Object.keys(properties).filter((key) => key in value),
+      ...Object.keys(value).filter((key) => !(key in properties)),
+    ];
+    for (const key of keys) {
       const childSchema = properties[key] ?? schema.additionalProperties ??
         true;
       projected[key] = projectValue(
-        child,
+        value[key],
         childSchema,
         implicitArrayTraversal,
         keepComposedAddresses,
@@ -3411,8 +3418,10 @@ export async function deriveSelectedValue(
     const outputValue = outputCell.get();
     // Runtime materialization can expose object children in arrival order.
     // Apply the resolved projection to the value in hand so declared fields
-    // instead follow schema order. This is local value work and starts no graph
-    // or storage operation.
+    // instead follow schema order, closed and open projections alike; the
+    // keys an open projection retains beyond its declaration follow, in the
+    // value's own order. This is local value work and starts no graph or
+    // storage operation.
     const orderedOutput = projection === undefined ? outputValue : projectValue(
       outputValue,
       projection.projectionSchema,

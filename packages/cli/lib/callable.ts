@@ -192,7 +192,8 @@ export interface CallableExecutionDeps {
    * are runtime/manager-wide; a shaped call can therefore still share a wait
    * with active work that the plain call's transaction-local acknowledgment
    * does not. Declared object keys are ordered locally from the projection
-   * after that readiness boundary. A verb that returns nothing keeps returning
+   * after that readiness boundary, with an open projection's retained extras
+   * following in value order. A verb that returns nothing keeps returning
    * nothing — there is no value for a selection to be about. */
   selection?: CellSelection;
 
