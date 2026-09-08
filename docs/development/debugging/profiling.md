@@ -145,6 +145,31 @@ reads the worker's scheduler, runner and storage rows plus main-thread IPC, with
 row recording set sizes rather than milliseconds will evict real timings — read
 those by name instead of widening the summary.
 
+The storage rows follow one inbound frame in arrival order, each keyed by the
+module that pays for the step: `storage.v2.remote/receive/decodeFrame`
+(websocket decompression), `memory.v2.client/receive/decodeBoundary` then
+`/schemaExpansion` (protocol decoding, and schema expansion only for a frame
+carrying a reference), and `storage.v2.remote/receive/dispatchPayload` — the
+whole synchronous handling of the frame, which for a pushed effect includes
+updating the watch view but not the replica. Two rows time replica application:
+`storage.v2/watchRefresh/applySessionSync` covers graph-watch refreshes, and
+`storage.v2/watchPush/applySessionSync` covers the subscription consumer. Direct
+operation-watch and watch-removal application are outside both spans.
+
+Around a graph-watch refresh, `storage.v2/watchRefresh/watchAddSync` includes
+watch-mutation queue wait, the client request, response-order wait in concurrent
+mode, and watch-view application. `memory.v2.client/watchAdd/request` covers
+the client request, including connection readiness, encoding, the transport
+round trip, and response handling;
+`memory.v2.client/watchAdd/apply` covers watch bookkeeping and watch-view
+application. The outer span minus the request span therefore includes
+application and scheduling overhead as well as waiting; it does not isolate
+queue wait. The rows aggregate different call populations, and their percentiles
+cannot be subtracted to recover any of these components. `watchRefresh/total`
+brackets the whole refresh, including replica application. The
+`runner/start/*Wave` rows bracket each resume pre-sync wave around the per-cell
+`runner/start/resume*` spans.
+
 ## 4. Split until an explosion has an origin
 
 A count that is too high is visible at the top level. The caller that multiplies
@@ -349,8 +374,18 @@ process:
 - `logCounts` — the same per-logger counts, which is how a warning storm shows
   up as a number rather than as a log to grep.
 - `slowQueries` — the last hundred query, watch, or commit operations over
-  100 ms, with the space and the root and watch counts. A `transact` entry
-  also carries the commit's operation and read counts, its outcome (`ok`,
+  100 ms, with the space and the root and watch counts. `graph.query`,
+  `session.watch.set` and `session.watch.add` entries attribute the traversal
+  (`rootsVisited`, `rootsElapsedMs`, `slowestRoot`) and carry `managerReads`,
+  the engine document reads across the whole request — the width a root
+  count cannot show, since one root's declaration can fan out over many
+  documents. `session.watch.add` and `session.watch.refresh` entries also
+  carry `upserts`, the snapshots the frame delivered: a wide traversal that
+  yields few is repeated server work, and a wide frame is transport and
+  client-ingest work as well. A refresh carries only `watches` and `upserts`:
+  it re-evaluates by dirty document rather than by root, so it has no
+  traversal to attribute, and absent is the honest answer there. A `transact`
+  entry also carries the commit's operation and read counts, its outcome (`ok`,
   the error name, or `threw` — a slow rejected commit records like a slow
   applied one), and `lockWaitMs`: how long the commit waited for the space
   publication lock before evaluating. Flush passes hold that same lock, so
@@ -424,6 +459,16 @@ a large batched fan-out and one expensive send are the same number here and
 dividing it to recover a per-frame cost is unsound. Read it as a bound instead —
 a client's push waits at least the refresh delay plus these two — and reach for
 `servingLoop.push` when the question is which sessions a batch served.
+
+`memory/watchAdd/total` covers each `session.watch.add` handler from admission
+through completion, including duplicate or empty additions, rejected requests,
+and failures. It ends before outbound schema preparation and transport.
+`slowQueries` records successful additions over its threshold, measured from
+evaluation through response assembly. `memory/response/prepareSchemas` against
+`memory/response/sendRaw` splits each outbound message, response or effect, into
+schema-table compression and the hand-off to the transport;
+`memory.compression/send/encode` is the websocket compression that follows, on
+whichever side is sending.
 
 ### Profile the process
 
