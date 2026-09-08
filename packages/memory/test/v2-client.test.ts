@@ -1131,7 +1131,7 @@ Deno.test("memory v2 client conflict errors expose readiness after caught-up syn
   }
 });
 
-Deno.test("memory v2 client readyToRetry waits for caught-up local sequence", async () => {
+Deno.test("memory v2 client waits for conflict catch-up and adopts advertised watches locally", async () => {
   const transport = new ConflictReadyTransport();
   const client = await connect({ transport });
   const session = await client.mount("did:key:z6Mk-memory-v2-ready-delay");
@@ -1184,6 +1184,31 @@ Deno.test("memory v2 client readyToRetry waits for caught-up local sequence", as
     transport.emitCatchUp(1);
     await readyPromise;
     assertEquals(ready, true);
+
+    const adopted = await session.watchAddSync([
+      {
+        id: "retry:doc:1",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:1",
+            selector: { path: [], schema: false },
+          }],
+        },
+      },
+      {
+        id: "retry:doc:2",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:2",
+            selector: { path: [], schema: false },
+          }],
+        },
+      },
+    ]);
+    assertEquals(adopted.sync.upserts, []);
+    assertEquals(adopted.sync.removes, []);
   } finally {
     await client.close();
   }
@@ -1954,6 +1979,28 @@ class ConflictReadyTransport implements Transport {
             conflicts: [
               { of: "of:doc:1", seq: 0, conflictSeq: 1 },
               { of: "of:doc:2", seq: 0, conflictSeq: 2 },
+            ],
+            conflictWatches: [
+              {
+                id: "conflict:doc:1",
+                kind: "graph",
+                query: {
+                  roots: [{
+                    id: "of:doc:1",
+                    selector: { path: [], schema: false },
+                  }],
+                },
+              },
+              {
+                id: "conflict:doc:2",
+                kind: "graph",
+                query: {
+                  roots: [{
+                    id: "of:doc:2",
+                    selector: { path: [], schema: false },
+                  }],
+                },
+              },
             ],
           },
         });

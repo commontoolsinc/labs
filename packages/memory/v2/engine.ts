@@ -1055,6 +1055,8 @@ export type ConfirmedReadConflict = {
   of: string;
   seq: number;
   conflictSeq: number;
+  /** Index of the stale entry in `ClientCommit.reads.confirmed`. */
+  readIndex: number;
 };
 
 export class PreconditionFailedError extends Error {
@@ -6170,7 +6172,7 @@ const validateConfirmedReads = (
   // against that writer identity, even when the read points at another branch.
   // Cross-branch reads inherit this same principal context.
   const conflicts: ConfirmedReadConflict[] = [];
-  for (const read of commit.reads.confirmed) {
+  for (const [readIndex, read] of commit.reads.confirmed.entries()) {
     const readBranch = read.branch ?? branch;
     ensureReadableBranch(engine, readBranch);
     const scopeKey = resolveScopeKey(read.scope, scopeContext);
@@ -6184,7 +6186,7 @@ const validateConfirmedReads = (
       read.nonRecursive ?? false,
     );
     if (conflictSeq !== null) {
-      conflicts.push({ of: read.id, seq: read.seq, conflictSeq });
+      conflicts.push({ of: read.id, seq: read.seq, conflictSeq, readIndex });
     }
   }
   if (conflicts.length > 0) {

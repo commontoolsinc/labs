@@ -22,10 +22,10 @@ export type SessionState = {
   caughtUpLocalSeq: number;
   pendingCaughtUpLocalSeq: number;
 
-  /** Set when delivery-state rollback re-inserted tombstone cache entries
-   * for a lost frame's removes: the incremental refresh path never emits
-   * removes, so the next sync must run a FULL watch evaluation to re-diff
-   * them out (CT-1927 review, round 7). Self-clearing. */
+  /** Set when the next sync must evaluate the complete watch union: delivery
+   * rollback re-inserted tombstones that incremental refresh cannot remove,
+   * or conflict handling added roots the session has never tracked.
+   * Self-clearing after the full evaluation. */
   forceFullResync: boolean;
 
   /** Set once this session was admitted an explicit `entity_scope_key`

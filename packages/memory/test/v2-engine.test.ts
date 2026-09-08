@@ -1358,8 +1358,18 @@ Deno.test("memory v2 engine: stale-read ConflictError carries every conflicted e
     assertEquals(
       error.conflicts,
       [
-        { of: "entity:stale-named", seq: 1, conflictSeq: 2 },
-        { of: "entity:also-stale", seq: 1, conflictSeq: 2 },
+        {
+          of: "entity:stale-named",
+          seq: 1,
+          conflictSeq: 2,
+          readIndex: 0,
+        },
+        {
+          of: "entity:also-stale",
+          seq: 1,
+          conflictSeq: 2,
+          readIndex: 1,
+        },
       ],
     );
     assertEquals(

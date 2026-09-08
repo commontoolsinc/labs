@@ -1742,6 +1742,9 @@ export type V2Error = {
     conflictSeq: number;
   }>;
 
+  /** Root-only watches in effect for the stale confirmed reads. */
+  conflictWatches?: WatchSpec[];
+
   /**
    * Present on an `AuthorizationError` that a fresh handshake can heal — the
    * connection-challenge and invocation-freshness anti-replay races (an expired,

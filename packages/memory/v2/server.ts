@@ -133,6 +133,7 @@ import {
   isEmptySync,
   mergeWatchesById,
   sameSnapshot,
+  sameWatchQuery,
   sameWatchSpec,
   type SessionCacheEntry,
   toCacheEntry,
@@ -3913,7 +3914,7 @@ export class Server {
           // and the verdict plus marker promote it — while patch-produced
           // heads ride the frame as full post-apply documents, since merged
           // state is truth the writer cannot extrapolate. REJECTED commits'
-          // docs are staged origin-less (stageConflictRefreshDirtyIds), so
+          // docs are staged origin-less (stageConflictRefresh), so
           // repair frames DO cover them.
           session.pendingCaughtUpLocalSeq = Math.max(
             session.pendingCaughtUpLocalSeq,
@@ -3953,12 +3954,14 @@ export class Server {
             });
           }
           let retryAfterSeq: number | undefined;
+          let conflictWatches: WatchSpec[] = [];
           if (error instanceof Engine.ConflictError) {
             span.setAttribute("ct.conflict", true);
-            this.#stageConflictRefreshDirtyIds(
+            conflictWatches = this.#stageConflictRefresh(
               message.space,
               session,
               message.commit,
+              error,
             );
             const engine = await this.#openEngine(message.space);
             retryAfterSeq = Engine.serverSeq(engine);
@@ -4003,7 +4006,14 @@ export class Server {
             error.conflicts !== undefined &&
             error.conflicts.length > 1
           ) {
-            responseError.conflicts = [...error.conflicts];
+            responseError.conflicts = error.conflicts.map((conflict) => ({
+              of: conflict.of,
+              seq: conflict.seq,
+              conflictSeq: conflict.conflictSeq,
+            }));
+          }
+          if (conflictWatches.length > 0) {
+            responseError.conflictWatches = conflictWatches;
           }
           span.recordException(
             error instanceof Error ? error : new Error(messageText),
@@ -5114,9 +5124,9 @@ export class Server {
     // not lost with the failed pass.
     let rearmedLeaseHolder = false;
     if (session.forceFullResync) {
-      // Rollback re-inserted tombstones for a lost frame's removes; only a
-      // full evaluation re-diffs them out. Self-clearing (restored by the
-      // catch below if evaluation throws).
+      // Delivery rollback or newly installed conflict roots require a full
+      // evaluation. Self-clearing (restored by the catch below if evaluation
+      // throws).
       session.forceFullResync = false;
       dirtyIds = undefined;
       dirtyOrigins = undefined;
@@ -6368,11 +6378,12 @@ export class Server {
     };
   }
 
-  #stageConflictRefreshDirtyIds(
+  #stageConflictRefresh(
     space: string,
     session: SessionState,
     commit: ClientCommit,
-  ): void {
+    error: Engine.ConflictError,
+  ): WatchSpec[] {
     session.pendingCaughtUpLocalSeq = Math.max(
       session.pendingCaughtUpLocalSeq,
       commit.localSeq,
@@ -6397,7 +6408,63 @@ export class Server {
     for (const read of commit.reads.pending) {
       addInstanceKey(read.id, read.scope);
     }
+
+    const conflictWatches: WatchSpec[] = [];
+    let addedConflictWatch = false;
+    for (const conflict of error.conflicts ?? []) {
+      const read = commit.reads.confirmed[conflict.readIndex];
+      if (
+        read === undefined || read.id !== conflict.of ||
+        read.seq !== conflict.seq
+      ) {
+        continue;
+      }
+      const branch = read.branch ?? commit.branch ?? "";
+      const watch: WatchSpec = {
+        id: `conflict:${
+          JSON.stringify([
+            branch,
+            read.scope ?? "space",
+            read.id,
+          ])
+        }`,
+        kind: "graph",
+        query: {
+          ...(branch === "" ? {} : { branch }),
+          roots: [{
+            id: read.id,
+            ...(read.scope === undefined ? {} : { scope: read.scope }),
+            selector: { path: [], schema: false },
+          }],
+        },
+      };
+      const existingWatch = session.watches.find((existing) =>
+        sameWatchQuery(existing, watch)
+      );
+      if (existingWatch !== undefined) {
+        conflictWatches.push(existingWatch);
+        continue;
+      }
+      let uniqueWatch = watch;
+      let suffix = 1;
+      while (
+        session.watches.some((existing) => existing.id === uniqueWatch.id)
+      ) {
+        uniqueWatch = { ...watch, id: `${watch.id}:${suffix++}` };
+      }
+      session.watches = mergeWatchesById(session.watches, [uniqueWatch]);
+      conflictWatches.push(uniqueWatch);
+      addedConflictWatch = true;
+    }
+    if (addedConflictWatch) {
+      // The new roots were not part of the session's tracked graph when the
+      // rejected commit ran. Evaluate the complete watch union so their
+      // current documents and every linked document from the existing graph
+      // watches arrive in one ordered cut.
+      session.forceFullResync = true;
+    }
     this.markSpaceDirty(space, ids);
+    return conflictWatches;
   }
 
   async flushSessions(spaces?: Iterable<string>): Promise<void> {

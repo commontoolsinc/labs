@@ -2804,6 +2804,11 @@ export class Runtime {
       if (seen.has(key)) continue;
       seen.add(key);
       try {
+        // A current server has already installed this root-only watch and sent
+        // its data in the conflict catch-up. `sync()` still records the
+        // replica's demand, while the memory client adopts the advertised
+        // server watch without another request. Older servers fall back to the
+        // ordinary watch.add round trip here.
         pulls.push(
           Promise.resolve(
             this.storageManager.open(conflict.space).sync(

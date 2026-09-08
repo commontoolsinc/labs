@@ -42,6 +42,7 @@ import {
 } from "../v2.ts";
 import type { AppliedCommit } from "./engine.ts";
 import type { Server } from "./server.ts";
+import { mergeWatchesById, sameWatchQuery } from "./server-sync.ts";
 import { containsReservedSchemaRefSubstring } from "./sync-schema-ref.ts";
 import { expandServerMessageSchemas } from "./sync-schema-table.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
@@ -354,6 +355,10 @@ export class Client {
       if (result.error.conflicts !== undefined) {
         (error as Error & { conflicts?: unknown }).conflicts =
           result.error.conflicts;
+      }
+      if (result.error.conflictWatches !== undefined) {
+        (error as Error & { conflictWatches?: WatchSpec[] }).conflictWatches =
+          result.error.conflictWatches;
       }
       if (result.error.retriable !== undefined) {
         (error as Error & { retriable?: boolean }).retriable =
@@ -751,6 +756,7 @@ export class SpaceSession {
     pending: PromiseWithResolvers<AppliedCommit>;
   }>();
   #watchSpecs: WatchSpec[] = [];
+  #serverConfirmedConflictWatches: WatchSpec[] = [];
   #watchView: WatchView | null = null;
   #precedingWatchSyncs: SessionSync[] = [];
   #sessionId: string;
@@ -1097,6 +1103,14 @@ export class SpaceSession {
       (result) => {
         this.#noteResult(result.serverSeq);
         this.#watchSpecs = watches;
+        this.#serverConfirmedConflictWatches = this
+          .#serverConfirmedConflictWatches
+          .filter((conflictWatch) =>
+            watches.some((watch) =>
+              watch.id === conflictWatch.id &&
+              sameWatchQuery(watch, conflictWatch)
+            )
+          );
         this.#noteOperationWatchCursors(result.sync);
         if (this.#watchView === null) {
           this.#watchView = WatchView.fromSync(result.sync);
@@ -1126,21 +1140,51 @@ export class SpaceSession {
   async watchAddSync(watches: WatchSpec[]): Promise<WatchMutationResult> {
     this.#assertOpen();
     return await this.#runWatchMutation(
-      () =>
-        this.#client.request<WatchAddResult>({
+      (): Promise<
+        | { kind: "adopt" }
+        | { kind: "response"; result: WatchAddResult }
+      > => {
+        // Concurrent issue may have an earlier watch.set on the wire whose
+        // response has not yet removed these confirmations locally. The
+        // single-flight path evaluates only after every prior mutation applies.
+        if (
+          !this.#concurrentWatchRefresh &&
+          this.#watchView !== null &&
+          watches.every((watch) =>
+            this.#serverConfirmedConflictWatches.some((conflictWatch) =>
+              sameWatchQuery(watch, conflictWatch)
+            )
+          )
+        ) {
+          return Promise.resolve({ kind: "adopt" } as const);
+        }
+        return this.#client.request<WatchAddResult>({
           type: "session.watch.add",
           requestId: crypto.randomUUID(),
           space: this.space,
           sessionId: this.#sessionId,
           watches,
-        }),
-      (result) => {
+        }).then((result) => ({ kind: "response" as const, result }));
+      },
+      (outcome) => {
+        if (outcome.kind === "adopt") {
+          this.#watchSpecs = mergeWatchesById(this.#watchSpecs, watches);
+          const serverSeq = this.#serverSeq;
+          return {
+            view: this.#watchView!,
+            precedingSyncs: this.#takePrecedingWatchSyncs(),
+            sync: {
+              type: "sync",
+              fromSeq: serverSeq,
+              toSeq: serverSeq,
+              upserts: [],
+              removes: [],
+            },
+          };
+        }
+        const result = outcome.result;
         this.#noteResult(result.serverSeq);
-        this.#watchSpecs = [
-          ...new Map(
-            [...this.#watchSpecs, ...watches].map((watch) => [watch.id, watch]),
-          ).values(),
-        ];
+        this.#watchSpecs = mergeWatchesById(this.#watchSpecs, watches);
         this.#noteOperationWatchCursors(result.sync);
         if (this.#watchView === null) {
           this.#watchView = WatchView.fromSync(result.sync);
@@ -1170,6 +1214,10 @@ export class SpaceSession {
         // Cancellation is local intent even when the request fails: a later
         // reconnect must not restore a watch its last subscriber removed.
         this.#watchSpecs = watches;
+        this.#serverConfirmedConflictWatches = this
+          .#serverConfirmedConflictWatches.filter((watch) =>
+            !removed.has(watch.id)
+          );
         return this.#client.request<WatchSetResult>({
           type: "session.watch.set",
           requestId: crypto.randomUUID(),
@@ -1368,6 +1416,7 @@ export class SpaceSession {
     }
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
+    this.#serverConfirmedConflictWatches = [];
     this.#watchView?.close();
     this.#watchView = null;
   }
@@ -1400,6 +1449,7 @@ export class SpaceSession {
     this.#rejectCaughtUpLocalSeqWaiters(error);
     this.#outstandingCommits.clear();
     this.#watchSpecs = [];
+    this.#serverConfirmedConflictWatches = [];
     this.#watchView?.close();
     this.#watchView = null;
   }
@@ -1779,6 +1829,16 @@ export class SpaceSession {
           this.#outstandingCommits.delete(localSeq);
         }
         if (isRetryableConflict(error)) {
+          if (Array.isArray(error.conflictWatches)) {
+            this.#serverConfirmedConflictWatches = mergeWatchesById(
+              this.#serverConfirmedConflictWatches,
+              error.conflictWatches,
+            );
+            this.#watchSpecs = mergeWatchesById(
+              this.#watchSpecs,
+              error.conflictWatches,
+            );
+          }
           error.readyToRetry = () => this.#waitForCaughtUpLocalSeq(localSeq);
         }
         pendingCommit.pending.reject(
@@ -1794,6 +1854,7 @@ export class SpaceSession {
 type RetryableConflictError = Error & {
   name: "ConflictError";
   retryAfterSeq: number;
+  conflictWatches?: WatchSpec[];
   readyToRetry?: () => Promise<void>;
 };
 

@@ -414,13 +414,21 @@ interface ConflictError extends Error {
 }
 ```
 
-The rejection carries no document values. Instead the server marks the commit's
-write targets and both read sets (`reads.confirmed` and `reads.pending`) dirty
-for the session — origin-less, so the session's own echo suppression does not
-hide them — and the next sync frame delivers the current documents for all of
-them as ordinary upserts. Repair therefore arrives as a consistent cut over the
-session's watched view — covering stale read dependencies as well as write
-targets, with every document the frame links to delivered in the same cut.
+The rejection carries no document values. Before returning it, the server adds
+a persistent root-only graph watch with `schema: false` for each confirmed read
+that actually conflicted. The error's `conflictWatches` field advertises the
+effective watch specifications so the client can adopt them as reconnect
+intent. An equivalent client-side watch addition then completes locally; an
+older client or server falls back to the ordinary `session.watch.add` request.
+
+The server also marks the commit's write targets and both read sets
+(`reads.confirmed` and `reads.pending`) dirty for the session — origin-less, so
+the session's own echo suppression does not hide them. Adding a conflict watch
+forces the next sync frame to evaluate the complete watch union. That frame
+therefore delivers the current conflicting roots as ordinary upserts while
+preserving a consistent cut over every existing graph watch: if an updated
+document changes a link, every newly reachable document is delivered in the
+same cut.
 
 ## 3.7 Server-Side Commit Processing
 
@@ -623,8 +631,9 @@ When a commit is rejected with a `ConflictError`:
 
 1. discard the rejected pending commit and any dependent stacked commits
 2. wait for the repair sync: the catch-up marker covering the rejected commit
-   (`caughtUpLocalSeq` reaching its `localSeq`), whose frame delivers current
-   documents for the commit's write targets and read sets (§3.6.4)
+   (`caughtUpLocalSeq` reaching its `localSeq`), whose frame delivers the
+   current conflicting confirmed-read roots and a consistent cut of the
+   session's watched graph (§3.6.4)
 3. rebuild the transaction against the repaired confirmed state
 4. resubmit
 
