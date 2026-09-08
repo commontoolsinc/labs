@@ -80,3 +80,9 @@ cache-state/
 test-records-spool/
 test-records-artifact/
 ci-lane-logs/
+
+# Written into the repository root by `tasks/coverage-check.ts`, which the
+# Coverage Check job runs and which anyone can run by hand to see what that
+# job would say. Both are JSON, so a copy left behind fails `deno fmt`.
+perf-metrics.json
+coverage-comment.json
