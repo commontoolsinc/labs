@@ -132,9 +132,6 @@ export interface Suite {
   /** Setup this suite needs before it can run. */
   needs: readonly CapabilityId[];
 
-  /** Whether a subset of it always runs, and on what basis. */
-  mandatory?: "always" | "changed";
-
   /**
    * Every unit available in this working tree. Read when the topology is
    * loaded rather than on demand, because `locate` answers from the same
@@ -313,7 +310,6 @@ export interface FileSuiteOptions {
   id: string;
   variant?: string;
   needs: readonly CapabilityId[];
-  mandatory?: "always" | "changed";
 
   /**
    * The packages it spans. One runner does not imply one scope: the
@@ -350,9 +346,6 @@ export function fileSuite(options: FileSuiteOptions): Suite {
     recordSurfaces,
     ...(options.variant === undefined ? {} : { variant: options.variant }),
     needs: options.needs,
-    ...(options.mandatory === undefined
-      ? {}
-      : { mandatory: options.mandatory }),
     units,
     unavailable,
 

@@ -10,10 +10,30 @@ const byId = (id: string): Suite => suites.find((s) => s.id === id)!;
 const context = { root: "/repo", outputDir: "/out" };
 
 describe("the repository's gate suites", () => {
-  it("marks only the gates whose failure means the tree is broken", () => {
-    expect(
-      suites.filter((s) => s.mandatory === "always").map((s) => s.id),
-    ).toEqual(["repo-gates"]);
+  it("gives the base revision to the gates whose suite asks for history", async () => {
+    // A lane opens what a suite needs before it runs any of it, so which
+    // suite a gate sits in decides whether the lane it runs in has
+    // history to read. Both lists are built over every gate of both
+    // suites, so a gate that reaches for the base revision from the suite
+    // that asks for no history fails this.
+
+    const reading: string[] = [];
+    const declared: string[] = [];
+    for (const suite of [byId("repo-gates"), byId("repo-history-gates")]) {
+      for (const unit of suite.units) {
+        const [invocation] = await suite.command([{ unit, skip: [] }], {
+          ...context,
+          baseRef: "origin/release",
+        });
+        if (invocation!.command.includes("origin/release")) reading.push(unit);
+        if (suite.needs.includes("git-history")) declared.push(unit);
+      }
+    }
+    expect(reading.toSorted()).toEqual([
+      "check-baselines-append-only",
+      "check-test-aliases",
+    ]);
+    expect(declared.toSorted()).toEqual(reading.toSorted());
   });
 
   it("runs a gate through the recorder that names its identity", async () => {
@@ -31,7 +51,7 @@ describe("the repository's gate suites", () => {
   });
 
   it("gives a gate that compares against a base the base to use", async () => {
-    const [invocation] = await byId("repo-checks").command(
+    const [invocation] = await byId("repo-history-gates").command(
       [{ unit: "check-test-aliases", skip: [] }],
       { ...context, baseRef: "origin/release" },
     );
@@ -39,7 +59,7 @@ describe("the repository's gate suites", () => {
   });
 
   it("compares against main where the lane names no base", async () => {
-    const [invocation] = await byId("repo-checks").command(
+    const [invocation] = await byId("repo-history-gates").command(
       [{ unit: "check-baselines-append-only", skip: [] }],
       context,
     );
@@ -47,7 +67,7 @@ describe("the repository's gate suites", () => {
   });
 
   it("runs a gate that belongs to a package in that package", async () => {
-    const [invocation] = await byId("repo-checks").command(
+    const [invocation] = await byId("repo-gates").command(
       [{ unit: "check-cfc-types", skip: [] }],
       context,
     );
@@ -55,14 +75,21 @@ describe("the repository's gate suites", () => {
   });
 
   it("locates a gate by the name its record carries", () => {
+    // Both gate suites record under the `gate` kind and the `repo` scope,
+    // so the name is what separates one's records from the other's.
     expect(
       byId("repo-gates").locate({
         test: { k: "format", s: "repo", n: "deno-fmt" },
       }),
     ).toEqual({ level: "unit", unit: "deno-fmt" });
     expect(
+      byId("repo-history-gates").locate({
+        test: { k: "gate", s: "repo", n: "check-test-aliases" },
+      }),
+    ).toEqual({ level: "unit", unit: "check-test-aliases" });
+    expect(
       byId("repo-gates").locate({
-        test: { k: "gate", s: "repo", n: "check-deno-pins" },
+        test: { k: "gate", s: "repo", n: "check-test-aliases" },
       }),
     ).toBeUndefined();
   });

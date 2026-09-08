@@ -80,6 +80,7 @@ describe("the test topology", () => {
     const records = [
       { test: { k: "format", s: "repo", n: "deno-fmt" } },
       { test: { k: "gate", s: "repo", n: "check-deno-pins" } },
+      { test: { k: "gate", s: "repo", n: "check-test-aliases" } },
       { test: { k: "gate", s: "repo", n: "pattern-compat annotation.tsx" } },
       { test: { k: "gate", s: "repo", n: "pattern-vintage a b c" } },
       { test: { k: "typecheck", s: "repo", n: "cfcheck a.tsx" } },
@@ -114,16 +115,6 @@ describe("the test topology", () => {
     });
     expect(claims.map((claim) => [claim.suite.id, claim.level])).toEqual([
       ["cli-core", "suite"],
-    ]);
-  });
-
-  it("marks only the three gates that mean the tree is broken", () => {
-    const always = suites.filter((suite) => suite.mandatory === "always");
-    expect(always.map((suite) => suite.id)).toEqual(["repo-gates"]);
-    expect(always[0]!.units).toEqual([
-      "deno-fmt",
-      "deno-lint",
-      "check-test-topology",
     ]);
   });
 });
