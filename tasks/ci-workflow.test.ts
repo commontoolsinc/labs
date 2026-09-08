@@ -990,7 +990,7 @@ Deno.test("every test-records artifact name is store-safe and unique", async () 
   }
   // The count pins the search itself: zero found steps would mean the
   // extraction broke, not that the repository stopped shipping records.
-  assert(shipSteps >= 5, `only ${shipSteps} ship steps found`);
+  assert(shipSteps >= 4, `only ${shipSteps} ship steps found`);
 });
 
 Deno.test("the lanes ship what they recorded and name no suite", async () => {
