@@ -1,4 +1,4 @@
-import { DEFAULT_GENERATE_OBJECT_MODELS } from "@commonfabric/llm";
+import { DEFAULT_GENERATE_OBJECT_MODEL } from "@commonfabric/llm";
 import {
   type LLMGenerateObjectRequest,
   type LLMGenerateObjectResponse,
@@ -38,7 +38,7 @@ async function generateObjectCall(
       string,
       unknown
     >;
-    const modelName = params.model ?? DEFAULT_GENERATE_OBJECT_MODELS;
+    const modelName = params.model ?? DEFAULT_GENERATE_OBJECT_MODEL;
     const modelConfig = await resolveModel(modelName);
     if (!modelConfig) {
       throw new LLMRequestError(`Unsupported model: ${modelName}`);

@@ -901,7 +901,19 @@ export function sqliteQuery(
       );
     }
 
-    const db = readDbRef(inputs.db);
+    // A `db` that does not read back as a handle reaches the result cell as
+    // this query's error, on the same terms as an unencodable parameter
+    // below. The guard above admits any truthy value, and an object read
+    // that resolved to nothing is `{}` — truthy, and not a handle — so the
+    // throw would otherwise leave the action dead and the query pending for
+    // good, with no later reactive pass to recover it once the handle reads.
+    let db: SqliteDbRef;
+    try {
+      db = readDbRef(inputs.db);
+    } catch (error) {
+      result.withTx(tx).set({ pending: false, error: errMsg(error) });
+      return;
+    }
     const linkCols = asCellColumnsFromRowSchema(inputs.rowSchema);
     let params: WireParams;
     try {

@@ -146,15 +146,26 @@ The current package provides:
   name-based selection retired for the delegated path — and the child's
   activation records `source: "skill-handle"` with the token and the digest of
   the injected text;
-- pattern references by search record: `delegate_task` takes up to eight
-  optional `{ patternId, note? }` entries and resolves each id only from
-  successful `search_patterns` results retained by that parent run and restored
-  from its persisted transcript on resume. A known id contributes a neutral
-  child-context block containing the trusted record's kind, quality,
-  description, match evidence, import hint, argument shape, result shape, and
-  the parent note verbatim; an unknown id is omitted and named in
-  `patternRefRefusals` as `not-searched-by-parent`. Delegation does not refetch
-  the index;
+- pattern references by trusted record: `delegate_task` takes up to eight
+  optional `{ patternId, note? }` entries and resolves each id only from the
+  records that run already holds — successful `search_patterns` results retained
+  by that parent run and restored from its persisted transcript on resume,
+  together with the patterns the task itself attached. A known id contributes a
+  neutral child-context block containing the trusted record's kind and quality
+  where the record carries them, its description, match evidence, import hint,
+  argument shape, result shape, and the parent note verbatim; an unknown id is
+  omitted and named in `patternRefRefusals` as `not-searched-by-parent`.
+  Delegation does not refetch the index;
+- pattern references attached to a task: a run may be configured with up to
+  eight published pattern ids, which it resolves through the index's
+  `getPattern` before its first model turn and seeds as searched hits, so the
+  run names them with no search. The id is the whole of the reference — the
+  content-addressed identity of published source — and a value outside that
+  grammar is refused by the surface it arrives at, while an id the index does
+  not hold fails the run, naming the id, rather than running without what the
+  caller attached. The seeded record carries what the index answers for the id
+  and nothing else: a reference grants what a search hit grants, which is to
+  compose that source by identifier;
 - shape captured where it is free and read back by token: a handle entry may
   carry the schema of its referent — a `run_pattern` result reference records
   the compiled pattern's result schema, marked `schemaSource: "harness"` — while

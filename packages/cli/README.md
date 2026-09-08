@@ -273,7 +273,8 @@ place and what `cd` refuses, `connection.ts` the one `PiecesController` a
 process holds, `line.ts` the split and the printing that inverts it,
 `options.ts` the option grammar over the tokens after a verb, `listing.ts` what
 `ls` reads and what each row turns out to be, `handles.ts` what a `%n` operand
-names in it, `verbs.ts` the dispatch — which writes nothing — `editor.ts` the
+names in it, `verbs.ts` the dispatch — which writes nothing — `vocabulary.ts`
+the shuttle, the deps and the acts every verb is written in, `editor.ts` the
 round trip `edit` makes through `$EDITOR`, `help.ts` the form a verb's account
 of itself prints in, `page.ts` how much of a rendering one page holds,
 `value.ts` how a value the fabric holds is written, `session.ts` what the last

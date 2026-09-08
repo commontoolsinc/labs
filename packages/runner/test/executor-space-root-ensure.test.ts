@@ -458,7 +458,7 @@ describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
     // THE CRASH CLASS'S ACTUAL SEAM: the subscription is registered
     // BEFORE the ensure activates, so the mention-carrying frames
     // arrive as server pushes through the BACKGROUND consume path
-    // (`consumeUpdates` → `applySessionSync`) — where the
+    // (`consumeUpdates` → `#applySessionSync()`) — where the
     // pre-containment validator throw was an unhandled rejection that
     // killed the consuming worker (the OW61 board's kill mode; the
     // round-3 review's R2: routed through the request-shaped pull

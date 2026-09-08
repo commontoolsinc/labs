@@ -220,8 +220,9 @@ Deno.test("memory v2 SpaceReplica rebases a pending blind write over a server sy
   // so the commit on the wire is shaped exactly like handleCellSet's: no
   // value-equality read at the written leaf, one nonRecursive structural read
   // at the cell's parent — which is why a real server accepts it on top of blue
-  // instead of rejecting a stale CAS read. applySessionSync must only advance
-  // the CONFIRMED base — the pending write replays on top, so the visible value
+  // instead of rejecting a stale CAS read. `SpaceReplica.#applySessionSync()`
+  // must only advance the CONFIRMED base — the pending write replays on top,
+  // so the visible value
   // keeps the local leaf while integrating the sibling change, exactly matching
   // what the server computes when it later applies the patch on top of blue.
   // The other guards then hold the line: confirming the commit promotes the

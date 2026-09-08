@@ -50,13 +50,8 @@
 import { quoteToken, tailOfLine } from "./line.ts";
 import { type Listing, listPlace } from "./listing.ts";
 import { operandForChild } from "./place.ts";
-import {
-  candidatesAfter,
-  guarded,
-  type Shuttle,
-  VERB_WORDS,
-  type VerbDeps,
-} from "./verbs.ts";
+import { candidatesAfter, VERB_WORDS } from "./verbs.ts";
+import { guarded, type Shuttle, type VerbDeps } from "./vocabulary.ts";
 
 /**
  * The line `tab` leaves behind where it was pressed at the end of `line`, and

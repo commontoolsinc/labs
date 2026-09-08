@@ -53,6 +53,21 @@ export default pattern<{ orders: SqliteDb }>(({ orders }) => {
 });
 ```
 
+The call returns an envelope, not the rows:
+`{ pending, result?, error?, withheld? }`. `result` holds the rows once there
+are any, so a field typed as the rows themselves — `PerSession<Row[]>` — cannot
+take the call's value, and reading `.result` is what gets from one to the
+other. `withheld` counts the rows a read-time clearance kept from this reader,
+and is absent unless the query asked for one.
+
+Render the failure, not just the wait. A pattern that branches only on
+`pending` shows a loading view for as long as the query stays broken, because a
+query that failed is settled — `pending` is `false` and `error` holds the
+reason — and nothing further arrives to move it on. `error` reaches the pattern
+for a statement the database refuses and for a handle that does not read back
+as one, so a view that shows it is the difference between a page that says what
+went wrong and a page that spins.
+
 The `<Row>` type argument names the columns the statement projects, and is what
 turns a result into something typed. Without it the rows come back as
 `Record<string, unknown>`, and a `_cf_link` column comes back as a raw link
@@ -109,6 +124,16 @@ the column requires, and code downstream of the read is held to it. Two
 options bound a read against such a column — `maxConfidentiality` for a ceiling
 the result may not exceed, and `onExceed` to choose between failing the query
 and dropping the rows that exceed it.
+
+Where the label lands decides where to look for it. Each result row splits into
+its own entity doc and the column's label sits on that doc, at the column's own
+path; the query's own document holds `pending`, `result` and `requestHash` and
+carries no label at any path. So a probe of the query document reports a fully
+labeled result as unlabeled, and the read that answers is one that follows the
+links the path crosses — `cf cell get-label <cell> <path>/result/<i>/<col>`
+does, and reports the column's label from the row's own doc. Inside a pattern
+nothing has to be asked for: a consumer inherits the label from the
+dereferences its read traverses.
 
 ## The rest of the API
 

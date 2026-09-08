@@ -10,6 +10,7 @@ import {
 } from "./prompt-loop.ts";
 import { establishHarnessSessionContext } from "./session-assembly.ts";
 import type { HarnessInputCellSpec } from "./contracts/input-cells.ts";
+import type { HarnessPatternRefSpec } from "./contracts/pattern-refs.ts";
 import {
   createHarnessChatErrorResponse,
   createHarnessChatEventEnvelope,
@@ -1480,12 +1481,13 @@ export class HarnessInteractiveChatService {
           policy,
           browserAccess,
           params.inputCells,
+          params.patternRefs,
         ),
       );
       // The context messages announce what this turn's own run holds — its
-      // preloaded skills, its granted references, its input cells — so they
-      // sit immediately before the request they are held for, after the
-      // history the session already had.
+      // preloaded skills, its granted references, its input cells, its
+      // attached patterns — so they sit immediately before the request they
+      // are held for, after the history the session already had.
       const transcript: HarnessTranscriptMessage[] = [
         ...seededSystemPrompt,
         ...record.transcript,
@@ -1622,7 +1624,8 @@ export class HarnessInteractiveChatService {
       options.fabricSession;
     if (
       options.engine === undefined && skillsRoot === undefined &&
-      fabricSession === undefined
+      fabricSession === undefined &&
+      (options.patternRefs?.length ?? 0) === 0
     ) {
       // Nothing configured needs a run to be brought up before its first model
       // turn, and constructing an engine to discover that would build a
@@ -1651,11 +1654,15 @@ export class HarnessInteractiveChatService {
     policy: HarnessChatPolicy,
     browserAccess?: HarnessChatBrowserAccessLease,
     inputCells?: readonly HarnessInputCellSpec[],
+    patternRefs?: readonly HarnessPatternRefSpec[],
   ): CreateHarnessPromptLoopOptions {
     return {
       ...this.#basePromptLoopOptions,
       ...(inputCells !== undefined && inputCells.length > 0
         ? { inputCells }
+        : {}),
+      ...(patternRefs !== undefined && patternRefs.length > 0
+        ? { patternRefs }
         : {}),
       ...(session.workspace?.hostPath !== undefined
         ? { workspaceHostPath: session.workspace.hostPath }
