@@ -15,6 +15,7 @@ import {
   COVERAGE_PROFILE_DIR,
   COVERAGE_REPORT_DIR,
   describeConflicts,
+  describeFailures,
   describePlan,
   describeWithheld,
   fullLanes,
@@ -1068,6 +1069,62 @@ describe("running a lane's work", () => {
       testIdentityKey({ k: "integration", s: "runner", n: "attaches" }),
     );
     expect(lines.join("\n")).toContain("kept as written");
+  });
+
+  it("names the invocation that failed, the suite and what it ran", () => {
+    // A lane runs commands that are not tests, and those say nothing a
+    // reader can pick out of the thousands of passing lines around them.
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      describeFailures([{
+        suite: "repo-gates",
+        units: ["deno-fmt"],
+        command: "deno fmt --check",
+      }]);
+    } finally {
+      console.log = log;
+    }
+    const printed = lines.join("\n");
+    expect(printed).toContain("One invocation");
+    expect(printed).toContain("repo-gates");
+    expect(printed).toContain("deno-fmt");
+    expect(printed).toContain("deno fmt --check");
+  });
+
+  it("gives the length of a unit list too long to read whole", () => {
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      describeFailures([{
+        suite: "workspace-unit",
+        units: ["a", "b", "c", "d", "e"],
+        command: "deno task test",
+        cwd: "/repo/packages/ui",
+        run: 2,
+      }]);
+    } finally {
+      console.log = log;
+    }
+    const printed = lines.join("\n");
+    expect(printed).toContain("5, starting a, b, c");
+    expect(printed).not.toContain(", d, e");
+    expect(printed).toContain("run 2");
+    expect(printed).toContain("/repo/packages/ui");
+  });
+
+  it("says nothing about a lane whose every invocation passed", () => {
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    try {
+      describeFailures([]);
+    } finally {
+      console.log = log;
+    }
+    expect(lines).toEqual([]);
   });
 
   it("says nothing when every record was one its suite describes", () => {

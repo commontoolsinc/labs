@@ -238,6 +238,34 @@ export async function changedFiles(
   );
 }
 
+/**
+ * One invocation of a batch that exited non-zero.
+ *
+ * A lane runs test commands and commands that are not tests, and only
+ * the first kind names what went wrong on its way out. A gate prints
+ * the diagnostic it was written to print and exits, a build prints a
+ * compiler error, and a task that does not exist prints the list of
+ * tasks that do — none of which a reader can tell from the thousands of
+ * passing lines around it. So the lane says which of its own invocations
+ * failed, rather than leaving that to be recovered from the log.
+ */
+export interface Failure {
+  /** The suite the batch belongs to. */
+  suite: string;
+
+  /** The units the invocation was asked for. */
+  units: readonly string[];
+
+  /** What ran, as a command line. */
+  command: string;
+
+  /** Where it ran, when that is not the repository root. */
+  cwd?: string;
+
+  /** Which run of a repeated batch, where a batch repeats. */
+  run?: number;
+}
+
 /** One suite's share of a lane, and what runs inside it. */
 export interface Batch {
   suite: Suite;
@@ -436,10 +464,12 @@ export async function runBatch(
   ok: boolean;
   records: TestRecord[];
   conflicts: TestRecord[];
+  failures: Failure[];
   seconds: number;
 }> {
   const records: TestRecord[] = [];
   const conflicts: TestRecord[] = [];
+  const failures: Failure[] = [];
   let ok = true;
   let seconds = 0;
   for (let run = 1; run <= batch.repeats; run++) {
@@ -475,7 +505,20 @@ export async function runBatch(
         ...invocation.env,
       });
       seconds += outcome.seconds;
-      if (!outcome.ok) ok = false;
+      if (!outcome.ok) {
+        ok = false;
+        const failure: Failure = {
+          suite: batch.suite.id,
+          units: batch.units.map((request) => request.unit),
+          command: invocation.command.join(" "),
+          ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
+          ...(batch.repeats > 1 ? { run } : {}),
+        };
+        failures.push(failure);
+        // One line where it happened, so the report at the end can be
+        // found again in the stream of everything the batches printed.
+        console.error(`ci-lane: ${failure.suite} failed: ${failure.command}`);
+      }
       const collected = await collectRecords({
         spoolDir: batchSpool,
         junit: (invocation.junit ?? []).map((output) => ({
@@ -507,7 +550,7 @@ export async function runBatch(
       ),
     ]);
   }
-  return { ok, records, conflicts, seconds };
+  return { ok, records, conflicts, failures, seconds };
 }
 
 /**
@@ -564,6 +607,37 @@ export function describeConflicts(conflicts: readonly TestRecord[]): void {
     "declare, so they were kept as written rather than marked:",
     "",
     ...conflicts.map((record) => `- ${testIdentityKey(record.test)}`),
+  ]);
+}
+
+/**
+ * Names every invocation of this lane that exited non-zero, in the job
+ * summary as well as the log.
+ *
+ * The units are what narrows a failure to the work that caused it, and a
+ * batch may hold hundreds of them, so a long list gives its length and
+ * the first few rather than all of them. The command is what a person
+ * runs next.
+ */
+export function describeFailures(failures: readonly Failure[]): void {
+  if (failures.length === 0) return;
+  const named = (units: readonly string[]): string =>
+    units.length <= 4
+      ? units.join(", ")
+      : `${units.length}, starting ${units.slice(0, 3).join(", ")}`;
+  say([
+    failures.length === 1
+      ? "One invocation of this lane failed:"
+      : `${failures.length} invocations of this lane failed:`,
+    "",
+    ...failures.flatMap((failure) => [
+      `- \`${failure.suite}\`${
+        failure.run === undefined ? "" : `, run ${failure.run}`
+      }, over ${named(failure.units)}`,
+      `  - \`${failure.command}\`${
+        failure.cwd === undefined ? "" : ` in \`${failure.cwd}\``
+      }`,
+    ]),
   ]);
 }
 
@@ -1026,6 +1100,7 @@ export async function runLane(
   const spool = recordsDir();
   let ok = true;
   const conflicts: TestRecord[] = [];
+  const failures: Failure[] = [];
   try {
     // Opening the capabilities is inside this, because a server that
     // refuses to start writes the only account of why into the working
@@ -1067,6 +1142,7 @@ export async function runLane(
         );
         if (!result.ok) ok = false;
         conflicts.push(...result.conflicts);
+        failures.push(...result.failures);
       }
       if (options.full || gate.members.length > 0) {
         await convertCoverage(options.root);
@@ -1085,6 +1161,7 @@ export async function runLane(
     // it, so it goes whether the batches passed, failed, or never ran.
     await Deno.remove(workDir, { recursive: true }).catch(() => {});
   }
+  describeFailures(failures);
   describeConflicts(conflicts);
   return ok;
 }
