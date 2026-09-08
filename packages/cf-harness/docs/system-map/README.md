@@ -98,33 +98,18 @@ with the file and the sources above in hand:
   close to separate, and every label unreadable at fit zoom; then judge whether
   status color still lives only on gates and threats.
 
+One boundary is described in words rather than drawn: the read ceiling a run
+carries (`--max-confidentiality` / `cfc.maxConfidentiality`) is told in the
+value-release gate's copy, because it is a second read boundary and the map has
+one release diamond. Giving it a diamond of its own is a geometry change, so it
+waits for a redraw rather than an edit.
+
 Regenerating the review screenshots takes a local static server, since browsers
 block `file:` navigation from automation:
 
 ```sh
 cd packages/cf-harness/docs/system-map && python3 -m http.server 8765 --bind 127.0.0.1
 ```
-
-## Since the snapshot
-
-The map predates the run read ceiling (`--max-confidentiality` /
-`cfc.maxConfidentiality`, [CURRENT_STATE.md](../CURRENT_STATE.md) "Fabric
-session" and deviation 9 in
-[IMPLEMENTATION_PROFILE.md](../IMPLEMENTATION_PROFILE.md)). It still draws the
-harness's fixed answer ceiling as the only read boundary. The ceiling a run
-carries is enforced by the runner's `db.query` builtin, on session-scoped query
-results only, with a space-scoped query refused; a shared cell another runtime
-filled is outside it. Redraw that boundary the next time the map is regenerated.
-
-The map also predates a task's pattern references: it draws
-`POST /api/task {text, inputCells}`, and a body may now carry
-`patternRefs: [{ patternId }]` beside those, which the run resolves against the
-index before its first model turn and seeds as searched hits
-([CURRENT_STATE.md](../CURRENT_STATE.md) "pattern references attached to a
-task", and the console's own [README](../../console/README.md)). No boundary
-moves: an id is a content hash the index either holds or does not, and what a
-reference grants is what a search hit grants. Add the field to that edge's label
-the next time the map is regenerated.
 
 ## Relation to the other documents here
 
