@@ -70,6 +70,11 @@ describe("cfc spec gallery integration test", () => {
         pieceId: piece.id,
       },
       identity,
+      // The subject is what each trusted surface declares for itself. The
+      // render ceiling denies author-supplied declassification, so this case
+      // runs the profile without it; the case below runs the same page with
+      // it.
+      renderCeiling: false,
     });
 
     await clickTrustedActionAndWaitForText(
@@ -145,9 +150,9 @@ describe("cfc spec gallery integration test", () => {
       // labels. Two of them sit outside the §8.10.6 display profile, so the
       // render ceiling blocks their cards and takes those labels with them;
       // this case runs the profile without the ceiling, and the case below
-      // runs the same page with it. `isCfcRenderCeilingEnabled` reads the key
-      // as `=== "true"`, so `false` selects the profile this page would take
-      // with no key at all until that reader changes.
+      // runs the same page with it. The key records an opt-out, so stating
+      // `false` is what selects this profile; a page with no key at all takes
+      // the ceiling.
       renderCeiling: false,
     });
 
