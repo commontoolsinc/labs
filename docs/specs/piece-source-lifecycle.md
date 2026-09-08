@@ -606,6 +606,20 @@ The runtime rejects that source until the input is repaired. An accepted direct
 replacement detaches the piece and appends a revision. Refollowing an accepted
 historical origin retains that origin.
 
+Preflight and setup share stored-argument validation. Optional fields holding
+`undefined` count as absent. An argument document or linked value unreadable in
+the validating transaction defers to reactive reads; a readable wrong-typed
+value is refused. Preflight does not establish that every linked value is
+available.
+
+A source update can preserve a committed direct handle under an unchanged
+consumer input contract. The retained bytes and equivalent contracts in both
+directions must be proven; a newly introduced link cannot use this rule. The
+linked producer retains its own store policy and enforces it on accesses, so
+its policy does not have to be repeated on the unchanged consumer contract.
+Capability-kind and scope checks still apply. Changed handle contracts require
+the full producer-contract proof.
+
 Whether an automatic origin update runs these comparisons turns on one
 question: did anything gate the release that produced the candidate?
 

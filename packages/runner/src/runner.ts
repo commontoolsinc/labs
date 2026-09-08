@@ -2569,6 +2569,33 @@ export class Runner {
     }
   }
 
+  /**
+   * Validate a piece's stored argument against a candidate without staging it.
+   *
+   * Uses setup's value validation and defaults. Unreadable argument documents
+   * and linked slots defer to reactive reads; readable wrong-typed values
+   * throw a stored-argument schema refusal. Optional `undefined` fields count
+   * as absent. Validation reads the supplied transaction's snapshot.
+   */
+  validateStoredArgument<R>(
+    tx: IExtendedStorageTransaction,
+    resultCell: Cell<R>,
+    pattern: Pattern,
+  ): void {
+    const argumentLink = getMetaLink(resultCell, "argument");
+    if (argumentLink === undefined) return;
+    const stored = this.#runtime.getCellFromLink(argumentLink, undefined, tx)
+      .getRaw({ meta: ignoreReadForScheduling });
+    if (stored === undefined) return;
+    const defaults = extractDefaultValues(pattern.argumentSchema);
+    this.#validateArgument(
+      tx,
+      argumentLink,
+      pattern.argumentSchema,
+      defaults,
+    );
+  }
+
   #resolveSetupPattern(
     patternOrModule: Pattern | Module | undefined,
     previousIdentityRef: { identity: string; symbol: string } | undefined,
@@ -2789,36 +2816,6 @@ export class Runner {
     }
   }
 
-  /**
-   * Check a piece's STORED argument against `pattern`'s schema without staging
-   * anything. Used where the caller must not move the piece but must not
-   * report success over an argument nobody has checked either.
-   *
-   * Mirrors the re-stage branch's deferrals deliberately, so the two paths
-   * cannot disagree about what counts as valid: an argument doc that reads
-   * nothing right now is skipped (CT-1917 — a nested piece's argument lives in
-   * its host's doc, and "not synced" is not "invalid"), and `#validateArgument`
-   * itself defers any slot whose stored link chain cannot be read right now.
-   */
-  #validateStoredArgument<R>(
-    tx: IExtendedStorageTransaction,
-    resultCell: Cell<R>,
-    pattern: Pattern,
-  ): void {
-    const argumentLink = getMetaLink(resultCell, "argument");
-    if (argumentLink === undefined) return;
-    const stored = this.#runtime.getCellFromLink(argumentLink, undefined, tx)
-      .getRaw({ meta: ignoreReadForScheduling });
-    if (stored === undefined) return;
-    const defaults = extractDefaultValues(pattern.argumentSchema);
-    this.#validateArgument(
-      tx,
-      argumentLink,
-      pattern.argumentSchema,
-      defaults,
-    );
-  }
-
   #updateResultSchemaMeta<R>(
     tx: IExtendedStorageTransaction,
     resultCell: Cell<R>,
@@ -2882,7 +2879,7 @@ export class Runner {
 
     if (argument === undefined && setupState.sameStoredSetup) {
       if (setupState.restageStoredArgument) {
-        this.#validateStoredArgument(tx, resultCell, pattern);
+        this.validateStoredArgument(tx, resultCell, pattern);
       }
       return { resultCell, patternRef, needsStart: false };
     }
