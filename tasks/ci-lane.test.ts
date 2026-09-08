@@ -1020,8 +1020,10 @@ describe("running a lane's work", () => {
 
 describe("planning a lane without running it", () => {
   it("plans the full run against the working tree", async () => {
-    // The full run switches selection off, so this reaches the topology
-    // and the packing without a manifest or a store.
+    // What this reaches is the topology and the packing. Selection is
+    // off, but the manifest is read either way for what things cost, so
+    // the store is held out the way the no-share case holds it out:
+    // otherwise this packs against whatever was published last.
     const lines: string[] = [];
     const log = console.log;
     console.log = (line: string) => lines.push(line);
@@ -1034,6 +1036,9 @@ describe("planning a lane without running it", () => {
         dryRun: true,
         laneCount: false,
         root: REPOSITORY,
+      }, {
+        manifest: (at) =>
+          Promise.resolve({ absent: `no manifest at ${at}: held out here` }),
       });
     } finally {
       console.log = log;
