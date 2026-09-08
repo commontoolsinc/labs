@@ -246,8 +246,8 @@ export async function changedFiles(
  * the diagnostic it was written to print and exits, a build prints a
  * compiler error, and a task that does not exist prints the list of
  * tasks that do — none of which a reader can tell from the thousands of
- * passing lines around it. So the lane says which of its own invocations
- * failed, rather than leaving that to be recovered from the log.
+ * passing lines around it. So the lane names the invocations of its own
+ * that failed.
  */
 export interface Failure {
   /** The suite the batch belongs to. */
@@ -1157,12 +1157,12 @@ export async function runLane(
     throw error;
   } finally {
     if (!ok) await keepLogs(workDir, path.join(options.root, LOG_DIR));
-    // What the batches found is said here rather than after this block,
-    // because a lane that threw part way through still ran the batches
-    // before it, and those are the more useful account of what went
-    // wrong. Reporting is caught for the same reason keeping the logs is:
-    // it runs while the lane may already be failing, and an error raised
-    // here would replace the one on its way out.
+    // What the batches found is said whichever way the lane leaves: one
+    // that raised part way through still ran the batches before it, and
+    // those are the account of what went wrong. Reporting is caught for
+    // the same reason keeping the logs is: it runs while the lane may
+    // already be failing, and an error raised here would replace the one
+    // on its way out.
     try {
       describeFailures(failures);
       describeConflicts(conflicts);

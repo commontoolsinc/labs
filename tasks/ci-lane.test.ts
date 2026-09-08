@@ -1881,9 +1881,8 @@ describe("what a lane does with the batches it was given", () => {
   });
 
   it("says what failed even where a later batch threw", async () => {
-    // The batches before the throw are the more useful account of what
-    // went wrong, and reporting them after the block that raises would
-    // never reach them.
+    // The batches before the throw are the account of what went wrong,
+    // and a lane says it whichever way it leaves.
     const lines: string[] = [];
     const log = console.log;
     console.log = (line: string) => lines.push(line);
@@ -1936,10 +1935,9 @@ describe("what a lane does with the batches it was given", () => {
       console.log = log;
     }
     // The error is what the lane exits with; the failed batch is what it
-    // still has to say about the work it did before that. The wording
-    // here belongs to the failure report alone: the suite's own name
-    // reaches this output through the plan table as well, so asserting
-    // on that would pass whether the report ran or not.
+    // still has to say about the work it did before that. The plan table
+    // names every suite in the lane, so the wording asserted on here is
+    // the failure report's own.
     expect(lines.join("\n")).toContain("One invocation of this lane failed");
   });
 
