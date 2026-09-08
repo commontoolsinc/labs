@@ -94,15 +94,14 @@ export function bodyOf(
  * untouched, so an unfamiliar overload still runs and still reports its
  * own error.
  *
- * With no capture installed there is no skip list to apply and no chain
- * for anything to read, so the call goes straight through.
+ * The capture is handed in rather than looked up, because a wrapper is
+ * only built where one is installed.
  */
 export function wrapDescribe(
   through: AnyFunction,
-  capture: () => RegistrationCapture | undefined = activeCapture,
+  capture: () => RegistrationCapture,
 ): AnyFunction {
   return (...args: unknown[]): unknown => {
-    if (capture() === undefined) return through(...args);
     const name = nameOf(args);
     const found = bodyOf(args);
     if (name === undefined || found === undefined) return through(...args);
@@ -149,11 +148,10 @@ export function wrapDescribe(
 export function wrapIt(
   through: AnyFunction,
   ignore: AnyFunction,
-  active: () => RegistrationCapture | undefined = activeCapture,
+  active: () => RegistrationCapture,
 ): AnyFunction {
   return (...args: unknown[]): unknown => {
     const capture = active();
-    if (capture === undefined) return through(...args);
     const name = nameOf(args);
     if (name === undefined) return through(...args);
     const identity = [...chain, name].join(NAME_SEPARATOR);
@@ -179,8 +177,7 @@ function withEntryPoints(
 }
 
 /**
- * Whether anything registered through this module has work to do, read
- * once as this module is evaluated.
+ * The capture installed before this module was evaluated, read once.
  *
  * Deno names a case's class after the nearest frame of the tree's own
  * code below the runner, so a wrapper here takes that name from the test
@@ -193,30 +190,31 @@ function withEntryPoints(
  * either a wrapper or the real function, and it is fixed before the
  * first `describe` runs. The preload installs the capture before any
  * test module loads, and `installRegistrationCapture` reports an
- * invocation that loaded this module ahead of it.
+ * invocation that loaded this module ahead of it. Nothing uninstalls a
+ * capture, so a wrapper built here has one for as long as it lives.
  */
-const capturing = activeCapture() !== undefined;
+const capture = activeCapture();
 
 /** `describe`, tracking the chain its body registers inside. */
-export const describe: typeof realDescribe = capturing
-  ? withEntryPoints(
-    wrapDescribe(realDescribe as unknown as AnyFunction),
+export const describe: typeof realDescribe = capture === undefined
+  ? realDescribe
+  : withEntryPoints(
+    wrapDescribe(realDescribe as unknown as AnyFunction, () => capture),
     realDescribe as unknown as AnyFunction,
-    wrapDescribe,
-  ) as typeof realDescribe
-  : realDescribe;
+    (through) => wrapDescribe(through, () => capture),
+  ) as typeof realDescribe;
 
 const realIgnore = (realIt as unknown as Record<string, AnyFunction>).ignore ??
   (realIt as unknown as AnyFunction);
 
 /** `it`, registering a listed leaf as ignored rather than running it. */
-export const it: typeof realIt = capturing
-  ? withEntryPoints(
-    wrapIt(realIt as unknown as AnyFunction, realIgnore),
+export const it: typeof realIt = capture === undefined
+  ? realIt
+  : withEntryPoints(
+    wrapIt(realIt as unknown as AnyFunction, realIgnore, () => capture),
     realIt as unknown as AnyFunction,
-    (through) => wrapIt(through, realIgnore),
-  ) as typeof realIt
-  : realIt;
+    (through) => wrapIt(through, realIgnore, () => capture),
+  ) as typeof realIt;
 
 /** The alias `@std/testing/bdd` gives `it`. */
 export const test: typeof realIt = it;
