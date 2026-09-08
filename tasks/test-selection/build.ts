@@ -40,6 +40,7 @@ import {
   value,
 } from "./score.ts";
 import { claimsFor } from "../test-topology.ts";
+import { isLaneMeasurement } from "../lane-measurement.ts";
 import type { Suite } from "../test-topology/suite.ts";
 import {
   type Calibration,
@@ -98,6 +99,19 @@ export interface AggregateState {
   compacted: string[];
 
   states: Record<string, IdentityState>;
+
+  /**
+   * Every identity no run has worked out a unit for, kept from one
+   * publish to the next. A run reads surfaces only from the objects it
+   * folds for the first time, so a surface recording less often than the
+   * publisher runs is absent from most runs; keeping the list across them
+   * is what lets a run tell an identity recorded once and not yet given a
+   * unit from one whose records keep arriving and keep saying too little.
+   * An entry is removed when the topology has a unit for its identity, or
+   * when it names something the count no longer holds, so the list is
+   * what the tree still says nothing about.
+   */
+  unclaimed?: string[];
 }
 
 /** A fresh aggregate, for a cold start. */
@@ -183,6 +197,13 @@ export function parseAggregate(text: string): AggregateState | undefined {
   const compacted = state.compacted === undefined
     ? (written as string[]).map((day) => sourceDateKey(CI_SOURCE, day))
     : written as string[];
+  // What was unplaced last time is compared against rather than folded,
+  // so an aggregate written without it, or with something that is not a
+  // list of identities, is read as having nothing to compare against.
+  const unclaimed = Array.isArray(state.unclaimed) &&
+      state.unclaimed.every((key) => typeof key === "string")
+    ? state.unclaimed as string[]
+    : undefined;
   return {
     schema: MANIFEST_SCHEMA_VERSION,
     day: state.day,
@@ -190,6 +211,7 @@ export function parseAggregate(text: string): AggregateState | undefined {
     context: serializeContext(parseContext(state.context)),
     compacted,
     states: state.states as Record<string, IdentityState>,
+    ...(unclaimed === undefined ? {} : { unclaimed }),
   };
 }
 
@@ -319,10 +341,22 @@ export function recordSurface(
   test: TestIdentity,
   file: string | undefined,
 ): Surface {
-  const suite = test.v === undefined
+  return {
+    suite: surfaceName(test),
+    unit: file ?? test.n,
+    fromFile: file !== undefined,
+  };
+}
+
+/**
+ * The surface an identity's own record names: the kind of check, the
+ * workspace member that owns it, and the configuration it ran under where
+ * that is not the default one.
+ */
+export function surfaceName(test: TestIdentity): string {
+  return test.v === undefined
     ? `${test.k}:${test.s}`
     : `${test.k}:${test.s}:${test.v}`;
-  return { suite, unit: file ?? test.n, fromFile: file !== undefined };
 }
 
 /** What the topology could not place, and why. */
@@ -337,10 +371,21 @@ export interface Unplaced {
   suiteLevel: string[];
 
   /**
-   * Identities no suite claims at a unit level. An identity recorded
-   * before the registration preload carried its file is the usual one:
-   * the store knows the test and nothing knows which file registers it,
-   * so it will be placed again the first time it runs and records one.
+   * Identities the topology has no unit for. What decides an identity's
+   * unit is its own records: the file, for a suite whose units are files,
+   * and the recorded name for one whose units are not. An identity whose
+   * records say neither is given a unit the first time it records one the
+   * tree holds. An identity that matches two suites is here as well, which
+   * is a topology defect the drift guard fails on rather than a record
+   * that says too little. The lane's measurements of itself are not here:
+   * they are not test surfaces, and `isLaneMeasurement` is what says so.
+   *
+   * A count of these alone says nothing about which of those it holds. A
+   * run reads surfaces only from the objects it folds for the first time,
+   * so an identity here that `AggregateState.unclaimed` already held has
+   * recorded more since and still has no unit. That is a surface whose
+   * records never say which unit, rather than one whose next record
+   * will.
    */
   unclaimed: string[];
 }
@@ -370,6 +415,9 @@ export function locateSurfaces(
   for (const [key, surface] of surfaces) {
     const test = identityOfKey(key);
     if (test === undefined) continue;
+    // A lane's measurement of its own setup or of one of its batches is
+    // not a test surface: no suite claims one, and none should.
+    if (isLaneMeasurement(test)) continue;
     const claims = claimsFor(suites, {
       test,
       // The unit a record's own surface fell back to is the file where
