@@ -75,9 +75,10 @@ import {
   type WorkflowRun,
 } from "./ci-check-lib.ts";
 import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
+import type { Suite } from "./test-topology/suite.ts";
 import { census } from "./test-selection/census.ts";
 import { plan } from "./test-selection/plan.ts";
-import { fetchManifest } from "./test-selection/store.ts";
+import { fetchManifest, type ManifestFetch } from "./test-selection/store.ts";
 import type { Manifest, WithheldReason } from "./test-selection/manifest.ts";
 import {
   buildReport,
@@ -177,7 +178,9 @@ export async function runAt(
  * step always writes the file, so one that is not there is a truncated
  * artifact and contributes nothing.
  */
-async function recordsInDirectory(directory: string): Promise<TestRecord[]> {
+export async function recordsInDirectory(
+  directory: string,
+): Promise<TestRecord[]> {
   let text: string;
   try {
     text = await Deno.readTextFile(join(directory, "records.ndjson"));
@@ -313,8 +316,27 @@ export async function coverageOfRun(
   );
 }
 
+/**
+ * What the reporter reads from outside itself.
+ *
+ * A caller that supplies one of these is saying what is there — what the
+ * checkout holds, what the tree declares, what the store has — which is
+ * how everything the reporter does with those answers is exercised
+ * without a checkout, a tree, or a store to read.
+ */
+export interface ReportDeps {
+  /** Runs git in the checkout. */
+  git?: (...args: string[]) => Promise<string>;
+
+  /** The suites the working tree declares. */
+  topology?: () => Promise<Suite[]>;
+
+  /** The manifest the store holds at a moment. */
+  manifest?: (at: string) => Promise<ManifestFetch>;
+}
+
 /** Runs git in the checkout and returns what it printed. */
-async function git(...args: string[]): Promise<string> {
+export async function runGit(...args: string[]): Promise<string> {
   const { code, stdout, stderr } = await new Deno.Command("git", {
     args,
     stdout: "piped",
@@ -343,7 +365,7 @@ async function git(...args: string[]): Promise<string> {
  * not being written, so this is the one place the reporter carries on
  * without an answer.
  */
-async function pullRequestHead(
+export async function pullRequestHead(
   pullRequest: number,
 ): Promise<{ sha: string; at: string } | "absent" | undefined> {
   let head: string;
@@ -486,7 +508,11 @@ async function runUnderReport(): Promise<WorkflowRun | undefined> {
   return event.workflow_run;
 }
 
-export async function main(dryRun = false): Promise<void> {
+export async function main(
+  dryRun = false,
+  deps: ReportDeps = {},
+): Promise<void> {
+  const git = deps.git ?? runGit;
   const run = await runUnderReport();
   if (run === undefined || !isReportable(run)) {
     console.log(
@@ -555,14 +581,17 @@ export async function main(dryRun = false): Promise<void> {
     const ran = theirRun === undefined
       ? undefined
       : await outcomesFromStore(theirRun);
-    const fetched = await fetchManifest({ at: head.at });
+    const fetched = await (deps.manifest ?? ((at: string) =>
+      fetchManifest({ at })))(head.at);
     if (fetched.manifest === undefined) {
       console.log(`No manifest at ${head.at}: ${fetched.absent}`);
     }
     view = {
-      ...(fetched.manifest === undefined
-        ? unknownPullRequest()
-        : manifestView(fetched.manifest, await loadTopology(), changed)),
+      ...(fetched.manifest === undefined ? unknownPullRequest() : manifestView(
+        fetched.manifest,
+        await (deps.topology ?? loadTopology)(),
+        changed,
+      )),
       ...(ran === undefined ? {} : { ran }),
     };
   }

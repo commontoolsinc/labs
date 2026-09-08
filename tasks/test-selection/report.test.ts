@@ -208,6 +208,24 @@ describe("report", () => {
       expect(selectionOf(view, key("kneads"))).toBe("did-not-run");
     });
 
+    // Under selection a lane runs a unit with a skip list, so a skip is
+    // the selector's own decision and the manifest says so. A skip no
+    // manifest explains is the test skipping itself.
+    it("separates a skip the selector chose from one the test chose", () => {
+      const chosen = ranThere([["kneads", "skip"]], {
+        flakeRates: new Map([[key("kneads"), 0]]),
+      });
+      expect(selectionOf(chosen, key("kneads"))).toBe("not-selected");
+      const itself: PullRequestView = {
+        ...unknownPullRequest(),
+        manifest: true,
+        ran: run([["kneads", "skip"]]),
+        selected: new Set([key("kneads")]),
+        flakeRates: new Map([[key("kneads"), 0]]),
+      };
+      expect(selectionOf(itself, key("kneads"))).toBe("skipped-there");
+    });
+
     // An identity the packing reached, and one the store has never seen,
     // are both identities that run. A run with no record of either
     // recorded less than it ran rather than running less than it should
@@ -222,6 +240,29 @@ describe("report", () => {
   });
 
   describe("firstFailures()", () => {
+    // Its inputs are keys this module's own vocabulary produced, so one
+    // that is not an identity is a caller in breach rather than data to
+    // work around.
+    it("refuses a key that is not a test identity", () => {
+      expect(() =>
+        firstFailures(input({
+          previous: new Map([["not a key", "pass"]]),
+          current: new Map([["not a key", "fail"]]),
+        }))
+      ).toThrow("not a test identity key");
+    });
+
+    it("names failures in a settled order", () => {
+      const failures = firstFailures(input({
+        previous: run([["proves", "pass"], ["bakes", "pass"]]),
+        current: run([["proves", "fail"], ["bakes", "fail"]]),
+      }));
+      expect(failures.map((failure) => failure.test.n)).toEqual([
+        "bakes",
+        "proves",
+      ]);
+    });
+
     it("names a test that passed before and failed at this commit", () => {
       const failures = firstFailures(input({
         previous: run([["kneads", "pass"]]),
@@ -423,6 +464,16 @@ describe("report", () => {
       expect(rises[0]?.route).toBe("gated");
     });
 
+    // A package the run before this one did not measure has no figure to
+    // compare against, and calling its first figure a rise would report
+    // every package the moment it gains a gate.
+    it("says nothing about a package the run before did not measure", () => {
+      expect(packageRises(input({
+        coverage: ownTests([[gated, 14]]),
+        touched: new Set(["tasks"]),
+      }))).toEqual([]);
+    });
+
     it("says nothing about a package that did not rise", () => {
       expect(packageRises(input({
         coverageBefore: ownTests([[gated, 10]]),
@@ -613,6 +664,63 @@ describe("report", () => {
           flakeRates: new Map([[key("kneads the dougk"), 0]]),
         },
       }))).toEqual([]);
+    });
+
+    // A variant is a separate history by construction, so a test under
+    // one is never the same test as one under another.
+    it("does not pair across variants", () => {
+      const gone = testIdentityKey({ ...test("kneads the dough"), v: "on" });
+      const arrived = testIdentityKey({
+        ...test("kneads the dougk"),
+        v: "off",
+      });
+      expect(renames(input({
+        previous: new Map([[gone, "pass" as const]]),
+        current: new Map([[arrived, "pass" as const]]),
+        pullRequest: {
+          ...unknownPullRequest(),
+          manifest: true,
+          catches: new Map([[gone, 4]]),
+          units: new Map([
+            [gone, "workspace-unit\tbakery"],
+            [arrived, "workspace-unit\tbakery"],
+          ]),
+        },
+      }))).toEqual([]);
+    });
+
+    it("offers each of two renames made in one change", () => {
+      const suggestions = renames(input({
+        previous: run([
+          ["kneads the dough", "pass"],
+          ["lights the oven", "pass"],
+          ["proves", "pass"],
+        ]),
+        current: run([
+          ["kneads the dougk", "pass"],
+          ["lights the ovek", "pass"],
+          ["proves", "pass"],
+        ]),
+        pullRequest: {
+          ...unknownPullRequest(),
+          manifest: true,
+          catches: new Map([
+            [key("kneads the dough"), 4],
+            [key("lights the oven"), 2],
+          ]),
+          units: inOneUnit(
+            "kneads the dough",
+            "lights the oven",
+            "kneads the dougk",
+            "lights the ovek",
+            "proves",
+          ),
+        },
+      }));
+      expect(suggestions.map((suggestion) => suggestion.from.n)).toEqual([
+        "kneads the dough",
+        "lights the oven",
+      ]);
     });
 
     it("does not pair across scopes", () => {
@@ -919,6 +1027,26 @@ describe("report", () => {
         context,
       )!;
       expect(body).toContain("somewhere else in the repository");
+    });
+
+    it("names the exclusion list's reason and the packages counted", () => {
+      const excluded = [...EXCLUDED_FROM_COVERAGE_GATE.keys()][0]!;
+      const body = renderReport(
+        buildReport(input({
+          touched: new Set([
+            "packages/memory",
+            "packages/ui",
+            "packages/html",
+            "tasks",
+          ]),
+          coverageBefore: ownTests([[excluded, 10], ["packages/memory", 4]]),
+          coverage: ownTests([[excluded, 14], ["packages/memory", 9]]),
+        })),
+        context,
+      )!;
+      expect(body).toContain("The list gives the reason:");
+      expect(body).toContain(EXCLUDED_FROM_COVERAGE_GATE.get(excluded));
+      expect(body).toContain("The change touched 3 covered packages.");
     });
 
     it("says the coverage note is not a failure", () => {
