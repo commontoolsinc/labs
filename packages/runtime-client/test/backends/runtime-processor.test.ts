@@ -5054,8 +5054,8 @@ describe("runtime-processor", () => {
           >[2],
         ),
       );
-      expect(options.cfcEnforcementMode).toBe("enforce-explicit");
-      expect(options.cfcFlowLabels).toBeUndefined();
+      expect(options.cfcEnforcementMode).toBe("enforce-strict");
+      expect(options.cfcFlowLabels).toBe("persist");
       expect(options.cfcReadMaxConfidentiality).toBeUndefined();
       expect(options.cfcReadOnExceed).toBeUndefined();
     });
