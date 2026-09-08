@@ -1391,6 +1391,14 @@ export type EngineOpener = (
   open: (space: string) => Promise<Engine.Engine>,
 ) => Promise<Engine.Engine>;
 
+/**
+ * The memory v2 server. An instance accepts connections and serves the
+ * session protocol over them — opening sessions, admitting transactions,
+ * evaluating queries and watches, and fanning out sync frames as spaces
+ * change — with one engine per space it serves and every request gated by
+ * that space's access control. It also reads and writes documents directly,
+ * outside any session, for in-process callers such as blob uploads.
+ */
 export class Server {
   #sessions: SessionRegistry;
   #connections = new Map<string, Connection>();
@@ -1513,16 +1521,6 @@ export class Server {
   #ensuredSchemas = new Map<string, true>();
 
   #ensuredSchemasMax = 4096;
-
-  #recordSchemaEnsured(key: string): void {
-    this.#ensuredSchemas.set(key, true);
-    if (this.#ensuredSchemas.size > this.#ensuredSchemasMax) {
-      const oldest = this.#ensuredSchemas.keys().next().value as
-        | string
-        | undefined;
-      if (oldest !== undefined) this.#ensuredSchemas.delete(oldest);
-    }
-  }
 
   constructor(
     readonly options: {
@@ -6954,6 +6952,20 @@ export class Server {
       if (liveExecutionLeaseHolder(engine, space) === holder) return space;
     }
     return undefined;
+  }
+
+  /**
+   * Records `key` in `#ensuredSchemas`, evicting the oldest entry once the
+   * map exceeds `#ensuredSchemasMax`.
+   */
+  #recordSchemaEnsured(key: string): void {
+    this.#ensuredSchemas.set(key, true);
+    if (this.#ensuredSchemas.size > this.#ensuredSchemasMax) {
+      const oldest = this.#ensuredSchemas.keys().next().value as
+        | string
+        | undefined;
+      if (oldest !== undefined) this.#ensuredSchemas.delete(oldest);
+    }
   }
 }
 
