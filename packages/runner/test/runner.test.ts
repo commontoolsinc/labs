@@ -1998,6 +1998,40 @@ describe("setup/start", () => {
     )).rejects.toThrow("requires a fresh source transition");
   });
 
+  it("runSynced refuses a run without a pattern", async () => {
+    const resultCell = runtime.getCell(space, "runSynced without a pattern");
+
+    await expect(runtime.runSynced(
+      resultCell,
+      // JavaScript callers can omit the required TypeScript argument; the
+      // runtime boundary must still refuse by name rather than failing on
+      // the first read of the missing pattern.
+      undefined as never,
+      {},
+    )).rejects.toThrow("requires a pattern");
+  });
+
+  it("runSyncedWithCommit refuses a run without a pattern", async () => {
+    const resultCell = runtime.getCell(
+      space,
+      "runSyncedWithCommit without a pattern",
+    );
+    const transition = unreachableReceiptSourceTransition();
+
+    await expect(runtime.runSyncedWithCommit(
+      resultCell,
+      // JavaScript callers can omit the required TypeScript argument; the
+      // runtime boundary must still refuse by name rather than failing on
+      // the first read of the missing pattern.
+      undefined as never,
+      {},
+      {
+        expectedPatternIdentity: transition.expected.pattern,
+        pieceSourceTransition: transition,
+      },
+    )).rejects.toThrow("requires a pattern");
+  });
+
   it("runSyncedWithCommit refuses a source revision ID already in history", async () => {
     const resultCell = runtime.getCell(
       space,
