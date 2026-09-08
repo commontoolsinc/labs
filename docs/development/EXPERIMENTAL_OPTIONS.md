@@ -1179,7 +1179,9 @@ the per-epic implementation notes).
   [`packages/shell/src/lib/render-ceiling.ts`](../../packages/shell/src/lib/render-ceiling.ts).
   Because the ceiling crosses the worker boundary in the fixed initialization
   data, flipping it takes effect on the next runtime (a reload or re-login), not
-  live.
+  live. A browser integration test states the side it needs through the
+  `renderCeiling` option of `ShellIntegration.goto`, which writes the same key
+  after the navigation and before the login.
 - **Added by.** Bernhard Seefeld, in "populate the render confidentiality
   ceiling behind a shell dogfood flag (Epic H3a)" (#4550, 2026-07-07).
 - **Purpose.** Populates the CFC render confidentiality ceiling in the shell's
