@@ -5,7 +5,6 @@ import { cloneIfNecessary, type FabricValue } from "@commonfabric/data-model";
 import {
   CFC_ENFORCEMENT_MODES,
   type CfcEnforcementMode as RunnerCfcEnforcementMode,
-  DEFAULT_CFC_ENFORCEMENT_MODE,
   isCfcEnforcementMode,
 } from "@commonfabric/runner/cfc";
 import { isObjectNotArray } from "@commonfabric/utils/types";
@@ -225,6 +224,14 @@ function statedCfcMode(
 }
 
 /**
+ * The rung a mount runs at when neither `--cfc-mode` nor `CF_CFC_MODE` names
+ * one. A mount is a write path into a real space, so it takes the rung the
+ * first-party presets pin rather than the floor an unconfigured transaction
+ * carries.
+ */
+export const DEFAULT_FUSE_CFC_MODE: CfcEnforcementMode = "enforce-strict";
+
+/**
  * The mode a mount runs its CFC guardrails at.
  *
  * `--cfc-mode` decides when it names a mode, `CF_CFC_MODE` decides otherwise,
@@ -242,7 +249,7 @@ export function resolveCfcMode(options: {
 }): CfcEnforcementMode {
   if (options.cliMode) return statedCfcMode(options.cliMode, "--cfc-mode");
   if (options.envMode) return statedCfcMode(options.envMode, "CF_CFC_MODE");
-  return DEFAULT_CFC_ENFORCEMENT_MODE;
+  return DEFAULT_FUSE_CFC_MODE;
 }
 
 export function shouldEnableCfcAnnotations(options: {
