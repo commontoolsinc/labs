@@ -1,5 +1,6 @@
 import { Identity } from "@commonfabric/identity";
 import { decode } from "@commonfabric/utils/encoding";
+import { dirname } from "@std/path";
 import { cliText } from "./cli-name.ts";
 
 export async function pkcs8FromPassphrase(
@@ -27,7 +28,9 @@ export async function pkcs8FromEntropy(): Promise<string> {
 /**
  * A keyfile `cf` was pointed at yields no identity: the path does not exist,
  * cannot be read, or does not hold a key. The message names the path, what is
- * wrong with it, and what to do, and carries nothing from inside the file: the
+ * wrong with it, and what to do — for a path that does not exist, a line that
+ * creates the directory as well as the file, since a teammate who has never
+ * provisioned a key has neither — and carries nothing from inside the file: the
  * key decoder quotes the bytes it failed on in its own message, and a keyfile
  * that is merely corrupt may still be most of a private key, so that message
  * is not forwarded.
@@ -60,7 +63,9 @@ async function identityFromKeyfile(
         path,
         "does not exist",
         `${POINT_AT} an existing keyfile, or create one there with ` +
-          `\`${cliText("cf id new")} > ${path}\`.`,
+          `\`mkdir -p '${dirname(path)}' && ${
+            cliText("cf id new")
+          } > '${path}'\`.`,
       );
     }
     const reason = error instanceof Error ? error.message : String(error);

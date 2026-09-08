@@ -45,9 +45,25 @@ describe("identity", () => {
       const error = await failureOf(loadIdentity(path));
       expect(error.message).toContain(
         `Identity keyfile ${path} does not exist. Point --identity or ` +
-          "CF_IDENTITY at an existing keyfile, or create one there with `",
+          "CF_IDENTITY at an existing keyfile, or create one there with " +
+          `\`mkdir -p '${dir}' && `,
       );
-      expect(error.message).toContain(`id new > ${path}\`.`);
+      expect(error.message).toContain(`id new > '${path}'\`.`);
+    });
+
+    it("names a keyfile whose directory does not exist, with a remedy that creates it", async () => {
+      // The default keyfile lives under a directory a teammate who has never
+      // provisioned a key does not have; a remedy that only writes the file
+      // fails on the very machine it is written for.
+
+      const below = `${dir}/never/made`;
+      const path = `${below}/identity.key`;
+      const error = await failureOf(loadIdentity(path));
+      expect(error.message).toContain(
+        `Identity keyfile ${path} does not exist.`,
+      );
+      expect(error.message).toContain(`\`mkdir -p '${below}' && `);
+      expect(error.message).toContain(`id new > '${path}'\`.`);
     });
 
     it("names a path that cannot be read, with the system's reason", async () => {
