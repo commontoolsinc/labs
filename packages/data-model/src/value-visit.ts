@@ -20,6 +20,7 @@ import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 import {
   isFabricArray,
   isFabricContainerValue,
+  isFabricPlainObject,
   isValidFabricValue,
 } from "./type-check.ts";
 import { toDebugKindString } from "./value-debug.ts";
