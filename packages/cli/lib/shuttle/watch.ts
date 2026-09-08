@@ -24,6 +24,7 @@ import type { Announce } from "./announce.ts";
 import { oneLine } from "./listing.ts";
 import { marker } from "./page.ts";
 import {
+  ARGUMENT_SUFFIX,
   labelForPlace,
   type PathSegment,
   type PiecePlace,
@@ -94,14 +95,20 @@ export class ArmedWatch {
     columns: () => number,
   ) {
     this.#target = target;
-    this.#label = labelForPlace(target.place);
+    this.#label = labelForPlace(target.place, target.input);
     this.#report = report;
     this.#columns = columns;
   }
 
   /**
    * What names this watch to a reader: the cell it watches, written the short
-   * way the prompt writes the place it stands at.
+   * way the prompt writes the place it stands at, and carrying the suffix
+   * where the cell is the piece's arguments rather than its result.
+   *
+   * That suffix is what makes the name as fine-grained as the watch is. Two
+   * watches on one piece's two cells are two watches, so a name that named
+   * only the place would list them as one line twice, and every line either
+   * wrote would open the same way.
    */
   get label(): string {
     return this.#label;
@@ -117,7 +124,7 @@ export class ArmedWatch {
    */
   get key(): string {
     return `${referenceForPlace(this.#target.place)}${
-      this.#target.input ? "#argument" : ""
+      this.#target.input ? ARGUMENT_SUFFIX : ""
     }`;
   }
 

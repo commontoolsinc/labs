@@ -101,6 +101,7 @@ import {
 } from "./options.ts";
 import { ASSUMED_COLUMNS, marker, wrapped } from "./page.ts";
 import {
+  ARGUMENT_SUFFIX,
   escapeControlCharacters,
   escapeControlCharactersInJson,
   holdsControlCharacter,
@@ -2504,9 +2505,6 @@ function wroteAt(
       }\`.`,
   };
 }
-
-/** What an operand writes to select a piece's arguments cell. */
-const ARGUMENT_SUFFIX = "#argument";
 
 /** Where a write is aimed: a cell of a piece, and which of the piece's two. */
 type Writable =

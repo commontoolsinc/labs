@@ -4683,6 +4683,48 @@ describe("verbs", () => {
         .toEqual([`/${HANDLE}@space/title#argument`]);
     });
 
+    it("lists a piece's two cells as two rows a reader can tell apart", async () => {
+      // Both are watched, because they are two cells — and `watches` is the
+      // one verb whose job is answering what this run is watching, which two
+      // rows reading alike would leave unanswered.
+
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      await runLine("watch title#argument", shuttle, deps);
+      expect(textOf(await runLine("watches", shuttle, deps))).toBe(
+        `%1 ${HANDLE}/title @space\n%2 ${HANDLE}/title#argument @space`,
+      );
+    });
+
+    it("opens each of a piece's two cells with an event line naming which", async () => {
+      const shuttle = atPiece();
+      const { deps, watched } = watching();
+      await runLine("watch title", shuttle, deps);
+      await runLine("watch title#argument", shuttle, deps);
+      // The watch's own subscription is the first each line took; the lens's
+      // is the second.
+      for (const settle of [watched.settles[0]!, watched.settles[2]!]) {
+        settle(1);
+        settle(2);
+      }
+      expect(watched.announced).toEqual([
+        `watch ${HANDLE}/title @space: 1 → 2`,
+        `watch ${HANDLE}/title#argument @space: 1 → 2`,
+      ]);
+    });
+
+    it("names each of a piece's two cells in the ambient record", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      await runLine("watch title#argument", shuttle, deps);
+      expect(textOf(await runLine("where", shuttle, deps)).split("\n").at(-1))
+        .toBe(
+          `watches   ${HANDLE}/title @space, ${HANDLE}/title#argument @space`,
+        );
+    });
+
     it("opens a lens onto the cell it armed the watch on", async () => {
       const shuttle = atPiece();
       const { deps } = watching();

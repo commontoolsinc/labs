@@ -55,11 +55,15 @@ interface Driven {
  * Helper for the cases below, which is a watch on `place` with its
  * subscription already handed over, recording what it writes.
  */
-function driving(place: PiecePlace = at("replies"), columns = WIDE): Driven {
+function driving(
+  place: PiecePlace = at("replies"),
+  columns = WIDE,
+  input = false,
+): Driven {
   const lines: string[] = [];
   let cancelled = 0;
   const watch = new ArmedWatch(
-    { place, input: false },
+    { place, input },
     (line) => lines.push(line),
     () => columns,
   );
@@ -74,6 +78,22 @@ describe("watch", () => {
         it("returns the cell written the short way the prompt writes a place", () => {
           expect(driving(at("replies")).watch.label)
             .toBe(`${HANDLE}/replies @space`);
+        });
+
+        it("carries the suffix where the cell watched is the piece's arguments", () => {
+          expect(driving(at("replies"), WIDE, true).watch.label)
+            .toBe(`${HANDLE}/replies#argument @space`);
+        });
+
+        it("names a piece's two cells apart", () => {
+          // What every surface that shows a watch rests on. The two are two
+          // watches, so a name that named only the place would list them as
+          // one line twice and open both their event lines the same way,
+          // leaving a person nothing to tell them apart by.
+
+          const place = at("replies");
+          expect(driving(place, WIDE, false).watch.label)
+            .not.toBe(driving(place, WIDE, true).watch.label);
         });
       });
 
@@ -119,6 +139,15 @@ describe("watch", () => {
           driven.watch.settled({ title: "verb contracts", replies: 15 });
           expect(driven.lines).toEqual([
             `watch ${HANDLE}/topics/3 @space: replies 14 → 15`,
+          ]);
+        });
+
+        it("opens the line with the name that says which of the two cells moved", () => {
+          const driven = driving(at("replies"), WIDE, true);
+          driven.watch.settled(14);
+          driven.watch.settled(15);
+          expect(driven.lines).toEqual([
+            `watch ${HANDLE}/replies#argument @space: 14 → 15`,
           ]);
         });
 
@@ -409,6 +438,19 @@ describe("watch", () => {
       expect(watchEntries([first, second])).toEqual([{
         label: "watches",
         value: `${HANDLE}/title @space, ${HANDLE}/replies @space`,
+      }]);
+    });
+
+    it("tells a piece's two cells apart where both are watched", () => {
+      // The record answers what this run is watching, and two entries a
+      // person cannot tell apart is that question going unanswered.
+
+      const place = at("title");
+      const result = driving(place, WIDE, false).watch;
+      const input = driving(place, WIDE, true).watch;
+      expect(watchEntries([result, input])).toEqual([{
+        label: "watches",
+        value: `${HANDLE}/title @space, ${HANDLE}/title#argument @space`,
       }]);
     });
   });

@@ -587,9 +587,9 @@ Landed:
   and the warm set: `watch <ref>` arms one and numbers what is armed, `watches`
   lists them, `unwatch %n` disarms the one a row was minted for, and `where`
   names them. Each settled change writes one line above the prompt — the cell,
-  the path inside it, and the transition — through the out-of-band door a
-  connection's own writing already goes through, so scrollback stays
-  append-only. A change is what is reported: the first settle is the baseline,
+  which of the piece's two cells it is, the path inside it, and the transition
+  — through the out-of-band door a connection's own writing already goes
+  through, so scrollback stays append-only. A change is what is reported: the first settle is the baseline,
   and a settle that landed on the value already held writes nothing. Every
   change on the line carries its transition, and what a screen too narrow for
   them costs is written down in rungs: the values stood in for by what they
