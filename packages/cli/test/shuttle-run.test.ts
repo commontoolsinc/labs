@@ -23,7 +23,7 @@ import { ConsoleMethod } from "@commonfabric/runner";
 import type { ConnectionOutput, SpaceConfig } from "../lib/piece.ts";
 import type { PromptTerminal } from "../lib/shuttle/prompt.ts";
 import { runShuttle, type ShuttleDeps } from "../lib/shuttle/run.ts";
-import type { VerbDeps } from "../lib/shuttle/verbs.ts";
+import type { VerbDeps } from "../lib/shuttle/vocabulary.ts";
 import type { Key } from "../lib/view/keys.ts";
 
 const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;

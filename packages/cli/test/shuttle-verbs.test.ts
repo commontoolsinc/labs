@@ -54,12 +54,8 @@ import { ShuttleSession } from "../lib/shuttle/session.ts";
 import { ASSUMED_ROWS } from "../lib/shuttle/page.ts";
 import { renderValue } from "../lib/shuttle/value.ts";
 import { moved } from "./shuttle-place-helpers.ts";
-import {
-  type Outcome,
-  runLine,
-  type Shuttle,
-  type VerbDeps,
-} from "../lib/shuttle/verbs.ts";
+import { runLine } from "../lib/shuttle/verbs.ts";
+import type { Outcome, Shuttle, VerbDeps } from "../lib/shuttle/vocabulary.ts";
 import type { WishReadConfig } from "../lib/wish.ts";
 
 const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;
