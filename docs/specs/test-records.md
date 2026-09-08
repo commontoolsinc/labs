@@ -342,8 +342,10 @@ first. Test workflows start emitting the field only after that support is on
 the default branch. Otherwise the old relay drops the field before writing a
 create-only object that cannot be repaired in place.
 
-The relay workflow follows the completion of every workflow that runs tests —
-success, failure, cancellation, and timeout alike. It ships a
+The relay workflow follows the completion of every workflow that records
+tests — success, failure, cancellation, and timeout alike. A workflow whose
+tests another workflow already records against the same commit records
+nothing of its own, and the relay does not follow it. It ships a
 same-repository run unconditionally, since only write access creates
 one, and a fork run only when the run's actor — read from the trusted
 payload — is on the team member list (`TEST_RECORDS_MEMBER_ACTOR_IDS`,

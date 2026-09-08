@@ -1167,6 +1167,12 @@ read CI's verdict — so its own test job is the only thing standing between a
 dashboard that fails its tests and the `latest` tag. Leave it in place even
 though it looks redundant.
 
+What that test job does not do is record what it runs. CI records the same
+task on the same commit, so a second recording here would file each of those
+tests twice against one commit. The job therefore sets no spool directory,
+wraps nothing in `run-recorded`, and ships no test-records artifact, and the
+relay does not follow this workflow.
+
 No image is built or published for a pull request.
 
 The publish job authenticates with GitHub OIDC and GCP Workload Identity

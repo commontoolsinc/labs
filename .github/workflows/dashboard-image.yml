@@ -27,8 +27,6 @@ jobs:
     name: Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
     steps:
       # A manual run can name any ref. Publishing moves the `latest` tag that
       # the deployment follows, so a run on another ref stops here, before
@@ -50,18 +48,15 @@ jobs:
       - name: 🔍 Install dependencies
         uses: ./.github/actions/deno-install
 
+      # This runs the same task on the same commit as CI's `Test` job, which
+      # is where the dashboard's tests are recorded. Repeating that recording
+      # here would file each of those tests twice against one commit, so this
+      # job writes no test records: it sets no spool directory, wraps nothing
+      # in `run-recorded`, and ships no artifact. The relay does not follow
+      # this workflow.
       - name: 🧪 Test dashboard
         working-directory: packages/dashboard
-        run: deno task run-recorded unit dashboard test -- deno task test
-
-      # The test-records relay follows this workflow's completion and ships
-      # the artifact; this job stays free of cloud credentials.
-      - name: 📤 Ship test records
-        if: always()
-        uses: ./.github/actions/test-records-ship
-        with:
-          artifact: dashboard-tests
-          job: Tests
+        run: deno task test
 
   publish:
     name: Publish image
