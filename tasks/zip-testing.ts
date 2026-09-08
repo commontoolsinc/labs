@@ -11,7 +11,7 @@
 
 // CRC32 of the deflate-format polynomial; zips carry one per member and a
 // reader that trusts the central directory still deserves honest fixtures.
-export function crc32(bytes: Uint8Array): number {
+function crc32(bytes: Uint8Array): number {
   let crc = 0xffffffff;
   for (const byte of bytes) {
     crc ^= byte;

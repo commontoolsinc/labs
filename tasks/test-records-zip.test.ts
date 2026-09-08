@@ -2,7 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { readZip } from "./test-records-zip.ts";
-import { buildZip, crc32 } from "./zip-testing.ts";
+import { buildZip } from "./zip-testing.ts";
 
 describe("test-records-zip", () => {
   describe("readZip()", () => {
