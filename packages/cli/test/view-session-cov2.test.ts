@@ -50,7 +50,7 @@ function selectByLabel(s: Session, label: string): void {
   throw new Error(`node not reached: ${label}`);
 }
 
-describe("session", () => {
+describe("Session", () => {
   //
   // Enter on a reference that resolves to no node
   //
