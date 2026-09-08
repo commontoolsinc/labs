@@ -366,14 +366,17 @@ process:
 - `logCounts` — the same per-logger counts, which is how a warning storm shows
   up as a number rather than as a log to grep.
 - `slowQueries` — the last hundred query, watch, or commit operations over
-  100 ms, with the space and the root and watch counts. Query and watch
-  entries attribute the traversal (`rootsVisited`, `rootsElapsedMs`,
-  `slowestRoot`) and carry `managerReads`, the engine document reads across
-  the whole request — the width a root count cannot show, since one root's
-  declaration can fan out over many documents. `session.watch.add` and
-  `session.watch.refresh` entries also carry `upserts`, the snapshots the
-  frame delivered: a wide traversal that yields few is repeated server work,
-  and a wide frame is transport and client-ingest work as well. A `transact`
+  100 ms, with the space and the root and watch counts. `graph.query`,
+  `session.watch.set` and `session.watch.add` entries attribute the traversal
+  (`rootsVisited`, `rootsElapsedMs`, `slowestRoot`) and carry `managerReads`,
+  the engine document reads across the whole request — the width a root
+  count cannot show, since one root's declaration can fan out over many
+  documents. `session.watch.add` and `session.watch.refresh` entries also
+  carry `upserts`, the snapshots the frame delivered: a wide traversal that
+  yields few is repeated server work, and a wide frame is transport and
+  client-ingest work as well. A refresh carries only `watches` and `upserts`:
+  it re-evaluates by dirty document rather than by root, so it has no
+  traversal to attribute, and absent is the honest answer there. A `transact`
   entry also carries the commit's operation and read counts, its outcome (`ok`,
   the error name, or `threw` — a slow rejected commit records like a slow
   applied one), and `lockWaitMs`: how long the commit waited for the space
