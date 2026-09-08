@@ -150,7 +150,7 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
       status: "good",
       value: "64%",
       sub: "16,614 of 19,544 tests",
-      aside: `<span class="hmtd" title="12h old">12h old</span>`,
+      aside: `<span class="hfacet" title="12h old">12h old</span>`,
       hint: "lanes ↗",
       href: "/test-selection",
     },

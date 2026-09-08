@@ -243,7 +243,7 @@ Deno.test("the selection tile goes amber once the manifest has gone stale", asyn
     now: () => Date.parse("2026-08-21T04:00:00.000Z"),
   }).collect(CTX);
   assertEquals(view.status, "warn");
-  assertEquals(view.aside, '<span class="hmtd" title="28h old">28h old</span>');
+  assertEquals(view.aside, '<span class="hfacet" title="28h old">28h old</span>');
 });
 
 Deno.test("the lane budget comes from the manifest that named it", () => {

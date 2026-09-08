@@ -81,7 +81,7 @@ async function selectionView(
       ? `fullest lane ${fullest.toFixed(0)}s of ${budget}s`
       : `${groupDigits(selected)} of ${groupDigits(known)} tests`,
     aside: stale
-      ? `<span class="hmtd" title="${badge}">${badge}</span>`
+      ? `<span class="hfacet" title="${badge}">${badge}</span>`
       : undefined,
     href: TEST_SELECTION_PATH,
     hint: "lanes ↗",
