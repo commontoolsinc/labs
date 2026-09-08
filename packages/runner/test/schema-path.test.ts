@@ -1,10 +1,15 @@
 /** Exercises schema path admission independently of whether input data exists. */
 
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import type { JSONSchema } from "../src/builder/types.ts";
 import { schemaPathSelection } from "../src/schema-path.ts";
+import {
+  acquireSchemaRegistryLease,
+  registerSchemaDocument,
+} from "../src/schema-registry.ts";
 
 /** Reads the admission result while keeping individual schema cases compact. */
 function schemaSelectsPath(
@@ -132,6 +137,60 @@ describe("schemaPathSelection", () => {
     };
     expect(schemaSelectsPath(schema, ["next", "next", "value"])).toBe(true);
     expect(schemaSelectsPath(schema, ["next", "extra"])).toBe(false);
+  });
+
+  it("resolves boolean definitions without exposing a false projection", () => {
+    const release = acquireSchemaRegistryLease();
+    try {
+      for (const allowed of [true, false]) {
+        expect(schemaSelectsPath({
+          $defs: { target: allowed },
+          $ref: "#/$defs/target",
+        }, ["value"])).toBe(allowed);
+        const hash = internSchemaAsTaggedHashString(allowed);
+        registerSchemaDocument(hash, allowed);
+        expect(schemaSelectsPath({ $ref: `cid:${hash}` }, ["value"])).toBe(
+          allowed,
+        );
+      }
+    } finally {
+      release();
+    }
+  });
+
+  it("selects concrete alternatives beside recursive and impossible branches", () => {
+    const value: JSONSchema = {
+      type: "object",
+      properties: { value: { type: "string" } },
+    };
+    const recursive: JSONSchema = {
+      $defs: {
+        node: { anyOf: [{ $ref: "#/$defs/node" }, false, value] },
+      },
+      $ref: "#/$defs/node",
+    };
+    expect(schemaSelectsPath(recursive, ["value"])).toBe(true);
+    expect(schemaSelectsPath(recursive, ["missing"])).toBe(false);
+    expect(schemaSelectsPath({ allOf: [value, false] }, ["value"])).toBe(false);
+    expect(schemaSelectsPath({ oneOf: [false, value] }, ["value"])).toBe(true);
+  });
+
+  it("requires a parent projection when the declared type has alternatives", () => {
+    expect(schemaPathSelection({
+      type: ["object", "undefined"],
+      properties: { value: { type: "string" } },
+    }, ["value"])).toEqual({ selected: true, conditionalDepth: 0 });
+    expect(schemaPathSelection(
+      {
+        type: ["array", "undefined"],
+        items: { type: "string" },
+      },
+      ["length"],
+      { allowArrayLength: true },
+    )).toEqual({
+      selected: true,
+      conditionalDepth: 0,
+    });
   });
 
   it("selects union paths only when one branch admits the entire path", () => {
