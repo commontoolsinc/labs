@@ -315,7 +315,7 @@ export function createRuntimeClientOptions({
   apiUrl,
   spaceHostMap,
   experimental,
-  cfcEnforcementMode = "enforce-explicit",
+  cfcEnforcementMode = "enforce-strict",
   // Epic H2 (docs/history/plans/cfc-future-work-implementation.md): shell hosts run the
   // flow-label dial at "persist" — the per-tx conservative join is derived AND
   // written as a `derived` label component on every value write. This
@@ -331,8 +331,10 @@ export function createRuntimeClientOptions({
   // `Space` labels through verified reader membership before the reconciler
   // fits them against the acting user's identity atoms and the admitted
   // influence-class caveat kinds. Author-supplied render declassification is
-  // denied, and labels that still do not fit the ceiling stay blocked.
-  cfcRenderCeiling = false,
+  // denied, and labels that still do not fit the ceiling stay blocked. The
+  // shell's per-profile `commonfabric.cfcRenderCeiling(false)` toggle opts a
+  // browser profile back out.
+  cfcRenderCeiling = true,
   trustSnapshot,
   forwardWorkerConsole,
   patternCoverage,

@@ -13,7 +13,11 @@ import {
   meetCfcObservationCeilings,
   resolveCfcDials,
 } from "@commonfabric/runner/cfc";
-import { type CfcPosture, presetCfcOptions } from "@commonfabric/runner";
+import {
+  type CfcPosture,
+  MAX_ENFORCEMENT_CFC_OPTIONS,
+  presetCfcOptions,
+} from "@commonfabric/runner";
 import type { HarnessCfcEnforcementModeSource } from "./contracts/cfc-policy-snapshot.ts";
 import {
   type HarnessCredentialOwnerRef,
@@ -33,13 +37,14 @@ import type { DockerRunscSandboxConfig } from "./sandbox/types.ts";
 
 export const DEFAULT_GATEWAY_BASE_URL = "https://llm.stage.commontools.dev/";
 export const DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE =
-  "enforce-explicit" as const satisfies CfcEnforcementMode;
+  "enforce-strict" as const satisfies CfcEnforcementMode;
 export type HarnessGatewayAuthMode = "bearer" | "none";
 
 /**
- * The fabric session's enforcement dial admits raises only: the remoteClient
- * preset already pins `enforce-explicit`, so the sole configurable move is up
- * to `enforce-strict`. This is a different dial from the harness's own
+ * The fabric session's enforcement dial names an enforcing rung: the
+ * remoteClient preset already pins `enforce-strict`, so stating this dial
+ * either restates that rung or lowers the session to `enforce-explicit`.
+ * This is a different dial from the harness's own
  * `cfcEnforcementMode`, which governs tool policy and the sandbox — this one
  * governs the runtime the `run_pattern` tool deploys patterns into.
  */
@@ -62,7 +67,8 @@ export type HarnessFabricCfcFlowLabelsSource =
  * the run offers `run_pattern` in the parent tool surface; when absent, the
  * tool is unavailable. The optional CFC dials reach the session's Runtime;
  * unset means the remoteClient preset's first-party posture
- * (`enforce-explicit`, flow labels off). `cfcPosture` opts the runtime into
+ * (`enforce-strict`, flow labels persisted). `cfcPosture` opts the runtime
+ * into
  * a named bundle (`MAX_ENFORCEMENT_CFC_OPTIONS` in the runner's presets);
  * the two dials still apply over it.
  */
@@ -396,19 +402,25 @@ export const fabricSessionCfcFlowLabels = (
 
 /**
  * Where that rung came from: `configured` when the config states the dial,
- * `posture` when the named bundle the config selected moves the dial off what
- * the preset resolves without it, and `default` when nothing the config states
- * reaches this dial at all.
+ * `posture` when the named bundle the config selected carries the dial, and
+ * `default` when nothing the config states reaches this dial at all.
+ *
+ * The bundle is asked whether it carries the dial rather than whether it moved
+ * the resolved value. A bundle naming the rung the core pin already holds
+ * still supplied it, and an operator who selected that bundle is owed a record
+ * saying so; comparing values instead makes the answer flip whenever the pin
+ * and the bundle happen to agree, which is a fact about the pins rather than
+ * about what the operator asked for.
  */
 export const fabricSessionCfcFlowLabelsSource = (
   fabricSession: HarnessFabricSessionConfig,
 ): HarnessFabricCfcFlowLabelsSource =>
   fabricSession.cfcFlowLabels !== undefined
     ? "configured"
-    : presetCfcOptions(fabricSessionPresetCfcDials(fabricSession))
-        .cfcFlowLabels === presetCfcOptions({}).cfcFlowLabels
-    ? "default"
-    : "posture";
+    : fabricSession.cfcPosture !== undefined &&
+        "cfcFlowLabels" in MAX_ENFORCEMENT_CFC_OPTIONS
+    ? "posture"
+    : "default";
 
 /** What the operator stated the harness's own dial to be, if anything. */
 const statedCfcEnforcementMode = (
