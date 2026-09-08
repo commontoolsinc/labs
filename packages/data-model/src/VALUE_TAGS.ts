@@ -9,15 +9,17 @@
  */
 
 /**
- * Tags identifying the classes this system recognizes for dispatch. These are
- * distinct from wire-format `TAGS` -- they identify _what the value is_, not
- * what fabric type it becomes after conversion.
+ * Tags identifying the value types that this system recognizes for dispatch.
+ * These are distinct from wire-format `TAGS`.
  *
- * Covers two categories:
- * - **Native JS builtins**: standard JS types that the fabric system converts.
- * - **System-defined value types**: classes defined by this system that
- *   behave like primitives (always frozen, pass through conversion
+ * Covers the following:
+ * * **Native JS builtins**: standard JS types, all represented by the type
+ *   `Primitive`.
+ * * **`FabricPrimitive`s**: classes defined by this package which are
+ *   considered equivalent to primitives (always frozen, pass through conversion
  *   unchanged) but aren't under the open-ended `FabricInstance` umbrella.
+ * * **`FabricInstance`s**: container classes defined by this package, all
+ *   represented by the type `FabricInstance`.
  */
 export const VALUE_TAGS = Object.freeze(
   {
