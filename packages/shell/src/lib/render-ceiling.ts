@@ -27,18 +27,18 @@ type CommonfabricGlobal = typeof globalThis & {
 /** Whether the render ceiling is enabled for this browser profile. */
 export function isCfcRenderCeilingEnabled(): boolean {
   try {
-    return globalThis.localStorage?.getItem(STORAGE_KEY) === "true";
+    return globalThis.localStorage?.getItem(STORAGE_KEY) !== "false";
   } catch {
-    return false;
+    return true;
   }
 }
 
 function setCfcRenderCeiling(enabled: boolean): void {
   try {
     if (enabled) {
-      globalThis.localStorage.setItem(STORAGE_KEY, "true");
-    } else {
       globalThis.localStorage.removeItem(STORAGE_KEY);
+    } else {
+      globalThis.localStorage.setItem(STORAGE_KEY, "false");
     }
   } catch (error) {
     console.error("[render-ceiling] Could not persist the setting:", error);
@@ -62,11 +62,11 @@ export function setupCfcRenderCeilingToggle(): void {
   const cf = (global.commonfabric ??= {});
   cf.cfcRenderCeiling = (enabled = true) => setCfcRenderCeiling(enabled);
 
-  if (isCfcRenderCeilingEnabled()) {
+  if (!isCfcRenderCeilingEnabled()) {
     console.info(
-      "[render-ceiling] CFC render ceiling is ON — labeled content outside " +
-        "the default display ceiling renders as blocked placeholders. " +
-        "Disable with commonfabric.cfcRenderCeiling(false).",
+      "[render-ceiling] CFC render ceiling is OFF for this profile — " +
+        "labeled content renders without display gating. Re-enable with " +
+        "commonfabric.cfcRenderCeiling().",
     );
   }
 }
