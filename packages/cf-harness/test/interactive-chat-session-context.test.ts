@@ -2,8 +2,9 @@
  * What an interactive turn opens with.
  *
  * A turn is its own run with its own handle table, so the references that run
- * holds — the well-known grants of its space, the input cells the request
- * attached — have to be established and announced per turn. Without that a
+ * holds — the well-known grants of its space, the input cells and published
+ * patterns the request attached — have to be established and announced per
+ * turn. Without that a
  * console session had a fabric session it could not explore and no way to be
  * handed a cell at all, which is what these tests are about.
  */
@@ -15,6 +16,10 @@ import {
   HARNESS_CHAT_REQUEST_TYPE,
 } from "../src/contracts/interactive-chat.ts";
 import type { HarnessInputCellSpec } from "../src/contracts/input-cells.ts";
+import type {
+  HarnessPatternRef,
+  HarnessPatternRefSpec,
+} from "../src/contracts/pattern-refs.ts";
 import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
 import type { CfHarnessEngine } from "../src/engine.ts";
 import {
@@ -33,7 +38,11 @@ import type {
  * tokens is `engine.test.ts`'s.
  */
 const stubEngine = (
-  established: { inputCells: readonly HarnessInputCellSpec[] },
+  established: {
+    inputCells: readonly HarnessInputCellSpec[];
+    patternRefs?: readonly HarnessPatternRef[];
+    unknownPatternId?: string;
+  },
 ): CfHarnessEngine =>
   ({
     config: { fabricSession: { space: "context-space" } },
@@ -50,6 +59,14 @@ const stubEngine = (
           token: `cfh:a:cell${index}`,
         })),
       ),
+    establishPatternRefs: () =>
+      established.unknownPatternId === undefined
+        ? Promise.resolve(established.patternRefs ?? [])
+        : Promise.reject(
+          new Error(
+            `patternRefs \`${established.unknownPatternId}\` is not in the pattern index`,
+          ),
+        ),
   }) as unknown as CfHarnessEngine;
 
 const recordingLoop = (
@@ -77,6 +94,7 @@ const runTurn = async (
   turnId: string,
   text: string,
   inputCells?: readonly HarnessInputCellSpec[],
+  patternRefs?: readonly HarnessPatternRefSpec[],
 ): Promise<void> => {
   await service.handleRequest({
     type: HARNESS_CHAT_REQUEST_TYPE,
@@ -88,6 +106,7 @@ const runTurn = async (
       turnId,
       input: { text },
       ...(inputCells !== undefined ? { inputCells } : {}),
+      ...(patternRefs !== undefined ? { patternRefs } : {}),
     },
   });
   await service.waitForTurn("session-1", turnId);
@@ -95,7 +114,11 @@ const runTurn = async (
 
 const startedService = async (
   seen: HarnessTranscriptMessage[][],
-  established: { inputCells: readonly HarnessInputCellSpec[] },
+  established: {
+    inputCells: readonly HarnessInputCellSpec[];
+    patternRefs?: readonly HarnessPatternRef[];
+    unknownPatternId?: string;
+  },
 ): Promise<HarnessInteractiveChatService> => {
   const service = new HarnessInteractiveChatService({
     basePromptLoopOptions: { engine: stubEngine(established) },
@@ -217,5 +240,54 @@ describe("interactive chat session context", () => {
       { name: "itinerary", ref: "/of:fid1:x/days" },
     ]);
     expect(options[1]).toBeUndefined();
+  });
+
+  it("announces the patterns the request attached, with the specifier that composes each", async () => {
+    const seen: HarnessTranscriptMessage[][] = [];
+    const service = await startedService(seen, {
+      inputCells: [],
+      patternRefs: [{
+        patternId: "pat-expenses",
+        record: {
+          patternId: "pat-expenses",
+          description: "Totals an expense list",
+          hashtags: ["expenses"],
+          importHint: 'import X from "cf:pattern:pat-expenses"',
+        },
+      }],
+    });
+
+    await runTurn(service, "turn-1", "total my spending", undefined, [
+      { patternId: "pat-expenses" },
+    ]);
+
+    const announced = seen[0].find((message) =>
+      message.content.includes("pat-expenses")
+    );
+    expect(announced?.content).toContain("Totals an expense list");
+    expect(announced?.content).toContain(
+      'import X from "cf:pattern:pat-expenses"',
+    );
+  });
+
+  it("fails a turn whose attached pattern the index does not hold, before a model turn", async () => {
+    const seen: HarnessTranscriptMessage[][] = [];
+    const service = await startedService(seen, {
+      inputCells: [],
+      unknownPatternId: "pat-nothing",
+    });
+
+    await runTurn(service, "turn-1", "total my spending", undefined, [
+      { patternId: "pat-nothing" },
+    ]);
+
+    const failure = service.events("session-1").map((envelope) =>
+      envelope.event
+    )
+      .find((event) => event.kind === "turn_failed");
+    expect(JSON.stringify(failure)).toContain("pat-nothing");
+    // The reference is what the caller attached, so a turn that cannot have
+    // it does not run without it.
+    expect(seen).toEqual([]);
   });
 });

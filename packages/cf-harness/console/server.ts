@@ -78,6 +78,11 @@ import {
 } from "../src/contracts/subagent.ts";
 import { parseHostMountSpecs } from "../src/host-mounts.ts";
 import { parseInputCellArgument } from "../src/input-cells.ts";
+import type { HarnessPatternRefSpec } from "../src/contracts/pattern-refs.ts";
+import {
+  checkPatternRefSpec,
+  MAX_HARNESS_PATTERN_REFS,
+} from "../src/pattern-refs.ts";
 import {
   harnessSessionChatPolicy,
   type HarnessSessionConfig,
@@ -345,6 +350,54 @@ const parseTaskInputCells = (
       throw new Error(`inputCells names \`${spec.name}\` twice`);
     }
     names.add(spec.name);
+    specs.push(spec);
+  }
+  return specs;
+};
+
+/**
+ * The pattern references a `/api/task` body attaches to the turn it starts,
+ * each a `{ patternId }`. An id is the index's own — the content-addressed
+ * identity of published source — so it names an entry the index holds or it
+ * names nothing, and the reference is the whole of what the caller says.
+ *
+ * The grammar is the run's, checked by the run's own parser, so a spelling
+ * the run refuses is refused here too, before a turn is spent on the read.
+ * Whether the index holds the id is the run's to find out. A body that names
+ * no patterns yields none, which is the ordinary task.
+ *
+ * @throws Error naming the defect, which the route answers 400 with.
+ */
+const parseTaskPatternRefs = (
+  value: unknown,
+): readonly HarnessPatternRefSpec[] => {
+  if (value === undefined || value === null) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error("patternRefs must be an array");
+  }
+  if (value.length > MAX_HARNESS_PATTERN_REFS) {
+    throw new Error(
+      `patternRefs takes at most ${MAX_HARNESS_PATTERN_REFS} references`,
+    );
+  }
+  const specs: HarnessPatternRefSpec[] = [];
+  const ids = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) {
+      throw new Error("each pattern reference must be an object");
+    }
+    const { patternId } = entry as { patternId?: unknown };
+    if (typeof patternId !== "string") {
+      throw new Error("each pattern reference needs a string patternId");
+    }
+    const spec = { patternId };
+    checkPatternRefSpec(spec);
+    if (ids.has(patternId)) {
+      throw new Error(`patternRefs names \`${patternId}\` twice`);
+    }
+    ids.add(patternId);
     specs.push(spec);
   }
   return specs;
@@ -656,13 +709,14 @@ export const resolveConsoleConfig = async (
     ),
     // The rest of the session description this surface does not vary. Skills
     // are scanned rather than preloaded by name, scripts are not allowlisted,
-    // handles materialize nowhere, and a task's input cells arrive per task
-    // on `/api/task` rather than at startup.
+    // handles materialize nowhere, and a task's input cells and pattern
+    // references arrive per task on `/api/task` rather than at startup.
     skillNames: [],
     allowedSkillScripts: [],
     skillScriptExecutionTarget: "sandbox",
     handleValueOrigins: [],
     inputCells: [],
+    patternRefs: [],
     // The tool surface is left to the session's own backing rather than
     // listed here, so a tool the harness gains reaches this surface with it.
     allowedSubagentProfiles: [
@@ -1256,8 +1310,12 @@ export class ConsoleServer {
         status: 400,
       });
     }
-    const body: { text?: unknown; sessionId?: unknown; inputCells?: unknown } =
-      typeof parsed === "object" && parsed !== null ? parsed : {};
+    const body: {
+      text?: unknown;
+      sessionId?: unknown;
+      inputCells?: unknown;
+      patternRefs?: unknown;
+    } = typeof parsed === "object" && parsed !== null ? parsed : {};
     const text = body.text;
     if (typeof text !== "string" || text.trim() === "") {
       return Response.json({ error: "text is required" }, { status: 400 });
@@ -1268,8 +1326,10 @@ export class ConsoleServer {
       });
     }
     let inputCells: readonly HarnessInputCellSpec[];
+    let patternRefs: readonly HarnessPatternRefSpec[];
     try {
       inputCells = parseTaskInputCells(body.inputCells);
+      patternRefs = parseTaskPatternRefs(body.patternRefs);
     } catch (error) {
       return Response.json({
         error: error instanceof Error ? error.message : String(error),
@@ -1292,6 +1352,7 @@ export class ConsoleServer {
       sessionId,
       input: { text },
       ...(inputCells.length > 0 ? { inputCells } : {}),
+      ...(patternRefs.length > 0 ? { patternRefs } : {}),
     });
     if (!turn.ok) {
       return chatErrorResponse(turn);

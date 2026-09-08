@@ -116,6 +116,16 @@ carries is enforced by the runner's `db.query` builtin, on session-scoped query
 results only, with a space-scoped query refused; a shared cell another runtime
 filled is outside it. Redraw that boundary the next time the map is regenerated.
 
+The map also predates a task's pattern references: it draws
+`POST /api/task {text, inputCells}`, and a body may now carry
+`patternRefs: [{ patternId }]` beside those, which the run resolves against the
+index before its first model turn and seeds as searched hits
+([CURRENT_STATE.md](../CURRENT_STATE.md) "pattern references attached to a
+task", and the console's own [README](../../console/README.md)). No boundary
+moves: an id is a content hash the index either holds or does not, and what a
+reference grants is what a search hit grants. Add the field to that edge's label
+the next time the map is regenerated.
+
 ## Relation to the other documents here
 
 The map is a reading aid, not a source of truth. Where it and

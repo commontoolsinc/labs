@@ -1955,6 +1955,10 @@ export const parseCfHarnessCliArgs = async (
     ...(browserAccess !== undefined ? { browserAccess } : {}),
     handleValueOrigins,
     inputCells,
+    // A pattern reference is attached per task, and this surface takes one
+    // prompt: a batch run names an indexed pattern in its prompt or finds it
+    // with search_patterns.
+    patternRefs: [],
     maxModelTurns: parsePositiveInteger(
       typeof args["max-model-turns"] === "string"
         ? args["max-model-turns"]

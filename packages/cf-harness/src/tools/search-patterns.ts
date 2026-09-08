@@ -70,6 +70,34 @@ export interface SearchPatternsToolResult {
   resultType?: string;
 }
 
+/**
+ * What a run knows about a published pattern it may name by id. A
+ * `search_patterns` hit is one of these, so every field a hit reports is
+ * here; a pattern reference the task attached is another, resolved from the
+ * index by id, and a by-id read answers no ranking evidence — no match
+ * counts, and no tier — because that is what search computes over a query.
+ * Whichever it came from, this is metadata and never source.
+ */
+export interface TrustedPatternRecord {
+  patternId: string;
+  description: string;
+  hashtags: readonly string[];
+  signals?: PatternIndexSignals;
+  kind?: PatternIndexPatternKind;
+  quality?: PatternIndexQuality;
+  matchedTerms?: number;
+  queryTerms?: number;
+  importHint: string;
+  argumentType?: string;
+  resultType?: string;
+
+  /** The identity that published it, where the index reported it. */
+  ownerDid?: string;
+
+  /** When the index recorded it, where the index reported it. */
+  createdAt?: string;
+}
+
 export interface SearchPatternsToolSuccessOutput {
   outputId: string;
   status: "ok";
@@ -238,7 +266,9 @@ const errorMessage = (error: unknown): string =>
  * absent: the search answers with what is known, and a shape it cannot write
  * down is not known.
  */
-const declaredType = (schema: JSONSchema | undefined): string | undefined => {
+export const patternIndexDeclaredType = (
+  schema: JSONSchema | undefined,
+): string | undefined => {
   if (schema === undefined) {
     return undefined;
   }
@@ -306,8 +336,8 @@ export const searchPatternsTool: HarnessToolDefinition<
     );
     const results = hits.map((hit, index): SearchPatternsToolResult => {
       const pattern = detailed[index];
-      const argumentType = declaredType(pattern?.argumentSchema);
-      const resultType = declaredType(pattern?.resultSchema);
+      const argumentType = patternIndexDeclaredType(pattern?.argumentSchema);
+      const resultType = patternIndexDeclaredType(pattern?.resultSchema);
       return {
         patternId: hit.patternId,
         description: hit.description,

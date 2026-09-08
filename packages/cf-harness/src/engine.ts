@@ -125,6 +125,11 @@ import type {
   HarnessInputCellSpec,
 } from "./contracts/input-cells.ts";
 import { mintInputCellHandles } from "./input-cells.ts";
+import type {
+  HarnessPatternRef,
+  HarnessPatternRefSpec,
+} from "./contracts/pattern-refs.ts";
+import { resolvePatternRefs } from "./pattern-refs.ts";
 import {
   addHarnessDocsQueryFailures,
   appendHarnessCfcModelContextObservations,
@@ -350,6 +355,13 @@ export interface CreateHarnessEngineOptions
   inputCells?: readonly HarnessInputCellSpec[];
 
   /**
+   * Published patterns to resolve against the index at run start; see
+   * `establishPatternRefs`. Requires a pattern index — the ids name entries
+   * it holds.
+   */
+  patternRefs?: readonly HarnessPatternRefSpec[];
+
+  /**
    * The space database the run's cell-label snapshot reads as it ends, for a
    * host where the store is not where the discovery walk looks. Absent, the
    * space named by the fabric session is resolved against the caches on this
@@ -488,6 +500,7 @@ export class CfHarnessEngine {
   #patternIndexPublications?: PatternIndexPublicationLedger;
   readonly #taskText?: string;
   readonly #inputCells: readonly HarnessInputCellSpec[];
+  readonly #patternRefs: readonly HarnessPatternRefSpec[];
   readonly #spaceDbPath?: string;
   readonly #hostMounts: readonly HostSandboxMount[];
   readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
@@ -693,6 +706,7 @@ export class CfHarnessEngine {
         );
     this.#taskText = options.taskText;
     this.#inputCells = options.inputCells ?? [];
+    this.#patternRefs = options.patternRefs ?? [];
     this.#spaceDbPath = options.spaceDbPath;
     const sandboxConfig = options.sandboxRuntime === undefined
       ? resolveSandboxConfig(this.config, {
@@ -1386,6 +1400,40 @@ export class CfHarnessEngine {
     );
     await this.persistRunState();
     return minted.inputCells;
+  }
+
+  /**
+   * Establishes the run's task pattern references: resolves each id against
+   * the pattern index, records the results in run state, and returns them.
+   * Idempotent across resume, like the input cells: references already
+   * recorded are returned as they stand.
+   *
+   * Failure is closed and loud for the same reason an input cell's is —
+   * references are explicit caller configuration — so a run configured with
+   * them and no index, an id outside the index's grammar, and an id the index
+   * does not hold all throw before anything is recorded.
+   */
+  async establishPatternRefs(): Promise<HarnessPatternRef[]> {
+    if (this.#runState.patternRefs !== undefined) {
+      return structuredClone(this.#runState.patternRefs);
+    }
+    if (this.#patternRefs.length === 0) {
+      return [];
+    }
+    if (this.#patternIndexClientFactory === undefined) {
+      throw new Error(
+        "patternRefs requires a pattern index; configure --pattern-index-url",
+      );
+    }
+    const client = await this.#patternIndexClientFactory();
+    const resolved = await resolvePatternRefs(client, this.#patternRefs);
+    this.#runState = patchHarnessRunState(
+      this.#runState,
+      { patternRefs: structuredClone(resolved) },
+      this.#now(),
+    );
+    await this.persistRunState();
+    return resolved;
   }
 
   async ensureRunManifestPersisted(): Promise<string | undefined> {

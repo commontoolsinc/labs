@@ -166,8 +166,9 @@ import {
 import { BUILTIN_TOOLS, getBuiltinTool } from "./tools/registry.ts";
 import {
   isSearchPatternsToolSuccessOutput,
-  type SearchPatternsToolResult,
+  type TrustedPatternRecord,
 } from "./tools/search-patterns.ts";
+import type { HarnessPatternRef } from "./contracts/pattern-refs.ts";
 import { isRunPatternToolSuccessOutput } from "./tools/run-pattern.ts";
 import {
   isRunSkillScriptToolSuccessOutput,
@@ -1419,7 +1420,7 @@ const buildSubagentSystemPrompt = (
 
 /** One selected pattern rebuilt from the parent's trusted search record. */
 interface RehydratedDelegatePatternRef {
-  record: SearchPatternsToolResult;
+  record: TrustedPatternRecord;
   note?: string;
 }
 
@@ -1438,8 +1439,8 @@ const PATTERN_REFS_CHILD_CONTEXT = (
     ...patternRefs.flatMap(({ record, note }, index) => [
       "",
       `Pattern ${index + 1}: ${record.patternId}`,
-      `Kind: ${record.kind}`,
-      `Quality: ${record.quality}`,
+      ...(record.kind !== undefined ? [`Kind: ${record.kind}`] : []),
+      ...(record.quality !== undefined ? [`Quality: ${record.quality}`] : []),
       `Description: ${record.description}`,
       ...(record.matchedTerms !== undefined &&
           record.queryTerms !== undefined
@@ -2717,10 +2718,7 @@ export class CfHarnessPromptLoop {
   readonly #reasoningEffort?: string;
   readonly #compactThreshold?: number;
   readonly #subagentCompositionGuidance: boolean;
-  readonly #trustedPatternSearchRecords = new Map<
-    string,
-    SearchPatternsToolResult
-  >();
+  readonly #trustedPatternRecords = new Map<string, TrustedPatternRecord>();
 
   /**
    * The `outputId` of every `run_pattern` call whose source this loop wrote to
@@ -2971,6 +2969,9 @@ export class CfHarnessPromptLoop {
     }
     this.engine.bindRunModel(model);
     const transcript: HarnessTranscriptMessage[] = [...options.transcript];
+    // The attachment first, so a search this run also made — which carries
+    // the ranking evidence a by-id read has none of — refines it.
+    this.#seedAttachedPatternRecords(initialRunState.patternRefs ?? []);
     this.#restorePatternSearchRecords(transcript);
     const maxModelTurns = options.maxModelTurns ?? this.#maxModelTurns;
     const toolActivity: HarnessToolActivity[] = [];
@@ -3393,6 +3394,23 @@ export class CfHarnessPromptLoop {
     }
   }
 
+  /**
+   * Retains the patterns the task attached, which the run resolved against
+   * the index before this loop ran. A reference is a hit the run made rather
+   * than one the model asked for, so it names the same things a search hit
+   * names and grants nothing further.
+   */
+  #seedAttachedPatternRecords(
+    patternRefs: readonly HarnessPatternRef[],
+  ): void {
+    for (const { record } of patternRefs) {
+      this.#trustedPatternRecords.set(
+        record.patternId,
+        structuredClone(record),
+      );
+    }
+  }
+
   /** Retains successful search hits for this parent prompt loop. */
   #recordPatternSearchResult(toolId: BuiltinToolId, output: unknown): void {
     if (
@@ -3402,7 +3420,7 @@ export class CfHarnessPromptLoop {
       return;
     }
     for (const record of output.results) {
-      this.#trustedPatternSearchRecords.set(
+      this.#trustedPatternRecords.set(
         record.patternId,
         structuredClone(record),
       );
@@ -3419,7 +3437,7 @@ export class CfHarnessPromptLoop {
     const records: RehydratedDelegatePatternRef[] = [];
     const refusals: DelegateTaskPatternRefRefusal[] = [];
     for (const patternRef of patternRefs ?? []) {
-      const record = this.#trustedPatternSearchRecords.get(
+      const record = this.#trustedPatternRecords.get(
         patternRef.patternId,
       );
       if (record === undefined) {

@@ -2,6 +2,7 @@ import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { HarnessBrowserAccessLease } from "./browser-access.ts";
 import type { HarnessImageAttachment } from "./image.ts";
 import type { HarnessInputCellSpec } from "./input-cells.ts";
+import type { HarnessPatternRefSpec } from "./pattern-refs.ts";
 import type { PromptSlotBinding } from "./prompt-slot.ts";
 import type { LoomLocalHostBinding } from "./run-manifest.ts";
 import {
@@ -192,6 +193,14 @@ export interface HarnessChatStartTurnParams {
    * given are the ones this turn's run minted.
    */
   inputCells?: readonly HarnessInputCellSpec[];
+
+  /**
+   * Published patterns the caller attaches to this turn by index id, resolved
+   * before the turn's first model turn and seeded into its run as searched
+   * hits. Named per turn for the same reason an input cell is: the run that
+   * holds them is this turn's.
+   */
+  patternRefs?: readonly HarnessPatternRefSpec[];
 
   metadata?: Record<string, unknown>;
 }
