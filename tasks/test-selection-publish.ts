@@ -34,6 +34,7 @@ import {
   objectUrl,
   readObject,
   type StoredReport,
+  testIdentityOfKey,
 } from "@commonfabric/test-support/records";
 import {
   ciSubmissionsPrefix,
@@ -48,7 +49,6 @@ import {
   dayOf,
   emptyAggregate,
   Fold,
-  identityOfKey,
   locateSurfaces,
   parseAggregate,
   partitionOf,
@@ -580,7 +580,7 @@ export async function publish(
   // count no longer holds.
   const stillUnplaced = (key: string): boolean => {
     if (placed.has(key)) return false;
-    const test = identityOfKey(key);
+    const test = testIdentityOfKey(key);
     return test !== undefined && !isLaneMeasurement(test);
   };
   folded.aggregate.unclaimed = [
@@ -690,7 +690,7 @@ const NAMED_SURFACES = 5;
 export function namingSurfaces(keys: readonly string[]): string {
   const counts = new Map<string, number>();
   for (const key of keys) {
-    const test = identityOfKey(key);
+    const test = testIdentityOfKey(key);
     if (test === undefined) continue;
     const surface = surfaceName(test);
     counts.set(surface, (counts.get(surface) ?? 0) + 1);
