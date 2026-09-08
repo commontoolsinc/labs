@@ -440,6 +440,30 @@ because the serialized link has no durable source contract. The superseded
 `cf set` spelling mounts this same command and has identical validation
 behavior.
 
+## Linking piece inputs
+
+`cf piece link <source>/<path> <target>/<path>` stores a live connection in the
+target piece's argument. Rebinding a terminal path replaces that connection; it
+does not write through the previous producer. Binding a Stream stores its handle
+without sending an event.
+
+The Piece API checks the binding before committing it. A producer with durable
+schema metadata must supply values the consumer can read. A writable consumer
+must also restrict its writes to values the producer accepts. Capability and
+scope constraints apply, and a rejected binding leaves the previous argument
+unchanged. `--allow-non-existing` only overrides the CLI's path-existence check;
+it does not waive contract validation.
+
+Ordinary cells and externally injected handles, including SQLite sources, can
+lack durable producer schema metadata. These remain supported as dynamic
+bindings, with destination scope checks but without a static producer payload or
+capability proof. A known Piece document whose producer contract cannot be
+recovered is refused. A piece without an argument schema imposes no consumer
+schema constraints, and plain-cell targets retain their ordinary binding
+behavior. Successful linking does not establish compatibility with a future
+producer schema; producer enforcement still applies when values are accessed or
+written.
+
 ## Updating piece source
 
 Run `cf piece setsrc --check` before every source update to a piece whose state
@@ -747,8 +771,7 @@ memo, which names a space once for the life of the process.
   callable's section — directly after the verb, before any `--`.
 - A `cf cell get` path that doesn't resolve prints a one-line error on stderr
   and exits 1 — it is a data error, not a usage error. A `piece link` that fails
-  validation (a source/target piece or path that doesn't exist) reports the same
-  way.
+  endpoint or contract validation reports the same way.
 - The launcher spawns the child CLI with `deno run --quiet` so Deno's own
   warnings (npm "Ignored build scripts" banner) never reach users.
 
