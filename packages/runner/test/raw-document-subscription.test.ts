@@ -1,30 +1,47 @@
 /**
- * `SpaceReplica.sinkDocument` — the raw-document subscription seam (issue
- * #6534). A consumer that needs a collection's membership and order, and not
- * the documents its links reach, subscribes to the collection document itself
- * and parses the links out of the raw value. Schema demand cannot express that
- * shape: a reader schema which looks shallow still walks element links on the
- * server, so the whole element closure is delivered.
+ * What the v2 replica's `sinkDocument` does today.
  *
- * These tests pin what a consumer may rely on: the callback carries the raw
- * document, it fires again when the server pushes an update, no element
- * document is loaded either time — and the subscription follows the BASE
- * instance of the document whatever scope the consumer reads under, which is
- * the constraint that decides where the seam may be used.
+ * It takes a document's URI and a callback, hands the callback that document
+ * as stored — links unresolved, nothing they reach fetched — and calls it
+ * again when the server pushes a new version. Nothing consumed it and nothing
+ * described it, so its behavior was whatever the implementation happened to
+ * do, and one of its properties fails silently.
  *
- * `sinkDocument` is on the concrete `SpaceReplica` and on neither
- * `IStorageProvider` nor `ISpaceReplica`, so these tests narrow to the class
- * the way its doc comment provides for.
+ * These cases record that behavior and its limits for the v2 implementation as
+ * it stands. They are not a contract. `sinkDocument` is on neither
+ * `ISpaceReplica` nor `IStorageProvider`, and recording what it does here does
+ * not make it an API to build on; what a live consumer should subscribe
+ * through is a separate question this file does not answer.
+ *
+ * Each case runs two storage managers against one in-process memory-v2 server,
+ * so the reader learns of a change only through a server sync frame. What they
+ * record:
+ *
+ * - the callback receives the collection document's links as stored, and no
+ *   document those links reach is loaded;
+ * - a deep read of the same collection does load them, which is what makes
+ *   that absence a fact about the subscription rather than about the fixture;
+ * - a server-pushed append reaches the callback, still without the appended
+ *   element's own documents;
+ * - the subscription follows the BASE instance of the document however the
+ *   surrounding reads are scoped. A `user`-scoped cell resolves to the same
+ *   URI, so a subscription on it reports base membership while a `user`-scoped
+ *   read of the same cause reports the overlay's, and a change to the `user`
+ *   instance produces no call at all. That is the silent one: no error, just
+ *   membership belonging to a different read.
+ *
+ * Issue #6534 carries the problem these were written against.
  */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import type { EntityDocument } from "@commonfabric/memory/v2";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
-import type { SpaceReplica } from "../src/storage/v2.ts";
-import type { URI } from "../src/storage/interface.ts";
+import type { ISpaceReplica, URI } from "../src/storage/interface.ts";
+import type { Cancel } from "../src/cancel.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
@@ -72,13 +89,46 @@ const deferred = <T>() => {
   return { promise, resolve };
 };
 
+/** A raw-document subscription, as the v2 replica offers one. */
+type SinkDocument = (
+  uri: URI,
+  callback: (document: EntityDocument | undefined) => void,
+) => Cancel;
+
+/**
+ * `replica`'s raw-document subscription, bound.
+ *
+ * `sinkDocument` belongs to the v2 replica and to no interface. Putting it on
+ * `ISpaceReplica` so a test could name it would oblige every future replica
+ * implementation to supply one for a test's benefit, so this file reaches past
+ * the interface instead — here, and nowhere else. This is the one place the
+ * file claims a capability no interface declares, and the claim is guarded: a
+ * replica without the method is reported by name from `beforeEach` rather than
+ * left to throw a bare `TypeError` from whichever case happened to run first.
+ * Everything `ISpaceReplica` already covers goes through it directly.
+ */
+const rawDocumentSink = (replica: ISpaceReplica): SinkDocument => {
+  const { sinkDocument } = replica as ISpaceReplica & {
+    sinkDocument?: SinkDocument;
+  };
+  if (typeof sinkDocument !== "function") {
+    throw new Error(
+      "no `sinkDocument` on this replica: these cases describe the v2 " +
+        "implementation, whose raw-document subscription they reach for past " +
+        "`ISpaceReplica`",
+    );
+  }
+  return sinkDocument.bind(replica);
+};
+
 describe("raw document subscription", () => {
   let server: MemoryV2Server.Server;
   let writerStorage: EmulatedStorageManager;
   let writerRt: Runtime;
   let readerStorage: EmulatedStorageManager;
   let readerRt: Runtime;
-  let readerReplica: SpaceReplica;
+  let readerReplica: ISpaceReplica;
+  let sinkDocument: SinkDocument;
   let collectionUri: URI;
 
   /** The element and body cells `label` names, created inside `tx`. */
@@ -142,7 +192,8 @@ describe("raw document subscription", () => {
       apiUrl: new URL(import.meta.url),
       storageManager: readerStorage,
     });
-    readerReplica = readerStorage.open(space).replica as SpaceReplica;
+    readerReplica = readerStorage.open(space).replica;
+    sinkDocument = rawDocumentSink(readerReplica);
   });
 
   afterEach(async () => {
@@ -155,7 +206,7 @@ describe("raw document subscription", () => {
 
   it("hands the callback the collection's raw links and loads no element document", async () => {
     const seen: unknown[] = [];
-    const cancel = readerReplica.sinkDocument(
+    const cancel = sinkDocument(
       collectionUri,
       (document) => seen.push(document),
     );
@@ -187,7 +238,7 @@ describe("raw document subscription", () => {
 
   it("fires with the new membership when the server pushes an append", async () => {
     const appended = deferred<unknown[]>();
-    const cancel = readerReplica.sinkDocument(collectionUri, (document) => {
+    const cancel = sinkDocument(collectionUri, (document) => {
       const membership = membershipOf(document);
       if (membership.length === BASE_ITEMS + 1) appended.resolve(membership);
     });
@@ -218,7 +269,7 @@ describe("raw document subscription", () => {
 
   it("hands over the base instance's membership while a `user`-scoped read of the same URI sees the overlay's", async () => {
     const seen: unknown[] = [];
-    const cancel = readerReplica.sinkDocument(
+    const cancel = sinkDocument(
       collectionUri,
       (document) => seen.push(document),
     );
@@ -245,7 +296,7 @@ describe("raw document subscription", () => {
 
   it("stays silent when the `user` instance of the same URI changes", async () => {
     const seen: unknown[] = [];
-    const cancel = readerReplica.sinkDocument(
+    const cancel = sinkDocument(
       collectionUri,
       (document) => seen.push(document),
     );
@@ -266,7 +317,7 @@ describe("raw document subscription", () => {
     await writerRt.idle();
 
     const barrier = deferred<void>();
-    const cancelBarrier = readerReplica.sinkDocument(
+    const cancelBarrier = sinkDocument(
       collectionUri,
       (document) => {
         if (membershipOf(document).length === BASE_ITEMS + 1) barrier.resolve();
