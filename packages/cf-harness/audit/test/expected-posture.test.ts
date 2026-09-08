@@ -195,6 +195,25 @@ describe("the expected-posture spec", () => {
       ]);
     });
 
+    it("names a boolean dial the record does not carry", () => {
+      // The boolean fields are equality, not a floor: a spec asking for one
+      // is unsatisfied by a record that does not carry it, whatever the rung
+      // fields say. Stated over `decomposedEnvelopes`, which no preset and no
+      // posture bundle turns on, so the case does not rest on a dial the
+      // fleet's own defaults may move.
+
+      const spec = parseExpectedPosture({ decomposedEnvelopes: true });
+      expect(postureMismatches(spec, MAX_ENFORCEMENT_RECORD)).toEqual([
+        { field: "decomposedEnvelopes", expected: "true", found: "false" },
+      ]);
+      expect(postureMismatches(
+        parseExpectedPosture({
+          decomposedEnvelopes: false,
+        }),
+        MAX_ENFORCEMENT_RECORD,
+      )).toEqual([]);
+    });
+
     it("names a policy digest the record does not carry", () => {
       const spec = parseExpectedPosture({ policyDigest: null });
       expect(
