@@ -44,7 +44,7 @@ request.
 // Shown at module scope.
 export default pattern<{ orders: SqliteDb }>(({ orders }) => {
   const pending = orders.query<{ id: number; glaze: string; boxes: number }>(
-    "SELECT id, glaze, boxes FROM orders WHERE shipped = 0 ORDER BY id",
+    "SELECT id, glaze, boxes FROM orders WHERE shipped = 0 ORDER BY id LIMIT 200",
   );
 
   return lift((rows?: Array<{ glaze: string; boxes: number }>) =>
@@ -90,6 +90,50 @@ schema-qualified table name. The consequence worth planning around: one
 statement reads the tables of the one database it was issued on, and no
 statement can join across two handles. Two databases means two queries and a
 join expressed in the pattern.
+
+## Bound the rows
+
+Every row a query returns is written into the space as a document of its own —
+which is what gives a per-row label somewhere to sit — so the row count of a
+statement is a durable cost of the space rather than the cost of one render. A
+query that returns a million rows writes a million documents, and they stay
+written after the view that asked for them is gone.
+
+A statement therefore bounds its rows, and a filter is not a bound. A `WHERE`
+clause narrows the candidates and says nothing about how many survive it: a
+month of a large store is still most of a large store. `LIMIT` is what states
+the ceiling, and a tight filter under it is what makes the rows the ceiling
+admits the interesting ones.
+
+A few hundred rows is a sensible ceiling for a view. It is more than a reader
+takes in at once, and it keeps what a query leaves behind in the space
+proportionate to what the view displays. A view that needs more of the store
+than that pages through it — a bound the reader moves — rather than raising the
+ceiling.
+
+Project the columns the view reads and no others: a row document carries every
+column the statement selected, so a wider projection is paid on every row.
+
+`ORDER BY` over an unbounded set is the other half of the cost, and it is paid
+before any row reaches the pattern, because the database sorts every candidate
+row to find the first one. A run that means to show the newest few otherwise
+sorts the whole store to find them; `ORDER BY … LIMIT n` asks for the same rows
+and lets the database stop at n.
+
+Where a view needs a number rather than the rows, ask SQL for the number.
+`count(*)`, `sum()` and a `GROUP BY` return one row per group, and one row is
+one document; the same answer reached by returning the rows and counting them in
+the pattern writes a document per row on the way.
+
+```tsx
+// Shown at module scope.
+export const newestOrders = (orders: SqliteDb, since: number) =>
+  orders.query<{ id: number; glaze: string }>(
+    "SELECT id, glaze FROM orders WHERE placed_at >= ? " +
+      "ORDER BY placed_at DESC LIMIT 200",
+    { params: [since] },
+  );
+```
 
 ## Session-scoped results
 

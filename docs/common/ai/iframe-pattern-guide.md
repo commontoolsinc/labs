@@ -333,7 +333,7 @@ const fabric = connectFabric();
 const database = fabric.sqlite("appDatabase");
 const refreshRows = async () => {
   const { rows } = await database.query<{ id: number; text: string }>(
-    "SELECT id, text FROM notes ORDER BY id",
+    "SELECT id, text FROM notes ORDER BY id LIMIT 200",
   );
   return rows;
 };
