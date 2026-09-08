@@ -12,6 +12,8 @@ import { type ValueTag } from "./VALUE_TAGS.ts";
 import {
   FabricContainerValue,
   FabricInstance,
+  FabricPlainObject,
+  FabricPrimitive,
   FabricValue,
 } from "./interface.ts";
 import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
@@ -187,7 +189,7 @@ class VisitInProgress<Domain, MainResult> {
   //
 
   /** Visits the indicated value as a top-level operation. */
-  visit(value: Domain): MainResult {
+  visit(value: Domain): MainResult | undefined {
     if (this.#stack.depth !== 0) {
       throw new Error(
         "Cannot use `VisitInProgress` for multiple concurrent top-level visits.",
@@ -216,7 +218,7 @@ class VisitInProgress<Domain, MainResult> {
 
     switch (result.type) {
       case "arrayContents": {
-        return this.#subvisitArray(result.value);
+        return this.#subvisitArray(value, result.value);
       }
 
       case "mainResult": {
@@ -224,7 +226,7 @@ class VisitInProgress<Domain, MainResult> {
       }
 
       case "mapContents": {
-        return this.#subvisitMap(result.value);
+        return this.#subvisitMap(value, result.value);
       }
     }
   }
@@ -304,7 +306,7 @@ class VisitInProgress<Domain, MainResult> {
    */
   #visitResolvingCyclesAndReplacement(
     value: Domain,
-  ): Exclude<GeneralVisitorResult<Domain, MainResult>, ReplaceForm> {
+  ): Exclude<GeneralVisitorResult<Domain, MainResult>, ReplaceForm<Domain>> {
     const vis = this.#visitor;
 
     for (;;) {
@@ -328,7 +330,7 @@ class VisitInProgress<Domain, MainResult> {
    */
   #visitResolvingSubtype(
     value: Domain,
-  ): Exclude<LeafVisitorResult<Domain, MainResult>, ReplaceForm> {
+  ): Exclude<LeafVisitorResult<Domain, MainResult>, ReplaceForm<Domain>> {
     const vis = this.#visitor;
 
     for (;;) {
@@ -393,7 +395,7 @@ class VisitInProgress<Domain, MainResult> {
  * for actually visiting. Subclasses are expected to `override` whatever methods
  * are needed in the context of the actual expected visits.
  */
-export class BaseValueVisitor<MainResult> implements ValueVisitor<MainResult> {
+export class BaseValueVisitor<Domain, MainResult> implements ValueVisitor<Domain, MainResult> {
   //
   // Subclass contract
   //
@@ -461,7 +463,7 @@ export class BaseValueVisitor<MainResult> implements ValueVisitor<MainResult> {
   //
 
   /** Visits the indicated value. */
-  visit(value: Domain): MainResult {
+  visit(value: Domain): MainResult | undefined {
     const inProgress = new VisitInProgress<Domain, MainResult>();
     return inProgress.visit(value);
   }
@@ -473,7 +475,7 @@ export class BaseValueVisitor<MainResult> implements ValueVisitor<MainResult> {
   /**
    * `Throw`s a "missing implementation" exception.
    */
-  static #throwMissing(methodName: string, value: Domain): never {
+  static #throwMissing(methodName: string, value: unknown): never {
     const desc = `${methodName}(${toDebugKindString(value)})`;
     throw new Error(`Missing visitor implementation: ${backtickQuote(desc)}`);
   }
