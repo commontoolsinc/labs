@@ -1,5 +1,10 @@
 import { type BuiltInLLMMessage } from "@commonfabric/api";
-import { type LLMRequest, llmRequestProblem } from "@commonfabric/llm/types";
+import {
+  type LLMGenerateObjectRequest,
+  llmGenerateObjectRequestProblem,
+  type LLMRequest,
+  llmRequestProblem,
+} from "@commonfabric/llm/types";
 import type { Context } from "@hono/hono";
 import * as HttpStatusCodes from "stoker/http-status-codes";
 
@@ -279,18 +284,17 @@ export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (
   if (!body.ok) {
     return c.json({ error: body.error }, HttpStatusCodes.BAD_REQUEST);
   }
-  const payload = body.payload;
-
-  if (!payload.messages || !payload.schema) {
-    const missing = [
-      !payload.messages && "'messages'",
-      !payload.schema && "'schema'",
-    ].filter(Boolean).join(" and ");
+  const problem = llmGenerateObjectRequestProblem(body.payload);
+  if (problem !== undefined) {
     return c.json(
-      { error: `Missing required field(s): ${missing}` },
+      { error: `Invalid request: ${problem}` },
       HttpStatusCodes.BAD_REQUEST,
     );
   }
+  // `llmGenerateObjectRequestProblem()` answering `undefined` is what makes
+  // this hold, and it is the only thing that does: `body.payload` is whatever
+  // the JSON parser returned.
+  const payload: LLMGenerateObjectRequest = body.payload;
 
   if (!payload.metadata) {
     payload.metadata = {};
