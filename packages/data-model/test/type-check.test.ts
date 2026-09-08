@@ -20,6 +20,7 @@ import { expect } from "@std/expect";
 
 import {
   assertValidFabricValueLayer,
+  isFabricArray,
   isFabricContainerValue,
   isFabricPlainObject,
   isValidFabricNativeObject,
@@ -36,6 +37,11 @@ import { LAYER_CORPUS, PlainClass } from "./fabric-value-corpus.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { toCompactDebugString } from "@/value-debug.ts";
+
+const EXAMPLE_FABRIC_BYTES = new FabricBytes(new Uint8Array([1, 2, 3, 4, 5]));
+
+const EXAMPLE_FABRIC_EPOCH_NSEC = new FabricEpochNsec(12345n);
 
 describe("type-check", () => {
   describe("isValidFabricValueLayer()", () => {
@@ -704,6 +710,34 @@ describe("type-check", () => {
         expect(isFabricContainerValue(42n)).toBe(false);
       });
     });
+  });
+
+  describe("isFabricArray()", () => {
+    it("returns `true` given a `FabricArray`", () => {
+      expect(isFabricArray([])).toBe(true);
+      expect(isFabricArray([1])).toBe(true);
+      expect(isFabricArray([{ a: "foo" }])).toBe(true);
+    });
+
+    it("returns `false` given a type-lie value", () => {
+      const wrongTypeValue = new Set() as unknown as FabricValue;
+      expect(isFabricArray(wrongTypeValue)).toBe(false);
+    });
+
+    for (
+      const value of [
+        123,
+        "boop",
+        { z: "zorp" },
+        EXAMPLE_FABRIC_EPOCH_NSEC,
+        EXAMPLE_FABRIC_BYTES,
+      ]
+    ) {
+      const desc = toCompactDebugString(value);
+      it(`returns \`false\` given ${desc}`, () => {
+        expect(isFabricArray(value)).toBe(false);
+      });
+    }
   });
 
   describe("isFabricPlainObject()", () => {
