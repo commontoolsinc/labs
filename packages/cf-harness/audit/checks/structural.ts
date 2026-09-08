@@ -1851,7 +1851,7 @@ const CELL_LABELS_REGISTRATION: KnownDefectRegistration = {
   runShape:
     "a run that minted no handle, so the engine never read a cell label for it",
   why:
-    "CT-2210's substance — AH-CFC-16 enumerates six artifacts and a cell-labels read is not among them, so AUD-9 was overclaiming — is closed by the split that produced this check, not by a change to what a run records. What is left open is narrower and is this check's own: the engine reads a space's cell labels only for the refs its handle table holds, so a run that minted no handle has nothing to record, and whether an audit should report that at all is undecided. Until it is, the check states the fact as `extends` and names where the question sits.",
+    "CT-2210's substance — AH-CFC-16 enumerates six categories of evidence and a cell-labels read is not among them, so AUD-9 was overclaiming — is closed by the split that produced this check, not by a change to what a run records. What is left open is narrower and is this check's own: the engine reads a space's cell labels only for the refs its handle table holds, so a run that minted no handle has nothing to record, and whether an audit should report that at all is undecided. Until it is, the check states the fact as `extends` and names where the question sits.",
   issue: "CT-2210",
 };
 
