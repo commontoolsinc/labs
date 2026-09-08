@@ -897,9 +897,9 @@ describe("RuntimeInternals", () => {
       session.as.did(),
     );
 
-    // `null` asks for no trust snapshot at all, which is a different case
-    // from a snapshot that carries no acting principal. Neither names an
-    // audience, so the session identity is acting in both.
+    // `null` leaves the worker to build its default session-principal snapshot.
+    // A supplied snapshot with no principal stays unnamed for transactions.
+    // Both use the session identity as the render audience.
     const withoutSnapshot = createRuntimeClientOptions({
       session,
       apiUrl: new URL("http://shell.test/"),
