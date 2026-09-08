@@ -145,5 +145,71 @@ export async function loadPackageIntegrationSuites(
       parts: opposites,
     }),
     deployedTopology,
+    await harnessEquipmentSuite(root),
   ];
+}
+
+/**
+ * The cf-harness integration tests, and the equipment each needs that a
+ * job does not have: a gVisor sandbox runtime with a Fabric mount
+ * bind-mounted into it, and a deployed pattern index with a keyfile that
+ * index authorizes. Each file says as much at the top of itself, and the
+ * package's own `test:integration` task is what a person runs them with.
+ *
+ * `packages/cf-harness/integration/` holds nothing else but the posture
+ * gate the deployed-topology suite owns, and
+ * `package-integration.test.ts` holds this list to that.
+ */
+export const HARNESS_EQUIPMENT: ReadonlyArray<
+  { file: string; reason: string }
+> = [
+  {
+    file: "integration/engine.integration.test.ts",
+    reason: "every case runs a container under the runsc-cfc gVisor " +
+      "runtime, and some reach into a Fabric mount bind-mounted into it",
+  },
+  {
+    file: "integration/pattern-index-live.integration.test.ts",
+    reason: "it searches a deployed pattern index, signed with an identity " +
+      "that index authorizes",
+  },
+];
+
+/**
+ * A suite over the tests above. Every one of its units is unavailable, so
+ * no lane is ever asked for one and no run is expected to record one.
+ *
+ * A test the tree holds and this configuration does not run is described
+ * here rather than left for a reader to come across, which is the same
+ * answer a configuration-specific skip gets and reached the same way.
+ *
+ * A unit is what the tree holds rather than what the list names, so a
+ * file that moves away takes its unit with it. That its entry above
+ * still names it is what `package-integration.test.ts` fails on.
+ */
+async function harnessEquipmentSuite(root: string): Promise<Suite> {
+  const packageDir = "packages/cf-harness";
+  const present = new Set(await integrationFiles(root, packageDir));
+  const held = HARNESS_EQUIPMENT
+    .map((entry) => ({ ...entry, unit: `${packageDir}/${entry.file}` }))
+    .filter((entry) => present.has(entry.unit));
+  return fileSuite({
+    id: "harness-equipment",
+    needs: ["deno"],
+    parts: [{
+      packageDir,
+      flags: ["--no-check", "-A"],
+      env: { CF_HARNESS_INTEGRATION: "1" },
+      junit: {
+        kind: "integration",
+        scope: "cf-harness",
+        filePrefix: packageDir,
+      },
+      files: held.map((entry) => entry.unit),
+      unavailable: held.map((entry) => ({
+        unit: entry.unit,
+        reason: entry.reason,
+      })),
+    }],
+  });
 }

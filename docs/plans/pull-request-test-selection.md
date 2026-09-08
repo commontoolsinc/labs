@@ -385,8 +385,10 @@ the set is a decision to spend part of every lane's budget forever.
 
 ### Today's jobs as suites
 
-The 18 job definitions in `deno.yml` become the following suites. This
-table is the migration's checklist.
+The 18 job definitions in `deno.yml` become the following suites, along
+with two the lanes do not run: the tests whose equipment a runner does
+not have, and the commands a job records after the lanes or on a
+schedule of its own. This table is the migration's checklist.
 
 | Suite | Today's jobs | Record variant | Capabilities |
 | --- | --- | --- | --- |
@@ -401,6 +403,8 @@ table is the migration's checklist.
 | `package-integration` | `Package Integration Tests (3 suites)` | — | `deno`, `toolshed`, `browser` |
 | `package-integration-opposite` | the posture opposite the server-execution default | resolved arm variant | `deno`, `toolshed-baked-opposite`, `browser` |
 | `deployed-topology` | the background-service and cf-harness default-posture gates | — | `deno`, `toolshed`, `bg-piece-service-binary` |
+| `harness-equipment` | no job; the cf-harness integration tests whose equipment a runner does not have | — | `deno` |
+| `out-of-lane` | `Coverage Check`, and the nightly `CFC Property Suite` workflow | — | none |
 | `cli-core` | `CLI Integration Tests (3 suites)` | — | `deno`, `toolshed`, `cf`, `jq` |
 | `cli-fuse` | the FUSE steps of the third CLI suite | — | `deno`, `toolshed`, `cf`, `fuse` |
 | `cli-deno` | the Deno-based CLI integration step | — | `deno`, `toolshed`, `cf` |
@@ -995,6 +999,14 @@ that `enumerate()` returns and that no run has ever produced a record for
 is either a test that never runs or a mapping that is wrong, and both are
 worth knowing about without blocking anybody. Entries in its unavailable
 list are reported separately and do not count as missing records.
+
+What the store half asks of a recorded identity holds for every record a
+run writes, including the ones the lanes did not produce. The coverage
+gate runs after the lanes and joins what they measured, and the nightly
+property suite runs on a schedule of its own; both record through the
+same wrapper every gate uses. The `out-of-lane` suite is where those are
+declared, each as an unavailable unit carrying the reason no lane runs
+it, so the guard finds a claim and the packer finds nothing to offer.
 
 Together these are what make "no continuous-integration change needed" a
 checked property rather than a hope.
@@ -3388,15 +3400,11 @@ exercised on the branch on its own.
       would be found only on `main`.
 - [x] `tasks/check-test-topology.ts`, both halves, wired into
       `repo-gates`, with exact variant matching and one source-item claim
-      allowed per variant. Two test files under
-      `packages/cf-harness/integration/` are reached only by a package
-      task nothing dispatches; they are recorded with the reason each
-      runs nowhere and reported rather than failed on, so a new
-      unclaimed surface still fails. Eight paths that look like tests
-      and are not are declared as the fixtures they are: the five
-      projects under `packages/deno-web-test/test/` that the harness
-      drives, and the three command-line tours the verb-session gate
-      holds the documentation to rather than running.
+      allowed per variant. Eight paths that look like tests and are not
+      are declared as the fixtures they are: the five projects under
+      `packages/deno-web-test/test/` that the harness drives, and the
+      three command-line tours the verb-session gate holds the
+      documentation to rather than running.
 - [x] Extract the part of `tasks/test-records-gather.ts` that reads records,
       ingests JUnit, and applies a declared variant as the shared gather
       function. Its command-line entry point and `tasks/ci-lane.ts` both

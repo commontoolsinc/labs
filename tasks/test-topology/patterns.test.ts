@@ -3,8 +3,11 @@ import { describe, it } from "@std/testing/bdd";
 import { SKIP_LIST_VARIABLE } from "@commonfabric/test-support/records";
 import { serverExecutionCiLane } from "../server-execution-ci.ts";
 import { loadPatternSuites } from "./patterns.ts";
-import { loadPackageIntegrationSuites } from "./package-integration.ts";
-import type { Suite } from "./suite.ts";
+import {
+  HARNESS_EQUIPMENT,
+  loadPackageIntegrationSuites,
+} from "./package-integration.ts";
+import { type Suite, unavailableUnits } from "./suite.ts";
 
 const root = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
 const suites = [
@@ -28,6 +31,20 @@ describe("the pattern and package suites", () => {
     expect(invocation!.cwd).toBe(`${root}/packages/patterns`);
     expect(invocation!.env?.HEADLESS).toBe("1");
     expect(invocation!.junit?.[0]?.scope).toBe("patterns");
+  });
+
+  it("leaves the pattern integration type check to the type check", async () => {
+    // `packages/patterns/integration` is one of the paths
+    // `tasks/typecheck.ts` lists, so a run that checks them again is
+    // doing that work twice.
+    for (const id of ["pattern-integration", "pattern-integration-opposite"]) {
+      const suite = byId(id);
+      const [invocation] = await suite.command(
+        [{ unit: suite.units[0]!, skip: [] }],
+        { root, outputDir: await outputDir() },
+      );
+      expect(invocation!.command).toContain("--no-check");
+    }
   });
 
   it("runs the opposite arm with an explicit define and history", async () => {
@@ -196,6 +213,48 @@ describe("the pattern and package suites", () => {
     for (const id of ["pattern-unit", "generated-patterns"]) {
       expect(await byId(id).command([], { root, outputDir: "/out" }))
         .toEqual([]);
+    }
+  });
+
+  it("holds every cf-harness integration test to being accounted for", async () => {
+    // The directory divides in two: the posture gate the
+    // deployed-topology suite runs, and the tests whose equipment a job
+    // does not have. A file that belongs to neither is a test nothing
+    // runs, so the two suites' units together are the whole directory.
+    const accounted = suites.flatMap((suite) => suite.units)
+      .filter((unit) => unit.startsWith("packages/cf-harness/integration/"));
+    const present: string[] = [];
+    for await (
+      const entry of Deno.readDir(`${root}/packages/cf-harness/integration`)
+    ) {
+      if (entry.isFile && entry.name.endsWith(".test.ts")) {
+        present.push(`packages/cf-harness/integration/${entry.name}`);
+      }
+    }
+    expect(accounted.sort()).toEqual(present.sort());
+  });
+
+  it("holds each recorded piece of equipment to a file that exists", async () => {
+    // A unit is what the tree holds rather than what the list names, so
+    // an entry naming a file that moved away would otherwise sit there
+    // describing nothing.
+    for (const entry of HARNESS_EQUIPMENT) {
+      const at = `${root}/packages/cf-harness/${entry.file}`;
+      expect((await Deno.stat(at)).isFile).toBe(true);
+    }
+  });
+
+  it("asks for none of the tests whose equipment a job lacks", async () => {
+    // Every unit of the suite is unavailable, each with the equipment it
+    // wants said in words, so nothing can be packed into a lane and no
+    // run is expected to record one.
+    const suite = byId("harness-equipment");
+    expect(suite.units.length).toBeGreaterThan(0);
+    expect([...unavailableUnits(suite)].sort()).toEqual(
+      [...suite.units].sort(),
+    );
+    for (const entry of suite.unavailable) {
+      expect(entry.reason.length).toBeGreaterThan(0);
     }
   });
 });

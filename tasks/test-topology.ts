@@ -24,6 +24,7 @@ import type { CapabilityId } from "./ci-capabilities.ts";
 import { loadBinarySuites } from "./test-topology/binaries.ts";
 import { loadCliSuites } from "./test-topology/cli.ts";
 import { loadGateSuites } from "./test-topology/gates.ts";
+import { loadOutOfLaneSuite } from "./test-topology/out-of-lane.ts";
 import { loadPackageIntegrationSuites } from "./test-topology/package-integration.ts";
 import { loadPatternSuites } from "./test-topology/patterns.ts";
 import { loadUnitSuites } from "./test-topology/unit.ts";
@@ -62,6 +63,7 @@ export async function loadTopology(
     ...await loadPackageIntegrationSuites(root),
     ...await loadCliSuites(root),
     ...loadBinarySuites(),
+    loadOutOfLaneSuite(),
   ];
 }
 

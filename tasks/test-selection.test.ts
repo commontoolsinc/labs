@@ -98,6 +98,19 @@ describe("test-selection", () => {
       expect(lines.join("\n")).toContain("no record of it");
     });
 
+    it("says nothing runs an identity inside an unavailable unit", () => {
+      // A unit no configuration runs has no record for the same reason it
+      // has no lane, so the rule that an identity with no history runs
+      // would answer the opposite of what happens.
+      const text = explainLines(manifest(), { ...TEST, n: "never seen" }, {
+        selected: false,
+        unavailable: "the equipment it wants is a workstation's",
+      }).join("\n");
+      expect(text).toContain("Nothing runs it");
+      expect(text).toContain("the equipment it wants is a workstation's");
+      expect(text).not.toContain("mandatory");
+    });
+
     it("prints the catches behind a score", () => {
       const held = manifest();
       held.entries[0]!.inputs = {
@@ -299,6 +312,28 @@ describe("verdictFor()", () => {
     expect(verdict.selected).toBe(true);
     expect(verdict.repeats).toBeGreaterThanOrEqual(1);
     expect(verdict.unschedulable).toBeUndefined();
+  });
+
+  it("reads the reason nothing runs a unit out of the topology", () => {
+    // An unavailable unit has no manifest entry to carry its reason, so
+    // the verdict asks the suite that declared it.
+    const unavailable = suiteHolding(["packages/memory/test/memory.test.ts"]);
+    unavailable.unavailable = [{
+      unit: "packages/memory/test/memory.test.ts",
+      reason: "the equipment it wants is a workstation's",
+    }];
+    unavailable.locate = () => ({
+      level: "unit",
+      unit: "packages/memory/test/memory.test.ts",
+    });
+    const verdict = verdictFor(sampleManifest({ entries: [] }), [unavailable], {
+      k: "unit",
+      s: "memory",
+      n: "anything",
+    });
+    expect(verdict.unavailable).toBe(
+      "the equipment it wants is a workstation's",
+    );
   });
 
   it("carries the cost the bound was compared against", () => {
