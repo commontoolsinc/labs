@@ -673,6 +673,26 @@ Deno.test("the Dashboard workflow records no tests", async () => {
   assertStringIncludes(workflowTriggers(relay), '    workflows: ["CI"]\n');
 });
 
+Deno.test("the Coverage Check job records no tests", async () => {
+  const job = jobBlock(
+    withoutComments(await workflow("deno.yml")),
+    "coverage-check",
+  );
+
+  // The gate reads the coverage artifacts of every test job in this run, so no
+  // lane can be asked to run it, and the criterion in `docs/specs/test-records.md`
+  // under "Recording" puts it outside test records: no spool directory, no
+  // wrapper, no ship step.
+  assert(!job.includes("CF_TEST_RECORDS_DIR"), "the job spools test records");
+  assert(
+    !job.includes("run-recorded"),
+    "the job wraps its command in run-recorded",
+  );
+  assert(!job.includes("test-records-ship"), "the job ships test records");
+  // The gate itself runs.
+  assertStringIncludes(job, "tasks/coverage-check.ts");
+});
+
 Deno.test("One commit publishes one set of release artifacts", async () => {
   // A release artifact is named after the commit it was built from, and the
   // deploy hands the bastion a commit rather than a build. So a commit has one

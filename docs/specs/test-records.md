@@ -146,6 +146,15 @@ such a harness as a child process hands it an empty
 `CF_TEST_RECORDS_DIR`, since the child reads its own environment; an
 empty value is recording off, the same as an unset one.
 
+A check that no lane can be asked to run is not recorded. A record is one
+execution of one test, and every history built from records — flake rate,
+duration, and what a pull request selects — answers whether to run that
+test again. A check reading the artifacts of every job in its own run
+exists only as part of a whole run, so there is nothing to select and no
+suite in the test topology to claim its identity. The pull request
+coverage gate is the one such check; a gate resolving a merge base
+against a base ref is not, and records normally.
+
 A run's owner — locally `deno task test`, `deno task integration`, or
 `deno task run-recorded` when a personal key is present — creates the
 spool under the per-user spool root (`CF_TEST_RECORDS_SPOOL_ROOT`, or the
