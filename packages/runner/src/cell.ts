@@ -1450,11 +1450,13 @@ export class CellImpl<T extends FabricValue>
     // can call `.exec`); at runtime we validate the actual handle value rather
     // than `#kind`, since handler-input materialization doesn't always stamp the
     // kind onto the delivered cell. Read the handle with `getRaw()` (NOT `get()`):
-    // the delivered cell's schema is the `SqliteDatabase` shape (no declared
-    // properties), so `get()` would shape the handle down to `{}` and drop the
-    // `id`/`tables` fields. Use `lastNode: "value"` so the FINAL link is still
-    // resolved (a handler-delivered handle may sit behind a link at its target) —
-    // getRaw's default `"top"` would stop at the link object and miss `id`.
+    // the delivered cell's schema is whatever the pattern that declared the
+    // handle was compiled against, and a pattern compiled before the descriptor
+    // emission carries the empty `SqliteDatabase` shape, which shapes the handle
+    // down to `{}` and drops the `id`/`tables` fields. Use `lastNode: "value"`
+    // so the FINAL link is still resolved (a handler-delivered handle may sit
+    // behind a link at its target) — getRaw's default `"top"` would stop at the
+    // link object and miss `id`.
     const handle = this.getRaw({ lastNode: "value" }) as
       | { id?: unknown; tables?: unknown; scope?: unknown }
       | undefined;
@@ -1467,8 +1469,8 @@ export class CellImpl<T extends FabricValue>
     // stores the handle inline (self-contained), but a handle written before
     // that fix can still hold doc LINKS where the rule's AST nodes should be,
     // so `getRaw` alone would see links. The permissive schema bypasses the
-    // SqliteDb shape (no declared properties) that would shape `get()` down
-    // to `{}`.
+    // handle's declared shape, which for a pattern compiled before the
+    // descriptor emission has no properties and shapes `get()` down to `{}`.
     const materialized = this.asSchema(
       { type: "object", additionalProperties: true } as JSONSchema,
     ).withTx(this.tx).get() as { tables?: unknown } | undefined;

@@ -55,12 +55,20 @@ empty object:
   [05](./05-reactivity.md)). It exists so `reactOn: db` re-runs after a write and
   so concurrent writes serialize; patterns do not read it directly.
 
+That descriptor is what the compiler emits as the schema of a `SqliteDb`
+position (`NativeTypeFormatter`, `packages/schema-generator`), keyed on the
+`SQLITE_DB_BRAND` the handle type carries: the brand's own members describe
+nothing, so a schema derived from them would shape every read of a handle down
+to `{}`. `tables` therefore reads back whole, per-column `ifc` labels included
+— a pattern needs the declared columns to write a query against the database,
+and the disclosure is the same one `describe_handle` makes deliberately.
+
 ```ts
 // Shown at module scope.
 export declare const SQLITE_DB_BRAND: unique symbol;
-/** Opaque database handle value (the SqliteDb cell's readable value). Patterns
- *  forward the SqliteDb cell to db.query / db.exec / reactOn; they do not read
- *  the handle fields directly. */
+/** The SqliteDb cell's readable value: the `{ id, tables, rev }` descriptor
+ *  above, behind a nominal brand. Patterns usually just forward the SqliteDb
+ *  cell to db.query / db.exec / reactOn. */
 export type SqliteDatabase = { readonly [SQLITE_DB_BRAND]: true };
 
 /** Imperative write: records a SQLite write onto the current transaction. */

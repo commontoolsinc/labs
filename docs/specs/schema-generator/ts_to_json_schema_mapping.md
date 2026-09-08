@@ -154,6 +154,7 @@ by any repo test.
 | `FabricSpecialObject` nominal brand (the `"@commonfabric/FabricSpecialObject"` key, `FABRIC_SPECIAL_OBJECT_BRAND` in `packages/data-model/src/api.ts`) on any other branded type | property skipped entirely (not in `properties`, not in `required`) — the key exists only in the type system, so no runtime value could ever satisfy it; e.g. a field typed as the `FabricPrimitive` base emits `{ type: "object", properties: {} }` | `shouldSkipInternalProperty`, `object-formatter.ts` | fixture `fabric-special-object-brand` |
 | TS `enum` declaration | hoisted under the enum name with **no `type` key** (all-literal union path, §8): numeric → `$defs: { Color: { enum: [0,1,2] } }` + `$ref`; string → `$defs: { Mode: { enum: ["on","off"] } }` | union path `union-formatter.ts`; hoisting §5 | `test/enum-schema-rows.test.ts` |
 | Single enum member type (`Mode.On`) | inline literal schema, e.g. `{ type: "string", enum: ["on"] }`; enum-member symbols are excluded from named-type hoisting so same-named members and unrelated named types cannot collide in `$defs` | `getNamedTypeKey`, `type-utils.ts`; pinned by `test/enum-member-hoisting.test.ts` | — |
+| `SqliteDatabase` (the `SqliteDb` handle's value, carrying the `SQLITE_DB_BRAND` unique symbol) | the handle descriptor `{ id, tables, rev }` with `additionalProperties: true` (§5.2), hoisted under `SqliteDatabase`; the brand's own members describe nothing, so a structural schema would shape a handle read down to `{}` | `native-type-formatter.ts` | `test/schema/cell-type.test.ts`; end-to-end: ts-transformers `handler-schema/sqlite-db-handler-state`, `schema-injection/scoped-sqlite-factory` |
 | `Date` / `URL` / typed arrays / etc. | native table, §5.2 | `native-type-formatter.ts` | date-types fixture, native-type tests |
 | `Map`/`WeakMap`/`Set`/`WeakSet` | **throws** (§13) | `type-utils.ts` | `schema-generator.test.ts` |
 | `Reactive<T>` | erases to `<T>`'s schema, **no marker** (§6.4) | — | `capability-wrapper-types.test.ts` |
@@ -238,6 +239,21 @@ emits that class's schema-vocabulary name, a leaf with no `properties`, no
 (`schemaTypeOfFabricPrimitive`,
 `packages/data-model-schema/src/schemaTypeOfFabricPrimitive.ts`); the dialect side is
 specified in `docs/specs/json_schema.md`.
+
+`NativeTypeFormatter` also claims one type that is not in the name table: the
+`SqliteDb` handle's readable value, recognized by the `SQLITE_DB_BRAND` unique
+symbol its type carries (`declaresSqliteDbBrand`). It emits the handle
+descriptor the SQLite spec defines
+(`docs/specs/sqlite-builtin/01-api.md`) —
+`{ type: "object", properties: { id: { type: "string" }, tables: { type: "object", additionalProperties: true }, rev: { type: "number" } }, additionalProperties: true }`.
+The type's own members describe nothing (a nominal brand is a single symbol
+key), so a structural schema would shape every read of a handle down to `{}`.
+`tables` carries the author-declared table schemas, whose per-column `ifc`
+labels are what a pattern reads to write a query, and `additionalProperties`
+keeps the fields outside the descriptor (`scope`, `owner`) from being dropped.
+Because the claim is by brand rather than by name, this one keeps its ordinary
+`$defs` hoisting: every `SqliteDb` position emits
+`$ref: "#/$defs/SqliteDatabase"` against one descriptor.
 
 The remaining typed arrays and the buffer types map to `true` (accept
 anything), which overclaims: none of them is representable as a `FabricValue`,

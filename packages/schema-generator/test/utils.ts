@@ -29,7 +29,10 @@ declare interface Stream<E, R = void> extends BrandedCell<E, "stream"> {
 declare interface ComparableCell<T> extends BrandedCell<T, "comparable"> {}
 declare interface ReadonlyCell<T> extends BrandedCell<T, "readonly"> {}
 declare interface WriteonlyCell<T> extends BrandedCell<T, "writeonly"> {}
-declare type SqliteDatabase = { readonly __sqliteDb: true };
+// Mirrors the real handle type: a nominal brand keyed by an exported unique
+// symbol, which is what the emitted descriptor is recognized by.
+declare const SQLITE_DB_BRAND: unique symbol;
+declare type SqliteDatabase = { readonly [SQLITE_DB_BRAND]: true };
 declare interface SqliteDb<T = SqliteDatabase>
   extends BrandedCell<T, "sqlite"> {}
 

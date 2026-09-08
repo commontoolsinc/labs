@@ -117,9 +117,10 @@ describe("SqliteDb .exec (commit-folded write)", () => {
   });
 
   it("reads the handle via getRaw even when the cell schema shapes it to {}", async () => {
-    // Real handler-input materialization delivers the handle cell with the
-    // `SqliteDatabase` schema (an object type with NO declared properties). A
-    // schema-shaped `get()` would project the handle down to `{}` and drop
+    // A pattern compiled before the handle descriptor landed declares the
+    // handle as an object type with NO properties, and handler-input
+    // materialization delivers the handle cell under that schema. A
+    // schema-shaped `get()` projects the handle down to `{}` and drops
     // `id`/`tables`; `.exec` must read the raw handle (getRaw, lastNode:"value")
     // and still fold the write. Regression guard for the get()->getRaw() fix.
     const dbRef: SqliteDbRef = {
@@ -148,6 +149,46 @@ describe("SqliteDb .exec (commit-folded write)", () => {
     const provider = storageManager.open(space);
     const r = await provider.sqliteQuery!(dbRef, "SELECT body FROM notes");
     expect(r.rows).toEqual([{ body: "hi" }]);
+  });
+
+  it("reads back id/rev/tables through the emitted handle descriptor", async () => {
+    // The schema a pattern now declares for a `SqliteDb` position (the
+    // descriptor emitted by `packages/schema-generator`). A read through it
+    // must return the handle, not `{}` — including the table schemas whose
+    // per-column `ifc` labels a pattern needs to write a query.
+    const dbRef: SqliteDbRef & { rev: number } = {
+      id: `of:exec-descriptor-${crypto.randomUUID()}`,
+      rev: 3,
+      tables: {
+        notes: table({ id: "integer primary key", body: "text" }),
+      },
+    };
+    const tx = runtime.edit();
+    const handle = runtime.getCell(space, "db-descriptor", undefined, tx);
+    handle.set(dbRef);
+    const db = createCell(
+      runtime,
+      {
+        ...handle.getAsNormalizedFullLink(),
+        schema: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            tables: { type: "object", additionalProperties: true },
+            rev: { type: "number" },
+          },
+          additionalProperties: true,
+        },
+      },
+      tx,
+      false,
+      "sqlite",
+    ) as unknown as SqliteDbCell;
+    const value = db.get() as typeof dbRef;
+    expect(value.id).toBe(dbRef.id);
+    expect(value.rev).toBe(3);
+    expect(value.tables).toEqual(dbRef.tables);
+    await tx.commit();
   });
 
   it("throws on an undefined param, allows null", async () => {
