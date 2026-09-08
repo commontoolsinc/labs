@@ -57,6 +57,7 @@ export interface SpecCitation {
 const CFC_SPEC = "docs/specs/agent-harness/02-cfc-integration.md";
 const RUNTIME_SPEC = "docs/specs/agent-harness/01-runtime-contract.md";
 const MATRIX_SPEC = "docs/specs/cfc-enforcement-matrix.md";
+const SQLITE_CFC_SPEC = "docs/specs/sqlite-builtin/06-cfc.md";
 
 /**
  * Every citation the checks draw on, keyed by the clause id where the clause
@@ -181,6 +182,12 @@ export const SPEC_CITATIONS = {
     clause: "\u00a72 rule 4",
     quote:
       "Multi-hop closure requires `cfcFlowLabels: persist` stamping the intermediate doc's derived label so the second hop's trigger read picks it up.",
+  },
+  "SQLITE-CFC-read-labels": {
+    doc: SQLITE_CFC_SPEC,
+    clause: "\u00a7 Read \u2014 sound column provenance, per-field labels",
+    quote:
+      "writes the result rows under a **per-field label schema** (`labelResultSchema`), so a consumer reading `q.result[i].<col>` inherits that column's label",
   },
   "AH-LIFE-6": {
     doc: RUNTIME_SPEC,
