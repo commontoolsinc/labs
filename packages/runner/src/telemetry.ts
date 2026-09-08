@@ -185,6 +185,30 @@ export type RuntimeTelemetryMarker = {
   key: string;
   outcome: "installed" | "cancelled";
 } | {
+  // Emitted as the runner memoizes which pattern the result doc under `key`
+  // holds for the scope instance `scopeKey`, the memo that lets the next run
+  // of the same computation skip materializing its child again.
+  type: "runner.result-pattern.memoize";
+  key: string;
+  scopeKey: string;
+} | {
+  // Emitted as a result-pattern memo leaves the runner: for every instance of
+  // the doc under `key` when a storage notification names that doc (no
+  // `scopeKey`), and for one instance when the commit that wrote its child
+  // is rejected. The sweep in `stopAll()` drops the whole memo without one.
+  type: "runner.result-pattern.evict";
+  key: string;
+  scopeKey?: string;
+} | {
+  // Emitted as the engine records a verified module's implementation under
+  // its content-addressed `{ identity, symbol }`, with the binding path of
+  // the module-scope declaration it was bound to when the transformer
+  // annotated one. A host-trusted value registers without one.
+  type: "harness.implementation.register";
+  identity: string;
+  symbol: string;
+  bindingPath?: string[];
+} | {
   // Emitted as the pattern manager begins a tracked compile-cache write-back
   // into `space` for the closure rooted at `entryIdentity`: a closure
   // persistence or a source write-back, the writes replication waits on

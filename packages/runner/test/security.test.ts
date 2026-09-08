@@ -6,6 +6,7 @@ import { getPatternEnvironment } from "../src/env.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 import { createModuleCompartmentGlobals } from "../src/sandbox/mod.ts";
 import { createCallbackCompartmentGlobals } from "../src/sandbox/compartment-globals.ts";
 import { evaluateFunctionSourceInSES } from "../src/sandbox/ses-runtime.ts";
@@ -326,16 +327,19 @@ describe("SES security regressions", () => {
       ],
     };
 
+    // Every implementation the engine records announces itself with a
+    // `harness.implementation.register` marker.
+    let registered = 0;
+    runtime.telemetry.addEventListener("telemetry", (event: Event) => {
+      const { marker } = (event as RuntimeTelemetryEvent).detail;
+      if (marker.type === "harness.implementation.register") registered++;
+    });
     const { main } = await engine.compileAndEvaluateModules(program);
-    const countVerifiedFunctions = () =>
-      engine.accessForTestingOnly.executableRegistry.accessForTestingOnly
-        .verifiedImplementationsByEntryRef.values()
-        .reduce((n, bucket) => n + bucket.size, 0);
 
     // The nested computation (now the module-scope `__cfLift_N`) and the
     // handler are blessed at load: the global executable index is already
     // populated before any invocation.
-    const verifiedAtLoad = countVerifiedFunctions();
+    const verifiedAtLoad = registered;
     expect(verifiedAtLoad).toBeGreaterThan(0);
 
     // Invoking the verified handler runs against the load-blessed functions and
@@ -350,7 +354,7 @@ describe("SES security regressions", () => {
       )
     ).not.toThrow();
 
-    expect(countVerifiedFunctions()).toBeGreaterThanOrEqual(verifiedAtLoad);
+    expect(registered).toBe(verifiedAtLoad);
   });
 
   it("freezes callback compartment globalThis bindings", () => {

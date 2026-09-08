@@ -5,7 +5,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { ExtendedStorageTransaction } from "../src/storage/extended-storage-transaction.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
-import { getVerifiedProvenance } from "../src/harness/verified-provenance.ts";
+import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 
 // CT-1665: An owner-protected field bound by `WriteAuthorizedBy<T, typeof fn>`
 // compiles to a verified-binding `writeAuthorizedBy` claim. At commit the CFC
@@ -58,20 +58,17 @@ function programFor(src: string): RuntimeProgram {
   return { main: "/main.tsx", files: [{ name: "/main.tsx", contents: src }] };
 }
 
+// The binding paths each runtime's engine has registered so far, collected
+// from its `harness.implementation.register` markers from the moment
+// `newRuntime()` built it.
+const bindingPathsByRuntime = new WeakMap<Runtime, string[][]>();
+
 function recordedBindingPaths(rt: Runtime): string[][] {
-  // The binding identity lives on each registered function's content-addressed
-  // provenance (the former `verifiedBindingMetadata` map is gone — PR E2);
-  // enumerate the engine's implementation index to reach the registered fns.
-  const byRef = rt.harness.accessForTestingOnly.executableRegistry
-    .accessForTestingOnly.verifiedImplementationsByEntryRef;
-  const out: string[][] = [];
-  for (const bucket of byRef.values()) {
-    for (const fn of bucket.values()) {
-      const path = getVerifiedProvenance(fn)?.bindingIdentity?.bindingPath;
-      if (Array.isArray(path)) out.push(path);
-    }
+  const paths = bindingPathsByRuntime.get(rt);
+  if (paths === undefined) {
+    throw new Error("Runtime was not built by `newRuntime()`");
   }
-  return out;
+  return paths;
 }
 
 // Capture the bindingPaths of the writer identities STAMPED on transactions
@@ -106,11 +103,24 @@ async function bindingPathsResolvedDuring(
 describe("CT-1665: verified binding metadata for non-exported handlers", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
-  const newRuntime = () =>
-    new Runtime({
+  const newRuntime = () => {
+    const rt = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
     });
+    const paths: string[][] = [];
+    rt.telemetry.addEventListener("telemetry", (event: Event) => {
+      const { marker } = (event as RuntimeTelemetryEvent).detail;
+      if (
+        marker.type === "harness.implementation.register" &&
+        marker.bindingPath !== undefined
+      ) {
+        paths.push(marker.bindingPath);
+      }
+    });
+    bindingPathsByRuntime.set(rt, paths);
+    return rt;
+  };
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });

@@ -43,19 +43,6 @@ export class ExecutableRegistry {
 
   readonly #hostRegisteredFunctions = new WeakSet<HarnessedFunction>();
 
-  /** The implementation index, which a test reads directly. */
-  get accessForTestingOnly(): {
-    readonly verifiedImplementationsByEntryRef: Map<
-      string,
-      Map<string, HarnessedFunction>
-    >;
-  } {
-    return {
-      verifiedImplementationsByEntryRef:
-        this.#verifiedImplementationsByEntryRef,
-    };
-  }
-
   clear(): void {
     this.#verifiedImplementationsByEntryRef.clear();
     this.#nextHostModuleId = 0;
