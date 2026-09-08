@@ -1087,7 +1087,7 @@ describe("running a lane's work", () => {
       console.log = log;
     }
     const printed = lines.join("\n");
-    expect(printed).toContain("One invocation");
+    expect(printed).toContain("One part of this lane failed");
     expect(printed).toContain("repo-gates");
     expect(printed).toContain("deno-fmt");
     expect(printed).toContain("deno fmt --check");
@@ -1931,15 +1931,16 @@ describe("what a lane does with the batches it was given", () => {
     await Deno.remove(spool, { recursive: true });
   });
 
-  it("says what failed even where a later batch threw", async () => {
-    // The batches before the throw are the account of what went wrong,
-    // and a lane says it whichever way it leaves.
+  it("counts a suite that raised as that batch failing, and goes on", async () => {
+    // A suite unable to say what to run is one batch's problem. The
+    // batches around it are still measurable, so the lane records what it
+    // raised, runs the rest, and reports both at the end.
     const lines: string[] = [];
+    const said: string[] = [];
     const log = console.log;
+    const error = console.error;
     console.log = (line: string) => lines.push(line);
-    // The failing batch runs before the raising one, which is the case
-    // this is about: work was done and went red, and then something
-    // after it raised.
+    console.error = (line: string) => said.push(line);
     const failing = suite({
       id: "runner-unit",
       units: ["packages/runner/test/oven.test.ts"],
@@ -1956,8 +1957,9 @@ describe("what a lane does with the batches it was given", () => {
         throw new Error("the suite could not say what to run");
       },
     });
+    let ok: boolean | undefined;
     try {
-      await expect(runLane(
+      ok = await runLane(
         {
           lane: 1,
           of: 1,
@@ -1981,15 +1983,19 @@ describe("what a lane does with the batches it was given", () => {
             }),
           topology: () => Promise.resolve([failing, raising]),
         },
-      )).rejects.toThrow("could not say what to run");
+      );
     } finally {
       console.log = log;
+      console.error = error;
     }
-    // The error is what the lane exits with; the failed batch is what it
-    // still has to say about the work it did before that. The plan table
-    // names every suite in the lane, so the wording asserted on here is
-    // the failure report's own.
-    expect(lines.join("\n")).toContain("One invocation of this lane failed");
+    expect(ok).toBe(false);
+    expect(said.join("\n")).toContain("could not say what to run");
+    // Both batches reach the report, the one that exited non-zero and the
+    // one that raised. The plan table names every suite in the lane, so
+    // the wording asserted on here is the failure report's own.
+    const printed = lines.join("\n");
+    expect(printed).toContain("2 parts of this lane failed");
+    expect(printed).toContain("raised rather than saying what to run");
   });
 
   it("runs every batch it was given, past a failure in one", async () => {

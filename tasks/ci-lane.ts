@@ -239,15 +239,15 @@ export async function changedFiles(
 }
 
 /**
- * One invocation of a batch that exited non-zero.
+ * What went wrong in one batch: an invocation that exited non-zero, or a
+ * suite that raised rather than saying what to run.
  *
  * A lane runs test commands and commands that are not tests, and only
  * the first kind names what went wrong on its way out. A gate prints
  * the diagnostic it was written to print and exits, a build prints a
  * compiler error, and a task that does not exist prints the list of
  * tasks that do — none of which a reader can tell from the thousands of
- * passing lines around it. So the lane names the invocations of its own
- * that failed.
+ * passing lines around it. So the lane names what of its own failed.
  */
 export interface Failure {
   /** The suite the batch belongs to. */
@@ -256,8 +256,11 @@ export interface Failure {
   /** The units the invocation was asked for. */
   units: readonly string[];
 
-  /** What ran, as a command line. */
-  command: string;
+  /** What ran, as a command line, where a command was built. */
+  command?: string;
+
+  /** What the suite raised, where it built no command to run. */
+  raised?: string;
 
   /** Where it ran, when that is not the repository root. */
   cwd?: string;
@@ -642,16 +645,18 @@ export function describeFailures(failures: readonly Failure[]): void {
       : `${units.length}, starting ${units.slice(0, 3).join(", ")}`;
   say([
     failures.length === 1
-      ? "One invocation of this lane failed:"
-      : `${failures.length} invocations of this lane failed:`,
+      ? "One part of this lane failed:"
+      : `${failures.length} parts of this lane failed:`,
     "",
     ...failures.flatMap((failure) => [
       `- \`${failure.suite}\`${
         failure.run === undefined ? "" : `, run ${failure.run}`
       }, over ${named(failure.units)}`,
-      `  - \`${failure.command}\`${
-        failure.cwd === undefined ? "" : ` in \`${failure.cwd}\``
-      }`,
+      failure.command === undefined
+        ? `  - raised rather than saying what to run: ${failure.raised}`
+        : `  - \`${failure.command}\`${
+          failure.cwd === undefined ? "" : ` in \`${failure.cwd}\``
+        }`,
     ]),
   ]);
 }
@@ -1142,19 +1147,35 @@ export async function runLane(
       for (const batch of batches) {
         // A failure never stops the lane: one failing batch would
         // otherwise hide every batch and every repeat after it, and the
-        // point of a lane is what it measured.
-        const result = await runBatch(
-          batch,
-          options,
-          workDir,
-          spool,
-          // What this suite asked for, not what the lane opened. Two
-          // capabilities may export the same name and mean different
-          // things by it, and the two server-execution arms can share a
-          // lane.
-          opened.envFor(batch.suite.needs),
-          measuring(options, gate, batch),
-        );
+        // point of a lane is what it measured. That covers a suite that
+        // raised as much as a command that exited non-zero — a suite
+        // unable to say what to run is one batch's problem, and the
+        // batches around it are still measurable.
+        let result;
+        try {
+          result = await runBatch(
+            batch,
+            options,
+            workDir,
+            spool,
+            // What this suite asked for, not what the lane opened. Two
+            // capabilities may export the same name and mean different
+            // things by it, and the two server-execution arms can share
+            // a lane.
+            opened.envFor(batch.suite.needs),
+            measuring(options, gate, batch),
+          );
+        } catch (error) {
+          ok = false;
+          const failure: Failure = {
+            suite: batch.suite.id,
+            units: batch.units.map((request) => request.unit),
+            raised: String(error),
+          };
+          failures.push(failure);
+          console.error(`ci-lane: ${failure.suite} raised: ${failure.raised}`);
+          continue;
+        }
         if (!result.ok) ok = false;
         conflicts.push(...result.conflicts);
         failures.push(...result.failures);
