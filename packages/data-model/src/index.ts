@@ -40,10 +40,14 @@ export {
   isFabricObjectOrArray,
   isFabricPlainContainer,
   isFabricPlainObject,
+  isKeyableObjectNotArray,
+  isKeyableObjectOrArray,
   isValidFabricNativeObject,
   isValidFabricPlainObject,
   isValidFabricValue,
   isValidFabricValueLayer,
+  isWalkableObjectNotArray,
+  isWalkableObjectOrArray,
 } from "./type-check.ts";
 
 export {
@@ -55,6 +59,10 @@ export {
   shallowFabricFromNativeObjectElseUndefined,
   shallowFabricFromNativeValue,
 } from "./native-conversion.ts";
+
+export { fabricAwareEqual } from "./fabricAwareEqual.ts";
+
+export { refuseFabricInstance } from "./refuseFabricInstance.ts";
 
 export { valueEqual } from "./valueEqual.ts";
 
