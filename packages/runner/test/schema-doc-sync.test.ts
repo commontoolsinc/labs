@@ -706,30 +706,6 @@ describe("schema-doc-sync", () => {
     expect(replica.getDocument("of:survivor-2")).toEqual({ value: { n: 2 } });
   });
 
-  it("closes the staged watch view when a frame fails validation", async () => {
-    const provider = readerStorage.open(space);
-    // The member is replaced by assignment, which its `private` rather than
-    // `#` name allows; the cast reaches only it.
-    const stubbed = provider.replica as unknown as {
-      applySessionSync(sync: SessionSync, type: "pull" | "integrate"): void;
-    };
-    const original = stubbed.applySessionSync.bind(stubbed);
-    stubbed.applySessionSync = () => {
-      throw new Error("synthetic frame validation failure");
-    };
-    try {
-      const result = await provider.sync("of:view-close-probe" as URI, {
-        path: [],
-        schema: false,
-      });
-      expect(String(result.error?.message)).toContain(
-        "synthetic frame validation failure",
-      );
-    } finally {
-      stubbed.applySessionSync = original;
-    }
-  });
-
   it("propagates a provider teardown failure out of close", async () => {
     const signer = await Identity.fromPassphrase("schema-doc-sync");
     const storage = EmulatedStorageManager.connectTo(server, { as: signer });

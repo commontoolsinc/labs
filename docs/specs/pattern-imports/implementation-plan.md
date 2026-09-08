@@ -638,8 +638,9 @@ export class FabricAwareResolver implements ProgramResolver {
       `"fabric import graph too deep/large"` (runaway-recursion backstop —
       transitive mounts arrive through this same method as the walk reaches
       mounted files' own fabric specifiers).
-   d. Fetch: open a read tx exactly like `replicateClosures` does
-      (`replicateClosures`, `packages/runner/src/pattern-manager.ts` —
+   d. Fetch: open a read tx exactly like
+      `PatternManager.#replicateClosures()` does
+      (`packages/runner/src/pattern-manager.ts` —
       `runtime.edit()` /
       `finally tx.abort?.(…)`), call `loadVerifiedSourceClosure(runtime,
       ctx.space, hash, tx)`. `undefined` → throw
@@ -662,7 +663,8 @@ export class FabricAwareResolver implements ProgramResolver {
       `verifySourceDocs`'s `entryFilename` (already returned inside
       `loadVerifiedSourceClosure` — if not surfaced, extend
       `loadVerifiedSourceClosure` to return `{ docs, entryFilename }`; check its
-      callers: `replicateClosures` and the pattern-manager cold path — adjust
+      callers: `PatternManager.#replicateClosures()` and the pattern-manager
+      cold path — adjust
       both destructurings). For each mounted path, record the source document's
       verified identity and effective identity fingerprint in
       `publishedModules`. An absent legacy field contributes the empty value.
@@ -896,8 +898,9 @@ closure walk returns importer and subtree emitted docs but no declaration docs;
 and a type-only relative edge between two emitted `.ts` modules appears under
 its authored specifier in the source links but not the compiled runtime links.
 The emitted target may still be retained by a synthetic compiled root. Also
-show that `replicateClosures` of an importer initially fails or loses the
-subtree because the source closure excludes it. Fix `replicateClosures` by
+show that `PatternManager.#replicateClosures()` of an importer initially
+fails or loses the subtree because the source closure excludes it. Fix
+`PatternManager.#replicateClosures()` by
 parsing each replicated source doc's external specifiers with
 `collectImportSpecifiers`, `isFabricImportSpecifier`, and `pinnedIdentity`, then
 recurse per subtree identity with a visited set. Test that an importer replicated
@@ -1108,7 +1111,8 @@ identity calculation.
   - cross-space (`ref.space` a DID ≠ compiling space): fetch via
     `loadVerifiedSourceClosure(runtime, refSpace, …)` — the storage session
     routes; CFC caveat is documented follow-up (decision 9). The write-back
-    then copies the docs into the compiling space (this is `replicateClosures`
+    then copies the docs into the compiling space (this is
+    `PatternManager.#replicateClosures()`
     semantics through the normal compile path — no extra code, but ADD a test
     asserting it happens, and a `logger.info` naming source space → dest
     space for the provenance audit trail).

@@ -6,7 +6,8 @@
 
 ## Motivation
 
-- `Runner.setupInternal` currently stores pattern, argument, internal, and schema
+- `Runner.#setupInternal()` currently stores pattern, argument, internal, and
+  schema
   metadata on the result cell. The runtime still lacks a persisted view of the
   concrete nodes it instantiated.
 - `instantiateNode` performs alias gymnastics through
@@ -144,7 +145,7 @@ type NodeFactoryDescriptor =
 
 > **Note:** Deferred to Phase 2 implementation.
 
-- On `Runner.setupInternal`, if a prior snapshot exists, load it before
+- On `Runner.#setupInternal()`, if a prior snapshot exists, load it before
   unpacking defaults. The runtime can:
   - Reattach scheduler subscriptions by walking the nodes, reusing modules whose
     implementation reference matches

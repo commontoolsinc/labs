@@ -3588,7 +3588,7 @@ serving replica + wire; the client arrival gate):
 - Danger-zone note (storage/v2.ts near the wedge machinery): the
   re-key touched `sealNative`/`sealOperations`, `settleSealedCommit`,
   `confirmPending`, `finalizeRejection`, `finalizeSupersededSpeculation`,
-  `SpaceReplica.applySessionSync()`, `SpaceReplica.#buildReads()`,
+  `SpaceReplica.#applySessionSync()`, `SpaceReplica.#buildReads()`,
   `record`/`visibleVersion` and the
   sink/notify paths — ONLY to thread the instance key/identity into
   the doc-key resolution and the touched-doc entries; no ordering,
@@ -3699,7 +3699,8 @@ supply; OW29/OW32/OW34 closed):
     piece instantiated with a VALUE argument narrows the same way. So
     stage A/B did NOT break the eager pass (verified: the eager
     scoped-keys pass in `data-updating.ts` and `updateArgument` /
-    `setupInternal`'s cell-link handling are BYTE-IDENTICAL across the
+    `Runner.#setupInternal()`'s cell-link handling are BYTE-IDENTICAL
+    across the
     stage-A base `6d18d6998` → stage-B head — the only stage-A
     `data-updating.ts` change is `seedMemoKey`, unrelated).
   - **The review's leak came from a NON-STANDARD construction, not a
@@ -4792,7 +4793,8 @@ supply; OW29/OW32/OW34 closed):
     `intent-error-notice`, `intent-refused`, `intent-echo-retired-by-
     backstop` (an intent-origin ENTRY retired by the W sweep instead —
     it counts ECHO entries swept by W, NOT missed marks: the arrival
-    sweep runs synchronously inside `SpaceReplica.applySessionSync()` and can
+    sweep runs synchronously inside `SpaceReplica.#applySessionSync()`
+    and can
     retire
     the echo before the mark's microtask check runs, so a non-zero
     count coexists with every fire resolved by its mark — the chat
@@ -5631,7 +5633,8 @@ supply; OW29/OW32/OW34 closed):
     TRIGGER: a nonzero park count in real ON usage, or OW56 landing
     (which dissolves the class), whichever comes first; the parked
     WIP branch `claude/server-exec-v2-ow45-sc-heal` is the
-    shelf-ready start (client-side heal riding `replicateClosures`
+    shelf-ready start (client-side heal riding
+    `PatternManager.#replicateClosures()`
     under the client's own identity, green red-first runner pins,
     serving posture pinned fail-closed; marked do-not-merge).
     Trigger DISCHARGED for the home-profile half — the
@@ -7841,7 +7844,8 @@ supply; OW29/OW32/OW34 closed):
     closure-carrying waves) could not falsify read-visibility — every
     local read trailed durability — so staged-vs-durable remains
     UNDISCRIMINATED and is NOT load-bearing for the fix. THE SECOND FIX
-    (same PR, red-first): `replicateClosures` records every durable
+    (same PR, red-first): `PatternManager.#replicateClosures()` records
+    every durable
     persist target per entry (`persistedClosureSpaces`) and, on a dry
     heuristic origin, retries its verified read against those recorded
     spaces — content-addressed, so the copy is byte-identical and the
@@ -7917,7 +7921,8 @@ supply; OW29/OW32/OW34 closed):
     kept the loop honest.
     **GEOMETRY-3 CLOSE (this PR, off #6484's merge `bd9b1c10b`;
     review-sharpened, red-first, LANDED):** on a dry origin AND dry
-    fallback map, `replicateClosures` snapshots BOTH in-flight compile
+    fallback map, `PatternManager.#replicateClosures()` snapshots BOTH
+    in-flight compile
     registries — `inProgressCompilations` AND
     `inProgressByIdentityLoads` (a supplier can be a by-identity load's
     recovery compile; NEVER `compileCacheWrites`, the replication's own
@@ -9519,7 +9524,7 @@ supply; OW29/OW32/OW34 closed):
     (`cid:…`) is "not delivered and verified in this replica",
     `SpaceReplica.#validateArrivedSchemaDocuments`
     (`packages/runner/src/storage/v2.ts`) THROWS on the background
-    consume path (`SpaceReplica.applySessionSync()` →
+    consume path (`SpaceReplica.#applySessionSync()` →
     `SpaceReplica.#consumeUpdates()`) — uncaught,
     outside any caller's try, killing the consuming worker/test file
     wholesale. Evidence: CI run 32742547103 at `7d97a80aa` — 13

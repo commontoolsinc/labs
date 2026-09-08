@@ -885,7 +885,8 @@ the description is taken after the same inlining. None of this constrains a
 later write: the create-only mark means the value the schema describes is the
 only value that document ever holds. A verb's *declared* result type is a
 separate question: lowered onto `module.resultSchema`, it reaches the runtime —
-a launched result pattern carries it as its result schema, which `setupInternal`
+a launched result pattern carries it as its result schema, which
+`Runner.#setupInternal()`
 records as that receipt's stored schema, and the CLI serves it from the
 compiled graph (`cf piece verbs`, `cf piece call <verb> --help`). What it never
 enters is the pattern's own durable schema — the shape the update gate compares

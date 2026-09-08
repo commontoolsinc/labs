@@ -3503,8 +3503,8 @@ export class SpaceReplica
       // The next two forward to TypeScript-private members so that a test
       // which replaces one by assignment is honored here too.
       refreshWatchSet: (entries, type, watchBranch) =>
-        this.refreshWatchSet(entries, type, watchBranch),
-      applySessionSync: (sync, type) => this.applySessionSync(sync, type),
+        this.#refreshWatchSet(entries, type, watchBranch),
+      applySessionSync: (sync, type) => this.#applySessionSync(sync, type),
       waitForConflictReadRepair: (rejection) =>
         this.#waitForConflictReadRepair(rejection),
     };
@@ -3895,7 +3895,7 @@ export class SpaceReplica
     // The dead session's views. `terminateSession` already closed the
     // SESSION's own view; these are the replica's references to it, which a
     // later refresh would otherwise overwrite rather than close (the leak
-    // `refreshWatchSet`'s own catch guards against).
+    // `#refreshWatchSet()`'s own catch guards against).
     this.#watchView?.close();
     this.#watchView = null;
     this.#subscribedWatchView?.close();
@@ -4029,9 +4029,9 @@ export class SpaceReplica
       }
       this.#watchView = view;
       for (const precedingSync of precedingSyncs) {
-        this.applySessionSync(precedingSync, "integrate");
+        this.#applySessionSync(precedingSync, "integrate");
       }
-      this.applySessionSync(sync, "integrate");
+      this.#applySessionSync(sync, "integrate");
       this.#consumeWatchView(view);
     } catch (error) {
       callbacks.delete(callback);
@@ -4065,9 +4065,9 @@ export class SpaceReplica
       }
       this.#watchView = view;
       for (const precedingSync of precedingSyncs) {
-        this.applySessionSync(precedingSync, "integrate");
+        this.#applySessionSync(precedingSync, "integrate");
       }
-      this.applySessionSync(sync, "integrate");
+      this.#applySessionSync(sync, "integrate");
       this.#consumeWatchView(view);
     } catch (error) {
       if (!this.#closed) {
@@ -4403,8 +4403,8 @@ export class SpaceReplica
     this.#resetConflictAdmissionState();
     this.#rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     // Settle any queued (not-yet-sent) watch refresh first so its pull promise
-    // cannot outlive close(); `#closed` also makes refreshWatchSet fail closed
-    // for any refresh already in flight.
+    // cannot outlive close(); `#closed` also makes `#refreshWatchSet()` fail
+    // closed for any refresh already in flight.
     this.#cancelQueuedWatchRefresh();
     this.#watchView?.close();
     this.#watchView = null;
@@ -4633,7 +4633,7 @@ export class SpaceReplica
     // HERE, per caller, before the entries join the coalesced
     // watch-refresh batch — the batch shares ONE pending promise across
     // every concurrent caller, so a refusal thrown inside the batch
-    // (the refreshWatchSet backstop below) poisons innocent SPACE-scope
+    // (the `#refreshWatchSet()` backstop below) poisons innocent SPACE-scope
     // foreign reads coalesced beside the offender: the load-bearing
     // §2b free-read row would fail intermittently whenever any pattern
     // persistently attempted one foreign scoped read. Refusing the
@@ -5210,11 +5210,11 @@ export class SpaceReplica
   }
 
   /**
-   * TypeScript-private rather than a `#` name, because
-   * `test/memory-v2-watch-remove-coverage.test.ts` replaces this member by
-   * assignment, which a `#` method does not allow.
+   * Adds the watches `entries` describe to the session and applies the
+   * frames that come back, resolving to the pull's verdict; a refresh that
+   * fails resolves to its error rather than rejecting.
    */
-  private async refreshWatchSet(
+  async #refreshWatchSet(
     entries: Iterable<[WatchAddress, SchemaPathSelector]>,
     type: "pull" | "integrate" = "pull",
     watchBranch = "",
@@ -5305,9 +5305,9 @@ export class SpaceReplica
       this.#watchView = view;
       try {
         for (const precedingSync of precedingSyncs) {
-          this.applySessionSync(precedingSync, "integrate");
+          this.#applySessionSync(precedingSync, "integrate");
         }
-        this.applySessionSync(sync, type);
+        this.#applySessionSync(sync, type);
       } catch (error) {
         // The frame failed validation, so this refresh's view never gets a
         // consumer; without a close it leaks when a later refresh
@@ -5344,9 +5344,9 @@ export class SpaceReplica
         this.#watchView = view;
         try {
           for (const precedingSync of precedingSyncs) {
-            this.applySessionSync(precedingSync, "integrate");
+            this.#applySessionSync(precedingSync, "integrate");
           }
-          this.applySessionSync(sync, "integrate");
+          this.#applySessionSync(sync, "integrate");
         } catch (error) {
           view.close();
           throw error;
@@ -5457,7 +5457,7 @@ export class SpaceReplica
     batch: WatchRefreshBatch,
   ): Promise<void> {
     try {
-      const result = await this.refreshWatchSet(
+      const result = await this.#refreshWatchSet(
         batch.entries.values(),
         batch.type,
       );
@@ -5492,13 +5492,13 @@ export class SpaceReplica
         return;
       }
       try {
-        this.applySessionSync(next.value, "integrate");
+        this.#applySessionSync(next.value, "integrate");
       } catch (error) {
         // The background consumer must never die wholesale on one bad
         // frame (OW61: a validation throw here was an unhandled rejection
         // that killed the consuming worker — nothing upstream awaits this
         // loop per-frame). Delivery-guarantee violations are contained
-        // per-doc inside applySessionSync already; this catch is the net
+        // per-doc inside `#applySessionSync()` already; this catch is the net
         // under every OTHER producer or apply bug: log loudly, skip the
         // frame, keep consuming. The replica stays behind for the
         // frame's docs until a later delivery covers them.
@@ -6455,7 +6455,7 @@ export class SpaceReplica
         watchIdForEntry(address, selector, watchBranch)
       );
       try {
-        const result = await this.refreshWatchSet(
+        const result = await this.#refreshWatchSet(
           entries,
           "pull",
           watchBranch,
@@ -6911,13 +6911,12 @@ export class SpaceReplica
   }
 
   /**
-   * TypeScript-private rather than a `#` name, because
-   * `test/executor-space-root-ensure.test.ts`,
-   * `test/schema-doc-sync.test.ts`, and
-   * `test/memory-v2-watch-remove-coverage.test.ts` replace this member by
-   * assignment, which a `#` method does not allow.
+   * Applies one session frame to the replica: operation-field deliveries to
+   * their sinks, then the frame's upserts and removes, with an entry that
+   * fails the delivery guarantee quarantined rather than applied. Throws on
+   * a frame that is not the shape the wire promises.
    */
-  private applySessionSync(
+  #applySessionSync(
     sync: SessionSync,
     type: "pull" | "integrate",
   ): void {
@@ -7764,7 +7763,7 @@ export class SpaceReplica
     // ON only): when confirmed advanced PAST this accept while it was
     // pending — foreign novelty integrated under the own overlay — the
     // removal below makes the foreign value visible where the overlay
-    // was, and NO other path notifies (applySessionSync's differential
+    // was, and NO other path notifies (`#applySessionSync()`'s differential
     // ran while the overlay still masked the change). Fire the ordinary
     // change notification for exactly the shadowed docs, so scheduler
     // dirtiness registers BEFORE `unappliedForeignSeqFloor` lifts and
@@ -7858,7 +7857,7 @@ export class SpaceReplica
 
     // The shadow-flip notification (see the checkout above): compare the
     // post-removal view and notify exactly the docs whose foreign value
-    // just became visible. Same pattern as applySessionSync's integrate
+    // just became visible. Same pattern as `#applySessionSync()`'s integrate
     // notification.
     if (shadowBefore !== undefined) {
       const changes = shadowBefore.compare(this);

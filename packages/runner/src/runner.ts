@@ -2015,7 +2015,7 @@ export class Runner {
    * eviction_ — never by the sanctioned removals (a real pattern's durable
    * stamps superseding the pointer; a failed staging's cleanup). Each records
    * the _pointer_ the eviction dropped, and the zero-evidence restage exemption
-   * in `setupInternal()` consults it: an evicted pointer is evidence unknown,
+   * in `#setupInternal()` consults it: an evicted pointer is evidence unknown,
    * not no evidence. A re-setup with a _different_ identity takes the
    * conservative restage the un-evicted state would have taken — without the
    * tombstone, eviction silently skipped that revalidation. A re-setup with the
@@ -2269,12 +2269,6 @@ export class Runner {
         outerThis.#deferredStartCommitter = value;
       },
       createStorageSubscription: () => this.#createStorageSubscription(),
-      // Forwards to the TypeScript-private member so that a test which
-      // replaces it by assignment is honored here too.
-      // TODO(danfuzz): Make `setupInternal()` a `#` method, which needs
-      // `test/runner.test.ts` to make a setup report no pattern identity some
-      // other way than by replacing the method: a pattern whose setup records
-      // none, or a seam the runner offers around recording it.
       setupInternal: (
         providedTx,
         patternOrModule,
@@ -2282,7 +2276,7 @@ export class Runner {
         resultCell,
         validationOptions,
       ) =>
-        this.setupInternal(
+        this.#setupInternal(
           providedTx,
           patternOrModule,
           argument,
@@ -2466,7 +2460,7 @@ export class Runner {
     options: SetupValidationOptions = {},
   ): Promise<Cell<R>> {
     if (providedTx) {
-      this.setupInternal(
+      this.#setupInternal(
         providedTx,
         patternOrModule,
         argument,
@@ -2479,10 +2473,11 @@ export class Runner {
       // we'll see the latest true value; it just lost the race against someone
       // else changing the pattern or argument. Correct action is anyhow similar
       // to what would have happened if the write succeeded and was immediately
-      // overwritten. Still surface real callback failures from setupInternal so
-      // callers don't silently continue after a broken setup.
+      // overwritten. Still surface real callback failures from
+      // `#setupInternal()` so callers don't silently continue after a broken
+      // setup.
       return this.#runtime.editWithRetry((tx) => {
-        this.setupInternal(tx, patternOrModule, argument, resultCell, options);
+        this.#setupInternal(tx, patternOrModule, argument, resultCell, options);
       }).then(({ error }) => {
         if (error) {
           if (
@@ -3037,7 +3032,7 @@ export class Runner {
     // document the projection lands in — so the transaction making them has to
     // name them. This is the one place all of that happens, and it is reached
     // on a transaction of its own from a pattern swap and from a start repair
-    // as well as from `setupInternal`, neither of which the instantiation's
+    // as well as from `#setupInternal()`, neither of which the instantiation's
     // enrollment covers: a swap commits its setup before instantiating, and a
     // descriptor the incoming pattern adds is a document nothing has named.
     markPieceOwnedStores(tx, resultCell, pattern);
@@ -3341,14 +3336,8 @@ export class Runner {
     }
   }
 
-  /**
-   * Internal setup that returns whether scheduling is required.
-   *
-   * TypeScript-private rather than a `#` name, because
-   * `test/runner.test.ts` replaces this member by
-   * assignment, which a `#` method does not allow.
-   */
-  private setupInternal<T, R = any>(
+  /** Internal setup that returns whether scheduling is required. */
+  #setupInternal<T, R = any>(
     providedTx: IExtendedStorageTransaction | undefined,
     patternOrModule: Pattern | Module | undefined,
     argument: T,
@@ -5665,7 +5654,7 @@ export class Runner {
     // piece whose pattern moved underneath it is an ordinary in-place swap.
     const creatingPiece = options.sourceOrigin !== undefined &&
       getPatternIdentityRef(resultCell.withTx(tx)) === undefined;
-    const { needsStart, pattern } = this.setupInternal(
+    const { needsStart, pattern } = this.#setupInternal(
       tx,
       patternOrModule,
       argument,
@@ -5873,7 +5862,7 @@ export class Runner {
     // scheduler if the transaction isn't committed before the first functions
     // run. Though most likely the worst case is just extra invocations.
     const givenTx = resultCell.tx?.status().status === "ready" && resultCell.tx;
-    let setupRes: ReturnType<typeof this.setupInternal> | undefined;
+    let setupRes: SetupResult<any> | undefined;
     let commit: PatternSetupCommitReceipt | undefined;
     const assertExpectedPatternIdentity = (
       cell: Cell<any>,
@@ -5898,7 +5887,7 @@ export class Runner {
       // If tx is given, i.e. result cell was part of a tx that is still open,
       // caller manages retries
       assertExpectedPatternIdentity(resultCell.withTx(givenTx));
-      setupRes = this.setupInternal(
+      setupRes = this.#setupInternal(
         givenTx,
         pattern,
         inputs,
@@ -5936,7 +5925,7 @@ export class Runner {
           kind: "bookkeeping",
         });
         assertExpectedPatternIdentity(resultCell.withTx(tx));
-        return this.setupInternal(
+        return this.#setupInternal(
           tx,
           pattern,
           inputs,
@@ -5978,7 +5967,7 @@ export class Runner {
         if (requireCommit) {
           const patternRef = setupRes.patternRef;
           if (patternRef === undefined) {
-            // `setupInternal` returns without a pointer when it resolves no
+            // `#setupInternal()` returns without a pointer when it resolves no
             // pattern at all. A caller passing one cannot reach that, so this
             // guards the type's edge rather than a live path — and it fails
             // loudly instead of minting a receipt that names nothing.
@@ -8360,7 +8349,7 @@ export class Runner {
 
     // The verb's DECLARED result type (`module.resultSchema`, lowered from
     // `action<E, R>` / `handler<E, T, R>`) becomes this synthesized pattern's
-    // result schema, which `setupInternal` records as the receipt cell's
+    // result schema, which `#setupInternal()` records as the receipt cell's
     // durable `schema` meta. A launched result is a link, so its settled value
     // describes nothing; the declaration is the only description there is. An
     // undeclared verb passes `undefined` and keeps the unconstrained schema a
@@ -8574,15 +8563,16 @@ export class Runner {
       undefined,
       tx,
     );
-    const resultSetup = this.setupInternal(
+    const resultSetup = this.#setupInternal(
       tx,
       resultPattern,
       undefined,
       resultCell,
     );
     // The receipt mark must ride the transaction that creates the result
-    // cell's head — setupInternal just wrote it into the handler tx. Marking
-    // the deferred start tx instead would see the already-committed head and
+    // cell's head — `#setupInternal()` just wrote it into the handler tx.
+    // Marking the deferred start tx instead would see the already-committed
+    // head and
     // reject the FIRST delivery as receipt-exists, while redeliveries (whose
     // own handler tx re-creates the cell) would go unguarded.
     if (markCreateOnlyResult) {

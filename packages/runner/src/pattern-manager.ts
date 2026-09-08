@@ -347,8 +347,8 @@ function sourcePackagePaths(
  * (heuristic origin dry, fallback map dry or every candidate incomplete).
  * Carries the WANTED identity — the identity whose read failed, which for
  * a dependency-recursion frame is the DEPENDENCY's identity, not the
- * entry's (`replicateClosures` re-enters with it as `entryIdentity`) — so
- * the failure-registration site can park under the identity a future
+ * entry's (`#replicateClosures()` re-enters with it as `entryIdentity`) —
+ * so the failure-registration site can park under the identity a future
  * supply record will name (the ruled 3b close; see
  * `#parkedFailedReplications`).
  *
@@ -539,7 +539,7 @@ export class PatternManager {
    * at the two tracked persists' success; session-lifetime, record-only — a
    * later slot invalidation forces a re-verify on read, and the fallback read
    * re-verifies fail-closed anyway, so a stale record costs one failed read,
-   * never a wrong copy). These are `replicateClosures()`' _fallback origins_:
+   * never a wrong copy). These are `#replicateClosures()`' _fallback origins_:
    * the caller-named origin is a provenance heuristic — the in-memory artifact
    * index serves patterns with no per-space persist, so a running piece's space
    * can lack the closure entirely — while the closure is content-addressed, so
@@ -578,7 +578,7 @@ export class PatternManager {
   >();
 
   /** Record a durable closure persist's target for
-   * {@link replicateClosures}' fallback-origin read — under EVERY module
+   * `#replicateClosures()`' fallback-origin read — under EVERY module
    * identity of the persisted set, not just the persist call's entry: the
    * write functions persist one addressable doc per module, and the
    * replicated entry is routinely a MODULE of a larger compiled closure
@@ -739,8 +739,9 @@ export class PatternManager {
 
   /**
    * The in-flight and cached compilation tables, the module-cache bound, the
-   * compile-cache writer a test may supply, and the three closure steps that
-   * a test drives directly.
+   * compile-cache writer a test may supply, and the four closure steps that
+   * a test drives directly; a replication driven here runs under a fresh
+   * ticket, as one issued by the manager does.
    */
   get accessForTestingOnly(): {
     readonly addressableByIdentity: Map<string, Map<string, unknown>>;
@@ -771,6 +772,13 @@ export class PatternManager {
       entryIdentity: string,
       opts: { runtimeVersion: string },
       moduleDelegations?: ModuleDelegationMap,
+      delegated?: WritebackDelegation,
+    ): Promise<void>;
+    replicateClosures(
+      entryIdentity: string,
+      fromSpace: MemorySpace,
+      toSpace: MemorySpace,
+      visited?: Set<string>,
       delegated?: WritebackDelegation,
     ): Promise<void>;
   } {
@@ -826,6 +834,21 @@ export class PatternManager {
           opts,
           moduleDelegations,
           delegated,
+        ),
+      replicateClosures: (
+        entryIdentity,
+        fromSpace,
+        toSpace,
+        visited,
+        delegated,
+      ) =>
+        this.#replicateClosures(
+          entryIdentity,
+          fromSpace,
+          toSpace,
+          visited,
+          delegated,
+          this.#nextReplicationTicket++,
         ),
     };
   }
@@ -1091,7 +1114,7 @@ export class PatternManager {
     reissueOf?: { wantedIdentity: string },
   ): void {
     const ticket = this.#nextReplicationTicket++;
-    const replication = this.replicateClosures(
+    const replication = this.#replicateClosures(
       entryIdentity,
       fromSpace,
       toSpace,
@@ -1148,21 +1171,17 @@ export class PatternManager {
    * not copied across spaces: it carries writer authority and is valid only in
    * the space whose cache documents attest it. The ordinary save path still
    * preserves any authenticated delegation already present in `toSpace`.
-   *
-   * TypeScript-private rather than a `#` name, because
-   * `test/pattern-replication-sibling-race.test.ts` replaces this member by
-   * assignment, which a `#` method does not allow.
    */
-  private async replicateClosures(
+  async #replicateClosures(
     entryIdentity: string,
     fromSpace: MemorySpace,
     toSpace: MemorySpace,
     visited = new Set<string>(),
     // Required (not optional): the older-sibling filter below is only
-    // meaningful relative to THIS replication's registration order. Both
-    // call sites — `replicatePatternToSpace` and the dependency recursion —
-    // thread the entry replication's ticket; a caller without one has no
-    // business in this private method.
+    // meaningful relative to THIS replication's registration order. The
+    // issue path and the dependency recursion thread the entry replication's
+    // ticket, and the accessor mints a fresh one; a caller without one has
+    // no business in this private method.
     delegated: WritebackDelegation | undefined,
     ticket: number,
   ): Promise<void> {
@@ -1455,7 +1474,7 @@ export class PatternManager {
     }
 
     for (const dependencyIdentity of fabricDependencies) {
-      await this.replicateClosures(
+      await this.#replicateClosures(
         dependencyIdentity,
         fromSpace,
         toSpace,
