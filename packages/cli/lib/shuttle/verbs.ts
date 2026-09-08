@@ -338,9 +338,9 @@ async function cd(
   deps: VerbDeps,
 ): Promise<Outcome> {
   // `cd ''` is one operand, so the dispatch passes it on and the place is what
-  // answers it — in the sentence the dispatch composes for no operand at all,
-  // so the two spellings read alike. That guard is `movePlace`'s own and
-  // stands for the callers this one is not.
+  // answers it, in this verb's name. That guard is `movePlace`'s own and
+  // answers for every verb that aims an operand through it, which is why it
+  // is given the name to say.
   const moved = await landing(
     shuttle,
     shuttle.place.cd(line.operands[0]),
@@ -393,7 +393,7 @@ async function get(
   const operand = line.operands[0];
   const at = operand === undefined
     ? { kind: "place" as const, place: shuttle.place.place, input: false }
-    : await aimed(shuttle, operand, deps);
+    : await aimed(shuttle, operand, "get", deps);
   if (at.kind === "refused") return at;
   // Before the read and not after it, which is the whole point of warming: the
   // value a read serves is what a running pattern holds, so the pattern runs
@@ -603,6 +603,17 @@ function where(shuttle: Shuttle): Outcome {
 }
 
 /**
+ * What a write onto a whole piece is refused with, and what `set`'s page says
+ * about one.
+ *
+ * Both read it from here because a person reads one of the two: the page
+ * before they write the line, and the refusal after. Two copies of a sentence
+ * are two sentences the moment one of them is improved.
+ */
+const WHOLE_PIECE_REFUSAL =
+  "A write onto a whole piece is refused. `link` is what writes a reference.";
+
+/**
  * Writes the value the line's second operand spells at the cell its first
  * names, and says where it landed.
  *
@@ -610,10 +621,13 @@ function where(shuttle: Shuttle): Outcome {
  * suffix included, so `set title#argument x` writes the arguments cell exactly
  * as `--input` does for `cf cell set`.
  *
- * The write refuses to land on a whole cell. Only resolution can decide that —
- * an address naming a collection spends its leading segments reaching the
- * member, so a path can still resolve to a piece's root — so the refusal is
- * the seam's, in the seam's own words.
+ * The write refuses to land on a whole cell, and the refusal is written twice
+ * because the question is asked twice. An operand that reached a piece and
+ * named no path inside it is refused here, in {@link WHOLE_PIECE_REFUSAL},
+ * which is the sentence this verb's page carries. The rest only resolution can
+ * decide — an address naming a collection spends its leading segments reaching
+ * the member, so a path can still resolve to a piece's root — and that one is
+ * the seam's under `refuseRootWrite`, in the seam's own words.
  */
 async function set(
   shuttle: Shuttle,
@@ -630,6 +644,10 @@ async function set(
   if (value.kind === "refused") return value;
   const at = await writable(shuttle, path, "set", deps);
   if (at.kind !== "aimed") return at;
+  // The operand reached a piece and named no path inside it, which is the
+  // half of the refusal the line settles. Ahead of the warm, a line that
+  // cannot write being no reason to start a pattern.
+  if (at.place.position.path.length === 0) return refuse(WHOLE_PIECE_REFUSAL);
   const warmed = await warm(shuttle, at.place, deps);
   if (warmed !== undefined) return warmed;
   const position = at.place.position;
@@ -683,11 +701,16 @@ async function set(
  * holds the tag, which is the question issue #6944 carries for `get` and is
  * not this verb's to settle.
  *
- * Four things stop the write, and each leaves the cell as it was. A value JSON
- * cannot carry is refused above. An editor that did not finish is the editor's
- * own refusal, carried through. Text that came back unchanged is nothing to
- * write, and says so. Text that will not parse is refused with the parse error
- * and the file it is still in.
+ * Five things stop the write, and each leaves the cell as it was. A whole
+ * piece is refused in {@link WHOLE_PIECE_REFUSAL}, which is the sentence
+ * {@link set} gives that write, and the refusal comes before the editor opens
+ * rather than after a save: what a person typed into an editor is work, and a
+ * line that could never have written it should say so while there is nothing
+ * to lose. A value JSON cannot carry is refused above, before the editor opens
+ * too. An editor that did not finish is the editor's own refusal, carried
+ * through. Text that came back unchanged is nothing to write, and says so.
+ * Text that will not parse is refused with the parse error and the file it is
+ * still in.
  *
  * What decides the file's fate is not which of those happened but whether the
  * cell took the text: the file is removed exactly where it holds nothing the
@@ -711,6 +734,10 @@ async function edit(
   }
   const at = await writable(shuttle, line.operands[0], "edit", deps);
   if (at.kind !== "aimed") return at;
+  // The operand reached a piece and named no path inside it, which is
+  // {@link set}'s guard on the write both verbs make. Ahead of the read and
+  // the editor, so nothing is typed into a file for a write that cannot land.
+  if (at.place.position.path.length === 0) return refuse(WHOLE_PIECE_REFUSAL);
   const warmed = await warm(shuttle, at.place, deps);
   if (warmed !== undefined) return warmed;
   const position = at.place.position;
@@ -1152,11 +1179,12 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
     summary: "Opens a cell's value in `$EDITOR` and writes back what you save.",
     detail: "The value goes out as JSON and comes back as JSON, so what is " +
       "edited is\nwhat a write takes rather than what `get` prints.\n\n" +
-      "Four things stop the write, and each leaves the cell as it was: a " +
-      "value\nJSON cannot carry, which is refused before the editor opens; " +
-      "an editor that\ndid not finish; text that came back unchanged; and " +
-      "text that will not\nparse, which is refused with the file it is " +
-      "still in.\n\nIt is the one write with no `cf` equivalent behind it.",
+      "Five things stop the write, and each leaves the cell as it was: a " +
+      "whole\npiece, and a value JSON cannot carry, both refused before the " +
+      "editor opens;\nan editor that did not finish; text that came back " +
+      "unchanged; and text that\nwill not parse, which is refused with the " +
+      "file it is still in.\n\nIt is the one write with no `cf` equivalent " +
+      "behind it.",
   }],
   ["get", {
     run: get,
@@ -1265,8 +1293,7 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
       '`"milk"`. A value opening the way JSON opens one and then ' +
       "failing to\nparse is refused with the parser's reason rather than " +
       "written as a string.\n`-` is refused, standard input being the " +
-      "keyboard the prompt reads.\n\nA write onto a whole piece is " +
-      "refused. `link` is what writes a reference.",
+      `keyboard the prompt reads.\n\n${WHOLE_PIECE_REFUSAL}`,
   }],
   ["verbs", {
     run: listVerbs,
@@ -1465,6 +1492,7 @@ async function landing(
         move,
         row.at,
         row.toward,
+        "cd",
       );
       return reached.kind !== "ran"
         ? reached
@@ -2189,7 +2217,7 @@ async function writable(
 ): Promise<Writable> {
   const at = operand === undefined
     ? { kind: "place" as const, place: shuttle.place.place, input: false }
-    : await aimed(shuttle, operand, deps);
+    : await aimed(shuttle, operand, verb, deps);
   if (at.kind === "refused") return at;
   const position = at.place.position;
   if (position.kind !== "piece") {
@@ -2470,7 +2498,7 @@ async function receiver(
 ): Promise<Receiving> {
   const at = operand === undefined
     ? { kind: "place" as const, place: shuttle.place.place, input: false }
-    : await aimed(shuttle, operand, deps);
+    : await aimed(shuttle, operand, verb, deps);
   if (at.kind === "refused") return at;
   if (at.input) {
     return refuse(
@@ -2607,7 +2635,7 @@ async function dispatched(
   // everywhere else. Only a bare handle can carry a name: a walk written after
   // one ends at a cell inside the row, and a cell is a receiver rather than a
   // verb, so it takes the name in the next operand like any other reference.
-  const aim = shuttle.place.aim(first).move;
+  const aim = shuttle.place.aim(first, "call").move;
   const carried = aim.kind === "handle" && aim.rest === ""
     ? carriedName(shuttle, aim.handle)
     : undefined;

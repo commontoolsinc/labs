@@ -147,6 +147,13 @@ export type OptionReading =
  * as no option can be, a value missing from an option that takes one, and a
  * value given to one that does not.
  *
+ * That sentence names the bare `--` as well, for a verb that opens no section.
+ * A person writing a value that opens with `-` — a negative number has no
+ * other spelling — is told they wrote an option, and the escape that makes it
+ * an operand is the one thing the parser's own sentence cannot know to
+ * mention. Under `opens` it is left out rather than reworded, the `--` there
+ * closing the callable's section instead of quoting an operand.
+ *
  * @throws Whatever the parser throws that is not a refusal of the line — a
  * table naming a type nothing registered, which is a fault in the verb rather
  * than in what was typed.
@@ -168,7 +175,12 @@ export function readOptions(
     return {
       kind: "refused",
       reason: `${thrown.message} \`${verb} --help\` says what \`${verb}\` ` +
-        `takes.`,
+        `takes${
+          opens
+            ? ""
+            : ", and a bare `--` writes every token after it as an operand, " +
+              "whatever it opens with"
+        }.`,
     };
   }
   if (parsed.flags.help === true) return { kind: "help" };

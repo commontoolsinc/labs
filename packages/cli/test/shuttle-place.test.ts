@@ -694,7 +694,7 @@ describe("place", () => {
         it("refuses an empty operand", () => {
           expect(moved(atSpaceRoot(), "")).toEqual({
             kind: "refused",
-            reason: "`cd` takes a place to move to.",
+            reason: "`cd` was given an empty operand, which names no place.",
           });
         });
 
@@ -2189,7 +2189,7 @@ describe("place", () => {
 
         /** Helper for the cases below, which is where `operand` points. */
         function pointsAt(place: CurrentPlace, operand: string): Move {
-          return place.aim(operand).move;
+          return place.aim(operand, "get").move;
         }
 
         it("returns where a relative operand points", () => {
@@ -2210,20 +2210,20 @@ describe("place", () => {
         it("leaves shuttle where it stood", () => {
           const place = atPiece();
           const before = place.place;
-          place.aim("topics/3");
+          place.aim("topics/3", "get");
           expect(place.place).toBe(before);
         });
 
         it("returns no selection of the arguments cell for an operand carrying no suffix", () => {
-          expect(atPiece().aim("topics").input).toBe(false);
+          expect(atPiece().aim("topics", "get").input).toBe(false);
         });
 
         it("returns the arguments cell selected for an operand ending in `#argument`", () => {
-          expect(atPiece().aim("topics#argument").input).toBe(true);
+          expect(atPiece().aim("topics#argument", "get").input).toBe(true);
         });
 
         it("returns the position the operand names with the suffix off it", () => {
-          expect(atPiece().aim("topics/3#argument").move).toEqual(
+          expect(atPiece().aim("topics/3#argument", "get").move).toEqual(
             pointsAt(atPiece(), "topics/3"),
           );
         });
@@ -2233,7 +2233,7 @@ describe("place", () => {
           // two doors visibly disagree: `cd` turns the suffix down because a
           // place is result-rooted, and a read is not standing anywhere.
           const place = inSlugs();
-          expect(place.aim("board#argument")).toEqual({
+          expect(place.aim("board#argument", "get")).toEqual({
             input: true,
             move: pointsAt(inSlugs(), "board"),
           });
@@ -2241,14 +2241,16 @@ describe("place", () => {
         });
 
         it("reads the suffix off a rooted reference", () => {
-          expect(atSpaceRoot().aim(`/${HANDLE}/title#argument`)).toEqual({
-            input: true,
-            move: pointsAt(atSpaceRoot(), `/${HANDLE}/title`),
-          });
+          expect(atSpaceRoot().aim(`/${HANDLE}/title#argument`, "get")).toEqual(
+            {
+              input: true,
+              move: pointsAt(atSpaceRoot(), `/${HANDLE}/title`),
+            },
+          );
         });
 
         it("refuses the suffix written with nothing in front of it", () => {
-          expect(atPiece().aim("#argument")).toEqual({
+          expect(atPiece().aim("#argument", "get")).toEqual({
             input: false,
             move: {
               kind: "refused",
@@ -2263,14 +2265,14 @@ describe("place", () => {
           // leaves the head reading to decide, and the head reading is the
           // wish target.
 
-          expect(atPiece().aim("#argument ")).toEqual({
+          expect(atPiece().aim("#argument ", "get")).toEqual({
             input: false,
             move: { kind: "wish", target: "#argument " },
           });
         });
 
         it("hands a `#name` target on whole, the head reading being another one", () => {
-          expect(atPiece().aim("#favorites")).toEqual({
+          expect(atPiece().aim("#favorites", "get")).toEqual({
             input: false,
             move: { kind: "wish", target: "#favorites" },
           });
@@ -2280,7 +2282,7 @@ describe("place", () => {
           // The suffix reading is the one spelling it accepts and nothing
           // wider, so every other `#` reaches the door that decides it — here
           // the walk, where `#` is data.
-          expect(atPiece().aim("a#b")).toEqual({
+          expect(atPiece().aim("a#b", "get")).toEqual({
             input: false,
             move: pointsAt(atPiece(), "a#b"),
           });
@@ -2288,7 +2290,7 @@ describe("place", () => {
         });
 
         it("refuses a key ending in whitespace inside a piece", () => {
-          expect(atPiece().aim("topics ")).toEqual({
+          expect(atPiece().aim("topics ", "get")).toEqual({
             input: false,
             move: {
               kind: "refused",
@@ -2299,7 +2301,7 @@ describe("place", () => {
         });
 
         it("returns the key a leading space names inside a piece", () => {
-          expect(atPiece().aim(" topics")).toEqual({
+          expect(atPiece().aim(" topics", "get")).toEqual({
             input: false,
             move: {
               kind: "moved",
@@ -2317,7 +2319,7 @@ describe("place", () => {
         });
 
         it("refuses a piece ending in whitespace inside a facet", () => {
-          expect(inSlugs().aim("board ")).toEqual({
+          expect(inSlugs().aim("board ", "get")).toEqual({
             input: false,
             move: {
               kind: "refused",
@@ -2333,19 +2335,55 @@ describe("place", () => {
           // The read door keeps the two apart the way the move door does: one
           // named nothing, and one named a key that is only a space.
 
-          expect(atPiece().aim("").move).toEqual({
+          expect(atPiece().aim("", "get").move).toEqual({
             kind: "refused",
-            reason: "`cd` takes a place to move to.",
+            reason: "`get` was given an empty operand, which names no place.",
           });
-          expect(atPiece().aim(" ").move).toEqual({
+          expect(atPiece().aim(" ", "get").move).toEqual({
             kind: "refused",
             reason: "` ` has a segment ending in whitespace, so a rendering " +
               "of the place would name a different cell.",
           });
         });
 
+        it("refuses a suffix with a walk after it, where `cd` is refused for its place", () => {
+          // One operand, two doors, two sentences. A read never reaches the
+          // place's suffix refusal with the suffix at the end of its operand
+          // — this door takes that one off and reads the arguments cell with
+          // it — so what a read is refused for is where the suffix sits,
+          // which is not what a move is refused for. Both are asserted here
+          // because a sentence that moved to the other door would pass
+          // whichever of the two was pinned alone.
+
+          expect(inSlugs().aim("board#argument/title", "get").move).toEqual({
+            kind: "refused",
+            reason: "`get` takes `#argument` at the end of an operand and " +
+              "nowhere else: it selects a piece's arguments cell, and a " +
+              "path inside that cell is written in front of it, as in " +
+              "`topics/3/title#argument`.",
+          });
+          expect(moved(inSlugs(), "board#argument/title")).toEqual({
+            kind: "refused",
+            reason: "A place is result-rooted, so `cd` takes no `#argument` " +
+              "suffix. A place rooted at the arguments cell would leave " +
+              "every later relative read ambiguous about which side of the " +
+              "piece it addressed. Reach arguments per operand instead, as " +
+              "in `get topics/3#argument`.",
+          });
+        });
+
+        it("names the verb it was given in the refusal for an empty operand", () => {
+          // Every verb aims an operand through this door, so the name in that
+          // refusal is the caller's rather than the door's own.
+
+          expect(atPiece().aim("", "set").move).toEqual({
+            kind: "refused",
+            reason: "`set` was given an empty operand, which names no place.",
+          });
+        });
+
         it("carries the reason a reference gave a fragment that is no suffix", () => {
-          expect(atSpaceRoot().aim(`/${HANDLE}/a#b`)).toEqual({
+          expect(atSpaceRoot().aim(`/${HANDLE}/a#b`, "get")).toEqual({
             input: false,
             move: {
               kind: "refused",
@@ -2909,7 +2947,12 @@ describe("place", () => {
             rest: "deeper",
             operand: "%1/deeper",
           };
-          const reached = place.reach(move, place.place, "nowhere-at-all");
+          const reached = place.reach(
+            move,
+            place.place,
+            "nowhere-at-all",
+            "cd",
+          );
           expect(reached.kind).toBe("refused");
           // And it moved nothing, a refusal leaving the place where it stood.
           expect(place.place).toEqual(new CurrentPlace(SPACE).place);

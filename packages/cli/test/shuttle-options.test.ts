@@ -150,13 +150,28 @@ describe("options", () => {
       expect(reasonOf(readOptions("get", ["-x"])))
         .toBe(
           'Unknown option "-x". Did you mean option "-h"? `get --help` says ' +
-            "what `get` takes.",
+            "what `get` takes, and a bare `--` writes every token after it " +
+            "as an operand, whatever it opens with.",
+        );
+    });
+
+    it("returns a refusal naming the bare `--` for a value that opens with `-`", () => {
+      // The line the escape exists for. A negative number has no spelling
+      // that does not open with `-`, so the person is told they wrote an
+      // option, and what the parser's own sentence cannot know to offer is
+      // the token that makes theirs an operand.
+
+      expect(reasonOf(readOptions("set", ["label", "-5"])))
+        .toBe(
+          'Unknown option "-5". Did you mean option "-h"? `set --help` says ' +
+            "what `set` takes, and a bare `--` writes every token after it " +
+            "as an operand, whatever it opens with.",
         );
     });
 
     it("returns a refusal naming the verb's page, for the verb the line named", () => {
       expect(reasonOf(readOptions("ls", ["-x"])))
-        .toContain("`ls --help` says what `ls` takes.");
+        .toContain("`ls --help` says what `ls` takes,");
     });
 
     it("returns a refusal where a declared option that takes a value is given none", () => {
@@ -288,7 +303,8 @@ describe("options", () => {
           ),
         ).toBe(
           'Unknown option "--query". Did you mean option "--help"? `call ' +
-            "--help` says what `call` takes.",
+            "--help` says what `call` takes, and a bare `--` writes every " +
+            "token after it as an operand, whatever it opens with.",
         );
       });
 

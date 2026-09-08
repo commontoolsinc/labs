@@ -43,14 +43,13 @@
 # to this walkthrough alone, so a change to a pattern the product actually
 # ships can never break a demonstration of what a shell can reach.
 #
-# Three gaps are asserted, as `verb-session-gaps.sh` and
-# `completion-over-the-cli.sh` assert theirs, and all three are about wording
-# rather than about capability: a refusal that names no spelling the prompt
-# accepts (step 19), and a write onto a whole piece refused in a vocabulary
-# the prompt does not have, whose one suggested spelling answers in another
-# verb's name (step 20). Each is written so that it fails the day the sentence
-# improves — which is the signal wanted, where pinning the wording would hold
-# the wart in place. Nothing else here is a gap.
+# No gap is open here, and the two steps that would carry one read a refusal's
+# words back instead: a value opening with `-` is told about the bare `--` that
+# writes it (step 19), and a write onto a whole piece is refused in the sentence
+# `set`'s own page carries (step 20). Both are wording a prompt can act on, so
+# both are pinned. The counter and the summary line stay as
+# `verb-session-gaps.sh` and `completion-over-the-cli.sh` carry theirs, for
+# whatever the next reading of this shell turns up.
 #
 # Documented in packages/cli/README.md's "Interactive shell" section, which
 # explains the shell this exercises. Keep the two in step: the doc is the
@@ -258,6 +257,7 @@ link /slugs/first/label#argument /slugs/second/label
 set label '"pointed at"'
 set settings/note '"written once and never again"'
 link /slugs/first/label /slugs/second/label#argument
+edit
 LINES
 EDITOR="$EDITOR_SCRIPT" python3 "$DRIVER" "$SCRIPT" "$TRANSCRIPT" -- \
   $CF sh $ARGS >/dev/null
@@ -477,84 +477,47 @@ contains "is read as JSON; anything else is the string it spells" \
 check '"a written place"' "$(said 25 "get label")" \
   "the refused write left the cell holding what it held"
 
-step "19. GAP: a value opening with a dash is refused without naming the escape"
-# The grammar itself is ruled and is not in question: a token opening with `-`
-# is an option wherever one may be written, which is why the line above spells
-# its value after a bare `--`. That spelling is exercised there rather than
-# described here.
-#
-# What is a gap is the sentence. A person writing a negative number is told
-# they wrote an unknown option and pointed at `-h`, and the one thing that
-# would help — the bare `--` that makes the token a value — goes unmentioned.
-# Issue #7065 carries it. Pinning the wording would make this step fail the
-# day somebody improves the sentence, which is backwards, so the gap is
-# written the other way round: it holds while the refusal says nothing about
-# `--`, and fails when it starts to.
-#
-# Which makes what counts as "says something about `--`" the judgement this
-# step turns on, and it is deliberately loose. A refusal names the escape when
-# it writes `--` as a token of its own — anywhere, in any wording, quoted or
-# bare, alone or inside a worked example. What it must not count is the `--`
-# that opens a long flag, `--help` among them, which the sentence already
-# carries and which teaches nobody how to write a value; hence the character
-# after it deciding, rather than the two characters alone.
-#
-# The bound is that the escape has to be written rather than described: a
-# refusal saying "put it after the option terminator" and never spelling `--`
-# would not be recognised. And the bias runs the other way from the usual one
-# — an ASCII double hyphen used as a dash in prose would read as the escape
-# and close the gap early. That is the direction to err in. A gap that fires
-# when it might have closed costs somebody a look; one that stays quiet after
-# it has closed is a marker that has silently stopped being true, which is the
-# failure this step exists to avoid.
+step "19. A value opening with a dash is refused, and the refusal names the escape"
+# The grammar is ruled and both halves of it are read back here: a token
+# opening with `-` is an option wherever one may be written, so `-5` is refused
+# as an option nobody declared, and the bare `--` the line above spells its
+# value after is what writes one as an operand. A negative number has no
+# spelling that does not open with `-`, so the escape is the whole of what the
+# refusal owes the person, and the parser's own sentence — which points at
+# `-h` — cannot know to offer it.
 DASH_VALUE=$(said 26 "set label -5")
-names_the_escape() {
-  printf '%s' "$1" | grep -qE -- '--([^A-Za-z0-9]|$)'
-}
-if printf '%s' "$DASH_VALUE" | grep -q "Unknown option" &&
-  ! names_the_escape "$DASH_VALUE"; then
-  ok "gap still open: the refusal does not name the \`--\` that writes the value"
-  GAPS=$((GAPS + 1))
-else
-  bad "GAP CLOSED — set label -5 reads [$DASH_VALUE]; update this step"
-fi
+contains 'Unknown option "-5"' "$DASH_VALUE" \
+  "a token opening with a dash is read as an option, which is the ruled grammar"
+contains 'a bare `--` writes every token after it as an operand' "$DASH_VALUE" \
+  'the refusal names the `--` that writes the value'
 
-step "20. A write onto a whole piece is refused, in words the prompt cannot use"
-# The safety property first, because it is the one that matters and it holds:
-# `set` passes `refuseRootWrite`, so a line naming the piece rather than a path
-# inside it writes nothing.
+step "20. A write onto a whole piece is refused, in the words the page uses"
+# The safety property first, because it is the one that matters and it holds: a
+# line naming the piece rather than a path inside it writes nothing, shuttle
+# refusing it and `refuseRootWrite` behind that for the paths only resolution
+# can judge.
 ROOT_WRITE=$(said 27 "set . '{\"label\":\"x\"}'")
 # Read after both of this step's lines rather than between them, so it says
-# neither of them wrote. Two things stop the first: `refuseRootWrite`, and the
+# neither of them wrote. Two things stop the first: the refusal below, and the
 # pattern's own schema, which turns down a result cell missing members the
 # fixture declares. Removing either leaves the other, which is what a safety
 # check should be able to say.
 check '"a written place"' "$(said 29 "get label")" \
   "the refused root write left the piece as it was"
-# What it says, though, is `pathRequiredRefusal()` (`lib/piece.ts`), written
-# for `cf`'s command line: it offers an address to embed a path in and a
-# positional argument to pass one as, and a shuttle line has neither — the
-# path IS the operand the person wrote. `set --help` carries the sentence that
-# would help ("A write onto a whole piece is refused. `link` is what writes a
-# reference"), and the runtime refusal does not.
-if printf '%s' "$ROOT_WRITE" | grep -q '/of:'; then
-  ok "gap still open: the root-write refusal speaks in cf's address vocabulary"
-  GAPS=$((GAPS + 1))
-else
-  bad "GAP CLOSED — the root-write refusal reads [$ROOT_WRITE]; update this step"
-fi
-# And the one spelling it does name is refused in another verb's name.
-# `movePlace` (`lib/shuttle/place.ts`) is the operand reading every verb aims
-# through, and its empty-operand refusal says `cd` whatever verb asked — so a
-# person following the advice above lands on a sentence about a verb they did
-# not write.
+# And what it says is the sentence `set --help` carries, word for word, which
+# is the whole of what a person reads whether they take the page first or the
+# refusal after: the address to embed a path in and the positional to pass one
+# as are `cf`'s command line, and a shuttle line has neither — the path IS the
+# operand the person wrote.
+check 'A write onto a whole piece is refused. `link` is what writes a reference.' \
+  "$ROOT_WRITE" "the root-write refusal is the sentence the verb's page carries"
+# The empty operand is a line of its own, and it is refused in the name of the
+# verb that wrote it. `movePlace` (`lib/shuttle/place.ts`) is the operand
+# reading every verb aims through, so a sentence of its own about `cd` would
+# reach a person who wrote no `cd`.
 EMPTY_OPERAND=$(said 28 "set '' '\"x\"'")
-if [ "$EMPTY_OPERAND" = '`cd` takes a place to move to.' ]; then
-  ok "gap still open: the empty operand a set line writes is refused in cd's name"
-  GAPS=$((GAPS + 1))
-else
-  bad "GAP CLOSED — the empty operand reads [$EMPTY_OPERAND]; update this step"
-fi
+check '`set` was given an empty operand, which names no place.' \
+  "$EMPTY_OPERAND" "the empty operand a set line writes is refused in set's name"
 
 step "21. verbs lists what the piece can be asked to do, and numbers each row"
 check "%1 addItem <handler on result> <Appends one line to \`items\`.>
@@ -598,7 +561,7 @@ check '"jam"' "$(said 37 "get summary")" \
 contains "\`verbs\` lists what this piece can be asked to do" \
   "$(said 38 "call . --help")" "an option in the name position names verbs"
 
-step "24. edit writes back what the editor saved, and stops three ways"
+step "24. edit writes back what the editor saved, stopping three ways after the editor and one before it"
 check "Wrote \`label\` on \`$FIRST\`." "$(said 39 "edit label")" \
   "edit writes back what came out of the editor"
 check '"edited in the editor"' "$(said 40 "get label")" \
@@ -621,6 +584,16 @@ else
 fi
 check '"garble me"' "$(said 44 "get label")" \
   "the refused edit left the cell holding what it held"
+# The stop that comes before the editor rather than after it. The operand
+# names the whole piece — here by naming nothing, shuttle standing on one —
+# and no write onto a whole piece can land, so the line is turned down while
+# there is nothing typed to lose. The editor never runs: had it run, this
+# fixture would have saved `"edited in the editor"` over the piece and the
+# line would have come back as a receipt or as the seam's refusal, neither of
+# which is this sentence. It is typed last, after everything that moves, which
+# is what leaves shuttle standing on the piece for it.
+check 'A write onto a whole piece is refused. `link` is what writes a reference.' \
+  "$(said 50 "edit")" "edit turns down a whole piece in the sentence set gives it"
 
 step "25. link writes a reference, so the second cell reads the first"
 check "Wrote a reference at \`/slugs/second/label\` naming \`/slugs/first/label\`." \
