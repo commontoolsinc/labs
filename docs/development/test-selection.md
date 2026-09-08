@@ -7,7 +7,16 @@ normative description of the contract;
 [the plan](../plans/pull-request-test-selection.md) carries the reasoning
 and the parts still to be built.
 
-Everything a person types goes through one entry point:
+## Current status
+
+The storage, keyless publisher identity, bootstrap state, and four-hourly
+publisher are live. This does not mean that test selection runs pull-request
+continuous integration. `.github/workflows/deno.yml` still runs the existing
+job matrices and does not invoke `tasks/ci-lane.ts`; the continuous-integration
+switch in parts two and three of the plan is still pending. For now, published
+manifests feed the dashboard and the read-only commands below, not test jobs.
+
+Every local query about test selection goes through one entry point:
 
 ```
 deno task test-selection <mode>
@@ -259,29 +268,97 @@ manifest or aggregate. The previous manifest stays newest. Completed
 days are recorded, so no later run over a wide window folds their raw
 objects on top and doubles every catch in them.
 
-A rollup is written by the one principal here whose credential exists as
-key material, so it carries weaker provenance than the raw records it
-summarizes, and
+A rollup is a derived cache of one closed day rather than the full-fidelity
+record of that day, so
 [the record spec](../specs/test-records.md#trust-boundaries-for-consumers)
-asks a consumer that feeds decisions to treat it as a cache of a day
-rather than the record of it. Seeding catch counts from days closed a
-week or more ago is that use. The four-hourly path in its steady state
-reaches no day it could read one from: compaction leaves a partition open
-for a week, and that path reads two days. So a rollup is read by a
-bootstrap, and by a run catching up after an outage or over a window
-somebody widened.
+asks a consumer that feeds decisions to use it on that basis. This is a
+content boundary, not weaker credential provenance. The daily compactor
+authenticates without a key through Workload Identity Federation, pinned to
+`.github/workflows/test-records-compact.yml` on the default branch. There is no
+downloaded compactor key and no writing path from a workstation; a local
+`deno task test-records-compact --plan` is read-only.
 
-`deno task test-records-compact` is what writes rollups, and an operator
-runs it from a workstation with a downloaded key — nothing federated runs
-it, so there is no workflow ref to pin an identity to. A day nobody has
-compacted is folded from its raw objects, which is what a bootstrap does
-for every day until the compactor has reached one.
+The four-hourly publisher normally reaches no rollup: compaction leaves a
+partition open for a week, while the incremental publisher reads two days. A
+bootstrap, an incremental run catching up after an outage, or an incremental
+run using a deliberately widened window can reach older closed days and read
+their rollups. A day the compactor has not reached is folded from its raw
+objects.
 
-Publishing needs the workflow's own federated identity, which is pinned
-to that workflow file on the default branch and is the only principal
-that can create a manifest. A personal reporting key cannot: it is scoped
-to its holder's own submissions folder. So a person runs `--dry-run
---out` and reads what a run would have produced.
+Publishing uses the workflow's own federated identity, pinned to that workflow
+file on the default branch. It is the only workflow principal with a
+folder-scoped create grant for manifests. A personal reporting key cannot
+create one: it is scoped to its holder's own submissions folder. So a person
+runs `--dry-run --out` and reads what a run would have produced.
+
+### Verifying publication
+
+A bootstrap or recovery is accepted only after all three of these are true:
+
+1. The workflow run succeeds and its log names the manifest it created.
+2. A complete public listing contains that manifest and a state object with the
+   same trailing identifier.
+3. A later incremental run succeeds and creates another manifest and state
+   pair. Reaching that write proves that the incremental path could list, read,
+   and validate the state left by the earlier run.
+
+These checks are read-only:
+
+```bash
+gh run list --repo commontoolsinc/labs \
+  --workflow test-selection.yml --branch main --limit 10
+gh run view RUN_ID --repo commontoolsinc/labs --log
+python3 - <<'PY'
+import json
+from urllib.parse import urlencode
+from urllib.request import urlopen
+
+endpoint = "https://storage.googleapis.com/storage/v1/b/cf-ci-metadata/o"
+query = {
+    "prefix": "labs/test-selection/v1/",
+    "fields": "nextPageToken,items(name,timeCreated,size)",
+}
+while True:
+    with urlopen(f"{endpoint}?{urlencode(query)}") as response:
+        page = json.load(response)
+    for item in page.get("items", []):
+        print(item["timeCreated"], item["size"], item["name"], sep="\t")
+    token = page.get("nextPageToken")
+    if not token:
+        break
+    query["pageToken"] = token
+PY
+```
+
+Use the identifier at the end of the logged manifest name to find both objects.
+The loop follows every `nextPageToken`; a first page is not evidence that state
+is absent.
+
+The selection dashboard tile supplies the existing stale signal: it turns
+amber when the newest manifest is more than eight hours old.
+
+### Recovery
+
+Read the failed run's log and the public object listing before taking action.
+Do not use bootstrap as a routine retry: it starts from an empty aggregate and
+replaces score history with only the selected window.
+
+- If the newest state is valid, rerun the ordinary workflow from `main` with
+  bootstrap off and the `days` input empty, so the landed default is used. If
+  an outage extends beyond that two-day window, keep the run incremental and
+  widen its window. Land the chosen window in reviewed workflow or publisher
+  configuration on `main` before running it; do not supply a live-only override.
+- If the complete paginated listing has no state objects under the intended
+  prefix and schema version, this is a cold start. Dispatch the workflow from
+  `main` once with bootstrap on and leave `days` empty so the landed sixty-day
+  default applies. Then require the three acceptance checks above.
+- If listing or pagination fails, the newest state cannot be read, or its schema
+  is invalid, that is not absence. The publisher refuses to write by design.
+  Leave the append-only manifests and state objects intact: they and the raw
+  record history are the recovery sources. The current tool has no operator
+  option to select or restore an older state, so recovery requires a reviewed
+  path that reads preserved state and folds forward, landed on `main`; do not
+  improvise one with object deletion, renaming, or bootstrap.
 
 To run it by hand against the store without creating anything:
 

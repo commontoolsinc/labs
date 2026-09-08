@@ -1,15 +1,16 @@
 # The publisher: reads the test-record store, folds what is new into a
-# rolling aggregate, scores every identity, and creates one manifest
-# object. The five pull-request lanes read that manifest to decide what to
-# run. Nothing gates on it: when this fails, the previous manifest is
-# still the newest one and lanes keep using it, so selection quality
-# decays slowly rather than anything turning red.
+# rolling aggregate, scores every identity, and creates one manifest object.
+# The planned five pull-request lanes will read that manifest once CI adopts
+# them. Nothing gates on it today: when this fails, the previous manifest stays
+# newest for the dashboard and read-only tools, so selection quality decays
+# slowly rather than anything turning red.
 #
 # Its Google Cloud identity comes from a Workload Identity Federation
 # provider pinned to exactly this workflow file on main, so no other
 # workflow, ref, or repository can mint it (infra: tofu/test-records). The
-# account holds objectCreator on the selection prefix and nothing else: it
-# cannot read, list, overwrite, or delete.
+# account's identity-specific writer grant is objectCreator on the selection
+# prefix, so it cannot overwrite or delete. The dataset's public objectViewer
+# grant separately lets it read and list objects like any public reader.
 #
 # Four-hourly rather than daily because aggregation is incremental and so
 # cheap, and a flake that appears in the morning should not wait until the
