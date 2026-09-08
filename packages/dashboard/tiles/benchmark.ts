@@ -12,10 +12,10 @@
  * Orange means at least one of those processors trends up. Green means every
  * eligible established processor stays flat or falls. Red means the most recent
  * run failed, or finished successfully without readable benchmark data.
- * A tile in the failed state drops its benchmark count and window span and
- * names the failure in their place: how long ago the benchmarks last worked,
- * and how many runs have failed since. A run under way puts a "running" badge
- * in the header.
+ * A tile in the failed state reads `failed` in its headline. It drops its
+ * benchmark count and window span and names the failure in their place: how
+ * long ago the benchmarks last worked, and how many runs have failed since.
+ * A run under way puts a "running" badge in the header.
  *
  * A benchmark added or removed is absent from one side of an adjacent
  * comparison, so it does not move the index. A processor change starts another
@@ -1040,10 +1040,10 @@ const RUNNING_BADGE =
 // never become benchmark changes. The headline shows the largest established
 // trend among processors measured in the last twelve hours. Orange means any
 // eligible processor trends up. Red means the most recent run failed or
-// produced no readable data. The line under the headline then dates the outage
-// instead of counting the benchmarks measured. `offline` names a fetch failure.
-// The tile then keeps its last-known trends gray, or shows a gray dash when no
-// history is cached.
+// produced no readable data. Its headline reads `failed`, and the line below
+// dates the outage instead of counting the benchmarks measured. `offline` names
+// a fetch failure. The tile then keeps its last-known trends gray, or shows a
+// gray dash when no history is cached.
 function benchmarkIndexView(
   runs: Run[],
   now: number,
@@ -1085,7 +1085,7 @@ function benchmarkIndexView(
         ...benchmarkDrill,
         label: "benchmarks",
         status: "bad",
-        value: "—",
+        value: "failed",
         sub: failSub,
         aside,
       };
@@ -1104,7 +1104,7 @@ function benchmarkIndexView(
         ...benchmarkDrill,
         label: "benchmarks",
         status: "bad",
-        value: "—",
+        value: "failed",
         sub: failSub,
         aside,
       };
@@ -1134,8 +1134,7 @@ function benchmarkIndexView(
     : rising
     ? "warn"
     : "good";
-  // Headline: the window's trend.
-  const value = escapeHtml(headline.trend.label);
+  const value = status === "bad" ? "failed" : escapeHtml(headline.trend.label);
   const latest = cached[cached.length - 1];
   const count = productMetricCount(latest);
   // Name the highlighted window's span beside the count, like CI duration names its

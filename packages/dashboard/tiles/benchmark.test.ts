@@ -869,10 +869,9 @@ Deno.test("benchmark: paging stops at the 45-day cutoff, and an out-of-window ru
   ];
   await withApi({ pages: { 1: page1 } }, async (calls) => {
     const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
-    // The most recent run is a failure, so the tile reads red; none of the runs
-    // sampled had an artifact, so there is nothing to headline.
+    // The most recent run failed, and none of the sampled runs had an artifact.
     assertEquals(v.status, "bad");
-    assertEquals(v.value, "—");
+    expect(v.value).toBe("failed");
     // Every failure on the page, in a row. The one success is older than the
     // trend's window, but it is still on the page fetched, so it still dates the
     // outage the failures make.
@@ -1356,7 +1355,7 @@ Deno.test("benchmark: the calibration the tile divides out is the one CI runs", 
   assertStringIncludes(workflow, `"/${CALIBRATION_FILE}",`);
 });
 
-Deno.test("benchmark: returns a failed rising view after the run list settles", async () => {
+Deno.test("benchmark: returns a failed view after the run list settles", async () => {
   const directory = await Deno.makeTempDir({
     prefix: "benchmark-settled-view-",
   });
@@ -1426,7 +1425,7 @@ Deno.test("benchmark: returns a failed rising view after the run list settles", 
     }));
     const final = await active;
     expect(final.status).toBe("bad");
-    expect(final.value).toContain("▲");
+    expect(final.value).toBe("failed");
   } finally {
     releaseRuns(Response.json({ workflow_runs: [] }));
     await collection?.catch(() => {});
@@ -1438,9 +1437,9 @@ Deno.test("benchmark: returns a failed rising view after the run list settles", 
   }
 });
 
-Deno.test("benchmark: a failed most-recent run turns the tile red over its last good total", async () => {
+Deno.test("benchmark: shows `failed` when the most recent completed run failed", async () => {
   const at = (d: number) => SAMPLED_BASE - (6 - d) * DAY;
-  // The last successful run totals 7ms; the failed head has no artifact to headline.
+  // Seven daily measurements, then a failed run with no artifact.
   await withTotals([
     ...Array.from({ length: 7 }, (_, d) => ({ id: 9_200 + d, at: at(d), total: d === 6 ? 7e6 : 5e6 })),
     { id: 9_299, at: SAMPLED_BASE + HOUR, conclusion: "failure" },
@@ -1448,7 +1447,7 @@ Deno.test("benchmark: a failed most-recent run turns the tile red over its last 
     const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
     assertEquals(v.status, "bad"); // the newest run failed
     assertMatch(v.sub ?? "", /^last good .+ ago · 1 run failed$/);
-    assertStringIncludes(v.value ?? "", "flat"); // the trend of the runs before the failure
+    expect(v.value).toBe("failed");
     assert(!(v.extra ?? "").includes("benchmark")); // the failure took the count line
   });
 });
@@ -1467,7 +1466,7 @@ Deno.test("benchmark: consecutive failures are counted on the tile", async () =>
     const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
     assertEquals(v.status, "bad"); // red however flat the trend is
     assertMatch(v.sub ?? "", /^last good .+ ago · 3 runs failed$/);
-    assertStringIncludes(v.value ?? "", "flat"); // the trend over the runs before the failures
+    expect(v.value).toBe("failed");
     assert(!(v.extra ?? "").includes("benchmark")); // no count line beside the failure line
   });
 });
@@ -1483,7 +1482,7 @@ Deno.test("benchmark: a failure outranks a rising trend", async () => {
     const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
     assertEquals(v.status, "bad"); // red, not the orange the rise would give
     assertMatch(v.sub ?? "", /^last good .+ ago · 1 run failed$/);
-    assertStringIncludes(v.value ?? "", "▲"); // the rise is still the headline
+    expect(v.value).toBe("failed");
   });
 });
 
@@ -1729,9 +1728,8 @@ Deno.test("benchmark: adding a benchmark is not read as a rise", async () => {
 });
 
 Deno.test("benchmark: a run that finished green but produced no valid data reads red", async () => {
-  // Seven good days, then a run that passes CI but whose artifact carries no usable
-  // measurement. It ran and made nothing, so it is as good as failed: red, over the
-  // last run whose total could be read.
+  // Seven good days, then a run that passes CI but whose artifact carries no
+  // usable measurement.
   const at = (d: number) => d === 7
     ? SAMPLED_BASE + HOUR
     : SAMPLED_BASE - (6 - d) * DAY;
@@ -1755,7 +1753,7 @@ Deno.test("benchmark: a run that finished green but produced no valid data reads
     const v = await benchmark.collect(ctx({ GH_TOKEN: "t" }));
     assertEquals(v.status, "bad"); // it ran but made nothing usable
     assertEquals(v.sub, "no benchmark data");
-    assertStringIncludes(v.value ?? "", "flat"); // the trend over the readable runs
+    expect(v.value).toBe("failed");
   });
 });
 
