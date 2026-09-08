@@ -388,7 +388,7 @@ V=$($CF piece call --quiet --piece "$KID" $ARGS archive '{}' 2>/dev/null)
 check "settled" "$(echo "$V" | jq -r '.status')" "archive settled"
 check "{}" "$(echo "$V" | jq -c '.result // {}')" "its result is the empty witness"
 
-step "10. A reference argument dispatches — the envelope, and the address as emitted"
+step "10. A reference argument dispatches — the envelope, the address as emitted, and the object a read renders it in"
 # blockOn declares `on: Writable<ItemOutput>` — a reference. #5880 landed the
 # ENVELOPE spelling: a link envelope in that position passes the gate and the
 # edge that comes back is the target, not a copy. The round-trip spelling
@@ -426,6 +426,16 @@ else
     --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
     jq -r '.[1]["$link"] // empty')
   check "$OTHER" "$EDGE2" "and its edge is the target, not a copy"
+  # The rendered spelling: the same address inside the `{"$link": …}` object
+  # a marked read prints it in, fed back as that object.
+  BLOCKED3=$($CF piece call --quiet --piece "$KID" $ARGS \
+    blockOn "{\"on\":{\"\$link\":\"$OTHER\"}}" 2>/dev/null)
+  check "3" "$(echo "$BLOCKED3" | jq -r '.result.blockedOnCount // empty')" \
+    "the \$link object a marked read renders, fed back as printed, dispatches"
+  EDGE3=$($CF cell get --quiet --piece "$KID" blockedOn $ARGS \
+    --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
+    jq -r '.[2]["$link"] // empty')
+  check "$OTHER" "$EDGE3" "and its edge is the target, not a copy"
   # The refusals guarding the same position, each matched against its
   # SPECIFIC message: a renamed verb or a server hiccup also exits nonzero,
   # and a probe that reads any failure as the refusal is a probe that cannot

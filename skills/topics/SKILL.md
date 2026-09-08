@@ -288,7 +288,8 @@ computed, such as a count or board-index row.
 A cross-Topic connection is a reference, not an address pasted into prose. Pass
 the canonical reference in the declared reference position; the CLI turns it
 into the live piece link the verb expects. Set `OTHER_TOPIC` to the `$link` from
-the index row for the Topic being referenced:
+the index row for the Topic being referenced; the row's `{"$link": …}` object
+passes in that position as it was printed, too:
 
 ```bash
 export OTHER_TOPIC='<canonical /of:... address from another index row>'

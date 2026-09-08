@@ -50,6 +50,57 @@ describe("verb-emitted-address", () => {
         .toEqual({ value: { on: ENVELOPE } });
     });
 
+    it("converts the `$link` object a marked read renders, alone or beside projected contents", () => {
+      // A read renders a marked position as `{"$link": "/of:…"}`, and joins
+      // the contents it also projected into the same object. Either way the
+      // address is what the position takes; the contents are the target's
+      // own fields, which a reference never stores.
+
+      expect(
+        resolveEmittedAddressArguments(
+          { on: { $link: ADDRESS } },
+          inlineMarker,
+        ),
+      ).toEqual({ value: { on: ENVELOPE } });
+      expect(
+        resolveEmittedAddressArguments(
+          { on: { $link: ADDRESS, title: "First note" } },
+          inlineMarker,
+        ),
+      ).toEqual({ value: { on: ENVELOPE } });
+      const listed: JSONSchema = {
+        type: "object",
+        properties: {
+          them: { type: "array", items: { type: "object", asCell: ["cell"] } },
+        },
+      };
+      expect(
+        resolveEmittedAddressArguments(
+          { them: [{ $link: ADDRESS }, ADDRESS] },
+          listed,
+        ),
+      ).toEqual({ value: { them: [ENVELOPE, ENVELOPE] } });
+    });
+
+    it("judges the string inside `$link` as it judges a bare one", () => {
+      expect(
+        resolveEmittedAddressArguments(
+          { on: { $link: "/tracker" } },
+          inlineMarker,
+        )
+          .refusal,
+      ).toContain('"/tracker" at <event>.on is not an address');
+    });
+
+    it("refuses a `$link` that holds no string as an inline copy", () => {
+      // `{"$link": true}` is the projection-schema marker, not an address.
+
+      expect(
+        resolveEmittedAddressArguments({ on: { $link: true } }, inlineMarker)
+          .refusal,
+      ).toContain("an inline copy would store a detached document");
+    });
+
     it("refuses a reference naming a piece by slug or a space by name", () => {
       // The wider vocabulary `cf`'s own intake takes stops at this seam. What
       // is built here is a stored link, which holds the id and the space
@@ -595,6 +646,14 @@ describe("verb-emitted-address", () => {
         expect(probe.storedRaw()).toHaveProperty("/");
         // And it points where the address pointed: reading through it lands
         // on the root's own field.
+        expect(probe.linkedLabel()).toBe("probe-root");
+      });
+    });
+
+    it("dispatches the `$link` object a read renders as a reference, and the edge lands on the target", async () => {
+      await withProbe("emitted-address-rendered-object", async (probe) => {
+        await probe.call("relate", { on: { $link: probe.address } });
+        expect(probe.storedRaw()).toHaveProperty("/");
         expect(probe.linkedLabel()).toBe("probe-root");
       });
     });
