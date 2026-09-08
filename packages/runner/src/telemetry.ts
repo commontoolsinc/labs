@@ -193,9 +193,10 @@ export type RuntimeTelemetryMarker = {
   scopeKey: string;
 } | {
   // Emitted as a result-pattern memo leaves the runner: for every instance of
-  // the doc under `key` when a storage notification names that doc (no
-  // `scopeKey`), and for one instance when the commit that wrote its child
-  // is rejected. The sweep in `stopAll()` drops the whole memo without one.
+  // the doc under `key` when a storage notification names that doc or resets
+  // the space holding it (no `scopeKey`), and for one instance when the
+  // commit that wrote its child is rejected. The sweep in `stopAll()` drops
+  // the whole memo without one.
   type: "runner.result-pattern.evict";
   key: string;
   scopeKey?: string;
