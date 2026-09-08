@@ -104,12 +104,13 @@ comments a pull request collects.
 
 ### Running the CLI
 
-The `cf` CLI runs from source through `bin/cf`, and `skills/cf/SKILL.md` covers
-invoking it. `deno task cf …` runs the same CLI from any directory inside the
-checkout and needs nothing on PATH, which makes it the spelling for a shell
-where `cf` is not found — the usual case in an agent's non-interactive shell.
-The two differ in one respect: `cf which`, which reports the checkout a `cf`
-would run, is answered by `bin/cf` alone.
+The `cf` CLI runs from source through `bin/cf`, which `deno task install-cf`
+puts on PATH once per machine, and `skills/cf/SKILL.md` covers invoking it.
+`deno task cf …` runs the same CLI from any directory inside the checkout and
+needs nothing on PATH, which makes it the spelling for a shell where `cf` is not
+found, as an agent's non-interactive shell is on a machine that never ran the
+install. The two differ in one respect: `cf which`, which reports the checkout a
+`cf` would run, is answered by `bin/cf` alone.
 
 ### Avoid timeouts, retry loops, and sleeps
 

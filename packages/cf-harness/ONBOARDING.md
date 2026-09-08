@@ -45,10 +45,10 @@ first run does without.
    deno --version
    ```
 
-   Success is a version matching the pin. For `mise` users: a fresh checkout or
-   worktree is untrusted, so `mise where deno` fails until you run `mise trust`
-   in it. Either trust it, or skip the shims and put the install on `PATH`
-   directly:
+   Success is a version matching the pin. For `mise` users: the repo's
+   `mise.toml` pins Deno and nothing else, so a fresh checkout or worktree
+   resolves it with no `mise trust` step. To skip the shims, put the install on
+   `PATH` directly:
 
    ```sh
    export PATH="$HOME/.local/share/mise/installs/deno/<pinned-version>/bin:$PATH"
