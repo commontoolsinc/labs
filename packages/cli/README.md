@@ -293,6 +293,23 @@ is where that claim lives: it deploys a fixture into a fresh space, opens
 `cf sh` on a pseudo-terminal, and reads back the drawing a line at a time — what
 the shell said, and the prompt it then drew.
 
+The writing verbs are read twice there, and the transcript is the weaker of the
+two readings. A `set` that receipted a write it never made, and a `call` that
+settled without running the handler, both draw exactly what a working one draws
+— so the session's writes are read again from outside once it has ended, over a
+connection it never held. What the shell said is the claim; what the fabric
+holds afterwards is the evidence.
+
+That second reading is taken at the end, so what it establishes is the state at
+the end rather than that every write landed: a cell written more than once
+carries only its last value, and a value another line would have produced anyway
+reads the same as one this line produced. So the walkthrough says which write
+each reading speaks for. One `set` goes to `settings/note`, a path nothing else
+in the session touches, and that one is established end to end at its own
+address; the writes the sweep cannot speak for rest on the shell's own read on
+the line after each, which catches a receipt with no write behind it but cannot
+see whether the write committed.
+
 ## Cell references
 
 `cf cell` holds the commands that act on a cell: `get` and `set` for its value,
