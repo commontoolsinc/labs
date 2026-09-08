@@ -8572,9 +8572,9 @@ export class Runner {
     // The receipt mark must ride the transaction that creates the result
     // cell's head — `#setupInternal()` just wrote it into the handler tx.
     // Marking the deferred start tx instead would see the already-committed
-    // head and
-    // reject the FIRST delivery as receipt-exists, while redeliveries (whose
-    // own handler tx re-creates the cell) would go unguarded.
+    // head and reject the FIRST delivery as receipt-exists, while
+    // redeliveries (whose own handler tx re-creates the cell) would go
+    // unguarded.
     if (markCreateOnlyResult) {
       tx.markCreateOnly?.(resultCell.getAsNormalizedFullLink());
     }

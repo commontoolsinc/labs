@@ -664,10 +664,10 @@ export class FabricAwareResolver implements ProgramResolver {
       `loadVerifiedSourceClosure` — if not surfaced, extend
       `loadVerifiedSourceClosure` to return `{ docs, entryFilename }`; check its
       callers: `PatternManager.#replicateClosures()` and the pattern-manager
-      cold path — adjust
-      both destructurings). For each mounted path, record the source document's
-      verified identity and effective identity fingerprint in
-      `publishedModules`. An absent legacy field contributes the empty value.
+      cold path — adjust both destructurings). For each mounted path, record
+      the source document's verified identity and effective identity
+      fingerprint in `publishedModules`. An absent legacy field contributes
+      the empty value.
    h. Record `FabricMount`, including `publishedModules`, plus the alias
       (`identifier → entryPath`); return the entry Source.
 

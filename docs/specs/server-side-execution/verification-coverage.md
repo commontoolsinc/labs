@@ -3700,8 +3700,7 @@ supply; OW29/OW32/OW34 closed):
     stage A/B did NOT break the eager pass (verified: the eager
     scoped-keys pass in `data-updating.ts` and `updateArgument` /
     `Runner.#setupInternal()`'s cell-link handling are BYTE-IDENTICAL
-    across the
-    stage-A base `6d18d6998` → stage-B head — the only stage-A
+    across the stage-A base `6d18d6998` → stage-B head — the only stage-A
     `data-updating.ts` change is `seedMemoKey`, unrelated).
   - **The review's leak came from a NON-STANDARD construction, not a
     handler-write gap.** The review's repro seeded a SCHEMA-LESS
@@ -4794,10 +4793,8 @@ supply; OW29/OW32/OW34 closed):
     backstop` (an intent-origin ENTRY retired by the W sweep instead —
     it counts ECHO entries swept by W, NOT missed marks: the arrival
     sweep runs synchronously inside `SpaceReplica.#applySessionSync()`
-    and can
-    retire
-    the echo before the mark's microtask check runs, so a non-zero
-    count coexists with every fire resolved by its mark — the chat
+    and can retire the echo before the mark's microtask check runs, so a
+    non-zero count coexists with every fire resolved by its mark — the chat
     witness below reads 2 beside 25/25), `intent-listener-installed` /
     `-released`, `intent-watch-failed` / `intent-listener-failed` /
     `intent-check-read-failed` / `intent-apply-failed` (the loud
@@ -5634,8 +5631,8 @@ supply; OW29/OW32/OW34 closed):
     (which dissolves the class), whichever comes first; the parked
     WIP branch `claude/server-exec-v2-ow45-sc-heal` is the
     shelf-ready start (client-side heal riding
-    `PatternManager.#replicateClosures()`
-    under the client's own identity, green red-first runner pins,
+    `PatternManager.#replicateClosures()` under the client's own identity,
+    green red-first runner pins,
     serving posture pinned fail-closed; marked do-not-merge).
     Trigger DISCHARGED for the home-profile half — the
     `integration/home-profile-reload-durability.test.ts` ON skip is
@@ -7845,9 +7842,8 @@ supply; OW29/OW32/OW34 closed):
     local read trailed durability — so staged-vs-durable remains
     UNDISCRIMINATED and is NOT load-bearing for the fix. THE SECOND FIX
     (same PR, red-first): `PatternManager.#replicateClosures()` records
-    every durable
-    persist target per entry (`persistedClosureSpaces`) and, on a dry
-    heuristic origin, retries its verified read against those recorded
+    every durable persist target per entry (`persistedClosureSpaces`) and,
+    on a dry heuristic origin, retries its verified read against those recorded
     spaces — content-addressed, so the copy is byte-identical and the
     integrity-gated read stays fail-closed; genuine absence (no recorded
     target) still fails loud and settles. Pinned in the same suite
@@ -7922,8 +7918,7 @@ supply; OW29/OW32/OW34 closed):
     **GEOMETRY-3 CLOSE (this PR, off #6484's merge `bd9b1c10b`;
     review-sharpened, red-first, LANDED):** on a dry origin AND dry
     fallback map, `PatternManager.#replicateClosures()` snapshots BOTH
-    in-flight compile
-    registries — `inProgressCompilations` AND
+    in-flight compile registries — `inProgressCompilations` AND
     `inProgressByIdentityLoads` (a supplier can be a by-identity load's
     recovery compile; NEVER `compileCacheWrites`, the replication's own
     set — awaiting it would await itself), `Promise.allSettled`s the

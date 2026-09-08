@@ -3500,8 +3500,6 @@ export class SpaceReplica
       buildReads: (source, localSeq, identity) =>
         this.#buildReads(source, localSeq, identity),
       consumeUpdates: (iterator) => this.#consumeUpdates(iterator),
-      // The next two forward to TypeScript-private members so that a test
-      // which replaces one by assignment is honored here too.
       refreshWatchSet: (entries, type, watchBranch) =>
         this.#refreshWatchSet(entries, type, watchBranch),
       applySessionSync: (sync, type) => this.#applySessionSync(sync, type),
@@ -5309,7 +5307,7 @@ export class SpaceReplica
         }
         this.#applySessionSync(sync, type);
       } catch (error) {
-        // The frame failed validation, so this refresh's view never gets a
+        // The frame failed to apply, so this refresh's view never gets a
         // consumer; without a close it leaks when a later refresh
         // overwrites `#watchView`.
         view.close();

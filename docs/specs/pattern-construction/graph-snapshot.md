@@ -7,9 +7,8 @@
 ## Motivation
 
 - `Runner.#setupInternal()` currently stores pattern, argument, internal, and
-  schema
-  metadata on the result cell. The runtime still lacks a persisted view of the
-  concrete nodes it instantiated.
+  schema metadata on the result cell. The runtime still lacks a persisted view
+  of the concrete nodes it instantiated.
 - `instantiateNode` performs alias gymnastics through
   `unwrapOneLevelAndBindToDoc` so nested patterns and closures work. A snapshot
   that records the resolved nodes makes this machinery obsolete: future runs can
