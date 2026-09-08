@@ -2154,14 +2154,17 @@ function projectValue(
   if (schema.additionalProperties !== false) {
     // Declared keys first, in schema order, so an open projection renders
     // its declared fields the way a closed one does; the keys it retains
-    // beyond the declaration follow in the value's own order.
+    // beyond the declaration follow in the value's own order. Own keys
+    // only: `in` walks the prototype chain, and a stored key spelled like
+    // an `Object.prototype` member (`toString`, `constructor`) is data here.
     const keys = [
-      ...Object.keys(properties).filter((key) => key in value),
-      ...Object.keys(value).filter((key) => !(key in properties)),
+      ...Object.keys(properties).filter((key) => Object.hasOwn(value, key)),
+      ...Object.keys(value).filter((key) => !Object.hasOwn(properties, key)),
     ];
     for (const key of keys) {
-      const childSchema = properties[key] ?? schema.additionalProperties ??
-        true;
+      const childSchema = Object.hasOwn(properties, key)
+        ? properties[key]
+        : schema.additionalProperties ?? true;
       projected[key] = projectValue(
         value[key],
         childSchema,
@@ -2172,7 +2175,9 @@ function projectValue(
     return projected;
   }
   for (const [key, childSchema] of Object.entries(properties)) {
-    if (key in value) {
+    // Own keys only, as above: a declared `toString` the value does not
+    // hold must not emit `Object.prototype.toString`.
+    if (Object.hasOwn(value, key)) {
       projected[key] = projectValue(
         value[key],
         childSchema,
@@ -2359,7 +2364,7 @@ export function selectSourceSchema(
   // those types in hand and applies the rule entire, in
   // {@link outputSchemaWithSourceRequired}.
   const selectedRequired = required?.filter((key) =>
-    key in properties && properties[key] !== false
+    Object.hasOwn(properties, key) && properties[key] !== false
   );
   return {
     ...metadata,
@@ -3413,7 +3418,12 @@ export async function deriveSelectedValue(
     }
     // pull() is the readiness boundary for this output: it drives transitive
     // computations, waits for linked documents those reads discover, and
-    // re-idles after each arrival.
+    // re-idles after each arrival. Nothing downstream re-checks it: the
+    // re-projection below imposes key order locally, so a pull that stopped
+    // short of the fixpoint would no longer show as an out-of-order key (what
+    // the four-entrypoint test could see) but as a silently absent one. The
+    // cold and stale session-scoped integration reads are what stand behind
+    // one pull sufficing.
     await timeSelectionPhase("output.pull", () => outputCell.pull());
     const outputValue = outputCell.get();
     // Runtime materialization can expose object children in arrival order.
@@ -3501,7 +3511,7 @@ function markersHeldBy(
     const properties: Record<string, LinkMarkers> = {};
     for (const [key, child] of Object.entries(markers.properties)) {
       const below = held.flatMap((value) =>
-        isObjectNotArray(value) && key in value
+        isObjectNotArray(value) && Object.hasOwn(value, key)
           ? [(value as Record<string, unknown>)[key]]
           : []
       );
