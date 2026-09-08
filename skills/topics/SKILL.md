@@ -28,18 +28,15 @@ export CF_API_URL='https://estuary.saga-castor.ts.net'
 export CF_SPACE='topics-dev-476ea34f'
 export TOPICS_BOARD='/of:fid1:jtdD-DSmuGrLGSt_6sJ3DS_7jmerrkKTEnW3fZV9e34'
 export CF_IDENTITY="${CF_IDENTITY:-$HOME/.config/commonfabric/identity.key}"
-test -r "$CF_IDENTITY" || {
-  printf 'Topics identity key is not readable: %s\n' "$CF_IDENTITY" >&2
-  exit 1
-}
 ```
 
 An already-set `CF_IDENTITY` is the explicit override. Otherwise use the team's
 stable per-user default at `~/.config/commonfabric/identity.key`; the path is
 common while its contents belong to that teammate. Use the same Estuary identity
-key as your human user. If the readability check fails, stop and ask the human
-to provision that default or export the correct path. Do not search for keys,
-mint an agent key, use another human's key, or use the publicly derivable
+key as your human user. When `cf` reports that keyfile missing or unreadable,
+stop and ask the human to provision that default or export the correct path; the
+check belongs to `cf`, so the shell never touches the key. Do not search for
+keys, mint an agent key, use another human's key, or use the publicly derivable
 `implicit trust` identity. Never print or inspect key material; use
 `cf id did "$CF_IDENTITY"` when the public DID is needed for verification.
 
