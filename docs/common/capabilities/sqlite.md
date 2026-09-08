@@ -44,7 +44,7 @@ request.
 // Shown at module scope.
 export default pattern<{ orders: SqliteDb }>(({ orders }) => {
   const pending = orders.query<{ id: number; glaze: string; boxes: number }>(
-    "SELECT id, glaze, boxes FROM orders WHERE shipped = 0 ORDER BY id",
+    "SELECT id, glaze, boxes FROM orders WHERE shipped = 0 ORDER BY id LIMIT 200",
   );
 
   return lift((rows?: Array<{ glaze: string; boxes: number }>) =>
@@ -90,6 +90,66 @@ schema-qualified table name. The consequence worth planning around: one
 statement reads the tables of the one database it was issued on, and no
 statement can join across two handles. Two databases means two queries and a
 join expressed in the pattern.
+
+## Bound the rows
+
+An ordinary result row is written into the space as a document of its own —
+which is what gives a per-row label somewhere to sit — so the row count of a
+statement is a durable cost of the space rather than the cost of one render. A
+query that returns a million such rows writes a million documents, and they stay
+written after the view that asked for them is gone. One row shape is carried
+differently: a row projecting a column name a Fabric record reserves
+(`constructor`, `__proto__`) crosses the wire as a list of entries, and unless
+it carries a label it stays inline in the query's own document. That row still
+costs the space — it enlarges the document holding it — so the bound below is
+what a query needs either way.
+
+A statement therefore bounds its rows, and a filter is not a bound. A `WHERE`
+clause narrows the candidates and says nothing about how many survive it: a
+month of a large store is still most of a large store. `LIMIT` is what states
+the ceiling, and a tight filter under it is what makes the rows the ceiling
+admits the interesting ones.
+
+A few hundred rows is a sensible ceiling for a view. It is more than a reader
+takes in at once, and it keeps what one query leaves behind in the space
+proportionate to what the view displays. A view that needs more of the store
+than that pages through it — a bound the reader moves. Paging bounds what one
+query writes rather than what the space accumulates: every page fetched
+materializes its own rows, nothing reclaims the rows of a page the reader has
+left, and returning to an earlier page issues a fresh query rather than reading
+the rows it wrote before. The durable cost is the sum of the pages fetched.
+
+Project the columns the view reads and no others: a row document carries every
+column the statement selected, so a wider projection is paid on every row.
+
+`LIMIT` bounds the rows a query returns, and therefore the documents it writes.
+What the database spends finding those rows is a separate question, and the
+query plan answers it: where an index covers the ordering, `ORDER BY … LIMIT n`
+reads in order and stops at n; where none does, the database scans the
+candidates and sorts them through a temporary B-tree before the first row comes
+back. So `LIMIT` alone bounds the writing and not the reading, and a `WHERE`
+clause narrow enough to keep the candidate set small is what bounds the work of
+an ordering the database cannot walk.
+
+Where a view needs a number rather than the rows, ask SQL for the number.
+`count(*)`, `sum()` and a `GROUP BY` return one row per group, and one row is
+one document; the same answer reached by returning the rows and counting them in
+the pattern writes a document per row on the way. An aggregate over a table that
+derives its labels from row data is the case to check before relying on one: it
+is admitted where the contributing rows have a reader in common, and refused
+where they do not, because no principal is then guaranteed to read everything
+the aggregate summed. The rule is in
+[06](../../specs/sqlite-builtin/06-cfc.md#read--re-derive-per-row-attach-ceiling-dbquery).
+
+```tsx
+// Shown at module scope.
+export const newestOrders = (orders: SqliteDb, since: number) =>
+  orders.query<{ id: number; glaze: string }>(
+    "SELECT id, glaze FROM orders WHERE placed_at >= ? " +
+      "ORDER BY placed_at DESC LIMIT 200",
+    { params: [since] },
+  );
+```
 
 ## Session-scoped results
 

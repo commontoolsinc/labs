@@ -26,4 +26,13 @@ describe("run-pattern description", () => {
     expect(description).toContain("session-only identity");
     expect(description).not.toContain("creates a piece no other runtime");
   });
+
+  it("tells the model to bound a query's rows", () => {
+    expect(runPatternToolDescriptor.description).toContain(
+      "Bound every query's rows with a LIMIT",
+    );
+    expect(runPatternToolDescriptor.description).toContain(
+      "an ordinary result row is materialized as its own document in the space",
+    );
+  });
 });

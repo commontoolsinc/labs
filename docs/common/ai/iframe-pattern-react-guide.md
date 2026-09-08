@@ -562,7 +562,7 @@ const { useCell, useSqliteQuery } = createFabricReact(React, fabric);
 function Notes({ heading }: { heading: string }) {
   const query = useSqliteQuery<{ id: number; text: string }>(
     "appDatabase",
-    "SELECT id, text FROM notes ORDER BY id",
+    "SELECT id, text FROM notes ORDER BY id LIMIT 200",
   );
   if (query.status === "error") return <p role="alert">{query.error.message}</p>;
   if (query.status !== "ready") return <p>Loading notes</p>;

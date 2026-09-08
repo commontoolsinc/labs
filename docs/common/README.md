@@ -85,7 +85,7 @@ on the Common Fabric runtime.
 
 - [capabilities/llm.md](capabilities/llm.md) — `generateText` / `generateObject`; reactive results, no `await`
 - [capabilities/fetch.md](capabilities/fetch.md) — `fetchJson` / `fetchText` / `fetchJsonUnchecked` / `fetchBinary`; reactive results, no `await`
-- [capabilities/sqlite.md](capabilities/sqlite.md) — reading a `SqliteDb` a pattern was given as an input: `db.query`, one statement per database, session-scoped results under a read ceiling
+- [capabilities/sqlite.md](capabilities/sqlite.md) — reading a `SqliteDb` a pattern was given as an input: `db.query`, one statement per database, bounding a query's rows, session-scoped results under a read ceiling
 
 ### workflows/ — CLI and testing mechanics
 
