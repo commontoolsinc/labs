@@ -171,14 +171,16 @@ export type RuntimeTelemetryMarker = {
 } | {
   // Emitted as a commit-gated start for the result under `key` enters the
   // runner's pending index, where a stop arriving before the commit finds it.
-  // One marker per pending attempt; a key can hold several at once.
+  // One marker per entry into the index: a key can hold several attempts at
+  // once, and an attempt that recovers from a refused commit re-enters.
   type: "runner.deferred-start.pending";
   key: string;
 } | {
   // Emitted as a pending commit-gated start leaves the index: `installed`
-  // when its commit landed and the registration now owns itself, `cancelled`
-  // when a stop or a failed commit ended it first. Pairs one-to-one with
-  // `runner.deferred-start.pending` for the same attempt.
+  // once the attempt has installed its registration, which happens before
+  // its own transaction commits, and `cancelled` when the attempt ended
+  // before installing one. Pairs one-to-one with
+  // `runner.deferred-start.pending` for the same entry.
   type: "runner.deferred-start.settled";
   key: string;
   outcome: "installed" | "cancelled";

@@ -36,11 +36,18 @@ function listen(
 export function observePendingDeferredStarts(runtime: Runtime): {
   /** How many keys hold at least one pending attempt. */
   keys(): number;
+
   /** How many attempts are pending under `key`. */
   count(key: string): number;
+
+  /** How many attempts have settled with the given outcome. */
+  settled(outcome: "installed" | "cancelled"): number;
+
+  /** Stops listening. */
   restore(): void;
 } {
   const pending = new Map<string, number>();
+  const settled = { installed: 0, cancelled: 0 };
   const restore = listen(runtime, (marker) => {
     if (marker.type === "runner.deferred-start.pending") {
       pending.set(marker.key, (pending.get(marker.key) ?? 0) + 1);
@@ -48,11 +55,13 @@ export function observePendingDeferredStarts(runtime: Runtime): {
       const left = (pending.get(marker.key) ?? 0) - 1;
       if (left > 0) pending.set(marker.key, left);
       else pending.delete(marker.key);
+      settled[marker.outcome]++;
     }
   });
   return {
     keys: () => pending.size,
     count: (key) => pending.get(key) ?? 0,
+    settled: (outcome) => settled[outcome],
     restore,
   };
 }
@@ -66,8 +75,11 @@ export function observePendingDeferredStarts(runtime: Runtime): {
 export function observeCacheWriteBacks(runtime: Runtime): {
   /** How many write-backs have started. */
   started(): number;
+
   /** How many write-backs have started and not yet settled. */
   inFlight(): number;
+
+  /** Stops listening. */
   restore(): void;
 } {
   let started = 0;

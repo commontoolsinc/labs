@@ -370,6 +370,8 @@ describe("child run ownership", () => {
     // waiting to be tombstoned.
     expect(runtime.runner.cancels.has(key(result))).toBe(true);
     expect(pending.keys()).toBe(0);
+    expect(pending.settled("installed")).toBe(1);
+    expect(pending.settled("cancelled")).toBe(0);
     pending.restore();
     runtime.runner.stop(result);
   });
@@ -401,6 +403,8 @@ describe("child run ownership", () => {
     // nothing behind for the result's key.
     expect(runtime.runner.cancels.has(key(result))).toBe(false);
     expect(pending.keys()).toBe(0);
+    expect(pending.settled("cancelled")).toBe(1);
+    expect(pending.settled("installed")).toBe(0);
     pending.restore();
   });
 
@@ -436,6 +440,8 @@ describe("child run ownership", () => {
     await runtime.idle();
 
     expect(pending.keys()).toBe(0);
+    expect(pending.settled("cancelled")).toBe(1);
+    expect(pending.settled("installed")).toBe(0);
     expect(runtime.runner.cancels.has(key(receipt))).toBe(false);
     pending.restore();
   });
