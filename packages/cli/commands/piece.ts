@@ -2973,7 +2973,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   .option("--no-start", "Only link without starting the pieces")
   .option(
     "--allow-non-existing",
-    "Allow missing pieces or source values, without overriding target input schemas",
+    "Allow missing pieces or endpoint values, without overriding target input schemas",
   )
   .action(async (options, sourceRef, targetRef) => {
     setQuietMode(!!options.quiet);

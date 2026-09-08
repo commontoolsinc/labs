@@ -30,6 +30,7 @@ import {
   SlugResolutionError,
 } from "@commonfabric/piece";
 import {
+  assertPieceInputPath,
   type PatternCompatibilityReport,
   type PatternUpdateReceipt,
   PieceController,
@@ -3802,8 +3803,9 @@ export async function executePieceCallable(
  * the source piece, so the target reads the source rather than holding a copy
  * of what it said.
  *
- * Both endpoints are read back first, and the link is refused when either the
- * piece or the path is missing; `options.allowNonExisting` links anyway.
+ * Both endpoints must have a pattern and their paths must have values unless
+ * `options.allowNonExisting` is set. A target piece's current input schema must
+ * select the target path regardless of that flag.
  */
 export async function linkPieces(
   config: SpaceConfig,
@@ -3916,6 +3918,39 @@ export async function linkPieces(
       errors.push(
         `Target piece ${resolvedTargetPieceId} does not have pattern`,
       );
+    } else if (resolvedTargetPath.length > 0) {
+      // Schema refusal takes precedence over the overridable absence check.
+      // The write repeats this check against metadata in its own transaction.
+      try {
+        assertPieceInputPath(
+          await targetPiece.input.getCell(),
+          resolvedTargetPath,
+        );
+      } catch (error) {
+        if (error instanceof PieceInputPathError) {
+          throw new LinkValidationError(error.message);
+        }
+        throw error;
+      }
+      const targetData = await timeCliPhase(
+        "linkPieces.readTargetInput",
+        () => targetPiece.input.get(),
+      );
+      let current: unknown = targetData;
+      for (const segment of resolvedTargetPath) {
+        if (current == null || typeof current !== "object") {
+          current = undefined;
+          break;
+        }
+        current = (current as Record<string | number, unknown>)[segment];
+      }
+      if (current === undefined) {
+        errors.push(
+          `Target path "${
+            resolvedTargetPath.join("/")
+          }" does not exist on piece ${resolvedTargetPieceId}`,
+        );
+      }
     }
 
     if (errors.length > 0) {
@@ -4766,13 +4801,12 @@ export async function getCellValue(
           () => piece.getCell().pull(),
         );
       }
-      const targetCell = await (options.input
-        ? piece.input.getCell(path)
-        : (await piece.result.getCell()).key(...path));
+      const targetCell = options.input
+        ? await piece.input.getCell(path)
+        : (await piece.result.getCell()).key(...path);
       await timeCliPhase(
         "getCellValue.step.target.pull",
-        () =>
-          targetCell.pull(),
+        () => targetCell.pull(),
       );
       await timeCliPhase(
         "getCellValue.step.synced.beforeIdle",

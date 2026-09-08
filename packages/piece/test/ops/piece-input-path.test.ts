@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { createSession, Identity } from "@commonfabric/identity";
 import { type JSONSchema, Runtime } from "@commonfabric/runner";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { PieceController } from "../../src/ops/piece-controller.ts";
@@ -155,7 +156,86 @@ describe("piece input paths", () => {
     expect((await piece.input.getCell(["items", "length"])).get()).toBe(2);
     await expect(pieces.link(piece.id, [], piece.id, ["items", "length"]))
       .rejects.toThrow("current pattern's input schema");
+    await expect(piece.input.set(0, ["items", "length"]))
+      .rejects.toThrow("current pattern's input schema");
     expect(await piece.input.get(["items"])).toEqual(["one", "two"]);
+  });
+
+  it("refuses hidden edits before invoking the producer and preserves visible edits", async () => {
+    const piece = await create({
+      type: "object",
+      properties: { title: { type: "string" } },
+    }, { title: "Topic", hidden: "retained" });
+    let calls = 0;
+    await expect(piece.input.edit(() => {
+      calls++;
+      return { value: "changed" };
+    }, ["hidden"])).rejects.toThrow("current pattern's input schema");
+    expect(calls).toBe(0);
+    expect((await piece.input.getCell()).getRaw()).toEqual({
+      title: "Topic",
+      hidden: "retained",
+    });
+    expect(
+      await piece.input.edit((stored) => ({ value: `${stored} edited` }), [
+        "title",
+      ]),
+    ).toEqual({ wrote: true });
+    expect(await piece.input.get(["title"])).toBe("Topic edited");
+  });
+
+  it("rechecks input visibility before producing a write after a metadata retry", async () => {
+    const piece = await create({
+      type: "object",
+      properties: { title: { type: "string" } },
+    }, { title: "Topic" });
+    const input = await piece.input.getCell();
+    const provider = storage.open(pieces.getSpace());
+    const originalReconciliation = provider.loadUnexaminedAbsences;
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<number>();
+    let first = true;
+    provider.loadUnexaminedAbsences = () => {
+      if (!first) return 0;
+      first = false;
+      entered.resolve();
+      return release.promise;
+    };
+    let calls = 0;
+    const update = piece.input.edit(() => {
+      calls++;
+      return { value: "Changed" };
+    }, ["title"]);
+    const refusal = expect(update).rejects.toThrow(
+      "current pattern's input schema",
+    );
+    try {
+      await entered.promise;
+      const currentSchema = {
+        type: "object",
+        properties: { other: { type: "string" } },
+      } as const;
+      const replaced = await runtime.editWithRetry((tx) => {
+        piece.getCell().withTx(tx).setMetaRaw(
+          "argument",
+          input.asSchema(currentSchema).getAsLink({
+            base: piece.getCell(),
+            includeSchema: true,
+          }),
+          rawMetaWriteAuthorization,
+        );
+      });
+      expect(replaced.error).toBeUndefined();
+      release.resolve(1);
+      await refusal;
+      expect(calls).toBe(1);
+      expect(input.getRaw()).toEqual({ title: "Topic" });
+      expect(await piece.input.get()).toEqual({});
+    } finally {
+      release.resolve(1);
+      provider.loadUnexaminedAbsences = originalReconciliation;
+      await refusal;
+    }
   });
 
   it("keeps unknown inputs opaque while preserving their reference", async () => {

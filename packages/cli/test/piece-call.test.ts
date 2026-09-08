@@ -4425,13 +4425,13 @@ describe("piece link data errors", () => {
   it("reports a validation failure with an inspect hint for both pieces", () => {
     const report = pieceLinkDataErrorReport(
       new LinkValidationError(
-        'Target path "config/email" does not exist on piece fid1:target-1\n\nUse --allow-non-existing to link anyway.',
+        'Source path "config/email" does not exist on piece fid1:source-1\n\nUse --allow-non-existing to link anyway.',
       ),
       { sourcePieceId: "fid1:source-1", targetPieceId: "fid1:target-1" },
     );
     // The runtime's message survives verbatim — it carries its own
     // --allow-non-existing next step — and the hint adds the inspect pointer.
-    expect(report?.message).toMatch(/does not exist on piece fid1:target-1/);
+    expect(report?.message).toMatch(/does not exist on piece fid1:source-1/);
     expect(report?.message).toMatch(/--allow-non-existing/);
     expect(report?.hint).toMatch(/piece inspect/);
     expect(report?.hint).toMatch(/fid1:source-1/);

@@ -39,15 +39,31 @@ const acceptsOpaqueCellOrUnresolvedLink = (
 const READ_NON_RECURSIVE: IReadOptions = { nonRecursive: true };
 
 /**
- * Reads the raw endpoint of a stored link chain without recursively loading it.
- * An absent document, missing value, non-object path, or cycle returns undefined;
- * operational storage errors propagate. Mid-path links carry the remaining path
- * to their targets rather than traversing the link envelope as data.
+ * Resolves one stored link — and any links it chains through — to the RAW
+ * value tree at its endpoint, reading doc bytes through `tx`. `value` is
+ * `undefined` whenever no readable tree is there: an absent doc, a doc
+ * record holding no value (what a meta-only write leaves behind), a path the
+ * present tree does not hold, a chain that cycles. The caller draws no
+ * distinction among those — this walk exists to mirror the structure the
+ * materialization resolved, not to judge absences, and which of them a raw
+ * read is looking at is not knowable here (a slot a pattern materializes
+ * lazily reads exactly like one that never synced; the pattern-vintage gate
+ * holds real stores of both).
  *
- * `chain` tracks the current descent. Entries added by this call are removed on
- * every exit, so sibling references to the same document do not look cyclic.
- * Exported for direct cycle tests because materialization can reject cycles
- * before validation reaches this walk.
+ * Steps hop by hop rather than calling link-resolution's resolver because
+ * the caller needs the endpoint's raw tree to recurse into, and because a
+ * raw read of a path that crosses a mid-doc link would descend into the
+ * link sigil's own JSON — so path segments are walked in memory and links
+ * met along the way are followed.
+ *
+ * `chain` carries the link addresses of the CURRENT descent; every key this
+ * walk adds is removed on the way out, whichever exit is taken — sibling
+ * slots routinely share targets (one profile linked from `profiles`, `mru`,
+ * and `defaultProfile` at once), and a leftover key would misread the
+ * second sibling as a cycle. The repeat-address guard is the walk's
+ * termination backstop, and the reason it is exported: the staging
+ * materialization happens to throw on the cyclic shapes reachable today
+ * before any walk runs, so only a direct test can exercise termination.
  */
 export function readStoredLinkChainRaw(
   tx: IExtendedStorageTransaction,
@@ -126,10 +142,29 @@ export function readStoredLinkChainRaw(
 }
 
 /**
- * Replaces undefined materializations reached through stored links with opaque
- * placeholders. Readable wrong-typed values and inline undefined values remain
- * unchanged. The walk follows stored links at every depth, including across
- * documents and spaces, without loading missing targets.
+ * Rebuilds `materialized` so every slot whose STORED value routes through a
+ * link and materialized to `undefined` carries
+ * {@link UNRESOLVED_LINK_PLACEHOLDER} instead. Behind a link, an absence
+ * defers, whatever produced it: the value is owned elsewhere, and "not
+ * replicated here yet" reads identically to "not materialized yet" — the
+ * pattern-vintage gate holds real stores where the same missing slot is
+ * each of those. A slot that materialized to a VALUE is never touched, so a
+ * readable wrong-typed value still refuses; and an `undefined` stored
+ * literally in the argument doc itself — no link involved — still judges,
+ * so a doc that plainly holds nothing keeps failing a required check. A
+ * deferred slot's schema check still happens, at instantiation-time
+ * reactive reads (the same verdict link-resolution's `pendingHopDoc`
+ * renders for lazy reads).
+ *
+ * The walk mirrors the materialization it repairs: from the argument doc's
+ * raw bytes, following every link — across docs and spaces, to any depth —
+ * via {@link readStoredLinkChainRaw}. The fleet incident this generalizes
+ * from: a profile's `name` cell stores a link to its seed value's doc,
+ * cold-start sync delivers the cell doc but not the seed doc, and the
+ * one-hop overlay this walk replaced could not see past the first
+ * resolution — so every home bricked with `profiles: 0: name: value does
+ * not match type string` on the first pattern-identity move after the
+ * profile was written.
  */
 function overlayUnreadableLinkPlaceholders(
   tx: IExtendedStorageTransaction,
@@ -217,8 +252,19 @@ export function storedArgumentValidationIssue(
   );
   const validationOptions = {
     acceptOpaqueValue: acceptsOpaqueCellOrUnresolvedLink,
-    // A stored optional key holding undefined carries no supplied value.
-    // Keep this relaxation local to argument validation, not result writes.
+    // An OPTIONAL key holding `undefined` carries no data, and a handler
+    // mints one without meaning to: `comments.push({ author, ... })` with
+    // no author in hand writes the key, and the codec stores that presence.
+    // Measuring it here asks whether `undefined` satisfies the property's
+    // declared type, which nothing ordinary answers yes to — and THIS
+    // refusal is permanent, because the same identity refuses identically
+    // (see `isStoredArgumentSchemaRefusal`). A pattern would be unable to
+    // update documents it wrote itself. Measured on `topics/topic.tsx`
+    // (`author`) and `lunch-poll/main.tsx` (`imageUrl`).
+    //
+    // Scoped to THIS caller rather than made the validator's rule: writing
+    // `undefined` where a number is declared is still a mistake worth
+    // rejecting at a result write, while the caller can still see it.
     optionalUndefinedIsAbsent: true,
   };
   let validationFailure = validateSchemaValue(
@@ -228,8 +274,21 @@ export function storedArgumentValidationIssue(
     validationOptions,
   );
   if (validationFailure !== undefined) {
-    // Only undefined linked slots can change verdict. Defer those slots to
-    // reactive reads, avoiding a second graph walk on the valid common path.
+    // Judge only what this context can actually read. The materialization
+    // above resolves the staged doc's whole link graph through this
+    // transaction, and a link chain that dead-ends at a doc the local
+    // replica cannot serve materializes as `undefined` — indistinguishable
+    // from a stored mistake, though the stored bytes are fine and every
+    // OTHER context may read them. Validating that `undefined` bricks the
+    // piece permanently (same identity, same refusal — see
+    // `isStoredArgumentSchemaRefusal`), so such slots validate as opaque
+    // and their schema check is deferred to instantiation-time reactive
+    // reads, which sync what they need. Supplied and re-staged arguments
+    // alike: a caller vouches for the value it stages, but which link
+    // targets happen to be replicated HERE was never part of that value.
+    // The overlay only ever turns `undefined` into an accepted opaque, so
+    // running it on failure alone changes no verdict — it spares the
+    // happy path a second walk of the stored graph.
     validationFailure = validateSchemaValue(
       argumentSchema,
       overlayUnreadableLinkPlaceholders(

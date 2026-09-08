@@ -17,7 +17,7 @@ export class PieceInputPathError extends Error {
       }" ` +
         "not found in the current pattern's input schema. " +
         "Update the target pattern with cf piece setsrc to " +
-        "declare this input before linking or reading it. " +
+        "declare this input before linking, reading, or writing it. " +
         "--allow-non-existing does not override the input schema.",
     );
   }
@@ -29,6 +29,9 @@ export function assertPieceInputPath(
   path: CellPath,
   options: { allowArrayLength?: boolean } = {},
 ): void {
+  // Link serialization omits the permissive schemas `true` and `{}`, including
+  // for persisted open-input patterns. An absent link schema must therefore
+  // remain permissive; setup and source updates retain constrained schemas.
   if (
     !schemaPathSelection(cell.getAsNormalizedFullLink().schema, path, options)
       .selected

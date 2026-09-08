@@ -94,15 +94,20 @@ whole design: integration between programs is a pointer, not an API project.
 
 The target path must be selected by the viewer's current input schema. A declared
 optional input, an array slot, or a key selected by `additionalProperties` can
-be linked before it has a value. If the pattern does not declare the input,
+be linked before it has a value with `--allow-non-existing`. Without the flag,
+both endpoint paths must have values. If the pattern does not declare the input,
 update the consumer with `cf piece setsrc` before linking. `--allow-non-existing`
-allows missing pieces and source values; it does not expose undeclared inputs.
+allows missing pieces and endpoint values; it does not expose undeclared inputs.
 A refused link writes no binding and reports no successful link receipt.
 
 Whole-input and targeted `cf cell get --input` reads use the same input
-projection. An old link stored under an undeclared input remains in the raw
-argument document, but a targeted piece-input read refuses that path. Updating
-the pattern to select the input makes that link visible without rewriting it.
+projection. Targeted `cf cell set --input` writes and piece input edits require
+the current input schema to select their path. A write can activate another
+schema branch; reads expose the branches selected by the resulting value.
+
+An old link stored under an undeclared input remains in the raw argument
+document, but a targeted piece-input read refuses that path. Updating the pattern
+to select the input makes that link visible without rewriting it.
 `cf piece setsrc --check` checks the candidate projection and uses runtime setup's
 stored-argument validation, including deferral of unreadable linked values; it
 does not change the stored arguments or the piece's source identity.

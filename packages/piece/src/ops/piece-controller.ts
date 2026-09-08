@@ -3038,6 +3038,7 @@ class PiecePropIo implements PieceCellIo {
       let targetCell: Cell<unknown>;
       if (this.#type === "input") {
         targetCell = pieces.getArgument(piece);
+        assertPieceInputPath(targetCell, path ?? []);
       } else {
         const resultCell = pieces.getResult(piece);
         const durableSchema = resultCell.getMetaRaw("schema") as

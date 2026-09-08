@@ -21,6 +21,7 @@ import {
   LinkValidationError,
   type PieceConfig,
   type PieceResolutionDeps,
+  setCellValue,
 } from "../lib/piece.ts";
 import { resetWriteReceipts } from "../lib/write-receipt.ts";
 import { captureStderr } from "./utils.ts";
@@ -206,7 +207,27 @@ describe("piece-link-input-visibility", () => {
     expect(isLink(raw.boardNames)).toBe(true);
   });
 
-  it("links absent optional inputs, array slots, and record keys without a force flag", async () => {
+  it("refuses invisible input writes without storing data or issuing a receipt", async () => {
+    const { target, config } = await createPair();
+    for (const value of [["forced"], "not-an-array"]) {
+      const receipt = await captureStderr(async () => {
+        await expect(
+          setCellValue(config, ["boardNames"], value, { input: true }, deps),
+        ).rejects.toThrow("current pattern's input schema");
+      });
+      expect(receipt).not.toContain("wrote to space");
+      expect((await target.input.getCell()).getRaw()).toEqual({
+        title: "Topic",
+      });
+      expect((await target.checkPattern(newProgram)).compatible).toBe(true);
+    }
+    await captureStderr(async () => {
+      await setCellValue(config, ["title"], "Updated", { input: true }, deps);
+    });
+    expect(await target.input.get(["title"])).toBe("Updated");
+  });
+
+  it("requires the force flag for absent optional inputs, array slots, and record keys", async () => {
     const consumer = program(`
       import { pattern, ReadonlyCell } from "commonfabric";
       interface Input {
@@ -223,6 +244,20 @@ describe("piece-link-input-visibility", () => {
       groups: {},
     });
     for (const path of [["optional"], ["rows", "0"], ["groups", "new"]]) {
+      const before = (await target.input.getCell()).getRaw();
+      const refusal = await captureStderr(async () => {
+        await expect(linkPieces(
+          config,
+          source.id,
+          ["namesTable"],
+          target.id,
+          path,
+          undefined,
+          deps,
+        )).rejects.toThrow(`Target path "${path.join("/")}" does not exist`);
+      });
+      expect(refusal).not.toContain("wrote to space");
+      expect((await target.input.getCell()).getRaw()).toEqual(before);
       await captureStderr(() =>
         linkPieces(
           config,
@@ -230,7 +265,7 @@ describe("piece-link-input-visibility", () => {
           ["namesTable"],
           target.id,
           path,
-          undefined,
+          { allowNonExisting: true },
           deps,
         )
       );
@@ -240,6 +275,27 @@ describe("piece-link-input-visibility", () => {
     for (const path of [["optional"], ["rows", "0"], ["groups", "new"]]) {
       expect(await target.input.get(path)).toEqual(["Grace"]);
     }
+  });
+
+  it("preserves open inputs whose durable argument links omit permissive schemas", async () => {
+    const consumer = program(`
+      import { pattern } from "commonfabric";
+      export default pattern<any>(({title}) => ({title}));
+    `);
+    const { source, target } = await createPair(consumer);
+    await withFreshPiece(target.id, async (reader) => {
+      expect((await reader.input.getCell()).getAsNormalizedFullLink().schema)
+        .toBeUndefined();
+      await reader.input.set("Added", ["newField"]);
+      expect(await reader.input.get(["newField"])).toBe("Added");
+      await reader.pieces().link(
+        source.id,
+        ["namesTable"],
+        reader.id,
+        ["boardNames"],
+      );
+      expect(await reader.input.get(["boardNames"])).toEqual(["Ada"]);
+    });
   });
 
   it("accepts a fresh source check over a legacy link without changing stored arguments", async () => {
