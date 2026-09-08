@@ -19,7 +19,10 @@ import {
   newLoopbackServer,
 } from "@commonfabric/runner/storage/cache.deno";
 
-import { assertSuppliedLinkSchemasCompatible } from "../../src/ops/piece-controller.ts";
+import {
+  assertSuppliedLinkSchemasCompatible,
+  type PieceController,
+} from "../../src/ops/piece-controller.ts";
 import { PiecesController } from "../../src/ops/pieces-controller.ts";
 
 const signer = await Identity.fromPassphrase("source input validation");
@@ -53,6 +56,32 @@ describe("piece-controller", () => {
     let runtime: Runtime;
     let pieces: PiecesController;
     let spaceName: string;
+
+    async function withFreshPiece(
+      id: string,
+      run: (piece: PieceController, replica: PiecesController) => Promise<void>,
+    ): Promise<void> {
+      await runtime.idle();
+      await storage.synced();
+      const freshStorage = EmulatedStorageManager.connectTo(server, {
+        as: signer,
+      });
+      const freshRuntime = new Runtime({
+        apiUrl: new URL("http://toolshed.test"),
+        storageManager: freshStorage,
+      });
+      try {
+        const freshPieces = new PiecesController(
+          await createSession({ identity: signer, spaceName }),
+          freshRuntime,
+        );
+        await freshPieces.synced();
+        await run(await freshPieces.get(id, false), freshPieces);
+      } finally {
+        await freshRuntime.dispose();
+        await freshStorage.close();
+      }
+    }
 
     beforeEach(async () => {
       server = newLoopbackServer({ subscriptionRefreshDelayMs: 0 });
@@ -103,76 +132,79 @@ describe("piece-controller", () => {
       });
     });
 
-    for (const initialized of [true, false]) {
-      it(
-        initialized
-          ? "returns a compatible verdict for an optional undefined field in a linked row"
-          : "defers an unreadable linked profile until its value arrives",
-        async () => {
-          const piece = await pieces.create(program("v1"));
-          const profile = runtime.getCell<{ name: string }>(
-            pieces.getSpace(),
-            "profile",
-          );
-          const argument = pieces.getArgument(piece.getCell());
-          const { error } = await runtime.editWithRetry((tx) => {
-            if (initialized) profile.withTx(tx).set({ name: "Baker" });
-            argument.withTx(tx).asSchema<{ rows: unknown[] }>(undefined)
-              .key("rows").push({
-                profile,
-                count: 2,
-                note: initialized ? undefined : "linked",
-              });
-          });
-          expect(error).toBeUndefined();
-          await runtime.idle();
-          await storage.synced();
-          expect(isLink((argument.getRaw() as { rows: unknown[] }).rows[0]))
-            .toBe(true);
-
-          const freshStorage = EmulatedStorageManager.connectTo(server, {
-            as: signer,
-          });
-          const freshRuntime = new Runtime({
-            apiUrl: new URL("http://toolshed.test"),
-            storageManager: freshStorage,
-          });
-          try {
-            const freshPieces = new PiecesController(
-              await createSession({ identity: signer, spaceName }),
-              freshRuntime,
-            );
-            await freshPieces.synced();
-            const reloaded = await freshPieces.get(piece.id, false);
-            const report = await reloaded.checkPattern(program("v2"));
-            expect(report.issues).toEqual({});
-            expect(report.compatible).toBe(true);
-            await reloaded.setPattern(program("v2"));
-            expect(await reloaded.result.get()).toMatchObject({
-              version: "v2",
-              count: 1,
-            });
-            if (!initialized) {
-              const { error } = await freshRuntime.editWithRetry((tx) => {
-                freshRuntime.getCellFromLink(profile.getAsNormalizedFullLink())
-                  .withTx(tx).set({ name: "Baker" });
-              });
-              expect(error).toBeUndefined();
-            }
-            expect(
-              await freshPieces.getArgument(reloaded.getCell()).asSchema(
-                undefined,
-              ).pull(),
-            ).toMatchObject({
-              rows: [{ profile: { name: "Baker" }, count: 2 }],
-            });
-          } finally {
-            await freshRuntime.dispose();
-            await freshStorage.close();
-          }
-        },
+    it("returns a compatible verdict for an optional `undefined` field in a linked row", async () => {
+      const piece = await pieces.create(program("v1"));
+      const profile = runtime.getCell<{ name: string }>(
+        pieces.getSpace(),
+        "profile",
       );
-    }
+      const argument = pieces.getArgument(piece.getCell());
+      const { error } = await runtime.editWithRetry((tx) => {
+        profile.withTx(tx).set({ name: "Baker" });
+        argument.withTx(tx).asSchema<{ rows: unknown[] }>(undefined)
+          .key("rows").push({ profile, count: 2, note: undefined });
+      });
+      expect(error).toBeUndefined();
+      expect(isLink((argument.getRaw() as { rows: unknown[] }).rows[0])).toBe(
+        true,
+      );
+
+      await withFreshPiece(piece.id, async (reloaded, replica) => {
+        const report = await reloaded.checkPattern(program("v2"));
+        expect(report.issues).toEqual({});
+        expect(report.compatible).toBe(true);
+        await reloaded.setPattern(program("v2"));
+        expect(await reloaded.result.get()).toMatchObject({
+          version: "v2",
+          count: 1,
+        });
+        expect(
+          await replica.getArgument(reloaded.getCell()).asSchema(undefined)
+            .pull(),
+        )
+          .toMatchObject({ rows: [{ profile: { name: "Baker" }, count: 2 }] });
+      });
+    });
+
+    it("defers an unreadable linked profile until its value arrives", async () => {
+      const piece = await pieces.create(program("v1"));
+      const profile = runtime.getCell<{ name: string }>(
+        pieces.getSpace(),
+        "profile",
+      );
+      const argument = pieces.getArgument(piece.getCell());
+      const { error } = await runtime.editWithRetry((tx) => {
+        argument.withTx(tx).asSchema<{ rows: unknown[] }>(undefined)
+          .key("rows").push({ profile, count: 2, note: "linked" });
+      });
+      expect(error).toBeUndefined();
+      expect(isLink((argument.getRaw() as { rows: unknown[] }).rows[0])).toBe(
+        true,
+      );
+
+      await withFreshPiece(piece.id, async (reloaded, replica) => {
+        const report = await reloaded.checkPattern(program("v2"));
+        expect(report.issues).toEqual({});
+        expect(report.compatible).toBe(true);
+        await reloaded.setPattern(program("v2"));
+        expect(await reloaded.result.get()).toMatchObject({
+          version: "v2",
+          count: 1,
+        });
+        const { error } = await replica.runtime.editWithRetry((tx) => {
+          replica.runtime.getCellFromLink(profile.getAsNormalizedFullLink())
+            .withTx(tx).set({ name: "Baker" });
+        });
+        expect(error).toBeUndefined();
+        expect(
+          await replica.getArgument(reloaded.getCell()).asSchema(undefined)
+            .pull(),
+        )
+          .toMatchObject({
+            rows: [{ profile: { name: "Baker" }, count: 2, note: "linked" }],
+          });
+      });
+    });
 
     it("refuses a readable wrong-typed value inside a linked row", async () => {
       const piece = await pieces.create(program("v1"));

@@ -1813,10 +1813,11 @@ function linkMatchesCommittedState(
   baseCell: Cell<unknown>,
   basePath: readonly (string | number)[],
 ): boolean {
+  // Live Cells prove preservation in `derivePreserveDecision`, not equality
+  // to stored bytes. They are not FabricValues, so `valueEqual` rejects them.
   if (isCell(suppliedLink.value)) return false;
-  // No undefined guard needed: `parseLinkOrThrow` has already rejected any
-  // supplied value that is not a real link record, so `suppliedLink.value`
-  // can never equal an absent committed slot here.
+  // After excluding live Cells, `parseLinkOrThrow` guarantees a serialized
+  // link, which cannot equal an absent committed slot.
   const committedRoot = baseCell.withTx().getRaw();
   const committed = getValueAtPath(committedRoot, [
     ...basePath,
@@ -2173,8 +2174,8 @@ function policePreservedEnvelope(
   // committed does not mean vetted — raw write paths
   // (`PiecesController.link`) commit links without ever running this
   // validator — so re-assert it: a carried wrapper's `asCell` STACK (kind
-  // and scope, per `asCellShapesMatch`; payload schemas are proved
-  // separately against the durable contracts) has to match every durable
+  // and scope, per `asCellShapesMatch`; payload compatibility is decided
+  // after these wrapper checks) has to match every durable
   // contract of the source. (Loom's injected links carry no envelope —
   // `PiecesController.link` serializes with `KeepAsCell.OnlyStream` — so the
   // real restore case is unaffected.)
@@ -2298,6 +2299,9 @@ function provePreservedContracts(
  * Whether an update retains both a committed handle and its input contract.
  * The producer's policy remains on the linked document; preserving the same
  * handle under the same contract changes neither its policy nor its authority.
+ * This proves consumer-contract continuity, not that the producer contract
+ * was checked at link creation or has stayed unchanged. Producer enforcement
+ * on access and commit governs the retained handle.
  */
 function retainsInputHandleContract(
   suppliedLink: SuppliedLink,
