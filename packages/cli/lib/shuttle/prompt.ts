@@ -46,7 +46,8 @@ import {
   messageOf,
 } from "./place.ts";
 import { renderValue } from "./value.ts";
-import { type Outcome, runLine, type Shuttle, type VerbDeps } from "./verbs.ts";
+import { runLine } from "./verbs.ts";
+import { type Outcome, type Shuttle, type VerbDeps } from "./vocabulary.ts";
 
 /** What the prompt opens every line with, before the place it carries. */
 const PROMPT_NAME = "shuttle";

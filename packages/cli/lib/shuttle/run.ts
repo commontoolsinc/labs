@@ -36,7 +36,7 @@ import { CurrentPlace } from "./place.ts";
 import { runPrompt } from "./prompt.ts";
 import { ShuttleSession } from "./session.ts";
 import { consoleColumns, consoleRows, withPromptTerminal } from "./terminal.ts";
-import type { Shuttle } from "./verbs.ts";
+import type { Shuttle } from "./vocabulary.ts";
 
 /** What a run reaches the world through, so that a case can stand for it. */
 export interface ShuttleDeps {

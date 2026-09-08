@@ -24,11 +24,8 @@ import { HeldConnection } from "../lib/shuttle/connection.ts";
 import { CurrentPlace } from "../lib/shuttle/place.ts";
 import { ShuttleSession } from "../lib/shuttle/session.ts";
 import { moved } from "./shuttle-place-helpers.ts";
-import {
-  type Shuttle,
-  VERB_WORDS,
-  type VerbDeps,
-} from "../lib/shuttle/verbs.ts";
+import { VERB_WORDS } from "../lib/shuttle/verbs.ts";
+import type { Shuttle, VerbDeps } from "../lib/shuttle/vocabulary.ts";
 
 const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;
 const HANDLE = "of:fid1:abcdefghijklmnop";
