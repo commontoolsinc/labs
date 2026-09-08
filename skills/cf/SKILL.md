@@ -23,15 +23,15 @@ deno task cf check --help     # Type checking
 Three ways to run the CLI, in order of preference. All run from source, so they
 always match the working tree:
 
-1. **`cf` (via `bin/cf`)** — a plain `cf` backed by source. On PATH wherever the
-   mise hook has run; an agent's non-interactive shell usually has not, so
-   prepend the checkout's `bin` there. Otherwise `deno task install-cf`. Works
-   from any cwd, and shell completion requires a `cf` on PATH. It runs whichever
-   checkout you are standing in (nearest one walking up, or a host's
-   `vendor/labs`), not the one it was installed from — set `CF_LABS_ROOT` to
-   override when your cwd cannot say what you mean, and run `cf which` to see
-   which CLI would run and why. See "Which checkout runs" in
-   `packages/cli/README.md`.
+1. **`cf` (via `bin/cf`)** — a plain `cf` backed by source. On PATH where mise's
+   hook has applied `_.path` for this directory, which an agent's
+   non-interactive shell has usually not seen (route 2 needs nothing on PATH).
+   Otherwise `deno task install-cf`. Works from any cwd, and shell completion
+   requires a `cf` on PATH. It runs whichever checkout you are standing in
+   (nearest one walking up, or a host's `vendor/labs`), not the one it was
+   installed from — set `CF_LABS_ROOT` to override when your cwd cannot say what
+   you mean, and run `cf which` to see which CLI would run and why. See "Which
+   checkout runs" in `packages/cli/README.md`.
 
 2. **`deno task cf ...`** — works from any directory inside the repo (the
    launcher resolves the repo root itself and runs the CLI from your invoking
