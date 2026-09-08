@@ -10,6 +10,7 @@ import { type Primitive } from "@commonfabric/utils/types";
 
 import { type ValueTag } from "./VALUE_TAGS.ts";
 import {
+  FabricArray,
   FabricContainerValue,
   FabricInstance,
   FabricPlainObject,
@@ -119,7 +120,7 @@ export interface ValueVisitor<Domain = FabricValue, ResultType = FabricValue> {
    * Visits the given _known-value_ `FabricArray`.
    */
   visitFabricArray(
-    value: Domain & FabricPlainObject,
+    value: Domain & FabricArray,
   ): LeafVisitorResult<Domain, ResultType>;
 
   /**
@@ -259,7 +260,7 @@ class VisitInProgress<Domain, ResultType> {
         }
 
         const idxNumber = Number(idx);
-        const item = values[idxNumber];
+        const item = values[idxNumber]!;
         const result = vis.visitArrayContentsItem(idxNumber, item);
 
         if (result !== undefined) {
@@ -291,11 +292,13 @@ class VisitInProgress<Domain, ResultType> {
     value: Domain,
     mappings: [Domain, Domain][],
   ): MainVisitResult<ResultType> {
+    const vis = this.#visitor;
+
     this.#stack.push(value);
 
     try {
       for (const [key, item] of mappings) {
-        const result = vis.visitMapContentsItemContentsItem(key, item);
+        const result = vis.visitMapContentsItem(key, item);
 
         if (result !== undefined) {
           switch (result.type) {
@@ -436,7 +439,7 @@ export class BaseValueVisitor<Domain, ResultType>
 
   /** @inheritDoc */
   visitFabricArray(
-    value: Domain & FabricPlainObject,
+    value: Domain & FabricArray,
   ): LeafVisitorResult<Domain, ResultType> {
     BaseValueVisitor.#throwMissing("visitFabricArray", value);
   }
