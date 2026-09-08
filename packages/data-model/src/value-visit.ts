@@ -95,6 +95,14 @@ export type MainVisitResult<ResultType> =
  */
 export interface ValueVisitor<Domain = FabricValue, ResultType = FabricValue> {
   /**
+   * Visits an item from an `arrayContents` result.
+   */
+  visitArrayContentsItem(
+    index: number,
+    value: Domain,
+  ): ContainerIterationResult<ResultType>;
+
+  /**
    * Visits a value which is already in the process of being visited.
    */
   visitCycle(
@@ -105,14 +113,6 @@ export interface ValueVisitor<Domain = FabricValue, ResultType = FabricValue> {
     /** Depth of the current visit. */
     thisDepth: number,
   ): LeafVisitorResult<Domain, ResultType>;
-
-  /**
-   * Visits an item from an `arrayContents` result.
-   */
-  visitArrayContentsItem(
-    index: number,
-    value: Domain,
-  ): ContainerIterationResult<ResultType>;
 
   /**
    * Visits the given _known-value_ `FabricArray`.
@@ -212,7 +212,7 @@ class VisitInProgress<Domain, ResultType> {
     if (result === undefined) {
       return undefined;
     } else if (result.type === "mainResult") {
-      return result.value;
+      return result;
     } else {
       throw new Error(
         `Shouldn't happen: Got result type \`${result.type}\` from top-level visit.`,
@@ -257,8 +257,9 @@ class VisitInProgress<Domain, ResultType> {
           throw new Error("Improper array returned in `arrayContents` result.");
         }
 
-        const item = values[idx];
-        const result = vis.visitArrayContentsItem(idx, item);
+        const idxNumber = Number(idx);
+        const item = values[idxNumber];
+        const result = vis.visitArrayContentsItem(idxNumber, item);
 
         if (result !== undefined) {
           switch (result.type) {
@@ -424,6 +425,15 @@ export class BaseValueVisitor<Domain, ResultType>
   }
 
   /** @inheritDoc */
+  visitCycle(
+    value: Domain,
+    _originalDepth: number,
+    _thisDepth: number,
+  ): LeafVisitorResult<Domain, ResultType> {
+    BaseValueVisitor.#throwMissing("visitCycle", value);
+  }
+
+  /** @inheritDoc */
   visitFabricArray(
     value: Domain & FabricPlainObject,
   ): LeafVisitorResult<Domain, ResultType> {
@@ -484,8 +494,8 @@ export class BaseValueVisitor<Domain, ResultType>
   //
 
   /** Visits the indicated value. */
-  visit(value: Domain): ResultType | undefined {
-    const inProgress = new VisitInProgress<Domain, ResultType>();
+  visit(value: Domain): MainVisitResult<ResultType> {
+    const inProgress = new VisitInProgress<Domain, ResultType>(this);
     return inProgress.visit(value);
   }
 
