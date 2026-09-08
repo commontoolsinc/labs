@@ -575,10 +575,12 @@ export interface ConnectionOutput {
  * controller over it: a space session, a runtime carrying that deployment's
  * experimental options, and a server proven live before it returns.
  *
- * The connection authenticates the space session but leaves the space cell
- * unread until an operation addresses it. Piece IDs, slug documents, and
- * content-addressed pattern artifacts can all be reached without that record;
- * registry and default-pattern operations sync the space cell on demand.
+ * By default the connection authenticates the space session but leaves the
+ * space cell unread until an operation addresses it. Piece IDs, slug documents,
+ * and content-addressed pattern artifacts can all be reached without that
+ * record; registry and default-pattern operations sync the space cell on
+ * demand. `deferSpaceCellSync: false` keeps the eager sync for a caller that
+ * needs the complete space record before this returns.
  *
  * Throws when this process is already connected to a different deployment.
  * The settings a connection writes — the LLM endpoint below among them — are
