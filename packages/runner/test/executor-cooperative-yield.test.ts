@@ -74,9 +74,17 @@ const burn = (ms: number): void => {
 const WALK_STEPS = 30;
 const STEP_MS = 40;
 
+// Read as a REAL: the engine opens its database with the driver's default
+// integer mode, which hands a JS caller the low 32 bits of an INTEGER
+// column. An epoch-millisecond expiry is well past 32 bits, so the raw read
+// is a wrapped value whose SIGN flips every 2^31 ms (~24.9 days) — the row
+// stayed correct and the lease's own liveness checks compare inside SQL,
+// but the raw number read here went negative on 2026-09-08 07:51 UTC and
+// failed the `> 0` pin below. A REAL is exact for any millisecond timestamp.
 const leaseExpiry = (engine: Engine.Engine): number =>
   (engine.database.prepare(
-    `SELECT expires_at FROM execution_lease WHERE space = :space`,
+    `SELECT CAST(expires_at AS REAL) AS expires_at FROM execution_lease
+      WHERE space = :space`,
   ).get({ space }) as { expires_at: number } | undefined)?.expires_at ?? 0;
 
 describe("stage C tuning T3: cooperative yield + mid-wave renew", () => {
