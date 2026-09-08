@@ -331,6 +331,24 @@ describe("score", () => {
       expect(state.pendingMain).toEqual([]);
     });
 
+    it("counts one catch for a run of failures one change ended", () => {
+      // A test red across several commits on the default branch has one
+      // thing wrong with it, and the change that makes it green fixed
+      // that one thing.
+      const state = stateFrom([
+        saw("fail", { day: "2026-08-17", commit: "c0" }),
+        saw("fail", { day: "2026-08-18", commit: "c1" }),
+        saw("fail", { day: "2026-08-19", commit: "c2" }),
+        saw("pass", { commit: "c3" }),
+      ]);
+      expect(state.mainCatches).toBe(1);
+      expect(state.lastCatch).toBe("2026-08-17");
+      expect(state.pendingMain).toEqual([]);
+      // One catch and nothing else: the run resolved, so none of the
+      // failures in it is also flake evidence.
+      expect(flakeRate(state, "2026-08-20")).toBe(0);
+    });
+
     it("reads a green rerun of the same commit as a flake", () => {
       // The two runs can arrive in separate batches, so the same-commit
       // check inside one batch does not see this pair.
@@ -344,16 +362,6 @@ describe("score", () => {
       ]);
       expect(state.mainCatches).toBe(0);
       expect(flakeRate(state, "2026-08-21")).toBe(1);
-    });
-
-    it("reads a failure nothing fixed as a flake", () => {
-      const folded = foldObservations([
-        saw("fail", { day: "2026-08-19", commit: "c0" }),
-        saw("pass", { commit: "c1" }),
-      ], { coveredChanged: () => false });
-      const state = folded.states.get(KEY)!;
-      expect(state.mainCatches).toBe(0);
-      expect(flakeRate(state, "2026-08-20")).toBe(1);
     });
   });
 

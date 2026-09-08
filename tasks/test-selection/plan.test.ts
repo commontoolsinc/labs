@@ -188,10 +188,7 @@ describe("plan", () => {
       }];
       const mandatory = new Map([
         [testIdentityKey(held.test), "changed" as const],
-        [
-          testIdentityKey(manifest.entries[3]!.test),
-          "covers-changed" as const,
-        ],
+        [testIdentityKey(manifest.entries[3]!.test), "changed" as const],
       ]);
       const names = selected(run(manifest, { mandatory })).map((s) =>
         s.entry.test.n
