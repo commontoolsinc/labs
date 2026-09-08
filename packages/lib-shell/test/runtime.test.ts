@@ -1043,12 +1043,16 @@ describe("RuntimeInternals", () => {
 
     // With no transport supplied, `create` spawns the worker itself and owns
     // it. Options are built first, so a snapshot this host cannot render for
-    // is refused while there is still nothing to dispose.
+    // is refused while there is still nothing to dispose. The worker URL and
+    // build hash are supplied so that resolving them reaches the spawn, which
+    // the rigged `Worker` constructor is what stops.
     await expect(
       withNoWorkerConstructible(() =>
         RuntimeInternals.create({
           identity,
           apiUrl: new URL("http://shell.test/"),
+          workerUrl: new URL("http://shell.test/worker.js"),
+          getBuildHash: () => Promise.resolve(undefined),
           trustSnapshot: {
             id: "principal:loom-host",
             actingPrincipal: "loom-host",

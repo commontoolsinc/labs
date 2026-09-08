@@ -152,16 +152,16 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    * true, the worker's display sinks gate labeled values against the
    * §8.10.6 profile for the acting identity and author-supplied
    * render-boundary declassification is denied. Dogfood flag, default off
-   * (= today's unbounded rendering). Expect over-blocking while exchange
-   * resolution (H3b) is not implemented.
+   * (= today's unbounded rendering).
    */
   cfcRenderCeiling?: boolean;
 
   /**
    * The trust the worker runs against. Its `actingPrincipal` is the identity
    * the runtime acts as, which is also the audience the render ceiling admits
-   * when `cfcRenderCeiling` is on. Omit it to run as the session identity;
-   * pass `null` to run against no snapshot at all.
+   * when `cfcRenderCeiling` is on. Omit it to send one naming the session
+   * identity; pass `null` to send none, which leaves the worker to build its
+   * own, naming the session identity as well.
    */
   trustSnapshot?: RuntimeTrustSnapshot | null;
 
@@ -352,11 +352,11 @@ export function createRuntimeClientOptions({
   patternCoverage?: boolean;
   concurrentWatchRefresh?: boolean;
 }) {
-  // The identity the runtime acts and renders as. A delegated host names it
-  // in its own trust snapshot; a snapshot that names nobody leaves the
-  // session identity acting, which is the rule the worker applies to the same
-  // field in `runtime-processor.ts`. A named principal must be a DID: the
-  // ceiling's entries are identity atoms over one.
+  // The identity the runtime renders as. A delegated host names it in its own
+  // trust snapshot; a snapshot that names nobody leaves the session identity
+  // as the render audience, the fallback the worker's own resolver applies to
+  // the same field in `runtime-processor.ts`. A named principal must be a DID:
+  // the ceiling's entries are identity atoms over one.
   const namedPrincipal = trustSnapshot?.actingPrincipal;
   if (namedPrincipal !== undefined && !isDID(namedPrincipal)) {
     throw new Error(
