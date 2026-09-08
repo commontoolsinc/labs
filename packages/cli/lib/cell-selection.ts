@@ -2152,11 +2152,21 @@ function projectValue(
   const properties = schema.properties ?? {};
   const projected: Record<string, unknown> = {};
   if (schema.additionalProperties !== false) {
-    for (const [key, child] of Object.entries(value)) {
-      const childSchema = properties[key] ?? schema.additionalProperties ??
-        true;
+    // Declared keys first, in schema order, so an open projection renders
+    // its declared fields the way a closed one does; the keys it retains
+    // beyond the declaration follow in the value's own order. Own keys
+    // only: `in` walks the prototype chain, and a stored key spelled like
+    // an `Object.prototype` member (`toString`, `constructor`) is data here.
+    const keys = [
+      ...Object.keys(properties).filter((key) => Object.hasOwn(value, key)),
+      ...Object.keys(value).filter((key) => !Object.hasOwn(properties, key)),
+    ];
+    for (const key of keys) {
+      const childSchema = Object.hasOwn(properties, key)
+        ? properties[key]
+        : schema.additionalProperties ?? true;
       projected[key] = projectValue(
-        child,
+        value[key],
         childSchema,
         implicitArrayTraversal,
         keepComposedAddresses,
@@ -2165,7 +2175,9 @@ function projectValue(
     return projected;
   }
   for (const [key, childSchema] of Object.entries(properties)) {
-    if (key in value) {
+    // Own keys only, as above: a declared `toString` the value does not
+    // hold must not emit `Object.prototype.toString`.
+    if (Object.hasOwn(value, key)) {
       projected[key] = projectValue(
         value[key],
         childSchema,
@@ -2352,7 +2364,7 @@ export function selectSourceSchema(
   // those types in hand and applies the rule entire, in
   // {@link outputSchemaWithSourceRequired}.
   const selectedRequired = required?.filter((key) =>
-    key in properties && properties[key] !== false
+    Object.hasOwn(properties, key) && properties[key] !== false
   );
   return {
     ...metadata,
@@ -3404,26 +3416,27 @@ export async function deriveSelectedValue(
         `Could not apply get transform: ${committed.error}`,
       );
     }
-    // This wait is GLOBAL: idle() drains the whole reactive graph and
-    // synced() the whole storage manager, not just this transform. On a
-    // plain `cf cell get` that is benign — nothing else runs in the CLI's
-    // runtime — but a shaped `cf piece call` readback arrives here right after
-    // its handler ran, so the selection waits on whatever derived
-    // recomputation that handler triggered elsewhere, a coupling the plain
-    // call's transaction-local acknowledgment deliberately avoids.
-    // Documented as a known cost of shaping at the call (decided
-    // 2026-08-14; packages/cli/README.md names the shape-the-collect
-    // alternative); scoping this wait to the transform's own computation is
-    // the named follow-up.
-    await timeSelectionPhase("output.pull.beforeIdle", () => outputCell.pull());
-    await timeSelectionPhase("runtime.idle.beforeSync", () => runtime.idle());
-    await timeSelectionPhase(
-      "storage.synced",
-      () => runtime.storageManager.synced(),
-    );
-    await timeSelectionPhase("output.pull.afterSync", () => outputCell.pull());
-    await timeSelectionPhase("runtime.idle.afterSync", () => runtime.idle());
+    // pull() is the readiness boundary for this output: it drives transitive
+    // computations, waits for linked documents those reads discover, and
+    // re-idles after each arrival. Nothing downstream re-checks it: the
+    // re-projection below imposes key order locally, so a pull that stopped
+    // short of the fixpoint would no longer show as an out-of-order key (what
+    // the four-entrypoint test could see) but as a silently absent one. The
+    // cold and stale session-scoped integration reads are what stand behind
+    // one pull sufficing.
+    await timeSelectionPhase("output.pull", () => outputCell.pull());
     const outputValue = outputCell.get();
+    // Runtime materialization can expose object children in arrival order.
+    // Apply the resolved projection to the value in hand so declared fields
+    // instead follow schema order, closed and open projections alike; the
+    // keys an open projection retains beyond its declaration follow, in the
+    // value's own order. This is local value work and starts no graph or
+    // storage operation.
+    const orderedOutput = projection === undefined ? outputValue : projectValue(
+      outputValue,
+      projection.projectionSchema,
+      implicitArrayTraversal,
+    );
     const recorded = errors.slice(errorCountBefore);
     if (recorded.length > 0) {
       // Translate the array-shape errors emitted by the runner filter/map
@@ -3455,10 +3468,10 @@ export async function deriveSelectedValue(
       );
     }
     deps.onOutputCell?.(outputCell);
-    return markers === undefined ? outputValue : await composeLinkAddresses(
+    return markers === undefined ? orderedOutput : await composeLinkAddresses(
       sourcePosition(sourceValueCell, space),
       markers,
-      outputValue,
+      orderedOutput,
       implicitArrayTraversal,
     );
   } finally {
@@ -3498,7 +3511,7 @@ function markersHeldBy(
     const properties: Record<string, LinkMarkers> = {};
     for (const [key, child] of Object.entries(markers.properties)) {
       const below = held.flatMap((value) =>
-        isObjectNotArray(value) && key in value
+        isObjectNotArray(value) && Object.hasOwn(value, key)
           ? [(value as Record<string, unknown>)[key]]
           : []
       );

@@ -130,6 +130,7 @@ import { normalizeCellScope, scopeRank } from "../scope.ts";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import { CFC_ENFORCEMENT_REJECTION_PREFIX } from "./rejection.ts";
 import {
+  allowMutableTransactionRead,
   clearSchemaRefusalTx,
   ignoreReadForCommit,
   internalVerifierRead,
@@ -1099,25 +1100,48 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // write that leaves it out — the root write replaces the envelope, so
       // every stored meta field it does not carry is a field it drops. The
       // first two are settled by the write alone. The third is settled by
-      // reading what the document carries, one meta member at a time,
-      // through the inner transaction and under a read that carries no
-      // weight of its own. Reading through the outer transaction would put
-      // the guard's read in the reactivity log and the flow join. Reading
-      // the document root would name a logical path covering every entry in
-      // the document's label map, widening what the transaction counts as
-      // consumed. And the read takes no commit precondition:
-      // `ignoreReadForCommit` drops it from the conflict set, so the blind
-      // root writes the runtime makes stay blind rather than becoming
-      // read-modify-writes that lose the race against any advance of the
-      // document they replace. What that leaves open is an erasure racing
-      // the guard, never a forgery — the two shapes that name a field are
-      // refused from the write itself, with no read at all.
+      // one read of the envelope the write replaces, at the document root.
+      //
+      // What the guard looks at there is which meta keys that envelope has
+      // rather than what any of them holds, and `nonRecursive` is how the
+      // journal says so. The flow join keys on that: a recursive read
+      // consumes every label-map entry at or below the path it names, and a
+      // `nonRecursive` one consumes only the entry at that path. So this read
+      // consumes the document's root entry and nothing else. A read of a meta
+      // member instead consumes the user data an entry of the same name
+      // covers, because canonicalization strips a leading `value` and a
+      // document with a user field named `slug` labels it at the same logical
+      // path the raw `["slug"]` member reads.
+      //
+      // `allowMutableTransactionRead` takes the stored value as it stands
+      // rather than an isolated copy of it. A guard that tests each meta key
+      // for being defined and keeps nothing has no use for the copy, and the
+      // copy is a clone of the whole document once the transaction has
+      // written into it. `ignoreReadForScheduling` keeps the read out of the
+      // reactivity log. `ignoreReadForCommit` drops it from the conflict set,
+      // so the blind root writes the runtime makes stay blind rather than
+      // becoming read-modify-writes that lose the race against any advance of
+      // the document they replace.
+      //
+      // The read goes through the inner transaction, which is what keeps it
+      // from marking the transaction CFC-relevant, invalidating a prepared
+      // CFC decision, or narrowing the transaction's read scope. It is in the
+      // journal, and so in the flow join, from either transaction.
+      //
+      // What that leaves open is an erasure racing the guard, never a forgery
+      // — the two shapes that name a field are refused from the write itself,
+      // with no read at all.
       const written = metaFieldsWritten(address.path, value);
       const dropped = address.path.length === 0
-        ? storedMetaFields((field) =>
-          this.tx.read({ ...address, path: [field] }, {
-            meta: { ...ignoreReadForScheduling, ...ignoreReadForCommit },
-          }).ok?.value
+        ? storedMetaFields(
+          this.tx.read(address, {
+            nonRecursive: true,
+            meta: {
+              ...ignoreReadForScheduling,
+              ...ignoreReadForCommit,
+              ...allowMutableTransactionRead,
+            },
+          }).ok?.value,
         ).filter((field) => !written.includes(field))
         : NO_META_FIELDS;
       if (written.length > 0 || dropped.length > 0) {

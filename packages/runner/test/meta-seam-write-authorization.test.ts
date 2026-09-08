@@ -2,7 +2,11 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import type { FabricValue } from "@commonfabric/api";
-import { type MetaField, rawMetaWriteAuthorization } from "../src/meta-seam.ts";
+import {
+  isMetaField,
+  type MetaField,
+  rawMetaWriteAuthorization,
+} from "../src/meta-seam.ts";
 import { Identity } from "@commonfabric/identity";
 import type { URI } from "@commonfabric/memory/interface";
 
@@ -11,6 +15,7 @@ import { Runtime } from "../src/runtime.ts";
 import type { CfcEnforcementMode } from "../src/cfc/types.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { getTransactionReadActivities } from "../src/storage/transaction-inspection.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("runner-meta-seam-write");
@@ -229,6 +234,40 @@ describe("meta-seam-write-authorization", () => {
         tx.writeOrThrow(documentAddress(id, []), { value: { note: "seeded" } });
 
         expect(cell.get()).toEqual({ note: "seeded" });
+      });
+    });
+
+    it("reads the envelope once to decide what a root write drops", async () => {
+      // Every meta field a root write could drop sits in the one envelope
+      // that write replaces, and the guard reads that envelope.
+      //
+      // Naming no meta path is the part that matters beyond the read count.
+      // Canonicalization strips a leading `value`, so a read of the raw
+      // `["slug"]` member and a label on a user field `value.slug` meet at
+      // the same logical path, and a recursive read there consumes that
+      // user field's label and everything under it. A membership read of the
+      // document root consumes the root entry alone.
+
+      await withRuntime(({ tx, id }) => {
+        const reads = () =>
+          [...getTransactionReadActivities(tx)].filter((read) =>
+            read.id === id
+          );
+        const before = reads().length;
+        tx.writeOrThrow(documentAddress(id, []), { value: { note: "one" } });
+        const added = reads().slice(before);
+
+        const atRoot = added.filter((read) => read.path.length === 0);
+        expect(
+          added.filter((read) => isMetaField(read.path[0] ?? "")).map((
+            read,
+          ) => read.path),
+        ).toEqual([]);
+        expect(atRoot).toHaveLength(1);
+        // The guard observes which meta keys the envelope has, not what any
+        // of them holds. Without this mark the same read consumes every entry
+        // in the document's label map.
+        expect(atRoot[0].nonRecursive).toBe(true);
       });
     });
   });

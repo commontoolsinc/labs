@@ -5217,6 +5217,7 @@ export class SpaceReplica
     type: "pull" | "integrate" = "pull",
     watchBranch = "",
   ): Promise<Result<Unit, PullError>> {
+    const refreshStart = performance.now();
     try {
       const { session } = await this.#activeSessionHandle();
       // Per-session (no global): mirror the storage setting onto the session so
@@ -5291,9 +5292,18 @@ export class SpaceReplica
         },
       }));
 
-      const { view, precedingSyncs, sync } = await session.watchAddSync(
-        watches,
-      );
+      // Both sub-spans record in `finally` blocks, as `total` below does: a
+      // refresh that fails inside the request or inside application still
+      // paid for it, and a success-only span would leave that share in
+      // `total` alone, so the halves would not add up across outcomes.
+      const watchAddStart = performance.now();
+      let mutation: MemoryV2Client.WatchMutationResult;
+      try {
+        mutation = await session.watchAddSync(watches);
+      } finally {
+        logger.time(watchAddStart, "watchRefresh", "watchAddSync");
+      }
+      const { view, precedingSyncs, sync } = mutation;
 
       if (this.#closed) {
         view.close();
@@ -5301,6 +5311,7 @@ export class SpaceReplica
       }
 
       this.#watchView = view;
+      const applyStart = performance.now();
       try {
         for (const precedingSync of precedingSyncs) {
           this.#applySessionSync(precedingSync, "integrate");
@@ -5314,12 +5325,16 @@ export class SpaceReplica
         // overwrites `#watchView`.
         view.close();
         throw error;
+      } finally {
+        // deno-coverage-ignore-stop
+        logger.time(applyStart, "watchRefresh", "applySessionSync");
       }
-      // deno-coverage-ignore-stop
       this.#consumeWatchView(view);
       return { ok: {} };
     } catch (error) {
       return { error: toPullError(error) };
+    } finally {
+      logger.time(refreshStart, "watchRefresh", "total");
     }
   }
 
@@ -5492,6 +5507,7 @@ export class SpaceReplica
       if (next.done || this.#closed) {
         return;
       }
+      const applyStart = performance.now();
       try {
         this.#applySessionSync(next.value, "integrate");
       } catch (error) {
@@ -5508,6 +5524,13 @@ export class SpaceReplica
           "consumer continues:",
           error,
         ]);
+      } finally {
+        // The push-side counterpart of `watchRefresh/applySessionSync`:
+        // this key times application from the subscription iterator;
+        // the refresh key times application during graph-watch refreshes.
+        // Direct operation-watch and watch-removal application have no
+        // span under either key.
+        logger.time(applyStart, "watchPush", "applySessionSync");
       }
     }
   }

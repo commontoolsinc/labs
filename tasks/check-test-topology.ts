@@ -37,7 +37,7 @@ import {
   type TestIdentity,
   testIdentityKey,
 } from "@commonfabric/test-support/records";
-import { isLaneMeasurement } from "./ci-lane.ts";
+import { isLaneMeasurement } from "./lane-measurement.ts";
 import { dayOf } from "./test-selection/build.ts";
 import { DENO_TEST_FILE } from "./test-topology/deno-task.ts";
 import { claimsFor, loadTopology } from "./test-topology.ts";

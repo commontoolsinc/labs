@@ -297,6 +297,11 @@ export class PiecesController<T = unknown> {
        * Open the space's session without syncing the space cell's contents. A
        * caller that reaches pieces by id, and never reads the space record,
        * does not need those contents.
+       *
+       * Defaults to `false` here: `initialize` syncs the space cell before it
+       * returns. The CLI's `loadPieces` defaults the same option to `true`,
+       * so a caller moving between the two surfaces should pass it
+       * explicitly rather than carry one default across to the other.
        */
       deferSpaceCellSync?: boolean;
 

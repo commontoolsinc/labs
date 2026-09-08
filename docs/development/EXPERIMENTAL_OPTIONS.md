@@ -50,7 +50,7 @@ was last checked against the code.
 | [`messageCompressionV1`](#messagecompressionv1)                             | `setMessageCompressionConfig()` (negotiated per connection)                                                                                     | on                                                                                   | PR #6474                                             | retire the rollback switch after the binary WebSocket envelope has field-soaked                                                                                                                                                   | implemented, on by default                                                      |
 | [`ownWriteEcho`](#ownwriteecho)                                             | `setOwnWriteEchoConfig()` (server-side only, not negotiated)                                                                                    | on                                                                                   | Robin McCollum (CT-1965)                              | remove the switch once the echo has field-soaked                                                                                                                                                                                  | implemented, on by default                                                      |
 | [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off                                                                                  | Ben Follington (#4937; shell toggle #4974)            | graduate to always-on after live measurement, or remove if superseded                                                                                                                                                             | implemented behind the flag, off by default, not yet measured over real latency |
-| [`cfcRenderCeiling`](#cfcrenderceiling)                                     | `commonfabric.cfcRenderCeiling()` in the browser (localStorage)                                                                                 | off                                                                                  | Bernhard Seefeld (#4550)                              | graduate once exchange resolution lands                                                                                                                                                                                           | implemented, off by default, dogfood only                                       |
+| [`cfcRenderCeiling`](#cfcrenderceiling)                                     | `commonfabric.cfcRenderCeiling()` in the browser (localStorage)                                                                                 | off                                                                                  | Bernhard Seefeld (#4550)                              | graduate to an unconditional ceiling                                                                                                                                                                                           | implemented, off by default, dogfood only                                       |
 | [`INGEST_SELF_SERVE_ENABLED`](#ingest_self_serve_enabled) | `INGEST_SELF_SERVE_ENABLED` env on toolshed | off | Alex Komoroske (self-serve ingest channels) | graduate on once named-space keys stop deriving from a public passphrase | implemented, off by default |
 | [`fuseNfsCacheTuning`](#fusenfscachetuning)                                 | `cf fuse mount --attrcache-timeout <whole seconds; 0 = untuned>` or `--noattrcache`                                                             | cf adds `attrcache-timeout=1` (one second) to FUSE-T mounts                          | Ian Hickson                                           | keep the default; shrink the exec.ts listing-recheck delay once the default has field-soaked                                                                                                                                      | implemented, on by default for FUSE-T, soak-validated                           |
 
@@ -676,6 +676,25 @@ the same resolution, not a second statement of it — but the field says what it
 is. `deno task cfc-audit --expected-posture` compares a published record
 against a written-down profile, and fails a deployment that publishes a
 projection; see the cf-harness README.
+
+Every value that resolution returns is a rung of its own dial.
+`resolveCfcDials` checks each stated value against the same table of rungs the
+record's `decidesOn` is read from, and throws on one that is not among them,
+naming the dial and its rungs. The two dials that are simply on or off take
+`true` and `false` and nothing else.
+
+A dial off its ladder has no rung to run on, and the record then disagrees with
+the runtime. For a named-rung dial the guards around a gate test for
+`!== "off"` and let the value through, while the gate itself tests for the one
+enforcing rung and declines to act, so the dial runs as `observe` does while
+the published record calls it enforcing. The two on-or-off dials part the other
+way round: the gates read them for truthiness, while the record tests for
+`true`, so a truthy value that is not `true` runs the gate while the record
+says the gate is off. Resolving such a value to the default instead would hand
+a deployment a posture it never stated, so the construction fails. That check
+reaches every host, whether its dials come from a preset, a worker
+initialization message, a command line, or the CFC section of a JSON manifest.
+
 The interactive `cf-harness` and the `fuse` mount expose the enforcement mode
 through `CF_CFC_MODE` for testing. Because these dials are keys of
 `RuntimeOptions`, the exhaustive `RUNTIME_OPTION_KEYS` registry in the same file
@@ -1164,19 +1183,20 @@ the per-epic implementation notes).
 - **Added by.** Bernhard Seefeld, in "populate the render confidentiality
   ceiling behind a shell dogfood flag (Epic H3a)" (#4550, 2026-07-07).
 - **Purpose.** Populates the CFC render confidentiality ceiling in the shell's
-  runtime. When on, display sinks admit only the acting user's own identity atom
-  plus allow-listed influence-class caveat kinds; everything else fails closed
-  and renders as a blocked placeholder, and author-supplied render-boundary
-  declassification is denied.
-- **Current default and planned end state.** Off by default. It changes what the
-  shell renders and is expected to over-block until exchange resolution (a later
-  CFC stage, Epic H3b) lands, so it is enabled deliberately per browser profile
-  for dogfooding. The end state is to graduate the ceiling on once exchange
-  resolution makes the blocking precise.
-- **Status on 2026-07-08.** Implemented, off by default, dogfood only.
-- **Path to removal.** Land exchange resolution so the ceiling stops
-  over-blocking, turn it on by default, and then remove the localStorage toggle
-  and make the ceiling unconditional.
+  runtime. Display sinks admit the acting user's identity and personal-space
+  atoms plus allow-listed influence-class caveat kinds. Before the fit check,
+  the worker resolves shared `Space` labels through verified reader membership;
+  a delegate's access to the session workspace requires its own membership
+  evidence. Confidentiality the ceiling does not satisfy stays blocked, and
+  author-supplied render-boundary declassification is denied.
+- **Current default and planned end state.** Off by default and enabled per
+  browser profile for dogfooding. The end state is to enable the ceiling by
+  default and make it unconditional.
+- **Status on 2026-09-08.** Exchange resolution is implemented. Where reader
+  membership is required, missing or unsynced ACL evidence keeps the content
+  blocked; a reader grant admits it and a revocation blocks it again.
+- **Path to removal.** Finish dogfood validation, turn the ceiling on by default,
+  then remove the localStorage toggle and make the ceiling unconditional.
 
 ## Category 5: Fuse mount cache tuning
 

@@ -431,6 +431,28 @@ describe("build", () => {
       expect(parseAggregate(JSON.stringify(aggregate))).toEqual(aggregate);
     });
 
+    it("carries what could not be placed into the next run", () => {
+      // A run compares what it cannot place against what the previous one
+      // could not, which is what tells an identity waiting for a record
+      // that places it from a surface whose records never carry one.
+      const aggregate = emptyAggregate("2026-08-20");
+      aggregate.unclaimed = [KEY];
+      expect(parseAggregate(JSON.stringify(aggregate))?.unclaimed)
+        .toEqual([KEY]);
+    });
+
+    it("reads a malformed unplaced list as nothing to compare against", () => {
+      // Nothing in the fold reads this list, so an aggregate carrying
+      // something else in its place is read as holding no list rather
+      // than refused outright.
+      const older = { ...emptyAggregate("2026-08-20") } as Record<
+        string,
+        unknown
+      >;
+      older.unclaimed = [7];
+      expect(parseAggregate(JSON.stringify(older))?.unclaimed).toBeUndefined();
+    });
+
     it("returns undefined for anything that is not one", () => {
       expect(parseAggregate("{not json")).toBeUndefined();
       expect(parseAggregate('{"schema":99}')).toBeUndefined();
@@ -558,6 +580,28 @@ describe("build", () => {
       );
       expect(placed.size).toBe(0);
       expect(unplaced.unclaimed).toEqual([KEY]);
+    });
+
+    it("leaves out the lane measuring itself", () => {
+      // A lane measures its own setup and its own batches through the
+      // record machinery every test uses. Those are not test surfaces, so
+      // they are neither placed nor counted as unplaced, and the suite
+      // here claims everything to show which of the two decides.
+      const key = testIdentityKey({
+        k: "gate",
+        s: "ci",
+        n: "ci-lane batch workspace-unit",
+      });
+      const { placed, unplaced } = locateSurfaces(
+        [claiming("workspace-unit", () => ({ level: "unit", unit: "one" }))],
+        new Map([[key, {
+          suite: "gate:ci",
+          unit: "ci-lane batch workspace-unit",
+          fromFile: false,
+        }]]),
+      );
+      expect(placed.size).toBe(0);
+      expect(unplaced).toEqual({ suiteLevel: [], unclaimed: [] });
     });
 
     it("passes over a key that names no identity", () => {

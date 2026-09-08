@@ -222,6 +222,114 @@ deno run --allow-read --allow-env --allow-net --allow-write \
 That writes the manifest and the aggregate as plain JSON where you can
 read them, and creates nothing in the store.
 
+## What a run leaves out
+
+A run's log names two kinds of identity that did not reach the manifest.
+The first is the design working. The second is either a set of identities
+whose next record will say enough, or a surface whose records never say
+enough, and the run says which.
+
+The first is the identities that measure a whole invocation:
+
+```
+test selection: 8 identities measure a whole invocation rather than one
+unit, so they are left out. The steps inside the invocation are measured
+separately, so nothing is missing and there is nothing to act on.
+```
+
+A script that records each of its steps also records its own run from end
+to end, and the topology tells the two apart. The whole-invocation record
+names no unit, so no lane can be asked to run it, and adding its time to
+the time of the steps inside it would count that work twice. The count is
+that separation working. It changes when a suite gains or loses such a
+record, and there is nothing to do about it either way.
+
+The second is the identities the topology has no unit for:
+
+```
+test selection: the topology has no unit for 3295 identities, so no lane
+can be asked to run one. An identity is left out until one of its records
+says enough to work out which unit it is in.
+test selection: those 3295 were recorded by 12 surface(s): unit:utils 742,
+unit:runtime-client 509, unit:ts-transformers 379,
+unit:schema-generator 314, unit:js-compiler 153, and 7 more
+```
+
+A surface is the kind of check a record is, the workspace member that owns
+it, and the configuration it ran under where that is not the default one.
+It says which part of the tree the count is about. The worst five are
+named and the rest are counted, so that reading the count does not mean
+reproducing the publisher against the store by hand.
+
+What decides an identity's unit is its own records. Where a suite's units
+are files, the answer is the file on the record, and a record has one when
+the report it came from could name one: the registration preload captures
+which module registered each test and leaves that map beside the report,
+and ingestion otherwise reads the file from the report's own class names,
+which needs the working directory the test process ran in. A report that
+supplies neither has no file on any of its records, and neither does a
+name that two files in one report both report. Where a suite's units are
+not files — a dispatch arm, a pattern key — the answer is the recorded
+name instead, and a name no suite recognizes leaves the identity without a
+unit the same way. An identity that matches two suites is left out as
+well, which is a topology defect the drift guard fails on separately. What
+is not in the count is the lane measuring its own setup and its own
+batches. Those records travel the same path as a test's, but nothing
+enumerates them and no lane can be asked to run one, so no suite has a
+unit for them and none should. `isLaneMeasurement` is what says so, and
+everything that reads a recorded identity asks it: the drift guard, the
+publisher, and the list the publisher keeps from one run to the next.
+
+The publisher leaves all of those out rather than putting an entry in the
+manifest that no lane could run. The next record that says enough puts the
+identity back in.
+
+A count on its own says nothing about which of the two it holds, so the
+aggregate keeps the identities that have no unit and removes each one when
+the topology has a unit for it, or when it names something the count no
+longer holds. A run compares its own list against that one:
+
+```
+test selection: 2900 of them were in this count at the last publish too,
+so more of their records have been read since and those records still do
+not say which unit. A surface whose records never say which unit is worth
+fixing. See docs/development/test-selection.md.
+test selection: those 2900 were recorded by 9 surface(s): unit:utils 742,
+unit:runtime-client 509, unit:ts-transformers 379,
+unit:schema-generator 314, unit:js-compiler 153, and 4 more
+```
+
+The second line is the one to act on. It is the same breakdown, over the
+part of the count that two runs both left without a unit.
+
+A run reads each identity's records only from the objects it folded for
+the first time, so every identity in its count was recorded in an object
+no earlier publish had read. One that was already on the list has
+therefore been recorded twice over and had no unit either time. That is a
+surface whose records never say which unit, rather than an identity whose
+next record will say. The list is kept across runs rather than replaced by
+each one, because a surface recording less often than the publisher runs
+is absent from most runs, and a list replaced each time would treat such a
+surface as new every time it did record.
+
+What to check is that surface's wiring, which
+[the record guide](test-records.md#covering-a-new-test-surface) covers: a
+JUnit path on the job's ship step, the `--preload` naming
+`packages/test-support/src/records/preload.ts` where the surface is
+`deno test`, and the working directory that relative class names are
+joined onto. Where the records do have a file, the file is one no suite
+has a unit for, and the answer is in the topology rather than in the job.
+
+Where none of them were on the list, the run says so instead:
+
+```
+test selection: none of them were in this count at the last publish, so
+nothing has been recorded twice with no unit.
+```
+
+A run folding into an empty aggregate has nothing to compare against, and
+says neither.
+
 ## What the wall shows
 
 Two tiles read the newest manifest. The flake tile reports how many tests

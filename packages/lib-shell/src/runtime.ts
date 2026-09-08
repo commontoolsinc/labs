@@ -1,5 +1,11 @@
 import type { CellScope } from "@commonfabric/api";
-import { createSession, DID, Identity, Session } from "@commonfabric/identity";
+import {
+  createSession,
+  DID,
+  Identity,
+  isDID,
+  Session,
+} from "@commonfabric/identity";
 import { CFC_CONCEPT_KIND, cfcAtom } from "@commonfabric/api/cfc";
 import type { FabricPlainObject } from "@commonfabric/data-model";
 import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
@@ -144,13 +150,21 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
   /**
    * Populate the default render confidentiality ceiling (Epic H3a). When
    * true, the worker's display sinks gate labeled values against the
-   * §8.10.6 profile for this identity and author-supplied render-boundary
-   * declassification is denied. Dogfood flag, default off (= today's
-   * unbounded rendering). Expect over-blocking while exchange resolution
-   * (H3b) is not implemented.
+   * §8.10.6 profile for the acting identity and author-supplied
+   * render-boundary declassification is denied. Dogfood flag, default off
+   * (= today's unbounded rendering).
    */
   cfcRenderCeiling?: boolean;
 
+  /**
+   * The trust the worker runs against. Its `actingPrincipal` is the identity
+   * the runtime acts as, which is also the audience the render ceiling admits
+   * when `cfcRenderCeiling` is on. Omit it to send one naming the session
+   * identity; pass `null` to send none, which leaves the worker to build its
+   * own, naming the session identity as well. A supplied snapshot without an
+   * `actingPrincipal` leaves transaction trust unnamed; rendering falls back
+   * to the session identity as its audience.
+   */
   trustSnapshot?: RuntimeTrustSnapshot | null;
 
   /**
@@ -313,15 +327,11 @@ export function createRuntimeClientOptions({
   // (§8.12.8) keeps the derived component tracking the current value rather
   // than ratcheting forever. H1 shipped "observe" as the measurement stage.
   cfcFlowLabels = "persist",
-  // Epic H3a: populate the render confidentiality ceiling. Off by default —
-  // a deployment-posture change to what the shell renders, enabled
-  // deliberately per host (shell dogfood flag). When on, display sinks
-  // admit only the §8.10.6 profile (the acting user's own identity atom
-  // plus display-dischargeable influence-class caveat kinds) and
-  // author-supplied render declassification is denied (audit S15); the
-  // reconciler's fail-closed narrowing does the enforcement. Exact-match
-  // forms only until H3b adds exchange resolution, so over-blocking is
-  // expected — that is the point of the dogfood stage.
+  // Hosts opt into the §8.10.6 display ceiling. The worker resolves shared
+  // `Space` labels through verified reader membership before the reconciler
+  // fits them against the acting user's identity atoms and the admitted
+  // influence-class caveat kinds. Author-supplied render declassification is
+  // denied, and labels that still do not fit the ceiling stay blocked.
   cfcRenderCeiling = false,
   trustSnapshot,
   forwardWorkerConsole,
@@ -340,11 +350,22 @@ export function createRuntimeClientOptions({
   patternCoverage?: boolean;
   concurrentWatchRefresh?: boolean;
 }) {
+  // The identity the runtime renders as. A delegated host names it in its own
+  // trust snapshot; a snapshot that names nobody leaves the session identity
+  // as the render audience, the fallback the worker's own resolver applies to
+  // the same field in `runtime-processor.ts`. A named principal must be a DID:
+  // the ceiling's entries are identity atoms over one.
+  const namedPrincipal = trustSnapshot?.actingPrincipal;
+  if (namedPrincipal !== undefined && !isDID(namedPrincipal)) {
+    throw new Error(
+      `A trust snapshot's acting principal must be a DID: ${
+        JSON.stringify(namedPrincipal)
+      }`,
+    );
+  }
+  const actingPrincipal = namedPrincipal ?? session.as.did();
   const resolvedTrustSnapshot = trustSnapshot === undefined
-    ? {
-      id: `principal:${session.as.did()}`,
-      actingPrincipal: session.as.did(),
-    }
+    ? { id: `principal:${actingPrincipal}`, actingPrincipal }
     : trustSnapshot ?? undefined;
 
   return {
@@ -360,8 +381,9 @@ export function createRuntimeClientOptions({
     ...(cfcRenderCeiling
       ? {
         renderDeclassificationPolicy: "deny" as const,
+        // A display sink's audience is the identity the runtime renders as.
         renderConfidentialityCeiling: defaultRenderConfidentialityCeiling(
-          session.as.did(),
+          actingPrincipal,
         ),
       }
       : {}),
@@ -949,15 +971,8 @@ export class RuntimeInternals extends EventTarget {
       `[Identity] User DID: ${identity.did()}`,
     );
 
-    const connection = transport ??
-      await WebWorkerRuntimeTransport.connect({
-        workerUrl: await resolveWorkerUrl({
-          workerUrl,
-          clientVersion,
-          getBuildHash,
-        }),
-      });
-
+    // Built before anything is connected, so a host's bad options are
+    // refused while a worker this page would own is still unspawned.
     const clientOptions = createRuntimeClientOptions({
       session,
       apiUrl,
@@ -971,6 +986,15 @@ export class RuntimeInternals extends EventTarget {
       patternCoverage,
       concurrentWatchRefresh,
     });
+
+    const connection = transport ??
+      await WebWorkerRuntimeTransport.connect({
+        workerUrl: await resolveWorkerUrl({
+          workerUrl,
+          clientVersion,
+          getBuildHash,
+        }),
+      });
     const client = attach
       ? await RuntimeClient.attach(
         connection,
