@@ -244,7 +244,7 @@ describe("the pattern and package suites", () => {
     }
   });
 
-  it("asks for none of the tests whose equipment a job lacks", async () => {
+  it("asks for none of the tests whose equipment a job lacks", () => {
     // Every unit of the suite is unavailable, each with the equipment it
     // wants said in words, so nothing can be packed into a lane and no
     // run is expected to record one.
