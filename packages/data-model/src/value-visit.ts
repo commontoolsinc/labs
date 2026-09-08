@@ -103,13 +103,16 @@ export interface ValueVisitor<Domain = FabricValue, MainResult = FabricValue> {
     /** Depth at which `value` was originally encountered. */
     originalDepth: number,
     /** Depth of the current visit. */
-    thisDepth: number
+    thisDepth: number,
   ): LeafVisitorResult<Domain, MainResult>;
 
   /**
    * Visits an item from an `arrayContents` result.
    */
-  visitArrayContentsItem(index: number, value: Domain): ContainerIterationResult<MainResult>;
+  visitArrayContentsItem(
+    index: number,
+    value: Domain,
+  ): ContainerIterationResult<MainResult>;
 
   /**
    * Visits the given _known-value_ `FabricArray`.
@@ -145,7 +148,10 @@ export interface ValueVisitor<Domain = FabricValue, MainResult = FabricValue> {
   /**
    * Visits an item from a `mapContents` result.
    */
-  visitMapContentsItem(key: Domain, value: Domain): ContainerIterationResult<MainResult>;
+  visitMapContentsItem(
+    key: Domain,
+    value: Domain,
+  ): ContainerIterationResult<MainResult>;
 
   /**
    * Visits a value determined to _not_ be a valid `FabricValue`.
@@ -279,7 +285,10 @@ class VisitInProgress<Domain, MainResult> {
    * Visits the items in an `mapContents` result, recursing or returning as
    * directed by `ValueVisitor.visitMapContentsItem()`.
    */
-  #subvisitMap(value: Domain, mappings: [Domain, Domain][]): MainVisitResult<MainResult> {
+  #subvisitMap(
+    value: Domain,
+    mappings: [Domain, Domain][],
+  ): MainVisitResult<MainResult> {
     this.#stack.push(value);
 
     try {
@@ -400,13 +409,17 @@ class VisitInProgress<Domain, MainResult> {
  * for actually visiting. Subclasses are expected to `override` whatever methods
  * are needed in the context of the actual expected visits.
  */
-export class BaseValueVisitor<Domain, MainResult> implements ValueVisitor<Domain, MainResult> {
+export class BaseValueVisitor<Domain, MainResult>
+  implements ValueVisitor<Domain, MainResult> {
   //
   // Subclass contract
   //
 
   /** @inheritDoc */
-  visitArrayContentsItem(_index: number, value: Domain): ContainerIterationResult<MainResult> {
+  visitArrayContentsItem(
+    _index: number,
+    value: Domain,
+  ): ContainerIterationResult<MainResult> {
     BaseValueVisitor.#throwMissing("visitArrayContentsItem", value);
   }
 
@@ -439,7 +452,10 @@ export class BaseValueVisitor<Domain, MainResult> implements ValueVisitor<Domain
   }
 
   /** @inheritDoc */
-  visitMapContentsItem(_key: Domain, value: Domain): ContainerIterationResult<MainResult> {
+  visitMapContentsItem(
+    _key: Domain,
+    value: Domain,
+  ): ContainerIterationResult<MainResult> {
     BaseValueVisitor.#throwMissing("visitMapContentsItem", value);
   }
 
