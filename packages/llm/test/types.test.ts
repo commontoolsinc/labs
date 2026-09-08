@@ -26,7 +26,6 @@ const TOOL: LLMTool = {
 
 /** A well-formed request, with `input` written over it. */
 const request = (input: object) => ({
-  cache: true,
   model: DEFAULT_MODEL_NAME,
   messages: [{ role: "user", content: "Hi" }] satisfies BuiltInLLMMessage[],
   ...input,
@@ -68,6 +67,12 @@ describe("types", () => {
       }))).toBeUndefined();
     });
 
+    it("returns `undefined` for a request that leaves `cache` out, turns caching on, or turns it off", () => {
+      expect(llmRequestProblem(request({}))).toBeUndefined();
+      expect(llmRequestProblem(request({ cache: true }))).toBeUndefined();
+      expect(llmRequestProblem(request({ cache: false }))).toBeUndefined();
+    });
+
     it("returns `undefined` for any metadata value JSON carries faithfully", () => {
       expect(llmRequestProblem(request({
         metadata: {
@@ -83,13 +88,10 @@ describe("types", () => {
 
     it("returns text naming each required field a request leaves out", () => {
       const messages: BuiltInLLMMessage[] = [{ role: "user", content: "Hi" }];
-      expect(llmRequestProblem({ messages, cache: true })).toContain("'model'");
-      expect(
-        llmRequestProblem({ model: DEFAULT_MODEL_NAME, cache: true }),
-      ).toContain("'messages'");
-      expect(
-        llmRequestProblem({ model: DEFAULT_MODEL_NAME, messages }),
-      ).toContain("'cache'");
+      expect(llmRequestProblem({ messages })).toContain("'model'");
+      expect(llmRequestProblem({ model: DEFAULT_MODEL_NAME })).toContain(
+        "'messages'",
+      );
     });
 
     it("returns text naming `messages` for an empty conversation", () => {
@@ -102,6 +104,8 @@ describe("types", () => {
     it("returns text naming the field whose value is of the wrong type", () => {
       const named = (input: object, field: string) =>
         expect(llmRequestProblem(request(input))).toContain(field);
+      named({ cache: "yes" }, "'cache'");
+      named({ cache: null }, "'cache'");
       named({ maxTokens: "4096 " }, "'maxTokens'");
       named({ system: {} }, "'system'");
       named({ stop: {} }, "'stop'");

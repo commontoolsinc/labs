@@ -8,7 +8,13 @@ import {
 import type { Context } from "@hono/hono";
 import * as HttpStatusCodes from "stoker/http-status-codes";
 
-import { CacheItem, hashKey, loadFromCache, saveToCache } from "./cache.ts";
+import {
+  CacheItem,
+  hashKey,
+  loadFromCache,
+  requestsCaching,
+  saveToCache,
+} from "./cache.ts";
 import { httpStatusForError } from "./errors.ts";
 import { generateObject as generateObjectCore } from "./generateObject.ts";
 import { generateText as generateTextCore } from "./generateText.ts";
@@ -192,7 +198,7 @@ export const generateText: AppRouteHandler<GenerateTextRoute> = async (c) => {
   //
   // Provider-native tools such as Google Search are intentionally time-sensitive.
   // Treat them as live requests until we have a freshness-aware cache policy.
-  const shouldCache = payload.cache === true &&
+  const shouldCache = requestsCaching(payload) &&
     (payload.nativeModelToolIds?.length ?? 0) === 0;
 
   let cacheKey: string | undefined;
@@ -308,9 +314,10 @@ export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (
   const cacheKey = await hashKey(
     JSON.stringify(removeNonCacheableFields(payload)),
   );
+  const shouldCache = requestsCaching(payload);
 
   // Check cache if enabled
-  if (payload.cache !== false) {
+  if (shouldCache) {
     const cachedResult = await loadFromCache(cacheKey);
     if (cachedResult) {
       return c.json({
@@ -323,7 +330,7 @@ export const generateObject: AppRouteHandler<GenerateObjectRoute> = async (
     const result = await generateObjectCore(payload);
 
     // Save to cache if enabled
-    if (payload.cache !== false) {
+    if (shouldCache) {
       try {
         await saveToCache(cacheKey, {
           ...removeNonCacheableFields(payload),
