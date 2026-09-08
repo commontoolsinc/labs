@@ -72,7 +72,7 @@ describe("ci capabilities", () => {
       dryRun: true,
       workDir: "/nonexistent",
     });
-    expect(opened.envFor(["toolshed"]).API_URL).toBe("http://localhost:8000/");
+    expect(opened.envFor(["toolshed"]).API_URL).toBe("http://localhost:8000");
     expect(opened.timings.map((timing) => timing.capability)).toEqual([
       "deno",
       "toolshed",
@@ -396,7 +396,9 @@ describe("opening a capability on a machine that answers", () => {
     const served = opened.envFor(["toolshed"]);
     const port = Number(served.TOOLSHED_PORT);
     expect(Number.isInteger(port) && port > 0).toBe(true);
-    expect(served.API_URL).toBe(`http://localhost:${port}/`);
+    // No trailing slash: the shell suites compose a path onto this, and
+    // the Deno suites add a slash of their own when they need one.
+    expect(served.API_URL).toBe(`http://localhost:${port}`);
     expect(m.asked.some((line) => line.includes(`--port=${port}`))).toBe(true);
     expect(m.asked.some((line) => line.includes("--background"))).toBe(true);
     // Closing is what `open` already did; killing a process this test

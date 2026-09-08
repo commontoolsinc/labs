@@ -360,8 +360,14 @@ async function startToolshed(
   // port is chosen here and the server is told which one to bind.
   const port = context.dryRun ? 8000 : freePort();
   const url = `http://localhost:${port}`;
+  // Every name carries the origin with no trailing slash, which is the
+  // form the shell suites are written against: they compose a path onto
+  // it as `${API_URL}/api/health/stats`, and a slash on both sides is a
+  // path the server does not serve. The Deno suites read it through
+  // `packages/integration/env.ts`, which adds a trailing slash of its
+  // own, so the same string reaches both.
   const env = {
-    API_URL: `${url}/`,
+    API_URL: url,
     MEMORY_URL: url,
     TOOLSHED_URL: url,
     TOOLSHED_PORT: `${port}`,
