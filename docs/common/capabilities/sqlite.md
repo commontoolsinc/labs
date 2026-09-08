@@ -93,11 +93,16 @@ join expressed in the pattern.
 
 ## Bound the rows
 
-Every row a query returns is written into the space as a document of its own —
+An ordinary result row is written into the space as a document of its own —
 which is what gives a per-row label somewhere to sit — so the row count of a
 statement is a durable cost of the space rather than the cost of one render. A
-query that returns a million rows writes a million documents, and they stay
-written after the view that asked for them is gone.
+query that returns a million such rows writes a million documents, and they stay
+written after the view that asked for them is gone. One row shape is carried
+differently: a row projecting a column name a Fabric record reserves
+(`constructor`, `__proto__`) crosses the wire as a list of entries, and unless
+it carries a label it stays inline in the query's own document. That row still
+costs the space — it enlarges the document holding it — so the bound below is
+what a query needs either way.
 
 A statement therefore bounds its rows, and a filter is not a bound. A `WHERE`
 clause narrows the candidates and says nothing about how many survive it: a
@@ -106,24 +111,35 @@ the ceiling, and a tight filter under it is what makes the rows the ceiling
 admits the interesting ones.
 
 A few hundred rows is a sensible ceiling for a view. It is more than a reader
-takes in at once, and it keeps what a query leaves behind in the space
+takes in at once, and it keeps what one query leaves behind in the space
 proportionate to what the view displays. A view that needs more of the store
-than that pages through it — a bound the reader moves — rather than raising the
-ceiling.
+than that pages through it — a bound the reader moves. Paging bounds what one
+query writes rather than what the space accumulates: every page fetched
+materializes its own rows, nothing reclaims the rows of a page the reader has
+left, and returning to an earlier page issues a fresh query rather than reading
+the rows it wrote before. The durable cost is the sum of the pages fetched.
 
 Project the columns the view reads and no others: a row document carries every
 column the statement selected, so a wider projection is paid on every row.
 
-`ORDER BY` over an unbounded set is the other half of the cost, and it is paid
-before any row reaches the pattern, because the database sorts every candidate
-row to find the first one. A run that means to show the newest few otherwise
-sorts the whole store to find them; `ORDER BY … LIMIT n` asks for the same rows
-and lets the database stop at n.
+`LIMIT` bounds the rows a query returns, and therefore the documents it writes.
+What the database spends finding those rows is a separate question, and the
+query plan answers it: where an index covers the ordering, `ORDER BY … LIMIT n`
+reads in order and stops at n; where none does, the database scans the
+candidates and sorts them through a temporary B-tree before the first row comes
+back. So `LIMIT` alone bounds the writing and not the reading, and a `WHERE`
+clause narrow enough to keep the candidate set small is what bounds the work of
+an ordering the database cannot walk.
 
 Where a view needs a number rather than the rows, ask SQL for the number.
 `count(*)`, `sum()` and a `GROUP BY` return one row per group, and one row is
 one document; the same answer reached by returning the rows and counting them in
-the pattern writes a document per row on the way.
+the pattern writes a document per row on the way. An aggregate over a table that
+derives its labels from row data is the case to check before relying on one: it
+is admitted where the contributing rows have a reader in common, and refused
+where they do not, because no principal is then guaranteed to read everything
+the aggregate summed. The rule is in
+[06](../../specs/sqlite-builtin/06-cfc.md#read--re-derive-per-row-attach-ceiling-dbquery).
 
 ```tsx
 // Shown at module scope.
