@@ -11,17 +11,19 @@
  * which is the whole reason the table is shared.
  */
 
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
   CFC_ENFORCEMENT_MODES,
   type CfcEnforcementMode,
+  type CfcPostureOptions,
   cfcPostureReport,
   inheritedCfcPostureReport,
   KNOWN_SINKS,
   projectedCfcPostureReport,
   resolveCfcDials,
+  type ResolvedCfcDials,
   RUNTIME_CFC_DIAL_DEFAULTS,
 } from "../src/cfc/mod.ts";
 import type { RuntimeOptions } from "../src/runtime.ts";
@@ -31,6 +33,15 @@ import { Runtime, signer, StorageManager } from "./engine-test-support.ts";
 /** The record a surface projects from options alone, with no Runtime. */
 const projected = (options: RuntimeOptions) =>
   projectedCfcPostureReport(options);
+
+/**
+ * One dial set to `value` by a caller the type system never saw: an
+ * initialization message across a worker boundary, a command line, the CFC
+ * section of a JSON manifest. The cast is what those callers do implicitly,
+ * written out so the tests below can hand over the values they hand over.
+ */
+const stated = (dial: string, value: unknown): CfcPostureOptions =>
+  ({ [dial]: value }) as CfcPostureOptions;
 
 describe("the CFC posture record", () => {
   describe("dial rendering", () => {
@@ -59,6 +70,143 @@ describe("the CFC posture record", () => {
       });
       expect(record.policyEvaluation.diagnosticOnly).toBe(false);
       expect(record.policyEvaluation.decidesOn).toContain("rewritten label");
+    });
+  });
+
+  describe("the dial ladders", () => {
+    // A dial off its ladder splits the runtime in two. The consumers of the
+    // named-rung dials test for one rung — `writeFloorMode === "enforce"`,
+    // `flowLabelsMode === "persist"` — while the guards around them test only
+    // for `!== "off"`, so an unrecognized name enters the block and then
+    // decides nothing, running as `observe` does. The record published at
+    // `/api/meta` says the opposite: `diagnosticOnly` is false, because the
+    // name is not one of the diagnostic rungs either, and `decidesOn` is
+    // absent, which `CfcDialReport` declares a `string`. The two on-or-off
+    // dials part the other way round: the gates read them for truthiness
+    // while the record tests for `true`, so a truthy value that is not `true`
+    // runs the gate while the record says the gate is off.
+
+    // Written as a record over every dial, so a dial added to
+    // `ResolvedCfcDials` is a type error here until it has a case of its own.
+    const offLadder: Record<keyof ResolvedCfcDials, unknown> = {
+      cfcEnforcementMode: "enforce-strictly",
+      cfcFlowLabels: "persisted",
+      cfcWriteFloor: "enfroce",
+      cfcPolicyEvaluation: "enforcing",
+      cfcLabelMetadataProtection: "observing",
+      cfcDeclaredMonotonicity: "on",
+      cfcTriggerReadGating: "true",
+      cfcDecomposedEnvelopes: 1,
+    };
+
+    for (const [dial, value] of Object.entries(offLadder)) {
+      it(`throws when a projection states a \`${dial}\` off its ladder`, () => {
+        expect(() => projectedCfcPostureReport(stated(dial, value))).toThrow(
+          new RegExp("^Runtime `" + dial + "` is "),
+        );
+      });
+    }
+
+    it("names the rungs it would have taken", () => {
+      expect(() =>
+        projectedCfcPostureReport(stated("cfcWriteFloor", "enfroce"))
+      )
+        .toThrow(
+          'Runtime `cfcWriteFloor` is "enfroce", not one of off, observe, enforce',
+        );
+      expect(() =>
+        projectedCfcPostureReport(stated("cfcTriggerReadGating", "true"))
+      ).toThrow(
+        'Runtime `cfcTriggerReadGating` is "true", not one of true, false',
+      );
+    });
+
+    it("throws on a `null`, which no dial has a rung for", () => {
+      // `null` is not an unset dial. The option type has no `null` member, so
+      // one that arrives came from a caller the types did not reach, and
+      // resolving it to the default would give that caller a posture it never
+      // stated.
+      expect(() => projectedCfcPostureReport(stated("cfcFlowLabels", null)))
+        .toThrow(/^Runtime `cfcFlowLabels` is null, /);
+    });
+
+    it("throws on a value that merely renders as a rung", () => {
+      // A rung is the string, not everything that prints as it. Every consumer
+      // compares the dial against a rung with `===`, so a one-element array or
+      // a boxed string decides nothing while carrying the rung's name into the
+      // published record.
+      for (
+        const lookalike of [
+          ["enforce"],
+          new String("enforce"),
+          { toString: () => "enforce" },
+        ]
+      ) {
+        expect(() =>
+          projectedCfcPostureReport(stated("cfcWriteFloor", lookalike))
+        ).toThrow(/^Runtime `cfcWriteFloor` is /);
+      }
+    });
+
+    it("returns a stated rung that is not the default", () => {
+      // Both dials are read back out of the record below, so the refusals
+      // above are held to accepting the values a deployment does state.
+      const record = projectedCfcPostureReport({
+        cfcWriteFloor: "enforce",
+        cfcTriggerReadGating: true,
+      });
+      expect(record.writeFloor.rung).toBe("enforce");
+      expect(record.writeFloor.diagnosticOnly).toBe(false);
+      expect(record.triggerReadGating).toBe(true);
+    });
+
+    describe("a constructed Runtime", () => {
+      let storageManager: ReturnType<typeof StorageManager.emulate>;
+
+      beforeEach(() => {
+        storageManager = StorageManager.emulate({ as: signer });
+      });
+
+      afterEach(async () => {
+        await storageManager.close();
+      });
+
+      const construct = (options: CfcPostureOptions) =>
+        new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+          ...options,
+        });
+
+      it("throws on a string dial off its ladder", () => {
+        expect(() => construct(stated("cfcWriteFloor", "enfroce"))).toThrow(
+          /^Runtime `cfcWriteFloor` is /,
+        );
+      });
+
+      it("throws on a boolean dial that is neither `true` nor `false`", () => {
+        expect(() => construct(stated("cfcTriggerReadGating", "true"))).toThrow(
+          /^Runtime `cfcTriggerReadGating` is /,
+        );
+      });
+
+      it("constructs on `enforce-strict`, `enforce` and `true`", async () => {
+        // The refusals above are worth nothing if a rung is refused too, and
+        // these are the settings a deployment states by hand. The claim is
+        // about these three: the ladders are not exported rung by rung, so a
+        // case here cannot exhaust them.
+        const runtime = construct({
+          cfcEnforcementMode: "enforce-strict",
+          cfcWriteFloor: "enforce",
+          cfcDecomposedEnvelopes: true,
+        });
+        try {
+          expect(cfcPostureReport(runtime).writeFloor.rung).toBe("enforce");
+          expect(cfcPostureReport(runtime).decomposedEnvelopes).toBe(true);
+        } finally {
+          await runtime.dispose();
+        }
+      });
     });
   });
 

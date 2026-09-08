@@ -52,7 +52,6 @@ import {
   SINK_UNGATED_RATIONALES,
   type SinkMaxConfidentiality,
 } from "./sink-inventory.ts";
-import { CFC_ENFORCEMENT_MODES, isCfcEnforcementMode } from "./types.ts";
 import type {
   CfcDeclaredMonotonicityMode,
   CfcDecomposedEnvelopes,
@@ -310,6 +309,84 @@ export const RUNTIME_CFC_DIAL_DEFAULTS: ResolvedCfcDials = Object.freeze({
   cfcDeclaredMonotonicity: "off",
 });
 
+/** A dial whose values are the named rungs of a ladder. */
+type LadderDial = {
+  [K in keyof ResolvedCfcDials]: ResolvedCfcDials[K] extends string ? K : never;
+}[keyof ResolvedCfcDials];
+
+/** A dial that is on or off. */
+type ToggleDial = {
+  [K in keyof ResolvedCfcDials]: ResolvedCfcDials[K] extends boolean ? K
+    : never;
+}[keyof ResolvedCfcDials];
+
+/**
+ * Each ladder dial against the table of what its rungs decide on.
+ *
+ * That table is keyed by the dial's own mode union, so it holds an entry for
+ * every rung and for nothing else. It is therefore the ladder as well as the
+ * words, and a check driven from it accepts a rung the moment the ladder
+ * gains one.
+ */
+const DIAL_LADDERS = {
+  cfcEnforcementMode: ENFORCEMENT_MODE_DECIDES,
+  cfcFlowLabels: FLOW_LABELS_DECIDES,
+  cfcWriteFloor: WRITE_FLOOR_DECIDES,
+  cfcPolicyEvaluation: POLICY_EVALUATION_DECIDES,
+  cfcLabelMetadataProtection: LABEL_METADATA_DECIDES,
+  cfcDeclaredMonotonicity: DECLARED_MONOTONICITY_DECIDES,
+} satisfies { [K in LadderDial]: Record<ResolvedCfcDials[K], string> };
+
+/**
+ * One ladder dial's rung: what `stated` names, or the default when it names
+ * nothing.
+ *
+ * The comparison is against the rung names as values rather than as property
+ * keys, so a value that merely renders as a rung — a one-element array, a
+ * boxed string — is not one.
+ *
+ * @throws If `stated` is not a rung of this dial's ladder.
+ */
+const resolveRung = <K extends LadderDial>(
+  dialName: K,
+  stated: ResolvedCfcDials[K] | undefined,
+): ResolvedCfcDials[K] => {
+  const rungs = Object.keys(DIAL_LADDERS[dialName]);
+  const value = stated === undefined
+    ? RUNTIME_CFC_DIAL_DEFAULTS[dialName]
+    : stated;
+  if (!rungs.includes(value)) {
+    throw new Error(
+      `Runtime \`${dialName}\` is ${JSON.stringify(value)}, not one of ` +
+        rungs.join(", "),
+    );
+  }
+  return value;
+};
+
+/**
+ * One toggle dial's setting: what `stated` says, or the default when it says
+ * nothing.
+ *
+ * @throws If `stated` is neither `true` nor `false`.
+ */
+const resolveToggle = <K extends ToggleDial>(
+  dialName: K,
+  stated: ResolvedCfcDials[K] | undefined,
+): ResolvedCfcDials[K] => {
+  const value = stated === undefined
+    ? RUNTIME_CFC_DIAL_DEFAULTS[dialName]
+    : stated;
+  if (typeof value !== "boolean") {
+    throw new Error(
+      `Runtime \`${dialName}\` is ${
+        JSON.stringify(value)
+      }, not one of true, false`,
+    );
+  }
+  return value;
+};
+
 /**
  * The dial values a runtime constructed with `options` runs at.
  *
@@ -320,48 +397,46 @@ export const RUNTIME_CFC_DIAL_DEFAULTS: ResolvedCfcDials = Object.freeze({
  * its own words. One table: a default moved here moves everywhere at once,
  * and a host cannot fall behind it silently.
  *
- * `cfcEnforcementMode` is a closed set. A stated one must be a member of
- * `CFC_ENFORCEMENT_MODES`; any other name is refused rather than resolved, so
- * no runtime holds a mode `cfcEnforcementStrictness` cannot rank. The type
- * says this too, and the check is what holds it for a name that reached the
+ * Every returned value is a rung of its own dial. A value that reached the
  * options as plain data — a worker's initialization message crosses
- * `postMessage` untyped.
+ * `postMessage` untyped, a command line and a JSON manifest arrive the same
+ * way — is checked here, once, for every host that resolves its dials
+ * through this. The type says the same thing, and says it only to callers
+ * the type checker saw.
  *
- * @throws Error when `options.cfcEnforcementMode` is stated and is not a
- * member of `CFC_ENFORCEMENT_MODES`.
+ * @throws Error when a stated dial value is not one that dial accepts,
+ * naming the dial and the values it takes.
  */
 export const resolveCfcDials = (
   options: CfcDialOptions,
-): ResolvedCfcDials => {
-  if (
-    options.cfcEnforcementMode !== undefined &&
-    !isCfcEnforcementMode(options.cfcEnforcementMode)
-  ) {
-    throw new Error(
-      `Runtime \`cfcEnforcementMode\` is ` +
-        `${String(options.cfcEnforcementMode)}, not one of ` +
-        CFC_ENFORCEMENT_MODES.join(", "),
-    );
-  }
-  return {
-    cfcEnforcementMode: options.cfcEnforcementMode ??
-      RUNTIME_CFC_DIAL_DEFAULTS.cfcEnforcementMode,
-    cfcFlowLabels: options.cfcFlowLabels ??
-      RUNTIME_CFC_DIAL_DEFAULTS.cfcFlowLabels,
-    cfcWriteFloor: options.cfcWriteFloor ??
-      RUNTIME_CFC_DIAL_DEFAULTS.cfcWriteFloor,
-    cfcTriggerReadGating: options.cfcTriggerReadGating ??
-      RUNTIME_CFC_DIAL_DEFAULTS.cfcTriggerReadGating,
-    cfcDecomposedEnvelopes: options.cfcDecomposedEnvelopes ??
-      RUNTIME_CFC_DIAL_DEFAULTS.cfcDecomposedEnvelopes,
-    cfcPolicyEvaluation: options.cfcPolicyEvaluation ??
-      RUNTIME_CFC_DIAL_DEFAULTS.cfcPolicyEvaluation,
-    cfcLabelMetadataProtection: options.cfcLabelMetadataProtection ??
-      RUNTIME_CFC_DIAL_DEFAULTS.cfcLabelMetadataProtection,
-    cfcDeclaredMonotonicity: options.cfcDeclaredMonotonicity ??
-      RUNTIME_CFC_DIAL_DEFAULTS.cfcDeclaredMonotonicity,
-  };
-};
+): ResolvedCfcDials => ({
+  cfcEnforcementMode: resolveRung(
+    "cfcEnforcementMode",
+    options.cfcEnforcementMode,
+  ),
+  cfcFlowLabels: resolveRung("cfcFlowLabels", options.cfcFlowLabels),
+  cfcWriteFloor: resolveRung("cfcWriteFloor", options.cfcWriteFloor),
+  cfcTriggerReadGating: resolveToggle(
+    "cfcTriggerReadGating",
+    options.cfcTriggerReadGating,
+  ),
+  cfcDecomposedEnvelopes: resolveToggle(
+    "cfcDecomposedEnvelopes",
+    options.cfcDecomposedEnvelopes,
+  ),
+  cfcPolicyEvaluation: resolveRung(
+    "cfcPolicyEvaluation",
+    options.cfcPolicyEvaluation,
+  ),
+  cfcLabelMetadataProtection: resolveRung(
+    "cfcLabelMetadataProtection",
+    options.cfcLabelMetadataProtection,
+  ),
+  cfcDeclaredMonotonicity: resolveRung(
+    "cfcDeclaredMonotonicity",
+    options.cfcDeclaredMonotonicity,
+  ),
+});
 
 /** The values of a record, whichever way its provenance was arrived at. */
 const buildReport = (

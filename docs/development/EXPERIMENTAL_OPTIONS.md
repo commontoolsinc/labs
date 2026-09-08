@@ -676,6 +676,25 @@ the same resolution, not a second statement of it — but the field says what it
 is. `deno task cfc-audit --expected-posture` compares a published record
 against a written-down profile, and fails a deployment that publishes a
 projection; see the cf-harness README.
+
+Every value that resolution returns is a rung of its own dial.
+`resolveCfcDials` checks each stated value against the same table of rungs the
+record's `decidesOn` is read from, and throws on one that is not among them,
+naming the dial and its rungs. The two dials that are simply on or off take
+`true` and `false` and nothing else.
+
+A dial off its ladder has no rung to run on, and the record then disagrees with
+the runtime. For a named-rung dial the guards around a gate test for
+`!== "off"` and let the value through, while the gate itself tests for the one
+enforcing rung and declines to act, so the dial runs as `observe` does while
+the published record calls it enforcing. The two on-or-off dials part the other
+way round: the gates read them for truthiness, while the record tests for
+`true`, so a truthy value that is not `true` runs the gate while the record
+says the gate is off. Resolving such a value to the default instead would hand
+a deployment a posture it never stated, so the construction fails. That check
+reaches every host, whether its dials come from a preset, a worker
+initialization message, a command line, or the CFC section of a JSON manifest.
+
 The interactive `cf-harness` and the `fuse` mount expose the enforcement mode
 through `CF_CFC_MODE` for testing. Because these dials are keys of
 `RuntimeOptions`, the exhaustive `RUNTIME_OPTION_KEYS` registry in the same file
