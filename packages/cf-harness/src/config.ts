@@ -483,10 +483,12 @@ const fabricSessionRaisesCfcEnforcement = (
 
 /**
  * This run's harness enforcement dial. The harness loop and the session's
- * Runtime are two dial families over one run, and a run under a session raised
- * to `enforce-strict` follows it rather than the harness default: a loop
- * weaker than the session it writes through enforces less than the run claims,
- * and says nothing about it.
+ * Runtime are two dial families over one run, and a harness dial that would
+ * resolve below the `enforce-strict` its session enforces follows the session
+ * instead: a loop weaker than the session it writes through enforces less than
+ * the run claims, and says nothing about it. Both families default to
+ * `enforce-strict`, so the case arises where something weaker reaches the
+ * harness dial rather than on every run under a session.
  *
  * @throws Error when the operator stated a harness dial weaker than the
  * `enforce-strict` its session enforces.

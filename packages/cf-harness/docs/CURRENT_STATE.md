@@ -243,7 +243,7 @@ The current package provides:
   Without the session configuration both tools are absent from the tool surface,
   for a `default`- or `pattern-author`-profile subagent as much as for the
   parent — a child shares the one session the parent built;
-  `--fabric-cfc-enforcement-mode` (raise-only: `enforce-explicit` or
+  `--fabric-cfc-enforcement-mode` (the enforcing rungs: `enforce-explicit` or
   `enforce-strict`) and `--fabric-cfc-flow-labels` (`off`/`observe`/`persist`)
   set the session runtime's CFC dials, so with labels persisted a
   confidentiality-tainted pattern write is refused at commit under strict, and
