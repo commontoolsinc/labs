@@ -164,6 +164,7 @@ async function running(
 ): Promise<Write[]> {
   const writes: Write[] = [];
   const terminal: PromptTerminal = {
+    ...framing(writes),
     keys: Array.isArray(keys)
       ? ReadableStream.from(keys as readonly Key[])
       : keys as AsyncIterable<Key>,
@@ -175,12 +176,6 @@ async function running(
     },
     announce: (text) => {
       writes.push({ kind: "announce", text });
-    },
-    frame: (rows) => {
-      writes.push({ kind: "frame", rows });
-    },
-    unframe: () => {
-      writes.push({ kind: "unframe" });
     },
     // Nothing the prompt does suspends the terminal: the trip is `edit`'s,
     // taken through a dep the run wires (`run.ts`), so a case here that
@@ -198,6 +193,32 @@ async function running(
     ...deps,
   });
   return writes;
+}
+
+/**
+ * Helper for the cases below, which is the frame half of a terminal, recording
+ * into `writes`.
+ *
+ * It holds whether a frame has the screen because the contract does: giving
+ * the screen back where no frame took it does nothing, which is what lets a
+ * caller put a terminal back without asking first. A stand-in that recorded
+ * every call would make a case read one write where a terminal makes none.
+ */
+function framing(
+  writes: Write[],
+): Pick<PromptTerminal, "frame" | "unframe"> {
+  let framed = false;
+  return {
+    frame: (rows) => {
+      framed = true;
+      writes.push({ kind: "frame", rows });
+    },
+    unframe: () => {
+      if (!framed) return;
+      framed = false;
+      writes.push({ kind: "unframe" });
+    },
+  };
 }
 
 /** Helper for the cases below, which is the last line the prompt drew. */
@@ -914,10 +935,16 @@ describe("prompt", () => {
     function driving(
       keys: (framed: Promise<void>) => AsyncIterable<Key>,
       sink: () => Promise<() => void> = () => Promise.resolve(() => {}),
-    ): { writes: Promise<Write[]>; framed: Promise<void> } {
+    ): {
+      writes: Promise<Write[]>;
+      drawn: Write[];
+      framed: Promise<void>;
+    } {
       const writes: Write[] = [];
       const drawn = Promise.withResolvers<void>();
+      const framer = framing(writes);
       const terminal: PromptTerminal = {
+        ...framer,
         keys: {
           [Symbol.asyncIterator]: () =>
             keys(drawn.promise)[Symbol.asyncIterator](),
@@ -932,11 +959,8 @@ describe("prompt", () => {
           writes.push({ kind: "announce", text });
         },
         frame: (rows) => {
-          writes.push({ kind: "frame", rows });
+          framer.frame(rows);
           drawn.resolve();
-        },
-        unframe: () => {
-          writes.push({ kind: "unframe" });
         },
         suspend: () => {
           throw new Error("The prompt handed the terminal over.");
@@ -944,6 +968,10 @@ describe("prompt", () => {
       };
       return {
         framed: drawn.promise,
+        // The array itself as well as the promise over it, because a run that
+        // threw hands back no array and what it drew on the way out is exactly
+        // what such a case is about.
+        drawn: writes,
         writes: runPrompt(atPiece(), terminal, {
           warmPiece: (config) => Promise.resolve({ piece: config.piece }),
           sinkCellValue: () => sink(),
@@ -1060,6 +1088,44 @@ describe("prompt", () => {
         },
       );
     }
+
+    it("gives the screen back where the run threw with a lens open", async () => {
+      // The one way out of a run a person cannot type their way back from: a
+      // frame still holding the screen is an alternate screen with a hidden
+      // cursor and nothing drawing on it. So the screen goes back whatever
+      // ended the run, and the throw is still the throw.
+
+      const run = driving(async function* (framed) {
+        yield* typed("watch title");
+        yield ENTER;
+        await framed;
+        throw new Error("The keyboard went.");
+      });
+      await expect(run.writes).rejects.toThrow("The keyboard went.");
+      expect(run.drawn.filter((write) => write.kind === "unframe").length)
+        .toBe(1);
+    });
+
+    it("cancels the lens's subscription where the run threw", async () => {
+      // The screen is half of it. The subscription the lens was drawing from
+      // is the other, and a run that ended holds no cancel for it.
+
+      let cancelled = 0;
+      const run = driving(
+        async function* (framed) {
+          yield* typed("watch title");
+          yield ENTER;
+          await framed;
+          throw new Error("The keyboard went.");
+        },
+        () => Promise.resolve(() => cancelled++),
+      );
+      await expect(run.writes).rejects.toThrow("The keyboard went.");
+      // One of the two subscriptions the line took: the lens's. The watch's is
+      // left armed, which is what a watch is for, and the run's own way out is
+      // where that one stops (`run.ts`).
+      expect(cancelled).toBe(1);
+    });
 
     it("drops what was typed ahead of a `ctrl-c` that closed the lens", async () => {
       // The rule the loop already states at the prompt: a person who pressed

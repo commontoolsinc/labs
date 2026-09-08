@@ -2,6 +2,11 @@
  * The value view: one cell rendered as structured JSON, scrollable, and live
  * for as long as it is open.
  *
+ * It answers to the motions and the way out of the key table `views.md` gives
+ * a view, and to nothing else yet; the rest of that table arrives with the
+ * slice that adds it (`docs/plans/shuttle/build-sequence.md`). What the frame
+ * offers along its bottom edge is what it answers to, so the two cannot part.
+ *
  * It is a lens rather than a move (`docs/plans/shuttle/views.md`): opening one
  * changes no place, and `q` returns to the prompt exactly where it stood. What
  * it is a lens *onto* is a watch, and the two have different lifetimes — this
@@ -25,7 +30,13 @@ import { type Change, changesBetween, transitionFor } from "./watch.ts";
 /** What the frame shows before the cell it watches has settled once. */
 const NOT_SETTLED = marker("nothing has settled yet");
 
-/** What the bottom edge offers, which is every key a lens takes. */
+/**
+ * What the bottom edge offers, which is every key this lens takes: the two
+ * motions and the way out. The rest of the table `views.md` gives a view
+ * arrives with the slice that adds it
+ * (`docs/plans/shuttle/build-sequence.md`), and the edge grows with it — a
+ * reader is offered what the frame answers to and nothing else.
+ */
 const KEYS = "q back (the watch stays armed) · j/k scroll · g/G ends";
 
 /** The narrowest frame that has a column of its own to write in. */
@@ -127,13 +138,18 @@ export class ValueLens {
   /**
    * Acts on `key`, drawing the frame again where it changed anything.
    *
-   * The keys are views.md's: `q` back, `j`/`k` and the arrows one line, `g`
-   * and `G` the two ends. `ctrl-c` closes as `q` does, because a full screen a
-   * person cannot get out of by the key every terminal program answers is
-   * worse than one key too many.
+   * The keys are the motions and the way out of views.md's table: `q` back,
+   * `j`/`k` and the arrows one line, `g` and `G` the two ends. `ctrl-c` closes
+   * as `q` does, because a full screen a person cannot get out of by the key
+   * every terminal program answers is worse than one key too many.
    *
-   * Everything else does nothing, and does nothing silently: a lens takes a
-   * small vocabulary and a key outside it is a key for a view this is not.
+   * Everything else does nothing, and does nothing silently. That covers two
+   * different keys and the silence suits both: one a view takes that this lens
+   * has yet to grow — `enter`, `/`, `e`, `:` and the rest of that table, which
+   * arrive with the slice that adds them
+   * (`docs/plans/shuttle/build-sequence.md`) — and one nothing takes at all. A
+   * frame offering only what it answers to is what tells a reader which is
+   * which.
    */
   reads(key: Key): void {
     if (this.#closed) return;

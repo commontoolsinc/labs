@@ -4837,6 +4837,32 @@ describe("verbs", () => {
       }).toEqual({ kind: "interrupted", cancelled: [true, true], armed: 0 });
     });
 
+    it("disarms the watch it armed where the lens's subscription failed", async () => {
+      // The other way out of that stretch. A read that failed raises rather
+      // than coming back as an outcome, and a watch left armed behind it is a
+      // sink nothing can reach: the session never took it, so `watches` does
+      // not list it and the run's own disarm passes it by.
+
+      const shuttle = atPiece();
+      const cancelled: boolean[] = [];
+      await expect(runLine(
+        "watch title",
+        shuttle,
+        answering({
+          sinkCellValue: () => {
+            const at = cancelled.length;
+            if (at === 1) return Promise.reject(new Error("The server went."));
+            cancelled.push(false);
+            return Promise.resolve(() => {
+              cancelled[at] = true;
+            });
+          },
+        }),
+      )).rejects.toThrow("The server went.");
+      expect({ cancelled, armed: shuttle.session.watches.length })
+        .toEqual({ cancelled: [true], armed: 0 });
+    });
+
     it("lists what is armed, numbering each", async () => {
       const shuttle = atPiece();
       const { deps } = watching();

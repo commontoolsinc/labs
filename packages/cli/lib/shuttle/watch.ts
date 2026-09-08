@@ -31,8 +31,8 @@ import {
 } from "./place.ts";
 import type { RecordEntry } from "./record.ts";
 
-/** How many changed paths an event line names before it counts the rest. */
-const NAMED_PATHS = 3;
+/** How many changes an event line writes out before it counts the rest. */
+const NAMED_CHANGES = 3;
 
 /** The cell a watch is armed on. */
 export interface WatchTarget {
@@ -283,13 +283,20 @@ function isKeyed(value: unknown): value is Record<string, unknown> {
  * settle is what a reader is being told about: several leaves that moved
  * together moved in one commit, and two lines would read as two.
  *
- * The fitting is a fallback rather than a truncation. The line is composed
- * with the values written out, and where that does not fit the screen it is
- * composed again with each value stood in for by what it is — a value the
- * fabric holds is as large as the fabric lets it be, and an event line that
- * wrote one out would fill the terminal with the record of a change nobody was
- * reading a value for. What the short form keeps is the whole of what the line
- * is for: which watch, where, and that it moved.
+ * Every change on the line carries its transition, which is what a reader is
+ * being shown: a line naming where something moved and not what it moved to
+ * says less than the value it replaced would have. Where several moved, the
+ * first few are written and the rest counted, so the line's length follows the
+ * shape of the data rather than the size of the commit.
+ *
+ * The fitting is a fallback rather than a truncation, and it has two rungs
+ * because two different things can make a line too wide. A value the fabric
+ * holds is as large as the fabric lets it be, so where the values do not fit
+ * each is stood in for by what it is; and where the changes still do not fit,
+ * a line naming several of them gives their count instead, which is the one
+ * thing that stays short however many there are. A single change never reaches
+ * that rung: what the count replaces is the list, and a list of one has
+ * nothing to gain from being counted.
  */
 export function eventLine(
   label: string,
@@ -314,52 +321,88 @@ export function transitionFor(
   return fitted("", changes, columns);
 }
 
+/** How much of a value a transition on the line writes out. */
+type Detail =
+  /** The value itself, as JSON. */
+  | "value"
+  /** What the value is, for a line the value itself will not fit on. */
+  | "kind";
+
 /**
- * Helper for the two above, which is `changes` written after `opening` with
- * the values written out where the whole of that fits `columns`, and stood in
- * for where it does not.
+ * Helper for the two above, which is `changes` written after `opening` at the
+ * most a line `columns` wide has room for.
+ *
+ * The rungs are tried in order and the first that fits is the answer, so a
+ * line is as full as the screen allows rather than as short as the widest case
+ * would need.
  */
 function fitted(
   opening: string,
   changes: readonly Change[],
   columns: number,
 ): string {
-  const whole = written(opening, changes, true);
-  return unicodeWidth(whole) <= columns
-    ? whole
-    : written(opening, changes, false);
+  const values = written(opening, changes, "value");
+  if (unicodeWidth(values) <= columns) return values;
+  const kinds = written(opening, changes, "kind");
+  if (unicodeWidth(kinds) <= columns || changes.length === 1) return kinds;
+  return `${after(opening)}${changes.length} changes`;
 }
 
 /**
- * Helper for {@link fitted}, which writes `changes` after `opening` with the
- * values written out under `whole` and stood in for otherwise.
+ * Helper for {@link fitted}, which writes `changes` after `opening` with each
+ * value written at `detail`, the first {@link NAMED_CHANGES} of them written
+ * out and the rest counted.
  */
 function written(
   opening: string,
   changes: readonly Change[],
-  whole: boolean,
+  detail: Detail,
 ): string {
-  const after = opening === "" ? "" : `${opening} `;
-  const only = changes.length === 1 ? changes[0] : undefined;
-  if (only !== undefined) {
-    const where = pathOf(only.at);
-    return `${after}${where === "" ? "" : `${where} `}${
-      shown(only.from, whole)
-    } → ${shown(only.to, whole)}`;
-  }
-  const count = `${changes.length} changes`;
-  if (!whole) return `${after}${count}`;
-  const named = changes.slice(0, NAMED_PATHS).map((change) =>
-    describePath(change.at)
+  const alone = changes.length === 1;
+  const named = changes.slice(0, NAMED_CHANGES).map((change) =>
+    transition(change, detail, alone)
   );
   const left = changes.length - named.length;
-  return `${after}${count} at ${named.join(", ")}${
-    left === 0 ? "" : `, and ${left} more`
+  return `${after(opening)}${named.join("; ")}${
+    left === 0 ? "" : `; and ${left} more`
   }`;
 }
 
 /**
- * Helper for {@link written}, which is `at` written as a path inside the
+ * Helper for {@link fitted} and {@link written}, which is `opening` with the
+ * space that separates it from what follows, and nothing where there is no
+ * opening.
+ */
+function after(opening: string): string {
+  return opening === "" ? "" : `${opening} `;
+}
+
+/**
+ * Helper for {@link written}, which is one change written as where it landed
+ * and the transition it made, `alone` saying it is the only one on the line.
+ *
+ * A change at the watched cell itself has no path to name. Alone on a line it
+ * is written without one, the frame or the watch's own name having said which
+ * cell it is; beside others it is named by what it is, since a line listing it
+ * next to two that have paths would otherwise leave a gap where a name should
+ * be.
+ */
+function transition(
+  change: Change,
+  detail: Detail,
+  alone: boolean,
+): string {
+  const path = pathOf(change.at);
+  const where = path !== ""
+    ? `${oneLine(path)} `
+    : alone
+    ? ""
+    : `${marker("the cell itself")} `;
+  return `${where}${shown(change.from, detail)} → ${shown(change.to, detail)}`;
+}
+
+/**
+ * Helper for {@link transition}, which is `at` written as a path inside the
  * watched cell, and the empty string for the cell itself.
  *
  * The separator is escaped in every segment, as it is everywhere else shuttle
@@ -370,21 +413,8 @@ function pathOf(at: readonly PathSegment[]): string {
 }
 
 /**
- * Helper for {@link written}, which is `at` written where a line is naming
- * several of them, and what to call the watched cell itself.
- *
- * A change at the cell itself has no path to name, and a line listing it
- * beside two that have would leave a gap where a name should be, so it is
- * named by what it is instead.
- */
-function describePath(at: readonly PathSegment[]): string {
-  const path = pathOf(at);
-  return path === "" ? marker("the cell itself") : oneLine(path);
-}
-
-/**
- * Helper for {@link written}, which is `value` written on a line: as JSON
- * under `whole`, and as what it is otherwise.
+ * Helper for {@link transition}, which is `value` written on a line: as JSON
+ * at the `value` detail, and as what it is at the `kind` one.
  *
  * `undefined` is stood in for either way, JSON having no form for it and the
  * word for what a cell holds nothing at being what a reader needs — the same
@@ -393,8 +423,10 @@ function describePath(at: readonly PathSegment[]): string {
  * prose about a change rather than the value itself, and `get` is what reads
  * one out.
  */
-function shown(value: unknown, whole: boolean): string {
-  if (!whole || value === undefined) return marker(describeValue(value));
+function shown(value: unknown, detail: Detail): string {
+  if (detail === "kind" || value === undefined) {
+    return marker(describeValue(value));
+  }
   try {
     const json = JSON.stringify(value);
     return json === undefined ? marker(describeValue(value)) : oneLine(json);
@@ -409,7 +441,7 @@ function shown(value: unknown, whole: boolean): string {
  *
  * It names the kind and the size where the size is what a reader is deciding
  * on — how long a string is, how many members an array has — because what the
- * short form is for is a value too large to write, and its size is the fact
+ * `kind` detail is for is a value too large to write, and its size is the fact
  * that put it there.
  */
 function describeValue(value: unknown): string {

@@ -590,27 +590,43 @@ Landed:
   the path inside it, and the transition — through the out-of-band door a
   connection's own writing already goes through, so scrollback stays
   append-only. A change is what is reported: the first settle is the baseline,
-  and a settle that landed on the value already held writes nothing. A line
-  wider than the screen stands its values in for what they are rather than
-  filling the terminal with a value nobody asked to read.
+  and a settle that landed on the value already held writes nothing. Every
+  change on the line carries its transition, and what a screen too narrow for
+  them costs is written down in rungs: the values stood in for by what they
+  are, and then, for a list of them, the count alone — rather than a terminal
+  filled with a value nobody asked to read.
 
   The value view (`lib/shuttle/lens.ts`) opens as one lens onto that watch,
   drawn on the alternate screen so that nothing already written scrolls while
-  it is up. It is pure logic plus a frame the prompt draws: the prompt owns the
-  keyboard, so a lens is a state of its loop rather than a program beside it,
-  and the terminal keeps what was announced while a frame held the screen.
-  The two lifetimes are separate, which is what the slice is for: `q` cancels
-  the lens's own subscription and leaves the watch armed.
+  it is up, and given back on every way out of a run — a signal among them,
+  which ends the process without unwinding. It is pure logic plus a frame the
+  prompt draws: the prompt owns the keyboard, so a lens is a state of its loop
+  rather than a program beside it, which is the shape every view here takes
+  and the reason `pager.ts` is not the substrate ([`views.md`](views.md)).
+  The terminal keeps what was announced while a frame held the screen. The two
+  lifetimes are separate, which is what the slice is for: `q` cancels the
+  lens's own subscription and leaves the watch armed.
 
-  Two departures from [`views.md`](views.md) are worth naming. The frame draws
-  no connection marker, the relay that would report connection state being B1's
-  and unbuilt ([`runtime-integration.md`](runtime-integration.md)). And the
-  transition row stands until another change replaces it rather than expiring,
-  which is the same document's "never a timer" applied to its own sentence;
-  views.md now says so.
+  One thing the frame does not draw is worth naming: the connection marker,
+  the relay that would report connection state being B1's and unbuilt
+  ([`runtime-integration.md`](runtime-integration.md)). The transition row
+  stands until another change replaces it rather than expiring, which is the
+  same document's "never a timer" applied to its own sentence.
 
 Still to land:
 
+- **The rest of a view's keys.** The value view answers to the motions and the
+  two ways out — `q` and `ctrl-c`, `j`/`k` and the arrows, `g` and `G`. What
+  the table in [`views.md`](views.md) has beyond them is this slice: `enter`
+  drill and `backspace` up, `/` filter within the view with `n`/`N` for the
+  next match, `e` to edit the selection in `$EDITOR`, and `:` to open a
+  command line. The last is the
+  reason this is a slice rather than a handful of key arms — `:` runs any
+  shuttle line with the view's `%n` handles bound to its rows, which reaches
+  the verb machinery from inside a lens and repaints the frame on what came
+  back. `e` reaches the editor trip the prompt already takes, and `enter` and
+  `backspace` want somewhere to drill *to*, so both of those read more
+  naturally beside the view that has rows.
 - **The list view.** It rests on `SpaceReplica.sinkDocument`, which is on
   neither `IStorageProvider` nor `ISpaceReplica`, so the seam question is
   `packages/runner`'s to settle before shuttle reaches it. It opens with the

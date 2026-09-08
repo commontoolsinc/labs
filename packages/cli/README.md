@@ -202,12 +202,15 @@ difference by refusing them as slug values.
 `watch` is the live half. It arms a **watch** — a subscription on one cell that
 outlives the view that opened it — and opens the value view onto that cell: the
 value as JSON, scrollable with `j`/`k` and the arrows, `g` and `G` for its ends,
-and `q` to come back to the prompt. The two halves are separable on purpose: `q`
-closes the view and the watch stays armed, and every settled change to a watched
-cell then writes one line above the prompt — the cell, where inside it the
-change landed, and the transition, as in `watch board/replies @space: 14 → 15`.
-Scrollback is never rewritten: liveness lives in those lines, and the view draws
-on a screen of its own.
+and `q` or `ctrl-c` to come back to the prompt. Those are the whole of what the
+view answers to; the fuller key table the design gives a view — drilling,
+filtering, editing a selection, and a command line inside the frame — is not
+built. The two halves are separable on purpose: `q` closes the view and the
+watch stays armed, and every settled change to a watched cell then writes one
+line above the prompt — the cell, where inside it the change landed, and the
+transition, as in `watch board/replies @space: 14 → 15`. Scrollback is never
+rewritten: liveness lives in those lines, and the view draws on a screen of its
+own.
 
 A change is what is reported rather than a value: the first reading of a cell is
 the baseline and writes nothing, and a recomputation that landed on what was

@@ -1049,6 +1049,11 @@ async function describe(
  * `#argument` suffix included, and a container is refused for the reason `get`
  * refuses one: a space root and a facet are lists of what stands inside them
  * and hold no value to watch.
+ *
+ * @throws Whatever taking a subscription throws — an unreachable server among
+ * them. Nothing is left armed by one: the session holds the watch only once
+ * both subscriptions are taken, and the first is cancelled on every way out
+ * before that.
  */
 async function watch(
   shuttle: Shuttle,
@@ -1088,12 +1093,20 @@ async function watch(
   if (watching.kind !== "ran") return watching;
   armed.holding(watching.answer);
   const lens = new ValueLens(armed.label);
-  const looking = await subscribed(shuttle, place, at.input, deps, (value) => {
-    lens.showing(value);
-  });
-  // The watch was armed and nothing has adopted it, so it is disarmed here:
-  // an interrupted line leaves the session as it found it, and a subscription
-  // nothing holds a cancel for is one nothing could ever stop.
+  // From here the watch holds a subscription and the session does not hold the
+  // watch, so every way out of this stretch but the lens disarms it — a line
+  // the person cancelled, and a subscription that failed. Left armed, it is a
+  // sink nothing can reach: `watches` does not list it, `unwatch` cannot name
+  // it, and the disarm a run makes on its way out passes it by.
+  let looking: Ran<() => void> | Interruption;
+  try {
+    looking = await subscribed(shuttle, place, at.input, deps, (value) => {
+      lens.showing(value);
+    });
+  } catch (thrown) {
+    armed.disarm();
+    throw thrown;
+  }
   if (looking.kind !== "ran") {
     armed.disarm();
     return looking;
@@ -1604,8 +1617,9 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
       "armed watch writes one line above the prompt per settled\nchange — " +
       "the cell, where inside it the change landed, and the transition.\n" +
       "The view scrolls with `j`/`k` and the arrows, `g` and `G` are its " +
-      "ends, and\nit repaints once per quiet runtime rather than once per " +
-      "value on the way\nthere.\n\nA cell already watched is refused: two " +
+      "ends, and\n`ctrl-c` closes it as `q` does — the whole of what it " +
+      "answers to. It repaints\nonce per quiet runtime rather than once per " +
+      "value on the way there.\n\nA cell already watched is refused: two " +
       "watches on one cell write two of\nevery line. The line numbers what " +
       "is armed as it arms one, so `unwatch %n`\nneeds no `watches` first.",
   }],

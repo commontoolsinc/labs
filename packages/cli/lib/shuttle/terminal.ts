@@ -63,10 +63,13 @@ const ENDING_SIGNALS = [
  *
  * Raw mode is entered before `body` and left after it, whatever `body` does,
  * because a terminal left in raw mode is one the person's next command cannot
- * be typed at. A signal never reaches that `finally`, so the ways of ending a
- * run that a process may bind are listened for and restore it themselves
+ * be typed at. The same holds of the screen a full-screen view takes: it goes
+ * back on the way out too, and for a stronger reason — a person left on an
+ * alternate screen with a hidden cursor sees nothing of what they type. A
+ * signal never reaches that `finally`, so the ways of ending a run that a
+ * process may bind are listened for and put both back themselves
  * ({@link ENDING_SIGNALS}); the listening starts before raw mode does, so
- * there is no moment where the mode is on and nothing would take it off.
+ * there is no moment where either is held and nothing would let it go.
  *
  * @throws Error if standard input or standard output is not a terminal. Both
  * halves are needed and for different reasons: the keys are what a terminal in
@@ -92,15 +95,20 @@ export async function withPromptTerminal<T>(
         `and standard ${redirected} is not one. Run it from a terminal.`,
     );
   }
-  const cook = cooker();
-  const listening = listenFor(cook);
+  // Built before the listeners so that they can put its screen back, and
+  // before raw mode for the reason the listeners are: constructing one enters
+  // no mode and takes no screen, so there is still no moment where something
+  // is held and nothing would let it go.
+  const terminal = new StandardTerminal();
+  const restore = restorer(terminal);
+  const listening = listenFor(restore);
   try {
     // Inside the `try` because the listeners are already on: raw mode failing
     // is a way this call can end, and every way it ends takes them off again.
     Deno.stdin.setRaw(true);
-    return await body(new StandardTerminal());
+    return await body(terminal);
   } finally {
-    cook();
+    restore();
     for (const [signal, handler] of listening) {
       try {
         Deno.removeSignalListener(signal, handler);
@@ -113,23 +121,42 @@ export async function withPromptTerminal<T>(
 }
 
 /**
- * Helper for {@link withPromptTerminal}, which is a function taking standard
- * input back out of raw mode, and doing so once however many times it is
- * called.
+ * Helper for {@link withPromptTerminal}, which is a function putting the
+ * terminal back the way it was found — the screen a frame took, and then raw
+ * mode — and doing so once however many times it is called.
  *
  * Two things call it and either may be first: a signal handler, and the run's
  * own way out. Once is what the terminal needs, and calling it again after the
  * process has begun to end is the case the memory is for.
  *
- * It swallows what the call throws, because every caller is already on its way
- * out and a terminal that will not leave raw mode is not a thing a message
- * about it could fix.
+ * Both halves are here because a signal ends the process without unwinding,
+ * so neither the prompt's own way out nor any `finally` under it runs. A
+ * person signalled out of an open view would otherwise be left on an alternate
+ * screen with a hidden cursor: their next command's output goes to a screen
+ * that is thrown away, and nothing they type is drawn. Giving the screen back
+ * writes out what was announced while the frame held it, so the record ends
+ * where the run did.
+ *
+ * The screen goes back before the mode. Neither restoration needs the other,
+ * so this is a convention rather than a dependency, and it is the one a
+ * reader can hold the pair to: what the person is looking at, and then what
+ * the terminal does with their keys.
+ *
+ * Each half swallows what it throws, because every caller is already on its
+ * way out and a terminal that will not be put back is not a thing a message
+ * about it could fix — and because the second half must run whatever the first
+ * one did.
  */
-function cooker(): () => void {
-  let cooked = false;
+function restorer(terminal: StandardTerminal): () => void {
+  let restored = false;
   return () => {
-    if (cooked) return;
-    cooked = true;
+    if (restored) return;
+    restored = true;
+    try {
+      terminal.unframe();
+    } catch {
+      // The terminal is gone, which is the other way of not holding a screen.
+    }
     try {
       Deno.stdin.setRaw(false);
     } catch {
@@ -145,20 +172,20 @@ function cooker(): () => void {
  * A handler restores the terminal before it ends the process, and in that
  * order on purpose: the restore is the part that must happen, so nothing that
  * could throw is allowed to precede it. What is left after it — ending the
- * process — is allowed to throw, because by then the terminal is already back
- * to the mode the person's next command is typed at.
+ * process — is allowed to throw, because by then the screen and the mode the
+ * person's next command is typed at are both back.
  *
  * A signal the platform will not deliver is skipped rather than fatal: what it
  * costs is one way of ending that this run cannot restore from, and refusing
  * to start over it would cost every way.
  */
 function listenFor(
-  cook: () => void,
+  restore: () => void,
 ): readonly (readonly [Deno.Signal, () => void])[] {
   const listening: (readonly [Deno.Signal, () => void])[] = [];
   for (const [signal, status] of ENDING_SIGNALS) {
     const handler = () => {
-      cook();
+      restore();
       Deno.exit(status);
     };
     try {

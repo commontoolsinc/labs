@@ -144,13 +144,16 @@ describe("watch", () => {
         it("writes one line for a settle that changed several leaves", () => {
           // One line per settled change, whatever the change turns out to be:
           // the leaves moved in one commit, and two lines would read as two.
+          // Each of them carries its transition, a screen this wide being no
+          // reason to write less than what moved.
 
           const driven = driving(at("topics"));
           driven.watch.settled({ title: "a", replies: 1 });
           driven.watch.settled({ title: "b", replies: 2 });
           expect(driven.lines.length).toBe(1);
-          expect(driven.lines[0])
-            .toBe(`watch ${HANDLE}/topics @space: 2 changes at title, replies`);
+          expect(driven.lines[0]).toBe(
+            `watch ${HANDLE}/topics @space: title "a" → "b"; replies 1 → 2`,
+          );
         });
 
         it("writes nothing once it has been disarmed", () => {
@@ -314,11 +317,14 @@ describe("watch", () => {
         { at: [], from: 1, to: 2 },
         { at: ["a"], from: 1, to: 2 },
       ], WIDE)).toBe(
-        "watch cell @space: 2 changes at <the cell itself>, a",
+        "watch cell @space: <the cell itself> 1 → 2; a 1 → 2",
       );
     });
 
-    it("counts the paths it did not name", () => {
+    it("counts the changes it did not write out", () => {
+      // What bounds the line as the commit grows: the length follows the shape
+      // of the data rather than how many leaves moved at once.
+
       expect(eventLine("cell @space", [
         { at: ["a"], from: 1, to: 2 },
         { at: ["b"], from: 1, to: 2 },
@@ -326,7 +332,23 @@ describe("watch", () => {
         { at: ["d"], from: 1, to: 2 },
         { at: ["e"], from: 1, to: 2 },
       ], WIDE)).toBe(
-        "watch cell @space: 5 changes at a, b, c, and 2 more",
+        "watch cell @space: a 1 → 2; b 1 → 2; c 1 → 2; and 2 more",
+      );
+    });
+
+    it("stands in for the values of several changes before it counts them", () => {
+      // The rungs are tried in order, so a line too narrow for the values is
+      // written with each stood in for rather than dropping to the count while
+      // there is still room to say what moved where.
+
+      const long = "x".repeat(80);
+      expect(eventLine("cell @space", [
+        { at: ["a"], from: "", to: long },
+        { at: ["b"], from: "", to: long },
+      ], 160)).toBe(
+        "watch cell @space: a <a string of 0 characters> → " +
+          "<a string of 80 characters>; b <a string of 0 characters> → " +
+          "<a string of 80 characters>",
       );
     });
 
@@ -352,11 +374,26 @@ describe("watch", () => {
         .toBe(`watch cell @space: a "" → "${long}"`);
     });
 
-    it("counts the changes alone where naming their paths would not fit", () => {
+    it("counts the changes alone where naming them would not fit either", () => {
+      // The last rung, and the one thing that stays short however many changed
+      // or however long their paths are.
+
       expect(eventLine("cell @space", [
         { at: ["a".repeat(40)], from: 1, to: 2 },
         { at: ["b".repeat(40)], from: 1, to: 2 },
       ], 40)).toBe("watch cell @space: 2 changes");
+    });
+
+    it("names one change however narrow the line, a count of one saying less", () => {
+      // What the count replaces is the list, and a list of one has nothing to
+      // gain from being counted: a line reading `1 change` names neither where
+      // it landed nor that it moved.
+
+      expect(eventLine("cell @space", [
+        { at: ["a".repeat(40)], from: 1, to: 2 },
+      ], 10)).toBe(
+        `watch cell @space: ${"a".repeat(40)} <a number> → <a number>`,
+      );
     });
   });
 

@@ -128,7 +128,9 @@ export interface PromptTerminal {
 
   /**
    * Gives the screen back, and writes whatever {@link PromptTerminal.announce}
-   * was handed while the frame held it.
+   * was handed while the frame held it. Where no frame has the screen it does
+   * nothing, so a caller putting a terminal back on its way out needs no test
+   * in front of it.
    *
    * Those lines are kept rather than dropped, because a run's out-of-band
    * writing is a record: a pattern's console output and an armed watch's event
@@ -287,113 +289,135 @@ export async function runPrompt(
     show();
   };
 
-  while (
-    !(ended && running === undefined && lens === undefined && held.length === 0)
-  ) {
-    // A lens is closed by a key, and there are no more keys. Closing it here
-    // is what stops a run ending with the screen still held.
-    if (ended && lens !== undefined) {
-      closeLens();
-      continue;
-    }
-    if (running === undefined && lens === undefined && held.length > 0) {
-      act(held.shift()!);
-      continue;
-    }
-    if (!ended) typing ??= nextKey(keys);
-    const arrival = await (
-      ended
-        ? running!.settled
-        : running === undefined
-        ? typing!
-        : Promise.race([typing!, running.settled])
-    );
-    if (arrival.kind === "ran") {
-      running = undefined;
-      if (arrival.text !== "") terminal.announce(arrival.text);
-      // After the line, not before it: `cd` is what moves the place, so the
-      // prompt a line is typed at is the place it was read against.
-      prompt = promptFor(shuttle);
-      show();
-      continue;
-    }
-    if (arrival.kind === "lens") {
-      running = undefined;
-      // What the line produced is written before the frame takes the screen,
-      // which is the order it happened in: the verb armed the watch and said
-      // what is armed, and the lens opened onto it. Written after, it would
-      // reach the transcript below the changes the frame was up for.
-      if (arrival.text !== "") terminal.announce(arrival.text);
-      const opened = arrival.lens;
-      lens = opened;
-      // The frame is composed at the size the screen has each time it is
-      // drawn, so a window resized under an open lens is redrawn to fit it.
-      opened.drawnThrough(() =>
-        terminal.frame(opened.frame(
-          measured(deps.rows?.(), ASSUMED_ROWS),
-          measured(deps.columns?.(), ASSUMED_COLUMNS),
-        ))
+  try {
+    while (
+      !(ended && running === undefined && lens === undefined &&
+        held.length === 0)
+    ) {
+      // A lens is closed by a key, and there are no more keys. Closing it here
+      // is what stops a run ending with the screen still held.
+      if (ended && lens !== undefined) {
+        closeLens();
+        continue;
+      }
+      if (running === undefined && lens === undefined && held.length > 0) {
+        act(held.shift()!);
+        continue;
+      }
+      if (!ended) typing ??= nextKey(keys);
+      const arrival = await (
+        ended
+          ? running!.settled
+          : running === undefined
+          ? typing!
+          : Promise.race([typing!, running.settled])
       );
-      continue;
-    }
-    if (arrival.kind === "completed") {
-      running = undefined;
-      // Onto the line it was computed for and onto no other. A read cannot be
-      // called off once sent, so what it answers may reach a line that has
-      // moved on — a key typed while it was out, or a `ctrl-c` that emptied
-      // it — and writing there would take back a character the person typed
-      // after the `tab`.
-      if (buffer.text() === arrival.from) recall(buffer, arrival.line);
-      show();
-      continue;
-    }
-    typing = undefined;
-    if (arrival.step.done) {
-      ended = true;
-      continue;
-    }
-    const key = arrival.step.value;
-    if (lens !== undefined) {
-      // Every key goes to the lens while one is open, which is what makes it
-      // full-screen: the line under it is not being typed at, so a key that
-      // the lens does not take does nothing rather than editing something
-      // nobody can see. Which keys close a frame is the lens's decision and
-      // not this loop's, so `q` and `ctrl-c` are one rule made where the keys
-      // are read; what is left here is what a `ctrl-c` does to the line under
-      // the frame.
-      lens.reads(key);
-      if (key.name === "ctrl-c") {
-        // What a `ctrl-c` drops is what was typed ahead of it, here as at the
-        // prompt: a person who pressed it to leave the frame did not mean to
-        // run whatever they had queued behind it.
+      if (arrival.kind === "ran") {
+        running = undefined;
+        if (arrival.text !== "") terminal.announce(arrival.text);
+        // After the line, not before it: `cd` is what moves the place, so the
+        // prompt a line is typed at is the place it was read against.
+        prompt = promptFor(shuttle);
+        show();
+        continue;
+      }
+      if (arrival.kind === "lens") {
+        running = undefined;
+        // What the line produced is written before the frame takes the screen,
+        // which is the order it happened in: the verb armed the watch and said
+        // what is armed, and the lens opened onto it. Written after, it would
+        // reach the transcript below the changes the frame was up for.
+        if (arrival.text !== "") terminal.announce(arrival.text);
+        const opened = arrival.lens;
+        lens = opened;
+        // The frame is composed at the size the screen has each time it is
+        // drawn, so a window resized under an open lens is redrawn to fit it.
+        opened.drawnThrough(() =>
+          terminal.frame(opened.frame(
+            measured(deps.rows?.(), ASSUMED_ROWS),
+            measured(deps.columns?.(), ASSUMED_COLUMNS),
+          ))
+        );
+        continue;
+      }
+      if (arrival.kind === "completed") {
+        running = undefined;
+        // Onto the line it was computed for and onto no other. A read cannot be
+        // called off once sent, so what it answers may reach a line that has
+        // moved on — a key typed while it was out, or a `ctrl-c` that emptied
+        // it — and writing there would take back a character the person typed
+        // after the `tab`.
+        if (buffer.text() === arrival.from) recall(buffer, arrival.line);
+        show();
+        continue;
+      }
+      typing = undefined;
+      if (arrival.step.done) {
+        ended = true;
+        continue;
+      }
+      const key = arrival.step.value;
+      if (lens !== undefined) {
+        // Every key goes to the lens while one is open, which is what makes it
+        // full-screen: the line under it is not being typed at, so a key that
+        // the lens does not take does nothing rather than editing something
+        // nobody can see. Which keys close a frame is the lens's decision and
+        // not this loop's, so `q` and `ctrl-c` are one rule made where the keys
+        // are read; what is left here is what a `ctrl-c` does to the line under
+        // the frame.
+        lens.reads(key);
+        if (key.name === "ctrl-c") {
+          // What a `ctrl-c` drops is what was typed ahead of it, here as at the
+          // prompt: a person who pressed it to leave the frame did not mean to
+          // run whatever they had queued behind it.
+          held = [];
+          buffer.setText("");
+          history.abandon();
+        }
+        if (!lens.open) closeLens();
+        continue;
+      }
+      if (running === undefined) {
+        act(key);
+      } else if (key.name === "ctrl-c") {
+        // A completion runs beside the line it is completing, which is still
+        // being edited and so is still the line to end; a verb's line was ended
+        // where it was taken, and what is being edited under it is the next
+        // one.
+        if (running.kind === "completion") terminal.finish();
+        running.stop();
         held = [];
         buffer.setText("");
         history.abandon();
+        show();
+      } else if (held.length > 0 || endsLine(key, buffer)) {
+        held.push(key);
+      } else {
+        apply({ buffer, history }, key);
+        show();
       }
-      if (!lens.open) closeLens();
-      continue;
     }
-    if (running === undefined) {
-      act(key);
-    } else if (key.name === "ctrl-c") {
-      // A completion runs beside the line it is completing, which is still
-      // being edited and so is still the line to end; a verb's line was ended
-      // where it was taken, and what is being edited under it is the next
-      // one.
-      if (running.kind === "completion") terminal.finish();
-      running.stop();
-      held = [];
-      buffer.setText("");
-      history.abandon();
-      show();
-    } else if (held.length > 0 || endsLine(key, buffer)) {
-      held.push(key);
-    } else {
-      apply({ buffer, history }, key);
-      show();
+  } finally {
+    // Whatever ended the run — the keys running out, a line that ended it, or
+    // a throw from anywhere in the loop — the screen goes back before this
+    // returns. A frame left holding it is an alternate screen with a hidden
+    // cursor and nothing drawing on it, which is the one way out of a run a
+    // person cannot type their way back from. The lens is closed rather than
+    // the frame merely dropped, so its own subscription stops with it, and it
+    // is closed first because that costs no terminal. Nothing is drawn on the
+    // way past: the prompt this ended at is the last thing a run has to say.
+    lens?.close();
+    try {
+      terminal.unframe();
+      terminal.finish();
+    } catch {
+      // A terminal that will not take this writing is one nothing here could
+      // put back, and a throw raised on the way out would replace whatever
+      // ended the run — which is what a reader needs. What holds the screen
+      // back either way is the restore the terminal's own owner makes on
+      // every way out of a run (`withPromptTerminal`, `terminal.ts`).
     }
   }
-  terminal.finish();
 }
 
 /**
