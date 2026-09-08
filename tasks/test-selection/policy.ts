@@ -210,6 +210,27 @@ export const FLAKE_COMMIT_REACH = 8;
 export const ATTRIBUTION_MAP_DAYS = 7;
 
 /**
+ * How alike two test names have to be before one is offered as the
+ * other's new name, between zero and one. A rename usually keeps most of
+ * a name, and below this the pairing is a guess: a wrong bridge silently
+ * credits one test with another's record, and the whole score rests on
+ * catch attribution, so there is no downstream check that would notice.
+ */
+export const RENAME_SIMILARITY = 0.7;
+
+/**
+ * How far ahead of the next candidate the best pairing has to be before
+ * a rename is offered, in the same units. Test names share a describe
+ * chain, so several leaves under one chain are alike; what separates a
+ * rename from a deletion beside an unrelated addition is that a rename's
+ * new name is clearly closer than anything else that arrived.
+ */
+export const RENAME_MARGIN = 0.1;
+
+/** The most rename suggestions one comment carries. */
+export const RENAME_SUGGESTIONS = 5;
+
+/**
  * Catches a rename may discard before the alias gate fails a pull
  * request. Undefined switches the gate off, which is where it starts:
  * most renames cost nothing, so a gate that fired on every rename would
@@ -676,6 +697,34 @@ export const DIALS: readonly Dial[] = [
     why:
       "Up when rebuilding the map costs more than its staleness does; down " +
       "when changed lines keep resolving to tests that have moved.",
+  },
+  {
+    name: "RENAME_SIMILARITY",
+    value: RENAME_SIMILARITY,
+    unit: "share of the longer name's own part",
+    setBy: "chosen",
+    why: "Up when the run report offers rename pairings nobody meant; down " +
+      "when a rename that discarded history goes unoffered. It only " +
+      "decides what is suggested — nothing is written to the alias file " +
+      "without somebody appending it.",
+  },
+  {
+    name: "RENAME_MARGIN",
+    value: RENAME_MARGIN,
+    unit: "share of the longer name's own part",
+    setBy: "chosen",
+    why:
+      "Up when the run report pairs a deletion with an unrelated addition; " +
+      "down when a rename made alongside another rename in the same area " +
+      "goes unoffered.",
+  },
+  {
+    name: "RENAME_SUGGESTIONS",
+    value: RENAME_SUGGESTIONS,
+    unit: "suggestions in one comment",
+    setBy: "chosen",
+    why: "Up when a change that renamed many tests has its later suggestions " +
+      "cut off; down when a comment carrying this many is one nobody reads.",
   },
   {
     name: "ALIAS_GATE_MIN_CATCHES",

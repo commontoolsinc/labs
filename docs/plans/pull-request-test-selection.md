@@ -3,9 +3,9 @@
 Status: in progress. Part one is built apart from the one-off bootstrap
 dispatch and one dashboard tile; part two is built apart from its
 continuous-integration configuration and the coverage work; part three has
-not started. [The work](#the-work) carries the detail. The record store
-this plan consumes is live and holds the data the design needs; the gaps
-it does not yet hold are listed under [What the store is
+the reporter and nothing else. [The work](#the-work) carries the detail.
+The record store this plan consumes is live and holds the data the design
+needs; the gaps it does not yet hold are listed under [What the store is
 missing](#what-the-store-is-missing) and closed by the first part of the
 work.
 
@@ -2453,7 +2453,8 @@ per-package baselines come out of it. And `coverage-comment.yml` is
 generalized into the reporter described in [Telling a pull request what
 `main` found](#telling-a-pull-request-what-main-found) rather than deleted
 — it already does the hard part, which is posting to a pull request from a
-trusted context with a write token.
+trusted context with a write token. It carries both comments now, and is
+named `pull-request-comments.yml` for it.
 
 ## Coverage
 
@@ -2800,10 +2801,12 @@ trade, and it is only acceptable if the change that caused it finds out
 without anybody having to go looking.
 
 A reporter workflow follows every `main` run to completion, in the
-base-repository context with a write token, exactly as
-`coverage-comment.yml` already does for the coverage comment. The repository
-squash-merges with the pull request number in the subject, so the pull
-request behind a `main` commit is unambiguous.
+base-repository context with a write token, exactly as the coverage
+comment already does. The repository squash-merges with the pull request
+number in the subject, so the pull request behind a `main` commit is
+unambiguous. Both comments live in
+`.github/workflows/pull-request-comments.yml`, and the reporter is
+`tasks/post-main-report.ts` over `tasks/test-selection/report.ts`.
 
 It comments once, on that pull request, when the run found something the
 pull request's own run could not have:
@@ -2813,11 +2816,13 @@ pull request's own run could not have:
   one. Attribution comes from the store rather than from an assumption,
   which is what stops the comment landing on whoever merged next after
   somebody else broke something.
-- **Whether that test was selected on the pull request.** Only this system
-  can answer it, and the answer changes what to do. Not selected is the
-  expected cost of selection, and the failure will raise the test's score
-  so the next change in that area runs it. Selected and passing is a flake
-  or an interaction between changes, and it is a different conversation.
+- **What the pull request's own run did with that test.** Its records say
+  whether it ran the test; the manifest it resolved says why it did not,
+  which only this system can answer. The answer changes what to do. Not
+  selected is the expected cost of selection, and the failure will raise
+  the test's score so the next change in that area runs it. Ran and
+  passing is a flake or an interaction between changes, and it is a
+  different conversation.
 - **A coverage debt increase above the threshold**, with the lines and
   where a test would go. Never as a failure — the run is green — and never
   for one line.
@@ -2828,7 +2833,10 @@ pull request's own run could not have:
   list; or a change somewhere else moved which lines of that package its
   own tests reach. The comment says which, because the three call for
   different things — nothing, a look at the exclusion list, and a look at
-  the change respectively.
+  the change respectively. A fourth state is possible and the comment
+  names it too: the gate measured the package on the pull request and
+  passed it, which is the two measurements disagreeing rather than any of
+  the three.
 - **A new test that turned out to be flaky**, when a test the pull request
   added has since disagreed with itself.
 - **A rename that discarded history**, with the alias line to append and
@@ -3170,6 +3178,9 @@ derived one is editing a line that is not there.
 | `FLAKE_WINDOW_DAYS` | 60 | days | Chosen | Up when a flake rate swings about on too little evidence; down when a test since fixed stays excluded. |
 | `COST_WINDOW_DAYS` | 7 | days | Chosen | Up when cost estimates are noisy; down when durations drift faster than the estimate follows. |
 | `ATTRIBUTION_MAP_DAYS` | 7 | days | Chosen | Up when rebuilding the map costs more than its staleness does; down when changed lines keep resolving to tests that have moved. |
+| `RENAME_SIMILARITY` | 0.7 | share of the longer name's own part | Chosen | Up when the run report offers rename pairings nobody meant; down when a rename that discarded history goes unoffered. It only decides what is suggested — nothing is written to the alias file without somebody appending it. |
+| `RENAME_MARGIN` | 0.1 | share of the longer name's own part | Chosen | Up when the run report pairs a deletion with an unrelated addition; down when a rename made alongside another rename in the same area goes unoffered. |
+| `RENAME_SUGGESTIONS` | 5 | suggestions in one comment | Chosen | Up when a change that renamed many tests has its later suggestions cut off; down when a comment carrying this many is one nobody reads. |
 | `ALIAS_GATE_MIN_CATCHES` | off | catches | Chosen | Off by default. Turn it on at a catch count to fail a pull request that discards that much history in a rename without an alias line, and lower the count as the alias file becomes routine. |
 
 Three more numbers are measured, and they are not in the table because
@@ -3452,11 +3463,32 @@ exercised on the branch on its own.
       `Status` depends on `pr-tests` and `full-tests`, with `skipped`
       counting as success for the latter.
 - [ ] The `ci: full` label.
-- [ ] `coverage-comment.yml` generalized into the reporter, with the
+- [x] `coverage-comment.yml` generalized into the reporter, with the
       first-failure attribution, the selected-or-not line, the coverage
       note, the per-package rise note naming which of the three routes let
       it through, the flaky-new-test note, and the rename suggestion with
-      its ready-to-append alias line.
+      its ready-to-append alias line. It is
+      `.github/workflows/pull-request-comments.yml`, which now holds both
+      comments this repository posts from the trusted context, and
+      `tasks/test-selection/report.ts` beside `tasks/post-main-report.ts`.
+      Each of the five properties under [keeping this on the right side of
+      the line](#keeping-this-on-the-right-side-of-the-line) carries a
+      test. It follows the test workflow, because a `workflow_run` payload
+      describes the run it names rather than the run that triggered it,
+      and it compares the run at the commit against the run at the
+      commit's parent: the parent's records and the pull request's come
+      from the store, and the run under report's from its own artifacts,
+      which are readable before the relay has shipped them. Whether the
+      pull request ran a test is settled by its own run's records, and the
+      manifest it resolved answers why it did not; the two together are
+      honest both before and after the lanes land. The per-package rise
+      reads a covered package's own-tests figure out of the run's
+      `perf-metrics` artifact, under the metric name
+      `ownTestsCoverageMetric` builds, so it reads the quantity the gate
+      compares rather than the source group of the same name that a
+      selected run only samples. The gate publishes that figure, so the
+      note is silent until the gate lands and needs nothing further
+      then.
 - [ ] The per-package coverage gate, in two halves. `tasks/ci-lane.ts`
       makes every item of a covered package the diff touches mandatory,
       keeps those items out of later passes and out of repeats, and

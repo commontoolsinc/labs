@@ -229,6 +229,69 @@ another's record, and since the whole score rests on catch attribution
 there is no downstream check that would notice. Suggesting a line is help;
 writing one unasked is not.
 
+## What a run on the default branch owes the change behind it
+
+Selection trades away the guarantee that a pull request runs every test
+that could have caught its regression. The counterpart of that trade is
+that the run on the default branch which does catch one reports it back
+to the change that caused it. A consumer of the store may build that
+report; what follows is what it may and may not conclude.
+
+Attribution is a comparison of two runs and nothing else. A test failed
+for the first time at a commit when the previous run on the default
+branch passed it and the run at that commit failed it. A test the
+previous run did not judge — because it did not run, or skipped, or was
+already failing — is not attributable to the commit, however long it has
+been failing. Nothing may stand in for that comparison, and in
+particular the identity of whoever merged next may not: that assumption
+is exactly the mistake the comparison exists to prevent.
+
+The previous run is the run at the commit's parent. Pushes to the default
+branch are not cancelled by their successors, so two of them overlap
+whenever two merges land close together; taking the run before this one
+from a listing of finished runs then reaches past the run in between, and
+attributes whatever that commit broke to this change.
+
+A run's records are evidence for what they cover and for nothing else. A
+run killed at its bound judged what it reached, and what it reached is
+worth reading; what it did not reach is not evidence that anything is
+absent. So every conclusion a consumer draws rests on a record that is
+there — a failure here against a pass there, a disagreement at one
+commit, a unit that recorded something — and never on a record that is
+missing. A run whose records cannot be found at all is a run nothing is
+known about, and in particular is not a run that skipped every test.
+
+A test that both passed and failed at one commit is that test
+disagreeing with itself, which is flake evidence rather than a catch, and
+it is not a first failure. That a test is new is likewise a claim about
+the store rather than about one run: an identity the store has never seen
+is new, and an identity absent from one run's records is only absent from
+that run.
+
+Whether a change's own run ran a test is settled by that run's records
+and by nothing else. The manifest it resolved answers the next question,
+which is why it did not: held back as too flaky, held back as already
+failing, or passed over by the packing. Only a resolved manifest that
+holds the identity can support that last answer, and a report without one
+says the run did not run the test rather than crediting the selector with
+a decision nothing made. Where the manifest says the test was to have run
+— the packing reached it, or the store has never seen it, which makes it
+mandatory — a run with no record of it recorded less than it ran, and
+that is a different statement from a run that did not reach it. A test the packing did not reach is coverage
+this design traded away rather than something the change missed, and it
+must be described that way. The failure raises the test's score, so the
+next change in that area runs it.
+
+A report addresses the change and never a person. No author is named, no
+figure is counted per author or per team, and no history of such reports
+is kept anywhere: a report is a pure function of one run, and nothing
+rolls a series of them up. A test the store holds a flake rate for is
+labelled as one, so nobody is told they broke something that breaks on
+its own.
+
+Nothing gates on any of this. A report is best-effort, and a run on the
+default branch is never failed by it.
+
 ## Determinism
 
 The packing function is pure. No clock, no unseeded randomness, no

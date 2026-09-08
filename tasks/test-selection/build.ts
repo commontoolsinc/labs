@@ -16,6 +16,7 @@ import {
   type StoredReport,
   type TestIdentity,
   testIdentityKey,
+  testIdentityOfKey,
 } from "@commonfabric/test-support/records";
 import {
   costSeconds,
@@ -413,7 +414,7 @@ export function locateSurfaces(
   const placed = new Map<string, Surface>();
   const unplaced: Unplaced = { suiteLevel: [], unclaimed: [] };
   for (const [key, surface] of surfaces) {
-    const test = identityOfKey(key);
+    const test = testIdentityOfKey(key);
     if (test === undefined) continue;
     // A lane's measurement of its own setup or of one of its batches is
     // not a test surface: no suite claims one, and none should.
@@ -481,24 +482,6 @@ function round(value: number, places: number): number {
   return Math.round(value * scale) / scale;
 }
 
-/** The identity a key names, parsed back out of its canonical form. */
-export function identityOfKey(key: string): TestIdentity | undefined {
-  let parts: unknown;
-  try {
-    parts = JSON.parse(key);
-  } catch {
-    return undefined;
-  }
-  if (!Array.isArray(parts) || parts.length < 3) return undefined;
-  const [k, s, n, v] = parts;
-  if (typeof k !== "string" || typeof s !== "string" || typeof n !== "string") {
-    return undefined;
-  }
-  const test: TestIdentity = { k, s, n };
-  if (typeof v === "string") test.v = v;
-  return test;
-}
-
 /**
  * The last day this identity is known to have run. The run counts are
  * kept per day and aged rather than kept forever, so an identity nothing
@@ -519,7 +502,7 @@ export function buildManifest(input: BuildInput): Manifest {
   const entries: ManifestEntry[] = [];
   const withheld: WithheldEntry[] = [];
   for (const [key, state] of input.states) {
-    const test = identityOfKey(key);
+    const test = testIdentityOfKey(key);
     if (test === undefined) continue;
     const surface = input.surfaces.get(key) ?? recordSurface(test, undefined);
     const inputs = scoreInputs(state, input.today);
