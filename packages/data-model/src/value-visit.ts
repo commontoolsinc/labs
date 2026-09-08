@@ -25,7 +25,7 @@ import {
 import { toDebugKindString } from "./value-debug.ts";
 
 /** Type for a `mainResult` form. */
-type MainResultForm<MainResult> = { type: "mainResult"; value: MainResult };
+type MainResultForm<ResultType> = { type: "mainResult"; value: ResultType };
 
 /** Type for a `replace` form. */
 type ReplaceForm<Domain> = { type: "replace"; value: Domain };
@@ -52,8 +52,8 @@ type ReplaceForm<Domain> = { type: "replace"; value: Domain };
  * * `undefined` -- The visit of the given value was completed; do nothing
  *   special.
  */
-export type GeneralVisitorResult<Domain, MainResult> =
-  | LeafVisitorResult<Domain, MainResult>
+export type GeneralVisitorResult<Domain, ResultType> =
+  | LeafVisitorResult<Domain, ResultType>
   | { type: "visitSubtype"; value: true };
 
 /**
@@ -64,8 +64,8 @@ export type GeneralVisitorResult<Domain, MainResult> =
  * being visited itself might or might not be a leaf in the sense of the graph
  * structure of the value.
  */
-export type LeafVisitorResult<Domain, MainResult> =
-  | MainVisitResult<MainResult>
+export type LeafVisitorResult<Domain, ResultType> =
+  | MainVisitResult<ResultType>
   | ReplaceForm<Domain>
   | { type: "arrayContents"; value: Domain[] }
   | { type: "mapContents"; value: [Domain, Domain][] };
@@ -79,21 +79,21 @@ export type LeafVisitorResult<Domain, MainResult> =
  * * `{ recurse: true }` -- Indicates that the value which was visited should be
  *   recursively visited.
  */
-export type ContainerIterationResult<MainResult> =
-  | MainVisitResult<MainResult>
+export type ContainerIterationResult<ResultType> =
+  | MainVisitResult<ResultType>
   | { type: "recurse"; value: true };
 
 /**
  * Outer result of a `visit()` call.
  */
-export type MainVisitResult<MainResult> =
-  | MainResultForm<MainResult>
+export type MainVisitResult<ResultType> =
+  | MainResultForm<ResultType>
   | undefined;
 
 /**
  * Interface for visit receivers.
  */
-export interface ValueVisitor<Domain = FabricValue, MainResult = FabricValue> {
+export interface ValueVisitor<Domain = FabricValue, ResultType = FabricValue> {
   /**
    * Visits a value which is already in the process of being visited.
    */
@@ -104,7 +104,7 @@ export interface ValueVisitor<Domain = FabricValue, MainResult = FabricValue> {
     originalDepth: number,
     /** Depth of the current visit. */
     thisDepth: number,
-  ): LeafVisitorResult<Domain, MainResult>;
+  ): LeafVisitorResult<Domain, ResultType>;
 
   /**
    * Visits an item from an `arrayContents` result.
@@ -112,28 +112,28 @@ export interface ValueVisitor<Domain = FabricValue, MainResult = FabricValue> {
   visitArrayContentsItem(
     index: number,
     value: Domain,
-  ): ContainerIterationResult<MainResult>;
+  ): ContainerIterationResult<ResultType>;
 
   /**
    * Visits the given _known-value_ `FabricArray`.
    */
   visitFabricArray(
     value: Domain & FabricPlainObject,
-  ): LeafVisitorResult<Domain, MainResult>;
+  ): LeafVisitorResult<Domain, ResultType>;
 
   /**
    * Visits the given _known-value_ `FabricInstance`.
    */
   visitFabricInstance(
     value: Domain & FabricInstance,
-  ): LeafVisitorResult<Domain, MainResult>;
+  ): LeafVisitorResult<Domain, ResultType>;
 
   /**
    * Visits the given _known-value_ `FabricPlainObject`.
    */
   visitFabricPlainObject(
     value: Domain & FabricPlainObject,
-  ): LeafVisitorResult<Domain, MainResult>;
+  ): LeafVisitorResult<Domain, ResultType>;
 
   /**
    * Visits the given _known-valid_ `FabricContainerValue`. If this returns type
@@ -143,7 +143,7 @@ export interface ValueVisitor<Domain = FabricValue, MainResult = FabricValue> {
    */
   visitFabricContainer(
     value: Domain & FabricContainerValue,
-  ): GeneralVisitorResult<Domain, MainResult>;
+  ): GeneralVisitorResult<Domain, ResultType>;
 
   /**
    * Visits an item from a `mapContents` result.
@@ -151,14 +151,14 @@ export interface ValueVisitor<Domain = FabricValue, MainResult = FabricValue> {
   visitMapContentsItem(
     key: Domain,
     value: Domain,
-  ): ContainerIterationResult<MainResult>;
+  ): ContainerIterationResult<ResultType>;
 
   /**
    * Visits a value determined to _not_ be a valid `FabricValue`.
    */
   visitNonFabricValue(
     value: Domain,
-  ): LeafVisitorResult<Domain, MainResult>;
+  ): LeafVisitorResult<Domain, ResultType>;
 
   /**
    * Visits the given primitive value, which can be either a native JavaScript
@@ -167,23 +167,23 @@ export interface ValueVisitor<Domain = FabricValue, MainResult = FabricValue> {
   visitPrimitive(
     value: Domain & (Primitive | FabricPrimitive),
     type: ValueTag,
-  ): LeafVisitorResult<Domain, MainResult>;
+  ): LeafVisitorResult<Domain, ResultType>;
 
   /**
    * Visits the given arbitrary value. If this returns type `visitSubtype`, then
    * the visitor system will call one of `visitFabricContainer()`,
    * `visitNonFabricValue()`, or `visitPrimitive()`.
    */
-  visitValue(value: Domain): GeneralVisitorResult<Domain, MainResult>;
+  visitValue(value: Domain): GeneralVisitorResult<Domain, ResultType>;
 }
 
 /**
  * State of a visit currently in progress, along with most of the visit
  * execution machinery.
  */
-class VisitInProgress<Domain, MainResult> {
+class VisitInProgress<Domain, ResultType> {
   /** Concrete visitor implementation. */
-  #visitor: ValueVisitor<Domain, MainResult>;
+  #visitor: ValueVisitor<Domain, ResultType>;
 
   /** Container stack of the visit currently in progress. */
   #stack = new IndexTrackingStack<Domain>();
@@ -191,7 +191,7 @@ class VisitInProgress<Domain, MainResult> {
   /**
    * Constructs an instance.
    */
-  constructor(visitor: ValueVisitor<Domain, MainResult>) {
+  constructor(visitor: ValueVisitor<Domain, ResultType>) {
     this.#visitor = visitor;
   }
 
@@ -200,7 +200,7 @@ class VisitInProgress<Domain, MainResult> {
   //
 
   /** Visits the indicated value as a top-level operation. */
-  visit(value: Domain): MainVisitResult<MainResult> {
+  visit(value: Domain): MainVisitResult<ResultType> {
     if (this.#stack.depth !== 0) {
       throw new Error(
         "Cannot use `VisitInProgress` for multiple concurrent top-level visits.",
@@ -220,7 +220,7 @@ class VisitInProgress<Domain, MainResult> {
     }
   }
 
-  #visitValue(value: Domain): MainVisitResult<MainResult> {
+  #visitValue(value: Domain): MainVisitResult<ResultType> {
     const result = this.#visitResolvingSubtype(value);
 
     if (result === undefined) {
@@ -246,7 +246,7 @@ class VisitInProgress<Domain, MainResult> {
    * Visits the items in an `arrayContents` result, recursing or returning as
    * directed by `ValueVisitor.visitArrayContentsItem()`.
    */
-  #subvisitArray(value: Domain, values: Domain[]): MainVisitResult<MainResult> {
+  #subvisitArray(value: Domain, values: Domain[]): MainVisitResult<ResultType> {
     const vis = this.#visitor;
 
     this.#stack.push(value);
@@ -288,7 +288,7 @@ class VisitInProgress<Domain, MainResult> {
   #subvisitMap(
     value: Domain,
     mappings: [Domain, Domain][],
-  ): MainVisitResult<MainResult> {
+  ): MainVisitResult<ResultType> {
     this.#stack.push(value);
 
     try {
@@ -320,7 +320,7 @@ class VisitInProgress<Domain, MainResult> {
    */
   #visitResolvingCyclesAndReplacement(
     value: Domain,
-  ): Exclude<GeneralVisitorResult<Domain, MainResult>, ReplaceForm<Domain>> {
+  ): Exclude<GeneralVisitorResult<Domain, ResultType>, ReplaceForm<Domain>> {
     const vis = this.#visitor;
 
     for (;;) {
@@ -344,7 +344,7 @@ class VisitInProgress<Domain, MainResult> {
    */
   #visitResolvingSubtype(
     value: Domain,
-  ): Exclude<LeafVisitorResult<Domain, MainResult>, ReplaceForm<Domain>> {
+  ): Exclude<LeafVisitorResult<Domain, ResultType>, ReplaceForm<Domain>> {
     const vis = this.#visitor;
 
     for (;;) {
@@ -409,8 +409,8 @@ class VisitInProgress<Domain, MainResult> {
  * for actually visiting. Subclasses are expected to `override` whatever methods
  * are needed in the context of the actual expected visits.
  */
-export class BaseValueVisitor<Domain, MainResult>
-  implements ValueVisitor<Domain, MainResult> {
+export class BaseValueVisitor<Domain, ResultType>
+  implements ValueVisitor<Domain, ResultType> {
   //
   // Subclass contract
   //
@@ -419,35 +419,35 @@ export class BaseValueVisitor<Domain, MainResult>
   visitArrayContentsItem(
     _index: number,
     value: Domain,
-  ): ContainerIterationResult<MainResult> {
+  ): ContainerIterationResult<ResultType> {
     BaseValueVisitor.#throwMissing("visitArrayContentsItem", value);
   }
 
   /** @inheritDoc */
   visitFabricArray(
     value: Domain & FabricPlainObject,
-  ): LeafVisitorResult<Domain, MainResult> {
+  ): LeafVisitorResult<Domain, ResultType> {
     BaseValueVisitor.#throwMissing("visitFabricArray", value);
   }
 
   /** @inheritDoc */
   visitFabricInstance(
     value: Domain & FabricInstance,
-  ): LeafVisitorResult<Domain, MainResult> {
+  ): LeafVisitorResult<Domain, ResultType> {
     BaseValueVisitor.#throwMissing("visitFabricInstance", value);
   }
 
   /** @inheritDoc */
   visitFabricPlainObject(
     value: Domain & FabricPlainObject,
-  ): LeafVisitorResult<Domain, MainResult> {
+  ): LeafVisitorResult<Domain, ResultType> {
     BaseValueVisitor.#throwMissing("visitFabricPlainObject", value);
   }
 
   /** @inheritDoc */
   visitFabricContainer(
     value: Domain & FabricContainerValue,
-  ): GeneralVisitorResult<Domain, MainResult> {
+  ): GeneralVisitorResult<Domain, ResultType> {
     BaseValueVisitor.#throwMissing("visitFabricContainer", value);
   }
 
@@ -455,14 +455,14 @@ export class BaseValueVisitor<Domain, MainResult>
   visitMapContentsItem(
     _key: Domain,
     value: Domain,
-  ): ContainerIterationResult<MainResult> {
+  ): ContainerIterationResult<ResultType> {
     BaseValueVisitor.#throwMissing("visitMapContentsItem", value);
   }
 
   /** @inheritDoc */
   visitNonFabricValue(
     value: Domain,
-  ): VisitNonFabricValueResult<Domain, MainResult> {
+  ): VisitNonFabricValueResult<Domain, ResultType> {
     BaseValueVisitor.#throwMissing("visitNonFabricValue", value);
   }
 
@@ -470,12 +470,12 @@ export class BaseValueVisitor<Domain, MainResult>
   visitPrimitive(
     value: Domain & (Primitive | FabricPrimitive),
     _type: ValueTag,
-  ): VisitPrimitiveResult<Domain, MainResult> {
+  ): VisitPrimitiveResult<Domain, ResultType> {
     BaseValueVisitor.#throwMissing("visitPrimitive", value);
   }
 
   /** @inheritDoc */
-  visitValue(value: Domain): VisitValueResult<Domain, MainResult> {
+  visitValue(value: Domain): VisitValueResult<Domain, ResultType> {
     BaseValueVisitor.#throwMissing("visitValue", value);
   }
 
@@ -484,8 +484,8 @@ export class BaseValueVisitor<Domain, MainResult>
   //
 
   /** Visits the indicated value. */
-  visit(value: Domain): MainResult | undefined {
-    const inProgress = new VisitInProgress<Domain, MainResult>();
+  visit(value: Domain): ResultType | undefined {
+    const inProgress = new VisitInProgress<Domain, ResultType>();
     return inProgress.visit(value);
   }
 
