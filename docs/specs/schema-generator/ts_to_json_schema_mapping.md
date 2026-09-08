@@ -83,13 +83,21 @@ triggers are documented in the ts-transformers behavior spec §12.
 `src/schema-generator.ts`) handles: `TypeLiteral` nodes (properties
 with `questionToken` optionality; string/number index signatures →
 `additionalProperties`, first non-undefined wins, no JSDoc),
-`ArrayTypeNode`, unions (`true` member short-circuits, `false`
+`readonly` type-operator nodes (analyze the wrapped type), `ArrayTypeNode`,
+unions (`true` member short-circuits, `false`
 members filtered, singletons unwrapped), literal nodes
 `TypeReference` nodes (wrapper detection first, then a
 scope-based name-resolution fallback for unbindable synthetic references via
 `checker.getSymbolsInScope` — plus a `Date`-by-name
 special case), keyword types, and a final
 resolve-else-`true` fallback.
+
+`readonly` marks mutability and contributes no JSON Schema keyword. A
+synthetic `readonly T[]` therefore has the same schema as its wrapped `T[]`.
+In particular, `readonly unknown[]` emits
+`{ type: "array", items: { type: "unknown" } }`, preserving the element's
+reference-only semantics. The synthetic readonly array cases in
+`test/schema-generator.test.ts` cover unknown, string, and object elements.
 
 **Observed node/type divergence — literal encodings.** The node path emits
 `const` (`{ type: "string", const: "x" }`); the type path emits

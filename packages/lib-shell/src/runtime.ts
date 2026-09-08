@@ -161,7 +161,9 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    * the runtime acts as, which is also the audience the render ceiling admits
    * when `cfcRenderCeiling` is on. Omit it to send one naming the session
    * identity; pass `null` to send none, which leaves the worker to build its
-   * own, naming the session identity as well.
+   * own, naming the session identity as well. A supplied snapshot without an
+   * `actingPrincipal` leaves transaction trust unnamed; rendering falls back
+   * to the session identity as its audience.
    */
   trustSnapshot?: RuntimeTrustSnapshot | null;
 
@@ -325,15 +327,11 @@ export function createRuntimeClientOptions({
   // (§8.12.8) keeps the derived component tracking the current value rather
   // than ratcheting forever. H1 shipped "observe" as the measurement stage.
   cfcFlowLabels = "persist",
-  // Epic H3a: populate the render confidentiality ceiling. Off by default —
-  // a deployment-posture change to what the shell renders, enabled
-  // deliberately per host (shell dogfood flag). When on, display sinks
-  // admit only the §8.10.6 profile (the acting user's own identity atom
-  // plus display-dischargeable influence-class caveat kinds) and
-  // author-supplied render declassification is denied (audit S15); the
-  // reconciler's fail-closed narrowing does the enforcement. Exact-match
-  // forms only until H3b adds exchange resolution, so over-blocking is
-  // expected — that is the point of the dogfood stage.
+  // Hosts opt into the §8.10.6 display ceiling. The worker resolves shared
+  // `Space` labels through verified reader membership before the reconciler
+  // fits them against the acting user's identity atoms and the admitted
+  // influence-class caveat kinds. Author-supplied render declassification is
+  // denied, and labels that still do not fit the ceiling stay blocked.
   cfcRenderCeiling = false,
   trustSnapshot,
   forwardWorkerConsole,

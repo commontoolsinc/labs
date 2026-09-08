@@ -778,6 +778,21 @@ export class SchemaGenerator {
       return schema;
     }
 
+    // A `readonly T[]` node is the operator form the checker prints a
+    // ReadonlyArray in, and it is what a synthetic result type built from a
+    // cell read looks like (`cell.get()` on a `Cell<T[]>` reads back
+    // `readonly T[]`). Readonly-ness is a mutability marker with no JSON
+    // Schema counterpart, so the node carries exactly the shape of `T[]`.
+    // Without this branch the node fell through to the accept-anything
+    // fallback at the end, which turned a read of `unknown[]` — the
+    // reference-only declaration — into a schema that walks everything.
+    if (
+      ts.isTypeOperatorNode(typeNode) &&
+      typeNode.operator === ts.SyntaxKind.ReadonlyKeyword
+    ) {
+      return this.#analyzeTypeNodeStructure(typeNode.type, checker, context);
+    }
+
     // Handle ArrayTypeNode (e.g., number[], string[])
     if (ts.isArrayTypeNode(typeNode)) {
       const elementType = typeRegistry?.get(typeNode.elementType) ??
