@@ -48,11 +48,14 @@ import {
   dayOf,
   emptyAggregate,
   Fold,
+  identityOfKey,
   locateSurfaces,
   parseAggregate,
   partitionOf,
+  surfaceName,
   type Unplaced,
 } from "./test-selection/build.ts";
+import { isLaneMeasurement } from "./lane-measurement.ts";
 import { capabilitiesBySuite, loadTopology } from "./test-topology.ts";
 import type { Suite } from "./test-topology/suite.ts";
 import {
@@ -568,6 +571,24 @@ export async function publish(
   // built without it names surfaces nothing in the tree answers to.
   const suites = await topology();
   const { placed, unplaced } = locateSurfaces(suites, folded.surfaces);
+  // What nothing has worked out a unit for, kept from one publish to the
+  // next. A surface records on its own schedule, and a run reads surfaces
+  // only from the objects it folds for the first time, so a surface
+  // recording less often than this runs is absent from most runs. An
+  // entry is removed when the topology has a unit for its identity, and
+  // one an earlier run wrote is removed as soon as it names something the
+  // count no longer holds.
+  const stillUnplaced = (key: string): boolean => {
+    if (placed.has(key)) return false;
+    const test = identityOfKey(key);
+    return test !== undefined && !isLaneMeasurement(test);
+  };
+  folded.aggregate.unclaimed = [
+    ...new Set([
+      ...(aggregate.unclaimed ?? []).filter(stillUnplaced),
+      ...unplaced.unclaimed,
+    ]),
+  ].sort();
   const states = new Map(
     [...folded.states].filter(([key]) => placed.has(key)),
   );
@@ -613,7 +634,13 @@ export async function publish(
       })),
   }));
 
-  summarize(manifest, reference, folded.observations, unplaced);
+  summarize(
+    manifest,
+    reference,
+    folded.observations,
+    unplaced,
+    aggregate.unclaimed,
+  );
 
   if (options.out !== undefined) {
     await Deno.mkdir(options.out, { recursive: true });
@@ -652,12 +679,51 @@ export async function publish(
   return 0;
 }
 
-/** What the job summary says: the shape of what this run decided. */
+/** How many of the worst surfaces a summary line names. */
+const NAMED_SURFACES = 5;
+
+/**
+ * The record surfaces that wrote a set of identities, worst first, as one
+ * phrase. The count says how much there is to fix, and the surface says
+ * which part of the tree it is in.
+ */
+export function namingSurfaces(keys: readonly string[]): string {
+  const counts = new Map<string, number>();
+  for (const key of keys) {
+    const test = identityOfKey(key);
+    if (test === undefined) continue;
+    const surface = surfaceName(test);
+    counts.set(surface, (counts.get(surface) ?? 0) + 1);
+  }
+  // By count and then by name, so that two surfaces of the same size come
+  // out in the same order every run.
+  const ordered = [...counts].sort((left, right) =>
+    right[1] - left[1] || left[0].localeCompare(right[0])
+  );
+  const named = ordered.slice(0, NAMED_SURFACES).map(([surface, count]) =>
+    `${surface} ${count}`
+  );
+  const rest = ordered.length - named.length;
+  return `${ordered.length} surface(s): ${named.join(", ")}` +
+    (rest > 0 ? `, and ${rest} more` : "");
+}
+
+/**
+ * What the job summary says: the shape of what this run decided.
+ *
+ * `wasUnclaimed` is everything no run had worked out a unit for by the
+ * previous publish, from the aggregate this run read. It separates an
+ * identity recorded once and not yet given a unit from one whose records
+ * keep arriving and keep saying too little. A run folding into an empty
+ * aggregate has nothing to compare against, and so does one reading an
+ * aggregate that records no such list; both say neither.
+ */
 function summarize(
   manifest: ReturnType<typeof buildManifest>,
   reference: ReturnType<typeof plan>,
   observations: number,
   unplaced: Unplaced,
+  wasUnclaimed: readonly string[] | undefined,
 ): void {
   console.log(
     `test selection: folded ${observations} execution(s) into ` +
@@ -666,17 +732,44 @@ function summarize(
   if (unplaced.suiteLevel.length > 0) {
     console.log(
       `test selection: ${unplaced.suiteLevel.length} identities measure a ` +
-        `suite rather than anything a lane can be asked to run`,
+        `whole invocation rather than one unit, so they are left out. The ` +
+        `steps inside the invocation are measured separately, so nothing ` +
+        `is missing and there is nothing to act on.`,
     );
   }
   if (unplaced.unclaimed.length > 0) {
-    // Almost always an identity whose records predate the registration
-    // preload, so nothing knows which file registers it. It is placed
-    // again the first time it runs and records one.
     console.log(
-      `test selection: ${unplaced.unclaimed.length} identities no suite ` +
-        `claims, so no lane can run them`,
+      `test selection: the topology has no unit for ` +
+        `${unplaced.unclaimed.length} identities, so no lane can be asked ` +
+        `to run one. An identity is left out until one of its records ` +
+        `says enough to work out which unit it is in.`,
     );
+    console.log(
+      `test selection: those ${unplaced.unclaimed.length} were recorded ` +
+        `by ${namingSurfaces(unplaced.unclaimed)}`,
+    );
+    if (wasUnclaimed !== undefined) {
+      const before = new Set(wasUnclaimed);
+      const stuck = unplaced.unclaimed.filter((key) => before.has(key));
+      if (stuck.length === 0) {
+        console.log(
+          `test selection: none of them were in this count at the last ` +
+            `publish, so nothing has been recorded twice with no unit.`,
+        );
+      } else {
+        console.log(
+          `test selection: ${stuck.length} of them were in this count at ` +
+            `the last publish too, so more of their records have been ` +
+            `read since and those records still do not say which unit. A ` +
+            `surface whose records never say which unit is worth fixing. ` +
+            `See docs/development/test-selection.md.`,
+        );
+        console.log(
+          `test selection: those ${stuck.length} were recorded by ` +
+            `${namingSurfaces(stuck)}`,
+        );
+      }
+    }
   }
   const held = new Map<string, number>();
   for (const entry of manifest.withheld) {
