@@ -101,6 +101,23 @@ export interface PromptTerminal {
    * glyph naming it.
    */
   announce(text: string): void;
+
+  /**
+   * Runs `body` with the terminal handed over to whatever it starts, and is
+   * what `body` answered.
+   *
+   * It is for the one thing shuttle does that is not shuttle drawing: a
+   * person's own editor, which draws a whole screen of its own and reads the
+   * keyboard on its own terms. Everything the prompt holds the terminal in for
+   * its own drawing has to come off around such a program and go back on
+   * after, whatever the program did, and only what opened the terminal knows
+   * what it is holding.
+   *
+   * What was drawn before is not drawn again on the way out. The program had
+   * the screen, so the next line is drawn where the cursor stands rather than
+   * over a line that may no longer be there.
+   */
+  suspend<T>(body: () => Promise<T>): Promise<T>;
 }
 
 /**

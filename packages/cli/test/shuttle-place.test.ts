@@ -2896,6 +2896,26 @@ describe("place", () => {
         });
       });
 
+      describe("reach()", () => {
+        it("hands back what the row's own operand reached, where that is nowhere", () => {
+          // The walk to the row comes first and the walk written after the
+          // handle second, so an operand that arrived at nothing is the answer
+          // already — nothing walks on from a step that never arrived.
+
+          const place = new CurrentPlace(SPACE);
+          const move = {
+            kind: "handle" as const,
+            handle: "%1",
+            rest: "deeper",
+            operand: "%1/deeper",
+          };
+          const reached = place.reach(move, place.place, "nowhere-at-all");
+          expect(reached.kind).toBe("refused");
+          // And it moved nothing, a refusal leaving the place where it stood.
+          expect(place.place).toEqual(new CurrentPlace(SPACE).place);
+        });
+      });
+
       describe("render()", () => {
         it("returns both halves of the place it stands at", () => {
           const place = atPiece();

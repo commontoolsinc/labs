@@ -131,14 +131,20 @@ So the line shape at the top of this document says where options usually go
 rather than where they must, and a shuttle verb mirroring either of those two
 carries the call section below rather than this rule.
 
-How many operands a verb takes is part of the same table. A verb declares both
-bounds, and the noun phrase its refusal calls a missing operand by, and the
-reading that divides the line enforces them: the count is applied in one place
+How many operands a verb takes is part of the same table. A verb declares what
+it takes, and the noun phrase its refusal calls a missing operand by, and the
+reading that divides the line enforces both: the count is applied in one place
 while the wording stays each verb's own — `cd` says it takes a place to move
 to where `wish` says it takes the target to resolve. A verb that takes an
 operand it can do without declares that too, since what it does with none is a
 reading of its own rather than a line for the dispatch to answer: `get` reads
 where it stands, and `help` lists the verbs.
+
+The verb that carries a call section is the one with no upper bound to
+declare, and it is the same fact as the option reading above: the words past
+its own operands are the callable's, and how many the callable takes is not
+this table's to know. So it declares the fewest it needs and nothing more, and
+the words after those reach the callable whatever their number.
 
 The parse is `cf`'s own: `parseFlags` (`@cliffy/flags`) is what `Command`
 reads a `cf` line's flags through, and it reads a bare token array, so a flag
@@ -893,9 +899,25 @@ and reaching it is a read of a place the line has not moved to.
 
 - `set <path> <value>` — the value parses as JSON; a bare word is a string
   where that is unambiguous, and a value holding whitespace is quoted, being
-  one token like any other operand. `set <path> -` reads stdin.
-- `edit <path>` — opens `$EDITOR` on the current value, writes back on save
-  (the view substrate's editing buffers already do the hard part).
+  one token like any other operand. A token opening the way JSON opens a value
+  and then failing to parse is refused with the parser's own reason rather
+  than written as the string it spells.
+- **`set <path> -` is refused rather than read.** Standard input is the
+  keyboard the prompt reads its keys off, and two readers of one keyboard
+  would each take some of the keys and neither would see them all — a read
+  that never reaches end of input wedges the shell rather than failing. A call
+  reaches that same stream by more spellings than a refusal over the line
+  could enumerate, so the reader is substituted instead, which closes the set
+  by construction. Reading a local file is the externals milestone's `<`, and
+  is spelled `file:`.
+- `edit <path>` — opens `$EDITOR` on the current value and writes back what
+  was saved. The value goes out as JSON and comes back as JSON, so what is
+  edited is what a write takes rather than what `get` prints. A value JSON
+  cannot carry is refused before the editor opens: a cell holds an explicit
+  `undefined`, an array hole, a symbol and a `bigint`, and a round trip
+  through JSON would write a value the person never typed and report it as a
+  success. It is the one write with no `cf` equivalent behind it, and the
+  terminal's raw mode comes off around the editor and goes back on after.
 - `link <target> <path>` — writes a cell reference, the fabric's link
   semantics (what FUSE spells `ln -s`). A redirect copies values; `link`
   is the only spelling that creates references, so the distinction is

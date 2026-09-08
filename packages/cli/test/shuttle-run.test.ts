@@ -23,6 +23,7 @@ import { ConsoleMethod } from "@commonfabric/runner";
 import type { ConnectionOutput, SpaceConfig } from "../lib/piece.ts";
 import type { PromptTerminal } from "../lib/shuttle/prompt.ts";
 import { runShuttle, type ShuttleDeps } from "../lib/shuttle/run.ts";
+import type { VerbDeps } from "../lib/shuttle/verbs.ts";
 import type { Key } from "../lib/view/keys.ts";
 
 const SPACE = "did:key:z6MkConnectedSpace" as MemorySpace;
@@ -79,6 +80,7 @@ async function running(
     announce: (text) => {
       produced.push(text);
     },
+    suspend: (body) => body(),
   };
   await runShuttle(CONFIG, {
     open: (config) => {
@@ -139,6 +141,7 @@ describe("runShuttle()", () => {
           announce: (text) => {
             announced.push(text);
           },
+          suspend: (body) => body(),
         }),
     });
     output?.report?.("navigateTo new piece id of:fid1:whatever");
@@ -206,6 +209,7 @@ describe("runShuttle()", () => {
           },
           finish: () => {},
           announce: () => {},
+          suspend: (body) => body(),
         }),
     })).rejects.toThrow("No screen.");
     expect(closed).toBe(1);
@@ -247,9 +251,66 @@ describe("runShuttle()", () => {
           edit: () => {},
           finish: () => {},
           announce: () => {},
+          suspend: (body) => body(),
         });
       },
     })).rejects.toThrow("The server refused.");
     expect(reached).toBe(true);
+  });
+
+  describe("what it hands the prompt", () => {
+    it("wires the editor trip to run inside the terminal's suspension", async () => {
+      // The one wire no verb reaches without a cell to read first. What it
+      // composes is two things with cases of their own — the terminal's
+      // suspension and the trip through `$EDITOR` — so what is left to check
+      // is that they are composed in that order and that the text goes
+      // through.
+
+      const order: string[] = [];
+      let opened: string | undefined;
+      const pieces = {
+        dispose: () => Promise.resolve(),
+        getSpace: () => SPACE,
+        getSpaceName: () => "board",
+      } as unknown as PiecesController;
+      let deps: VerbDeps | undefined;
+      await runShuttle(CONFIG, {
+        open: () => Promise.resolve(pieces),
+        terminal: (body) =>
+          body({
+            keys: ReadableStream.from([]),
+            edit: () => {},
+            finish: () => {},
+            announce: () => {},
+            suspend: async (inner) => {
+              order.push("suspended");
+              const answer = await inner();
+              order.push("resumed");
+              return answer;
+            },
+          }),
+        prompt: (_shuttle, _terminal, given) => {
+          deps = given;
+          return Promise.resolve();
+        },
+      });
+      // The editor is named for the case rather than taken from whatever this
+      // process inherited: an ambient `$EDITOR` would be a real editor with
+      // this terminal, waiting for somebody to quit it. `true` reads nothing,
+      // writes nothing and exits zero, so the trip comes back with the text it
+      // went out with.
+      const before = Deno.env.get("EDITOR");
+      Deno.env.set("EDITOR", "true");
+      try {
+        const editing = await deps?.editText?.("the value");
+        opened = editing?.kind === "edited" ? editing.text : undefined;
+        if (editing?.kind === "edited") await editing.discard();
+      } finally {
+        if (before === undefined) Deno.env.delete("EDITOR");
+        else Deno.env.set("EDITOR", before);
+      }
+      expect(order).toEqual(["suspended", "resumed"]);
+      expect(opened).toBe("the value");
+    });
   });
 });

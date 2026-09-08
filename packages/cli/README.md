@@ -137,16 +137,38 @@ differently from the rest of `cf`, which takes those two as ordinary slugs;
 [#6992](https://github.com/commontoolsinc/labs/issues/6992) retires the
 difference by refusing them as slug values.
 
-| Verb            | What it does                                                                                                                                                                                                                                                                   |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `cd <ref>`      | Moves the place, once the fabric says it is there. Takes relative segments, `..`, `-`, `/`, `.` for where you stand, `./<ref>` for a member and `.@scope` for the scope, rooted and complete references, slugs, and `#name` entry points.                                      |
-| `ls`            | Lists what stands where you are: a space root's facets, the slugs the index records, the space's pieces, or the keys under a cell. Rows are numbered, a row that is one of the piece's callables says so, and one screenful is written. `--limit <rows>` overrides the height. |
-| `pwd`           | The complete address of the place, both dimensions.                                                                                                                                                                                                                            |
-| `get [<ref>]`   | Reads the value at a cell, defaulting to where you stand. A trailing `#argument` reads the piece's arguments cell. Takes `cf cell get`'s read options — `--filter`, `--select`, `--schema`, `--json` — and writes one screenful of JSON, or the whole value under `--json`.    |
-| `wish <#name>`  | Resolves a named entry point, exactly as `cf wish` does.                                                                                                                                                                                                                       |
-| `more`          | Writes the next page of a listing or a value that did not fit, a listing continuing under the numbers it already gave its rows.                                                                                                                                                |
-| `where`         | The whole ambient record: the connection, and the place `pwd` prints.                                                                                                                                                                                                          |
-| `help [<verb>]` | Lists the verbs, or writes one verb's page. `<verb> --help` writes the same page.                                                                                                                                                                                              |
+| Verb                         | What it does                                                                                                                                                                                                                                                                   |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `cd <ref>`                   | Moves the place, once the fabric says it is there. Takes relative segments, `..`, `-`, `/`, `.` for where you stand, `./<ref>` for a member and `.@scope` for the scope, rooted and complete references, slugs, and `#name` entry points.                                      |
+| `ls`                         | Lists what stands where you are: a space root's facets, the slugs the index records, the space's pieces, or the keys under a cell. Rows are numbered, a row that is one of the piece's callables says so, and one screenful is written. `--limit <rows>` overrides the height. |
+| `pwd`                        | The complete address of the place, both dimensions.                                                                                                                                                                                                                            |
+| `get [<ref>]`                | Reads the value at a cell, defaulting to where you stand. A trailing `#argument` reads the piece's arguments cell. Takes `cf cell get`'s read options — `--filter`, `--select`, `--schema`, `--json` — and writes one screenful of JSON, or the whole value under `--json`.    |
+| `set <ref> <value>`          | Writes a value at a cell, which copies rather than links. The value is JSON, and a bare word is the string it spells. `-` is refused, standard input being the keyboard.                                                                                                       |
+| `edit [<ref>]`               | Opens a cell's value in `$EDITOR` and writes back what you save. A value JSON cannot carry is refused before the editor opens, and text that will not parse is refused with the file it is still in.                                                                           |
+| `link <ref> <ref>`           | Writes a reference at the second cell naming the first, `ln -s`'s order. The one spelling that makes a cell read another cell.                                                                                                                                                 |
+| `call <ref> <name> [input…]` | Invokes a piece's verb. The verb name opens the callable's own section, so its schema-derived flags follow bare and `--` closes it. A callable handle off `verbs` carries the name already, as in `call %4`.                                                                   |
+| `verbs [<ref>]`              | Lists a piece's callables, numbering each so `call %n` invokes it. `--all` shows the rows the marks hide.                                                                                                                                                                      |
+| `describe [<ref>]`           | The page `cf piece describe` writes: what the piece is, what it holds, and what it takes. `--all` as above.                                                                                                                                                                    |
+| `wish <#name>`               | Resolves a named entry point, exactly as `cf wish` does.                                                                                                                                                                                                                       |
+| `more`                       | Writes the next page of a listing or a value that did not fit, a listing continuing under the numbers it already gave its rows.                                                                                                                                                |
+| `where`                      | The whole ambient record: the connection, and the place `pwd` prints.                                                                                                                                                                                                          |
+| `help [<verb>]`              | Lists the verbs, or writes one verb's page. `<verb> --help` writes the same page.                                                                                                                                                                                              |
+
+A listing numbers its rows, and `%n` names a row until the next listing replaces
+the numbering — `more` continues the current one rather than starting another.
+`cd %3` and `get %1/title` act on what a listing showed, and `call %4` invokes a
+callable row without the receiver or the name being written again: a row carries
+its kind, and the place the listing was read at is the receiver. A row nothing
+stands at, a callable among them, is a row `cd` refuses and `call` invokes.
+
+Reaching into a piece starts it, so what a read serves is what a running pattern
+holds rather than what was last committed. Every verb that touches a piece
+reaches in — `cd` onto one, `get` and `ls` inside one, and each of the writes
+and calls — while a place that is no piece starts nothing, there being no
+pattern behind a facet. A piece is started once for the run, counted by the
+piece the walk resolved to rather than by the path that reached it: two lines
+writing two fields of one piece start it once, and two lines reaching two
+members of one collection start two.
 
 A line is split POSIX-style — whitespace separates, quotes group — so a value
 holding a space is one operand when it is quoted, and anything shuttle prints as
@@ -189,6 +211,23 @@ for it. The parse is `cf`'s own — the one a `cf` command reads its flags throu
 — so a flag is spelled and refused here as it is on a `cf` command line, and
 `--help` is the option every verb takes.
 
+`call` reads that rule the other way, because its operands carry a callable's
+own flags. The parse stops at its first operand, so
+`call topics/3 search
+--query milk` hands `--query` to the callable rather than
+refusing it, and the bare `--` closes the callable's section instead of quoting
+an operand. Its own options are still its own: they are the ones written before
+the receiver, so `call --help` writes this verb's page.
+
+A callable's page is not reached by writing an option where its name goes. A
+name in that shape is one nobody can type: the option grammar reads such a token
+as an option wherever one may be written, and the single place it does not —
+inside the callable's own section, past the name — is a place a name cannot be.
+So `call topics/3 --help` is refused rather than sent to the fabric as a
+callable called `--help`, and the refusal says why; where the name was `--help`
+or `-h` it also points at `verbs`, which lists what the piece can be asked to
+do.
+
 The line editor is `lib/view`'s `EditBuffer` over its own key decoder, bound to
 Emacs keys: `ctrl-a`/`ctrl-e` and `home`/`end` for the ends of the line,
 `ctrl-b`/`ctrl-f` and the arrows for a character, `alt-b`/`alt-f` for a word,
@@ -206,17 +245,22 @@ on it is not recorded, nor is one you just ran again, and neither end wraps
 round. Running a line or pressing `ctrl-c` returns you to the line being typed.
 
 `tab` completes the token the line ends in: a verb where you have typed none,
-and after a verb whatever that verb's operand takes — a verb name for `help`,
-and for `cd` and `get` the rows that stand where you stand. What it writes is
-what `ls` prints for the same row, so a name needing quotes arrives quoted and a
-name the reference has to carry arrives as the reference; where several rows
-agree only as far as a partial that would need quoting, nothing is written and
-you type on. Completing under a place is a read, so it runs beside the keys the
-way a line does: `enter` typed under it is held and runs the line it completed,
-`ctrl-c` cancels it, and a read that failed writes nothing rather than saying
-so. What it completes is the token at the end of the line, so a cursor elsewhere
-leaves the line alone — and the token is the one the split reads, so a space you
-quoted or escaped stays inside its token rather than starting a new one.
+and after a verb whatever that verb takes at the position you are typing at — a
+verb name for `help`, and the rows that stand where you stand for the verbs that
+reach one. A verb taking two operands answers per position rather than once:
+both ends of a `link` are places, `set`'s path is a place and the JSON value
+after it is nothing anything could list, and `call`'s receiver is a place while
+the callable's name after it belongs to that receiver rather than to where you
+stand. What it writes is what `ls` prints for the same row, so a name needing
+quotes arrives quoted and a name the reference has to carry arrives as the
+reference; where several rows agree only as far as a partial that would need
+quoting, nothing is written and you type on. Completing under a place is a read,
+so it runs beside the keys the way a line does: `enter` typed under it is held
+and runs the line it completed, `ctrl-c` cancels it, and a read that failed
+writes nothing rather than saying so. What it completes is the token at the end
+of the line, so a cursor elsewhere leaves the line alone — and the token is the
+one the split reads, so a space you quoted or escaped stays inside its token
+rather than starting a new one.
 
 Nothing turns a candidate down for its shape. What bounds a completion is which
 rows stand where you stand, so `cd slugs/bo` at a space root writes nothing —
@@ -228,16 +272,17 @@ The code is `lib/shuttle/`: `run.ts` composes a session, `place.ts` holds the
 place and what `cd` refuses, `connection.ts` the one `PiecesController` a
 process holds, `line.ts` the split and the printing that inverts it,
 `options.ts` the option grammar over the tokens after a verb, `listing.ts` what
-`ls` reads and what each row turns out to be, `verbs.ts` the dispatch — which
-writes nothing — `help.ts` the form a verb's account of itself prints in,
-`page.ts` how much of a rendering one page holds, `value.ts` how a value the
-fabric holds is written, `session.ts` what the last listing numbered and what
-`more` writes next, `prompt.ts` the loop that reads keys and runs a line beside
-them, `history.ts` the lines that loop has read and the traversal over them,
-`completion.ts` what `tab` finishes, `announce.ts` what a connection and a
-pattern write onto that loop's out-of-band line, `record.ts` the form `where`
-and `pwd` share, and `paint.ts` and `terminal.ts` the escape sequences and the
-raw mode under it.
+`ls` reads and what each row turns out to be, `handles.ts` what a `%n` operand
+names in it, `verbs.ts` the dispatch — which writes nothing — `editor.ts` the
+round trip `edit` makes through `$EDITOR`, `help.ts` the form a verb's account
+of itself prints in, `page.ts` how much of a rendering one page holds,
+`value.ts` how a value the fabric holds is written, `session.ts` what the last
+listing numbered, what `more` writes next and which pieces the run has started,
+`prompt.ts` the loop that reads keys and runs a line beside them, `history.ts`
+the lines that loop has read and the traversal over them, `completion.ts` what
+`tab` finishes, `announce.ts` what a connection and a pattern write onto that
+loop's out-of-band line, `record.ts` the form `where` and `pwd` share, and
+`paint.ts` and `terminal.ts` the escape sequences and the raw mode under it.
 
 Each of those is driven by a unit test with nothing behind it — no server, no
 piece, and no terminal — so what the shell does when all of them are real is a

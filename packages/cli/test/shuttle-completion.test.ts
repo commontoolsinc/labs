@@ -68,6 +68,7 @@ function shuttleIn(): Shuttle {
       } as unknown as PiecesController,
     }),
     session: new ShuttleSession(),
+    invocationSession: "a-session",
   };
 }
 
@@ -108,6 +109,30 @@ function cancelled(): AbortSignal {
   return stopper.signal;
 }
 
+/**
+ * Helper for the case below, which is the shortest proper prefix of `word`
+ * that no other word in `words` opens with, and nothing where every one of
+ * them opens another word too.
+ *
+ * Nothing is an answer about the set rather than a failure to find one: a
+ * two-letter verb beside a longer one that opens the same way — `cd` beside
+ * `call`, `ls` beside `link` — is told apart from it only by its last
+ * character, so the typing that names it alone is the whole of it.
+ */
+function ownPrefix(
+  word: string,
+  words: readonly string[],
+): string | undefined {
+  for (let cut = 1; cut < word.length; cut++) {
+    const prefix = word.slice(0, cut);
+    const shared = words.some((other) =>
+      other !== word && other.startsWith(prefix)
+    );
+    if (!shared) return prefix;
+  }
+  return undefined;
+}
+
 describe("completion", () => {
   describe("completeLine() over the verbs", () => {
     it("writes the verb a prefix names, where it names one", async () => {
@@ -123,29 +148,46 @@ describe("completion", () => {
         .toBe("wish");
     });
 
-    it("writes every verb the table declares, under its own whole word", async () => {
+    it("leaves every verb the table declares whole, from the typing that names it alone", async () => {
       // The claim ranges over the verbs, so the enumeration is written out
       // and held to the table beside it. Ranging over `VERB_WORDS` alone
       // would close nothing: the words offered and the words walked would be
       // the same array, so a word missing from it would be a word this never
       // asked about.
+      //
+      // What is asked of each is that the shortest typing naming it alone
+      // leaves the whole verb on the line. For most that means a completion
+      // wrote the rest; for a verb every proper prefix of which opens another
+      // verb too, it means the typing was already the word. Both are the same
+      // sentence about what a person has in front of them, which is why they
+      // are one assertion rather than two cases — and a verb the completion
+      // does not know at all fails it either way, the line standing at the
+      // prefix it was given.
 
       const words = [
+        "call",
         "cd",
+        "describe",
+        "edit",
         "get",
         "help",
+        "link",
         "ls",
         "more",
         "pwd",
+        "set",
+        "verbs",
         "where",
         "wish",
       ];
       expect([...VERB_WORDS]).toEqual(words);
       for (const word of words) {
-        expect(
-          await completeLine(shuttleIn(), word.slice(0, -1), READS_NOTHING),
-        )
-          .toBe(word);
+        const typed = ownPrefix(word, words) ?? word;
+        const written = await completeLine(shuttleIn(), typed, READS_NOTHING);
+        // `written ?? typed` is the line as it stands afterwards, a
+        // completion that wrote nothing having left it as it was.
+        expect({ word, line: written ?? typed })
+          .toEqual({ word, line: word });
       }
     });
 
@@ -334,6 +376,56 @@ describe("completion", () => {
       expect(
         await completeLine(atPiece(), "get --json ti", holding({ title: 1 })),
       ).toBe("get --json title");
+    });
+
+    // A verb taking two operands declares a candidate for each, so which
+    // position a token stands in decides what is offered for it. The three
+    // cases below are the three answers the table gives at a second position,
+    // and each is a different fact about the verb rather than about the
+    // grammar: `link` writes a reference and both ends are places, `set`
+    // writes a value that nothing enumerates, and `call`'s name belongs to
+    // the receiver rather than to the place shuttle stands at.
+
+    it("writes a key at either end of `link`, both being places", async () => {
+      const cells = holding({ title: 1, latest: 2 });
+      expect(await completeLine(atPiece(), "link ti", cells))
+        .toBe("link title");
+      expect(await completeLine(atPiece(), "link title la", cells))
+        .toBe("link title latest");
+    });
+
+    it("writes a key for `set`'s path and nothing for the value after it", async () => {
+      const cells = holding({ title: 1, latest: 2 });
+      expect(await completeLine(atPiece(), "set ti", cells))
+        .toBe("set title");
+      expect(await completeLine(atPiece(), "set title la", cells))
+        .toBeUndefined();
+    });
+
+    it("writes a key for `call`'s receiver and nothing for the name after it", async () => {
+      // The name is a callable of the receiver the line names, not a row of
+      // the place shuttle stands at, so offering one is a read of somewhere
+      // the line has not moved to — which is a completion of its own.
+
+      const cells = holding({ title: 1, latest: 2 });
+      expect(await completeLine(atPiece(), "call ti", cells))
+        .toBe("call title");
+      expect(await completeLine(atPiece(), "call title la", cells))
+        .toBeUndefined();
+    });
+
+    it("writes nothing in the section a callable's own grammar reads", async () => {
+      // Past `call`'s own two operands the words are the callable's, and this
+      // dispatch does not read them — so the position is past the end of what
+      // the verb declared rather than a position declared empty.
+
+      expect(
+        await completeLine(
+          atPiece(),
+          "call title verb la",
+          holding({ title: 1, latest: 2 }),
+        ),
+      ).toBeUndefined();
     });
   });
 

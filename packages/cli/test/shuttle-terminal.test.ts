@@ -44,6 +44,23 @@ interface Stubs {
   /** What the bytes of one read are, and `null` where the input ended. */
   readonly reads?: readonly (string | null)[];
 
+  /**
+   * Called as each read of standard input is issued, for a case that has to
+   * see *when* one happens rather than what it returned.
+   */
+  readonly reading?: () => void;
+
+  /**
+   * What the `n`th read waits on before it answers, and nothing where it
+   * answers at once.
+   *
+   * It is what lets a case put a read *in flight* across something else. A
+   * stub that answers immediately never has one outstanding, so a case about
+   * the read that was already going when a program took the terminal would
+   * otherwise be a case about a read that had already finished.
+   */
+  readonly holdRead?: (nth: number) => Promise<void> | undefined;
+
   /** How wide the terminal says it is, or a throw where it will not say. */
   readonly consoleSize?: () => { columns: number; rows: number };
 
@@ -81,6 +98,9 @@ interface Stubs {
 interface Watched {
   /** Every raw-mode call, in order, by the mode it asked for. */
   readonly raw: boolean[];
+
+  /** How many reads of standard input were issued, which a case may sample. */
+  reads(): number;
 
   /** Everything written, joined as the terminal would have received it. */
   written(): string;
@@ -128,6 +148,7 @@ async function watching(
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   const reads = [...(stubs.reads ?? [])];
+  let issued = 0;
   const original = {
     inputIsTerminal: Deno.stdin.isTerminal,
     outputIsTerminal: Deno.stdout.isTerminal,
@@ -160,12 +181,16 @@ async function watching(
       arrived();
     }
   };
-  Deno.stdin.read = (buffer: Uint8Array) => {
+  Deno.stdin.read = async (buffer: Uint8Array) => {
+    issued++;
+    stubs.reading?.();
+    const waiting = stubs.holdRead?.(issued);
+    if (waiting !== undefined) await waiting;
     const next = reads.shift();
-    if (next === undefined || next === null) return Promise.resolve(null);
+    if (next === undefined || next === null) return null;
     const bytes = encoder.encode(next);
     buffer.set(bytes);
-    return Promise.resolve(bytes.length);
+    return bytes.length;
   };
   if (stubs.consoleSize !== undefined) Deno.consoleSize = stubs.consoleSize;
   Deno.stdout.writeSync = (bytes: Uint8Array) => {
@@ -224,6 +249,7 @@ async function watching(
   return {
     raw,
     written: () => chunks.join(""),
+    reads: () => issued,
     thrown,
     listened,
     released,
@@ -651,6 +677,269 @@ describe("terminal", () => {
         for await (const key of terminal.keys) keys.push(key);
       });
       expect(keys).toEqual([{ name: "up" }]);
+    });
+  });
+
+  describe("suspend()", () => {
+    // A program that takes the terminal takes all of it. Raw mode is the half
+    // that is easy to see; the other half is that this prompt stops reading
+    // and stops drawing, and a case for each is what keeps the two together.
+
+    it("draws nothing while a program holds the terminal", async () => {
+      // Every write goes through one door, so the three of them are asserted
+      // through whichever a case picks: what a person sees is that the screen
+      // the program drew is not written over.
+
+      let during = "";
+      const watched = await watching({}, async (terminal) => {
+        terminal.edit("before> ", 8);
+        const already = { length: 0 };
+        await terminal.suspend(() => {
+          already.length = 1;
+          terminal.edit("held> ", 6);
+          terminal.announce("held");
+          terminal.finish();
+          return Promise.resolve();
+        });
+        during = String(already.length);
+      });
+      // Nothing between the line drawn before the trip and the trip's end.
+      expect(watched.written()).not.toContain("held");
+      expect(watched.written()).toContain("before> ");
+      expect(during).toBe("1");
+    });
+
+    it("draws again once the program gives it back", async () => {
+      // The other side of the same rule: suspension is for the trip and not
+      // for the rest of the run.
+
+      const watched = await watching({}, async (terminal) => {
+        await terminal.suspend(() => Promise.resolve());
+        terminal.edit("after> ", 7);
+      });
+      expect(watched.written()).toContain("after> ");
+    });
+
+    /**
+     * Helper for the two cases below, which is every key the reader delivered
+     * when a read that was already in flight answered from inside a trip.
+     *
+     * The trip is started from inside the read itself, which is the only
+     * arrangement that puts the bytes in the window this is about: the reader
+     * is pull-driven, so the read exists only once something is pulling, and a
+     * trip started before the pull would be a trip with nothing outstanding.
+     * `reading` fires as the read is issued and the trip begins there; the
+     * read then answers while the terminal is held.
+     */
+    async function acrossATrip(caught: string): Promise<string[]> {
+      const seen: string[] = [];
+      let release = () => {};
+      const answered = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let terminal: PromptTerminal | undefined;
+      let trip: Promise<void> | undefined;
+      let issued = 0;
+      await watching(
+        {
+          reads: ["a", caught, "z"],
+          reading: () => {
+            if (++issued !== 2 || terminal === undefined) return;
+            trip = terminal.suspend(async () => {
+              release();
+              for (let turn = 0; turn < 12; turn++) await Promise.resolve();
+            });
+          },
+          holdRead: (nth) => (nth === 2 ? answered : undefined),
+        },
+        async (opened) => {
+          terminal = opened;
+          const keys = opened.keys[Symbol.asyncIterator]();
+          const named = (r: IteratorResult<unknown>) =>
+            (r.value as { name?: string } | undefined)?.name ?? "";
+          seen.push(named(await keys.next()));
+          const pending = keys.next();
+          const after = await pending;
+          if (after.done !== true) seen.push(named(after));
+          await trip;
+          // And what the reader has left, so a key the trip should have held
+          // back shows here rather than sitting unpulled. One key pulled would
+          // hide it: the reader yields what it kept before it reads again.
+          for (let more = 0; more < 2; more++) {
+            const next = await keys.next();
+            if (next.done === true) break;
+            seen.push(named(next));
+          }
+          await keys.return?.(undefined);
+        },
+      );
+      return seen;
+    }
+
+    it("carries what a read already in flight caught out of the suspension", async () => {
+      // The one thing holding the terminal cannot take back: those bytes have
+      // left the stream whatever this does. Dropping them is the answer a
+      // person cannot see — the key reached neither the program nor the prompt
+      // and nothing says so — so they are carried out instead.
+
+      expect(await acrossATrip("b")).toEqual(["a", "b", "z"]);
+    });
+
+    it("holds back the submit from what it carries out, and keeps the rest", async () => {
+      // Both halves in one read, which is what tells the rule from a reader
+      // that simply drops everything: the ordinary key is carried out and the
+      // submit is not. A submit on its own would look the same either way,
+      // the reader going on to the next read for something to deliver.
+
+      expect(await acrossATrip("x\r")).toEqual(["a", "x", "z"]);
+    });
+
+    it("issues no read from the moment a program holds the terminal", async () => {
+      // What leaves the keys typed at the program on the stream for it to
+      // read. The reader is pulled continuously here, as the prompt pulls it,
+      // because a reader nobody is pulling issues no read whatever this does —
+      // a case that let the pulling stop would pass on a terminal with no gate
+      // at all, which is what the last number below rules out.
+      //
+      // The count starts at the instant the terminal is taken, not after a
+      // settling delay: `suspend` sets the hold in the turn it is called in,
+      // and the statement before it is the last thing that runs before that,
+      // so a read issued from the trip's first turn onwards is inside the
+      // window this is about. A case that let turns pass before counting
+      // would let the read it exists to catch land unseen.
+
+      let issued = 0;
+      let before = 0;
+      let duringTheTrip = 0;
+      let afterIt = 0;
+      await watching(
+        {
+          // Long enough that the reader is still going when the trip starts.
+          // A list it had already drained would leave a finished generator
+          // issuing no reads for a reason that has nothing to do with the
+          // gate, and the case would pass with no gate at all.
+          reads: Array.from({ length: 4000 }, (_, at) => `k${at % 9}`),
+          reading: () => issued++,
+        },
+        async (terminal) => {
+          let pulling = true;
+          const puller = (async () => {
+            for await (const _key of terminal.keys) if (!pulling) break;
+          })();
+          for (let turn = 0; turn < 10; turn++) await Promise.resolve();
+          before = issued;
+          await terminal.suspend(async () => {
+            for (let turn = 0; turn < 40; turn++) await Promise.resolve();
+            duringTheTrip = issued - before;
+          });
+          const resumed = issued;
+          for (let turn = 0; turn < 40; turn++) await Promise.resolve();
+          afterIt = issued - resumed;
+          pulling = false;
+          await Promise.race([puller, Promise.resolve()]);
+        },
+      );
+      // The reader was demonstrably going before the trip and demonstrably
+      // going after it, and issued nothing at all in between — so the middle
+      // number is a gate rather than a reader that had already stopped.
+      expect(before).toBeGreaterThan(0);
+      expect(duringTheTrip).toBe(0);
+      expect(afterIt).toBeGreaterThan(0);
+    });
+
+    it("issues no read for a key pulled while a program holds the terminal", async () => {
+      // The half of that rule the case above cannot reach. A reader parked
+      // between reads when the trip begins has nothing in flight, so a pull
+      // arriving during the trip is a read the gate is the only thing
+      // stopping — and the key it would take is one typed at the program.
+
+      let issued = 0;
+      let duringTheTrip = 0;
+      let afterwards: string | undefined;
+      await watching(
+        { reads: ["a", "b", "c"], reading: () => issued++ },
+        async (terminal) => {
+          const keys = terminal.keys[Symbol.asyncIterator]();
+          await keys.next();
+          // Parked at the yield with its read finished, which is the state
+          // this case is about: what happens next is a read or it is not.
+          const before = issued;
+          let pulled: Promise<IteratorResult<Key>> | undefined;
+          await terminal.suspend(async () => {
+            pulled = keys.next();
+            for (let turn = 0; turn < 40; turn++) await Promise.resolve();
+            duringTheTrip = issued - before;
+          });
+          const arrived = await pulled;
+          if (arrived?.done !== true) afterwards = arrived?.value.name;
+          await keys.return?.(undefined);
+        },
+      );
+      // None while it was held, and the pull answered once it was given back
+      // — so the first number is a read deferred rather than a pull dropped.
+      expect(duringTheTrip).toBe(0);
+      expect(afterwards).toBe("b");
+    });
+
+    it("issues none from any turn the hold can fall on across one pull", async () => {
+      // What a suspension can catch is a reader that has decided it may read
+      // and has not yet read, so where the hold falls relative to that
+      // decision is what this varies — and it is the *only* thing it varies,
+      // which is what makes the set closed. One pull, reads that answer at
+      // once, and the trip started after each of seven microtask turns. Every
+      // scheduling this reader can be in is not a set anything here could
+      // enumerate; where the hold falls across one pull is.
+      //
+      // Seven is measured rather than round. The reader resumes and reads
+      // within two microtask turns of the pull — one read stands counted
+      // before the hold on the first two rows and two from the third on — and
+      // the span brackets that: the hold falls before the reader has read, on
+      // the turn it reads, and four turns past it. Which turn that is belongs
+      // to the reader's own composition rather than to anything a case may
+      // assume, so the bracket is what keeps the row that matters inside the
+      // range when the composition moves.
+      //
+      // Each row's count starts at the instant the terminal is taken — the
+      // statement before `suspend`, which sets the hold in the turn it is
+      // called in — so a read the reader had already issued is on the far
+      // side of the line and a read it issues from the trip's first turn
+      // onwards is inside it.
+
+      const leaked: number[] = [];
+      for (let turns = 0; turns <= 6; turns++) {
+        let issued = 0;
+        let during = 0;
+        await watching(
+          {
+            // One key per read, so that a pull is a read. A two-character
+            // read decodes to two keys and the second pull is served from
+            // what the first one left, which is a pull that issues no read
+            // for a reason that has nothing to do with the hold.
+            reads: Array.from(
+              { length: 40 },
+              (_, at) => String.fromCharCode(97 + (at % 26)),
+            ),
+            reading: () => issued++,
+          },
+          async (terminal) => {
+            const keys = terminal.keys[Symbol.asyncIterator]();
+            await keys.next();
+            const pending = keys.next();
+            for (let turn = 0; turn < turns; turn++) await Promise.resolve();
+            const before = issued;
+            await terminal.suspend(async () => {
+              for (let turn = 0; turn < 20; turn++) await Promise.resolve();
+              during = issued - before;
+            });
+            await pending;
+            await keys.return?.(undefined);
+          },
+        );
+        if (during !== 0) leaked.push(turns);
+      }
+      // Named rather than counted, so a failure says which row let a read
+      // through instead of only that one did.
+      expect(leaked).toEqual([]);
     });
   });
 

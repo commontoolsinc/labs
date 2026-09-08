@@ -7,19 +7,23 @@
  * nothing read. The address grammar belongs to the fabric
  * (`normalizeLLMFriendlyRef` over the runner's `parseReferenceParts`) and this
  * module consumes it; what it adds is the navigation spellings that grammar
- * has no room for — `..`, `-`, `/`, `.` for the position, and the `./` and
- * `.@` heads a relative reference takes a member or a qualifier on — the
- * facet
+ * has no room for — `..`, `-`, `/`, `.` for the position, the `./` and
+ * `.@` heads a relative reference takes a member or a qualifier on, and the
+ * `%n` a listing's numbered row is named back by — the facet
  * names a rooted operand reserves for the walk from the root, the refusals a
  * place is subject to, the operand that reaches a child, which is those same
  * readings asked in the other direction, and the one reading that differs
  * between moving somewhere and reading it: a place cannot stand in an
  * arguments cell, and an operand may still name one.
  *
- * Where a value stops is the moves that reach a piece. Whether the fabric
- * holds one, and what a slug names, are reads, so those come back pending and
- * `verbs.ts` settles them: `cd` is the one verb whose success is a promise
- * that the place is there, so the read happens before the place is adopted.
+ * Where a value stops is the moves that reach a piece, and the spellings that
+ * name something no value here holds. Whether the fabric holds a piece, and
+ * what a slug names, are reads, so those come back pending and `verbs.ts`
+ * settles them: `cd` is the one verb whose success is a promise that the place
+ * is there, so the read happens before the place is adopted. A `%n` is the
+ * other: what a listing numbered is the session's to say, so it comes back for
+ * `verbs.ts` to look up and hand back with the place and the operand the row
+ * carries.
  */
 
 import type { CellScope } from "@commonfabric/api";
@@ -270,12 +274,43 @@ export interface SpaceNamedMove {
   readonly scope: CellScope;
 }
 
+/**
+ * A move whose operand opens with a numbered handle, which names a row of a
+ * listing rather than a level anything here can walk to. Looking the row up
+ * and handing this back to {@link CurrentPlace.reach} with the place the
+ * listing was read at and the operand that row prints is what lands it.
+ *
+ * The handle is carried as it was written, `%` included, because what it names
+ * is the handle table's to say and the reason it names nothing is the table's
+ * to give. What follows the separator after it is an ordinary relative walk,
+ * read from wherever the row turns out to stand.
+ */
+export interface HandleMove {
+  /** Names this arm of {@link Move}. */
+  readonly kind: "handle";
+
+  /** The handle as the operand wrote it, `%` included. */
+  readonly handle: string;
+
+  /** The walk written after it, empty where the handle was the whole. */
+  readonly rest: string;
+
+  /**
+   * The whole operand, as the person wrote it. A refusal about the walk after
+   * the handle quotes this rather than the handle: the handle is the part
+   * that was right, and naming it alone would put the fault somewhere it is
+   * not.
+   */
+  readonly operand: string;
+}
+
 /** The arms of a {@link Move} that leave shuttle where it stood. */
 type Unlanded =
   /** The move is refused, for the reason given. */
   | { readonly kind: "refused"; readonly reason: string }
   /** The operand is a wish target, which the connected space resolves. */
   | { readonly kind: "wish"; readonly target: string }
+  | HandleMove
   | SpaceNamedMove
   | PendingMove;
 
@@ -629,6 +664,37 @@ export class CurrentPlace {
   }
 
   /**
+   * Moves as a {@link HandleMove} says, `at` being the place the listing that
+   * minted the handle was read at and `toward` the operand its row prints.
+   *
+   * The row's operand is walked from the listing's place, and the walk written
+   * after the handle from wherever that reached. Both are the walk a person
+   * could have typed: a handle is a way of not retyping a row's operand rather
+   * than a second way of reaching it, so a row naming a piece comes back
+   * pending here exactly as the typed operand does, and is confirmed by the
+   * same read.
+   *
+   * The walk starts with no trail, as one from a reference does. A handle
+   * carries no route: it was minted from a row of a listing, and a listing is
+   * a view rather than a path shuttle took, so a `..` written after one backs
+   * out of the level the row stands in.
+   */
+  reach(move: HandleMove, at: Place, toward: string): Move {
+    return this.#commit(this.#reached(move, at, toward));
+  }
+
+  /**
+   * Like {@link CurrentPlace.reach}, except that it moves nothing: what comes
+   * back is where the handle and the walk after it point, and shuttle stays
+   * where it stood.
+   *
+   * Nothing comes back pending, for {@link CurrentPlace.aim}'s reason.
+   */
+  resolveHandle(move: HandleMove, at: Place, toward: string): Aimed {
+    return pointing(this.#reached(move, at, toward));
+  }
+
+  /**
    * Lands a {@link PendingMove} a read confirmed, `resolved` being what the
    * read resolved it to.
    *
@@ -699,6 +765,31 @@ export class CurrentPlace {
       this.#here = step.to;
     }
     return outcomeOf(step);
+  }
+
+  /**
+   * Helper for {@link CurrentPlace.reach} and
+   * {@link CurrentPlace.resolveHandle}, which is where `move` reaches once the
+   * row it names is known.
+   *
+   * A row's operand that reached nowhere is the answer already, and is the
+   * answer whether the walk after the handle is empty or not: nothing walks on
+   * from a step that never arrived.
+   *
+   * No previous place goes into the walk to the row, so a row whose operand is
+   * `-` reaches nothing rather than reaching wherever shuttle last stood. It
+   * is not a row a listing mints — `operandForChild` offers the name and the
+   * reference, neither of which is that word — and refusing it here is what
+   * keeps that a property of this walk rather than of what a listing happens
+   * to offer.
+   */
+  #reached(move: HandleMove, at: Place, toward: string): Step {
+    const step = movePlace({ place: at, trail: [] }, toward);
+    const from = reached(step);
+    if (from === undefined) return step;
+    return move.rest === ""
+      ? step
+      : moveBySegments(from, move.rest, move.operand);
   }
 
   /**
@@ -856,6 +947,20 @@ function movePlace(
   }
 
   if (operand.startsWith("#")) return { kind: "wish", target: operand };
+  // At the head of a relative operand and nowhere else, as the other
+  // spellings above are. A handle names a row of a listing, which is not a
+  // level this module can walk to, so it comes back for the handle table the
+  // way a wish target comes back for the connection. In any later segment `%`
+  // is an ordinary character of a data key.
+  if (operand.startsWith(HANDLE_SIGIL)) {
+    const cut = operand.indexOf("/");
+    return {
+      kind: "handle",
+      handle: cut === -1 ? operand : operand.slice(0, cut),
+      rest: cut === -1 ? "" : operand.slice(cut + 1),
+      operand,
+    };
+  }
   return moveBySegments(from, operand, operand);
 }
 
@@ -1353,6 +1458,21 @@ const MEMBER_HEAD = `${RELATIVE_HEAD}/`;
 const SCOPE_HEAD = `${RELATIVE_HEAD}@`;
 
 /**
+ * The character a numbered handle opens with, which a listing prints in front
+ * of a row and an operand writes to name that row back.
+ *
+ * It heads an operand and nothing else. A key called `%3` is reached by a
+ * later segment of a walk, and by a reference outright.
+ *
+ * The grammar owns it rather than the listing that prints it, because what a
+ * character means in an operand is decided here for every other spelling too.
+ * A listing mints what this reads (`handleFor`, `listing.ts`) and a table
+ * resolves it (`handles.ts`), so the three agree by reading one constant
+ * rather than by three authors spelling one character the same way.
+ */
+export const HANDLE_SIGIL = "%";
+
+/**
  * The sentence a refusal adds where `operand` is a scope word written with no
  * head, and nothing for every other operand.
  *
@@ -1812,6 +1932,31 @@ export function messageOf(thrown: unknown): string {
     // The conversion is what failed, which is the case this exists for.
   }
   return "The failure carries nothing that can be written as a message.";
+}
+
+/**
+ * The rooted reference naming the cell `place` stands on, which is what a `cf`
+ * seam reading a `--cell` takes.
+ *
+ * It is the piece as the place holds it — a handle, or the operand's own
+ * spelling where nothing resolved it — carrying the place's scope, and the
+ * path after it with the separator escaped in every segment. That is
+ * {@link renderPosition}'s rendering of a piece with the space left out, and
+ * the space is left out because the seam is handed one already: shuttle
+ * connects to one space and every config it builds names that space, so
+ * writing it here would say a second time what the config says once.
+ *
+ * A place is result-rooted, so nothing here writes the `#argument` suffix. An
+ * operand that selects the arguments cell says so through the flag the seam
+ * reads it on, which is where the selection is a parameter rather than part of
+ * the address.
+ */
+export function referenceForPlace(place: PiecePlace): string {
+  return encodeJsonPointer([
+    "",
+    `${place.position.piece}@${place.scope}`,
+    ...place.position.path.map(String),
+  ]);
 }
 
 /**

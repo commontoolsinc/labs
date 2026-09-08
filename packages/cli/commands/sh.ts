@@ -50,11 +50,16 @@ export const sh = new Command()
     cliText(`Open shuttle, the interactive shell for fabric state.
 
 Shuttle holds one connection and one place — the space, piece and path its
-prompt shows — and reads lines against them: cd, ls, pwd, get, wish, and
-where, which prints the whole ambient record. The place fills in what a
-reference leaves out, so a line names what it acts on rather than repeating
-the address. Type help at the prompt for the verbs, and <verb> --help for what
-one of them takes.
+prompt shows — and reads lines against them: cd, ls, more, pwd, get, set,
+edit, link, call, verbs, describe, wish, and where, which prints the whole
+ambient record. The place fills in what a reference leaves out, so a line
+names what it acts on rather than repeating the address. Type help at the
+prompt for the verbs, and <verb> --help for what one of them takes.
+
+A listing numbers its rows, and %n names a row until the next listing
+replaces the numbering: cd %3 and call %4 act on what was shown. Reaching
+into a piece starts it, so every read is served by a running pattern; edit
+opens $EDITOR on a cell's value and writes back what you save.
 
 The connection is fixed for the run: one shuttle serves one space, and
 restarting is how to reach another.`),

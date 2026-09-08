@@ -28,11 +28,10 @@
 # to this walkthrough alone, so a change to a pattern the product actually
 # ships can never break a demonstration of what a shell can reach.
 #
-# One step is a GAP rather than a capability, the way `verb-session-gaps.sh`
-# and `completion-over-the-cli.sh` carry theirs: reaching into a piece does not
-# warm it yet, so a computed value is served as storage holds it. That step
-# fails the day warming lands, which is how a walkthrough announces a decision
-# arriving instead of aging into a stale plan.
+# No step here asserts a GAP: the tally on the last line runs at zero. The
+# machinery is kept, as `verb-session-gaps.sh` and `completion-over-the-cli.sh`
+# keep theirs, because a step that finds a capability missing has to be able to
+# say so and be counted rather than merely fail.
 #
 # Documented in packages/cli/README.md's "Interactive shell" section, which
 # explains the shell this exercises. Keep the two in step: the doc is the
@@ -158,6 +157,11 @@ if echo '["bread"]' | $CF cell set --quiet --input --cell first items $ARGS \
 else
   bad "the external write failed"
 fi
+# What storage holds for the computed member, read here because here is the
+# only place it can be read: reaching in warms, and a warm run commits what it
+# computed, so once a session has stood on this piece nothing can read what
+# storage held before it. Step 11 compares this with what the shell serves.
+STORED=$($CF cell get --quiet --cell first summary $ARGS 2>/dev/null)
 
 step "3. Drive a session over a pseudo-terminal"
 SCRIPT=$(mktemp)
@@ -263,31 +267,32 @@ check '[
   "bread"
 ]' "$(said 9 "get items")" "get serves the item the external write left"
 
-step "11. GAP: reaching into a piece does not warm it"
+step "11. Reaching into a piece warms it, so a computed value reads live"
 # Decision 10 of docs/plans/shuttle/README.md rules that reaching in warms, so
-# that every read the shell serves is live. Until that lands, a computed value
-# is whatever the last thing to run the pattern left: `items` above changed and
-# `summary`, computed from it, did not. When warming arrives this step fails,
-# which is the announcement.
+# that every read the shell serves is live. `summary` is computed from `items`,
+# and the write in step 2 changed `items` without running the pattern: storage
+# therefore holds what the deploy left, and a shell standing on the piece
+# serves what the pattern computes from what is there now. Both readings are
+# asserted, because either alone is equally consistent with the other value
+# never having existed — a warm reading with no stale one beside it says only
+# that the fixture computes something.
 #
 # The claim is only readable with the serving loop off. With it on, the server
 # may run the piece for reasons of its own, and a warm `summary` would then say
 # nothing about whether the shell warmed anything — and with the posture
 # unreadable, neither does anything else, so the step says that rather than
 # picking the arm that happens to pass.
-COLD=$(said 10 "get summary")
+WARM=$(said 10 "get summary")
 read_posture
 case "$POSTURE" in
   on)
     ok "skipped: the server executes, so a warm value would not be the shell's doing"
     ;;
   off)
-    if [ "$COLD" = '""' ]; then
-      ok "gap still open: a computed value is served as storage holds it"
-      GAPS=$((GAPS + 1))
-    else
-      bad "GAP CLOSED — get summary read [$COLD]; warming has landed, so update this script"
-    fi
+    check '""' "$STORED" \
+      "storage holds what the deploy left, the write having run nothing"
+    check '"bread"' "$WARM" \
+      "the shell serves what the pattern computes from the written item"
     ;;
   *)
     bad "the server-execution posture is $POSTURE, so this step can read nothing"
@@ -353,14 +358,13 @@ GET_HELP=$(said 20 "get --help")
 contains "Usage: get [<ref>]" "$GET_HELP" "--help writes the verb's page"
 lacks "names no facet" "$GET_HELP" "--help is not read as a path"
 
-# Where the stale-versus-warm read goes once warming lands. It needs two things
-# this script does not have: the warm set of decision 10, and a way to run a
-# command with the session standing at a prompt, so that the piece changes
-# under a shell that is already connected. The driver reads a settled prompt
-# already, so the second is a small addition to it — but adding it now would
-# mean asserting against the warming that is not there, and a check that passes
-# against a stub is the thing this walkthrough exists to escape. Step 11 holds
-# the place until then, and fails when it comes.
+# What step 11 does not reach: a piece that changes under a shell already
+# standing on it. Step 11 reads storage before the session and the shell's own
+# answer during it, which is what tells a warm read from a stored one; what it
+# cannot ask is whether a read taken after an external write mid-session serves
+# the new value, because the driver types a script of lines and has nowhere to
+# run a command between two of them. It reads a settled prompt already, so that
+# is a small addition to it, and the check belongs here once it is made.
 
 rm -f "$SCRIPT" "$TRANSCRIPT"
 ELAPSED=$(($(date +%s) - START))

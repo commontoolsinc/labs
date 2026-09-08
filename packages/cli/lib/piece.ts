@@ -5032,6 +5032,97 @@ export async function callPieceHandler<T = any>(
   );
 }
 
+/**
+ * Starts the piece `config` names and leaves it running, so that a later read
+ * of a computed value is served by a pattern running in this process.
+ *
+ * It is what a long-lived caller reaches for where a one-shot command reaches
+ * for {@link stepPiece}. The two differ in what they are for and so in what
+ * they do around the start: a step exists to commit what recomputation
+ * produced, so it pulls, settles, receipts the space and stops the piece
+ * again; this one leaves the pattern running, writes nothing, and receipts
+ * nothing, because starting a piece is not a write.
+ *
+ * `addressedPath` is the path the caller was aiming at, and what it decides is
+ * which piece runs: a walk that reaches a collection's member spends the
+ * leading segments getting there, so the member is what starts rather than the
+ * holder it was addressed through. Whatever the walk did not spend is a path
+ * inside the piece it reached, and warming a piece is not a read of a path, so
+ * the remainder is left alone.
+ *
+ * The start is idempotent — `PiecesController.getPieceCell` says so of the
+ * `runtime.start` it performs — so warming a piece already running costs the
+ * resolution and the sync in front of it and nothing else. A caller that
+ * remembers what it warmed skips even that, through
+ * {@link WarmPieceDeps.alreadyRunning}, which is asked with the piece the
+ * resolution reached rather than the path it was handed.
+ *
+ * @returns The piece the resolution reached, which is what a caller keys a
+ * memo of warmed pieces on.
+ *
+ * @throws Error if the piece cannot be resolved, or if the pattern behind it
+ * will not load in this space.
+ */
+export async function warmPiece(
+  config: PieceConfig,
+  addressedPath: (string | number)[] = [],
+  deps: WarmPieceDeps = {},
+): Promise<WarmedPiece> {
+  const pieces = await timeCliPhase(
+    "warmPiece.loadPieces",
+    () => (deps.loadPieces ?? loadPieces)(config),
+  );
+  const { config: resolvedConfig } = await resolvePieceTargetWithPieces(
+    config,
+    addressedPath,
+    pieces,
+    deps,
+  );
+  // Asked after the resolution and not before it, because which piece runs is
+  // the resolution's answer: a walk into a collection holder reaches a member,
+  // and the caller's memo is over pieces rather than over the paths that
+  // reach them.
+  if (deps.alreadyRunning?.(resolvedConfig.piece) !== true) {
+    await timeCliPhase(
+      "warmPiece.getPiece",
+      () =>
+        pieces.get(
+          resolvedConfig.piece,
+          true,
+          undefined,
+          resolvedConfig.pieceScope,
+        ),
+    );
+  }
+  return { piece: resolvedConfig.piece };
+}
+
+/** What {@link warmPiece} started, or found already running. */
+export interface WarmedPiece {
+  /**
+   * The piece, by the handle the resolution reached. It is what a caller
+   * remembers a warm under: two paths into one collection holder reach two
+   * members and two pieces, and two paths inside one piece reach one.
+   */
+  readonly piece: string;
+}
+
+/** What {@link warmPiece} reaches the world through. */
+export interface WarmPieceDeps extends PieceResolutionDeps {
+  /**
+   * Whether the caller already started the piece the resolution reached, so
+   * that the start is skipped.
+   *
+   * It is asked rather than told because the answer is only knowable here: the
+   * caller has a path and this has the piece that path resolves to, and those
+   * are different things wherever a collection is walked into. The start it
+   * skips is idempotent either way — `PiecesController.getPieceCell` says so
+   * of the `runtime.start` it performs — so what a wrong answer costs is a
+   * repeat rather than a fault.
+   */
+  readonly alreadyRunning?: (piece: string) => boolean;
+}
+
 export async function stepPiece(
   config: PieceConfig,
   deps: PieceResolutionDeps = {},

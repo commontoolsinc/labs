@@ -395,9 +395,20 @@ Each of these is small and lands on its own; together they are what decision
    un-injected call leaks a runtime, a storage manager, and a WebSocket —
    injection is correctness, not merely speed. `groupSessions` in
    `lib/bulk.ts` (open, `synced`, `dispose` per group) names the cost.
-8. **Invocation session.** `newSessionId`'s contract is one per agent run,
-   shared by every call of the run. A shuttle instance is a run: mint one at
-   startup and pass it explicitly into every `call` (decision 6 forbids
-   env-var mutation; `resolveInvocationIdentity` throws on `--invocation`
-   without a session). Replay via `--invocation` then works within a
-   shuttle session for free.
+8. **Invocation session.** Done. `newSessionId`'s contract is one per agent
+   run, shared by every call of the run. A shuttle instance is a run: one is
+   minted at startup and passed explicitly into every `call` (decision 6
+   forbids env-var mutation; `resolveInvocationIdentity` throws on
+   `--invocation` without a session). Replay via `--invocation` then works
+   within a shuttle session for free.
+
+9. **Warming a piece without stepping it.** Done, as `warmPiece`
+   (`packages/cli/lib/piece.ts`). Reaching in warms (decision 10) needs a
+   piece started and left running, which is what no existing seam did:
+   `stepPiece` exists to commit what recomputation produced, so it settles,
+   receipts the space and stops the piece again. `warmPiece` resolves the
+   target the way a read does, starts it, and writes nothing — starting a
+   piece is not a write. The path it is handed is the path the caller aimed
+   at, which is what decides *which* piece runs: a walk reaching a
+   collection's member starts the member rather than the holder it was
+   addressed through.
