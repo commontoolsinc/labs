@@ -484,7 +484,7 @@ export function operandForChild(
   const from: Standing = { place, trail: [] };
   for (const candidate of [child, renderPosition(goal)]) {
     if (readsAsOption(candidate)) continue;
-    const reach = reached(movePlace(from, candidate));
+    const reach = reached(movePlace(from, candidate, "cd"));
     if (reach !== undefined && samePlace(reach.place, goal)) return candidate;
   }
   return undefined;
@@ -584,12 +584,12 @@ export class CurrentPlace {
    * `..`, `-`, and `/` — nothing about either being a read's to decide.
    */
   cd(operand: string): Move {
-    return this.#commit(movePlace(this.#here, operand, this.#previous));
+    return this.#commit(movePlace(this.#here, operand, "cd", this.#previous));
   }
 
   /**
    * Where `operand` points and which of a piece's two cells it selects,
-   * without going there.
+   * without going there, `verb` naming the verb whose line it was read from.
    *
    * It differs from {@link CurrentPlace.cd} in the two ways a read differs
    * from a move. Nothing moves, so shuttle stays where it stood whatever
@@ -610,7 +610,7 @@ export class CurrentPlace {
    * aimed at such a cell fails on its own account, in the read's own words,
    * and there is nothing left for a check in front of it to add.
    */
-  aim(operand: string): Aim {
+  aim(operand: string, verb: string): Aim {
     if (operand === ARGUMENT_SUFFIX) {
       return { input: false, move: pointing(refuse(SUFFIX_NAMES_NO_TARGET)) };
     }
@@ -618,7 +618,7 @@ export class CurrentPlace {
     return {
       input: stripped !== undefined,
       move: pointing(
-        movePlace(this.#here, stripped ?? operand, this.#previous),
+        movePlace(this.#here, stripped ?? operand, verb, this.#previous),
       ),
     };
   }
@@ -665,7 +665,8 @@ export class CurrentPlace {
 
   /**
    * Moves as a {@link HandleMove} says, `at` being the place the listing that
-   * minted the handle was read at and `toward` the operand its row prints.
+   * minted the handle was read at, `toward` the operand its row prints, and
+   * `verb` the verb whose line the handle was written on.
    *
    * The row's operand is walked from the listing's place, and the walk written
    * after the handle from wherever that reached. Both are the walk a person
@@ -679,8 +680,8 @@ export class CurrentPlace {
    * a view rather than a path shuttle took, so a `..` written after one backs
    * out of the level the row stands in.
    */
-  reach(move: HandleMove, at: Place, toward: string): Move {
-    return this.#commit(this.#reached(move, at, toward));
+  reach(move: HandleMove, at: Place, toward: string, verb: string): Move {
+    return this.#commit(this.#reached(move, at, toward, verb));
   }
 
   /**
@@ -690,8 +691,13 @@ export class CurrentPlace {
    *
    * Nothing comes back pending, for {@link CurrentPlace.aim}'s reason.
    */
-  resolveHandle(move: HandleMove, at: Place, toward: string): Aimed {
-    return pointing(this.#reached(move, at, toward));
+  resolveHandle(
+    move: HandleMove,
+    at: Place,
+    toward: string,
+    verb: string,
+  ): Aimed {
+    return pointing(this.#reached(move, at, toward, verb));
   }
 
   /**
@@ -783,8 +789,13 @@ export class CurrentPlace {
    * keeps that a property of this walk rather than of what a listing happens
    * to offer.
    */
-  #reached(move: HandleMove, at: Place, toward: string): Step {
-    const step = movePlace({ place: at, trail: [] }, toward);
+  #reached(
+    move: HandleMove,
+    at: Place,
+    toward: string,
+    verb: string,
+  ): Step {
+    const step = movePlace({ place: at, trail: [] }, toward, verb);
     const from = reached(step);
     if (from === undefined) return step;
     return move.rest === ""
@@ -868,8 +879,12 @@ type Step =
   | Unlanded;
 
 /**
- * Where `operand` moves `from` to, `previous` being the standing `-` returns
- * to.
+ * Where `operand` moves `from` to, `verb` naming the verb whose line it was
+ * read from and `previous` being the standing `-` returns to.
+ *
+ * The verb is carried for one sentence: an empty operand names no place, and
+ * every verb aims through this reading, so the refusal for one names the verb
+ * whose line it is reading rather than a verb of its own.
  *
  * The operand is read in the order the spellings can be told apart: `-`, a
  * `.` and its `./` and `.@` heads, and `/` are shuttle's own, a rooted
@@ -890,10 +905,15 @@ type Step =
 function movePlace(
   from: Standing,
   operand: string,
+  verb: string,
   previous?: Standing,
 ): Step {
   const place = from.place;
-  if (operand === "") return refuse("`cd` takes a place to move to.");
+  if (operand === "") {
+    return refuse(
+      `\`${verb}\` was given an empty operand, which names no place.`,
+    );
+  }
   if (operand === "-") {
     return previous === undefined
       ? refuse("There is no previous place to return to.")

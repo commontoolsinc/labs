@@ -338,9 +338,9 @@ async function cd(
   deps: VerbDeps,
 ): Promise<Outcome> {
   // `cd ''` is one operand, so the dispatch passes it on and the place is what
-  // answers it — in the sentence the dispatch composes for no operand at all,
-  // so the two spellings read alike. That guard is `movePlace`'s own and
-  // stands for the callers this one is not.
+  // answers it, in this verb's name. That guard is `movePlace`'s own and
+  // answers for every verb that aims an operand through it, which is why it
+  // is given the name to say.
   const moved = await landing(
     shuttle,
     shuttle.place.cd(line.operands[0]),
@@ -393,7 +393,7 @@ async function get(
   const operand = line.operands[0];
   const at = operand === undefined
     ? { kind: "place" as const, place: shuttle.place.place, input: false }
-    : await aimed(shuttle, operand, deps);
+    : await aimed(shuttle, operand, "get", deps);
   if (at.kind === "refused") return at;
   // Before the read and not after it, which is the whole point of warming: the
   // value a read serves is what a running pattern holds, so the pattern runs
@@ -603,6 +603,17 @@ function where(shuttle: Shuttle): Outcome {
 }
 
 /**
+ * What a write onto a whole piece is refused with, and what `set`'s page says
+ * about one.
+ *
+ * Both read it from here because a person reads one of the two: the page
+ * before they write the line, and the refusal after. Two copies of a sentence
+ * are two sentences the moment one of them is improved.
+ */
+const WHOLE_PIECE_REFUSAL =
+  "A write onto a whole piece is refused. `link` is what writes a reference.";
+
+/**
  * Writes the value the line's second operand spells at the cell its first
  * names, and says where it landed.
  *
@@ -610,10 +621,13 @@ function where(shuttle: Shuttle): Outcome {
  * suffix included, so `set title#argument x` writes the arguments cell exactly
  * as `--input` does for `cf cell set`.
  *
- * The write refuses to land on a whole cell. Only resolution can decide that —
- * an address naming a collection spends its leading segments reaching the
- * member, so a path can still resolve to a piece's root — so the refusal is
- * the seam's, in the seam's own words.
+ * The write refuses to land on a whole cell, and the refusal is written twice
+ * because the question is asked twice. An operand that reached a piece and
+ * named no path inside it is refused here, in {@link WHOLE_PIECE_REFUSAL},
+ * which is the sentence this verb's page carries. The rest only resolution can
+ * decide — an address naming a collection spends its leading segments reaching
+ * the member, so a path can still resolve to a piece's root — and that one is
+ * the seam's under `refuseRootWrite`, in the seam's own words.
  */
 async function set(
   shuttle: Shuttle,
@@ -630,6 +644,10 @@ async function set(
   if (value.kind === "refused") return value;
   const at = await writable(shuttle, path, "set", deps);
   if (at.kind !== "aimed") return at;
+  // The operand reached a piece and named no path inside it, which is the
+  // half of the refusal the line settles. Ahead of the warm, a line that
+  // cannot write being no reason to start a pattern.
+  if (at.place.position.path.length === 0) return refuse(WHOLE_PIECE_REFUSAL);
   const warmed = await warm(shuttle, at.place, deps);
   if (warmed !== undefined) return warmed;
   const position = at.place.position;
@@ -1265,8 +1283,7 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
       '`"milk"`. A value opening the way JSON opens one and then ' +
       "failing to\nparse is refused with the parser's reason rather than " +
       "written as a string.\n`-` is refused, standard input being the " +
-      "keyboard the prompt reads.\n\nA write onto a whole piece is " +
-      "refused. `link` is what writes a reference.",
+      `keyboard the prompt reads.\n\n${WHOLE_PIECE_REFUSAL}`,
   }],
   ["verbs", {
     run: listVerbs,
@@ -1465,6 +1482,7 @@ async function landing(
         move,
         row.at,
         row.toward,
+        "cd",
       );
       return reached.kind !== "ran"
         ? reached
@@ -2189,7 +2207,7 @@ async function writable(
 ): Promise<Writable> {
   const at = operand === undefined
     ? { kind: "place" as const, place: shuttle.place.place, input: false }
-    : await aimed(shuttle, operand, deps);
+    : await aimed(shuttle, operand, verb, deps);
   if (at.kind === "refused") return at;
   const position = at.place.position;
   if (position.kind !== "piece") {
@@ -2470,7 +2488,7 @@ async function receiver(
 ): Promise<Receiving> {
   const at = operand === undefined
     ? { kind: "place" as const, place: shuttle.place.place, input: false }
-    : await aimed(shuttle, operand, deps);
+    : await aimed(shuttle, operand, verb, deps);
   if (at.kind === "refused") return at;
   if (at.input) {
     return refuse(
@@ -2607,7 +2625,7 @@ async function dispatched(
   // everywhere else. Only a bare handle can carry a name: a walk written after
   // one ends at a cell inside the row, and a cell is a receiver rather than a
   // verb, so it takes the name in the next operand like any other reference.
-  const aim = shuttle.place.aim(first).move;
+  const aim = shuttle.place.aim(first, "call").move;
   const carried = aim.kind === "handle" && aim.rest === ""
     ? carriedName(shuttle, aim.handle)
     : undefined;

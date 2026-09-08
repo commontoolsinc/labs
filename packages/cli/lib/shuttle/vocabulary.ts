@@ -375,15 +375,21 @@ export type Verb = (
 
 /**
  * Helper for {@link get}, which is where `operand` points, read from where
- * shuttle stands and settling nothing.
+ * shuttle stands and settling nothing, `verb` naming the verb whose line the
+ * operand was written on.
+ *
+ * The verb reaches the place's reading rather than anything here: an operand
+ * every verb aims through is refused in the name of the one that wrote it
+ * ({@link CurrentPlace.aim}).
  */
 export async function aimed(
   shuttle: Shuttle,
   operand: string,
+  verb: string,
   deps: VerbDeps,
 ): Promise<Aiming> {
-  const aim = shuttle.place.aim(operand);
-  const at = await reading(shuttle, aim.move, deps);
+  const aim = shuttle.place.aim(operand, verb);
+  const at = await reading(shuttle, aim.move, verb, deps);
   return at.kind === "refused" ? at : { ...at, input: aim.input };
 }
 
@@ -453,7 +459,8 @@ export type Aiming =
   | Refusal;
 
 /**
- * Helper for {@link get}, which finishes `move` without moving.
+ * Helper for {@link get}, which finishes `move` without moving, `verb` naming
+ * the verb whose line it came off.
  *
  * A space written as a name is settled the way {@link landing} settles one. A
  * `#name` target is not: `cf cell get` takes no such target and `cf wish`
@@ -473,6 +480,7 @@ export type Aiming =
 async function reading(
   shuttle: Shuttle,
   move: Aimed,
+  verb: string,
   deps: VerbDeps,
 ): Promise<Reading> {
   switch (move.kind) {
@@ -492,6 +500,7 @@ async function reading(
       return named.kind === "refused" ? named : await reading(
         shuttle,
         shuttle.place.resolveNamedSpace(move, named.space),
+        verb,
         deps,
       );
     }
@@ -499,7 +508,8 @@ async function reading(
       const row = rowFor(shuttle, move);
       return row.kind === "refused" ? row : await reading(
         shuttle,
-        shuttle.place.resolveHandle(move, row.at, row.toward),
+        shuttle.place.resolveHandle(move, row.at, row.toward, verb),
+        verb,
         deps,
       );
     }

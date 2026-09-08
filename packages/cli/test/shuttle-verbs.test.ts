@@ -634,7 +634,8 @@ describe("verbs", () => {
       expect(reasonOf(await runLine("ls -x", shuttleIn(), READS_NOTHING)))
         .toBe(
           'Unknown option "-x". Did you mean option "-h"? `ls --help` says ' +
-            "what `ls` takes.",
+            "what `ls` takes, and a bare `--` writes every token after it " +
+            "as an operand, whatever it opens with.",
         );
     });
 
@@ -855,11 +856,11 @@ describe("verbs", () => {
 
     it("returns the place's own refusal for an operand that is the empty string", async () => {
       // One operand, so the dispatch hands it on and `movePlace`'s guard is
-      // what answers — in the sentence the dispatch composes for a line naming
-      // no operand at all, so the two spellings read alike.
+      // what answers, in this verb's name — the guard being the one every
+      // verb aims an operand through.
 
       expect(reasonOf(await runLine("cd ''", shuttleIn(), READS_NOTHING)))
-        .toBe("`cd` takes a place to move to.");
+        .toBe("`cd` was given an empty operand, which names no place.");
     });
 
     it("refuses an operand ending in `#argument`, a place being result-rooted", async () => {
@@ -2965,10 +2966,52 @@ describe("verbs", () => {
       expect(options?.input).toBe(true);
     });
 
+    it("refuses a write onto a whole piece before the seam is asked", async () => {
+      // The operand reached a piece and named no path inside it, which the
+      // line settles: refusing it here is what keeps the sentence the one
+      // this verb's page carries, `cf`'s address and positional being no
+      // spelling a prompt has. Nothing is warmed for it either, a line that
+      // cannot write being no reason to start a pattern.
+
+      let warmed = false;
+      let wrote = false;
+      expect(
+        reasonOf(
+          await runLine(
+            `set . '{"label":"x"}'`,
+            atPiece(),
+            answering({
+              warmPiece: (config) => {
+                warmed = true;
+                return Promise.resolve({ piece: config.piece });
+              },
+              setCellValue: () => {
+                wrote = true;
+                return Promise.resolve({ piece: HANDLE, path: [] });
+              },
+            }),
+          ),
+        ),
+      ).toBe(
+        "A write onto a whole piece is refused. `link` is what writes a " +
+          "reference.",
+      );
+      expect({ warmed, wrote }).toEqual({ warmed: false, wrote: false });
+    });
+
+    it("refuses an empty operand in its own name", async () => {
+      // The reading every verb aims an operand through is `movePlace`'s, so
+      // the name in its refusal is the line's rather than one verb's.
+
+      expect(reasonOf(await runLine(`set '' '"x"'`, atPiece(), answering())))
+        .toBe("`set` was given an empty operand, which names no place.");
+    });
+
     it("asks the seam to refuse a write onto a whole piece", async () => {
-      // Only resolution can decide it — an address naming a collection spends
-      // its leading segments reaching the member, so a path can still resolve
-      // to a piece's root — so the refusal is the seam's, in its own words.
+      // The half of the refusal only resolution can decide: an address naming
+      // a collection spends its leading segments reaching the member, so a
+      // path the line carried can still resolve to a piece's root, and the
+      // seam is what sees that.
 
       let options: { refuseRootWrite?: boolean } | undefined;
       await runLine(
