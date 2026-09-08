@@ -6,6 +6,7 @@ import { getMetaLink } from "../src/link-utils.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Action } from "../src/scheduler.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
 
 const signer = await Identity.fromPassphrase("transactional setup ownership");
@@ -37,7 +38,14 @@ describe("transactional setup ownership", () => {
     // The requirement is that the child comes back and stays reactive, not that
     // any particular bookkeeping survives the abort untouched.
 
-    const internals = runtime.runner.accessForTestingOnly;
+    // Whether a child has been memoized yet, read from the runner's memoize
+    // marker: it is what tells a commit of the computation's own transaction
+    // from one issued before any child was materialized.
+    let childMemoized = false;
+    runtime.telemetry.addEventListener("telemetry", (event: Event) => {
+      const { marker } = (event as RuntimeTelemetryEvent).detail;
+      if (marker.type === "runner.result-pattern.memoize") childMemoized = true;
+    });
     const originalEdit = runtime.edit.bind(runtime);
     type TestTx = ReturnType<typeof originalEdit>;
     type CommitResult = Awaited<ReturnType<TestTx["commit"]>>;
@@ -60,7 +68,7 @@ describe("transactional setup ownership", () => {
         const action = tx.tx.sourceAction;
         if (
           held.length >= 2 || action === undefined ||
-          internals.resultPatternCache.size === 0 ||
+          !childMemoized ||
           (sourceAction !== undefined && action !== sourceAction)
         ) {
           return originalCommit();
@@ -117,8 +125,6 @@ describe("transactional setup ownership", () => {
       await runtime.scheduler.run(sourceAction);
       await secondCaptured.promise;
 
-      const cacheKey = [...internals.resultPatternCache.keys()][0];
-      expect(cacheKey).toBeDefined();
       const newerCommit = await held[1].commit();
       expect(newerCommit.error).toBeUndefined();
       held[1].result = newerCommit;

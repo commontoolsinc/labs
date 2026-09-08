@@ -6,6 +6,7 @@ import { getPatternEnvironment } from "../src/env.ts";
 import { Runtime } from "../src/runtime.ts";
 import { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 import { createModuleCompartmentGlobals } from "../src/sandbox/mod.ts";
 import { createCallbackCompartmentGlobals } from "../src/sandbox/compartment-globals.ts";
 import { evaluateFunctionSourceInSES } from "../src/sandbox/ses-runtime.ts";
@@ -293,19 +294,14 @@ describe("SES security regressions", () => {
   });
 
   it("blesses nested callbacks at load (CT-1644: hoisted to module scope)", async () => {
-    // CT-1644: this test compiles
+    // This test compiles
     //   handler((_e, _s) => [computed(() => format('a'))][0])
-    // The nested `computed(...)` is a callback that must be verified/blessed so
-    // it can run in trusted compartments. Before Phase 2 the computed lowered
-    // to a lift INSIDE the handler body, so it was blessed at INVOCATION time,
-    // and this test asserted the verified-function registry GREW when the
-    // handler ran. After Phase 2 the computed lowers to a module-scope `const
-    // __cfLift_N = lift(false, fn)` blessed ONCE AT LOAD; the handler body just
-    // calls `__cfLift_N()`. Berni confirmed (2026-06-02) load-time blessing is
-    // sufficient, so the assertion is updated to the load-time shape: the
-    // nested computation is already in the registry after load, and invoking
-    // the handler succeeds without needing (or losing) an invocation-time
-    // entry.
+    // The nested `computed(...)` is a callback that must be verified so it
+    // can run in trusted compartments. The transformer lowers it to a
+    // module-scope `const __cfLift_N = lift(false, fn)`, blessed once at
+    // load, and the handler body calls `__cfLift_N()`. So the nested
+    // computation is registered after load, and invoking the handler needs
+    // no invocation-time entry.
 
     const program: RuntimeProgram = {
       main: "/main.tsx",
@@ -326,21 +322,24 @@ describe("SES security regressions", () => {
       ],
     };
 
+    // Every implementation the engine records announces itself with a
+    // `harness.implementation.register` marker.
+    let registered = 0;
+    runtime.telemetry.addEventListener("telemetry", (event: Event) => {
+      const { marker } = (event as RuntimeTelemetryEvent).detail;
+      if (marker.type === "harness.implementation.register") registered++;
+    });
     const { main } = await engine.compileAndEvaluateModules(program);
-    const countVerifiedFunctions = () =>
-      engine.accessForTestingOnly.executableRegistry.accessForTestingOnly
-        .verifiedImplementationsByEntryRef.values()
-        .reduce((n, bucket) => n + bucket.size, 0);
 
     // The nested computation (now the module-scope `__cfLift_N`) and the
     // handler are blessed at load: the global executable index is already
     // populated before any invocation.
-    const verifiedAtLoad = countVerifiedFunctions();
+    const verifiedAtLoad = registered;
     expect(verifiedAtLoad).toBeGreaterThan(0);
 
     // Invoking the verified handler runs against the load-blessed functions and
-    // succeeds — no invocation-time blessing is needed, and the index stays
-    // consistent (load-time blessing covered every nested callback).
+    // succeeds, and the engine records no implementation during invocation:
+    // load-time blessing covered every nested callback.
     expect(() =>
       runtime.runner.accessForTestingOnly.invokeJavaScriptImplementation(
         main?.makeNested as Module,
@@ -350,7 +349,7 @@ describe("SES security regressions", () => {
       )
     ).not.toThrow();
 
-    expect(countVerifiedFunctions()).toBeGreaterThanOrEqual(verifiedAtLoad);
+    expect(registered).toBe(verifiedAtLoad);
   });
 
   it("freezes callback compartment globalThis bindings", () => {

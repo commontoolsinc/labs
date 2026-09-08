@@ -1631,6 +1631,14 @@ export class Engine extends EventTarget {
         symbol,
         implementation as HarnessedFunction,
       );
+      this.#ctRuntime.telemetry.submit({
+        type: "harness.implementation.register",
+        identity,
+        symbol,
+        ...(bindingIdentity
+          ? { bindingPath: bindingIdentity.bindingPath }
+          : {}),
+      });
     };
     for (const [identity, namespace] of exportsByIdentity) {
       for (const [exportName, value] of Object.entries(namespace)) {

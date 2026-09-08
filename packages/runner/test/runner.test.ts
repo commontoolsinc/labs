@@ -47,6 +47,7 @@ import {
 } from "../src/storage/interface.ts";
 import { trustExecutable } from "./support/trusted-builder.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
+import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -1378,10 +1379,22 @@ describe("storage subscription", () => {
       ],
     } satisfies ICommitNotification;
 
-    const subscription = internals.createStorageSubscription();
-    subscription.next(notification);
+    const evicted: string[] = [];
+    const listener = (event: Event) => {
+      const { marker } = (event as RuntimeTelemetryEvent).detail;
+      if (marker.type === "runner.result-pattern.evict") {
+        evicted.push(marker.key);
+      }
+    };
+    runtime.telemetry.addEventListener("telemetry", listener);
+    try {
+      const subscription = internals.createStorageSubscription();
+      subscription.next(notification);
+    } finally {
+      runtime.telemetry.removeEventListener("telemetry", listener);
+    }
 
-    expect(internals.resultPatternCache.has(key)).toBe(false);
+    expect(evicted).toEqual([key]);
   });
 });
 

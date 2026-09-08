@@ -2389,6 +2389,65 @@ export class Runner {
   }
 
   /**
+   * Helper for the result-pattern step, which records that the result doc
+   * under `cacheDocKey` holds the pattern `resultPatternKey` for the scope
+   * instance `scopeKey`, and emits the `runner.result-pattern.memoize` marker
+   * for it.
+   */
+  #memoizeResultPattern(
+    cacheDocKey: `${MemorySpace}/${URI}`,
+    scopeKey: ScopeKey,
+    resultPatternKey: string,
+  ): void {
+    let instanceMemos = this.#resultPatternCache.get(cacheDocKey);
+    if (instanceMemos === undefined) {
+      instanceMemos = new Map();
+      this.#resultPatternCache.set(cacheDocKey, instanceMemos);
+    }
+    instanceMemos.set(scopeKey, resultPatternKey);
+    this.#runtime.telemetry.submit({
+      type: "runner.result-pattern.memoize",
+      key: cacheDocKey,
+      scopeKey,
+    });
+  }
+
+  /**
+   * Helper for the result-pattern step's commit callback, which drops the
+   * memo for `scopeKey` under `cacheDocKey` when it still names
+   * `resultPatternKey`, and emits the `runner.result-pattern.evict` marker
+   * for it. A memo a later run has already replaced is left alone.
+   */
+  #rollBackResultPatternMemo(
+    cacheDocKey: `${MemorySpace}/${URI}`,
+    scopeKey: ScopeKey,
+    resultPatternKey: string,
+  ): void {
+    const memos = this.#resultPatternCache.get(cacheDocKey);
+    if (memos?.get(scopeKey) !== resultPatternKey) return;
+    memos.delete(scopeKey);
+    if (memos.size === 0) this.#resultPatternCache.delete(cacheDocKey);
+    this.#runtime.telemetry.submit({
+      type: "runner.result-pattern.evict",
+      key: cacheDocKey,
+      scopeKey,
+    });
+  }
+
+  /**
+   * Helper for the storage subscription, which drops every instance's memo
+   * under `cacheDocKey` and emits the `runner.result-pattern.evict` marker
+   * for it. Does nothing for a doc with no memo.
+   */
+  #evictResultPatternMemos(cacheDocKey: `${MemorySpace}/${URI}`): void {
+    if (!this.#resultPatternCache.delete(cacheDocKey)) return;
+    this.#runtime.telemetry.submit({
+      type: "runner.result-pattern.evict",
+      key: cacheDocKey,
+    });
+  }
+
+  /**
    * Creates and returns a new storage subscription.
    *
    * This will be used to remove the cached pattern information when the result
@@ -2416,15 +2475,13 @@ export class Runner {
             // eviction-on-notification CONTRACT is what the storage
             // subscription exists for and is pinned by the "clears
             // cached patterns when storage notifies of changes" test.
-            this.#resultPatternCache.delete(
-              `${space}/${change.address.id}`,
-            );
+            this.#evictResultPatternMemos(`${space}/${change.address.id}`);
           }
         } else if (notification.type === "reset") {
           // copy keys, since we'll mutate the collection while iterating
           const cacheKeys = [...this.#resultPatternCache.keys()];
           cacheKeys.filter((key) => key.startsWith(`${notification.space}/`))
-            .forEach((key) => this.#resultPatternCache.delete(key));
+            .forEach((key) => this.#evictResultPatternMemos(key));
         }
         return { done: false };
       },
@@ -8738,12 +8795,11 @@ export class Runner {
     const patternUnchanged = previousResultPatternKey === resultPatternKey;
 
     if (!patternUnchanged) {
-      let instanceMemos = this.#resultPatternCache.get(cacheDocKey);
-      if (instanceMemos === undefined) {
-        instanceMemos = new Map();
-        this.#resultPatternCache.set(cacheDocKey, instanceMemos);
-      }
-      instanceMemos.set(effectiveOutputScopeKey, resultPatternKey);
+      this.#memoizeResultPattern(
+        cacheDocKey,
+        effectiveOutputScopeKey,
+        resultPatternKey,
+      );
 
       const childSetupTx = new TransactionWrapper(tx, {
         nonReactive: true,
@@ -8769,11 +8825,11 @@ export class Runner {
         // A rollback carries a release's authority, not a stop's: it lets go
         // of the registration this materialization installed and is not
         // authoritative over a lifetime or a start it does not own.
-        const memos = this.#resultPatternCache.get(cacheDocKey);
-        if (memos?.get(effectiveOutputScopeKey) === resultPatternKey) {
-          memos.delete(effectiveOutputScopeKey);
-          if (memos.size === 0) this.#resultPatternCache.delete(cacheDocKey);
-        }
+        this.#rollBackResultPatternMemo(
+          cacheDocKey,
+          effectiveOutputScopeKey,
+          resultPatternKey,
+        );
         this.releaseChild(resultCell, undefined);
       });
       this.#pullCellOnceAfterSuccessfulCommit(tx, resultCell);
