@@ -5966,6 +5966,7 @@ export class Runner {
         // type whose message names none of them.
         if (requireCommit) {
           const patternRef = setupRes.patternRef;
+          // deno-coverage-ignore-start -- every caller passes a pattern
           if (patternRef === undefined) {
             // `#setupInternal()` returns without a pointer when it resolves no
             // pattern at all. A caller passing one cannot reach that, so this
@@ -5975,6 +5976,7 @@ export class Runner {
               "the pattern setup committed without recording a pattern identity",
             );
           }
+          // deno-coverage-ignore-stop
           commit = { pattern: patternRef };
         }
       }

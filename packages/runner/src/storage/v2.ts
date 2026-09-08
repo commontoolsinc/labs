@@ -5306,6 +5306,8 @@ export class SpaceReplica
           this.#applySessionSync(precedingSync, "integrate");
         }
         this.#applySessionSync(sync, type);
+        // deno-coverage-ignore-start -- the client's own view has applied
+        // every frame handed over here, so only an apply bug lands here
       } catch (error) {
         // The frame failed to apply, so this refresh's view never gets a
         // consumer; without a close it leaks when a later refresh
@@ -5313,6 +5315,7 @@ export class SpaceReplica
         view.close();
         throw error;
       }
+      // deno-coverage-ignore-stop
       this.#consumeWatchView(view);
       return { ok: {} };
     } catch (error) {
@@ -6499,6 +6502,8 @@ export class SpaceReplica
           if ((this.#docs.get(key)?.confirmed.seq ?? 0) > 0) present += 1;
         }
         return present;
+        // deno-coverage-ignore-start -- the refresh resolves to its error
+        // and the removal swallows its own, so only a bug lands here
       } catch {
         await this.#removeWatchIds(watchIds);
         // Best-effort, like the retry gate it front-runs: an unexamined
@@ -6506,6 +6511,7 @@ export class SpaceReplica
         // verdict still decides.
         return 0;
       }
+      // deno-coverage-ignore-stop
     })();
   }
 

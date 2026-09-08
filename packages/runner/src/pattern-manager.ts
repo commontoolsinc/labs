@@ -630,16 +630,18 @@ export class PatternManager {
               record.delegated,
               { wantedIdentity: identity },
             );
+            // deno-coverage-ignore-start -- nothing in the re-issue path
+            // throws synchronously: the replication is an `async` call
           } catch (error) {
-            // Defensive: nothing in the re-issue path throws synchronously
-            // today, but a future edit must surface loudly here rather
-            // than as an unhandled microtask error.
+            // Defensive: a future edit that does throw here must surface
+            // loudly rather than as an unhandled microtask error.
             logger.error("closure-replication-reissue-error", () => [
               `entry=${record.entryIdentity}`,
               `wanted=${identity}`,
               String(error),
             ]);
           }
+          // deno-coverage-ignore-stop
         });
       }
       if (parked.size === 0) this.#parkedFailedReplications.delete(identity);
