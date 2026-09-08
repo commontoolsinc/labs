@@ -353,7 +353,8 @@ class VisitInProgress<Domain, ResultType> {
     const vis = this.#visitor;
 
     for (;;) {
-      let result = this.#visitResolvingCyclesAndReplacement(value);
+      let result: GeneralVisitorResult<Domain, ResultType> = this
+        .#visitResolvingCyclesAndReplacement(value);
 
       if (result?.type !== "visitSubtype") {
         return result;
