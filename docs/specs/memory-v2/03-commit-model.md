@@ -418,8 +418,9 @@ The rejection carries no document values. Before returning it, the server adds
 a persistent root-only graph watch with `schema: false` for each confirmed read
 that actually conflicted. The error's `conflictWatches` field advertises the
 effective watch specifications so the client can adopt them as reconnect
-intent. An equivalent client-side watch addition then completes locally; an
-older client or server falls back to the ordinary `session.watch.add` request.
+intent. An equivalent client-side watch addition then completes locally in the
+standard single-flight watch path. Older peers and concurrent watch mutation
+fall back to the ordinary `session.watch.add` request.
 
 The server also marks the commit's write targets and both read sets
 (`reads.confirmed` and `reads.pending`) dirty for the session — origin-less, so
