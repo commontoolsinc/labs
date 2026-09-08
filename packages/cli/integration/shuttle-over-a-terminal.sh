@@ -257,6 +257,7 @@ link /slugs/first/label#argument /slugs/second/label
 set label '"pointed at"'
 set settings/note '"written once and never again"'
 link /slugs/first/label /slugs/second/label#argument
+edit
 LINES
 EDITOR="$EDITOR_SCRIPT" python3 "$DRIVER" "$SCRIPT" "$TRANSCRIPT" -- \
   $CF sh $ARGS >/dev/null
@@ -560,7 +561,7 @@ check '"jam"' "$(said 37 "get summary")" \
 contains "\`verbs\` lists what this piece can be asked to do" \
   "$(said 38 "call . --help")" "an option in the name position names verbs"
 
-step "24. edit writes back what the editor saved, and stops three ways"
+step "24. edit writes back what the editor saved, stopping three ways after the editor and one before it"
 check "Wrote \`label\` on \`$FIRST\`." "$(said 39 "edit label")" \
   "edit writes back what came out of the editor"
 check '"edited in the editor"' "$(said 40 "get label")" \
@@ -583,6 +584,16 @@ else
 fi
 check '"garble me"' "$(said 44 "get label")" \
   "the refused edit left the cell holding what it held"
+# The stop that comes before the editor rather than after it. The operand
+# names the whole piece — here by naming nothing, shuttle standing on one —
+# and no write onto a whole piece can land, so the line is turned down while
+# there is nothing typed to lose. The editor never runs: had it run, this
+# fixture would have saved `"edited in the editor"` over the piece and the
+# line would have come back as a receipt or as the seam's refusal, neither of
+# which is this sentence. It is typed last, after everything that moves, which
+# is what leaves shuttle standing on the piece for it.
+check 'A write onto a whole piece is refused. `link` is what writes a reference.' \
+  "$(said 50 "edit")" "edit turns down a whole piece in the sentence set gives it"
 
 step "25. link writes a reference, so the second cell reads the first"
 check "Wrote a reference at \`/slugs/second/label\` naming \`/slugs/first/label\`." \

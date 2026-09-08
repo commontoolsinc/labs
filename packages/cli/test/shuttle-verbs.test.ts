@@ -799,8 +799,12 @@ describe("verbs", () => {
         // The half a maximum alone cannot express. `get` reads where it stands
         // and `help` lists the verbs, so neither is a line the dispatch may
         // answer for, and a count refusing none would take both readings away.
+        //
+        // Standing inside the piece rather than on it, so that the count is
+        // the only thing that could refuse: a whole piece is no cell to write
+        // onto, which `edit` says of a line naming none from a piece's root.
 
-        const outcome = await runLine(word, atPiece(), answering());
+        const outcome = await runLine(word, atPiece("title"), answering());
         expect(outcome.kind).not.toBe("refused");
       });
     }
@@ -3318,6 +3322,50 @@ describe("verbs", () => {
         "No editor is reachable from here, so there is nothing to open the " +
           "value in.",
       );
+    });
+
+    it("refuses a whole piece before the editor opens", async () => {
+      // The sentence `set` gives the same write, said while there is nothing
+      // to lose: a person who has typed a document into an editor and saved
+      // it is owed the write, and this line could never have made one. It is
+      // said in front of the warm as well, for the reason `set` says it
+      // there.
+
+      let warmed = false;
+      let read = false;
+      let opened = false;
+      expect(
+        reasonOf(
+          await runLine(
+            "edit .",
+            atPiece(),
+            answering({
+              warmPiece: (config) => {
+                warmed = true;
+                return Promise.resolve({ piece: config.piece });
+              },
+              getCellValue: () => {
+                read = true;
+                return Promise.resolve({ a: 1 });
+              },
+              editText: (text) => {
+                opened = true;
+                return Promise.resolve({
+                  kind: "edited" as const,
+                  text: `${text} `,
+                  file: "/tmp/edited",
+                  discard: () => Promise.resolve(),
+                });
+              },
+            }),
+          ),
+        ),
+      ).toBe(
+        "A write onto a whole piece is refused. `link` is what writes a " +
+          "reference.",
+      );
+      expect({ warmed, read, opened })
+        .toEqual({ warmed: false, read: false, opened: false });
     });
 
     it("opens the value as JSON a person can read", async () => {

@@ -701,11 +701,16 @@ async function set(
  * holds the tag, which is the question issue #6944 carries for `get` and is
  * not this verb's to settle.
  *
- * Four things stop the write, and each leaves the cell as it was. A value JSON
- * cannot carry is refused above. An editor that did not finish is the editor's
- * own refusal, carried through. Text that came back unchanged is nothing to
- * write, and says so. Text that will not parse is refused with the parse error
- * and the file it is still in.
+ * Five things stop the write, and each leaves the cell as it was. A whole
+ * piece is refused in {@link WHOLE_PIECE_REFUSAL}, which is the sentence
+ * {@link set} gives that write, and the refusal comes before the editor opens
+ * rather than after a save: what a person typed into an editor is work, and a
+ * line that could never have written it should say so while there is nothing
+ * to lose. A value JSON cannot carry is refused above, before the editor opens
+ * too. An editor that did not finish is the editor's own refusal, carried
+ * through. Text that came back unchanged is nothing to write, and says so.
+ * Text that will not parse is refused with the parse error and the file it is
+ * still in.
  *
  * What decides the file's fate is not which of those happened but whether the
  * cell took the text: the file is removed exactly where it holds nothing the
@@ -729,6 +734,10 @@ async function edit(
   }
   const at = await writable(shuttle, line.operands[0], "edit", deps);
   if (at.kind !== "aimed") return at;
+  // The operand reached a piece and named no path inside it, which is
+  // {@link set}'s guard on the write both verbs make. Ahead of the read and
+  // the editor, so nothing is typed into a file for a write that cannot land.
+  if (at.place.position.path.length === 0) return refuse(WHOLE_PIECE_REFUSAL);
   const warmed = await warm(shuttle, at.place, deps);
   if (warmed !== undefined) return warmed;
   const position = at.place.position;
@@ -1170,11 +1179,12 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
     summary: "Opens a cell's value in `$EDITOR` and writes back what you save.",
     detail: "The value goes out as JSON and comes back as JSON, so what is " +
       "edited is\nwhat a write takes rather than what `get` prints.\n\n" +
-      "Four things stop the write, and each leaves the cell as it was: a " +
-      "value\nJSON cannot carry, which is refused before the editor opens; " +
-      "an editor that\ndid not finish; text that came back unchanged; and " +
-      "text that will not\nparse, which is refused with the file it is " +
-      "still in.\n\nIt is the one write with no `cf` equivalent behind it.",
+      "Five things stop the write, and each leaves the cell as it was: a " +
+      "whole\npiece, and a value JSON cannot carry, both refused before the " +
+      "editor opens;\nan editor that did not finish; text that came back " +
+      "unchanged; and text that\nwill not parse, which is refused with the " +
+      "file it is still in.\n\nIt is the one write with no `cf` equivalent " +
+      "behind it.",
   }],
   ["get", {
     run: get,
