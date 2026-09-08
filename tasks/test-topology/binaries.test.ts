@@ -46,7 +46,6 @@ describe("the binary build suites", () => {
     // once. After that a build earns its place the way every other test
     // does, and a compile that breaks on `main` is what lifts it.
     for (const suite of suites) {
-      expect([suite.id, suite.mandatory]).toEqual([suite.id, undefined]);
       expect([suite.id, suite.unitsForChange]).toEqual([suite.id, undefined]);
     }
   });

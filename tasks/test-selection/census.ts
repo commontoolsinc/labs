@@ -119,12 +119,11 @@ export interface Census {
 /**
  * Reads the working tree against a manifest.
  *
- * Three rules make a unit mandatory: its suite is marked `always`, the
- * change touched what it covers, or no manifest has ever seen it. The
- * last of those is the rule the test-record spec requires of any consumer
- * that selects which tests run. A selector that never runs the unselected
- * starves its own data, and a renamed test is an unknown identity until
- * an alias lands.
+ * Two rules make a unit mandatory: the change touched what it covers, or
+ * no manifest has ever seen it. The second is the rule the test-record
+ * spec requires of any consumer that selects which tests run. A selector
+ * that never runs the unselected starves its own data, and a renamed test
+ * is an unknown identity until an alias lands.
  */
 export function census(
   suites: readonly Suite[],
@@ -173,9 +172,7 @@ export function census(
     );
     for (const unit of suite.units) {
       if (unavailable.has(unit)) continue;
-      const reason: SelectionReason | undefined = suite.mandatory === "always"
-        ? "always"
-        : touched.has(unit)
+      const reason: SelectionReason | undefined = touched.has(unit)
         ? "changed"
         : undefined;
       const recorded = inUnit.get(`${suite.id}\t${unit}`);

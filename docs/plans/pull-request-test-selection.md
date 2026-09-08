@@ -264,9 +264,6 @@ interface Suite {
   /** Environment variables its commands run with. */
   env?: Record<string, string>;
 
-  /** Whether a subset of this suite is always run, and on what basis. */
-  mandatory?: "always" | "changed";
-
   /** Every available item and every configured unavailability. */
   enumerate(): Promise<{
     items: Item[];
@@ -359,15 +356,12 @@ suite supplies the variant shared by all of them. Direct records already
 carry their kind, scope, and name; the runner checks their record surface
 against the suite before applying that same variant.
 
-`mandatory` is the policy escape hatch. `"always"` means every item runs
-on every pull request, with no exceptions of any kind — it outranks the
-score, the budget, and both exclusion rules, and
-[Two rules that keep a test out](#two-rules-that-keep-a-test-out) explains
-why that has to be literal. `"changed"` means an item runs when the pull
-request touches a file the item covers; the per-package type check is the
-natural user, because the store already records one `typecheck` identity
-per package group and the mapping from a changed file to a package is
-direct.
+No suite exempts itself from selection. An item runs because the change
+touches what it covers, because nothing has a record of it, or because it
+is worth what running it costs, and a repository gate is held to those
+rules the way a unit test is. `deno fmt --check` earns its place from the
+failures it has caught; a suite that could declare itself exempt would be
+a suite whose worth nothing measures.
 
 Answering "what does this item cover" belongs to the suite, because a
 unit that is not a path is one only its suite can map a diff onto. A
@@ -375,13 +369,7 @@ suite whose units are files needs to say nothing: the diff naming the
 file is the whole of the question. A suite whose units are type-check
 groups or binaries maps the diff itself, and a suite that maps it wrongly
 runs too much or too little rather than reporting anything, so the answer
-errs toward running. Absent the field, the suite is selected purely on value.
-
-The `always` set is deliberately tiny, and every member of it is a gate
-whose failure means the tree is broken rather than that one test is
-unhappy: `deno fmt --check`, `deno lint`, and the topology drift guard.
-Together they cost seconds. Nothing expensive belongs there, and adding to
-the set is a decision to spend part of every lane's budget forever.
+errs toward running.
 
 ### Today's jobs as suites
 
@@ -391,6 +379,7 @@ table is the migration's checklist.
 | Suite | Today's jobs | Record variant | Capabilities |
 | --- | --- | --- | --- |
 | `repo-gates` | `Check` (all but the type check) | — | `deno` |
+| `repo-history-gates` | the two append-only gates in `Pattern Update State and Baseline Integrity` | — | `deno`, `git-history` |
 | `typecheck` | `Check` (the type check) | — | `deno` |
 | `workspace-unit` | `Test (1..8)` | — | `deno`, `fuse`, `browser` |
 | `runner-unit` | `Runner Tests (1..8)` | — | `deno` |
@@ -735,7 +724,7 @@ build's 17,999 executions.
 | A pattern file run by `cf test` | `pattern-unit` | One. The runner writes one record per pattern file | Nothing to reach: the file is the identity. |
 | A pattern file checked by the compatibility gate | `pattern-compat` | One, named `pattern-compat <key>`, which the task appends itself as each file's verdict is known | Nothing to reach. The task already takes `--only` to restrict which files it reads. |
 | A single-step arm of `integration.sh` | `cli-core` | One, named for its step | Nothing to reach. The script's own whole-invocation record is suite-level and belongs to no invocation unit at all. |
-| One gate command | `repo-gates` | One, named for the gate that ran | Nothing to reach. |
+| One gate command | `repo-gates`, `repo-history-gates` | One, named for the gate that ran | Nothing to reach. |
 | One `deno check` invocation | `typecheck` | One, named for the path group it checked, which the task records itself | Nothing to reach. |
 | A whole task carrying one record | `cfcheck`, `pattern-vintage` | One, for everything the task did | Nothing to reach, and nothing finer exists: the suite is its own identity. |
 | A section of `fuse-exec.sh` | `cli-fuse` | The phases that section alone selects. The phases more than one section runs record against the suite instead, since they name no single section | Nothing to reach below the section. A mount comes up for the section, not for the phase, so its phases run or are skipped together. |
@@ -969,18 +958,19 @@ far worse failure than the workflow edit it replaced.
 `deno task check-test-topology` closes that, in two halves that catch the
 two different ways a surface goes missing.
 
-The **tree half** needs no store and runs on every pull request, in the
-`repo-gates` suite marked `mandatory: "always"`. It walks the tree for
-things that look like tests — `*.test.ts`, `*.test.tsx`, the integration
-directories, the shell scripts under `packages/cli/integration/` — and
-fails if any of them is claimed by no suite's `enumerate()`, or more than
-once under the same record surface and variant. A default suite and a
-non-default suite may claim the same source item because they are distinct
-execution surfaces. This is the half that catches a pull request adding a
-test surface nobody registered, at the moment it is added, and it is cheap
-enough to be unconditional. An entry in a configuration's declared skip
-registry accounts for its unavailable file or leaf without pretending it
-ran.
+The **tree half** needs no store, and is a unit of the `repo-gates` suite.
+It walks the tree for things that look like tests — `*.test.ts`,
+`*.test.tsx`, the integration directories, the shell scripts under
+`packages/cli/integration/` — and fails if any of them is claimed by no
+suite's `enumerate()`, or more than once under the same record surface and
+variant. A default suite and a non-default suite may claim the same source
+item because they are distinct execution surfaces. This is the half that
+catches a pull request adding a test surface nobody registered, and it is
+selected the way everything else is: a pull request that does not draw it
+leaves the unregistered surface to the full run on `main`, which is where
+the record of what this guard catches comes from. An entry in a
+configuration's declared skip registry accounts for its unavailable file or
+leaf without pretending it ran.
 
 The **store half** runs on `main`. It reads the most recent successful
 `main` build's records and fails if any recorded identity is one that no
@@ -1440,31 +1430,25 @@ from measurement rather than from somebody's judgement at one moment, it
 needs no owner or expiry to stop it rotting, and it reverses on its own
 the moment the test is fixed.
 
-**Neither rule touches an `always` item.** Both exclusions exist to stop a
-pull request failing for something its author cannot act on, and both
-reason about *tests*, whose individual absence costs one signal. An
-`always` item is not that. It is a gate the repository has decided must be
-green, and the moment it is red the exclusion would remove it from every
-pull request — including the pull requests that are about to make it
-worse, and including, in the drift guard's case, the very pull request
-that added the unregistered test surface it exists to catch. A guard that
-switches itself off exactly when it starts firing is not a guard.
+**Both rules reach a repository gate as well.** Formatting, linting and
+the drift guard are tests of the tree, and neither rule says anything
+about one of them that it does not say about a unit test. A gate failing
+in the latest `main` run leaves the selectable set, because a pull request
+red on it is red for something its author cannot act on. A gate above the
+flake threshold leaves the set too, and appears on the wall as the defect
+in the gate that it is.
 
-So `always` means always. Two consequences follow and both are intended.
-An `always` item red on `main` blocks every pull request until it is
-fixed. That is correct: with `deno fmt`, `deno lint`, and the topology
-guard, a red one means the tree is broken, the fix is usually a minute's
-work, and letting changes pile on top of it is how a minute becomes an
-afternoon. And an `always` item above the flake threshold keeps running
-rather than being hidden; a gate that is flaky is a defect in the gate,
-reported as one on the wall, and concealing it would be worse than the
-noise.
+The exception both rules carry cannot fire for a gate. A gate's unit is
+the name of a gate rather than a path, and its suite maps no change onto
+its units, so nothing a pull request touches reaches one. A gate red on
+`main` therefore stays out of pull requests until `main` is green, and
+`main`, which runs the whole corpus, is where it goes on failing until
+somebody fixes it.
 
 What the lane owes people in exchange is clarity about whose problem it
-is. A failing `always` item that was already failing in the latest `main`
-run is labelled in the job summary as pre-existing, with a link to the
-`main` run that first showed it, so nobody spends time looking for it in
-their own diff.
+is. The job summary names what was withheld and why, and says of each
+whether it ran anyway because the change reaches it, so nobody spends time
+looking for a pre-existing failure in their own diff.
 
 ### Two rules that force a test in
 
@@ -1778,9 +1762,9 @@ quietly absent.
 From what is left, given every item's value and cost and a budget of five
 lanes times 230 seconds each, it fills in four passes.
 
-1. **Mandatory.** Everything marked mandatory goes in first: the `always`
-   suites, the items the diff touched directly, every item of a covered
-   package the diff touched as described in [The one coverage gate that
+1. **Mandatory.** Everything mandatory goes in first: the items the diff
+   touched directly, every item of a covered package the diff touched as
+   described in [The one coverage gate that
    survives](#the-one-coverage-gate-that-survives), and the items with no
    history. An item excluded above comes back into this pass if the
    change edits the test itself, or its suite maps the change onto its
@@ -2918,7 +2902,6 @@ is pinned to the commit's date. And if none of that settles it,
 | A fork pull request | Works unchanged. The manifest is world-readable, and the existing member gate decides whether the fork's records ship. |
 | A re-run of one failed lane | Runs the same set, because the manifest is resolved by the commit's date, which no attempt changes. |
 | Both `pr-tests` and `full-tests` skip | `Status` fails. Its second clause requires one of them to have succeeded, so a pull request that ran no tests can never report green. |
-| An `always` item is red on `main` | Every pull request fails on it, deliberately, and the job summary says it was already red and links the `main` run. See [Two rules that keep a test out](#two-rules-that-keep-a-test-out). |
 | `main` is broken and stays broken | Every test failing in the latest `main` run leaves the selectable set, so pull requests are unaffected while it is fixed. They come back on their own. |
 | The reporter cannot find the pull request behind a `main` commit | It logs the commit and posts nothing. A direct push to `main` with no pull request behind it is the ordinary case for this. |
 | The reporter would comment on a test that is known flaky | It says so in the comment rather than implying the change caused it. |
@@ -3307,10 +3290,10 @@ exercised on the branch on its own.
       measurements, and returns at most one item for an identity that
       several arms or entry points can run. Add `tasks/ci-capabilities.ts`.
       Twenty-one suites currently hold 2,396 units. The repository gates are two
-      suites rather than one, because `mandatory` belongs to a suite and
-      the `always` set has to stay tiny: `repo-gates` holds formatting,
-      linting and the drift guard, and `repo-checks` holds the rest of
-      what the `Check` job runs, selected on value like anything else.
+      suites rather than one, because a lane opens what a suite needs
+      before it runs any of it: `repo-gates` holds every gate that reads
+      the working tree alone, and `repo-history-gates` the two append-only
+      gates that read the revision the change is measured against.
 - [x] The server-execution ON configuration consumes
       `tasks/server-execution-on-skips.ts`: whole-file entries are declared
       unavailable and omitted from enumeration, while step entries exclude

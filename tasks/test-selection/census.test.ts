@@ -121,7 +121,6 @@ describe("what a lane must run whatever the score says", () => {
     // than the diff being matched against the unit's name.
     const binaries = suite({
       id: "binaries",
-      mandatory: "changed",
       recordSurfaces: [{ kind: "gate", scope: "repo" }],
       units: ["toolshed", "cf"],
       unitsForChange: (changed) =>
@@ -156,10 +155,12 @@ describe("what a lane must run whatever the score says", () => {
     ).toBeUndefined();
   });
 
-  it("runs every unit of a suite marked always", () => {
+  it("leaves a gate the corpus already knows to the score", () => {
+    // A gate is a test of the tree like any other: what it is worth is
+    // what decides, so a gate that catches nothing stops being paid for.
+
     const gates = suite({
       id: "repo-gates",
-      mandatory: "always",
       recordSurfaces: [{ kind: "gate", scope: "repo" }],
       units: ["deno-fmt"],
     });
@@ -168,8 +169,13 @@ describe("what a lane must run whatever the score says", () => {
       suite: "repo-gates",
       unit: "deno-fmt",
     }]);
-    const { mandatory } = census([gates], manifest, new Set());
-    expect([...mandatory.values()]).toEqual(["always"]);
+    expect(census([gates], manifest, new Set()).mandatory.size).toBe(0);
+    // A gate's unit is a name rather than a path and its suite maps no
+    // change onto its units, so the rule that reaches it is the corpus
+    // having no record of it.
+    expect([
+      ...census([gates], undefined, new Set()).mandatory.values(),
+    ]).toEqual(["unknown"]);
   });
 
   it("says nothing about a unit a configuration declares unavailable", () => {

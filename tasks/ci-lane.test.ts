@@ -1505,9 +1505,10 @@ describe("what a lane records about itself", () => {
         {
           manifest: () =>
             Promise.resolve({
-              // A gate the change did not touch, costing most of a lane:
-              // `always` outranks the budget, so the lane takes it and
-              // reports what that cost rather than dropping it.
+              // A manifest that knows one gate, which leaves every
+              // other unit in the tree unknown and therefore mandatory.
+              // The lane takes them all and says what that cost rather
+              // than dropping work.
               manifest: manifestOf([{
                 test: { k: "format", s: "repo", n: "deno-fmt" },
                 suite: "repo-gates",
