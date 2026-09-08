@@ -658,6 +658,24 @@ describe("verb-emitted-address", () => {
       });
     });
 
+    it("dispatches the `$link` object joined by projected contents as the address alone", async () => {
+      // What a marked read that also projected fields prints: the address and
+      // the target's contents in one object. The label beside the address is
+      // deliberately not the target's, so an edge and a stored copy read
+      // differently.
+
+      await withProbe(
+        "emitted-address-rendered-object-with-contents",
+        async (probe) => {
+          await probe.call("relate", {
+            on: { $link: probe.address, label: "a projected copy" },
+          });
+          expect(probe.storedRaw()).toHaveProperty("/");
+          expect(probe.linkedLabel()).toBe("probe-root");
+        },
+      );
+    });
+
     it("refuses a string that is not an address, naming the position", async () => {
       await withProbe("emitted-address-refuses-string", async (probe) => {
         await expect(probe.call("relate", { on: "not-an-address" }))

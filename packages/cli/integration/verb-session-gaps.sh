@@ -436,6 +436,18 @@ else
     --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
     jq -r '.[2]["$link"] // empty')
   check "$OTHER" "$EDGE3" "and its edge is the target, not a copy"
+  # The same object with the contents the read projected beside the address,
+  # which is what a `--select @,title` row looks like. The address is what the
+  # position takes; the title beside it is not the target's, so a stored copy
+  # would read differently from the edge.
+  BLOCKED4=$($CF piece call --quiet --piece "$KID" $ARGS \
+    blockOn "{\"on\":{\"\$link\":\"$OTHER\",\"title\":\"a projected copy\"}}" 2>/dev/null)
+  check "4" "$(echo "$BLOCKED4" | jq -r '.result.blockedOnCount // empty')" \
+    "the \$link object with projected contents beside it dispatches as the address"
+  EDGE4=$($CF cell get --quiet --piece "$KID" blockedOn $ARGS \
+    --schema '{"type":"array","items":{"$link":true}}' 2>/dev/null |
+    jq -r '.[3]["$link"] // empty')
+  check "$OTHER" "$EDGE4" "and its edge is the target, not the copy beside the address"
   # The refusals guarding the same position, each matched against its
   # SPECIFIC message: a renamed verb or a server hiccup also exits nonzero,
   # and a probe that reads any failure as the refusal is a probe that cannot
