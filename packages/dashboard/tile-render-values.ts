@@ -15,6 +15,11 @@ export const escapeHtml = (s: string) =>
     (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]!,
   );
 
+/** An integer with its thousands separated, the same in every locale. */
+export function groupDigits(value: number): string {
+  return String(Math.round(value)).replace(/\B(?=(\d{3})+$)/g, ",");
+}
+
 // How a sparkline caption spells a day span, consistently across tiles.
 export function daysLabel(days: number): string {
   if (days < 1) return "<1 day";
@@ -29,6 +34,18 @@ export function humanSpan(ms: number): string {
     return `${hr} hour${hr === 1 ? "" : "s"}`;
   }
   return `${Math.max(1, Math.round(ms / 60_000))} min`;
+}
+
+/**
+ * A span in the least room it can be read in: minutes, then hours, then
+ * days. For a caption sharing its line with other text, where the units
+ * `humanSpan` spells out would not fit.
+ */
+export function compactSpan(ms: number): string {
+  const minutes = Math.max(0, Math.round(ms / 60_000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `${hours}h` : `${Math.round(hours / 24)}d`;
 }
 
 export const DURATION_LABEL_HEIGHT = 9;

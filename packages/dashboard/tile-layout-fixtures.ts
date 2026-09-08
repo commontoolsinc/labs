@@ -136,17 +136,11 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
     view: {
       label: "flaky tests",
       status: "warn",
-      value: "4",
-      sub: "too noisy to judge a change by · 4 tests",
-      extra:
-        `<div class="tile-detail-list" tabindex="0" role="region" aria-label="Flaky test details; scroll for more" title="Scroll for more details">${
-          [
-            "4.2% · package alpha: longest representative test name",
-            "3.7% · package beta: another representative test name",
-            "2.9% · package gamma: a third representative test name",
-            "2.1% · package delta: a fourth representative test name",
-          ].map((line) => `<div title="${line}">${line}</div>`).join("")
-        }</div>`,
+      value: "25 flaky tests",
+      valueLabel: "25 flaky tests",
+      sub: "60 days of runs · 3h old",
+      hint: "flakes ↗",
+      href: "/test-selection#flaky",
     },
   },
   {
@@ -155,8 +149,10 @@ const TILE_LAYOUT_FIXTURE_INPUTS: readonly TileLayoutFixture[] = [
       label: "test selection",
       status: "good",
       value: "64%",
-      sub: "640 of 1000 tests · fullest lane 280s of 300s",
-      aside: "12h old",
+      sub: "16,614 of 19,544 tests",
+      aside: `<span class="hmtd" title="12h old">12h old</span>`,
+      hint: "lanes ↗",
+      href: "/test-selection",
     },
   },
   {
