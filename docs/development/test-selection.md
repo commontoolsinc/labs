@@ -342,6 +342,151 @@ Both follow [the wall's rules](../../packages/dashboard/README.md#philosophy-and
 they report on the system, they name tests, and nothing about either is
 aggregated per person.
 
+## The comment a run on the default branch leaves
+
+Selection means some regressions land and the run on the default branch
+catches them. When that happens, the change that caused it is told,
+without anybody going looking.
+
+`.github/workflows/pull-request-comments.yml` runs
+`tasks/post-main-report.ts` in the base-repository context with a write
+token. It follows the test workflow, because a `workflow_run` payload
+describes the run it names and not the run that triggered it: a follower
+of the relay would read the default branch and its tip whichever run's
+records the relay had shipped. The repository squash-merges with the pull
+request number in the subject, so the pull request behind a commit is
+unambiguous; a commit pushed straight to the default branch has none, and
+then nothing is posted.
+
+Three runs are compared: the run at the commit, the run at the commit's
+parent, and the pull request's own run. The two on the default branch are
+read from their own `test-records-*` artifacts, which are readable the
+moment a run ends where the store holds a run only once the relay has
+shipped it — and two merges landing close together, which is the case
+this exists for, is exactly when the earlier relay is still running.
+
+The pull request's own run is read from the store instead, because the
+relay is where the trust decision about it was made: records from a fork
+run are authored by the fork, and the relay ships them only for a member.
+What the store holds is what this repository was willing to believe.
+
+The previous run is asked for by the parent commit's name rather than
+taken from a listing. Pushes to the default branch are not cancelled by
+their successors, so two of them overlap whenever two merges land close
+together, and the run before this one in a listing of finished runs can
+be the run two commits back.
+
+Every conclusion that leaves records counts, a run killed at its bound
+included: that is the shape a hanging test takes, and every note needs
+evidence rather than the absence of it. A run whose records cannot be
+found is a run nothing is known about, not a run that skipped every test
+it did not record — and a run one of whose artifacts could not be
+downloaded is read as nothing at all, because a run read in part reads
+as a run that ran less, and a report built on that would withdraw one an
+earlier attempt correctly made.
+
+A commit whose subject names a number that is not a pull request gets
+nothing. An issue takes comments the same way a pull request does, so
+the number is looked up before anything is written.
+
+The comment carries up to six notes, and it carries a note only when the
+run found something the pull request's own run could not have found for
+itself.
+
+- **A test that failed for the first time at this commit.** Precisely
+  that: it passed in the previous run on the default branch and failed in
+  this one. A test that was already failing produces no note, which is
+  what stops a break being attributed to whoever merged next. A test that
+  both passed and failed at this commit produces no note either: that is
+  the test disagreeing with itself, which the scorer calls flake evidence
+  rather than a catch. Nor does a test the pull request's own run failed,
+  because a failure that run reported is not something a later run found
+  for it.
+- **What the pull request's own run did with that test.** Its records say
+  whether it ran the test, which is the only thing that settles it, and
+  the manifest it resolved says why it did not. Ran and passed is a flake
+  or an interaction between changes. Withheld is the store holding the
+  test back as too flaky or as already failing. Not selected is the
+  expected cost of selection: the coverage this design traded away, so
+  nothing was missed. A test the packing reached, or one the store has
+  never seen, with no record either way is a run that recorded less than
+  it ran — a test job that fails before it uploads leaves its share
+  behind like that — which is said in those words rather than as a test
+  the run did not reach. And a test its run recorded a skip for, where no
+  manifest says selection is why, is a test that skips itself under some
+  condition.
+- **A rise in the repository's uncovered-line count** of at least
+  `COVERAGE_COMMENT_LINES`, measured between the run before the commit
+  and the run at it, with the source groups the change touched that rose
+  with it. Naming those is as near as this gets to saying where a test
+  would go, and it is also what separates the part of the rise the
+  change is behind from the part that is somewhere else. Never a
+  failure, and never for one line. A change that touched no source at
+  all is not asked about, because the repository-wide figure moves a
+  little between runs on its own.
+- **A rise in a covered package's own-tests number**, naming what let it
+  past the per-package gate. As with the repository-wide figure, a change
+  that touched no source at all is not asked about. The routes are: the package is on
+  `EXCLUDED_FROM_COVERAGE_GATE`; the change touched more covered packages
+  than `LOCAL_COVERAGE_MAX_PACKAGES` allows, so the gate did not run; the
+  change did not touch the package, so the gate had nothing to compare;
+  or the gate did measure the package and passed it, which means the two
+  measurements disagree. Each calls for something different, which is why
+  the note names it. The number is the package's source measured by only
+  the package's own tests, which a run measures whole however much of the
+  corpus it ran. That is a different number from the source group of the
+  same name, which is the package measured by every test in the run and
+  which a selected run only samples; `ownTestsCoverageMetric` in
+  `tasks/ci-check-lib.ts` is the one name the producer and the reader
+  share. The per-package gate is what publishes it, so this note is
+  silent until that gate lands.
+- **A new test that turned out to be flaky.** A test this run ran, the
+  previous run did not, and the store has never seen — that third
+  condition is what stops a run that shipped part of its records making
+  every test in the missing part look new — which passed and failed at
+  this one commit, across the repeats a lane runs, across shards and
+  across attempts.
+- **A rename that discarded history**, with the number of catches it
+  would bring back and the line to append to
+  `tasks/test-identity-aliases.jsonl`. Four things have to hold: the
+  departing test caught something; the unit it lived in produced records
+  in this run, so its absence is a test that left rather than a suite
+  that did not run; the arriving name is one the store has never seen;
+  and the pairing is clear — alike past `RENAME_SIMILARITY`, ahead of
+  every other candidate by `RENAME_MARGIN`, and pointed at by no other
+  departure. Alikeness is the lower of two comparisons, one over the
+  groups a name is nested under and one over the part that is the test's
+  own, because either alone answers a different question: two tests under
+  one group share the whole chain, and two tests under different groups
+  routinely share a leaf. At most `RENAME_SUGGESTIONS` are offered. A rename is never inferred, so this
+  is a suggestion: append the line if the pairing is right, and ignore it
+  if it is not.
+
+Five properties keep this on the right side of
+[the wall's rule](../../packages/dashboard/README.md#philosophy-and-values)
+that reporting is about the system and never about individuals. The
+comment's subject is a commit and a test, and no author is named. Nothing
+is counted per author, per team, or per anything, and no history is kept:
+each comment is a pure function of one run, and no tile, report or query
+rolls them up. A test the selector declined to run is described as
+coverage this design traded away, because the author did not miss it. A
+test the store knows disagrees with itself is labelled as one. And the
+comment is edited in place rather than repeated, which the hidden marker
+at the top makes possible; a later attempt that finds nothing withdraws
+what an earlier one said.
+
+If it ever stops being all five of those, it should be removed rather
+than tuned.
+
+Nothing gates on it. The reporter is best-effort throughout: a failure
+becomes a warning annotation on the run and the workflow stays green,
+because a comment nobody gates on must never turn a run red, and least of
+all a run that has already passed. It reads two runs' worth of record
+artifacts, so it takes minutes; nothing waits on it.
+
+To see what it would say about a run, set `MAIN_REPORT_RUN_ID` to that
+run and pass `--dry-run`, which posts nothing.
+
 ## Telling the machinery about a new test
 
 Nothing, in the ordinary case. A test added to an existing suite is

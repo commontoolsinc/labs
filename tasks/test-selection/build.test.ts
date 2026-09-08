@@ -15,7 +15,6 @@ import {
   emptyAggregate,
   Fold,
   foldReports,
-  identityOfKey,
   lastRun,
   localReporter,
   locateSurfaces,
@@ -496,28 +495,6 @@ describe("build", () => {
         states: {},
       };
       expect(parseAggregate(JSON.stringify(before))?.compacted).toEqual([]);
-    });
-  });
-
-  describe("identityOfKey()", () => {
-    it("recovers the identity a canonical key names", () => {
-      expect(identityOfKey('["unit","memory","a"]')).toEqual({
-        k: "unit",
-        s: "memory",
-        n: "a",
-      });
-      expect(identityOfKey('["unit","memory","a","on"]')).toEqual({
-        k: "unit",
-        s: "memory",
-        n: "a",
-        v: "on",
-      });
-    });
-
-    it("returns undefined for anything that is not one", () => {
-      expect(identityOfKey("not json")).toBeUndefined();
-      expect(identityOfKey('["unit","memory"]')).toBeUndefined();
-      expect(identityOfKey('["unit",1,"a"]')).toBeUndefined();
     });
   });
 

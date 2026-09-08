@@ -411,13 +411,48 @@ Deno.test("every work step is bounded before its job is", async () => {
   }
 });
 
-Deno.test("Coverage Comment follows the CI workflow by name", async () => {
+Deno.test("Pull Request Comments follows the CI workflow by name", async () => {
   const deno = await workflow("deno.yml");
-  const comment = await workflow("coverage-comment.yml");
+  const comment = await workflow("pull-request-comments.yml");
   const name = deno.match(/^name: (.+)$/m);
   assert(name, "workflow name not found");
 
   assertStringIncludes(comment, `    workflows: ["${name[1]}"]\n`);
+});
+
+// A workflow_run payload describes the run it names, not the run that
+// triggered it, so only a first-level follower of the test workflow can
+// read a run's own event, branch and head. A follower of a follower gets
+// the default branch and its tip whatever the triggering run was.
+Deno.test("each comment job selects runs by the triggering run's own facts", async () => {
+  const comment = await workflow("pull-request-comments.yml");
+  assertStringIncludes(
+    comment,
+    "github.event.workflow_run.event == 'pull_request' &&",
+  );
+  assertStringIncludes(
+    comment,
+    "github.event.workflow_run.event == 'push' &&",
+  );
+  assertStringIncludes(
+    comment,
+    "github.event.workflow_run.head_branch == 'main' &&",
+  );
+});
+
+// The run report reads the tree of the commit it reports on, so that the
+// topology it packs is the pull request's tree as it landed and the diff
+// it reads is the change itself. That commit is on the default branch,
+// which is what makes it safe to run in a job holding a write token; a
+// pull request head in the same job would be running fork-authored code
+// with permission to comment as the repository.
+Deno.test("the run report checks out the commit it reports on", async () => {
+  const comment = await workflow("pull-request-comments.yml");
+  assertStringIncludes(
+    comment,
+    "ref: ${{ github.event.workflow_run.head_sha }}",
+  );
+  assertStringIncludes(comment, "fetch-depth: 2");
 });
 
 Deno.test("coverage requirements follow sharded test matrices", async () => {
