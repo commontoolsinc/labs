@@ -84,8 +84,10 @@ const CHECK_GATES: readonly Gate[] = [
     kind: "gate",
     task: "check-verb-session-sync",
   },
+  { name: "check-pattern-tiers", kind: "gate", task: "check-pattern-tiers" },
   { name: "check-unused-deps", kind: "gate", task: "check-unused-deps" },
   { name: "check-deno-pins", kind: "gate", task: "check-deno-pins" },
+  { name: "check-action-pins", kind: "gate", task: "check-action-pins" },
   {
     name: "check-single-copy-deps",
     kind: "gate",
