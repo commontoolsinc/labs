@@ -681,10 +681,18 @@ export interface PresetCfcParams {
 export const presetCfcOptions = (
   params: PresetCfcParams,
 ): Partial<RuntimeOptions> => ({
-  // Pinned, not defaulted: several sites pinned this individually so that a
-  // changed constructor default could not silently relax them; the pin now
-  // lives once. Same value as the constructor default today.
-  cfcEnforcementMode: "enforce-explicit",
+  // Pinned, not defaulted: several sites pinned these individually so that a
+  // changed constructor default could not silently relax them; the pins now
+  // live once. Same values as the constructor defaults today — the strict end
+  // state of the deployment-mode matrix
+  // (docs/specs/cfc-enforcement-matrix.md §3).
+  cfcEnforcementMode: "enforce-strict",
+  cfcFlowLabels: "persist",
+  cfcWriteFloor: "enforce",
+  cfcTriggerReadGating: true,
+  cfcPolicyEvaluation: "enforce",
+  cfcLabelMetadataProtection: "enforce",
+  cfcDeclaredMonotonicity: "observe",
   ...(params.cfcPosture === "max-enforcement"
     ? MAX_ENFORCEMENT_CFC_OPTIONS
     : {}),
