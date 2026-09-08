@@ -482,8 +482,8 @@ describe("queueEvent with auto-start", () => {
     );
 
     // Create a internal and argument cells, and attach them to resultCell.
-    // This would be done inside setupInternal, but we want to proactively set up links
-    // to that internal cell in our result cell.
+    // This would be done inside `Runner.#setupInternal()`, but we want to
+    // proactively set up links to that internal cell in our result cell.
     const argumentCell = getMetaCell(resultCell, "argument", tx);
     const doubledCell = getDerivedInternalCell(resultCell, {
       partialCause: "doubled",
@@ -640,8 +640,8 @@ describe("queueEvent with auto-start", () => {
     );
 
     // Create a internal and argument cells, and attach them to resultCell.
-    // This would be done inside setupInternal, but we want to proactively set up links
-    // to that internal cell in our result cell.
+    // This would be done inside `Runner.#setupInternal()`, but we want to
+    // proactively set up links to that internal cell in our result cell.
     const argumentCell = getMetaCell(resultCell, "argument", tx);
     const doubledCell = getDerivedInternalCell(resultCell, {
       partialCause: "doubled",

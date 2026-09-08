@@ -608,8 +608,9 @@ Deno.test("memory v2 runner integrates watch deltas without re-diffing cold watc
 Deno.test("memory v2 runner never moves a confirmed doc backwards on a stale watch refresh", async () => {
   // Watch refreshes can arrive after local confirmations; an upsert whose
   // seq is below the confirmed base must be skipped (pending replay depends
-  // on monotonic bases). Pins the applySessionSync guard directly — its
-  // only other coverage was an incidental race in unrelated tests.
+  // on monotonic bases). Pins the `SpaceReplica.#applySessionSync()` guard
+  // directly — its only other coverage was an incidental race in unrelated
+  // tests.
   const docA = `of:watch-stale-a-${crypto.randomUUID()}` as URI;
   const docB = `of:watch-stale-b-${crypto.randomUUID()}` as URI;
   const transport = new IncrementalEffectTransport(

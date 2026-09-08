@@ -1688,13 +1688,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
     wtx.prepareCfc();
     await wtx.commit();
 
-    const manager = runtime.patternManager as unknown as {
-      replicateClosures(
-        entryIdentity: string,
-        fromSpace: string,
-        toSpace: string,
-      ): Promise<void>;
-    };
+    const manager = runtime.patternManager.accessForTestingOnly;
     await manager.replicateClosures(importerIdentity, spaceA, spaceB);
 
     const rtx = runtime.edit();
@@ -1838,14 +1832,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
   it("rejects replication from an incomplete origin closure", async () => {
     const targetSpace = "did:key:z6MkCellCacheIncompleteReplicationTarget";
     const { modules, entryIdentity } = toModules(PROGRAM);
-    const manager = runtime.patternManager as unknown as {
-      replicateClosures(
-        entryIdentity: string,
-        fromSpace: string,
-        toSpace: string,
-        visited?: Set<string>,
-      ): Promise<void>;
-    };
+    const manager = runtime.patternManager.accessForTestingOnly;
 
     const visitKey = `${spaceA}\0${targetSpace}\0${entryIdentity}`;
     await expect(
@@ -1912,13 +1899,7 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
       writeTx.prepareCfc();
       expect((await writeTx.commit()).error).toBeUndefined();
 
-      const manager = coverageRuntime.patternManager as unknown as {
-        replicateClosures(
-          entryIdentity: string,
-          fromSpace: string,
-          toSpace: string,
-        ): Promise<void>;
-      };
+      const manager = coverageRuntime.patternManager.accessForTestingOnly;
       await expect(
         manager.replicateClosures(entryIdentity, spaceA, targetSpace),
       ).rejects.toThrow("coverage spans unavailable in origin space");

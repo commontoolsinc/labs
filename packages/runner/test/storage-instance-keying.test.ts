@@ -316,7 +316,7 @@ describe("stage A: instance keying — unit pins", () => {
     expect(readAs(undefined)).toBe("own");
 
     // The KEYED retraction: exactly Alice's instance goes; the own
-    // instance is untouched. (Mutation: `applySessionSync` ignoring
+    // instance is untouched. (Mutation: `#applySessionSync()` ignoring
     // `remove.scopeKey` wipes the own instance and keeps Alice's stale
     // one — the exact inverse.)
     replica.accessForTestingOnly.applySessionSync({

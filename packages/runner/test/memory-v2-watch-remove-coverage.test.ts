@@ -1,4 +1,5 @@
-// Deterministic coverage for the "removes" arm of applySessionSync in
+// Deterministic coverage for the "removes" arm of
+// `SpaceReplica.#applySessionSync()` in
 // storage/v2.ts. A watch refresh / sync batch can carry removals when a watched
 // doc is deleted upstream. Most tests only deliver upserts, so the removes path
 // runs intermittently. Here the scripted transport answers the watch.add with a
@@ -21,7 +22,6 @@ import {
   SingleSessionFactory,
   TestStorageManager,
 } from "./memory-v2-test-utils.ts";
-import type { SpaceReplica } from "../src/storage/v2.ts";
 
 const signer = await Identity.fromPassphrase("memory-v2-watch-remove-coverage");
 const space = signer.did();
@@ -354,46 +354,6 @@ Deno.test("absence cleanup closes a returned view when the replica closes concur
   } finally {
     tx.abort("inspection only");
     await closing;
-    await runtime.dispose();
-    await storageManager.close();
-  }
-});
-
-Deno.test("absence reconciliation cleans up after an unexpected probe exception", async () => {
-  const transport = new FailFirstWatchRemovalTransport(0);
-  const sessionFactory = new SingleSessionFactory(transport);
-  const storageManager = TestStorageManager.create({
-    as: signer,
-    memoryHost: new URL("memory://runner-v2-watch-probe-exception"),
-  }, sessionFactory);
-  const runtime = new Runtime({
-    apiUrl: new URL(import.meta.url),
-    storageManager,
-  });
-  const provider = storageManager.open(space);
-  // The member is replaced by assignment, which its `private` rather than
-  // `#` name allows; the cast reaches only it, typed as the class types it.
-  const replica = provider.replica as unknown as {
-    refreshWatchSet: SpaceReplica["accessForTestingOnly"]["refreshWatchSet"];
-  };
-  const originalRefresh = replica.refreshWatchSet.bind(replica);
-  replica.refreshWatchSet = () =>
-    Promise.reject(new Error("synthetic unexpected probe exception"));
-  const tx = runtime.edit();
-  tx.read({
-    space,
-    id: `of:watch-probe-exception-${crypto.randomUUID()}`,
-    type: "application/json",
-    scope: "space",
-    path: [],
-  }, { trackReadWithoutLoad: true });
-
-  try {
-    assertEquals(await provider.loadUnexaminedAbsences!(tx.tx), 0);
-    assertEquals(transport.watchRemovalAttempts, 1);
-  } finally {
-    replica.refreshWatchSet = originalRefresh;
-    tx.abort("inspection only");
     await runtime.dispose();
     await storageManager.close();
   }

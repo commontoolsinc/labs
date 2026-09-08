@@ -1055,8 +1055,8 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
     await rt2.storageManager.synced();
 
     // Destination stored source is the VERBATIM legacy envelope — no
-    // normalization in replicateClosures (normalizing would rotate the
-    // identity, the exact failure the design rules out).
+    // normalization in `PatternManager.#replicateClosures()` (normalizing
+    // would rotate the identity, the exact failure the design rules out).
     const readTx = rt2.edit();
     try {
       const replicated = await loadVerifiedSourceClosure(

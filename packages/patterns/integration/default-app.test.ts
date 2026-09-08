@@ -1479,13 +1479,13 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
       if (!stack) return "unknown";
       if (
         stack.includes("_CellImpl.setMetaRaw") &&
-        stack.includes("Runner.setupInternal")
+        stack.includes("#setupInternal")
       ) {
         return "setup:setMetaRaw";
       }
       if (
         stack.includes("_CellImpl.setRawUntyped") &&
-        stack.includes("Runner.setupInternal")
+        stack.includes("#setupInternal")
       ) {
         return "setup:setRawUntyped";
       }
@@ -1519,7 +1519,7 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
         line.includes("postRun") ||
         line.includes("#instantiatePatternNode") ||
         line.includes("Runner.run") ||
-        line.includes("Runner.setupInternal") ||
+        line.includes("#setupInternal") ||
         line.includes("sendValueToBinding") ||
         line.includes("diffAndUpdate") ||
         line.includes("applyChangeSet") ||
