@@ -151,14 +151,22 @@ module that pays for the step: `storage.v2.remote/receive/decodeFrame`
 `/schemaExpansion` (protocol decoding, and schema expansion only for a frame
 carrying a reference), and `storage.v2.remote/receive/dispatchPayload` — the
 whole synchronous handling of the frame, which for a pushed effect includes
-updating the watch view but not the replica. Replica application is its own
-pair, and every frame the replica ingests lands in one of them:
-`storage.v2/watchRefresh/applySessionSync` for the frames a refresh brought
-back, `storage.v2/watchPush/applySessionSync` for the frames the server pushed.
-Around a refresh, `storage.v2/watchRefresh/watchAddSync` is the request as the
-replica saw it, queue wait included, while `memory.v2.client/watchAdd/request`
-is the round trip alone, so their difference is time spent behind earlier watch
-mutations; `watchRefresh/total` brackets both with application. The
+updating the watch view but not the replica. Two rows time replica application:
+`storage.v2/watchRefresh/applySessionSync` covers graph-watch refreshes, and
+`storage.v2/watchPush/applySessionSync` covers the subscription consumer. Direct
+operation-watch and watch-removal application are outside both spans.
+
+Around a graph-watch refresh, `storage.v2/watchRefresh/watchAddSync` includes
+watch-mutation queue wait, the client request, response-order wait in concurrent
+mode, and watch-view application. `memory.v2.client/watchAdd/request` covers
+the client request, including connection readiness, encoding, the transport
+round trip, and response handling;
+`memory.v2.client/watchAdd/apply` covers watch bookkeeping and watch-view
+application. The outer span minus the request span therefore includes
+application and scheduling overhead as well as waiting; it does not isolate
+queue wait. The rows aggregate different call populations, and their percentiles
+cannot be subtracted to recover any of these components. `watchRefresh/total`
+brackets the whole refresh, including replica application. The
 `runner/start/*Wave` rows bracket each resume pre-sync wave around the per-cell
 `runner/start/resume*` spans.
 
@@ -452,9 +460,11 @@ dividing it to recover a per-frame cost is unsound. Read it as a bound instead �
 a client's push waits at least the refresh delay plus these two — and reach for
 `servingLoop.push` when the question is which sessions a batch served.
 
-`memory/watchAdd/total` is one `session.watch.add` end to end — evaluation
-through response assembly — for every request, where `slowQueries` keeps only
-those over its threshold. `memory/response/prepareSchemas` against
+`memory/watchAdd/total` covers each `session.watch.add` handler from admission
+through completion, including duplicate or empty additions, rejected requests,
+and failures. It ends before outbound schema preparation and transport.
+`slowQueries` records successful additions over its threshold, measured from
+evaluation through response assembly. `memory/response/prepareSchemas` against
 `memory/response/sendRaw` splits each outbound message, response or effect, into
 schema-table compression and the hand-off to the transport;
 `memory.compression/send/encode` is the websocket compression that follows, on

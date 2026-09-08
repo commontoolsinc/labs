@@ -5526,10 +5526,10 @@ export class SpaceReplica
         ]);
       } finally {
         // The push-side counterpart of `watchRefresh/applySessionSync`:
-        // frames the server pushed apply here, off the subscription
-        // iterator, never inside a refresh. Between the two keys every
-        // frame the replica ingests is timed, so a slow trickle and a
-        // slow initial sync read as different rows.
+        // this key times application from the subscription iterator;
+        // the refresh key times application during graph-watch refreshes.
+        // Direct operation-watch and watch-removal application have no
+        // span under either key.
         logger.time(applyStart, "watchPush", "applySessionSync");
       }
     }

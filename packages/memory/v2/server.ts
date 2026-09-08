@@ -4496,7 +4496,20 @@ export class Server {
     }
   }
 
+  /** Add session watches, timing admission through the handler's completion. */
   async watchAdd(
+    message: WatchAddRequest,
+  ): Promise<ResponseMessage<WatchAddResult>> {
+    const startedAt = performance.now();
+    try {
+      return await this.#watchAdd(message);
+    } finally {
+      timing.time(startedAt, "memory", "watchAdd", "total");
+    }
+  }
+
+  /** Helper for watchAdd(), which authorizes, evaluates, and installs watches. */
+  async #watchAdd(
     message: WatchAddRequest,
   ): Promise<ResponseMessage<WatchAddResult>> {
     const session = this.#sessions.get(message.space, message.sessionId);
@@ -4744,7 +4757,6 @@ export class Server {
           ...attribution,
         },
       );
-      timing.time(startedAt, "memory", "watchAdd", "total");
       return response;
     } catch (error) {
       // Evaluation state is staged (the session's graphs and watches are
