@@ -1395,9 +1395,11 @@ export type EngineOpener = (
  * The memory v2 server. An instance accepts connections and serves the
  * session protocol over them — opening sessions, admitting transactions,
  * evaluating queries and watches, and fanning out sync frames as spaces
- * change — with one engine per space it serves and every request gated by
- * that space's access control. It also reads and writes documents directly,
- * outside any session, for in-process callers such as blob uploads.
+ * change — with one engine per space it serves. Each space's access control
+ * is evaluated per the `acl` option: gating every request in `enforce` mode,
+ * only counting would-denies in `observe` mode, and not at all in `off` mode,
+ * the default. It also reads and writes documents directly, outside any
+ * session, for in-process callers such as blob uploads.
  */
 export class Server {
   #sessions: SessionRegistry;

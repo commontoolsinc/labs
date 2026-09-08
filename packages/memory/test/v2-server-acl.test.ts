@@ -43,6 +43,18 @@ const CAROL = "did:key:z6Mk-acl-carol";
 const SERVICE = "did:key:z6Mk-acl-service";
 const TEST_AUDIENCE = "did:key:z6Mk-acl-test-audience";
 
+/**
+ * Asserts that `value` is neither `undefined` nor `null`, and narrows it to
+ * say so.
+ */
+function expectExists<T>(
+  value: T,
+  message?: string,
+): asserts value is NonNullable<T> {
+  expect(value, message).toBeDefined();
+  expect(value, message).not.toBeNull();
+}
+
 const shiftMessage = (messages: ServerMessage[]): ServerMessage => {
   const message = messages.shift();
   expectExists(message, "expected a server message");
@@ -55,18 +67,6 @@ const assertResponse = <Result>(
   expect(message.type).toBe("response");
   return message as ResponseMessage<Result>;
 };
-
-/**
- * Asserts that `value` is neither `undefined` nor `null`, and narrows it to
- * say so.
- */
-function expectExists<T>(
-  value: T,
-  message?: string,
-): asserts value is NonNullable<T> {
-  expect(value, message).toBeDefined();
-  expect(value, message).not.toBeNull();
-}
 
 // CT-1927: every transact verdict stages a catch-up marker that rides the
 // next batched frame — a marker-only empty frame when nothing watched is
@@ -790,8 +790,8 @@ describe("v2-server-acl", () => {
         expectExists(aliceSession.ok);
         expectExists(bobSession.ok);
 
-        // Starting the revoke first deterministically queues both transactions at
-        // the old ACL. Session validity and authorization are checked beside
+        // Starting the revoke first deterministically queues both transactions
+        // at the old ACL. Session validity and authorization are checked beside
         // apply: once Alice's ACL commit lands and revokes Bob, Bob's
         // already-started request is denied before it can commit.
         const [revoke, write] = await Promise.all([
@@ -851,9 +851,10 @@ describe("v2-server-acl", () => {
         expectExists(aliceSession.ok);
         expectExists(bobSession.ok);
 
-        // Starting the query first deterministically queues both operations at the
-        // old ACL. Authorization and graph evaluation must share one engine turn:
-        // Bob may receive the old ACL, but must never read the post-revoke ACL.
+        // Starting the query first deterministically queues both operations at
+        // the old ACL. Authorization and graph evaluation must share one engine
+        // turn: Bob may receive the old ACL, but must never read the
+        // post-revoke ACL.
         const [query, revoke] = await Promise.all([
           server.graphQuery({
             type: "graph.query",
@@ -924,8 +925,8 @@ describe("v2-server-acl", () => {
             }],
           },
         }));
-        // Let the connection enter graphQuery and block on its engine turn before
-        // the competing ACL commit runs.
+        // Let the connection enter graphQuery and block on its engine turn
+        // before the competing ACL commit runs.
         await Promise.resolve();
         const revoke = server.transact({
           type: "transact",
@@ -1063,13 +1064,13 @@ describe("v2-server-acl", () => {
         }));
         expectExists(assertResponse(shiftMessage(bob.messages)).ok);
 
-        // Make the watched graph differ from Bob's cached snapshot. writeDocument
-        // schedules its normal timer refresh, but the manual refresh below starts
-        // in this turn before that timer can run.
+        // Make the watched graph differ from Bob's cached snapshot.
+        // writeDocument schedules its normal timer refresh, but the manual
+        // refresh below starts in this turn before that timer can run.
         await server.writeDocument(space, watchedId, { changed: true });
 
-        // refreshDirty yields while re-evaluating the watch. The revoke then drops
-        // Bob's session before the refresh result is ready to send.
+        // refreshDirty yields while re-evaluating the watch. The revoke then
+        // drops Bob's session before the refresh result is ready to send.
         const refresh = bob.connection.refreshDirty(space);
         const revoke = server.transact({
           type: "transact",
@@ -1102,9 +1103,9 @@ describe("v2-server-acl", () => {
 
     it("returns the commit response to an owner who removes their own access before revoking them", async () => {
       // The writing session must receive its transact response before any
-      // revocation — otherwise the client treats session/revoked as terminal and
-      // reports the successful self-removal as a failure. The access change still
-      // takes effect on the owner's next message.
+      // revocation — otherwise the client treats session/revoked as terminal
+      // and reports the successful self-removal as a failure. The access change
+      // still takes effect on the owner's next message.
       const server = createAclServer("memory://acl-enforce-self-remove", {
         mode: "enforce",
       });
@@ -1115,7 +1116,8 @@ describe("v2-server-acl", () => {
         const aliceSession = await openSession(alice, space, ALICE);
         expectExists(aliceSession.ok);
 
-        // Alice rewrites the ACL to drop herself entirely (someone else owns now).
+        // Alice rewrites the ACL to drop herself entirely (someone else owns
+        // now).
         const selfRemove = await transactSet(
           alice,
           space,
@@ -1139,9 +1141,9 @@ describe("v2-server-acl", () => {
         ).toEqual(["session/revoked"]);
         alice.messages.length = 0;
 
-        // The writer's session was still dropped from the registry (so it receives
-        // no further pushes without READ): its next message fails closed as an
-        // unknown session.
+        // The writer's session was still dropped from the registry (so it
+        // receives no further pushes without READ): its next message fails
+        // closed as an unknown session.
         const after = await transactSet(
           alice,
           space,
@@ -1944,7 +1946,7 @@ describe("v2-server-acl", () => {
             refused.error,
             "non-delegating actingAs must be refused",
           );
-          expect(refused.error?.name).toBe("AuthorizationError");
+          expect(refused.error.name).toBe("AuthorizationError");
           expect(refused.error.message).toContain("delegating");
         } finally {
           await server.close();
@@ -2261,8 +2263,8 @@ describe("v2-server-acl", () => {
       );
       expect(sameAcl(null, expected)).toBe(false);
       expect(sameAcl("OWNER", expected)).toBe(false);
-      // Red-first witnessed: an array is an object with zero keys, so [] matched
-      // an empty expected document.
+      // Red-first witnessed: an array is an object with zero keys, so []
+      // matched an empty expected document.
       expect(sameAcl([], {})).toBe(false);
       expect(sameAcl(undefined, {})).toBe(false);
     });
