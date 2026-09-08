@@ -1880,6 +1880,69 @@ describe("what a lane does with the batches it was given", () => {
     expect(await run([Deno.execPath(), "eval", "Deno.exit(1)"])).toBe(false);
   });
 
+  it("says what failed even where a later batch threw", async () => {
+    // The batches before the throw are the more useful account of what
+    // went wrong, and reporting them after the block that raises would
+    // never reach them.
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (line: string) => lines.push(line);
+    // The failing batch runs before the raising one, which is the case
+    // this is about: work was done and went red, and then something
+    // after it raised.
+    const failing = suite({
+      id: "runner-unit",
+      units: ["packages/runner/test/oven.test.ts"],
+      command: (_units, context) =>
+        Promise.resolve([{
+          command: [Deno.execPath(), "eval", "Deno.exit(1)"],
+          cwd: context.root,
+        }]),
+    });
+    const raising = suite({
+      id: "workspace-unit",
+      units: ["packages/bakery/test/glaze.test.ts"],
+      command: () => {
+        throw new Error("the suite could not say what to run");
+      },
+    });
+    try {
+      await expect(runLane(
+        {
+          lane: 1,
+          of: 1,
+          full: false,
+          dryRun: false,
+          laneCount: false,
+          root: REPOSITORY,
+          at: "2026-09-01T00:00:00Z",
+        },
+        {
+          manifest: () =>
+            Promise.resolve({
+              manifest: manifestOf([
+                {},
+                {
+                  suite: "runner-unit",
+                  unit: "packages/runner/test/oven.test.ts",
+                },
+              ]),
+              objectName: "manifest-fixture.json.gz",
+            }),
+          topology: () => Promise.resolve([failing, raising]),
+        },
+      )).rejects.toThrow("could not say what to run");
+    } finally {
+      console.log = log;
+    }
+    // The error is what the lane exits with; the failed batch is what it
+    // still has to say about the work it did before that. The wording
+    // here belongs to the failure report alone: the suite's own name
+    // reaches this output through the plan table as well, so asserting
+    // on that would pass whether the report ran or not.
+    expect(lines.join("\n")).toContain("One invocation of this lane failed");
+  });
+
   it("runs every batch it was given, past a failure in one", async () => {
     // One failing batch must not hide the batches after it. A lane that
     // stopped there would leave units it was given unrun while reporting

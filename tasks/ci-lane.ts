@@ -1157,12 +1157,22 @@ export async function runLane(
     throw error;
   } finally {
     if (!ok) await keepLogs(workDir, path.join(options.root, LOG_DIR));
+    // What the batches found is said here rather than after this block,
+    // because a lane that threw part way through still ran the batches
+    // before it, and those are the more useful account of what went
+    // wrong. Reporting is caught for the same reason keeping the logs is:
+    // it runs while the lane may already be failing, and an error raised
+    // here would replace the one on its way out.
+    try {
+      describeFailures(failures);
+      describeConflicts(conflicts);
+    } catch (error) {
+      console.error(`ci-lane: cannot report what failed: ${error}`);
+    }
     // The lane owns this directory and nothing outside the lane reads
     // it, so it goes whether the batches passed, failed, or never ran.
     await Deno.remove(workDir, { recursive: true }).catch(() => {});
   }
-  describeFailures(failures);
-  describeConflicts(conflicts);
   return ok;
 }
 
