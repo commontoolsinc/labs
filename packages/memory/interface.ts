@@ -148,6 +148,9 @@ export interface ConflictError extends Error {
   transaction: ClientCommit;
 
   conflict: Conflict;
+
+  /** All known conflicts; `conflict` is the first for compatibility. */
+  conflicts?: Conflict[];
   retryAfterSeq?: number;
   readyToRetry?: () => Promise<void>;
 }

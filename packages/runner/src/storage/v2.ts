@@ -8021,12 +8021,24 @@ const toRejectedError = (
   ) {
     const retryAfterSeq = (error as { retryAfterSeq?: unknown })?.retryAfterSeq;
     const readyToRetry = (error as { readyToRetry?: unknown })?.readyToRetry;
-    // The conflicted entity: structured field when the error is in-process;
-    // parsed from the message when it crossed the wire (Error fields do not
-    // survive serialization, the message does — its format is owned by
-    // memory/v2/engine.ts's ConflictError construction).
-    const staleReadOf = (error as { of?: unknown })?.of ??
-      message.match(/stale confirmed read: (\S+) at seq/)?.[1];
+    // Stale-read descriptors cross current protocol boundaries structurally.
+    // Parsing every clause keeps conflict repair compatible with an error
+    // transported through a boundary that retained only its message.
+    const structuredConflicts = (error as { conflicts?: unknown })?.conflicts;
+    const structuredStaleReadIds = Array.isArray(structuredConflicts)
+      ? structuredConflicts.flatMap((conflict) => {
+        const of = (conflict as { of?: unknown })?.of;
+        return typeof of === "string" ? [of] : [];
+      })
+      : [];
+    const staleReadIds = structuredStaleReadIds.length > 0
+      ? structuredStaleReadIds
+      : Array.from(
+        message.matchAll(/stale confirmed read: (\S+) at seq/g),
+        (match) => match[1],
+      );
+    const staleReadOf = staleReadIds[0] ??
+      (error as { of?: unknown })?.of;
     const firstOperation = commit.operations?.[0];
     const firstOperationId = firstOperation && "id" in firstOperation
       ? firstOperation.id
@@ -8035,9 +8047,8 @@ const toRejectedError = (
       name: "ConflictError",
       message,
       transaction: commit,
-      // Conflict descriptor: for stale-read conflicts `of` is authoritative
-      // (the memory engine names the conflicted entity structurally), so a
-      // retrier can pull exactly that doc before re-running. `the` remains a
+      // Primary conflict descriptor for consumers of the singular interface.
+      // `conflicts` below carries the complete stale-read set. `the` remains a
       // placeholder.
       conflict: {
         space,
@@ -8046,6 +8057,13 @@ const toRejectedError = (
           firstOperationId ?? "of:unknown") as Entity,
       },
     };
+    if (staleReadIds.length > 0) {
+      rejected.conflicts = staleReadIds.map((of) => ({
+        space,
+        the: DOCUMENT_MIME,
+        of: of as Entity,
+      }));
+    }
     // retryAfterSeq is carried for diagnostics; retry gating is by caughtUpLocalSeq
     // (readyToRetry), and downstream only uses retryAfterSeq's presence to mark
     // the conflict retryable.

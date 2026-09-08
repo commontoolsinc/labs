@@ -2739,9 +2739,9 @@ export class Runtime {
    * this replica never READ does not arrive with it — and a conflicted blind
    * WRITE means exactly that (the compile-cache write-back rewrites derived
    * docs a cold replica has never seen; a piece start's basis names computed
-   * docs the serving side was materializing). So the named doc is pulled
-   * too, and the retry's write carries its true version instead of
-   * re-asserting seq 0.
+   * docs the serving side was materializing). So every document named by the
+   * rejection is pulled concurrently, and the retry's writes carry their true
+   * versions instead of re-asserting seq 0.
    *
    * Every step is best-effort by design: this resolves rather than throws,
    * because the retry's commit — not this readiness — is what decides.
@@ -2780,24 +2780,44 @@ export class Runtime {
       }
     }
     if (teardownSignal?.aborted) return;
-    const conflict = (error as {
+    const rejection = error as {
       conflict?: { space?: MemorySpace; of?: string };
-    })?.conflict;
-    if (
-      conflict?.space !== undefined &&
-      typeof conflict.of === "string" &&
-      conflict.of !== "of:unknown"
-    ) {
+      conflicts?: Array<{ space?: MemorySpace; of?: string }>;
+    };
+    const conflicts = Array.isArray(rejection?.conflicts) &&
+        rejection.conflicts.length > 0
+      ? rejection.conflicts
+      : rejection?.conflict === undefined
+      ? []
+      : [rejection.conflict];
+    const pulls: Promise<unknown>[] = [];
+    const seen = new Set<string>();
+    for (const conflict of conflicts) {
+      if (
+        conflict.space === undefined ||
+        typeof conflict.of !== "string" ||
+        conflict.of === "of:unknown"
+      ) {
+        continue;
+      }
+      const key = `${conflict.space}\u0000${conflict.of}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       try {
-        await waitUnlessTeardown(
-          this.storageManager.open(conflict.space).sync(
-            conflict.of as unknown as URI,
-            { path: [], schema: false },
-          ),
+        pulls.push(
+          Promise.resolve(
+            this.storageManager.open(conflict.space).sync(
+              conflict.of as unknown as URI,
+              { path: [], schema: false },
+            ),
+          ).catch(() => undefined),
         );
       } catch {
-        // Pull failed — the retry's commit decides.
+        // A synchronous pull failure leaves the retry's commit to decide.
       }
+    }
+    if (pulls.length > 0) {
+      await waitUnlessTeardown(Promise.all(pulls));
     }
   }
 
