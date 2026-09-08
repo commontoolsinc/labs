@@ -60,6 +60,14 @@ steps wrap their command in `deno task run-recorded <kind> <scope> <name>
 without the ship step runs fine and records nothing — which is how a new
 job silently falls out of the flake and duration history.
 
+A job whose every test another workflow already records against the same
+commit is the exception, and it records nothing: no spool directory, no
+`run-recorded` wrapper, no ship step. Recording there would file each of
+those tests twice against one commit. The Dashboard workflow's tests job
+is the one such job, and the relay does not follow that workflow. The
+exemption covers tests, not jobs, so a test that runs only in such a job
+is recorded there.
+
 ## Before splitting or rebalancing jobs
 
 `docs/development/CI_PERFORMANCE.md` says when that work is worth starting and,

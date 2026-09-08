@@ -622,6 +622,22 @@ Deno.test("Dashboard publishes only from main, never from a pull request", async
   );
 });
 
+Deno.test("the Dashboard workflow records no tests", async () => {
+  const dashboard = withoutComments(await workflow("dashboard-image.yml"));
+  const relay = withoutComments(await workflow("test-records-relay.yml"));
+
+  // CI runs `packages/dashboard`'s test task on the same commit and records
+  // what it runs. Recording the same task again here would file each of those
+  // tests twice against one commit, so this workflow takes no part in test
+  // records at either end: it spools nothing, and the relay does not follow
+  // it. Reinstating either half alone produces a run whose records are
+  // gathered and never shipped.
+  assertEquals(dashboard.includes("CF_TEST_RECORDS_DIR"), false);
+  assertEquals(dashboard.includes("run-recorded"), false);
+  assertEquals(dashboard.includes("test-records-ship"), false);
+  assertStringIncludes(workflowTriggers(relay), '    workflows: ["CI"]\n');
+});
+
 Deno.test("One commit publishes one set of release artifacts", async () => {
   // A release artifact is named after the commit it was built from, and the
   // deploy hands the bastion a commit rather than a build. So a commit has one
