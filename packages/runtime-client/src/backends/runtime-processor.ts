@@ -497,10 +497,12 @@ export function browserWorkerParamsFromInitializationData(
  *  - the acting user's own identity space (space DID == principal DID) — a
  *    principal definitionally reads its own space;
  *  - the current session workspace (`sessionSpace` = the space the session was
- *    authorized to open) — with `createSession({ spaceName })` the home space
- *    is a derived `spaceIdentity` DID distinct from the principal DID, and it
- *    is the space `session.open` gated on, so an own-workspace `Space(...)`
- *    label resolves rather than over-blocking.
+ *    authorized to open), while the acting principal is the session's own key
+ *    holder — with `createSession({ spaceName })` the home space is a derived
+ *    `spaceIdentity` DID distinct from the principal DID, and it is the space
+ *    `session.open` gated on, so an own-workspace `Space(...)` label resolves
+ *    rather than over-blocking. A principal a host names in the key holder's
+ *    place reaches that space through the membership lookup below.
  *
  * Broader cross-space membership comes from the §4.9.3 membership lookup: a
  * runtime-backed `SpaceMembershipProvider` reads each other space's declared
@@ -523,10 +525,14 @@ export function renderConfidentialityResolverFor(
   }
   const actingPrincipal = runtime.trustSnapshotProvider()?.actingPrincipal ??
     identity.did();
-  const memberSpaces = sessionSpace === undefined ||
-      sessionSpace === actingPrincipal
-    ? [actingPrincipal]
-    : [actingPrincipal, sessionSpace];
+  // `session.open` authorizes the key holder, so the workspace it gated on is
+  // a member for that principal's own renders. A host that names somebody else
+  // as acting has shown nothing about what that principal reads.
+  const ownSessionWorkspace = actingPrincipal === identity.did() &&
+    sessionSpace !== undefined && sessionSpace !== actingPrincipal;
+  const memberSpaces = ownSessionWorkspace
+    ? [actingPrincipal, sessionSpace]
+    : [actingPrincipal];
   return createRenderConfidentialityResolver({
     actingPrincipal,
     trustConfig: runtime.cfcTrustConfig,

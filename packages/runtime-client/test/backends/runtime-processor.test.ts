@@ -124,7 +124,7 @@ class SharedV2StorageManager extends V2Storage.StorageManager {
   }
 }
 
-const createRuntime = () => {
+const createRuntime = (actingPrincipal?: string) => {
   const server = new MemoryV2Server.Server({
     authorizeSessionOpen(message) {
       const principal = (message.authorization as { principal?: unknown })
@@ -142,6 +142,12 @@ const createRuntime = () => {
   const runtime = new Runtime({
     apiUrl: new URL("http://localhost/"),
     storageManager,
+    ...(actingPrincipal === undefined ? {} : {
+      trustSnapshotProvider: () => ({
+        id: `principal:${actingPrincipal}`,
+        actingPrincipal,
+      }),
+    }),
   });
   return { runtime, storageManager };
 };
@@ -231,6 +237,50 @@ describe("runtime-processor", () => {
             ceiling,
           ),
         ).toEqual([cfcAtom.space("did:key:z6MkThird")]);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("withholds the session workspace from a delegated principal", async () => {
+      // `session.open` gated on the workspace for the key holder. A host that
+      // names somebody else as acting has shown nothing about what that
+      // principal reads, so the workspace is left to the ACL lookup, which
+      // grants it nothing here.
+
+      const delegate = "did:key:z6MkDelegatedActingPrincipal";
+      const { runtime, storageManager } = createRuntime(delegate);
+      const sessionSpace = "did:key:z6MkSessionWorkspaceDistinct";
+      try {
+        const resolver = renderConfidentialityResolverFor(
+          runtime,
+          cfcSigner,
+          { atoms: [cfcAtom.user(delegate)] },
+          sessionSpace,
+        );
+        const ceiling = [cfcAtom.user(delegate)];
+        // The key holder's workspace stays blocked for the delegate.
+        expect(
+          atomsOutsideCeiling(
+            resolver!({ confidentiality: [cfcAtom.space(sessionSpace)] }),
+            ceiling,
+          ),
+        ).toEqual([cfcAtom.space(sessionSpace)]);
+        // So does the key holder's own identity space.
+        expect(
+          atomsOutsideCeiling(
+            resolver!({ confidentiality: [cfcAtom.space(cfcSigner.did())] }),
+            ceiling,
+          ),
+        ).toEqual([cfcAtom.space(cfcSigner.did())]);
+        // The delegate's own space still resolves.
+        expect(
+          atomsOutsideCeiling(
+            resolver!({ confidentiality: [cfcAtom.space(delegate)] }),
+            ceiling,
+          ),
+        ).toEqual([]);
       } finally {
         await runtime.dispose();
         await storageManager.close();
