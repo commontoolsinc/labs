@@ -233,13 +233,22 @@ describe("types", () => {
         .toContain("'schema'");
     });
 
+    it("returns text naming the request for input that is not an object", () => {
+      expect(llmGenerateObjectRequestProblem(null)).toContain("an object");
+      expect(llmGenerateObjectRequestProblem([])).toContain("an object");
+    });
+
     it("returns text naming the field whose value is of the wrong type", () => {
-      // `model` and `cache` are the two this checker states for itself.
+      // Every scalar field this checker states, which is all of them but the
+      // conversation: the two checkers share only the walk over `messages`.
       const named = (input: object, field: string) =>
         expect(llmGenerateObjectRequestProblem(objectRequest(input)))
           .toContain(field);
       named({ model: 7 }, "'model'");
       named({ cache: "yes" }, "'cache'");
+      named({ system: {} }, "'system'");
+      named({ maxTokens: "4096" }, "'maxTokens'");
+      named({ metadata: "via piece" }, "'metadata'");
     });
 
     it("returns text naming the `system` field for a system-role message", () => {
