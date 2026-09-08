@@ -813,7 +813,6 @@ export function scoreInputs(
     catches: CATCH_WEIGHT_LOCAL * state.localCatches +
       CATCH_WEIGHT_PR * state.prCatches +
       CATCH_WEIGHT_MAIN * state.mainCatches,
-    mainCatches: state.mainCatches,
     sources: state.sources.length,
     churn: churn(state, today),
   };

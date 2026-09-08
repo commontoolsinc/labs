@@ -83,7 +83,7 @@ export function standIn(
     unit,
     cost: median(suiteCosts) ?? UNMEASURED_COST_SECONDS,
     score: VALUE_FLOOR,
-    inputs: { catches: 0, mainCatches: 0, sources: 0, churn: 0 },
+    inputs: { catches: 0, sources: 0, churn: 0 },
     flakeRate: 0,
     repeats: 1,
   };

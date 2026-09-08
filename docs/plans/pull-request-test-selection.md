@@ -1,11 +1,11 @@
 # Choosing which tests a pull request runs
 
 Status: in progress. Part one is built apart from the one-off bootstrap
-dispatch and one dashboard tile; part two is built apart from its
-continuous-integration configuration and the coverage work; part three has
-the reporter and nothing else. [The work](#the-work) carries the detail.
-The record store this plan consumes is live and holds the data the design
-needs; the gaps it does not yet hold are listed under [What the store is
+dispatch; part two is built apart from its continuous-integration
+configuration and the coverage work; part three has the reporter and
+nothing else. [The work](#the-work) carries the detail. The record store
+this plan consumes is live and holds the data the design needs; the gaps
+it does not yet hold are listed under [What the store is
 missing](#what-the-store-is-missing) and closed by the first part of the
 work.
 
@@ -1239,8 +1239,7 @@ commit ten times counts once.
 
 A catch is always a point in the test's favor, and the place it happened
 says something further. The three places are worth keeping apart, because
-they answer different questions and one of them is the measure of whether
-this whole design is working.
+they answer different questions.
 
 A **local catch** is somebody at a workstation, part way through writing
 something, running a test and finding it red. It is the highest-quality
@@ -1277,11 +1276,6 @@ invites the mistake. The first of those is this system's job to fix, and
 it fixes it automatically, because main catches raise the score that gets
 the test selected.
 
-The aggregate of main catches across all tests is the number that says
-whether selecting a subset was a good idea: how often something reaches
-`main` that a test we already had would have caught. It goes on the wall
-as a system measure, and it is the thing to watch after the lanes go live.
-
 ### The inputs
 
 For each complete identity that the topology locates to an item, the
@@ -1289,8 +1283,6 @@ publisher computes:
 
 - `catches` — how many catches it has, over all of history, weighted by
   where each happened.
-- `mainCatches` — how many of those were on `main`, kept separately
-  because they measure escapes as well as the test.
 - `lastCatch` — when the most recent one was.
 - `sources` — how many distinct sources are among those catches. A source
   is the branch for a continuous-integration run and the reporting
@@ -2902,14 +2894,6 @@ that, a flaky-but-not-excluded item repeated three times fails three times
 as often as it would have. The net is an empirical question and the
 dashboard is where it gets answered.
 
-**Whether this was a good idea is measurable, and the measurement exists
-before the change does.** The escape rate — how often something reaches
-`main` that a test the repository already had would have caught — can be
-computed from the store today, while pull requests still run everything.
-That gives a baseline taken under the old regime to judge the new one
-against, rather than a number that only starts existing once there is
-nothing to compare it to.
-
 **Coverage stops being enforced across the repository, and stays enforced
 per package.** Nothing will fail because a change lowered the repository's
 whole coverage number. What replaces that is a weekly trend somebody has
@@ -3320,19 +3304,10 @@ answers somewhere people can see them.
 - [ ] The one-off bootstrap dispatch.
 - [x] Repeat the record census after `main` emitted server-execution
       variant records, and replace the plan's projection inputs.
-- [ ] Dashboard tiles: the coverage debt trend, the flake list, what the
-      newest manifest would select, and the escape rate — how often
-      something reaches `main` that a test we already had caught there.
-      That last one is measurable today, before any of this changes what
-      runs, which makes it the baseline everything after is judged
-      against.
-  - [x] The flake list, and what the newest manifest would select.
-  - [x] The coverage debt trend. It reads the repository-wide figure each
-        `main` run's `perf-metrics` artifact already carries, so it needed
-        nothing from the rest of this work.
-  - [ ] The escape rate. Every manifest carries each identity's `main`
-        catches, but over unbounded history, so a rate needs the state to
-        keep those per day as well as in total.
+- [x] Dashboard tiles: the flake list, what the newest manifest would
+      select, and the coverage debt trend. The trend reads the
+      repository-wide figure each `main` run's `perf-metrics` artifact
+      already carries, so it needed nothing from the rest of this work.
 - [x] The `deno task test-selection` entry point and its modes: `dials`,
       `coverage`, `explain <identity>`, and `plan` with `--dry-run` and
       `--verify`. Every mode that packs reads the topology, so the

@@ -469,7 +469,7 @@ describe("post-main-report", () => {
           unit,
           flakeRate: 0.02,
           cost: 1,
-          inputs: { catches: 3, mainCatches: 1, sources: 2, churn: 0 },
+          inputs: { catches: 3, sources: 2, churn: 0 },
         }),
       ],
       withheld: [{ test: kneads, suite: "workspace-unit", reason: "flaky" }],
