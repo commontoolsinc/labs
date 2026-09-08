@@ -90,7 +90,7 @@ describe("FsTree", () => {
     });
 
     describe("getPath()", () => {
-      it("returns the full path of a deeply nested dir", () => {
+      it("returns the full path of a deeply nested directory", () => {
         const tree = new FsTree();
         const a = tree.addDir(tree.rootIno, "a");
         const b = tree.addDir(a, "b");
@@ -100,7 +100,7 @@ describe("FsTree", () => {
     });
 
     describe("rename()", () => {
-      it("resolves the inode under the new name and no longer under the old, within one parent", () => {
+      it("leaves `lookup()` returning the inode under the new name and `undefined` under the old, within one parent", () => {
         const tree = new FsTree();
         const ino = tree.addDir(tree.rootIno, "original");
         tree.rename(tree.rootIno, "original", tree.rootIno, "renamed");
@@ -179,7 +179,7 @@ describe("FsTree", () => {
     });
 
     describe("getCfcAnnotation()", () => {
-      it("returns CFC directory entries sorted by name digest, sorting once when read", () => {
+      it("returns CFC directory entries sorted by name digest, whatever order they were added in", () => {
         const tree = new FsTree();
         const annotator = new CfcProjectionAnnotator(tree, {
           space: "did:key:zSpace",
@@ -259,7 +259,7 @@ describe("FsTree", () => {
         ).toEqual(["kept"]);
       });
 
-      it("clears a dir and its nested file recursively", () => {
+      it("clears a directory and its nested file recursively", () => {
         const tree = new FsTree();
         const dir = tree.addDir(tree.rootIno, "dir");
         const file = tree.addFile(dir, "nested.txt", "content", "string");
@@ -271,7 +271,7 @@ describe("FsTree", () => {
         expect(tree.lookup(tree.rootIno, "dir")).toBeUndefined();
       });
 
-      it("forgets that the removed inode was generated", () => {
+      it("leaves `isGenerated()` returning `false` and `refreshGenerated()` returning `undefined` for the removed inode", () => {
         const tree = new FsTree();
         const dir = tree.addDir(tree.rootIno, "d");
         const ino = tree.addGeneratedFile(
@@ -770,7 +770,7 @@ describe("FsTree", () => {
     });
 
     describe("touch()", () => {
-      it("advances a directory's `mtime` strictly upward, and ignores a missing inode", () => {
+      it("advances a directory's `mtime` strictly upward, and returns without throwing for a missing inode", () => {
         const clock = 1_000; // does not advance
         const tree = new FsTree(() => clock);
         const dir = tree.addDir(tree.rootIno, "dir");
@@ -880,7 +880,7 @@ describe("FsTree", () => {
           () => `count=${count}`,
           "object",
         );
-        const mtimeOf = () => (tree.getNode(ino) as { mtime: number }).mtime;
+        const mtimeOf = () => tree.getNode(ino)?.mtime;
         expect(mtimeOf()).toBe(5_000);
 
         // A render equal to the published one is not a modification.
