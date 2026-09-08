@@ -68,6 +68,14 @@ is the one such job, and the relay does not follow that workflow. The
 exemption covers tests, not jobs, so a test that runs only in such a job
 is recorded there.
 
+A check that no lane can be asked to run is the other exception, and it
+records nothing either: no spool directory, no `run-recorded` wrapper, no
+ship step. `docs/specs/test-records.md` under "Recording" holds the
+criterion. The `Coverage Check` job in `deno.yml` is the one such job,
+because it reads the coverage artifacts of every test job in its own run.
+A gate comparing against a base ref is not this: `check-baselines-append-only`
+and `check-test-aliases` each resolve a merge base, and both record.
+
 ## Before splitting or rebalancing jobs
 
 `docs/development/CI_PERFORMANCE.md` says when that work is worth starting and,
