@@ -12,7 +12,7 @@ import {
 } from "@commonfabric/data-model-schema";
 import { hashOf } from "@commonfabric/data-model";
 import {
-  DEFAULT_GENERATE_OBJECT_MODELS,
+  DEFAULT_GENERATE_OBJECT_MODEL,
   DEFAULT_MODEL_NAME,
   extractTextFromLLMResponse,
   GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
@@ -1428,7 +1428,7 @@ export function generateText(
  * @param schema - JSON Schema to validate the response against.
  * @param system - Optional system message.
  * @param maxTokens - Maximum number of tokens to generate.
- * @param model - Model to use (defaults to DEFAULT_GENERATE_OBJECT_MODELS).
+ * @param model - Model to use (defaults to DEFAULT_GENERATE_OBJECT_MODEL).
  * @param cache - Whether to cache the response (defaults to true).
  * @param metadata - Additional metadata to pass to the LLM.
  * @param tools - Optional tools to make available to the LLM.
@@ -1618,7 +1618,7 @@ export function generateObject<T extends Record<string, unknown>>(
         stop: "",
         maxTokens: maxTokens ?? 8192,
         stream: true,
-        model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
+        model: model ?? DEFAULT_GENERATE_OBJECT_MODEL,
         metadata: {
           ...readyMetadata,
           context: "piece",
@@ -2053,7 +2053,7 @@ export function generateObject<T extends Record<string, unknown>>(
         schema: llmToolExecutionHelpers.prepareSchemaForLLM(
           toDeepFrozenSchema(schema),
         ),
-        model: model ?? DEFAULT_GENERATE_OBJECT_MODELS,
+        model: model ?? DEFAULT_GENERATE_OBJECT_MODEL,
         metadata: {
           ...readyMetadata,
           context: "piece",

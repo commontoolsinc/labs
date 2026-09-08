@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { BuiltInLLMContent, BuiltInLLMMessage } from "@commonfabric/api";
 import {
+  DEFAULT_GENERATE_OBJECT_MODEL,
   DEFAULT_MODEL_NAME,
   GOOGLE_SEARCH_NATIVE_MODEL_TOOL,
   isLLMTool,
@@ -169,6 +170,17 @@ describe("types", () => {
       }));
       expect(problem).toContain("Message 1");
       expect(problem).toContain(`not "wizard"`);
+    });
+  });
+
+  describe("DEFAULT_GENERATE_OBJECT_MODEL", () => {
+    it("names a gateway model", () => {
+      // A deployment's catalog is discovered at run time, so no list here can
+      // say the name is served. What this holds is the weaker property the
+      // name has to have to be servable at all: the toolshed registers the
+      // gateway's models wherever the gateway answers, where a name qualified
+      // by a direct provider registers only where that provider's key is set.
+      expect(DEFAULT_GENERATE_OBJECT_MODEL.startsWith("gateway:")).toBe(true);
     });
   });
 

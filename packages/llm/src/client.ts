@@ -562,11 +562,13 @@ export class LLMClient {
   /**
    * Sends a request to the LLM service.
    *
-   * @param userRequest The LLM request object.
-   * @param partialCB Optional callback for streaming text responses.
-   * @param toolCallCB Optional callback for tool call events.
+   * @param request The LLM request object.
+   * @param callback Optional callback for streaming text responses.
+   * @param abortSignal Optional signal that abandons the request.
+   * @param opts Optional per-call overrides, currently the endpoint.
    * @returns The full LLM response with content and tool information.
-   * @throws If the request fails after retrying with fallback models.
+   * @throws If the request fails. The request is issued once, against the
+   *   model `request` names; no other model is tried in its place.
    */
   async sendRequest(
     request: LLMRequest,
