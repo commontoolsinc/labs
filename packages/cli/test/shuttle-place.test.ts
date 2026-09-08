@@ -2346,6 +2346,32 @@ describe("place", () => {
           });
         });
 
+        it("refuses a suffix with a walk after it, where `cd` is refused for its place", () => {
+          // One operand, two doors, two sentences. A read never reaches the
+          // place's suffix refusal with the suffix at the end of its operand
+          // — this door takes that one off and reads the arguments cell with
+          // it — so what a read is refused for is where the suffix sits,
+          // which is not what a move is refused for. Both are asserted here
+          // because a sentence that moved to the other door would pass
+          // whichever of the two was pinned alone.
+
+          expect(inSlugs().aim("board#argument/title", "get").move).toEqual({
+            kind: "refused",
+            reason: "`get` takes `#argument` at the end of an operand and " +
+              "nowhere else: it selects a piece's arguments cell, and a " +
+              "path inside that cell is written in front of it, as in " +
+              "`topics/3/title#argument`.",
+          });
+          expect(moved(inSlugs(), "board#argument/title")).toEqual({
+            kind: "refused",
+            reason: "A place is result-rooted, so `cd` takes no `#argument` " +
+              "suffix. A place rooted at the arguments cell would leave " +
+              "every later relative read ambiguous about which side of the " +
+              "piece it addressed. Reach arguments per operand instead, as " +
+              "in `get topics/3#argument`.",
+          });
+        });
+
         it("names the verb it was given in the refusal for an empty operand", () => {
           // Every verb aims an operand through this door, so the name in that
           // refusal is the caller's rather than the door's own.

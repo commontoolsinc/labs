@@ -484,7 +484,7 @@ export function operandForChild(
   const from: Standing = { place, trail: [] };
   for (const candidate of [child, renderPosition(goal)]) {
     if (readsAsOption(candidate)) continue;
-    const reach = reached(movePlace(from, candidate, "cd"));
+    const reach = reached(movePlace(from, candidate, MOVING_VERB));
     if (reach !== undefined && samePlace(reach.place, goal)) return candidate;
   }
   return undefined;
@@ -584,7 +584,9 @@ export class CurrentPlace {
    * `..`, `-`, and `/` — nothing about either being a read's to decide.
    */
   cd(operand: string): Move {
-    return this.#commit(movePlace(this.#here, operand, "cd", this.#previous));
+    return this.#commit(
+      movePlace(this.#here, operand, MOVING_VERB, this.#previous),
+    );
   }
 
   /**
@@ -800,7 +802,7 @@ export class CurrentPlace {
     if (from === undefined) return step;
     return move.rest === ""
       ? step
-      : moveBySegments(from, move.rest, move.operand);
+      : moveBySegments(from, move.rest, move.operand, verb);
   }
 
   /**
@@ -929,7 +931,12 @@ function movePlace(
   if (operand === RELATIVE_HEAD) return land(place, from.trail);
   if (operand.startsWith(SCOPE_HEAD)) return moveScope(from, operand);
   if (operand.startsWith(MEMBER_HEAD)) {
-    return moveBySegments(from, operand.slice(MEMBER_HEAD.length), operand);
+    return moveBySegments(
+      from,
+      operand.slice(MEMBER_HEAD.length),
+      operand,
+      verb,
+    );
   }
 
   // A leading `/` roots a reference, and `/` alone roots one and names
@@ -949,7 +956,7 @@ function movePlace(
   // the root split on the same separator here, so `/slugs/board` is what `cd
   // /` and `cd slugs/board` are together, down to the trail it leaves.
   const walk = rootedFacetWalk(operand);
-  if (walk !== undefined) return moveBySegments(root, walk, operand);
+  if (walk !== undefined) return moveBySegments(root, walk, operand, verb);
 
   const edged = rootedOnlyByTrim(operand);
   if (edged !== undefined) return edged;
@@ -963,7 +970,7 @@ function movePlace(
     return refuse(messageOf(error));
   }
   if (reference !== undefined) {
-    return moveByReference(place, reference, operand);
+    return moveByReference(place, reference, operand, verb);
   }
 
   if (operand.startsWith("#")) return { kind: "wish", target: operand };
@@ -981,7 +988,7 @@ function movePlace(
       operand,
     };
   }
-  return moveBySegments(from, operand, operand);
+  return moveBySegments(from, operand, operand, verb);
 }
 
 /**
@@ -1103,8 +1110,9 @@ function moveByReference(
   place: Place,
   reference: NormalizedLLMFriendlyRef,
   operand: string,
+  verb: string,
 ): Step {
-  if (reference.input === true) return refuseArgumentSuffix();
+  if (reference.input === true) return refuseArgumentSuffix(verb);
   const badPiece = unnameablePiece(reference.pieceId);
   if (badPiece !== undefined) return refuseUnnameable(operand, badPiece);
   const badSegment = firstUnnameableSegment(reference.path);
@@ -1169,6 +1177,7 @@ function moveBySegments(
   from: Standing,
   walk: string,
   operand: string,
+  verb: string,
 ): Step {
   const segments = walk.split("/");
   if (segments[segments.length - 1] === "") segments.pop();
@@ -1182,7 +1191,7 @@ function moveBySegments(
     // not the reason a data key gets.
     const step = segment === ".."
       ? moveUp(moved)
-      : moveDown(moved, segment, operand);
+      : moveDown(moved, segment, operand, verb);
     const reach = reached(step);
     if (reach === undefined) return step;
     moved = reach;
@@ -1227,7 +1236,12 @@ function enclosing(position: Position): Position {
  * back pending, a piece having still to resolve and a key having still to be
  * found.
  */
-function moveDown(from: Standing, segment: string, operand: string): Step {
+function moveDown(
+  from: Standing,
+  segment: string,
+  operand: string,
+  verb: string,
+): Step {
   const place = from.place;
   const position = place.position;
   const trail = [...from.trail, position];
@@ -1244,7 +1258,7 @@ function moveDown(from: Standing, segment: string, operand: string): Step {
             scopeMoveHint(operand),
         );
     case "facet":
-      return moveIntoPiece(place, position, segment, trail, operand);
+      return moveIntoPiece(place, position, segment, trail, operand, verb);
     case "piece": {
       const fault = unnameableSegment(segment);
       if (fault !== undefined) return refuseUnnameable(operand, fault);
@@ -1282,11 +1296,12 @@ function moveIntoPiece(
   segment: string,
   trail: Trail,
   operand: string,
+  verb: string,
 ): Step {
   const hash = segment.indexOf("#");
   if (hash !== -1) {
     const suffix = segment.slice(hash);
-    return suffix === "#argument" ? refuseArgumentSuffix() : refuse(
+    return suffix === "#argument" ? refuseArgumentSuffix(verb) : refuse(
       `Unknown suffix "${suffix}". The one supported suffix is ` +
         `"#argument", which selects the piece's arguments cell the way ` +
         `"--input" does.`,
@@ -1514,6 +1529,14 @@ export function scopeMoveHint(operand: string): string {
 const ARGUMENT_SUFFIX = "#argument";
 
 /**
+ * The verb whose operand this module reads to stand somewhere rather than to
+ * point at something, which is what tells {@link refuseArgumentSuffix} which
+ * of its two sentences a line is owed: only a move can be wrong about what a
+ * place may be.
+ */
+const MOVING_VERB = "cd";
+
+/**
  * The reason {@link ARGUMENT_SUFFIX} written with nothing in front of it is
  * refused. It selects a piece's arguments cell, so what it wants in front of
  * it is a target.
@@ -1552,18 +1575,41 @@ function argumentSuffixOff(operand: string): string | undefined {
 }
 
 /**
- * Helper for the movers, which refuses the `#argument` suffix on a `cd`
- * operand. A place is result-rooted, so no spelling of the suffix moves one
- * and the reason never turns on which spelling carried it.
+ * Helper for the movers, which refuses an operand carrying the `#argument`
+ * suffix, `verb` naming the verb whose line it was read from.
+ *
+ * Two sentences, because the two callers are wrong about different things and
+ * one sentence for both would be false of one of them.
+ *
+ * A move is refused in every spelling the suffix is written in: a place is
+ * result-rooted, and one rooted at the arguments cell would leave every later
+ * relative read ambiguous about which side of the piece it addressed
+ * (`docs/plans/shuttle/grammar.md`). That reason is about what a place may be,
+ * so it holds wherever the suffix sits in the operand.
+ *
+ * A read never reaches here with the suffix at the end of its operand:
+ * {@link CurrentPlace.aim} takes that one off and reads the arguments cell
+ * with it, which is the spelling the same document names as the way to reach
+ * arguments. So what reaches this from a read is a suffix with a walk written
+ * after it, where what is wrong is the position of the suffix rather than
+ * anything about a place — and a sentence about places would be telling a
+ * `get` line that a spelling it has works only for `cd`.
  */
-function refuseArgumentSuffix(): Step {
-  return refuse(
-    "A place is result-rooted, so `cd` takes no `#argument` suffix. A " +
-      "place rooted at the arguments cell would leave every later " +
-      "relative read ambiguous about which side of the piece it " +
-      "addressed. Reach arguments per operand instead, as in " +
-      "`get topics/3#argument`.",
-  );
+function refuseArgumentSuffix(verb: string): Step {
+  return verb === MOVING_VERB
+    ? refuse(
+      "A place is result-rooted, so `cd` takes no `#argument` suffix. A " +
+        "place rooted at the arguments cell would leave every later " +
+        "relative read ambiguous about which side of the piece it " +
+        "addressed. Reach arguments per operand instead, as in " +
+        "`get topics/3#argument`.",
+    )
+    : refuse(
+      `\`${verb}\` takes \`${ARGUMENT_SUFFIX}\` at the end of an operand ` +
+        `and nowhere else: it selects a piece's arguments cell, and a path ` +
+        `inside that cell is written in front of it, as in ` +
+        `\`topics/3/title${ARGUMENT_SUFFIX}\`.`,
+    );
 }
 
 /**

@@ -2970,6 +2970,25 @@ describe("verbs", () => {
       expect(options?.input).toBe(true);
     });
 
+    it("refuses a suffix with a walk after it, in the name of the verb that wrote it", async () => {
+      // The name reaches the place's reading through this verb's own aim, so
+      // a line that never says `get` is not answered in `get`'s name.
+
+      expect(
+        reasonOf(
+          await runLine(
+            `set slugs/board#argument/title '"x"'`,
+            shuttleIn(),
+            answering(),
+          ),
+        ),
+      ).toBe(
+        "`set` takes `#argument` at the end of an operand and nowhere else: " +
+          "it selects a piece's arguments cell, and a path inside that cell " +
+          "is written in front of it, as in `topics/3/title#argument`.",
+      );
+    });
+
     it("refuses a write onto a whole piece before the seam is asked", async () => {
       // The operand reached a piece and named no path inside it, which the
       // line settles: refusing it here is what keeps the sentence the one
