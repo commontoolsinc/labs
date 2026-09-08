@@ -466,14 +466,14 @@ gating on, installs the standard prompt-caveat policy, and gives the
 network-fetch sinks public-only confidentiality ceilings. The server prints the
 posture it resolved at startup, so what a run ran under is never a guess.
 
-The bundle leaves the enforcement pin at `enforce-explicit`; `enforce-strict`
-stays a deliberate per-session raise. Each dial has a flag, and the flag wins:
+The bundle names no enforcement mode, so the session keeps the core's
+`enforce-strict` pin. Each dial has a flag, and the flag wins:
 
 | Flag                            | Environment                              | Default                            |
 | ------------------------------- | ---------------------------------------- | ---------------------------------- |
 | `--fabric-cfc-posture`          | `CF_HARNESS_FABRIC_CFC_POSTURE`          | `max-enforcement` (`none` to drop) |
 | `--fabric-cfc-flow-labels`      | `CF_HARNESS_FABRIC_CFC_FLOW_LABELS`      | the posture's `persist`            |
-| `--fabric-cfc-enforcement-mode` | `CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE` | `enforce-explicit`                 |
+| `--fabric-cfc-enforcement-mode` | `CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE` | `enforce-strict`                   |
 
 These govern the runtime `run_pattern` deploys patterns into. The harness's own
 `cfcEnforcementMode`, which governs tool policy and the sandbox, is a separate

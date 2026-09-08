@@ -236,7 +236,7 @@ export const DEFAULT_FUSE_CFC_MODE: CfcEnforcementMode = "enforce-strict";
  *
  * `--cfc-mode` decides when it names a mode, `CF_CFC_MODE` decides otherwise,
  * and a mount that names a mode nowhere runs at
- * {@link DEFAULT_CFC_ENFORCEMENT_MODE}. An empty value names nothing: the
+ * {@link DEFAULT_FUSE_CFC_MODE}. An empty value names nothing: the
  * mount reads an absent flag as one, and so is an exported but unset
  * environment variable.
  *

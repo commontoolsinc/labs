@@ -1510,13 +1510,13 @@
       g_write: {
         t: "Write gate",
         status: "shipped",
-        short: "enforce-explicit",
+        short: "enforce-strict",
         boundary: "runner → space",
       },
       g_render: {
         t: "Render ceiling",
-        status: "partial",
-        short: "off by default",
+        status: "shipped",
+        short: "on by default",
         boundary: "TCB → person",
       },
       g_conn: {
@@ -1932,7 +1932,7 @@
         band: "tcb",
         threats: ["t13", "t8"],
         body:
-          `<p>The one place policy meaning lives. On every transaction it derives labels onto computed values (the store put <code>finance</code> on every field of today's dashboard with a verified <code>TransformedBy</code> atom) and runs the gates:</p><ul><li><b>Sink ceiling</b>: a release's consumed labels must fit the sink's ceiling.</li><li><b>Writer fit</b> and <b>write floor</b>: what a writer may put where, and the integrity a written value must carry. Writer-fit misfits reject only under <code>enforce-strict</code>; under the console's <code>enforce-explicit</code> they persist and flag.</li><li><b>Policy evaluation</b>: exchange rules that can discharge a clause before the fit; only ever loosens, fails closed on fuel or lookup.</li><li><b>Render ceiling</b>: the same fit for the display sink.</li></ul><p>Its posture is a set of orthogonal dials, not an on/off switch.</p>`,
+          `<p>The one place policy meaning lives. On every transaction it derives labels onto computed values (the store put <code>finance</code> on every field of today's dashboard with a verified <code>TransformedBy</code> atom) and runs the gates:</p><ul><li><b>Sink ceiling</b>: a release's consumed labels must fit the sink's ceiling.</li><li><b>Writer fit</b> and <b>write floor</b>: what a writer may put where, and the integrity a written value must carry. Writer-fit misfits reject under <code>enforce-strict</code>, which is the default rung; below it they persist and flag.</li><li><b>Policy evaluation</b>: exchange rules that can discharge a clause before the fit; only ever loosens, fails closed on fuel or lookup.</li><li><b>Render ceiling</b>: the same fit for the display sink.</li></ul><p>Its posture is a set of orthogonal dials, not an on/off switch.</p>`,
         links: [["the label reader was broken, the store was fine", 6751]],
       },
       spaces: {
@@ -1949,7 +1949,7 @@
         kind: "TCB · configuration",
         band: "tcb",
         body:
-          `<p>Two things, both operator-owned. The <b>dials</b> are runtime options: the enforcement matrix names five (enforcement mode, flow-label persistence, write floor, trigger-read gating, policy evaluation) and the runtime has nine; the console's <code>max-enforcement</code> bundle sets seven of them, with the enforcement mode pinned at <code>enforce-explicit</code>. The <b>policy snapshot</b> is the digest-bound set of exchange-rule records and grants. Records are <code>ambient</code> (apply to every label) or <code>referenced</code> (fire only where the label names them by hash). The harness publishes this posture as <code>projected</code> before the session runtime exists, not as an attestation of a constructed runtime.</p>`,
+          `<p>Two things, both operator-owned. The <b>dials</b> are runtime options: the enforcement matrix names five (enforcement mode, flow-label persistence, write floor, trigger-read gating, policy evaluation) and the runtime has nine; the console's <code>max-enforcement</code> bundle sets seven of them and names no enforcement mode, so the mode stays at the core's <code>enforce-strict</code> pin. The <b>policy snapshot</b> is the digest-bound set of exchange-rule records and grants. Records are <code>ambient</code> (apply to every label) or <code>referenced</code> (fire only where the label names them by hash). The harness publishes this posture as <code>projected</code> before the session runtime exists, not as an attestation of a constructed runtime.</p>`,
         threats: ["t14"],
         close: [
           "There is no door for a policy record to reach a harness runtime: config exposes a posture name only (CT-2175 question 4).",
@@ -2104,7 +2104,7 @@
       },
       g_write: {
         body:
-          `<p>Every transaction commits through the runner's boundary pass. The enforcement mode is <code>enforce-explicit</code> by default and in the console's bundle, so a recorded reason rejects the commit, including a labeled write with no resolvable policy input. The write floor and trigger-read gating are further reason sources on their own dials. Writer fit is not: its misfit rejects only under <code>enforce-strict</code>, and persists-and-flags under explicit, which is what runs today.</p>`,
+          `<p>Every transaction commits through the runner's boundary pass. The enforcement mode is <code>enforce-strict</code> by default, so a recorded reason rejects the commit, including a labeled write with no resolvable policy input. The write floor and trigger-read gating are further reason sources on their own dials, both enforcing by default. Writer fit rejects here too: its misfit rejects under <code>enforce-strict</code>, and persists-and-flags at every rung below.</p>`,
         why:
           "The place labels are derived and persisted; everything downstream reads what this wrote.",
         close: [
@@ -2113,7 +2113,7 @@
       },
       g_render: {
         body:
-          `<p>The display sink. When the shell renders a piece, the runner can fit the value's labels against a render ceiling with <code>sinkClass: display</code>; it is the precedent for every non-network release site. It is implemented but off by default: a browser profile has to populate the ceiling (<code>commonfabric.cfcRenderCeiling()</code> in localStorage, dogfood only, expected to over-block until exchange resolution lands). In today's demo the panel showed finance values because no ceiling was populated, not because a fit admitted them.</p>`,
+          `<p>The display sink. When the shell renders a piece, the runner can fit the value's labels against a render ceiling with <code>sinkClass: display</code>; it is the precedent for every non-network release site. It is on by default; a browser profile opts out with <code>commonfabric.cfcRenderCeiling(false)</code>, which is what the localStorage key records. A panel that shows a labeled value does so because a fit admitted it.</p>`,
         why:
           "The person is a sink too. This is the last gate before human eyes, and today it is open.",
         close: [

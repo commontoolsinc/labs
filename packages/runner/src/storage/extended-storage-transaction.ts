@@ -2366,7 +2366,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // A vouched ingest still needs its provenance mark minted even where
       // CFC enforcement is disabled (an explicit `cfcEnforcementMode:
       // "disabled"` opt-in — no shipped host today; toolshed passes no CFC
-      // options and so runs the enforce-explicit default). The mint is a
+      // options and so runs the enforce-strict default). The mint is a
       // builtin-authored boundary-commit step that never rejects, so run
       // prepare for it explicitly rather than forcing the enforcement dial up
       // (which would desync ingest txs from the runtime's real mode). The
