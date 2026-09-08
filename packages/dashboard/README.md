@@ -286,6 +286,28 @@ pressure people into gaming it, leave it off. This is a quiet instrument panel a
 tired person should be able to trust at 2am, not a scoreboard and not a
 surveillance tool.
 
+A tile is about as wide as a business card, and every line on it is set without
+wrapping. A line longer than that width is not shortened by the renderer so much
+as cut off by it, and a line that ends in an ellipsis has taken the whole line
+and delivered none of it. So the headline figure and the sub line under it are
+what a tile has room to say. Text can go below them — the host names down the
+production tile, the run list on the full-width recent runs — but only text
+short enough to be read whole at the width the tile is actually given. Something
+longer is not a longer tile, it is a page.
+
+That page is an ordinary drill-down — a route the tile declares, reached through
+the tile's `href`, and named on the tile by its `hint` so that a person can see
+there is something behind it. `/bench` holds the histories behind the benchmark
+and duration tiles, and `/test-selection` holds the manifest behind the two test
+tiles. A page has the width to spell a test's whole name, so nothing on one has
+to be abbreviated.
+
+Where a tile has more than one candidate for its sub line, the one that explains
+the color it is wearing wins. The test selection tile carries the share of the
+corpus a pull request would run while it is green, and gives that line up to
+name the lane that went past its budget once one has, because that lane is what
+turned the tile red.
+
 ### The `TileView` a tile returns
 
 | field | meaning |
@@ -311,6 +333,9 @@ surveillance tool.
 | commit CI Gantt → `/ci-gantt` | job and step timing for every successful main workflow run attached to one commit, linked from run durations in recent main runs | `GH_TOKEN` |
 | CI duration history → `/bench?view=ci` | labs and loom job, shard-group, and end-to-end workflow duration trends. The duration tiles open their matching repository view | `GH_TOKEN` |
 | CI run Gantt → `/bench?view=gantt` | detailed labs or loom job phases from `scripts/ci-gantt.ts`, backed by the CI history cache | `GH_TOKEN` |
+| flaky tests | how many tests the test-selection publisher measured disagreeing with themselves often enough to keep off pull requests, read from the newest selection manifest. The headline names what it counts, so it reads `25 flaky tests`, or `no flaky tests` when there are none. The line under it says what the count was drawn from: the span of history a flake share is measured over, which the manifest's `FLAKE_WINDOW_DAYS` dial names, and how long ago the publisher measured. Which tests they are is on the page behind it. Amber from one, red from ten | none |
+| test selection | what share of the corpus the newest selection manifest would have a pull request run, read from the same manifest. The manifest's packing is built with nothing mandatory, so the share is the one a pull request touching no test would get; a real one re-packs against its own diff and spends part of the same budget on what that diff makes mandatory. Amber once that manifest is over eight hours old, because selection quality decays with it, and red when a lane's projected work is past the budget the manifest was packed to, which is the one condition the sub line gives up the corpus share to name | none |
+| test selection detail → `/test-selection` | the manifest behind both test tiles, at full width: every lane against its budget and how many tests it holds, every test held back as flaky with the rate it was measured at, every test held back while main is red, and every test no lane can hold. Both tiles link here, the flaky tests tile straight to its flaky section | none |
 | coverage debt | the repository's whole uncovered-line count and what a median day does to it, read from the `perf-metrics` artifact of each day's newest successful `main` run (`docs/development/COVERAGE.md`). The headline is the count; under it a signed rate gives the median day's move over the last three weeks, and the chart shows eight weeks with those days picked out. Amber means that median is a rise, which takes more than half the days in the window, so a day that added debt says nothing on its own. It never turns red, and it goes gray rather than stand on a stale number: when five days have passed with nothing measured, and until the window holds a week of days to take a median over. A run whose pattern compile cache missed is passed over, because a cold run reaches branches a warm one does not and reads about a tenth of a percent low. It looks for a landing every five minutes, which costs one request when none has happened; the figure itself cannot exist until a run's Coverage Check uploads it, about twelve minutes after the commit lands | `GH_TOKEN` |
 | production | a direct synthetic HTTP check of the public common.tools site, synthetic HTTP checks of `/_health` on estuary and rapids, plus a name or reachability check for all three and for the bastion, the production and staging shells, the LLM gateway, and the sandbox service. When every host is well the headline counts them up. When a host has nothing behind it at all, the headline names that host, as in `bastion down`, and counts them when there is more than one, as in `2 hosts down`. Otherwise it names the worst condition seen, such as a response time or an HTTP status. Estuary and rapids keep their response times in the body while the tile is green or orange. Common.tools stays out of the body while it is good. Hosts without a health request stay out for as long as they answer, and a red tile drops all the green hosts. Red means the tile found nothing at the other end — a name with no A or AAAA record, a tailnet host the proxy cannot reach, or an HTTP request that never connected — and it also means a server health response other than 200, a health response over 1000 ms, or a common.tools 5xx response. Orange means a health response over 500 ms, a common.tools 4xx response or response over 2500 ms, or a resolver that failed, which leaves the tile unable to say either way. Hosts outside the tailnet are looked up by the dashboard itself. Tailnet hosts go through `PROD_PROXY`, because a dashboard that needs that proxy has no view of Tailscale's MagicDNS. Estuary and rapids are covered there by their health requests. The bastion has no health endpoint, so it gets a SOCKS5 connect that leaves the name for the proxy to resolve. The bastion records that connect in its own logs, so a bastion that answers is left alone for an hour and counts as reachable in between. One that does not answer is asked again on the next refresh, since a connect that reaches nothing leaves nothing behind. With no `PROD_PROXY` set, every host is looked up locally | optional `COMMON_TOOLS_URL`, `ESTUARY_URL`, `RAPIDS_URL`, `BASTION_HOST`, `PROD_PROXY`; `PROD_URL` remains an alias for `ESTUARY_URL` |
 | prod errors | SigNoz trace error rate for one service (errored spans / all spans): last-12h headline, with a per-hour sparkline over the retained trace history (~2 weeks) and the last-12h slice that feeds the headline highlighted. Scoped to `PROD_SERVICE` — the same SigNoz holds staging and one-off perf runs, whose rates are not production's. Gray (not red) when SigNoz is unreachable. Pops out to the SigNoz logs explorer | `SIGNOZ_URL`, `SIGNOZ_API_KEY`; optional `PROD_SERVICE`, `SIGNOZ_UI_URL` for the pop-out |
