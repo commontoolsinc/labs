@@ -82,7 +82,8 @@ export const isTerminalHarnessRunStatus = (
  * session factory directly, whose runtime's posture the harness never saw.
  */
 export interface HarnessFabricSessionCfcPosture {
-  enforcementMode: "enforce-explicit" | "enforce-strict";
+  /** The rung the session's runtime resolves to, from the whole ladder. */
+  enforcementMode: CfcEnforcementMode;
 
   /** `configured` when the operator set the dial; `preset-pin` otherwise. */
   enforcementModeSource: "configured" | "preset-pin";

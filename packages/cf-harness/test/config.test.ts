@@ -248,7 +248,7 @@ Deno.test("the harness loop's own default matches the rung an unstated fabric se
   assertEquals(
     fabricSessionCfcEnforcementMode(unstatedSession),
     pinned,
-    "`fabricSessionCfcEnforcementMode` restates the rung `presetCfcOptions` pins, and the two have parted; move the fallback in `config.ts` to the rung the preset now pins",
+    "`fabricSessionCfcEnforcementMode` no longer reads the rung `presetCfcOptions` resolves; take it back to that resolution rather than naming a rung in `config.ts`",
   );
 
   assert(
