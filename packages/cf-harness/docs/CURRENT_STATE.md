@@ -441,12 +441,6 @@ Package behavior is covered by the unit suite:
 deno task test
 ```
 
-Real sandbox/CFC paths are separately environment-gated:
-
-```bash
-deno task test:integration
-```
-
 Product adapters maintain their own contract and cancellation tests; package
 tests alone are not evidence that Docker, Browser Access, or a live product
 instance is healthy.
