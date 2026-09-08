@@ -17,9 +17,13 @@ contracts live in `packages/patterns/topics/main.tsx` and
 
 ## Deployment and identity
 
-Run from the Labs repository root so `cf` uses that checkout:
+Run from the Labs repository root so `cf` uses that checkout. Here `cf` is that
+checkout's own `bin/cf`, and the first line puts it on PATH: the mise entry that
+would do so exists only in a shell where the mise hook has run, and an agent's
+non-interactive shell usually has not.
 
 ```bash
+export PATH="$PWD/bin:$PATH"
 export CF_API_URL='https://estuary.saga-castor.ts.net'
 export CF_SPACE='topics-dev-476ea34f'
 export TOPICS_BOARD='/of:fid1:jtdD-DSmuGrLGSt_6sJ3DS_7jmerrkKTEnW3fZV9e34'

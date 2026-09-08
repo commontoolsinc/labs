@@ -137,6 +137,12 @@ there to what your task needs.
 When authoring or reviewing a skill itself, read
 `docs/development/skill-authoring.md` and `docs/development/skill-audit.md`.
 
+The `cf` CLI runs from source through `bin/cf`, and `skills/cf/SKILL.md` covers
+invoking it. An agent's non-interactive shell has usually not run the mise hook
+that puts `bin` on PATH, so `cf` is not found there until the checkout's `bin`
+is prepended to PATH; `deno task cf` also works from anywhere inside the
+checkout.
+
 For reading or changing Topics on Estuary, use `skills/topics/SKILL.md`.
 
 ### Runtime Development

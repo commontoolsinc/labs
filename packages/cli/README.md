@@ -1494,6 +1494,10 @@ mise trust    # only if this checkout has not been trusted yet
 deno task install-cf              # --dry-run to see what it would do
 ```
 
+The mise route depends on the mise hook having run for this directory, which an
+agent's non-interactive shell usually has not. There, prepend the checkout's
+`bin` to PATH, or use `deno task cf`.
+
 `install-cf` copies `bin/cf` and `bin/cfsh` to a directory already on your PATH
 — refusing to guess if there isn't one, since installing somewhere unreachable
 would reproduce the silent failure this exists to prevent. A copy rather than a
