@@ -6,6 +6,7 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
+import { type FabricValue, valueEqual } from "@commonfabric/data-model";
 import { createSession, Identity } from "@commonfabric/identity";
 import {
   getPieceSourceSnapshot,
@@ -44,6 +45,32 @@ interface Input {
 export default pattern<Input, { version: string; count: number }>(
   ({ rows }) => ({ version: ${JSON.stringify(version)}, count: rows.length }),
 );
+`,
+    }],
+  };
+}
+
+/** Declares a writable row projection with defaults on its visible fields. */
+function rowProjectionProgram(
+  version: string,
+  titleDefault = "",
+): RuntimeProgram {
+  return {
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: `
+import { Default, lift, NAME, pattern, ReadonlyCell, Writable } from "commonfabric";
+interface Row {
+  [NAME]: string | Default<""> | undefined;
+  title: string | Default<${JSON.stringify(titleDefault)}>;
+}
+interface Input { rows?: Writable<Row[] | Default<[]>>; }
+const labelOf = lift((rows: ReadonlyCell<Row[]>) => rows.get()?.[0]?.title ?? "empty");
+export default pattern<Input, { label: string; version: string }>(({ rows }) => ({
+  label: labelOf(rows!),
+  version: ${JSON.stringify(version)},
+}));
 `,
     }],
   };
@@ -297,6 +324,86 @@ export default pattern<{ avatar: string }, { avatar: Owned }>(
       expect(changed.issues.retainedLinks).toBeDefined();
       await expect(piece.setPattern(program("v3", "number"))).rejects.toThrow();
       expect(await piece.result.get()).toMatchObject({ version: "v2" });
+    });
+
+    it("retains unchanged row defaults for identical source and a stopped source update", async () => {
+      const producer = await pieces.create({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: `
+import { NAME, pattern } from "commonfabric";
+interface Row { [NAME]: string; title: string; piece: unknown; }
+export default pattern<Record<string, never>, { rows: Row[] }>(() => ({
+  rows: [{ [NAME]: "Donut", title: "Donut", piece: { reference: "preserved" } }],
+}));
+`,
+        }],
+      });
+      const source = rowProjectionProgram("v1");
+      const consumer = await pieces.create(source);
+      expect((await consumer.checkPattern(source)).compatible).toBe(true);
+      const pattern = await runtime.patternManager.compilePattern(source, {
+        space: pieces.getSpace(),
+      });
+      const argument = pieces.getArgument(consumer.getCell());
+      await pieces.link(producer.id, ["rows"], consumer.id, ["rows"]);
+      const before = argument.getRaw();
+
+      const sameSource = await consumer.checkPattern(source);
+      expect(sameSource.issues).toEqual({});
+      expect(sameSource.compatible).toBe(true);
+      const nextSource = rowProjectionProgram("v2");
+      const changedSource = await consumer.checkPattern(nextSource);
+      expect(changedSource.issues).toEqual({});
+      expect(changedSource.compatible).toBe(true);
+      runtime.runner.stop(consumer.getCell());
+      await consumer.setPattern(nextSource);
+      expect(await consumer.result.get()).toMatchObject({
+        label: "Donut",
+        version: "v2",
+      });
+      expect(
+        valueEqual(argument.getRaw() as FabricValue, before as FabricValue),
+      )
+        .toBe(true);
+
+      const changedDefaults = await consumer.checkPattern(
+        rowProjectionProgram("v3", "Glaze"),
+      );
+      expect(changedDefaults.compatible).toBe(false);
+      expect(changedDefaults.issues.retainedLinks).toBeDefined();
+
+      const otherProducer = await pieces.create({
+        main: "/main.tsx",
+        files: [{
+          name: "/main.tsx",
+          contents: `
+import { pattern } from "commonfabric";
+export default pattern<Record<string, never>, { rows: { title: number }[] }>(
+  () => ({ rows: [{ title: 1 }] }),
+);
+`,
+        }],
+      });
+      expect(() =>
+        assertSuppliedLinkSchemasCompatible(
+          [{
+            path: ["rows"],
+            value: otherProducer.getCell().key("rows").getAsLink({
+              base: argument,
+              includeSchema: false,
+            }),
+          }],
+          pattern.argumentSchema,
+          argument,
+          pieces,
+          {
+            priorArgumentSchema: pattern.argumentSchema,
+            linksPreservedVerbatim: true,
+          },
+        )
+      ).toThrow();
     });
   });
 });

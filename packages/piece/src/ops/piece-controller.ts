@@ -64,6 +64,7 @@ import { pieceId } from "../piece-id.ts";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
+  schemasHaveSameContract,
 } from "../schema-compatibility.ts";
 import {
   cloneInternalManifest,
@@ -2323,6 +2324,23 @@ function retainsInputHandleContract(
       suppliedLink.path,
       suppliedLink.path.join(".") || "<root>",
     );
+    const sameContract = (
+      prior: PathSchemaContract,
+      target: PathSchemaContract,
+    ): boolean =>
+      prior.mayBeMissing === target.mayBeMissing &&
+      schemasHaveSameContract(prior.schema, target.schema, {
+        sourceRoot: prior.root,
+        targetRoot: target.root,
+      });
+    if (
+      priorContracts.every((prior) =>
+        targetContracts.some((target) => sameContract(prior, target))
+      ) &&
+      targetContracts.every((target) =>
+        priorContracts.some((prior) => sameContract(prior, target))
+      )
+    ) return true;
     assertContractSubset(priorContracts, targetContracts, "retained input");
     assertContractSubset(targetContracts, priorContracts, "retained input");
     return true;

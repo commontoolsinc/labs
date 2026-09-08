@@ -668,6 +668,35 @@ export function assertSchemaSubset(
   }
 }
 
+/**
+ * Determines whether two valid schemas describe the same resolved contract,
+ * including defaults and reference roots. Uses the contract's IFC normalization
+ * without treating defaults as a new materialization step.
+ *
+ * @internal Used to recognize a retained consumer contract. New-link admission
+ * requires `assertSchemaSubset()`, whose default-insertion checks still apply.
+ */
+export function schemasHaveSameContract(
+  source: JSONSchema,
+  target: JSONSchema,
+  options: SchemaSubsetOptions = {},
+): boolean {
+  const sourceRoot = options.sourceRoot ?? source;
+  const targetRoot = options.targetRoot ?? target;
+  if (
+    validateSchemaDefinition(source, sourceRoot) !== undefined ||
+    validateSchemaDefinition(target, targetRoot) !== undefined
+  ) return false;
+  const sourceResolution = resolveSchema(source, sourceRoot);
+  const targetResolution = resolveSchema(target, targetRoot);
+  return sourceResolution.schema !== undefined &&
+    targetResolution.schema !== undefined &&
+    schemasResolveEqually(sourceResolution.schema, targetResolution.schema, {
+      sourceRoot: sourceResolution.root,
+      targetRoot: targetResolution.root,
+    });
+}
+
 function schemaSubsetIssue(
   sourceInput: JSONSchema,
   targetInput: JSONSchema,
@@ -1585,7 +1614,7 @@ function schemaSubtreesEqual(left: unknown, right: unknown): boolean {
 function schemasResolveEqually(
   source: unknown,
   target: unknown,
-  context: CompatibilityContext,
+  context: Pick<CompatibilityContext, "sourceRoot" | "targetRoot">,
 ): boolean {
   if (!schemaSubtreesEqual(source, target)) return false;
 
