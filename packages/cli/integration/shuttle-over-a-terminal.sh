@@ -24,14 +24,33 @@
 # is the whole of what the verb did: a `cd` that was refused and a `cd` that
 # moved differ in where the next line is typed, and nothing else.
 #
+# The writing verbs are read back twice, and neither reading covers what the
+# other does. A `set` that printed its receipt and wrote nothing would satisfy
+# any assertion made against the transcript, and so would a `call` that settled
+# without running the handler — so the session's writes are read again from
+# outside once it has ended, through the same `cf cell get` step 2 takes its
+# stored reading with.
+#
+# That second reading is taken at the end, so what it establishes is the state
+# at the end rather than that each write landed: a cell written more than once
+# carries only its last value, and a value another line would have produced
+# anyway reads the same as one this line produced. So each check says which
+# write it speaks for, and a write the final reading cannot speak for rests on
+# the shell's own read on the line after it — which catches a receipt with no
+# write behind it, but cannot see whether the write committed.
+#
 # It deploys pattern/shuttle-place.tsx and nothing else. That fixture belongs
 # to this walkthrough alone, so a change to a pattern the product actually
 # ships can never break a demonstration of what a shell can reach.
 #
-# No step here asserts a GAP: the tally on the last line runs at zero. The
-# machinery is kept, as `verb-session-gaps.sh` and `completion-over-the-cli.sh`
-# keep theirs, because a step that finds a capability missing has to be able to
-# say so and be counted rather than merely fail.
+# Three gaps are asserted, as `verb-session-gaps.sh` and
+# `completion-over-the-cli.sh` assert theirs, and all three are about wording
+# rather than about capability: a refusal that names no spelling the prompt
+# accepts (step 19), and a write onto a whole piece refused in a vocabulary
+# the prompt does not have, whose one suggested spelling answers in another
+# verb's name (step 20). Each is written so that it fails the day the sentence
+# improves — which is the signal wanted, where pinning the wording would hold
+# the wart in place. Nothing else here is a gap.
 #
 # Documented in packages/cli/README.md's "Interactive shell" section, which
 # explains the shell this exercises. Keep the two in step: the doc is the
@@ -164,6 +183,29 @@ fi
 STORED=$($CF cell get --quiet --cell first summary $ARGS 2>/dev/null)
 
 step "3. Drive a session over a pseudo-terminal"
+# `edit` opens `$EDITOR` on the value and writes back what was saved, so the
+# person is the one part of that round trip a script has to stand in for.
+# Everything else stays real: this is a program `edit` runs, over a file it
+# made, on a value the fabric served, and what it saves goes back through the
+# same write `set` uses. Standing in for the person is not standing in for the
+# system — no seam below `openEditor` is replaced, which is what would make
+# this a stub rather than a walkthrough.
+#
+# It has no state and takes no turn: what it saves is decided by what it was
+# given, so each of the three lines below reaches it with a different value and
+# gets a different one of `edit`'s three endings. That is what lets one editor
+# drive all three from a script the driver types in one go.
+EDITOR_SCRIPT=$(mktemp)
+cat >"$EDITOR_SCRIPT" <<'EDITS'
+#!/usr/bin/env bash
+case "$(cat "$1")" in
+  '"garble me"') printf 'not json at all' >"$1" ;;
+  '"edited in the editor"') : ;;
+  *) printf '"edited in the editor"' >"$1" ;;
+esac
+EDITS
+chmod +x "$EDITOR_SCRIPT"
+
 SCRIPT=$(mktemp)
 TRANSCRIPT=$(mktemp)
 cat >"$SCRIPT" <<'LINES'
@@ -185,10 +227,39 @@ cd /
 cd /slugs/first
 pwd
 get
+more
 help
 get --help
+set label '"a written place"'
+get label
+set label -- -Infinity
+get label
+set label -5
+set . '{"label":"x"}'
+set '' '"x"'
+get label
+verbs
+call . addItem '{"text":"milk"}'
+get items
+call %2 '{}'
+get items
+call %1 '{"text":"jam"}'
+get items
+get summary
+call . --help
+edit label
+get label
+edit label
+set label '"garble me"'
+edit label
+get label
+link /slugs/first/label /slugs/second/label
+link /slugs/first/label#argument /slugs/second/label
+set label '"pointed at"'
+set settings/note '"written once and never again"'
+link /slugs/first/label /slugs/second/label#argument
 LINES
-python3 "$DRIVER" "$SCRIPT" "$TRANSCRIPT" -- \
+EDITOR="$EDITOR_SCRIPT" python3 "$DRIVER" "$SCRIPT" "$TRANSCRIPT" -- \
   $CF sh $ARGS >/dev/null
 DRIVE_STATUS=$?
 check "0" "$DRIVE_STATUS" "the session ran and ended on ctrl-d with a zero status"
@@ -256,10 +327,11 @@ check "shuttle first @space> " "$(prompt 6 "cd first")" \
 check "%1 \$NAME
 %2 \$UI
 %3 addItem
-%4 items
-%5 label
-%6 settings
-%7 summary" "$(said 7 "ls")" "the piece lists every key the fixture declares"
+%4 clearItems
+%5 items
+%6 label
+%7 settings
+%8 summary" "$(said 7 "ls")" "the piece lists every key the fixture declares"
 
 step "10. get reads a stored value, and reads it as storage holds it"
 check '"a place"' "$(said 8 "get label")" "get reads a stored scalar"
@@ -341,22 +413,266 @@ check "shuttle first @space> " "$(prompt 16 "cd /slugs/first")" \
   "a rooted facet reference reaches the piece the slug names"
 contains "$FIRST" "$(said 17 "pwd")" "pwd names the handle the deploy printed"
 
-step "15. get at a piece stands in for its picture of itself"
+step "15. get at a piece stands in for its picture of itself, and more writes the rest"
 WHOLE=$(said 18 "get")
 contains '"$UI": "<elided' "$WHOLE" "the UI node is stood in for"
 # `children` is the key every vnode carries and the first one the tree would
 # write, so it is the part of the node that reaches the page rather than a part
 # a bound would have cut off anyway.
 lacks '"children"' "$WHOLE" "no part of the vnode tree reaches the screen"
-contains '"label": "a place"' "$WHOLE" "the rest of the piece is written out"
+# The piece is larger than a screen, so what a page bounds is read here rather
+# than assumed: the first page says it was cut, and `more` writes what it cut
+# under the same reading. `label` is the member that lands on the continuation,
+# which is what makes the pair an assertion about the bound rather than about
+# the value — a `get` that had written the whole piece would put it on the
+# first page, and a `more` with nothing held back would say so.
+contains "more continues" "$WHOLE" "the first page says the rendering was cut"
+contains '"label": "a place"' "$(said 19 "more")" \
+  "more writes the part of the piece the page bound held back"
 
 step "16. The shell has help, and a verb's --help is a page rather than a path"
-HELP=$(said 19 "help")
+HELP=$(said 20 "help")
 contains "cd <ref>" "$HELP" "help lists the verb that moves"
 contains "get [<ref>]" "$HELP" "help lists the verb that reads"
-GET_HELP=$(said 20 "get --help")
+GET_HELP=$(said 21 "get --help")
 contains "Usage: get [<ref>]" "$GET_HELP" "--help writes the verb's page"
 lacks "names no facet" "$GET_HELP" "--help is not read as a path"
+
+# Every step from here writes. `AFTER` takes a reading from outside the way
+# step 2 took its stored one — over a connection this session never had, so a
+# write that reached only the running piece and never committed fails there. It
+# reads each cell once, at the end, so which write a reading is evidence for is
+# a question per cell: step 26 names that write beside each of its checks, and
+# the writes it cannot speak for rest on the shell's own read on the line after
+# each.
+AFTER() { $CF cell get --quiet --cell "$1" "$2" $ARGS 2>/dev/null; }
+
+step "17. A set lands, and the fabric holds it after the session has gone"
+check "Wrote \`label\` on \`$FIRST\`." "$(said 22 "set label '\"a written place\"'")" \
+  "set receipts the path it wrote and the piece it wrote on"
+check '"a written place"' "$(said 23 "get label")" \
+  "the shell serves the value it just wrote"
+# `label` is written five times below, so a reading of it at the end says the
+# last write landed and nothing about the four before it. This one goes to a
+# path nothing else in the session touches, which is what lets step 26 speak
+# about a particular write rather than about whichever write reached a cell
+# last.
+check "Wrote \`settings/note\` on \`$FIRST\`." \
+  "$(said 48 "set settings/note '\"written once and never again\"'")" \
+  "a set reaches a path below the piece root, and receipts that path"
+
+step "18. A value JSON cannot carry is refused, and the cell keeps what it had"
+# `set` reads its value as JSON and a bare word as the string it spells, so the
+# values it turns down are the ones that open the way JSON opens a value and
+# then do not parse. `-Infinity` is one of them, and it is the same value
+# `edit` refuses on the way out for the same reason: JSON has no spelling that
+# writes it back. The refusal carries the parser's own words, and the reading
+# after it is the half that matters — a refusal that had written anything
+# would be worse than one that had not been made.
+REFUSED_VALUE=$(said 24 "set label -- -Infinity")
+contains "\`-Infinity\` is not JSON" "$REFUSED_VALUE" \
+  "set names the value it would not write"
+contains "is read as JSON; anything else is the string it spells" \
+  "$REFUSED_VALUE" "the refusal says which values are read as JSON"
+check '"a written place"' "$(said 25 "get label")" \
+  "the refused write left the cell holding what it held"
+
+step "19. GAP: a value opening with a dash is refused without naming the escape"
+# The grammar itself is ruled and is not in question: a token opening with `-`
+# is an option wherever one may be written, which is why the line above spells
+# its value after a bare `--`. That spelling is exercised there rather than
+# described here.
+#
+# What is a gap is the sentence. A person writing a negative number is told
+# they wrote an unknown option and pointed at `-h`, and the one thing that
+# would help — the bare `--` that makes the token a value — goes unmentioned.
+# Issue #7065 carries it. Pinning the wording would make this step fail the
+# day somebody improves the sentence, which is backwards, so the gap is
+# written the other way round: it holds while the refusal says nothing about
+# `--`, and fails when it starts to.
+#
+# Which makes what counts as "says something about `--`" the judgement this
+# step turns on, and it is deliberately loose. A refusal names the escape when
+# it writes `--` as a token of its own — anywhere, in any wording, quoted or
+# bare, alone or inside a worked example. What it must not count is the `--`
+# that opens a long flag, `--help` among them, which the sentence already
+# carries and which teaches nobody how to write a value; hence the character
+# after it deciding, rather than the two characters alone.
+#
+# The bound is that the escape has to be written rather than described: a
+# refusal saying "put it after the option terminator" and never spelling `--`
+# would not be recognised. And the bias runs the other way from the usual one
+# — an ASCII double hyphen used as a dash in prose would read as the escape
+# and close the gap early. That is the direction to err in. A gap that fires
+# when it might have closed costs somebody a look; one that stays quiet after
+# it has closed is a marker that has silently stopped being true, which is the
+# failure this step exists to avoid.
+DASH_VALUE=$(said 26 "set label -5")
+names_the_escape() {
+  printf '%s' "$1" | grep -qE -- '--([^A-Za-z0-9]|$)'
+}
+if printf '%s' "$DASH_VALUE" | grep -q "Unknown option" &&
+  ! names_the_escape "$DASH_VALUE"; then
+  ok "gap still open: the refusal does not name the \`--\` that writes the value"
+  GAPS=$((GAPS + 1))
+else
+  bad "GAP CLOSED — set label -5 reads [$DASH_VALUE]; update this step"
+fi
+
+step "20. A write onto a whole piece is refused, in words the prompt cannot use"
+# The safety property first, because it is the one that matters and it holds:
+# `set` passes `refuseRootWrite`, so a line naming the piece rather than a path
+# inside it writes nothing.
+ROOT_WRITE=$(said 27 "set . '{\"label\":\"x\"}'")
+# Read after both of this step's lines rather than between them, so it says
+# neither of them wrote. Two things stop the first: `refuseRootWrite`, and the
+# pattern's own schema, which turns down a result cell missing members the
+# fixture declares. Removing either leaves the other, which is what a safety
+# check should be able to say.
+check '"a written place"' "$(said 29 "get label")" \
+  "the refused root write left the piece as it was"
+# What it says, though, is `pathRequiredRefusal()` (`lib/piece.ts`), written
+# for `cf`'s command line: it offers an address to embed a path in and a
+# positional argument to pass one as, and a shuttle line has neither — the
+# path IS the operand the person wrote. `set --help` carries the sentence that
+# would help ("A write onto a whole piece is refused. `link` is what writes a
+# reference"), and the runtime refusal does not.
+if printf '%s' "$ROOT_WRITE" | grep -q '/of:'; then
+  ok "gap still open: the root-write refusal speaks in cf's address vocabulary"
+  GAPS=$((GAPS + 1))
+else
+  bad "GAP CLOSED — the root-write refusal reads [$ROOT_WRITE]; update this step"
+fi
+# And the one spelling it does name is refused in another verb's name.
+# `movePlace` (`lib/shuttle/place.ts`) is the operand reading every verb aims
+# through, and its empty-operand refusal says `cd` whatever verb asked — so a
+# person following the advice above lands on a sentence about a verb they did
+# not write.
+EMPTY_OPERAND=$(said 28 "set '' '\"x\"'")
+if [ "$EMPTY_OPERAND" = '`cd` takes a place to move to.' ]; then
+  ok "gap still open: the empty operand a set line writes is refused in cd's name"
+  GAPS=$((GAPS + 1))
+else
+  bad "GAP CLOSED — the empty operand reads [$EMPTY_OPERAND]; update this step"
+fi
+
+step "21. verbs lists what the piece can be asked to do, and numbers each row"
+check "%1 addItem <handler on result> <Appends one line to \`items\`.>
+%2 clearItems <handler on result> <Empties \`items\`, which is the opposite of what \`addItem\` does.>" \
+  "$(said 30 "verbs")" "verbs numbers both callables with what each is"
+
+step "22. call runs the callable, and what it did is there afterwards"
+# The receipt is the seam's Invocation JSON, so what is asserted of it is that
+# the call settled rather than that it was accepted — a call the fabric took
+# and never ran would say the second and not the first. What the handler did
+# is a separate reading, and this is the only one that takes it: step 23 empties
+# `items` and refills it, so the array step 26 reads ends at `["jam"]` whether
+# or not this call's `milk` ever committed.
+CALLED=$(said 31 "call . addItem '{\"text\":\"milk\"}'")
+contains '"status": "settled"' "$CALLED" "the call settled"
+# Appended rather than written: `items` already holds what step 2 wrote from
+# outside, so a call that had replaced the array would be caught here as well
+# as one that had done nothing.
+check '[
+  "bread",
+  "milk"
+]' "$(said 32 "get items")" "the item the call appended is there, after the one that was"
+
+step "23. call %n invokes the row the listing numbered, and not another"
+# Two callables with opposite effects is what makes this an assertion. With one
+# row, `call %1` passes whether the handle named that row or was thrown away;
+# with two, each number is only right if it reached its own row — a `%2` that
+# had run `addItem` would leave two items, and a `%1` that had run `clearItems`
+# would leave none.
+contains '"status": "settled"' "$(said 33 "call %2 '{}'")" \
+  "the callable handle off verbs settles a call"
+check "[]" "$(said 34 "get items")" \
+  "%2 ran clearItems, which emptied what %1 had filled"
+check '[
+  "jam"
+]' "$(said 36 "get items")" "%1 ran addItem, which appended to what %2 emptied"
+check '"jam"' "$(said 37 "get summary")" \
+  "the computed member follows what the calls did"
+# A callable's page is not reached by writing an option where its name goes,
+# and the refusal points at the verb that does list them.
+contains "\`verbs\` lists what this piece can be asked to do" \
+  "$(said 38 "call . --help")" "an option in the name position names verbs"
+
+step "24. edit writes back what the editor saved, and stops three ways"
+check "Wrote \`label\` on \`$FIRST\`." "$(said 39 "edit label")" \
+  "edit writes back what came out of the editor"
+check '"edited in the editor"' "$(said 40 "get label")" \
+  "the cell holds what was saved rather than what was opened"
+check "Nothing changed, so nothing was written." "$(said 41 "edit label")" \
+  "text that came back unchanged is nothing to write"
+# Text that will not parse is the one ending that leaves work on disk, and the
+# file it names is the only copy of it. So the refusal names a file, and the
+# file is there — which is a claim about the filesystem rather than about the
+# sentence, and the only one of the three that a transcript alone cannot make.
+UNPARSED=$(said 43 "edit label")
+contains "What the editor saved is not JSON" "$UNPARSED" \
+  "edit refuses text that will not parse"
+KEPT=$(printf '%s' "$UNPARSED" | sed -n 's/.*the text is in `\([^`]*\)`.*/\1/p')
+if [ -n "$KEPT" ] && [ -f "$KEPT" ]; then
+  ok "the file the refusal names is still on disk, holding the unwritten text"
+  rm -f "$KEPT"
+else
+  bad "the refusal named no file that is there (named [$KEPT])"
+fi
+check '"garble me"' "$(said 44 "get label")" \
+  "the refused edit left the cell holding what it held"
+
+step "25. link writes a reference, so the second cell reads the first"
+check "Wrote a reference at \`/slugs/second/label\` naming \`/slugs/first/label\`." \
+  "$(said 45 "link /slugs/first/label /slugs/second/label")" \
+  "link receipts both ends, in the order it was given them"
+# There are two endpoints, so the claim about both is made of two readings.
+# Each refusal quotes the operand it was written on, which is also what says
+# the refusal is about the endpoint the line spelled rather than about
+# whichever of the two happens to be resolved first.
+contains "\`/slugs/first/label#argument\` selects a piece's arguments cell" \
+  "$(said 46 "link /slugs/first/label#argument /slugs/second/label")" \
+  "the source endpoint does not take the argument-cell suffix"
+contains "\`/slugs/second/label#argument\` selects a piece's arguments cell" \
+  "$(said 49 "link /slugs/first/label /slugs/second/label#argument")" \
+  "the target endpoint does not take the argument-cell suffix"
+
+step "26. What the fabric holds, read from outside the session that wrote it"
+# The half no transcript can make: every reading is taken over a connection
+# this session never had, after the shell has gone, so a write that reached
+# only the running piece and never committed fails here and nowhere above.
+#
+# What a reading taken at the end establishes is the state at the end, which
+# is a narrower thing than every write having landed. A cell written more than
+# once carries only its last value, and a value some other line would have
+# produced anyway reads the same as one this line produced. So each check
+# below says which write it speaks for, and the writes it cannot speak for are
+# named rather than left to look covered: those rest on the shell's own read
+# on the line after each, which catches a receipt with no write behind it but
+# cannot see whether the write committed.
+#
+# `label` is written five times, so this reading is of the fifth.
+check '"pointed at"' "$(AFTER first label)" \
+  "the last set of the five that wrote this cell is what the fabric holds"
+# Written on one line and never touched again, so this reading is of that line
+# and of no other — the one set here established end to end.
+check '"written once and never again"' "$(AFTER first settings/note)" \
+  "the set that went to its own path landed, and committed there"
+# `["jam"]` is reachable only if the last two calls both ran: without the
+# `clearItems` the array would still carry `bread` and `milk`, and without the
+# `addItem` after it the array would be empty. The first call is not
+# established here — an `items` that never received `milk` ends at `["jam"]`
+# too — and the reading in step 22 is what speaks for that one.
+check '["jam"]' "$(AFTER first items | tr -d ' \n')" \
+  "both calls whose absence would change the final array committed"
+check '"jam"' "$(AFTER first summary)" \
+  "the computed member was committed as the warm run left it"
+# The one reading that tells a reference from a copy. `second` was never
+# written by name after the link, and `first/label` was — so a `second` holding
+# the new value read it through the reference, and a `link` that had copied
+# would hold the value `first` had when the link was made.
+check '"pointed at"' "$(AFTER second label)" \
+  "the linked cell reads the value written at the cell it names"
 
 # What step 11 does not reach: a piece that changes under a shell already
 # standing on it. Step 11 reads storage before the session and the shell's own
@@ -366,7 +682,7 @@ lacks "names no facet" "$GET_HELP" "--help is not read as a path"
 # run a command between two of them. It reads a settled prompt already, so that
 # is a small addition to it, and the check belongs here once it is made.
 
-rm -f "$SCRIPT" "$TRANSCRIPT"
+rm -f "$SCRIPT" "$TRANSCRIPT" "$EDITOR_SCRIPT"
 ELAPSED=$(($(date +%s) - START))
 printf '\n== %d passed, %d failed, %d gaps open — %ds wall clock\n' \
   "$PASS" "$FAIL" "$GAPS" "$ELAPSED"

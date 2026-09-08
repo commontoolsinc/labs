@@ -18,8 +18,12 @@
  *   whether anything ran the pattern since the last write. That is the
  *   difference between a warm read and a cold one, which the walkthrough
  *   reads rather than assumes.
- * - `addItem` writes, so the walkthrough has a way to change `items` from
- *   outside the shell.
+ * - `addItem` and `clearItems` write, so the walkthrough has a way to change
+ *   `items` from outside the shell and a way to change it from inside one.
+ *   There are two of them because one would not be a choice: a piece with a
+ *   single callable makes `call %1` pass whether the handle named that row or
+ *   was ignored, where two rows with opposite effects make each `call %n`
+ *   assert which row the number reached.
  * - `[UI]` is a real node with a nested tree, so the walkthrough can ask
  *   whether a read at the piece root serves it or holds it back.
  */
@@ -67,6 +71,9 @@ interface PlaceOutput {
 
   /** Appends one line to `items`. */
   addItem: Stream<AddEvent>;
+
+  /** Empties `items`, which is the opposite of what `addItem` does. */
+  clearItems: Stream<void>;
 }
 
 /** The fixture the shuttle walkthrough deploys, twice, under two slugs. */
@@ -75,6 +82,10 @@ export const ShuttlePlace = pattern<PlaceInput, PlaceOutput>(
     const addItem = action(({ text }: AddEvent) => {
       const trimmed = text.trim();
       if (trimmed !== "") items.push(trimmed);
+    });
+
+    const clearItems = action(() => {
+      items.set([]);
     });
 
     const summary = computed(() => (items.get() ?? []).join(", "));
@@ -92,6 +103,7 @@ export const ShuttlePlace = pattern<PlaceInput, PlaceOutput>(
       settings: { depth: 2, note: "two segments in" },
       summary,
       addItem,
+      clearItems,
     };
   },
 );
