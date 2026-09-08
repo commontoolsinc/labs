@@ -65,11 +65,10 @@ export type GeneralVisitorResult<Domain, MainResult> =
  * structure of the value.
  */
 export type LeafVisitorResult<Domain, MainResult> =
-  | MainResultForm<MainResult>
+  | MainVisitResult<MainResult>
   | ReplaceForm<Domain>
   | { type: "arrayContents"; value: Domain[] }
-  | { type: "mapContents"; value: [Domain, Domain][] }
-  | undefined;
+  | { type: "mapContents"; value: [Domain, Domain][] };
 
 /**
  * Result of a value-in-container visitor, called per item while iterating.
@@ -81,8 +80,14 @@ export type LeafVisitorResult<Domain, MainResult> =
  *   recursively visited.
  */
 export type ContainerIterationResult<MainResult> =
+  | MainVisitResult<MainResult>
+  | { type: "recurse"; value: true };
+
+/**
+ * Outer result of a `visit()` call.
+ */
+export type MainVisitResult<MainResult> =
   | MainResultForm<MainResult>
-  | { type: "recurse"; value: true }
   | undefined;
 
 /**
@@ -189,7 +194,7 @@ class VisitInProgress<Domain, MainResult> {
   //
 
   /** Visits the indicated value as a top-level operation. */
-  visit(value: Domain): MainResult | undefined {
+  visit(value: Domain): MainVisitResult<MainResult> {
     if (this.#stack.depth !== 0) {
       throw new Error(
         "Cannot use `VisitInProgress` for multiple concurrent top-level visits.",
@@ -209,7 +214,7 @@ class VisitInProgress<Domain, MainResult> {
     }
   }
 
-  #visitValue(value: Domain): MainResultForm<MainResult> | undefined {
+  #visitValue(value: Domain): MainVisitResult<MainResult> {
     const result = this.#visitResolvingSubtype(value);
 
     if (result === undefined) {
@@ -235,7 +240,7 @@ class VisitInProgress<Domain, MainResult> {
    * Visits the items in an `arrayContents` result, recursing or returning as
    * directed by `ValueVisitor.visitArrayContentsItem()`.
    */
-  #subvisitArray(value: Domain, values: Domain[]): ContainerIterationResult<MainResult> {
+  #subvisitArray(value: Domain, values: Domain[]): MainVisitResult<MainResult> {
     const vis = this.#visitor;
 
     this.#stack.push(value);
@@ -274,7 +279,7 @@ class VisitInProgress<Domain, MainResult> {
    * Visits the items in an `mapContents` result, recursing or returning as
    * directed by `ValueVisitor.visitMapContentsItem()`.
    */
-  #subvisitMap(value: Domain, mappings: [Domain, Domain][]): ContainerIterationResult<MainResult> {
+  #subvisitMap(value: Domain, mappings: [Domain, Domain][]): MainVisitResult<MainResult> {
     this.#stack.push(value);
 
     try {
