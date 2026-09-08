@@ -18,9 +18,12 @@ import { ASSUMED_COLUMNS, ASSUMED_ROWS } from "./page.ts";
 import {
   above,
   finish,
+  givingScreen,
   NOTHING_PAINTED,
   type PaintedLine,
   repaint,
+  screenOf,
+  takingScreen,
 } from "./paint.ts";
 import type { PromptTerminal } from "./prompt.ts";
 
@@ -190,6 +193,22 @@ class StandardTerminal implements PromptTerminal {
   /** Ends {@link StandardTerminal.#held}, held by the suspension that made it. */
   #release: (() => void) | undefined;
 
+  /** Whether a frame currently has the screen. */
+  #framed = false;
+
+  /**
+   * The lines announced while a frame had the screen, in the order they
+   * arrived, and empty otherwise.
+   *
+   * They are kept rather than dropped, on the reasoning
+   * {@link StandardTerminal.suspend} carries out keys typed at another
+   * program: a line that appears somewhere is one a person can read, and a
+   * dropped one is invisible. What a frame differs in is that this terminal
+   * knows exactly when the screen comes back, so nothing is lost rather than
+   * merely delayed.
+   */
+  #waiting: string[] = [];
+
   #keys = typedKeys(() => this.#held);
 
   /**
@@ -223,7 +242,45 @@ class StandardTerminal implements PromptTerminal {
    * with the line being typed at the bottom of it.
    */
   announce(text: string): void {
+    if (this.#framed) {
+      this.#waiting.push(text);
+      return;
+    }
     this.#send(above(this.#painted, text));
+  }
+
+  /**
+   * @inheritDoc
+   *
+   * The screen is taken on the first call and held until
+   * {@link StandardTerminal.unframe}, so a redraw is a redraw rather than a
+   * second taking: entering the alternate screen twice would save the
+   * transcript's position over itself and leave nothing to go back to.
+   */
+  frame(rows: readonly string[]): void {
+    if (!this.#framed) {
+      this.#framed = true;
+      this.#write(takingScreen());
+    }
+    this.#write(screenOf(rows));
+  }
+
+  /**
+   * @inheritDoc
+   *
+   * What was drawn before the frame is forgotten, as it is across a
+   * suspension and for the same reason: the alternate screen leaves the cursor
+   * where the transcript ended rather than where the last line was drawn, so
+   * the next drawing is an ordinary first one.
+   */
+  unframe(): void {
+    if (!this.#framed) return;
+    this.#framed = false;
+    this.#write(givingScreen());
+    this.#painted = NOTHING_PAINTED;
+    const waiting = this.#waiting;
+    this.#waiting = [];
+    for (const text of waiting) this.announce(text);
   }
 
   /**
@@ -288,6 +345,21 @@ class StandardTerminal implements PromptTerminal {
   }
 
   /**
+   * Helper for the three writes that draw the line being edited, which sends
+   * `text` where a frame is not holding the screen.
+   *
+   * It is the one check rather than one per write, so those three cannot
+   * drift from each other about what a frame means. What a frame does with a
+   * line written above the prompt is {@link StandardTerminal.announce}'s
+   * decision and a different one: it is kept, where a drawing of a line that
+   * is not on screen has nothing to be kept for.
+   */
+  #send(text: string): void {
+    if (this.#framed) return;
+    this.#write(text);
+  }
+
+  /**
    * Helper for the writes, which sends the whole of `text` to the terminal.
    *
    * A write is allowed to accept part of what it is offered, so what is left
@@ -299,10 +371,11 @@ class StandardTerminal implements PromptTerminal {
    * @throws Error if a write accepts nothing at all, which no number of
    * further attempts would improve on.
    */
-  #send(text: string): void {
+  #write(text: string): void {
     // Nothing is drawn while a program holds the terminal. It is the one check
-    // rather than one per write, so the three writes above cannot drift from
-    // each other about what holding the terminal means.
+    // rather than one per write, so nothing this class draws — the line being
+    // edited, or a frame — can drift from the rest about what holding the
+    // terminal means.
     if (this.#held !== undefined) return;
     const bytes = this.#encoder.encode(text);
     let offset = 0;

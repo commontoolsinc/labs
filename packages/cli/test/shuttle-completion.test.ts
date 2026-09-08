@@ -197,7 +197,10 @@ describe("completion", () => {
         "more",
         "pwd",
         "set",
+        "unwatch",
         "verbs",
+        "watch",
+        "watches",
         "where",
         "wish",
       ];

@@ -55,6 +55,7 @@ import { ASSUMED_ROWS } from "../lib/shuttle/page.ts";
 import { renderValue } from "../lib/shuttle/value.ts";
 import { moved } from "./shuttle-place-helpers.ts";
 import { runLine } from "../lib/shuttle/verbs.ts";
+import type { ValueLens } from "../lib/shuttle/lens.ts";
 import type { Outcome, Shuttle, VerbDeps } from "../lib/shuttle/vocabulary.ts";
 import type { WishReadConfig } from "../lib/wish.ts";
 
@@ -168,6 +169,9 @@ const READS_NOTHING: VerbDeps = {
   callFromCommand: () => {
     throw new Error("A call was dispatched.");
   },
+  sinkCellValue: () => {
+    throw new Error("A cell was subscribed to.");
+  },
 };
 
 /**
@@ -236,6 +240,7 @@ function answering(over: VerbDeps = {}): VerbDeps {
     describePiece: () =>
       Promise.resolve({ pattern: null, verbs: [callable("a-verb")] }),
     callFromCommand: () => Promise.resolve(),
+    sinkCellValue: () => Promise.resolve(() => {}),
     editText: (text) =>
       Promise.resolve({
         kind: "edited" as const,
@@ -482,7 +487,10 @@ const VERB_ARITY: readonly (readonly [
   ["more", "none"],
   ["pwd", "none"],
   ["set", "pair"],
+  ["unwatch", "required"],
   ["verbs", "optional"],
+  ["watch", "optional"],
+  ["watches", "none"],
   ["where", "none"],
   ["wish", "required"],
 ];
@@ -534,6 +542,10 @@ const NEEDS_ONE: ReadonlyMap<string, string> = new Map([
     "`set` takes the path to write and the value to write there, as in " +
     `\`set title '"a"'\`.`,
   ],
+  [
+    "unwatch",
+    "`unwatch` takes the watch to disarm, as in `unwatch %1`.",
+  ],
   ["wish", "`wish` takes the target to resolve, as in `wish #favorites`."],
 ]);
 
@@ -548,7 +560,8 @@ const NEEDS_ONE: ReadonlyMap<string, string> = new Map([
  * until it is.
  */
 const THE_VERBS = "The verbs are `call`, `cd`, `describe`, `edit`, `get`, " +
-  "`help`, `link`, `ls`, `more`, `pwd`, `set`, `verbs`, `where`, and `wish`.";
+  "`help`, `link`, `ls`, `more`, `pwd`, `set`, `unwatch`, `verbs`, `watch`, " +
+  "`watches`, `where`, and `wish`.";
 
 /** Helper for the cases below, which is every verb, in that same order. */
 const VERB_WORDS = VERB_ARITY.map(([word]) => word);
@@ -574,7 +587,10 @@ const LINE_PER_VERB: ReadonlyMap<string, string> = new Map([
   ["more", "more"],
   ["pwd", "pwd"],
   ["set", 'set a "b"'],
+  ["unwatch", "unwatch %1"],
   ["verbs", "verbs"],
+  ["watch", "watch"],
+  ["watches", "watches"],
   ["where", "where"],
   ["wish", "wish #favorites"],
 ]);
@@ -2390,20 +2406,21 @@ describe("verbs", () => {
           `identity  ${CONFIG.identity}\n` +
           `space     ${SPACE}\n` +
           `position  /@${SPACE}/${HANDLE}@space/title\n` +
-          "scope     @space",
+          "scope     @space\n" +
+          "watches   none",
       });
     });
 
     it("returns the place's dimensions written exactly as `pwd` writes them", async () => {
       // What makes the two one format rather than two that agree today: the
-      // dimensions `pwd` prints are the end of what `where` prints, character
-      // for character.
+      // dimensions `pwd` prints stand inside what `where` prints, whole and
+      // character for character.
 
       const shuttle = atPiece("title");
       const whole = await runLine("where", shuttle, READS_NOTHING);
       const place = await runLine("pwd", shuttle, READS_NOTHING);
       expect(whole.kind === "text" && place.kind === "text").toBe(true);
-      expect(textOf(whole).endsWith(`\n${textOf(place)}`)).toBe(true);
+      expect(textOf(whole).includes(`\n${textOf(place)}\n`)).toBe(true);
     });
 
     it("returns the record over a connection that will not open", async () => {
@@ -2428,7 +2445,8 @@ describe("verbs", () => {
             `identity  ${CONFIG.identity}\n` +
             `space     ${SPACE}\n` +
             `position  @${SPACE}/\n` +
-            "scope     @space",
+            "scope     @space\n" +
+            "watches   none",
         );
     });
 
@@ -4577,6 +4595,330 @@ describe("verbs", () => {
       expect(order).toEqual(["warm", "describe"]);
     });
   });
+  describe("watch, watches and unwatch", () => {
+    // The three read one session object, so what the cases turn on is the pair
+    // of lifetimes: a lens cancels its own subscription on the way out and the
+    // watch's goes on firing, and only `unwatch` stops that one.
+    //
+    // Every subscription is stood in for, so a case drives a settle by calling
+    // what the seam was handed rather than by waiting for a runtime.
+
+    /** What driving the subscriptions produced. */
+    interface Watching {
+      /** Every settle callback the line took, in the order it took them. */
+      readonly settles: ((value: unknown) => void)[];
+
+      /** How many of those subscriptions have been cancelled. */
+      readonly cancelled: boolean[];
+
+      /** Every line the run wrote above the prompt, in order. */
+      readonly announced: string[];
+    }
+
+    /**
+     * Helper for the cases below, which is a deps bag whose subscription is
+     * this case's to drive, recording each one.
+     */
+    function watching(): { deps: VerbDeps; watched: Watching } {
+      const watched: Watching = {
+        settles: [],
+        cancelled: [],
+        announced: [],
+      };
+      return {
+        watched,
+        deps: answering({
+          sinkCellValue: (_config, _path, onSettled) => {
+            const at = watched.settles.length;
+            watched.settles.push(onSettled);
+            watched.cancelled.push(false);
+            return Promise.resolve(() => {
+              watched.cancelled[at] = true;
+            });
+          },
+          announce: (text) => {
+            watched.announced.push(text);
+          },
+          columns: () => 200,
+        }),
+      };
+    }
+
+    /** Helper for the cases below, which is the lens a `watch` line opened. */
+    function lensOf(outcome: Outcome): ValueLens {
+      if (outcome.kind !== "watching") {
+        throw new Error(`The line opened no lens: ${outcome.kind}.`);
+      }
+      return outcome.lens;
+    }
+
+    /** Helper for the cases below, which is what a `watch` line listed. */
+    function armedOf(outcome: Outcome): string {
+      return outcome.kind === "watching"
+        ? outcome.armed
+        : `not watching: ${outcome.kind}`;
+    }
+
+    it("arms a watch on the cell the operand names", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      expect(shuttle.session.watches.map((armed) => armed.label))
+        .toEqual([`${HANDLE}/title @space`]);
+    });
+
+    it("arms a watch on where shuttle stands where the line names nothing", async () => {
+      const shuttle = atPiece("title");
+      const { deps } = watching();
+      await runLine("watch", shuttle, deps);
+      expect(shuttle.session.watches.map((armed) => armed.key))
+        .toEqual([`/${HANDLE}@space/title`]);
+    });
+
+    it("arms a watch on the arguments cell the suffix selects", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title#argument", shuttle, deps);
+      expect(shuttle.session.watches.map((armed) => armed.key))
+        .toEqual([`/${HANDLE}@space/title#argument`]);
+    });
+
+    it("opens a lens onto the cell it armed the watch on", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      const outcome = await runLine("watch title", shuttle, deps);
+      expect(lensOf(outcome).label).toBe(`${HANDLE}/title @space`);
+    });
+
+    it("takes a subscription for the watch and one for the lens", async () => {
+      // Two lifetimes, so two subscriptions: a lens cancels its own on the way
+      // out and the watch's goes on firing, which one subscription could not
+      // express.
+
+      const { deps, watched } = watching();
+      await runLine("watch title", atPiece(), deps);
+      expect(watched.settles.length).toBe(2);
+    });
+
+    it("leaves the watch armed when the lens closes, and cancels the lens's own", async () => {
+      const shuttle = atPiece();
+      const { deps, watched } = watching();
+      const outcome = await runLine("watch title", shuttle, deps);
+      lensOf(outcome).close();
+      expect({
+        cancelled: watched.cancelled,
+        armed: shuttle.session.watches.length,
+      }).toEqual({ cancelled: [false, true], armed: 1 });
+    });
+
+    it("writes an event line above the prompt for a settled change", async () => {
+      const { deps, watched } = watching();
+      await runLine("watch title", atPiece(), deps);
+      const settle = watched.settles[0]!;
+      settle(14);
+      settle(15);
+      expect(watched.announced)
+        .toEqual([`watch ${HANDLE}/title @space: 14 → 15`]);
+    });
+
+    it("writes no event line once the watch is disarmed", async () => {
+      const shuttle = atPiece();
+      const { deps, watched } = watching();
+      await runLine("watch title", shuttle, deps);
+      const settle = watched.settles[0]!;
+      settle(14);
+      await runLine("unwatch %1", shuttle, deps);
+      settle(15);
+      expect(watched.announced).toEqual([]);
+    });
+
+    it("numbers what is armed as it arms one, so `unwatch %n` needs no listing first", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      const outcome = await runLine("watch title", shuttle, deps);
+      expect(armedOf(outcome)).toBe(`%1 ${HANDLE}/title @space`);
+      expect(textOf(await runLine("unwatch %1", shuttle, deps)))
+        .toBe(`Disarmed the watch on \`${HANDLE}/title @space\`.`);
+    });
+
+    it("refuses a cell it is already watching, naming what is armed", async () => {
+      // Two watches on one cell write two of every line, and the second says
+      // nothing the first did not.
+
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      expect(reasonOf(await runLine("watch title", shuttle, deps))).toBe(
+        `\`${HANDLE}/title @space\` is watched already. \`watches\` numbers ` +
+          "what is armed, and `unwatch %n` disarms one.",
+      );
+    });
+
+    it("refuses a second spelling of a cell it is already watching", async () => {
+      // The question is asked of the cell rather than of the operand, so the
+      // two spellings that reach one cell are one watch.
+
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      expect(
+        reasonOf(await runLine(`watch /${HANDLE}/title`, shuttle, deps))
+          .endsWith(
+            "disarms one.",
+          ),
+      ).toBe(true);
+    });
+
+    it("takes no subscription for a cell it is already watching", async () => {
+      const shuttle = atPiece();
+      const { deps, watched } = watching();
+      await runLine("watch title", shuttle, deps);
+      await runLine("watch title", shuttle, deps);
+      expect(watched.settles.length).toBe(2);
+    });
+
+    it("refuses a container, which holds no value to watch", async () => {
+      expect(reasonOf(await runLine("watch", shuttleIn(), READS_NOTHING)))
+        .toBe(
+          "A space root is a list of what stands inside it rather than a " +
+            "cell, so there is nothing to watch. `ls` lists it.",
+        );
+    });
+
+    it("starts the piece before it subscribes", async () => {
+      // What a sink reports is what a running pattern holds, or what was last
+      // committed if nothing is running it.
+
+      const order: string[] = [];
+      const shuttle = atPiece();
+      await runLine(
+        "watch title",
+        shuttle,
+        answering({
+          warmPiece: (config) => {
+            order.push("warm");
+            return Promise.resolve({ piece: config.piece });
+          },
+          sinkCellValue: () => {
+            order.push("subscribe");
+            return Promise.resolve(() => {});
+          },
+        }),
+      );
+      expect(order).toEqual(["warm", "subscribe", "subscribe"]);
+    });
+
+    it("disarms the watch it armed where the lens's subscription was cancelled", async () => {
+      // An interrupted line leaves the session as it found it, and a
+      // subscription nothing holds a cancel for is one nothing could stop.
+
+      const stopper = new AbortController();
+      const shuttle = atPiece();
+      const cancelled: boolean[] = [];
+      const outcome = await runLine(
+        "watch title",
+        shuttle,
+        answering({
+          sinkCellValue: () => {
+            const at = cancelled.length;
+            cancelled.push(false);
+            if (at === 1) stopper.abort();
+            return Promise.resolve(() => {
+              cancelled[at] = true;
+            });
+          },
+          signal: stopper.signal,
+        }),
+      );
+      expect({
+        kind: outcome.kind,
+        cancelled,
+        armed: shuttle.session.watches.length,
+      }).toEqual({ kind: "interrupted", cancelled: [true, true], armed: 0 });
+    });
+
+    it("lists what is armed, numbering each", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      await runLine("watch body", shuttle, deps);
+      expect(textOf(await runLine("watches", shuttle, deps)))
+        .toBe(
+          `%1 ${HANDLE}/title @space\n%2 ${HANDLE}/body @space`,
+        );
+    });
+
+    it("says so where nothing is armed", async () => {
+      expect(textOf(await runLine("watches", shuttleIn(), READS_NOTHING)))
+        .toBe("<no watches are armed>");
+    });
+
+    it("disarms the watch a row numbered and cancels its subscription", async () => {
+      const shuttle = atPiece();
+      const { deps, watched } = watching();
+      await runLine("watch title", shuttle, deps);
+      await runLine("unwatch %1", shuttle, deps);
+      expect({
+        armed: shuttle.session.watches.length,
+        cancelled: watched.cancelled,
+      }).toEqual({ armed: 0, cancelled: [true, false] });
+    });
+
+    it("disarms the watch the row was minted for, not whichever is second now", async () => {
+      // What a bound reference buys: the row carries the cell its watch is
+      // armed on, so a listing read against a session that has changed since
+      // still names the watch it showed.
+
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      await runLine("watch body", shuttle, deps);
+      await runLine("watches", shuttle, deps);
+      await runLine("unwatch %1", shuttle, deps);
+      await runLine("unwatch %2", shuttle, deps);
+      expect(shuttle.session.watches.map((armed) => armed.label)).toEqual([]);
+    });
+
+    it("refuses a handle naming a row of some other listing", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      await runLine("ls", shuttle, deps);
+      expect(reasonOf(await runLine("unwatch %1", shuttle, deps))).toBe(
+        "`%1` names a row of a listing rather than a watch. `watches` lists " +
+          "what is armed and numbers each of them.",
+      );
+    });
+
+    it("refuses a handle naming a watch that is no longer armed", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      await runLine("unwatch %1", shuttle, deps);
+      expect(reasonOf(await runLine("unwatch %1", shuttle, deps))).toBe(
+        "`%1` names a watch that is no longer armed. `watches` lists what is.",
+      );
+    });
+
+    it("refuses a `cd` onto a watch row, naming the verb that disarms one", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      expect(reasonOf(await runLine("cd %1", shuttle, deps))).toBe(
+        "`%1` names a row no place stands at, it being a watch. `unwatch` " +
+          "is what disarms one.",
+      );
+    });
+
+    it("names what is armed in the ambient record", async () => {
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      expect(textOf(await runLine("where", shuttle, deps)).split("\n").at(-1))
+        .toBe(`watches   ${HANDLE}/title @space`);
+    });
+  });
+
   describe("a numbered handle", () => {
     // The other half of a handle: `%n` is printed by a listing and read here.
     // What every case turns on is that the row and the place it was listed at
@@ -5193,6 +5535,7 @@ describe("verbs", () => {
       "listPieceCallables",
       "describePiece",
       "callFromCommand",
+      "sinkCellValue",
     ] as const;
 
     /** One of {@link READS}. */
@@ -5309,6 +5652,10 @@ describe("verbs", () => {
           note("callFromCommand");
           return Promise.resolve();
         },
+        sinkCellValue: () => {
+          note("sinkCellValue");
+          return Promise.resolve(() => {});
+        },
         editText: (text) =>
           Promise.resolve({
             kind: "edited" as const,
@@ -5387,6 +5734,9 @@ describe("verbs", () => {
       ["verbs", onPiece, "listPieceCallables"],
       ["describe", onPiece, "suspend"],
       ["describe", onPiece, "describePiece"],
+      ["watch title", onPiece, "suspend"],
+      ["watch title", onPiece, "warmPiece"],
+      ["watch title", onPiece, "sinkCellValue"],
     ];
 
     it("issues no read after the cancel, on any line and from any read", async () => {
@@ -5409,7 +5759,14 @@ describe("verbs", () => {
      * with every read standing in as a throw, so a verb listed here that
      * reaches one fails instead of being excused by this list.
      */
-    const READS_NOTHING_AT_ALL = ["help", "more", "pwd", "where"];
+    const READS_NOTHING_AT_ALL = [
+      "help",
+      "more",
+      "pwd",
+      "unwatch",
+      "watches",
+      "where",
+    ];
 
     it("cancels a line of every verb, or says why the verb has no read", async () => {
       // What closes the set of verbs, which is the gap the rows above had:

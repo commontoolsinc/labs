@@ -71,7 +71,9 @@ import {
   partitionVerbListing,
   type PieceCallableListing,
   type PieceConfig,
+  type PieceResolutionDeps,
   setCellValue,
+  sinkCellValue,
   warmPiece,
 } from "../piece.ts";
 import { projectWishValue, readWish } from "../wish.ts";
@@ -79,6 +81,7 @@ import { type Announce } from "./announce.ts";
 import { connectionEntries, type HeldConnection } from "./connection.ts";
 import { resolveHandle } from "./handles.ts";
 import { renderVerbList, renderVerbPage, type VerbHelp } from "./help.ts";
+import { ValueLens } from "./lens.ts";
 import { quoteToken, splitLine } from "./line.ts";
 import {
   type ListingHandles,
@@ -116,6 +119,7 @@ import {
 import { renderRecord } from "./record.ts";
 import { ShuttleSession } from "./session.ts";
 import { renderValue } from "./value.ts";
+import { ArmedWatch, watchEntries } from "./watch.ts";
 import {
   aimed,
   connectedSpace,
@@ -127,6 +131,7 @@ import {
   paged,
   pieceConfigAt,
   pieceConfigOf,
+  type Ran,
   type Refusal,
   refuse,
   rowFor,
@@ -607,8 +612,8 @@ async function wish(
  * it stands.
  *
  * It prints the record `pwd` prints, so the two share one format
- * (`record.ts`) and `pwd` is this minus the connection's dimensions. A
- * milestone that adds a dimension to the record adds it here.
+ * (`record.ts`) and the two dimensions `pwd` prints stand inside this one
+ * whole. A milestone that adds a dimension to the record adds it here.
  *
  * Nothing here reads. Every dimension is a value this process is already
  * holding, so a shuttle whose connection will not open still says what it was
@@ -621,6 +626,7 @@ function where(shuttle: Shuttle): Outcome {
     text: renderRecord([
       ...connectionEntries(shuttle.config),
       ...shuttle.place.entries(),
+      ...watchEntries(shuttle.session.watches),
     ]),
   };
 }
@@ -1024,6 +1030,233 @@ async function describe(
 }
 
 /**
+ * Arms a watch on the cell the line names — where shuttle stands where it
+ * names none — and opens the value view as one lens onto it.
+ *
+ * The two halves are separable on purpose (decision 28): `q` closes the lens
+ * and the watch goes on firing, so what a person leaves behind after looking
+ * at a cell is a line per change to it rather than nothing. They take two
+ * subscriptions and not one for the same reason — the lens cancels its own on
+ * the way out, and cancelling one subscription for both would be the design
+ * that cannot express what the two halves are for.
+ *
+ * A cell already watched is refused rather than watched twice: two watches on
+ * one cell write two of every line and the second says nothing the first did
+ * not. The question is asked of the cell rather than of the operand, so the
+ * two spellings that reach one cell are one watch.
+ *
+ * The operand is read through the door `get` reads one through, the
+ * `#argument` suffix included, and a container is refused for the reason `get`
+ * refuses one: a space root and a facet are lists of what stands inside them
+ * and hold no value to watch.
+ */
+async function watch(
+  shuttle: Shuttle,
+  line: VerbLine,
+  deps: VerbDeps,
+): Promise<Outcome> {
+  const at = await aimed(shuttle, line.operands[0], "watch", deps);
+  if (at.kind === "refused") return at;
+  const position = at.place.position;
+  if (position.kind !== "piece") {
+    return refuse(
+      `${container(position)} is a list of what stands inside it rather ` +
+        `than a cell, so there is nothing to watch. \`ls\` lists it.`,
+    );
+  }
+  const place: PiecePlace = { ...at.place, position };
+  // Before the subscription and not after it, which is the same order `get`
+  // takes: what a sink reports is what a running pattern holds, or what was
+  // last committed if nothing is running it.
+  const warmed = await warm(shuttle, place, deps);
+  if (warmed !== undefined) return warmed;
+  const armed = new ArmedWatch(
+    { place, input: at.input },
+    deps.announce ?? (() => {}),
+    () => measured(deps.columns?.(), ASSUMED_COLUMNS),
+  );
+  const already = shuttle.session.watching(armed.key);
+  if (already !== undefined) {
+    return refuse(
+      `\`${escapeControlCharacters(already.label)}\` is watched already. ` +
+        `\`watches\` numbers what is armed, and \`unwatch %n\` disarms one.`,
+    );
+  }
+  const watching = await subscribed(shuttle, place, at.input, deps, (value) => {
+    armed.settled(value);
+  });
+  if (watching.kind !== "ran") return watching;
+  armed.holding(watching.answer);
+  const lens = new ValueLens(armed.label);
+  const looking = await subscribed(shuttle, place, at.input, deps, (value) => {
+    lens.showing(value);
+  });
+  // The watch was armed and nothing has adopted it, so it is disarmed here:
+  // an interrupted line leaves the session as it found it, and a subscription
+  // nothing holds a cancel for is one nothing could ever stop.
+  if (looking.kind !== "ran") {
+    armed.disarm();
+    return looking;
+  }
+  lens.holding(looking.answer);
+  // Everything from here is adoption, on the near side of the check the
+  // subscription above made on its way back, with nothing awaited between.
+  shuttle.session.arm(armed);
+  const listed = armedListing(shuttle, deps);
+  return { kind: "watching", lens, armed: listed };
+}
+
+/**
+ * Lists what is armed, numbering each so that `unwatch %n` disarms one.
+ *
+ * It awaits nothing, so it needs no guard: the dispatch's own check is the
+ * last thing before it and there is no suspension after that for a cancel to
+ * arrive in.
+ */
+function watches(
+  shuttle: Shuttle,
+  _line: VerbLine,
+  deps: VerbDeps,
+): Outcome {
+  return { kind: "text", text: armedListing(shuttle, deps) };
+}
+
+/**
+ * Disarms the watch the handle names.
+ *
+ * It takes a handle rather than a reference, which is the `%n` vocabulary a
+ * listing already mints (decision 27): the row `watches` numbered carries the
+ * cell its watch is armed on, so `unwatch %2` disarms the watch that row
+ * showed and not whichever one is second now.
+ *
+ * A handle naming a row of some other listing is refused in that row's own
+ * terms, which is what tells a person who typed `%2` off an `ls` that they are
+ * looking at the wrong numbering rather than that the number is wrong.
+ */
+function unwatch(
+  shuttle: Shuttle,
+  line: VerbLine,
+  _deps: VerbDeps,
+): Outcome {
+  const token = line.operands[0] ?? "";
+  const bound = resolveHandle(shuttle.session.handles, token);
+  if (bound.kind === "refused") return bound;
+  const key = bound.row.watch;
+  if (key === undefined) {
+    return refuse(
+      `\`${token}\` names a row of a listing rather than a watch. ` +
+        `\`watches\` lists what is armed and numbers each of them.`,
+    );
+  }
+  const armed = shuttle.session.watching(key);
+  if (armed === undefined) {
+    return refuse(
+      `\`${token}\` names a watch that is no longer armed. \`watches\` ` +
+        `lists what is.`,
+    );
+  }
+  shuttle.session.disarm(armed);
+  return {
+    kind: "text",
+    text: `Disarmed the watch on \`${escapeControlCharacters(armed.label)}\`.`,
+  };
+}
+
+/**
+ * Helper for {@link watch} and {@link watches}, which numbers what is armed
+ * and is the page that lists it.
+ *
+ * Both write it, which is what makes `watch` arm a watch with a handle already
+ * on it: the line that arms one says what is armed, numbered, so `unwatch %n`
+ * needs no listing of its own first.
+ *
+ * A row carries the cell its watch is armed on rather than its position in the
+ * list, so a row read back names the watch it was minted for whatever has been
+ * armed or disarmed since.
+ */
+function armedListing(shuttle: Shuttle, deps: VerbDeps): string {
+  const armed = shuttle.session.watches;
+  const rows: readonly ListingRow[] = armed.map((watching) => ({
+    name: watching.label,
+    kind: "watch",
+    watch: watching.key,
+  }));
+  numbering(shuttle.session, { place: shuttle.place.place, rows });
+  return paged(
+    shuttle,
+    armed.length === 0 ? [marker("no watches are armed")] : [],
+    numbered(armed.map((watching) => oneLine(watching.label))),
+    screenFit(deps),
+  ).text;
+}
+
+/**
+ * Helper for {@link watch}, which subscribes to the cell `place` names and is
+ * the cancel that stops the subscription.
+ *
+ * The subscription is taken through {@link guarded} as every other read is,
+ * and what it adds is the one thing a read does not need: an act that ran
+ * after the line was cancelled has left something running, so the cancel is
+ * written where this can reach it and used where the guard hands back an
+ * interruption. A read's answer may be dropped; a subscription's cannot.
+ */
+async function subscribed(
+  shuttle: Shuttle,
+  place: PiecePlace,
+  input: boolean,
+  deps: VerbDeps,
+  onSettled: (value: unknown) => void,
+): Promise<Ran<() => void> | Interruption> {
+  const taken: Subscription = {};
+  const ran = await guarded(
+    deps,
+    subscribing,
+    taken,
+    deps.sinkCellValue ?? sinkCellValue,
+    pieceConfigOf(shuttle, place.position, place.scope),
+    [...place.position.path],
+    input,
+    onSettled,
+    { loadPieces: () => shuttle.connection.pieces() },
+  );
+  if (ran.kind !== "ran") {
+    taken.cancel?.();
+    return ran;
+  }
+  return ran;
+}
+
+/** Where {@link subscribing} puts the cancel of the subscription it took. */
+interface Subscription {
+  /** Stops it, once it has been taken. */
+  cancel?: () => void;
+}
+
+/**
+ * Helper for {@link subscribed}, which takes the subscription, writes its
+ * cancel into `taken`, and returns that cancel.
+ *
+ * It does both because the two ways its caller can come back want different
+ * halves. A guard that hands back an interruption hands back no answer, and
+ * the subscription it interrupted is running all the same, so the cancel has
+ * to be somewhere the caller can still reach; a guard that ran hands the
+ * cancel over as the answer, where nothing has to be read out of a field that
+ * the types cannot say is filled.
+ */
+async function subscribing(
+  taken: Subscription,
+  sink: typeof sinkCellValue,
+  config: PieceConfig,
+  path: (string | number)[],
+  input: boolean,
+  onSettled: (value: unknown) => void,
+  deps: PieceResolutionDeps,
+): Promise<() => void> {
+  taken.cancel = await sink(config, path, onSettled, { input }, deps);
+  return taken.cancel;
+}
+
+/**
  * The read and projection options a data verb takes, which decision 7 makes
  * the ones `cf` takes: same names, same values, same refusal for a value the
  * parser will not take, and the same pair of spellings for one projection with
@@ -1326,6 +1559,24 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
       "written as a string.\n`-` is refused, standard input being the " +
       `keyboard the prompt reads.\n\n${WHOLE_PIECE_REFUSAL}`,
   }],
+  ["unwatch", {
+    run: unwatch,
+    arity: {
+      operands: "required",
+      names: "the watch to disarm, as in `unwatch %1`",
+      // A handle names a row of the last listing, and nothing lists those:
+      // what a completion offers is read off a place, and a watch stands at
+      // none. `watches` is what prints the numbers.
+      completes: ["nothing"],
+    },
+    usage: "unwatch <handle>",
+    summary: "Disarms the watch a `watches` row numbered.",
+    detail: "It takes a handle rather than a reference, and the row carries " +
+      "the cell its\nwatch is armed on — so `unwatch %2` disarms the watch " +
+      "that row showed and\nnot whichever one is second by then.\n\nA " +
+      "handle off some other listing is refused: `%n` names a row of the " +
+      "newest\nlisting, and `watches` is the listing that numbers watches.",
+  }],
   ["verbs", {
     run: listVerbs,
     arity: { operands: "optional", completes: ["children"] },
@@ -1340,6 +1591,33 @@ const VERBS: ReadonlyMap<string, VerbEntry> = new Map<string, VerbEntry>([
       "deprecated verb — are\nwithheld and counted; `--all` shows them. " +
       "Each is callable either way: a\nmark is a display default rather " +
       "than a capability boundary.",
+  }],
+  ["watch", {
+    run: watch,
+    arity: { operands: "optional", completes: ["children"] },
+    usage: "watch [<ref>]",
+    summary: "Arms a watch on a cell and opens the value view onto it.",
+    detail: "The operand takes everything `get` takes, the `#argument` " +
+      "suffix included,\nand defaults to where you stand. A space root and " +
+      "a facet hold no value and\nare refused.\n\nThe two halves are " +
+      "separable. `q` closes the view and leaves the watch\narmed, and an " +
+      "armed watch writes one line above the prompt per settled\nchange — " +
+      "the cell, where inside it the change landed, and the transition.\n" +
+      "The view scrolls with `j`/`k` and the arrows, `g` and `G` are its " +
+      "ends, and\nit repaints once per quiet runtime rather than once per " +
+      "value on the way\nthere.\n\nA cell already watched is refused: two " +
+      "watches on one cell write two of\nevery line. The line numbers what " +
+      "is armed as it arms one, so `unwatch %n`\nneeds no `watches` first.",
+  }],
+  ["watches", {
+    run: watches,
+    arity: { operands: "none" },
+    usage: "watches",
+    summary: "Lists the watches this run has armed, numbering each.",
+    detail: "Every row is numbered from `%1`, and a row's handle carries the " +
+      "cell its\nwatch is armed on, so `unwatch %2` needs neither the " +
+      "reference nor the\nscope again.\n\n`where` names them too, beside " +
+      "the connection and the place.",
   }],
   ["where", {
     run: where,

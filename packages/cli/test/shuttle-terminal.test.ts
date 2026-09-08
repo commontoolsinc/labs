@@ -680,6 +680,90 @@ describe("terminal", () => {
     });
   });
 
+  describe("frame()", () => {
+    it("takes the alternate screen once and draws the rows on it", async () => {
+      const watched = await watching({}, async (terminal) => {
+        terminal.frame(["a"]);
+        terminal.frame(["b"]);
+        await Promise.resolve();
+      });
+      expect(watched.written()).toBe(
+        "\x1b[?1049h\x1b[?25l" +
+          "\x1b[?7l\x1b[1;1H\x1b[2Ka\x1b[?7h" +
+          "\x1b[?7l\x1b[1;1H\x1b[2Kb\x1b[?7h",
+      );
+    });
+
+    it("draws no line being edited while it has the screen", async () => {
+      // A drawing of a line that is not on screen has nothing to be kept for,
+      // where a line written above the prompt is a record.
+
+      const watched = await watching({}, async (terminal) => {
+        terminal.frame(["a"]);
+        terminal.edit("shuttle> ", 9);
+        terminal.finish();
+        await Promise.resolve();
+      });
+      expect(watched.written().includes("shuttle> ")).toBe(false);
+    });
+
+    it("keeps what was announced while it had the screen", async () => {
+      // A watch's event lines and a pattern's console go on arriving while a
+      // frame is up, and a transcript missing them would be missing exactly
+      // the changes a person opened the frame to watch.
+
+      const watched = await watching({}, async (terminal) => {
+        terminal.frame(["a"]);
+        terminal.announce("one");
+        terminal.announce("two");
+        await Promise.resolve();
+      });
+      expect(watched.written().includes("one")).toBe(false);
+      expect(watched.written().includes("two")).toBe(false);
+    });
+  });
+
+  describe("unframe()", () => {
+    it("gives the screen back and writes what was announced, in order", async () => {
+      const watched = await watching({}, async (terminal) => {
+        terminal.frame(["a"]);
+        terminal.announce("one");
+        terminal.announce("two");
+        terminal.unframe();
+        await Promise.resolve();
+      });
+      const written = watched.written();
+      const gave = written.indexOf("\x1b[?1049l");
+      expect(gave).toBeGreaterThan(-1);
+      expect(written.indexOf("one")).toBeGreaterThan(gave);
+      expect(written.indexOf("two")).toBeGreaterThan(written.indexOf("one"));
+    });
+
+    it("does nothing where no frame has the screen", async () => {
+      const watched = await watching({}, async (terminal) => {
+        terminal.unframe();
+        await Promise.resolve();
+      });
+      expect(watched.written()).toBe("");
+    });
+
+    it("forgets what was drawn before the frame took the screen", async () => {
+      // The alternate screen leaves the cursor where the transcript ended
+      // rather than where the last line was drawn, so the next drawing is an
+      // ordinary first one and clears nothing above it.
+
+      const watched = await watching({ consoleSize: wide(20) }, async (t) => {
+        t.edit("a".repeat(25), 25);
+        t.frame(["f"]);
+        t.unframe();
+        t.edit("b", 1);
+        await Promise.resolve();
+      });
+      expect(watched.written().endsWith("\r\x1b7\x1b[0Jb\x1b8\x1b[1C"))
+        .toBe(true);
+    });
+  });
+
   describe("suspend()", () => {
     // A program that takes the terminal takes all of it. Raw mode is the half
     // that is easy to see; the other half is that this prompt stops reading

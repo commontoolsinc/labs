@@ -569,12 +569,56 @@ schema-derived flag machinery `cf` already exports (`pieceCallRawArgs`,
 lands here, since `set` is what makes stale computed state visible.
 
 **B3 — watch and views** (after A4). `Cell.sink` with the guard-plus-`idle()`
-settling discipline; the value, list, and structured piece-overview views on
-the `cf view` pager substrate; session watches (`watch`, `watches`, `unwatch`)
-with prompt event lines. Governed by [`views.md`](views.md); it opens with the
-two experiments and the raw-document-subscription proving test from issue
-[#6534](https://github.com/commontoolsinc/labs/issues/6534), falling back to
-the capped deep sink if the seam disappoints.
+settling discipline; the value, list, and structured piece-overview views;
+session watches (`watch`, `watches`, `unwatch`) with prompt event lines.
+Governed by [`views.md`](views.md). Landing in slices.
+
+Landed:
+
+- **B3a — the settle discipline, the value view, and watches as session
+  objects.** `sinkCellValue` (`packages/cli/lib/piece.ts`) is the subscription
+  seam: it resolves the target the way a read does, sinks the cell, and reports
+  once per quiet runtime through a reentrancy guard plus `runtime.idle()` —
+  `renderVDomToHtml`'s form, and no timer anywhere under it. Starting the piece
+  stays the caller's own act, so a caller watching several cells of one piece
+  starts it once.
+
+  A watch (`lib/shuttle/watch.ts`) is a session object beside the handle table
+  and the warm set: `watch <ref>` arms one and numbers what is armed, `watches`
+  lists them, `unwatch %n` disarms the one a row was minted for, and `where`
+  names them. Each settled change writes one line above the prompt — the cell,
+  the path inside it, and the transition — through the out-of-band door a
+  connection's own writing already goes through, so scrollback stays
+  append-only. A change is what is reported: the first settle is the baseline,
+  and a settle that landed on the value already held writes nothing. A line
+  wider than the screen stands its values in for what they are rather than
+  filling the terminal with a value nobody asked to read.
+
+  The value view (`lib/shuttle/lens.ts`) opens as one lens onto that watch,
+  drawn on the alternate screen so that nothing already written scrolls while
+  it is up. It is pure logic plus a frame the prompt draws: the prompt owns the
+  keyboard, so a lens is a state of its loop rather than a program beside it,
+  and the terminal keeps what was announced while a frame held the screen.
+  The two lifetimes are separate, which is what the slice is for: `q` cancels
+  the lens's own subscription and leaves the watch armed.
+
+  Two departures from [`views.md`](views.md) are worth naming. The frame draws
+  no connection marker, the relay that would report connection state being B1's
+  and unbuilt ([`runtime-integration.md`](runtime-integration.md)). And the
+  transition row stands until another change replaces it rather than expiring,
+  which is the same document's "never a timer" applied to its own sentence;
+  views.md now says so.
+
+Still to land:
+
+- **The list view.** It rests on `SpaceReplica.sinkDocument`, which is on
+  neither `IStorageProvider` nor `ISpaceReplica`, so the seam question is
+  `packages/runner`'s to settle before shuttle reaches it. It opens with the
+  two experiments and the raw-document-subscription proving test from issue
+  [#6534](https://github.com/commontoolsinc/labs/issues/6534), falling back to
+  the capped deep sink if the seam disappoints.
+- **The structured piece overview** (decision 26): one refreshable frame
+  carrying arguments, a result summary, callables and pattern identity.
 
 **B4 — externals and escapes.** `>` and `<` to and from `file:` externals
 under the scheme-absolute rule; the external working location

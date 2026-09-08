@@ -258,6 +258,14 @@ set label '"pointed at"'
 set settings/note '"written once and never again"'
 link /slugs/first/label /slugs/second/label#argument
 edit
+watch settings/depth
+@frame q
+watches
+set settings/depth 3
+@said watch first/settings/depth @space: 2 → 3
+where
+unwatch %1
+watches
 cd /pieces
 ls
 cd %1
@@ -450,7 +458,7 @@ lacks "names no facet" "$GET_HELP" "--help is not read as a path"
 # step 2 took its stored one — over a connection this session never had, so a
 # write that reached only the running piece and never committed fails there. It
 # reads each cell once, at the end, so which write a reading is evidence for is
-# a question per cell: step 28 names that write beside each of its checks, and
+# a question per cell: step 29 names that write beside each of its checks, and
 # the writes it cannot speak for rest on the shell's own read on the line after
 # each.
 AFTER() { $CF cell get --quiet --cell "$1" "$2" $ARGS 2>/dev/null; }
@@ -462,7 +470,7 @@ check '"a written place"' "$(said 23 "get label")" \
   "the shell serves the value it just wrote"
 # `label` is written five times below, so a reading of it at the end says the
 # last write landed and nothing about the four before it. This one goes to a
-# path nothing else in the session touches, which is what lets step 28 speak
+# path nothing else in the session touches, which is what lets step 29 speak
 # about a particular write rather than about whichever write reached a cell
 # last.
 check "Wrote \`settings/note\` on \`$FIRST\`." \
@@ -537,7 +545,7 @@ step "22. call runs the callable, and what it did is there afterwards"
 # the call settled rather than that it was accepted — a call the fabric took
 # and never ran would say the second and not the first. What the handler did
 # is a separate reading, and this is the only one that takes it: step 23 empties
-# `items` and refills it, so the array step 28 reads ends at `["jam"]` whether
+# `items` and refills it, so the array step 29 reads ends at `["jam"]` whether
 # or not this call's `milk` ever committed.
 CALLED=$(said 31 "call . addItem '{\"text\":\"milk\"}'")
 contains '"status": "settled"' "$CALLED" "the call settled"
@@ -618,15 +626,53 @@ contains "\`/slugs/second/label#argument\` selects a piece's arguments cell" \
   "$(said 49 "link /slugs/first/label /slugs/second/label#argument")" \
   "the target endpoint does not take the argument-cell suffix"
 
-step "26. The pieces facet numbers rows cd takes, and shows what each piece is called"
+step "26. watch arms a subscription, opens a view over it, and outlives it"
+# The half no unit case can reach. Every sink in the unit suite is stood in
+# for, so what is asserted there is what shuttle does with a settle it was
+# handed; here the subscription is taken over the connection this session
+# holds, on a cell the fabric resolved, and the line it writes is one a real
+# runtime settled.
+#
+# The view is asserted by the driver rather than by a check: it waits for the
+# shell to take the alternate screen before it types `q`, so a `watch` that
+# opened no view leaves a wait that never comes back, and the session's own
+# backstop reports it with everything drawn so far. Nothing below could stand in for
+# that — with no view, the `q` would have been typed as a line and refused,
+# and the records after it would read as they do here.
+check "%1 first/settings/depth @space" "$(said 51 "watch settings/depth")" \
+  "watch numbers what it armed, so unwatch needs no listing first"
+check "%1 first/settings/depth @space" "$(said 52 "watches")" \
+  "the view closing left the watch armed"
+# The line the settle wrote, which the driver waited for by name before it
+# typed anything else. That is what puts it in the transcript; which record it
+# landed in is not something to assert, since a settled change arrives when the
+# runtime is quiet rather than when the line that caused it answered, and the
+# prompt that ends a record can fall either side of that.
+WATCHED=$(jq -r '[.[].said] | join("\n")' "$TRANSCRIPT")
+contains "watch first/settings/depth @space: 2 → 3" "$WATCHED" \
+  "a settled change wrote one line naming the cell and the transition"
+# The other half of "a change is what is reported", and the half only a real
+# runtime can show: the subscription fires once on registration with what the
+# cell already holds, and a watch that reported that would have written a
+# transition from nothing at the moment it was armed.
+lacks "watch first/settings/depth @space: <nothing> →" "$WATCHED" \
+  "the reading the subscription opened with wrote no line"
+contains "watches   first/settings/depth @space" "$(said 54 "where")" \
+  "the ambient record names what this run is watching"
+check "Disarmed the watch on \`first/settings/depth @space\`." \
+  "$(said 55 "unwatch %1")" "unwatch disarms the watch the row was minted for"
+check "<no watches are armed>" "$(said 56 "watches")" \
+  "nothing is armed once the one watch is disarmed"
+
+step "27. The pieces facet numbers rows cd takes, and shows what each piece is called"
 # The composition no unit case reaches, because each half of it is stubbed out
 # where the other is under test: a listing mints a row, `%n` expands to what
 # that row printed, and `cd` moves onto the piece the row named. The spelling
 # is the piece's own id, which carries no `of:` scheme — so what is asserted
 # here is that the facet and the mover read one spelling between them.
-check "shuttle /pieces/ @space> " "$(prompt 51 "cd /pieces")" \
+check "shuttle /pieces/ @space> " "$(prompt 57 "cd /pieces")" \
   "cd into the piece facet moves the prompt onto it"
-LISTED=$(said 52 "ls")
+LISTED=$(said 58 "ls")
 contains "$FIRST" "$LISTED" "the facet lists the first deployed piece"
 contains "$SECOND" "$LISTED" "the facet lists the second deployed piece"
 # The fixture names itself, so a facet that showed no name would show none
@@ -640,13 +686,13 @@ ROW=$(printf '%s' "$LISTED" | sed -n '1s/^ *%1 \([^ ]*\).*/\1/p')
 if [ -z "$ROW" ]; then
   bad "the listing's first row printed no operand for the next line to reach"
 else
-  check "" "$(said 53 "cd %1")" "cd %1 is not refused on the row ls printed"
-  check "shuttle $ROW @space> " "$(prompt 53 "cd %1")" \
+  check "" "$(said 59 "cd %1")" "cd %1 is not refused on the row ls printed"
+  check "shuttle $ROW @space> " "$(prompt 59 "cd %1")" \
     "cd %1 lands on the piece the first row named"
-  contains "$ROW" "$(said 54 "pwd")" "pwd names the piece the row named"
+  contains "$ROW" "$(said 60 "pwd")" "pwd names the piece the row named"
 fi
 
-step "27. ls reads a child without standing on it, and its numbers bind"
+step "28. ls reads a child without standing on it, and its numbers bind"
 # The other composition no unit case reaches, and the one `ls <target>` is
 # for: the listing is read at a place the shell is not standing at, and the
 # `%n` it hands out has to name a row of *that* place. Numbered against where
@@ -658,28 +704,28 @@ step "27. ls reads a child without standing on it, and its numbers bind"
 # standing on it means; that `cd %1` then stood two segments in; and that the
 # segment it stood on is the row the listing printed rather than a key this
 # script guessed.
-check "shuttle first @space> " "$(prompt 55 "cd /slugs/first")" \
+check "shuttle first @space> " "$(prompt 61 "cd /slugs/first")" \
   "the shell is standing on the piece before the child is listed"
-NESTED=$(said 56 "ls settings")
+NESTED=$(said 62 "ls settings")
 contains "depth" "$NESTED" "the listing names a key of the target"
 lacks "label" "$NESTED" \
   "the listing is the target's rather than the place's"
-check "shuttle first @space> " "$(prompt 56 "ls settings")" \
+check "shuttle first @space> " "$(prompt 62 "ls settings")" \
   "listing a child leaves the shell standing where it was"
-# The row `%1` named, read off the listing rather than assumed, as step 26
+# The row `%1` named, read off the listing rather than assumed, as step 27
 # reads its own: what is asserted is that the listing and the mover agree,
 # which a hard-coded key would turn into a claim about the fixture.
 NESTED_ROW=$(printf '%s' "$NESTED" | sed -n '1s/^ *%1 \([^ ]*\).*/\1/p')
 if [ -z "$NESTED_ROW" ]; then
   bad "the listing of the child printed no operand for the next line to reach"
 else
-  check "shuttle first/settings/$NESTED_ROW @space> " "$(prompt 57 "cd %1")" \
+  check "shuttle first/settings/$NESTED_ROW @space> " "$(prompt 63 "cd %1")" \
     "cd %1 lands on the row the listing of the child numbered"
-  contains "settings/$NESTED_ROW" "$(said 58 "pwd")" \
+  contains "settings/$NESTED_ROW" "$(said 64 "pwd")" \
     "pwd names the path the row stands at"
 fi
 
-step "28. What the fabric holds, read from outside the session that wrote it"
+step "29. What the fabric holds, read from outside the session that wrote it"
 # The half no transcript can make: every reading is taken over a connection
 # this session never had, after the shell has gone, so a write that reached
 # only the running piece and never committed fails here and nowhere above.

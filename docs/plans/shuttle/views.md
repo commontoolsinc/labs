@@ -26,9 +26,11 @@ disciplines it leans on are in
 ## The v1 views
 
 **Value view** — `watch <ref>`. One cell or subtree, rendered as structured
-JSON: scrollable, references followable, and live — a changed value briefly
-shows its transition (`14 → 15`) before settling, so a change is seen
-rather than inferred.
+JSON: scrollable, references followable, and live — a changed value shows the
+transition it made (`14 → 15`) in a row above it, standing until another change
+replaces it, so a change is seen rather than inferred. It stands rather than
+expiring because nothing here waits on a clock, and a row that took itself away
+would need one.
 
 **List view** — `browse [<ref>]`. A paged listing of whatever stands below
 the reference — a facet, a collection, search results. Rows carry the same

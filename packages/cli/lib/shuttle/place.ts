@@ -745,8 +745,7 @@ export class CurrentPlace {
    * the scope sits last rather than where a reference carries it.
    */
   label(): string {
-    const place = this.#here.place;
-    return `${labelPosition(place.position)} ${renderScope(place.scope)}`;
+    return labelForPlace(this.#here.place);
   }
 
   /**
@@ -1998,6 +1997,21 @@ export function messageOf(thrown: unknown): string {
     // The conversion is what failed, which is the case this exists for.
   }
   return "The failure carries nothing that can be written as a message.";
+}
+
+/**
+ * `place` written short, which is the form the prompt carries for the place
+ * shuttle stands at and a watch carries for the cell it watches.
+ *
+ * It is one rendering rather than two because it makes one promise: the piece
+ * is written by the name the space's index confirmed for it and by its handle
+ * otherwise, nothing is cut down to a prefix, and the scope is written out.
+ * A reader who has learned to read the prompt reads a watch's name with no
+ * second convention, and neither is an address — {@link referenceForPlace} is
+ * what a seam takes and `pwd` is what a person copies.
+ */
+export function labelForPlace(place: Place): string {
+  return `${labelPosition(place.position)} ${renderScope(place.scope)}`;
 }
 
 /**
