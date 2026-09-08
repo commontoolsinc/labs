@@ -154,6 +154,7 @@ import { parseInputCellArgument } from "./input-cells.ts";
 import {
   HarnessControlError,
   type HarnessControlErrorCode,
+  harnessResumeRefusal,
 } from "./control-errors.ts";
 
 const DEFAULT_MODEL = "gpt-5.6-sol";
@@ -3283,7 +3284,7 @@ export const runCfHarnessCli = async (
         },
       );
       if (artifacts.runState.lineage?.role === "subagent") {
-        throw new Error(
+        throw harnessResumeRefusal(
           `Cannot resume subagent run ${artifacts.runState.runId} as a top-level run; resume root run ${artifacts.runState.lineage.rootRunId} instead.`,
         );
       }
@@ -3295,8 +3296,7 @@ export const runCfHarnessCli = async (
         requestedProvider !== undefined &&
         requestedProvider !== recordedProvider
       ) {
-        throw new HarnessControlError(
-          "provider-mismatch",
+        throw harnessResumeRefusal(
           `resume provider mismatch: run uses ${recordedProvider}, requested ${requestedProvider}`,
         );
       }
@@ -3304,8 +3304,8 @@ export const runCfHarnessCli = async (
       if (
         modelProvider === "openai-codex" && parsed.gatewayConfigurationExplicit
       ) {
-        throw new Error(
-          "gateway URL/auth options cannot be used with openai-codex",
+        throw harnessResumeRefusal(
+          "gateway URL/auth options cannot be used with openai-codex, which is the provider this run recorded",
         );
       }
       if (
@@ -3325,8 +3325,7 @@ export const runCfHarnessCli = async (
         parsed.docsCorpus !== undefined && recordedDocsCorpus !== undefined &&
         !harnessDocsCorpusRecordsEqual(parsed.docsCorpus, recordedDocsCorpus)
       ) {
-        throw new HarnessControlError(
-          "provider-mismatch",
+        throw harnessResumeRefusal(
           `resume docs corpus mismatch: run uses ${
             describeHarnessDocsCorpus(recordedDocsCorpus)
           }, requested ${describeHarnessDocsCorpus(parsed.docsCorpus)}`,
@@ -3338,8 +3337,7 @@ export const runCfHarnessCli = async (
         artifacts.runState.model !== undefined &&
         runManifest.model !== artifacts.runState.model
       ) {
-        throw new HarnessControlError(
-          "provider-mismatch",
+        throw harnessResumeRefusal(
           `resume model mismatch: run uses ${artifacts.runState.model}, requested manifest uses ${runManifest.model}`,
         );
       }
@@ -3352,8 +3350,7 @@ export const runCfHarnessCli = async (
           credentialOwner,
         )
       ) {
-        throw new HarnessControlError(
-          "provider-mismatch",
+        throw harnessResumeRefusal(
           "resume credential owner mismatch: requested owner does not match the recorded run",
         );
       }

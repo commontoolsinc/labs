@@ -40,6 +40,7 @@ import {
   type RunHarnessPromptOptions,
   type RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
+import type { HarnessRunState } from "../src/run-state.ts";
 import {
   chatViewOfRequest,
   responsesBodyFromChatFixture,
@@ -6790,6 +6791,146 @@ Deno.test("Codex cross-model resume fails before creating a model client", async
   assertEquals(stderr, [
     "resumed openai-codex run model gpt-recorded does not match requested model gpt-different\n",
   ]);
+});
+
+Deno.test("a refused resume names the setting, whichever tier refused it", async () => {
+  // The CLI checks the argv and the run manifest against the recorded run,
+  // and the engine constructor checks the settings the CLI hands it. A host
+  // that reports structured failures reads both tiers through one mapping, so
+  // a refusal from either arrives carrying the setting that was refused. The
+  // provider case is the anchor: it already refused this way, and the rest
+  // report as it does.
+
+  const baseRunState = {
+    status: "failed" as const,
+    createdAt: "2026-07-23T20:00:00.000Z",
+    updatedAt: "2026-07-23T20:00:01.000Z",
+    cfcEnforcementMode: "disabled" as const,
+    currentDir: "/workspace",
+    model: "gpt-recorded",
+    credentialOwnerKey: "local",
+    policyEvents: [],
+    toolOutputs: [],
+  };
+  const refuse = async (
+    argv: readonly string[],
+    runState: Partial<HarnessRunState> & { runId: string },
+    manifest?: Record<string, unknown>,
+  ): Promise<{ code: string; message: string }> => {
+    const buffers = createIoBuffers();
+    let modelClientsCreated = 0;
+    let promptLoopsCreated = 0;
+    let providerRequests = 0;
+    const exitCode = await runCfHarnessCli(argv, {
+      io: buffers.io,
+      cwd: "/tmp/project",
+      env: { CF_HARNESS_API_KEY: "test-key" },
+      structuredHostFailures: true,
+      readRunArtifacts: () =>
+        Promise.resolve({
+          runRoot: "/tmp/run",
+          runStatePath: "/tmp/run/run-state.json",
+          transcriptPath: "/tmp/run/transcript.json",
+          runState: { ...baseRunState, ...runState },
+          transcript: [{ role: "user" as const, content: "Continue" }],
+        }),
+      ...(manifest !== undefined
+        ? { readTextFile: () => Promise.resolve(JSON.stringify(manifest)) }
+        : {}),
+      createModelClient: () => {
+        modelClientsCreated += 1;
+        throw new Error("must not create a model client");
+      },
+      createPromptLoop: () => {
+        promptLoopsCreated += 1;
+        throw new Error("must not construct a prompt loop");
+      },
+      fetchFn: () => {
+        providerRequests += 1;
+        return Promise.reject(new Error("must not request a provider"));
+      },
+    });
+    assertEquals(exitCode, 1);
+    // The refusal is settled against the recorded run alone, so nothing has
+    // reached a credential store or a provider by the time it is reported.
+    assertEquals(modelClientsCreated, 0);
+    assertEquals(promptLoopsCreated, 0);
+    assertEquals(providerRequests, 0);
+    assertEquals(buffers.stdout, []);
+    assertEquals(buffers.stderr.length, 1);
+    const failure = JSON.parse(buffers.stderr[0]);
+    assertEquals(failure.type, "cf-harness.host-failure");
+    assertEquals(failure.version, 1);
+    assertEquals(failure.ok, false);
+    return failure.error;
+  };
+
+  // The CLI's own checks: the provider the argv asks for, and a run whose
+  // lineage makes it somebody else's child.
+  const provider = await refuse(
+    ["--resume-run", "/tmp/run", "--model-provider", "openai-codex"],
+    { runId: "run-gateway", modelProvider: "openai-compatible-gateway" },
+  );
+  assertEquals(provider.code, "provider-mismatch");
+  assertStringIncludes(provider.message, "openai-compatible-gateway");
+  assertStringIncludes(provider.message, "openai-codex");
+
+  const subagent = await refuse(["--resume-run", "/tmp/run"], {
+    runId: "root.subagent.1",
+    modelProvider: "openai-codex",
+    lineage: {
+      role: "subagent",
+      rootRunId: "root",
+      parentRunId: "root",
+      parentToolCallId: "call-child",
+      depth: 1,
+    },
+  });
+  assertEquals(subagent.code, "provider-mismatch");
+  assertStringIncludes(subagent.message, "root.subagent.1");
+  assertStringIncludes(subagent.message, "resume root run root");
+
+  // The engine constructor's checks: a Codex run asked for another model, and
+  // a run asked to answer out of another credential home.
+  const model = await refuse(
+    ["--resume-run", "/tmp/run", "--model", "gpt-different"],
+    { runId: "run-codex", modelProvider: "openai-codex" },
+  );
+  assertEquals(model.code, "provider-mismatch");
+  assertStringIncludes(model.message, "gpt-recorded");
+  assertStringIncludes(model.message, "gpt-different");
+
+  const home = await refuse(
+    ["--resume-run", "/tmp/run", "--run-manifest", "/tmp/resume.json"],
+    {
+      runId: "run-home",
+      modelProvider: "openai-compatible-gateway",
+      harnessHomeIdentity: "sha256:recorded-home",
+    },
+    {
+      type: "cf-harness.loom-run-manifest",
+      version: 1,
+      source: "loom",
+      harnessHomeIdentity: "sha256:requested-home",
+    },
+  );
+  assertEquals(home.code, "provider-mismatch");
+  assertStringIncludes(home.message, "harness home");
+
+  // Gateway options against a run that recorded Codex contradict the record
+  // rather than the rest of the argv, which the message says.
+  const gateway = await refuse(
+    [
+      "--resume-run",
+      "/tmp/run",
+      "--gateway-base-url",
+      "https://gateway.example/",
+    ],
+    { runId: "run-codex-gateway", modelProvider: "openai-codex" },
+  );
+  assertEquals(gateway.code, "provider-mismatch");
+  assertStringIncludes(gateway.message, "gateway URL/auth options");
+  assertStringIncludes(gateway.message, "this run recorded");
 });
 
 Deno.test("resume rejects manifest provider and credential-owner switches", async () => {
