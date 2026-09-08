@@ -208,8 +208,7 @@ export function explainLines(
     `${key}`,
     `  suite ${entry.suite}, in ${entry.unit}`,
     `  score ${entry.score.toFixed(3)}, costing ${entry.cost.toFixed(3)}s`,
-    `  ${entry.inputs.catches.toFixed(1)} weighted catches, ` +
-    `${entry.inputs.mainCatches} of them on main, across ` +
+    `  ${entry.inputs.catches.toFixed(1)} weighted catches, across ` +
     `${entry.inputs.sources} sources`,
     entry.inputs.lastCatch === undefined
       ? "  it has never caught anything"

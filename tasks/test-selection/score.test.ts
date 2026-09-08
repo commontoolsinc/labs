@@ -425,14 +425,12 @@ describe("score", () => {
     it("keeps an old proven test ahead of one with no record", () => {
       const proven = {
         catches: 4,
-        mainCatches: 0,
         lastCatch: "2024-08-20",
         sources: 2,
         churn: 0,
       };
       const unproven = {
         catches: 0,
-        mainCatches: 0,
         sources: 0,
         churn: 0,
       };
@@ -446,7 +444,6 @@ describe("score", () => {
         value(
           {
             catches,
-            mainCatches: 0,
             lastCatch: "2026-08-20",
             sources: 1,
             churn: 0,
@@ -461,7 +458,7 @@ describe("score", () => {
     it("decays a catch slowly and never below the freshness floor", () => {
       const at = (lastCatch: string) =>
         value(
-          { catches: 4, mainCatches: 0, lastCatch, sources: 0, churn: 0 },
+          { catches: 4, lastCatch, sources: 0, churn: 0 },
           "2026-08-20",
         );
       expect(at("2026-08-13")).toBeGreaterThan(at("2026-04-20"));

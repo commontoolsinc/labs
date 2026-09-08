@@ -102,14 +102,13 @@ describe("test-selection", () => {
       const held = manifest();
       held.entries[0]!.inputs = {
         catches: 3,
-        mainCatches: 1,
         sources: 2,
         churn: 0.5,
         lastCatch: "2026-08-20",
       };
       const text = explainLines(held, TEST, { selected: true }).join("\n");
       expect(text).toContain("3.0 weighted catches");
-      expect(text).toContain("1 of them on main");
+      expect(text).toContain("2 sources");
       expect(text).toContain("2026-08-20");
       expect(text).toContain("selects it");
     });

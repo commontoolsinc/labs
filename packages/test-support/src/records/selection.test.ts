@@ -25,6 +25,19 @@ describe("selection", () => {
       expect(parseManifest(serializeManifest(manifest))).toEqual(manifest);
     });
 
+    it("drops a field it does not know rather than refusing the object", () => {
+      // Manifests already in the store carry fields this reader has
+      // since stopped keeping. Refusing those would leave every lane
+      // running the whole corpus for as long as one is the newest.
+      const object = JSON.parse(serializeManifest(sampleManifest()));
+      for (const entry of object.entries) entry.inputs.mainCatches = 3;
+      const parsed = parseManifest(JSON.stringify(object));
+      expect(parsed).toBeDefined();
+      expect(parsed!.entries.length).toBe(object.entries.length);
+      expect(Object.hasOwn(parsed!.entries[0]!.inputs, "mainCatches"))
+        .toBe(false);
+    });
+
     it("returns undefined for a schema version it does not know", () => {
       const ahead = {
         ...sampleManifest(),
@@ -227,7 +240,6 @@ describe("selection", () => {
         "a churn that is not a number",
         withField("inputs", {
           catches: 0,
-          mainCatches: 0,
           sources: 0,
           churn: "some",
         }, "entry"),
@@ -236,7 +248,6 @@ describe("selection", () => {
         "a last catch that is not a day",
         withField("inputs", {
           catches: 0,
-          mainCatches: 0,
           sources: 0,
           churn: 0,
           lastCatch: 7,

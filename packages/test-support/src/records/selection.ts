@@ -22,9 +22,6 @@ export interface ScoreInputs {
   /** Catches, weighted by where each happened. */
   catches: number;
 
-  /** How many of those were on `main`, which measure escapes as well. */
-  mainCatches: number;
-
   /** The day of the most recent catch, absent when there are none. */
   lastCatch?: string;
 
@@ -253,8 +250,8 @@ function parseIdentity(value: unknown): TestIdentity | undefined {
 function parseInputs(value: unknown): ScoreInputs | undefined {
   if (!isRecord(value)) return undefined;
   if (
-    !isFiniteNumber(value.catches) || !isFiniteNumber(value.mainCatches) ||
-    !isFiniteNumber(value.sources) || !isFiniteNumber(value.churn)
+    !isFiniteNumber(value.catches) || !isFiniteNumber(value.sources) ||
+    !isFiniteNumber(value.churn)
   ) {
     return undefined;
   }
@@ -263,7 +260,6 @@ function parseInputs(value: unknown): ScoreInputs | undefined {
   }
   const inputs: ScoreInputs = {
     catches: value.catches,
-    mainCatches: value.mainCatches,
     sources: value.sources,
     churn: value.churn,
   };

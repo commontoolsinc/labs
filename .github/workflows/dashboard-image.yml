@@ -7,6 +7,11 @@ on:
     paths:
       - "Dockerfile.dashboard"
       - "packages/dashboard/**"
+      # The image runs whatever `packages/test-support` held when it was
+      # built, and the wall's manifest reader is in there. Without this
+      # the deployed dashboard keeps reading manifests by a rule the
+      # publisher has stopped writing to.
+      - "packages/test-support/**"
       - "scripts/ci-gantt.ts"
       - "deno.jsonc"
       - "deno.lock"

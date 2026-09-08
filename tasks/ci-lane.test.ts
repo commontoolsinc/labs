@@ -78,7 +78,7 @@ function manifestOf(entries: readonly Partial<ManifestEntry>[]): Manifest {
       unit: "packages/bakery/glaze.test.ts",
       cost: 1,
       score: 0.5,
-      inputs: { catches: 0, mainCatches: 0, sources: 0, churn: 0 },
+      inputs: { catches: 0, sources: 0, churn: 0 },
       flakeRate: 0,
       repeats: 1,
       ...entry,
@@ -888,7 +888,7 @@ describe("running a lane's work", () => {
       unit: "packages/bakery/glaze.test.ts",
       cost: 1.5,
       score: 0.5,
-      inputs: { catches: 0, mainCatches: 0, sources: 0, churn: 0 },
+      inputs: { catches: 0, sources: 0, churn: 0 },
       flakeRate: 0,
       repeats: 1,
     };
