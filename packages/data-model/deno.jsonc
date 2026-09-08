@@ -50,6 +50,7 @@
     "./fabric-bases": "./src/fabric-bases/index.ts",
     "./fabric-instances": "./src/fabric-instances/index.ts",
     "./fabric-primitives": "./src/fabric-primitives/index.ts",
-    "./frozen-builtins": "./src/frozen-builtins.ts"
+    "./frozen-builtins": "./src/frozen-builtins.ts",
+    "./value-visit": "./src/value-visit.ts"
   }
 }
