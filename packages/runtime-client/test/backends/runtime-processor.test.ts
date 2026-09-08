@@ -157,7 +157,7 @@ const createRuntime = (actingPrincipal?: string) => {
 const fid = (seed: string) => taggedHashStringOf(seed);
 
 describe("runtime-processor", () => {
-  describe("renderConfidentialityResolverFor (H3b)", () => {
+  describe("renderConfidentialityResolverFor", () => {
     it("returns undefined when no ceiling is configured", async () => {
       const { runtime, storageManager } = createRuntime();
       try {
@@ -4937,7 +4937,7 @@ describe("runtime-processor", () => {
       );
     });
 
-    it("refuses LOUDLY when the host declared ON but the worker resolved OFF (the silent F10 revert, now surfaced)", () => {
+    it("refuses LOUDLY when the host declared ON but the worker resolved OFF", () => {
       expect(() =>
         assertServerExecutionPostureAgreement(
           { serverExecution: true },

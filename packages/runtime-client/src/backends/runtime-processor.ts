@@ -712,6 +712,20 @@ type RuntimeOperationSession = {
   clientId: ClientId;
 };
 
+/**
+ * The worker side of a runtime client connection. An instance owns the
+ * worker's `Runtime`, keeps a `PiecesController` for the home space and for
+ * each other space a request has named, and serves every client attached to
+ * the worker: `handleRequest()` routes a client's request to the handler for
+ * its type, and what the runtime produces on its own (console output, errors,
+ * navigation, subscription updates) reaches the client through
+ * `postToClient()`. Subscriptions, operation sessions, and VDOM mounts are
+ * keyed by the client that opened them, so one client's departure takes down
+ * only its own. The security context is fixed at `initialize()` and is the
+ * one every attached client is held to. `dispose()` cancels what is
+ * outstanding and disposes the runtime, once, however many times it is
+ * called.
+ */
 export class RuntimeProcessor {
   #runtime: Runtime;
   #cc: PiecesController;
