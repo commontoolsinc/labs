@@ -156,6 +156,13 @@ jobs:
     timeout-minutes: *full-lane-job-timeout
     env:
       CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
+      # `check-action-pins` resolves every pinned action commit to the
+      # release it belongs to, which it can only ask GitHub. Unauthenticated
+      # that is sixty requests an hour against an address the runners share;
+      # with this it is five thousand against the repository. The job asks
+      # for `contents: read` and nothing else, so this is the same reach the
+      # checkout has.
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     permissions:
       contents: read
     strategy:
@@ -286,6 +293,13 @@ jobs:
     timeout-minutes: *lane-job-timeout
     env:
       CF_TEST_RECORDS_DIR: ${{ github.workspace }}/test-records-spool
+      # `check-action-pins` resolves every pinned action commit to the
+      # release it belongs to, which it can only ask GitHub. Unauthenticated
+      # that is sixty requests an hour against an address the runners share;
+      # with this it is five thousand against the repository. The job asks
+      # for `contents: read` and nothing else, so this is the same reach the
+      # checkout has.
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     permissions:
       contents: read
     strategy:

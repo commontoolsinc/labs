@@ -472,6 +472,7 @@ export async function runBatch(
   const failures: Failure[] = [];
   let ok = true;
   let seconds = 0;
+  let invoked = 0;
   for (let run = 1; run <= batch.repeats; run++) {
     const outputDir = path.join(workDir, `${batch.suite.id}-${run}`);
     const batchSpool = path.join(outputDir, "spool");
@@ -496,6 +497,7 @@ export async function runBatch(
         : {}),
     });
     for (const invocation of invocations) {
+      invoked++;
       const outcome = await runInvocation(invocation, {
         ...env,
         // Each execution writes into a spool of its own, so a repeat
@@ -540,7 +542,20 @@ export async function runBatch(
       await Deno.mkdir(batchSpool, { recursive: true });
     }
   }
-  if (spool !== undefined) {
+  if (invoked === 0) {
+    // The suite built no command for what it was handed, which happens
+    // when a manifest names units the working tree no longer has. There
+    // is nothing to time, and a zero-second passing record here would
+    // enter the calibration the packer fits its estimates from, making
+    // the suite look free for as long as the record stands.
+    console.error(
+      `ci-lane: ${batch.suite.id} ran nothing for ${
+        batch.units.length === 1
+          ? batch.units[0]!.unit
+          : `${batch.units.length} units`
+      }`,
+    );
+  } else if (spool !== undefined) {
     spoolRecords(spool, [
       ...records,
       timingRecord(

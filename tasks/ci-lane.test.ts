@@ -1880,6 +1880,57 @@ describe("what a lane does with the batches it was given", () => {
     expect(await run([Deno.execPath(), "eval", "Deno.exit(1)"])).toBe(false);
   });
 
+  it("times nothing for a batch whose suite built no command", async () => {
+    // A manifest naming units the tree no longer holds. A zero-second
+    // passing record would enter the calibration the packer fits its
+    // estimates from, making the suite look free for as long as it
+    // stands.
+    const spool = await Deno.makeTempDir({ prefix: "ci-lane-spool-" });
+    const before = Deno.env.get("CF_TEST_RECORDS_DIR");
+    Deno.env.set("CF_TEST_RECORDS_DIR", spool);
+    const log = console.log;
+    const error = console.error;
+    const said: string[] = [];
+    console.log = () => {};
+    console.error = (line: string) => said.push(line);
+    try {
+      await runLane(
+        {
+          lane: 1,
+          of: 1,
+          full: false,
+          dryRun: false,
+          laneCount: false,
+          root: REPOSITORY,
+          at: "2026-09-01T00:00:00Z",
+        },
+        {
+          manifest: selecting(),
+          topology: () =>
+            Promise.resolve([
+              suite({
+                id: "workspace-unit",
+                units: ["packages/bakery/test/glaze.test.ts"],
+                command: () => Promise.resolve([]),
+              }),
+            ]),
+        },
+      );
+    } finally {
+      console.log = log;
+      console.error = error;
+      if (before === undefined) Deno.env.delete("CF_TEST_RECORDS_DIR");
+      else Deno.env.set("CF_TEST_RECORDS_DIR", before);
+    }
+    const written: string[] = [];
+    for await (const entry of Deno.readDir(spool)) {
+      written.push(await Deno.readTextFile(`${spool}/${entry.name}`));
+    }
+    expect(written.join("\n")).not.toContain("ci-lane batch workspace-unit");
+    expect(said.join("\n")).toContain("ran nothing");
+    await Deno.remove(spool, { recursive: true });
+  });
+
   it("says what failed even where a later batch threw", async () => {
     // The batches before the throw are the account of what went wrong,
     // and a lane says it whichever way it leaves.
