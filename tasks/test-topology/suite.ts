@@ -239,9 +239,8 @@ export interface ConfiguredSkip {
  *
  * A whole-file entry leaves the file out of the variant suite's units. A
  * step-level entry leaves the file in and names the one leaf that does
- * not run, so that leaf is excluded from the unknown-identity and
- * coverage-target rules while every other identity in the file behaves
- * normally.
+ * not run, so that leaf is excluded from the unknown-identity rule while
+ * every other identity in the file behaves normally.
  */
 export function unavailableFrom(
   skips: readonly ConfiguredSkip[],

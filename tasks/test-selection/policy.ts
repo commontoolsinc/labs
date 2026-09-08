@@ -206,9 +206,6 @@ export const SAME_COMMIT_REACH_DAYS = 2;
  */
 export const FLAKE_COMMIT_REACH = 8;
 
-/** Days before the coverage attribution map is rebuilt. */
-export const ATTRIBUTION_MAP_DAYS = 7;
-
 /**
  * How alike two test names have to be before one is offered as the
  * other's new name, between zero and one. A rename usually keeps most of
@@ -688,15 +685,6 @@ export const DIALS: readonly Dial[] = [
     why: "Up when reruns of a commit arrive far enough behind the run they " +
       "repeat that their disagreement is being counted as a catch; down " +
       "when the fold's memory is the thing that will not fit.",
-  },
-  {
-    name: "ATTRIBUTION_MAP_DAYS",
-    value: ATTRIBUTION_MAP_DAYS,
-    unit: "days",
-    setBy: "chosen",
-    why:
-      "Up when rebuilding the map costs more than its staleness does; down " +
-      "when changed lines keep resolving to tests that have moved.",
   },
   {
     name: "RENAME_SIMILARITY",

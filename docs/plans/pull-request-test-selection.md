@@ -432,8 +432,8 @@ items. The manifest reports it as unavailable under that suite and variant,
 with the registry's phase and reason. A step-level entry leaves the file
 item in the suite because every other step still runs. It marks only the
 skipped leaf identity unavailable, so that leaf is excluded from the
-unknown-identity and coverage-target rules while the rest of the file's
-identities behave normally.
+unknown-identity rule while the rest of the file's identities behave
+normally.
 
 Removing either kind of skip makes the file or leaf ordinary topology
 again. Until a full `main` run records it, it is unknown and therefore
@@ -822,12 +822,14 @@ So the check is one invocation per identity with every sibling skipped,
 and the answer is a flag carried in the manifest beside the score.
 
 It cannot be a sweep. One invocation per identity is around 18,000 of
-them, against the roughly 2,000 the weekly coverage attribution job
-already costs three and a half hours for. So `main` checks the identities
-in the files its own run touched, plus a rotating slice of everything else.
-The map fills in over weeks and stays current where the code is moving,
-and an identity whose file changed loses its flag until it is checked
-again.
+them, and every one pays a process start before it runs a test. At the
+rate one invocation per test file costs, which [the consequences
+below](#consequences-we-are-choosing) price at three and a half hours for
+two thousand, that is upwards of thirty hours. So `main` checks the
+identities in the files its own run touched, plus a rotating slice of
+everything else. The flags fill in over weeks and stay current where the
+code is moving, and an identity whose file changed loses its flag until it
+is checked again.
 
 #### When the flag is wrong
 
@@ -1482,10 +1484,14 @@ until a successful `main` run has produced records for it.
 
 **What the change touches must run.** A pull request that edits a test and
 does not run it is not something this repository should permit, so a
-changed test file's items are mandatory. A changed *source* file is
-handled by the coverage attribution map, which knows which test files
-execute which lines: see
-[Choosing tests by what the change touches](#choosing-tests-by-what-the-change-touches).
+changed test file's items are mandatory. A unit that is not a file, such
+as a type-check group or a binary, is one its suite maps the change onto,
+since only the suite knows what its unit covers. A changed *source* file
+forces nothing else in, apart from the whole of a covered package's
+measured set under [the per-package
+gate](#the-one-coverage-gate-that-survives). What runs for it otherwise is
+what the score chose, which is the trade named under [consequences we are
+choosing](#consequences-we-are-choosing).
 
 ### Renames, and the alias file
 
@@ -1616,14 +1622,25 @@ be counted as a catch. A test failing on `main` a dozen times a year would
 then look like one of the most valuable tests in the repository while
 being one of the least.
 
-The second rule closes it, and it is the same distinction stated as a
-question about what came next. **A failure on `main` that a change fixed
-is a catch. A failure on `main` that went away by itself is a flake.**
-Concretely: the identity failed at `main` commit C and passed at the next
-`main` run, and nothing between the two touched any code the test covers.
-The coverage attribution map is what answers "any code the test covers";
-without it the fallback is the test's own file and scope, which is
-coarser and errs toward calling things catches.
+The second rule is the same distinction stated as a question about what
+came next. **A failure on `main` is judged by the next
+`main` run that passed.** At the same commit the test disagreed with
+itself, so the failure is a flake observation. The two runs can arrive in
+separate batches, which is why this is a rule of its own rather than the
+directly observable case above. At a later commit the failure counts as a
+catch.
+
+A run of failures ended by one pass counts one catch, dated to the first
+of them, so a week of `main` being red is worth one catch and not seven.
+
+That narrows the hole rather than closing it. Nothing separates a failure
+a change fixed from one that healed itself, so a flaky test collects
+catches on `main` it did not earn. The same test runs on pull requests as
+well, where repeats and re-runs put several observations at one commit,
+and a test that disagrees with itself there is seen doing it. I would
+expect that to bound the over-crediting, because a test flaky enough on
+`main` to matter is being run far more often on pull requests, but nothing
+here measures it.
 
 `flakeRate` is the share of a test's failures that fall under either rule.
 
@@ -1762,12 +1779,12 @@ From what is left, given every item's value and cost and a budget of five
 lanes times 230 seconds each, it fills in four passes.
 
 1. **Mandatory.** Everything marked mandatory goes in first: the `always`
-   suites, the items the diff touched directly, the items the coverage
-   attribution map says execute the changed lines, every item of a
-   covered package the diff touched as described in [The one coverage gate
-   that survives](#the-one-coverage-gate-that-survives), and the items with
-   no history. An item excluded above comes back into this pass if the
-   change touches what it covers, since that is very likely a fix. Every
+   suites, the items the diff touched directly, every item of a covered
+   package the diff touched as described in [The one coverage gate that
+   survives](#the-one-coverage-gate-that-survives), and the items with no
+   history. An item excluded above comes back into this pass if the
+   change edits the test itself, or its suite maps the change onto its
+   unit, since that is very likely a fix. Every
    item taken here leaves the selectable set, so no later pass can run one
    of them again. This pass can in principle put a lane past its budget;
    when it does, the runner says in the job summary how far past, rather
@@ -2049,8 +2066,9 @@ The object carries:
 - the `unschedulable` list;
 - a count and digest of the known item-level identities, for the
   unknown-item rule;
-- the name of the newest coverage attribution map, which is published
-  beside the manifest on its own weekly cadence rather than inside it.
+- each covered workspace member's own-tests uncovered-line count, against
+  the commit it was measured at, which is what the per-package gate
+  compares a pull request against.
 
 The size is measured rather than bounded. A publisher run over one day of
 the store — 18,849 objects holding 5,487,611 executions — produced 20,091
@@ -2249,10 +2267,9 @@ alternate execution of one test.
 
 What the runner does, in order:
 
-1. Resolve the manifest from the commit's date and fetch it, then fetch
-   the attribution map that manifest names. No manifest at or before that
-   date, or a fetch failure, takes the fallback (see [Failure
-   modes](#failure-modes)).
+1. Resolve the manifest from the commit's date and fetch it. No manifest
+   at or before that date, or a fetch failure, takes the fallback (see
+   [Failure modes](#failure-modes)).
 2. Enumerate every suite against the working tree, and read the manifest
    against that enumeration. The tree decides which tests exist and the
    manifest decides what each is worth and costs, so an entry naming a
@@ -2260,9 +2277,8 @@ What the runner does, in order:
    never seen gains a stand-in. Everything after this reads the result
    rather than the manifest the store gave, which is what keeps the full
    run and a pull request working from one answer about what exists.
-3. Compute the diff against the merge base, and resolve the changed source
-   lines through the attribution map to the items that execute them. The
-   full run skips this: it has no diff.
+3. Compute the diff against the merge base, and ask each suite which of
+   its units the diff touched. The full run skips this: it has no diff.
 4. Call `plan()`, take this lane's plan. The full run calls it with the
    `everything` policy, and with the empty diff step 3 left it. Those two
    values are the whole of the difference between the two runs.
@@ -2460,9 +2476,9 @@ is no longer the same thing.
 
 What the gate was actually for is worth separating from how it worked. It
 was there so that coverage keeps going up, or at least stops going down
-quietly. That goal survives, and it is served three ways: as a trend on
-`main`, as a gate over the packages a pull request can still measure
-whole, and as information about the diff itself.
+quietly. That goal survives, and it is served two ways: as a trend on
+`main`, and as a gate over the packages a pull request can still measure
+whole.
 
 ### The repository-wide number is a trend, not a gate
 
@@ -2724,68 +2740,6 @@ which is the change the author is looking at. That is the whole of the
 argument, and it is why this gate keeps its teeth while the
 repository-wide one gives them up.
 
-### Coverage attribution, and what it unlocks
-
-Deno writes one coverage profile per pair of test file and source file. A
-test file that exercises a source file produces a profile naming that
-source and counting only what that test file reached. This was checked
-rather than assumed: two test files touching different functions of one
-module produce two separate profiles for that module, with the counts
-correctly separated, and it holds under `--parallel`.
-
-The profiles carry no marker saying which test file produced them, so
-attribution needs one coverage directory per test file, which needs one
-`deno test` invocation per test file. At 2,000 test files that is around
-three and a half hours of runner time — impossible per run, and entirely
-affordable as a weekly job sharded across the same lane machinery. Pattern
-coverage needs none of this: `cf test` already writes one coverage file
-per test.
-
-What that buys is an **attribution map**: for every source line, the test
-items that execute it. Published beside the manifest, refreshed weekly,
-and stale in exactly the way a weekly map is stale — which is fine,
-because it is used to *add* tests to a run, never to remove them.
-
-An attribution target is a suite item, not a bare file path. When the same
-file runs in default and non-default suites, the map keeps those targets
-separate. A changed line makes every configuration whose measured item
-executes it mandatory; coverage from one variant does not silently stand
-in for another. A whole file or exact leaf declared unavailable in a
-configuration is not a coverage target for that configuration. The file's
-remaining available leaves continue to participate normally.
-
-### Choosing tests by what the change touches
-
-With the map, a pull request's changed source lines resolve to the test
-items that execute them, and those items become mandatory. This is the
-thing today's continuous integration cannot do at all, and it makes a
-selected run better at its actual job than a scope-based guess would be: a
-change to one function in `packages/runner` runs the tests that execute
-that function, rather than a sample of the 655 test files in that package.
-
-Without the map — before it is first built, or for a brand-new source file
-nothing covers yet — the fallback is the scope-level boost the score
-already carries, and an uncovered new file is reported rather than
-silently passed over.
-
-### Diff coverage on a pull request, as information
-
-The same map gives a number worth showing without gating on it: of the
-lines this change adds or modifies, how many did the tests that actually
-ran execute?
-
-That number needs no baseline, which is what makes it survive selection.
-It is a floor rather than a verdict — some tests that cover those lines
-were not selected — and the comment says so. It appears as part of the
-reporter's comment, framed as what it is: here are the lines your change
-added that nothing ran, and here are the test files that cover the lines
-next to them, which is where a new test would most naturally go.
-
-This is what covers the ground the repository-wide gate used to. For a
-package that carries the per-package gate the ratchet still says no. For
-everything else the comment says where a test would go, which is more
-likely to produce a test than a failure was.
-
 ## Telling a pull request what `main` found
 
 Selection means some regressions land and `main` catches them. That is the
@@ -2815,9 +2769,10 @@ pull request's own run could not have:
   the test's score so the next change in that area runs it. Ran and
   passing is a flake or an interaction between changes, and it is a
   different conversation.
-- **A coverage debt increase above the threshold**, with the lines and
-  where a test would go. Never as a failure — the run is green — and never
-  for one line.
+- **A coverage debt increase above the threshold**, naming the source
+  groups the change touched that rose as well, which is as near as this
+  gets to saying where a test would go. Never as a failure — the run is
+  green — and never for one line.
 - **A rise in a covered package's own-tests number**, named as one the
   per-package gate exists to catch. There are three ways one reaches
   `main`: the change touched more covered packages than the cap allows, so
@@ -2883,6 +2838,28 @@ intolerable, the escape hatch is a merge queue, which restores the
 guarantee at the cost of merge latency. This plan does not propose one; it
 notes that the option exists and that nothing here forecloses it.
 
+**Outside a covered package, a change to a source file does not pull in
+the tests that execute it.** Selection knows which test files a change
+edited, and which units each suite says the change touched. Where the diff
+touches a covered package and stays under the cap, [the per-package
+gate](#the-one-coverage-gate-that-survives) makes that package's whole
+measured set mandatory, which reaches the tests executing the changed
+lines by running every test the package has. Everywhere else, selection
+does not know which tests execute a changed line, so what runs for an
+edited source file is what the score chose. The finer answer is buildable
+and is not being built. Deno writes one coverage profile per pair of test
+file and source file, which was checked rather than assumed, but the
+profiles carry no marker saying which test file produced them. So telling
+them apart takes one coverage directory per test file, which takes one
+`deno test` invocation per test file, and at around 2,000 test files that
+is about three and a half hours of runner time. A job of that size runs on
+a cadence of its own and publishes an artifact of its own, which every
+lane then has to resolve, reconcile against the tree, and fall back from
+when it is absent. What that buys is a better mandatory set, and what it
+costs is a second store to keep and a second thing to be wrong about. Such
+a map only ever adds items to a run, so building one later means adding
+the job and the rules that read it rather than redesigning the packer.
+
 **Pull requests should get *less* red, not more.** This is the opposite of
 what an early draft of this design predicted, and the difference is the
 two exclusion rules. A test that is currently failing on `main` is not
@@ -2897,8 +2874,8 @@ dashboard is where it gets answered.
 **Coverage stops being enforced across the repository, and stays enforced
 per package.** Nothing will fail because a change lowered the repository's
 whole coverage number. What replaces that is a weekly trend somebody has
-to choose to look at, plus a comment saying where a test would go. Over
-the 31 packages that carry the [per-package
+to choose to look at, plus a comment naming the source groups where the
+debt rose. Over the 31 packages that carry the [per-package
 gate](#the-one-coverage-gate-that-survives) the ratchet still fails a pull
 request, because there both sides measure the same complete thing. The
 reduction in enforcement is real and confined to what could no longer be
@@ -2927,7 +2904,7 @@ is pinned to the commit's date. And if none of that settles it,
 | A new test surface nobody registered | `check-test-topology` fails on the next `main` run and names the unclaimed identities. |
 | A record's variant or record surface contradicts its batch | Kept as written and named in the lane summary. The identity then belongs to no suite, so the store half of the drift guard fails on the next `main` run. |
 | A suite gains a new variant with no records | Every available item in that variant is mandatory until a successful full `main` run accounts for every enumerated item under that exact variant, the store drift guard passes, and the next publisher cycle includes the run. Other variants do not stand in for it. |
-| A variant deliberately skips a file or leaf | The topology reads the existing skip registry and the manifest reports the test as unavailable with its phase and reason. It is not unknown or a coverage target. Removing the skip makes it mandatory until `main` records it. |
+| A variant deliberately skips a file or leaf | The topology reads the existing skip registry and the manifest reports the test as unavailable with its phase and reason. It is not unknown. Removing the skip makes it mandatory until `main` records it. |
 | One item is bigger than a lane's planned budget | It gets a lane to itself, up to the hard five-minute bound. Bigger than that, a mandatory item is still placed and its lane over-runs, while a discretionary one is listed as unschedulable in the manifest and reported; the 60-second ratchet is the fix. |
 | The mandatory set alone exceeds the budget | The lane runs it anyway and over-runs, past the five-minute step bound where the set demands it. The summary says by how much, which is what argues for raising the bound. |
 | A covered package has no baseline, or none from an ancestor of the merge base | The lane reports the comparison and does not fail. The next full `main` run supplies one. |
@@ -2945,7 +2922,6 @@ is pinned to the commit's date. And if none of that settles it,
 | `main` is broken and stays broken | Every test failing in the latest `main` run leaves the selectable set, so pull requests are unaffected while it is fixed. They come back on their own. |
 | The reporter cannot find the pull request behind a `main` commit | It logs the commit and posts nothing. A direct push to `main` with no pull request behind it is the ordinary case for this. |
 | The reporter would comment on a test that is known flaky | It says so in the comment rather than implying the change caused it. |
-| The attribution map is stale or missing | Changed-source selection falls back to the scope-level boost, and the diff-coverage figure says it is a floor. The map only ever adds tests to a run. |
 | Somebody games the coverage number | There is nothing to game: no gate, no per-change target, and a tile that shows a multi-week direction rather than a figure. |
 
 ## Security and trust
@@ -3005,7 +2981,7 @@ only to the suite carrying its exact variant. Separate fixtures cover both
 skip shapes from `tasks/server-execution-on-skips.ts`: a whole-file skip is
 declared unavailable and is not enumerated, while a step-level skip leaves
 the file and its other identities available but excludes the named leaf
-from the unknown and coverage rules. A CLI fixture maps step identities to
+from the unknown-identity rule. A CLI fixture maps step identities to
 items and the overlapping `integration.sh` task identity to the suite. The
 task identity is claimed by the drift guard but contributes to neither
 item score nor item cost, so it cannot double-count its steps. The same
@@ -3161,7 +3137,6 @@ derived one is editing a line that is not there.
 | `FLAKE_COMMIT_REACH` | 8 | commits | Chosen | How many of the most recently observed commits the fold keeps outcomes at, alongside the span above. Moves for the same two reasons and against the same cost. |
 | `FLAKE_WINDOW_DAYS` | 60 | days | Chosen | Up when a flake rate swings about on too little evidence; down when a test since fixed stays excluded. |
 | `COST_WINDOW_DAYS` | 7 | days | Chosen | Up when cost estimates are noisy; down when durations drift faster than the estimate follows. |
-| `ATTRIBUTION_MAP_DAYS` | 7 | days | Chosen | Up when rebuilding the map costs more than its staleness does; down when changed lines keep resolving to tests that have moved. |
 | `RENAME_SIMILARITY` | 0.7 | share of the longer name's own part | Chosen | Up when the run report offers rename pairings nobody meant; down when a rename that discarded history goes unoffered. It only decides what is suggested — nothing is written to the alias file without somebody appending it. |
 | `RENAME_MARGIN` | 0.1 | share of the longer name's own part | Chosen | Up when the run report pairs a deletion with an unrelated addition; down when a rename made alongside another rename in the same area goes unoffered. |
 | `RENAME_SUGGESTIONS` | 5 | suggestions in one comment | Chosen | Up when a change that renamed many tests has its later suggestions cut off; down when a comment carrying this many is one nobody reads. |
@@ -3339,7 +3314,7 @@ exercised on the branch on its own.
 - [x] The server-execution ON configuration consumes
       `tasks/server-execution-on-skips.ts`: whole-file entries are declared
       unavailable and omitted from enumeration, while step entries exclude
-      only the named leaf identity from unknown and coverage rules.
+      only the named leaf identity from the unknown-identity rule.
 - [x] Give `packages/cli/integration/fuse-exec.sh` fine granularity.
   - [x] Every phase records, so the suite records 25 identities rather
         than one, across the 23 phases the script goes through. Each
@@ -3392,8 +3367,6 @@ exercised on the branch on its own.
       and repeats.
 - [ ] `deno.yml`: `plan-full` and `full-tests` on push, with the build,
       attestation, coverage and deploy jobs repointed at them.
-- [ ] The weekly coverage attribution job, and the map published beside
-      the manifest.
 - [ ] Repository-wide coverage measurement moves to the full run and stops
       failing anything.
 - [ ] `tasks/write-coverage-lcov.ts` converts each workspace member's

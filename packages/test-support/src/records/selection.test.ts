@@ -149,7 +149,6 @@ describe("selection", () => {
         "a known digest that is not one",
         withField("known", { count: 0, digest: "" }),
       ],
-      ["an attribution map that is not a name", withField("attributionMap", 7)],
       ["entries that are not a list", withField("entries", {})],
       ["withheld that is not a list", withField("withheld", {})],
       [
@@ -444,7 +443,6 @@ describe("selection", () => {
 
     it("accepts the optional fields when they are well formed", () => {
       const manifest = sampleManifest({
-        attributionMap: "labs/test-selection/v1/map-1.json",
         unavailable: [{
           suite: "s",
           unit: "u",

@@ -179,9 +179,6 @@ export interface Manifest {
   /** How many item-level identities the store knows, and their digest. */
   known: { count: number; digest: string };
 
-  /** The newest coverage attribution map, published on its own cadence. */
-  attributionMap?: string;
-
   coverageBaselines: CoverageBaseline[];
 }
 
@@ -483,12 +480,6 @@ export function parseManifest(value: unknown): Manifest | undefined {
   ) {
     return undefined;
   }
-  if (
-    value.attributionMap !== undefined &&
-    !isNonEmptyString(value.attributionMap)
-  ) {
-    return undefined;
-  }
   // One identity may not appear twice: the packer removes an identity
   // from the selectable set as it takes it, and a duplicate would let a
   // later pass take it again.
@@ -498,7 +489,7 @@ export function parseManifest(value: unknown): Manifest | undefined {
     if (seen.has(key)) return undefined;
     seen.add(key);
   }
-  const manifest: Manifest = {
+  return {
     schema: MANIFEST_SCHEMA_VERSION,
     generatedAt: value.generatedAt,
     seed: value.seed,
@@ -514,10 +505,6 @@ export function parseManifest(value: unknown): Manifest | undefined {
     known: { count: value.known.count, digest: value.known.digest },
     coverageBaselines,
   };
-  if (value.attributionMap !== undefined) {
-    manifest.attributionMap = value.attributionMap;
-  }
-  return manifest;
 }
 
 /** Serializes a manifest for the store. */
