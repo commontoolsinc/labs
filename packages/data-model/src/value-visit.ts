@@ -472,7 +472,7 @@ export class BaseValueVisitor<Domain, ResultType>
   /** @inheritDoc */
   visitNonFabricValue(
     value: Domain,
-  ): VisitNonFabricValueResult<Domain, ResultType> {
+  ): LeafVisitorResult<Domain, ResultType> {
     BaseValueVisitor.#throwMissing("visitNonFabricValue", value);
   }
 
@@ -480,12 +480,12 @@ export class BaseValueVisitor<Domain, ResultType>
   visitPrimitive(
     value: Domain & (Primitive | FabricPrimitive),
     _type: ValueTag,
-  ): VisitPrimitiveResult<Domain, ResultType> {
+  ): LeafVisitorResult<Domain, ResultType> {
     BaseValueVisitor.#throwMissing("visitPrimitive", value);
   }
 
   /** @inheritDoc */
-  visitValue(value: Domain): VisitValueResult<Domain, ResultType> {
+  visitValue(value: Domain): MainVisitResult<ResultType> {
     BaseValueVisitor.#throwMissing("visitValue", value);
   }
 
