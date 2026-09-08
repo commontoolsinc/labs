@@ -347,9 +347,12 @@ Mike's call, after S4.
    2. Deploy the board leg, which is refused over topics filed before the
       namespace and needs `--dangerously-allow-incompatible-schema` until a
       general mechanism for adding a property to existing data exists.
-   3. Backfill, then bind `namesTable` onto each topic `addTopic` did not
-      wire. Run it from a host: laptop runs died 4-6 minutes in during the
-      2026-08-28 migration. Never pass `--allow-non-existing` (#6965).
+   3. Update each topic to a pattern whose input schema selects `boardNames`.
+      Backfill, then bind `namesTable` onto each topic `addTopic` did not wire.
+      The link command accepts declared inputs before they hold values;
+      `--allow-non-existing` cannot override a topic's input schema (#6965).
+      Run it from a host: laptop runs died 4-6 minutes in during the
+      2026-08-28 migration.
    4. Verify by reading both the board's index and the member addresses. In
       the rerun the fixed board's index agreed with its members at all three
       reads; the two reads that disagreed were on the instrument board

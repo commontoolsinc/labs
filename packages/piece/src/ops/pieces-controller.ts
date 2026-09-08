@@ -89,6 +89,10 @@ import {
   patternSourceUrl,
 } from "../system-pattern-url.ts";
 import { PieceController } from "./piece-controller.ts";
+import {
+  assertPieceInputPath,
+  PieceInputPathError,
+} from "./piece-input-path.ts";
 import { reconcilePieceSource } from "./piece-origin.ts";
 import { compileProgram } from "./utils.ts";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
@@ -1784,6 +1788,7 @@ export class PiecesController<T = unknown> {
           undefined,
           tx,
         );
+        assertPieceInputPath(targetInputCell, targetPath);
       }
 
       targetInputCell.key(...targetPath).setRawUntyped(
@@ -1794,7 +1799,15 @@ export class PiecesController<T = unknown> {
         }),
       );
     });
-    if (result.error) throw result.error;
+    if (result.error) {
+      if (
+        result.error.name === "StorageTransactionAborted" &&
+        result.error.reason instanceof PieceInputPathError
+      ) {
+        throw result.error.reason;
+      }
+      throw result.error;
+    }
 
     if (targetIsPiece && start) {
       await this.getResult(targetCell).pull();

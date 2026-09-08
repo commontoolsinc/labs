@@ -10,7 +10,7 @@ import {
   isStoredArgumentSchemaRefusal,
   STORED_ARGUMENT_SCHEMA_REFUSAL,
 } from "../src/index.ts";
-import { readStoredLinkChainRaw } from "../src/runner.ts";
+import { readStoredLinkChainRaw } from "../src/stored-argument-validation.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
 import { getMetaLink } from "../src/link-utils.ts";

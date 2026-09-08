@@ -2075,7 +2075,7 @@ describe("piece pull materialization", () => {
     });
   });
 
-  it("preserves missing-path diagnostics through the narrow fallback", async () => {
+  it("refuses an undeclared path without pulling the input root", async () => {
     const piece = await pieces.runPersistent(
       trustPattern(runtime, doublePattern()),
       { input: 5 },
@@ -2088,7 +2088,7 @@ describe("piece pull materialization", () => {
       await expect(controller.input.get(["missing"])).rejects.toThrow(
         'Cannot access path "missing" - property "missing" not found',
       );
-      expect(rootPulls()).toBe(1);
+      expect(rootPulls()).toBe(0);
     });
   });
 

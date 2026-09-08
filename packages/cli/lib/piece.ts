@@ -33,6 +33,7 @@ import {
   type PatternCompatibilityReport,
   type PatternUpdateReceipt,
   PieceController,
+  PieceInputPathError,
   type PiecePatternRef,
   PiecesController,
 } from "@commonfabric/piece/ops";
@@ -3915,31 +3916,6 @@ export async function linkPieces(
       errors.push(
         `Target piece ${resolvedTargetPieceId} does not have pattern`,
       );
-    } else if (resolvedTargetPath.length > 0) {
-      // Check target path resolves on the input cell
-      const targetData = await timeCliPhase(
-        "linkPieces.readTargetInput",
-        () => targetPiece.input.get(),
-      );
-      let current: any = targetData;
-      for (const segment of resolvedTargetPath) {
-        if (current == null || typeof current !== "object") {
-          errors.push(
-            `Target path "${
-              resolvedTargetPath.join("/")
-            }" does not exist on piece ${resolvedTargetPieceId}`,
-          );
-          break;
-        }
-        current = current[segment];
-      }
-      if (current === undefined) {
-        errors.push(
-          `Target path "${
-            resolvedTargetPath.join("/")
-          }" does not exist on piece ${resolvedTargetPieceId}`,
-        );
-      }
     }
 
     if (errors.length > 0) {
@@ -3949,25 +3925,32 @@ export async function linkPieces(
     }
   }
 
-  await timeCliPhase(
-    "linkPieces.link",
-    () =>
-      pieces.link(
-        resolvedSourcePieceId,
-        resolvedSourcePath,
-        resolvedTargetPieceId,
-        resolvedTargetPath,
-        {
-          ...options,
-          ...(resolvedSourceScope === undefined
-            ? {}
-            : { sourceScope: resolvedSourceScope }),
-          ...(resolvedTargetScope === undefined
-            ? {}
-            : { targetScope: resolvedTargetScope }),
-        },
-      ),
-  );
+  try {
+    await timeCliPhase(
+      "linkPieces.link",
+      () =>
+        pieces.link(
+          resolvedSourcePieceId,
+          resolvedSourcePath,
+          resolvedTargetPieceId,
+          resolvedTargetPath,
+          {
+            ...options,
+            ...(resolvedSourceScope === undefined
+              ? {}
+              : { sourceScope: resolvedSourceScope }),
+            ...(resolvedTargetScope === undefined
+              ? {}
+              : { targetScope: resolvedTargetScope }),
+          },
+        ),
+    );
+  } catch (error) {
+    if (error instanceof PieceInputPathError) {
+      throw new LinkValidationError(error.message);
+    }
+    throw error;
+  }
   noteWroteTo(config.space);
 }
 
@@ -4783,12 +4766,13 @@ export async function getCellValue(
           () => piece.getCell().pull(),
         );
       }
-      const rootCell =
-        await (options.input ? piece.input.getCell() : piece.result.getCell());
-      const targetCell = rootCell.key(...path);
+      const targetCell = await (options.input
+        ? piece.input.getCell(path)
+        : (await piece.result.getCell()).key(...path));
       await timeCliPhase(
         "getCellValue.step.target.pull",
-        () => targetCell.pull(),
+        () =>
+          targetCell.pull(),
       );
       await timeCliPhase(
         "getCellValue.step.synced.beforeIdle",
@@ -4807,8 +4791,9 @@ export async function getCellValue(
     const prop = options.input ? "input" : "result";
     if (options.selection !== undefined) {
       const selection = options.selection;
-      const rootCell = await piece[prop].getCell();
-      const targetCell = rootCell.key(...path);
+      const targetCell = options.input
+        ? await piece.input.getCell(path)
+        : (await piece.result.getCell()).key(...path);
       let selected: unknown;
       try {
         selected = await timeCliPhase(
