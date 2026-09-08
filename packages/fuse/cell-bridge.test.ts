@@ -113,11 +113,9 @@ interface FakePiece {
   name?: () => string | undefined;
   getCell?: () => unknown;
   getPatternRef?: () => Promise<unknown>;
-  getPatternMeta?: () => Promise<unknown>;
   getPatternSourceProgram?: () => Promise<unknown>;
   input?: FakePieceProp;
   result?: FakePieceProp;
-  spacePieces?: () => unknown;
 }
 
 /** One of a `FakePiece`'s `input` and `result` props. */
@@ -382,6 +380,7 @@ describe("cell-bridge", () => {
     describe("constructor()", () => {
       it("throws a `RangeError` for an entity projection cache limit that is not a positive integer", () => {
         // An `Error` instance pins both the class and the message.
+
         for (const maxEntityProjections of [0, -1, 1.5, Number.NaN]) {
           expect(() =>
             new CellBridge(new FsTree(), "/tmp/cf-exec", {
@@ -402,6 +401,7 @@ describe("cell-bridge", () => {
           // tree and state, and the per-space table entries seeded here as a
           // connect could have left them, must be gone afterward, and the
           // failing dispose of the space's runtime is warned about, not thrown.
+
           const connectionFailure = new Error("manifest generation failed");
           const tree = new RefusingTree(".index.json", connectionFailure);
           let disposeCalls = 0;
@@ -437,7 +437,7 @@ describe("cell-bridge", () => {
 
           expect(disposeCalls).toBe(1);
           expect(warnings.length).toBe(1);
-          expect(String(warnings[0][0]).includes("dispose failed")).toBe(true);
+          expect(String(warnings[0][0])).toContain("dispose failed");
           expect(tree.lookup(tree.rootIno, encodeFuseComponent("home")))
             .toBeUndefined();
           expect(bridge.spaces.has("home")).toBe(false);
@@ -640,7 +640,6 @@ describe("cell-bridge", () => {
             const piece = {
               id: "of:status-piece",
               name: () => "Status Piece",
-              getPatternMeta: () => Promise.resolve({}),
               input: {
                 getCell: () =>
                   Promise.resolve(inputCell as unknown as FakeCell),
@@ -672,9 +671,9 @@ describe("cell-bridge", () => {
             const status = JSON.parse(readStatusFile(tree));
             expect(status.debug).toBe(false);
             expect(status.rebuilds.pending).toBe(0);
-            expect(status.rebuilds.completed >= 1).toBe(true);
+            expect(status.rebuilds.completed).toBeGreaterThanOrEqual(1);
             expect(status.rebuilds.errors).toBe(0);
-            expect(cfcReconciliations >= 1).toBe(true);
+            expect(cfcReconciliations).toBeGreaterThanOrEqual(1);
             expect(status.cfc.writeback.counts["mutation-applied"]).toEqual(
               cfcReconciliations,
             );
@@ -955,7 +954,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:lazy-piece",
             name: () => "Lazy Piece",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -990,7 +988,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:entity-result-json",
             name: () => "Lookup JSON",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -1489,7 +1486,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: entityId,
             name: () => "Removed Entity",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -1831,7 +1827,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:alias-piece",
             name: () => "Alias Piece",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -1840,10 +1835,6 @@ describe("cell-bridge", () => {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
             },
-            spacePieces: () => ({
-              runtime: { idle: () => Promise.resolve() },
-              synced: () => Promise.resolve(),
-            }),
           };
           state.pieceControllers.set("Alias-Piece", fakePiece(piece));
 
@@ -1999,7 +1990,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:entity-finalize-generation",
             name: () => "Finalize Generation",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -2142,7 +2132,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:entity-finalize-namespace",
             name: () => "Finalize Namespace",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -2195,7 +2184,7 @@ describe("cell-bridge", () => {
           await bridge.finalizeWritePath(rootPath);
           resultIno = tree.lookup(pieceIno, "result")!;
           expect(tree.lookup(resultIno, "file")).toBeUndefined();
-          expect(tree.getCfcAnnotation(resultIno)?.generation).not.toEqual(
+          expect(tree.getCfcAnnotation(resultIno)?.generation).not.toBe(
             initialRootGeneration,
           );
 
@@ -2208,7 +2197,7 @@ describe("cell-bridge", () => {
           await bridge.finalizeWritePath(rootPath);
           resultIno = tree.lookup(pieceIno, "result")!;
           expect(tree.lookup(resultIno, "dir")).toBeUndefined();
-          expect(tree.getCfcAnnotation(resultIno)?.generation).not.toEqual(
+          expect(tree.getCfcAnnotation(resultIno)?.generation).not.toBe(
             afterUnlinkGeneration,
           );
 
@@ -2236,10 +2225,10 @@ describe("cell-bridge", () => {
           const updatedToIno = tree.lookup(resultIno, "to")!;
           expect(tree.lookup(updatedFromIno, "old")).toBeUndefined();
           expect(getFileContent(tree, updatedToIno, "new")).toBe("move");
-          expect(tree.getCfcAnnotation(updatedFromIno)?.generation).not.toEqual(
+          expect(tree.getCfcAnnotation(updatedFromIno)?.generation).not.toBe(
             fromGeneration,
           );
-          expect(tree.getCfcAnnotation(updatedToIno)?.generation).not.toEqual(
+          expect(tree.getCfcAnnotation(updatedToIno)?.generation).not.toBe(
             toGeneration,
           );
 
@@ -2256,7 +2245,7 @@ describe("cell-bridge", () => {
           expect(tree.getCfcAnnotation(linkIno)?.ref.projection).toBe(
             "symlink",
           );
-          expect(tree.getCfcAnnotation(resultIno)?.generation).not.toEqual(
+          expect(tree.getCfcAnnotation(resultIno)?.generation).not.toBe(
             beforeSymlinkGeneration,
           );
         });
@@ -2410,7 +2399,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:fs-roundtrip",
             name: () => "FS Roundtrip",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
               get: () => Promise.resolve(inputCell.get()),
@@ -2480,7 +2468,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:invalidate-piece",
             name: () => "Invalidate Piece",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -2538,7 +2525,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:race-piece",
             name: () => "Race Piece",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -2592,7 +2578,7 @@ describe("cell-bridge", () => {
           await Promise.all([firstHydration, secondHydration]);
 
           expect(maxConcurrentGets).toBe(1);
-          expect(getCalls >= 2).toBe(true);
+          expect(getCalls).toBeGreaterThanOrEqual(2);
           const resultIno = tree.lookup(pieceIno, "result");
           expect(resultIno).toBeDefined();
           expect(getFileContent(tree, resultIno!, "content")).toBe("fresh");
@@ -2612,7 +2598,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:entity-handler-piece",
             name: () => "Handler Piece",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -2621,10 +2606,6 @@ describe("cell-bridge", () => {
               getCell: () => Promise.resolve(resultCell),
               get: () => Promise.resolve({ content: "hello" }),
             },
-            spacePieces: () => ({
-              runtime: { idle: () => Promise.resolve() },
-              synced: () => Promise.resolve(),
-            }),
           };
 
           const addPiece = bridge.accessForTestingOnly.addPieceToSpace;
@@ -2664,6 +2645,7 @@ describe("cell-bridge", () => {
           // mints a fresh empty `error.log`. So this resolves the directory
           // from the state the rebuild updated, never from an inode a caller
           // captured earlier.
+
           const bridge = new CellBridge(new FsTree(), "/tmp/cf-exec");
           const state = buildTestSpace(bridge, "space", []);
           const tree = bridge.tree;
@@ -2704,6 +2686,7 @@ describe("cell-bridge", () => {
           // `undefined` is the refresh having succeeded. The rebuild already
           // left `error.log` empty, and saying anything here would describe a
           // clean write as a broken one.
+
           const bridge = new CellBridge(new FsTree(), "/tmp/cf-exec");
           const state = buildTestSpace(bridge, "space", []);
           const tree = bridge.tree;
@@ -2734,6 +2717,7 @@ describe("cell-bridge", () => {
           // `srcErrorLogInos`. Resolving the file by name here would find the
           // authored one and overwrite committed source with this report; the
           // console line is the whole report such a piece gets.
+
           const bridge = new CellBridge(new FsTree(), "/tmp/cf-exec");
           const state = buildTestSpace(bridge, "space", []);
           const tree = bridge.tree;
@@ -2765,6 +2749,7 @@ describe("cell-bridge", () => {
           // committed, so the console line stands in for the file rather than
           // the report being lost or the call failing over a directory that was
           // never built.
+
           const bridge = new CellBridge(new FsTree(), "/tmp/cf-exec");
           buildTestSpace(bridge, "space", []);
 
@@ -2795,6 +2780,7 @@ describe("cell-bridge", () => {
           // synthetic log tracked; a failure in the source-tree step itself
           // drops the tracked log before it can fail, and its receipt warning
           // reaches the console alone.
+
           const tree = new FsTree();
           const bridge = new CellBridge(tree, "/tmp/cf-exec");
           const state = buildTestSpace(bridge, "space", []);
@@ -3048,6 +3034,7 @@ describe("cell-bridge", () => {
           // seeded with every kind of state a partially built space can hold:
           // cancels in both subscription tables, a partial piece and entity
           // directory, and an entry in each per-entity and per-space table.
+
           const tree = new FsTree();
           const bridge = new CellBridge(tree, "/tmp/cf-exec");
           const state = buildTestSpace(bridge, "home", []);
@@ -3168,7 +3155,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:entity-456",
             name: () => "Article",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () =>
                 Promise.resolve(makeCell({ title: "hello" }, {
@@ -3213,7 +3199,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:entity-cfc",
             name: () => "Annotated Fixture",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -3305,7 +3290,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:entity-derived-generation",
             name: () => "Derived Generation",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -3369,7 +3353,7 @@ describe("cell-bridge", () => {
           const rebuiltResultIno = tree.lookup(pieceIno, "result");
           const rebuiltTitleIno = tree.lookup(rebuiltResultIno!, "title");
           const rebuiltAnnotation = tree.getCfcAnnotation(rebuiltTitleIno!);
-          expect(rebuiltAnnotation?.generation).not.toEqual(
+          expect(rebuiltAnnotation?.generation).not.toBe(
             titleAnnotation?.generation,
           );
           expect(rebuiltAnnotation?.ref.generation).toEqual(
@@ -3421,7 +3405,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:entity-link-handler",
             name: () => "Link Handler",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -3472,6 +3455,7 @@ describe("cell-bridge", () => {
           // against — so a schema the runtime carries as a `cid:` reference has
           // to be written into the shim in its expanded form, here and not
           // there.
+
           const eventSchema = {
             type: "object",
             properties: { text: { type: "string" } },
@@ -3527,7 +3511,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:entity-ref-schema-handler",
             name: () => "Ref Schema Handler",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -3561,8 +3544,8 @@ describe("cell-bridge", () => {
           const shim = new TextDecoder().decode(
             (shimNode as { script: Uint8Array }).script,
           );
-          expect(shim.includes('"text"')).toBe(true);
-          expect(shim.includes("cid:")).toBe(false);
+          expect(shim).toContain('"text"');
+          expect(shim).not.toContain("cid:");
 
           const unresolvedIno = tree.lookup(
             resultIno!,
@@ -3572,7 +3555,7 @@ describe("cell-bridge", () => {
           const unresolvedShim = new TextDecoder().decode(
             (unresolvedNode as { script: Uint8Array }).script,
           );
-          expect(unresolvedShim.includes(absentRef)).toBe(true);
+          expect(unresolvedShim).toContain(absentRef);
         });
 
         it("materializes `input` and `result` on demand", async () => {
@@ -3583,7 +3566,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:entity-789",
             name: () => "Post",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () =>
                 Promise.resolve(makeCell({ title: "hello" }, {
@@ -3643,7 +3625,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:cached-piece",
             name: () => "Cached Piece",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -3708,7 +3689,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:entity-void-handler",
             name: () => "Contact Book",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -3782,7 +3762,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:entity-stale-callable",
             name: () => "Callable Fixture",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -3879,7 +3858,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:stable-inode-piece",
             name: () => "Stable Piece",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () =>
                 Promise.resolve(
@@ -3934,8 +3912,8 @@ describe("cell-bridge", () => {
 
           // Only the changed value's inode cache is dropped; the unchanged
           // sibling is left cached.
-          expect(invalidatedInodes.includes(titleIno)).toBe(true);
-          expect(invalidatedInodes.includes(countIno)).toBe(false);
+          expect(invalidatedInodes).toContain(titleIno);
+          expect(invalidatedInodes).not.toContain(countIno);
         });
 
         it("clears stale result mounts when the value becomes `null`", async () => {
@@ -3956,7 +3934,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:entity-null-result",
             name: () => "Null Result Fixture",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -4027,7 +4004,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:entity-null-fs",
             name: () => "Null FS Fixture",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -4085,7 +4061,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:entity-stable-fs",
             name: () => "Stable FS Fixture",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -4139,7 +4114,7 @@ describe("cell-bridge", () => {
           expect(tree.lookup(pieceIno, "index.md")).toBe(indexIno);
           expect(getFileContent(tree, pieceIno, "index.md").includes("Goodbye"))
             .toBe(true);
-          expect(invalidatedInodes.includes(indexIno)).toBe(true);
+          expect(invalidatedInodes).toContain(indexIno);
         });
 
         it("reconciles a prop changing from an object to a scalar", async () => {
@@ -4154,7 +4129,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:object-to-scalar",
             name: () => "Object To Scalar",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -4218,7 +4192,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:entity-fs-removed",
             name: () => "FS Removed Fixture",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -4268,7 +4241,7 @@ describe("cell-bridge", () => {
           // invalidated so a client drops the entry instead of resolving a
           // freed inode.
           expect(tree.lookup(pieceIno, "index.md")).toBeUndefined();
-          expect(entryInvalidations.includes("index.md")).toBe(true);
+          expect(entryInvalidations).toContain("index.md");
         });
 
         it("advances the piece directory mtime only when its entries change", async () => {
@@ -4287,7 +4260,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:piece-dir-mtime",
             name: () => "Dir Mtime Fixture",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -4358,6 +4330,7 @@ describe("cell-bridge", () => {
           // yield is where an unqueued second rebuild would start. A rebuild's
           // start is witnessed at the first thing it asks of the job's cell,
           // its schema, and its end at the projection-rebuilt hook.
+
           const time = new FakeTime();
           try {
             const tree = new FsTree();
@@ -4454,7 +4427,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:added-piece",
             name: () => "Added Piece",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -4484,7 +4456,6 @@ describe("cell-bridge", () => {
           const makeNotePiece = (id: string) => ({
             id,
             name: () => "My Note",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -4547,7 +4518,6 @@ describe("cell-bridge", () => {
                 },
               }),
             }),
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -4576,7 +4546,6 @@ describe("cell-bridge", () => {
           const makeStandupPiece = (id: string) => ({
             id,
             name: () => "Standup",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -4622,7 +4591,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:piece-123",
             name: () => "  Hello, world! 🚀 / notes  ",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -4658,7 +4626,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:emoji-piece",
             name: () => "🔥✨",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -4682,6 +4649,7 @@ describe("cell-bridge", () => {
           // refresh fails at the kernel invalidation of the piece's
           // `meta.json`, and the failure must be reported rather than
           // swallowed.
+
           const tree = new FsTree();
           const bridge = new CellBridge(tree, "/tmp/cf-exec");
           const state = buildTestSpace(bridge, "home", []);
@@ -4715,7 +4683,6 @@ describe("cell-bridge", () => {
             name: () => "Pattern Subscription Failure",
             getCell: () => immediateRootCell,
             getPatternRef: () => Promise.resolve(patternRef),
-            getPatternMeta: () => Promise.resolve({}),
             getPatternSourceProgram: () =>
               Promise.resolve({ main: "/main.tsx", files: [] }),
             input: {
@@ -4766,7 +4733,6 @@ describe("cell-bridge", () => {
               throw new Error("root unavailable");
             },
             getPatternRef: () => Promise.resolve(undefined),
-            getPatternMeta: () => Promise.resolve({}),
             getPatternSourceProgram: () =>
               Promise.resolve({ main: "/main.tsx", files: [] }),
             input: {
@@ -4836,7 +4802,6 @@ describe("cell-bridge", () => {
             fakePiece({
               id: "of:alpha",
               name: () => "Alpha",
-              getPatternMeta: () => Promise.resolve({}),
               input: {
                 getCell: () => Promise.resolve(makeCell({}, undefined)),
                 get: () => Promise.resolve({}),
@@ -4854,7 +4819,6 @@ describe("cell-bridge", () => {
             fakePiece({
               id: "of:beta",
               name: () => "Beta",
-              getPatternMeta: () => Promise.resolve({}),
               input: {
                 getCell: () => Promise.resolve(makeCell({}, undefined)),
                 get: () => Promise.resolve({}),
@@ -4939,7 +4903,6 @@ describe("cell-bridge", () => {
           const existingPiece = {
             id: "of:p1",
             name: () => "Piece One",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -4953,7 +4916,6 @@ describe("cell-bridge", () => {
           const newPiece = {
             id: "of:p2",
             name: () => "Piece Two",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -4990,7 +4952,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:gone",
             name: () => "Gone Piece",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -5041,7 +5002,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:summary-piece",
             name: () => "Summary Piece",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(makeCell({}, undefined)),
               get: () => Promise.resolve({}),
@@ -5086,7 +5046,6 @@ describe("cell-bridge", () => {
             const piece = {
               id: "of:reactive-stable",
               name: () => "Reactive Stable",
-              getPatternMeta: () => Promise.resolve({}),
               input: {
                 getCell: () => Promise.resolve(makeCell({}, undefined)),
                 get: () => Promise.resolve({}),
@@ -5245,7 +5204,6 @@ describe("cell-bridge", () => {
             const piece = {
               id: "of:abc",
               name: () => pieceName,
-              getPatternMeta: () => Promise.resolve({}),
               input: {
                 getCell: () => Promise.resolve(makeCell({}, undefined)),
                 get: () => Promise.resolve({}),
@@ -5325,7 +5283,6 @@ describe("cell-bridge", () => {
             const piece = {
               id: "of:abc",
               name: () => pieceName,
-              getPatternMeta: () => Promise.resolve({}),
               input: {
                 getCell: () => Promise.resolve(makeCell({}, undefined)),
                 get: () => Promise.resolve({}),
@@ -5390,7 +5347,6 @@ describe("cell-bridge", () => {
           const piece = {
             id: "of:fs-piece",
             name: () => "FS Piece",
-            getPatternMeta: () => Promise.resolve({}),
             input: {
               getCell: () => Promise.resolve(inputCell as unknown as FakeCell),
               get: () => Promise.resolve(inputCell.get()),
@@ -5464,7 +5420,6 @@ describe("cell-bridge", () => {
             const piece = {
               id: "of:undefined-sink-piece",
               name: () => "Undefined Sink Piece",
-              getPatternMeta: () => Promise.resolve({}),
               input: {
                 getCell: () =>
                   Promise.resolve(inputCell as unknown as FakeCell),
@@ -5518,7 +5473,6 @@ describe("cell-bridge", () => {
             const piece = {
               id: "of:undefined-transient-piece",
               name: () => "Undefined Transient Piece",
-              getPatternMeta: () => Promise.resolve({}),
               input: {
                 getCell: () =>
                   Promise.resolve(inputCell as unknown as FakeCell),
@@ -5598,6 +5552,7 @@ describe("cell-bridge", () => {
           // through the inode the previous rebuild recorded would hit a node
           // that is no longer a file, which turns a committed source update
           // into a failed write at the mount.
+
           const tree = new FsTree();
           const bridge = new CellBridge(tree, "/tmp/cf-exec");
           const state = buildTestSpace(bridge, "home", []);
@@ -5916,6 +5871,7 @@ describe("cell-bridge", () => {
       // The write committed, so the flush succeeds and the file is saved — but
       // the piece is on the new source and not running it, and error.log is the
       // only place the mount can say so.
+
       expect(sourceRefreshWarning({
         status: "committed",
         ref: { identity: "A".repeat(43), symbol: "default" },
