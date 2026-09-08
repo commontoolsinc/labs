@@ -12,6 +12,7 @@ import { Runtime } from "../src/runtime.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
 import type { CommitError } from "../src/storage/interface.ts";
 import type { RuntimeTelemetryEvent } from "../src/telemetry.ts";
+import { observePendingDeferredStarts } from "./support/telemetry-observers.ts";
 
 // A commit-gated piece start whose transaction is REFUSED for a stale
 // confirmed read. Under server-side execution that refusal is the expected
@@ -961,6 +962,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       resumingRefusalOf(result),
     );
     const installed = observeContextInstalls(runtime, key(result));
+    const pending = observePendingDeferredStarts(runtime);
     // Fail the recovery's walk at its dependency pre-sync: the first attempt
     // wires normally, never passing that step, and is torn down by the
     // refusal; the recovery's walk then dies at the step only it reaches.
@@ -990,9 +992,10 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       expect(syncFailures).toBe(1);
       expect(injector.refusals()).toBe(1);
       expect(runtime.runner.cancels.has(key(result))).toBe(false);
-      expect(harness.pendingDeferredStarts.has(key(result))).toBe(false);
+      expect(pending.count(key(result))).toBe(0);
     } finally {
       harness.dependencySyncer = undefined;
+      pending.restore();
       installed.restore();
       injector.restore();
     }
@@ -1065,6 +1068,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
     const originalCommitNative = replica.commitNative;
     const refusalWaiter = Promise.withResolvers<void>();
     let refusals = 0;
+    const pending = observePendingDeferredStarts(runtime);
     replica.commitNative = function (...args: unknown[]) {
       const candidate = args[1] as { tx?: object } | object;
       const inner = (candidate as { tx?: object }).tx ?? candidate;
@@ -1101,7 +1105,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
         "the recovery awaiting the refusal's readiness gate",
       );
       expect(scheduled).toBe(1);
-      expect(harness.pendingDeferredStarts.get(key(receipt))?.size).toBe(1);
+      expect(pending.count(key(receipt))).toBe(1);
       gate.resolve();
       await runtime.runner.idleDeferredStartCatchUps();
       await runtime.idle();
@@ -1114,6 +1118,7 @@ describe("a deferred start refused for a stale confirmed read, flag-ON", () => {
       expect(runtime.runner.cancels.has(key(receipt))).toBe(false);
     } finally {
       gate.resolve();
+      pending.restore();
       replica.commitNative = originalCommitNative;
       harness.deferredStartCommitter = undefined;
     }

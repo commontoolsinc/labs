@@ -214,7 +214,8 @@ Deno.test("toggling a favorite requests the subscription and swallows a disposal
   try {
     const { XHeaderView } = await import("../src/views/HeaderView.ts");
 
-    // A successful toggle subscribes and clears the in-flight flag.
+    // A successful toggle subscribes and releases the in-flight guard: a
+    // second toggle writes again.
     const ok = new XHeaderView() as unknown as HeaderViewLike;
     const okRt = makeRuntime();
     ok.rt = okRt;
@@ -226,9 +227,11 @@ Deno.test("toggling a favorite requests the subscription and swallows a disposal
     await ok.accessForTestingOnly.handleToggleFavorite(fakeEvent());
     assertEquals(okRt.subscribeCount, 1);
     assertEquals(okRt.writeCount, 1);
-    assertFalse(ok.accessForTestingOnly.isFavoriteLoading);
+    await ok.accessForTestingOnly.handleToggleFavorite(fakeEvent());
+    assertEquals(okRt.writeCount, 2);
 
-    // A write cancelled by a disposed runtime is swallowed, not surfaced.
+    // A write cancelled by a disposed runtime is swallowed, not surfaced,
+    // and releases the guard the same way.
     const racing = new XHeaderView() as unknown as HeaderViewLike;
     const racingRt = makeRuntime({ failWrite: true, aborted: true });
     racing.rt = racingRt;
@@ -238,7 +241,9 @@ Deno.test("toggling a favorite requests the subscription and swallows a disposal
       scope: "space",
     };
     await racing.accessForTestingOnly.handleToggleFavorite(fakeEvent());
-    assertFalse(racing.accessForTestingOnly.isFavoriteLoading);
+    assertEquals(racingRt.writeCount, 1);
+    await racing.accessForTestingOnly.handleToggleFavorite(fakeEvent());
+    assertEquals(racingRt.writeCount, 2);
 
     // A piece whose scope the view does not yet know has no address to be
     // favorited at, and the toggle writes nothing rather than favoriting
