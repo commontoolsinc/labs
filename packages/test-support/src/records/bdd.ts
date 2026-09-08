@@ -19,6 +19,9 @@
  * it appears in the run's output and in its JUnit report as skipped and
  * the store learns it was deliberately not run instead of watching the
  * identity disappear.
+ *
+ * An invocation with no capture installed gets the real functions back
+ * whole; see `capturing`.
  */
 
 import { describe as realDescribe, it as realIt } from "@std/testing/bdd/real";
@@ -91,12 +94,8 @@ export function bodyOf(
  * untouched, so an unfamiliar overload still runs and still reports its
  * own error.
  *
- * With no capture installed there is no skip list to apply, and the
- * chain would be read by nobody. The call goes straight through, so an
- * invocation that is not recording keeps its report's own class names:
- * a frame between the test file and `describe` moves where the runner
- * thinks the test was registered, and the class name is what ingestion
- * falls back to when there is no name map to join onto.
+ * With no capture installed there is no skip list to apply and no chain
+ * for anything to read, so the call goes straight through.
  */
 export function wrapDescribe(
   through: AnyFunction,
@@ -133,10 +132,19 @@ export function wrapDescribe(
 
 /**
  * Wraps one `it` entry point so that a listed leaf is registered as
- * ignored. The leaf's identity is the enclosing chain and its own name
- * joined, which is what the store speaks in, and the file is read from
- * the registration stack the same way the preload reads it — the two
+ * ignored, and so that the leaf's own file reaches the name map. The
+ * leaf's identity is the enclosing chain and its own name joined, which
+ * is what the store speaks in, and the file is read from the
+ * registration stack the same way the preload reads it — the two
  * together, because the same test name occurs in more than one file.
+ *
+ * The preload's wrapper around `Deno.test` sees only the container the
+ * describe chain registers, so without this the map holds one entry per
+ * top-level suite title. Two files opening with the same title are then
+ * one ambiguous entry, and every leaf under either of them loses its
+ * file. Recording each leaf against its own file narrows that to two
+ * files holding the same whole identity, which is a name clash rather
+ * than a shared title.
  */
 export function wrapIt(
   through: AnyFunction,
@@ -150,6 +158,7 @@ export function wrapIt(
     if (name === undefined) return through(...args);
     const identity = [...chain, name].join(NAME_SEPARATOR);
     const file = registeringFile(new Error().stack ?? "");
+    if (file !== undefined) capture.names.set(identity, file);
     return capture.skipped(file, identity) ? ignore(...args) : through(...args);
   };
 }
@@ -169,22 +178,45 @@ function withEntryPoints(
   return wrapper;
 }
 
+/**
+ * Whether anything registered through this module has work to do, read
+ * once as this module is evaluated.
+ *
+ * Deno names a case's class after the nearest frame of the tree's own
+ * code below the runner, so a wrapper here takes that name from the test
+ * file whether or not it does anything with the call. With no capture
+ * there is nothing for it to do, and the real functions go back whole,
+ * so the report's class names name the file and ingestion reads the file
+ * from those.
+ *
+ * Reading it once is what makes that possible: the exported binding is
+ * either a wrapper or the real function, and it is fixed before the
+ * first `describe` runs. The preload installs the capture before any
+ * test module loads, and `installRegistrationCapture` reports an
+ * invocation that loaded this module ahead of it.
+ */
+const capturing = activeCapture() !== undefined;
+
 /** `describe`, tracking the chain its body registers inside. */
-export const describe = withEntryPoints(
-  wrapDescribe(realDescribe as unknown as AnyFunction),
-  realDescribe as unknown as AnyFunction,
-  wrapDescribe,
-) as typeof realDescribe;
+export const describe: typeof realDescribe = capturing
+  ? withEntryPoints(
+    wrapDescribe(realDescribe as unknown as AnyFunction),
+    realDescribe as unknown as AnyFunction,
+    wrapDescribe,
+  ) as typeof realDescribe
+  : realDescribe;
 
 const realIgnore = (realIt as unknown as Record<string, AnyFunction>).ignore ??
   (realIt as unknown as AnyFunction);
 
 /** `it`, registering a listed leaf as ignored rather than running it. */
-export const it = withEntryPoints(
-  wrapIt(realIt as unknown as AnyFunction, realIgnore),
-  realIt as unknown as AnyFunction,
-  (through) => wrapIt(through, realIgnore),
-) as typeof realIt;
+export const it: typeof realIt = capturing
+  ? withEntryPoints(
+    wrapIt(realIt as unknown as AnyFunction, realIgnore),
+    realIt as unknown as AnyFunction,
+    (through) => wrapIt(through, realIgnore),
+  ) as typeof realIt
+  : realIt;
 
 /** The alias `@std/testing/bdd` gives `it`. */
 export const test: typeof realIt = it;

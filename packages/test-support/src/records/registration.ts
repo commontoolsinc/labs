@@ -25,19 +25,31 @@ export const NAME_MAP_SUFFIX = ".json";
 /** Variable naming the file holding this invocation's skip list. */
 export const SKIP_LIST_VARIABLE = "CF_TEST_SKIP_LIST";
 
+/** The tail of the bdd re-export's path, wherever the tree is checked out. */
+const BDD_MODULE_SUFFIX = "src/records/bdd.ts";
+
 /**
- * The tails of the test machinery's own paths. Deno names a JUnit case's
- * class after the module that registered the test, so a case registered
- * through one of these names that module rather than the test file:
- * `registration.ts` while the `Deno.test` wrapper is installed, and
- * `bdd.ts` for anything registered through the `describe` and `it` this
- * repository's import map resolves to. Ingestion rejects a classname
- * ending in either rather than reading it as a test file, and the
- * preload's name map is what supplies the file instead.
+ * The tails of the paths of modules that register a test on another
+ * file's behalf. Deno names a JUnit case's class after the module that
+ * registered the test, so a case registered through one of these names
+ * that module rather than the test file: `registration.ts` is the
+ * `Deno.test` wrapper the preload installs, `bdd.ts` the `describe` and
+ * `it` this repository's import map resolves to, `fixture-runner.ts`
+ * builds a suite over a directory of fixtures, and `clock-preload.ts`
+ * replaces `Deno.test` to give each test a clock. Ingestion rejects a
+ * classname ending in one of these rather than reading it as a test
+ * file, and the preload's name map supplies the file instead.
+ *
+ * Every module named here calls `registerFrameworkModule`, so that the
+ * map names the file that asked for the test rather than the module
+ * that registered it. The two lists cover one thing from two sides, and
+ * a module missing from either loses a file its own way.
  */
 export const MACHINERY_MODULE_SUFFIXES: readonly string[] = [
   "src/records/registration.ts",
-  "src/records/bdd.ts",
+  BDD_MODULE_SUFFIX,
+  "src/fixture-runner.ts",
+  "test/clock-preload.ts",
 ];
 
 /**
@@ -48,8 +60,11 @@ export const MACHINERY_MODULE_SUFFIXES: readonly string[] = [
 export const NAME_SEPARATOR = " > ";
 
 /**
- * A name map as it travels: the name each `Deno.test` was registered
- * under, against the repository-relative file that registered it.
+ * A name map as it travels: a registered name against the
+ * repository-relative file it came from. The names are what `Deno.test`
+ * was called with, and, for a file written with `describe` and `it`, the
+ * whole chain of each leaf as well — a title two files share says
+ * nothing about either, where a leaf's whole chain usually does.
  */
 export type NameMap = Record<string, string>;
 
@@ -327,6 +342,21 @@ export function installRegistrationCapture(
   // write the replacement map into. With neither, the report is the
   // better source and nothing is wrapped.
   if (skips === undefined && !writableSpool(spool)) return undefined;
+  // The bdd re-export decides whether to wrap as it is evaluated, and
+  // declares itself machinery in the same breath. Finding it declared
+  // here means it decided before this ran and handed back the real
+  // `describe` and `it`, so nothing of ours sits inside a describe chain
+  // any more: no leaf reaches the name map, and no leaf is checked
+  // against the skip list. A skip list says what this invocation is not
+  // to run, so an invocation that cannot apply one stops rather than
+  // running what it was told to leave alone. A name map is metadata, and
+  // losing it is said out loud and carried.
+  if ([...frameworkModules].some((url) => url.endsWith(BDD_MODULE_SUFFIX))) {
+    const detail = "the bdd re-export loaded before this preload, so no " +
+      "leaf reaches the name map or the skip list";
+    if (skips !== undefined) throw new Error(`test records: ${detail}`);
+    console.warn(`test records: ${detail}`);
+  }
 
   const built = buildCapture({
     registrar: Deno.test,

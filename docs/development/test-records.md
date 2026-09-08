@@ -310,12 +310,36 @@ leaves the map in the spool, and it applies `CF_TEST_SKIP_LIST`. Wrapping
 own, so a process with nothing to skip and no spool it may write leaves
 `Deno.test` alone and the report's own class names are read instead.
 
+Both of those need permissions the test task grants. Reading
+`CF_TEST_RECORDS_DIR` and `CF_TEST_SKIP_LIST` needs `--allow-env`, so a
+task naming a restricted list of variables names those two among them —
+`readEnv` swallows the refusal, so a task that leaves them out records
+nothing and skips nothing, silently.
+Writing the map needs `--allow-write` covering the directory the run
+owner put the spool in, which is a path only the environment knows: a
+task string cannot name it, because `deno task` expands `$VAR` but not
+`${VAR:-default}`, and `--allow-write=` with an unset variable ends the
+run with `Empty values are not allowed`. So a task that has to capture
+grants a write path wide enough to hold whatever spool a run hands it.
+
 A test task naming its own `--import-map` does not take the preload. That
 map governs every module of the invocation, the preload included, so a
 specifier the preload needs and the map does not carry fails the whole
 run rather than the preload alone. Such a member keeps its JUnit path and
 loses nothing by the omission: with no wrapper installed, the report
 keeps its own class names and ingestion reads the file from those.
+
+What a class name reaches is the test file that registered the test
+itself. A module of ours that registers on a file's behalf — a fixture
+runner handed a directory of cases, a harness that replaces `Deno.test`
+to give each test a clock — is the nearest frame below the runner, so
+the class names it instead. Such a module goes in two places: it calls
+`registerFrameworkModule(import.meta.url)`, so the preload's map names
+the file that asked, and its path tail goes in
+`MACHINERY_MODULE_SUFFIXES`, so ingestion declines the class name rather
+than recording the module as every test's file. Missing from the first,
+it takes the map; missing from the second, it takes the report. A
+surface that registers this way and cannot write a map records no file.
 
 A harness with per-result callbacks
 appends records through `FragmentWriter` (see the hooks in
