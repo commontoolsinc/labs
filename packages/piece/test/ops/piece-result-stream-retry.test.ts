@@ -80,13 +80,10 @@ async function runRetryScenario(
     );
 
     const provider = storageManager.open(pieces.getSpace());
-    const originalReconciliation = provider.loadUnexaminedAbsences;
     const replica = provider.replica;
     const originalEnqueue = replica.enqueueEventAppend;
-    if (
-      originalReconciliation === undefined || originalEnqueue === undefined
-    ) {
-      throw new Error("test storage does not support event reconciliation");
+    if (originalEnqueue === undefined) {
+      throw new Error("test storage does not support event delivery");
     }
     const cellSet = spy(Object.getPrototypeOf(piece), "set");
     const initialIdentity = activeRuntime.scopeKeyIdentity;
@@ -100,20 +97,38 @@ async function runRetryScenario(
       });
     }
 
-    let reconciliationCalls = 0;
+    const originalEdit = activeRuntime.edit.bind(activeRuntime);
+    let forceConflict = true;
+    let forcedConflicts = 0;
     const eventIds: string[] = [];
-    provider.loadUnexaminedAbsences = () => {
-      reconciliationCalls++;
-      if (
-        reconciliationCalls === 1 && identityMode === "replace-session"
-      ) {
-        currentIdentity = {
-          principal: initialIdentity.principal,
-          sessionId: `replacement-${crypto.randomUUID()}`,
-        };
-      }
-      return Promise.resolve(reconciliationCalls === 1 ? 1 : 0);
-    };
+    activeRuntime.edit = ((...args: Parameters<Runtime["edit"]>) => {
+      const tx = originalEdit(...args);
+      const originalCommit = tx.commit.bind(tx);
+      tx.commit = (() => {
+        if (forceConflict) {
+          forceConflict = false;
+          forcedConflicts++;
+          tx.abort("synthetic conflict");
+          return Promise.resolve({
+            error: {
+              name: "ConflictError" as const,
+              message: "synthetic conflict",
+              readyToRetry: () => {
+                if (identityMode === "replace-session") {
+                  currentIdentity = {
+                    principal: initialIdentity.principal,
+                    sessionId: `replacement-${crypto.randomUUID()}`,
+                  };
+                }
+                return Promise.resolve();
+              },
+            },
+          });
+        }
+        return originalCommit();
+      }) as typeof tx.commit;
+      return tx;
+    }) as Runtime["edit"];
     replica.enqueueEventAppend = (append) => {
       eventIds.push(append.eventId);
       return Promise.resolve({ delivered: true });
@@ -131,9 +146,9 @@ async function runRetryScenario(
 
       return {
         eventIds,
+        forcedConflicts,
         initialSessionId: initialIdentity.sessionId,
         received,
-        reconciliationCalls,
         runtimeId: activeRuntime.id,
         sessionId: activeRuntime.scopeKeyIdentity.sessionId,
         streamSends,
@@ -142,7 +157,7 @@ async function runRetryScenario(
       if (identityMode !== "session") {
         Reflect.deleteProperty(activeRuntime, "scopeKeyIdentity");
       }
-      provider.loadUnexaminedAbsences = originalReconciliation;
+      activeRuntime.edit = originalEdit;
       replica.enqueueEventAppend = originalEnqueue;
       cellSet.restore();
       removeHandler();
@@ -162,7 +177,7 @@ describe("piece-controller", () => {
       const result = await runRetryScenario();
 
       expect(result.sessionId).toBeDefined();
-      expect(result.reconciliationCalls).toBe(2);
+      expect(result.forcedConflicts).toBe(1);
       expect(result.streamSends).toHaveLength(2);
       expect(
         result.streamSends.every(({ session }) => session === result.sessionId),
@@ -177,7 +192,7 @@ describe("piece-controller", () => {
       const result = await runRetryScenario("without-session");
 
       expect(result.sessionId).toBeUndefined();
-      expect(result.reconciliationCalls).toBe(2);
+      expect(result.forcedConflicts).toBe(1);
       expect(result.streamSends).toHaveLength(2);
       expect(
         result.streamSends.every(({ session }) => session === result.runtimeId),
@@ -193,7 +208,7 @@ describe("piece-controller", () => {
 
       expect(result.initialSessionId).toBeDefined();
       expect(result.sessionId).not.toBe(result.initialSessionId);
-      expect(result.reconciliationCalls).toBe(2);
+      expect(result.forcedConflicts).toBe(1);
       expect(result.streamSends).toHaveLength(2);
       expect(
         result.streamSends.every(({ session }) =>
@@ -209,7 +224,7 @@ describe("piece-controller", () => {
     it("keeps transaction-scoped event identity without server execution", async () => {
       const result = await runRetryScenario("session", false);
 
-      expect(result.reconciliationCalls).toBe(2);
+      expect(result.forcedConflicts).toBe(1);
       expect(result.streamSends).toEqual([]);
       expect(result.eventIds).toEqual([]);
       expect(result.received).toEqual([7]);

@@ -279,6 +279,13 @@ export const sameWatchSpec = (
   right: WatchSpec,
 ): boolean =>
   left.id === right.id &&
+  sameWatchQuery(left, right);
+
+/** Whether two watches select the same data, independent of watch identity. */
+export const sameWatchQuery = (
+  left: WatchSpec,
+  right: WatchSpec,
+): boolean =>
   left.kind === right.kind &&
   watchQueryIdentity(left) === watchQueryIdentity(right);
 

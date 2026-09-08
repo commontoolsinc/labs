@@ -2967,19 +2967,14 @@ export class PatternManager {
     for (const chunk of chunks) {
       // The write-back re-writes source docs whose values carry quote-cell
       // indirections (one derived doc per import edge). On a cold replica
-      // those derived docs are unknown, and each commit attempt discovers
-      // exactly ONE of them: the engine rejects on the first stale read,
-      // editWithRetry pulls that doc, and only then does the next attempt's
-      // diff reach the following one (CT-1824, live-traced on the browser
-      // rig — the system-app closure re-write conflicts on ~24 pre-existing
-      // edge docs, one per round). Convergence therefore needs one retry per
-      // pre-existing derived doc; the general DEFAULT_MAX_RETRIES (5)
-      // exhausts long before that and the cache never heals, so every later
-      // cold boot recompiles. Budget by the chunk's edge count (source +
-      // compiled edge docs) with slack. Rounds are bounded by actual
-      // conflicts — a conflict-free write-back still commits on the first
-      // attempt — so the ceiling is only paid during recovery after a
-      // compiler-version bump.
+      // those derived docs are unknown. The engine reports every stale read
+      // in one rejection and editWithRetry pulls the whole named set before
+      // re-running. Further retries remain possible when a re-run reaches a
+      // new dependency layer or another writer advances a document again.
+      // Budget by the chunk's edge count (source + compiled edge docs) with
+      // slack. A conflict-free write-back still commits on the first attempt,
+      // so the ceiling is only paid during recovery after a compiler-version
+      // bump.
       //
       // The historical fixed floor (16) is NOT applied per chunk — that would
       // multiply the minimum by chunk count (six low-edge chunks = 96 retries
@@ -3032,11 +3027,10 @@ export class PatternManager {
    * Pre-syncs the write targets, carrying the one-hop edge selector: a
    * schema-less sync delivers only the root doc, leaving the per-edge element
    * docs unknown to the replica, so a re-write of pre-existing docs touches
-   * them blind and conflicts one engine round per edge. With the edge docs
-   * materialized up front the write-back diffs against true state and commits
-   * on the first attempt; the retry budget in `#writeBackCompileCache()`
-   * remains as a backstop. Same-microtask syncs batch into a single server
-   * round trip.
+   * them blind and needs conflict repair. With the edge docs materialized up
+   * front the write-back diffs against true state and commits on the first
+   * attempt; the retry budget in `#writeBackCompileCache()` remains as a
+   * backstop. Same-microtask syncs batch into a single server round trip.
    */
   async #syncSourceCacheWriteTargets(
     space: MemorySpace,

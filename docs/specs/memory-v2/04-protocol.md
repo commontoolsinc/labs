@@ -1054,6 +1054,8 @@ interface ConflictError extends Error {
   name: "ConflictError";
   /** Server head seq at rejection time (§3.6.4). */
   retryAfterSeq: number;
+  /** Root-only watches installed for stale confirmed reads (§3.6.4). */
+  conflictWatches?: WatchSpec[];
 }
 
 interface TransactionError extends Error {
@@ -1182,6 +1184,12 @@ enforced through the catch-up marker and CLIENT-side verdict parking (CT-1927):
   otherwise-empty frame when nothing the session watches is dirty. Other
   rejection kinds (protocol, authorization, apply errors) carry no marker
   obligation; the client applies them immediately
+- a stale-confirmed-read rejection MUST install root-only `schema: false`
+  watches for the actual conflicting reads before the verdict is sent, and
+  MUST evaluate the complete resulting watch union for the covering frame.
+  The verdict advertises the effective specifications in `conflictWatches`,
+  allowing the client to retain them across reconnects without a second
+  watch-addition request
 - the marker means "every verdict of yours through this localSeq is
   decided, and this frame reflects those outcomes for the docs it covers."
   The frame includes a doc unless the session provably holds it (CT-1965,

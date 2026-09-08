@@ -125,7 +125,6 @@ import {
 import {
   getDirectTransactionMergeableOpAddresses,
   getDirectTransactionReadActivities,
-  getTransactionWriteAttempts,
 } from "./transaction-inspection.ts";
 import {
   getBlindStructuralTarget,
@@ -2723,13 +2722,6 @@ class Provider implements IStorageProvider, IOperationStorageCapability {
     >;
   }
 
-  /** See {@link SpaceReplica.loadUnexaminedAbsences}. */
-  loadUnexaminedAbsences(
-    source: IStorageTransaction | undefined,
-  ): number | Promise<number> {
-    return this.replica.loadUnexaminedAbsences(source);
-  }
-
   async #replaySync(
     replica: SpaceReplica,
     uri: URI,
@@ -3483,7 +3475,6 @@ export class SpaceReplica
     refreshWatchSet(
       entries: Iterable<[WatchAddress, SchemaPathSelector]>,
       type?: "pull" | "integrate",
-      watchBranch?: string,
     ): Promise<Result<Unit, PullError>>;
     applySessionSync(sync: SessionSync, type: "pull" | "integrate"): void;
     waitForConflictReadRepair(
@@ -3500,8 +3491,7 @@ export class SpaceReplica
       buildReads: (source, localSeq, identity) =>
         this.#buildReads(source, localSeq, identity),
       consumeUpdates: (iterator) => this.#consumeUpdates(iterator),
-      refreshWatchSet: (entries, type, watchBranch) =>
-        this.#refreshWatchSet(entries, type, watchBranch),
+      refreshWatchSet: (entries, type) => this.#refreshWatchSet(entries, type),
       applySessionSync: (sync, type) => this.#applySessionSync(sync, type),
       waitForConflictReadRepair: (rejection) =>
         this.#waitForConflictReadRepair(rejection),
@@ -5215,7 +5205,6 @@ export class SpaceReplica
   async #refreshWatchSet(
     entries: Iterable<[WatchAddress, SchemaPathSelector]>,
     type: "pull" | "integrate" = "pull",
-    watchBranch = "",
   ): Promise<Result<Unit, PullError>> {
     try {
       const { session } = await this.#activeSessionHandle();
@@ -5270,7 +5259,7 @@ export class SpaceReplica
       }
 
       const watches = watchEntries.map(([address, selector]) => ({
-        id: watchIdForEntry(address, selector, watchBranch),
+        id: watchIdForEntry(address, selector, ""),
         kind: "graph" as const,
         query: {
           roots: [{
@@ -5320,50 +5309,6 @@ export class SpaceReplica
       return { ok: {} };
     } catch (error) {
       return { error: toPullError(error) };
-    }
-  }
-
-  /** Remove graph watches whose caller needed only a one-shot absence probe. */
-  async #removeWatchIds(watchIds: readonly string[]): Promise<void> {
-    if (watchIds.length === 0) return;
-    let lastError: unknown;
-    // A failed watchRemoveSync has already removed these ids from the
-    // SpaceSession's reconnect intent. Reissuing it therefore sends the full
-    // corrected watch set; Client.request waits for an in-progress reconnect,
-    // so one retry also repairs the resumed-session ambiguity where the server
-    // may still hold the old watches.
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        const { session } = await this.#activeSessionHandle();
-        const { view, precedingSyncs, sync } = await session.watchRemoveSync(
-          watchIds,
-        );
-        if (this.#closed) {
-          view.close();
-          return;
-        }
-        this.#watchView = view;
-        try {
-          for (const precedingSync of precedingSyncs) {
-            this.#applySessionSync(precedingSync, "integrate");
-          }
-          this.#applySessionSync(sync, "integrate");
-        } catch (error) {
-          view.close();
-          throw error;
-        }
-        this.#consumeWatchView(view);
-        return;
-      } catch (error) {
-        lastError = error;
-        if (this.#closed) return;
-      }
-    }
-    if (!this.#closed) {
-      console.warn(
-        "failed to remove temporary graph watches after retry",
-        lastError,
-      );
     }
   }
 
@@ -6293,9 +6238,6 @@ export class SpaceReplica
 
   /**
    * Return the raw reads that become commit-time concurrency preconditions.
-   * Reconciliation and commit construction must use the same set: loading a
-   * read that buildReads later drops can spend a retry on an observation the
-   * server would never validate.
    */
   #commitReadActivities(
     source: IStorageTransaction,
@@ -6364,155 +6306,6 @@ export class SpaceReplica
       commitReads.push(read);
     }
     return commitReads;
-  }
-
-  /**
-   * Load the documents a transaction read as absent without the replica ever
-   * having examined them, and report how many turned out to exist.
-   *
-   * A read of a document the replica never synced resolves as absent, and
-   * {@link buildReads} exports that as `seq: 0` — the claim that no such
-   * document exists. The engine rejects the commit as `stale confirmed read`
-   * whenever one does, and the rejection is right: the reading run followed
-   * a link into a document it did not hold, so its traversal is sound only
-   * if that document really is absent. `Runtime.editWithRetry` calls this
-   * between running its action and committing, and a non-zero return is its
-   * signal to discard the attempt and re-run against the now-local
-   * documents — the same convergence the engine's rejection would force,
-   * without the round trip, the catch-up gate, or the wasted upload.
-   *
-   * Session-scoped reads of this replica's own fresh session are excluded,
-   * because no unseen server-side revision can exist under that instance.
-   * A served run can carry another session's identity, though, and that
-   * explicit instance is reconciled like a user-scoped one.
-   *
-   * The instance key matches {@link buildReads}: a served run uses the
-   * transaction's scope identity, while ordinary client transactions use the
-   * replica's own identity.
-   */
-  loadUnexaminedAbsences(
-    source: IStorageTransaction | undefined,
-  ): number | Promise<number> {
-    if (source === undefined) return 0;
-    const reads = getDirectTransactionReadActivities(source);
-    if (!reads) return 0;
-    const identity = source.scopeKeyIdentity;
-    // Documents this transaction writes are its own creations in flight:
-    // reading one as absent and then writing it is what creating a document
-    // IS, and the paired absence claim is what the engine validates the
-    // create against. Only reads with no such write are absences the
-    // transaction merely relied on.
-    const ownWrites = new Set<string>();
-    for (const write of getTransactionWriteAttempts(source) ?? []) {
-      if (write.space !== this.#space) continue;
-      ownWrites.add(docKey(write.id, this.instanceKey(write.scope, identity)));
-    }
-    const unexamined = new Map<string, WatchAddress>();
-    for (const read of this.#commitReadActivities(source, reads)) {
-      const scope = normalizeCellScope(read.scope);
-      // A malformed/incomplete served identity cannot name the instance on
-      // the wire. Leave its claim for commit admission rather than pulling a
-      // different instance under the replica identity.
-      if (identity !== undefined && !canResolveScopeKey(scope, identity)) {
-        continue;
-      }
-      const instance = this.instanceKey(scope, identity);
-      const ownInstance = this.instanceKey(scope);
-      if (scope === "session" && instance === ownInstance) continue;
-      const key = docKey(read.id, instance);
-      if (ownWrites.has(key)) continue;
-      if (this.#docs.has(key) || unexamined.has(key)) continue;
-      unexamined.set(key, {
-        id: read.id,
-        type: DOCUMENT_MIME as MIME,
-        scope,
-        ...(scope !== "space" && instance !== ownInstance
-          ? { scopeKey: instance as ScopeKey }
-          : {}),
-      });
-    }
-    // Synchronous zero: with nothing to examine there is nothing to await,
-    // and callers whose commit path is synchronous today stay synchronous —
-    // the commit-gated runner start among them.
-    if (unexamined.size === 0) return 0;
-    return (async () => {
-      // Like pull(), a one-shot probe must not reuse a session invalidated by
-      // an ACL change merely because the normal selector tracker is bypassed.
-      this.#consumeOwedSessionRemount();
-      const entries = normalizeSyncEntries(
-        [...unexamined.values()].map((
-          address,
-        ): [WatchAddress, SchemaPathSelector] => [
-          address,
-          // Fetch the document itself and follow no links. The basis needs
-          // this document's revision, not a schema-guided closure.
-          { path: [], schema: false },
-        ]),
-      );
-      // These probes own distinct watches so an absent result can be removed
-      // without disturbing a concurrent or pre-existing ordinary pull.
-      const watchBranch = `absence:${crypto.randomUUID()}`;
-      const watchIds = entries.map(([address, selector]) =>
-        watchIdForEntry(address, selector, watchBranch)
-      );
-      try {
-        const result = await this.#refreshWatchSet(
-          entries,
-          "pull",
-          watchBranch,
-        );
-        if (result.error) {
-          await this.#removeWatchIds(watchIds);
-          return 0;
-        }
-
-        const absentWatchIds: string[] = [];
-        const covered = Promise.resolve({ ok: {} } as Result<Unit, PullError>);
-        for (let index = 0; index < entries.length; index++) {
-          const [address, selector] = entries[index];
-          const key = docKey(
-            address.id,
-            this.instanceKey(address.scope, identity, address.scopeKey),
-          );
-          if ((this.#docs.get(key)?.confirmed.seq ?? 0) === 0) {
-            absentWatchIds.push(watchIds[index]);
-            continue;
-          }
-          // A discovered document is now a real dependency of the retry.
-          // Retain its watch and teach ordinary pulls that the selector is
-          // covered, even though this probe used a distinct watch id.
-          this.#watchSelectorTracker.add(
-            {
-              id: address.id,
-              type: DOCUMENT_MIME,
-              scope: normalizeCellScope(address.scope),
-              ...(address.scopeKey !== undefined
-                ? { scopeKey: address.scopeKey }
-                : {}),
-            },
-            selector,
-            covered,
-          );
-        }
-        // A never-created id must not become permanent live subscription
-        // state merely because one transaction asserted its absence.
-        await this.#removeWatchIds(absentWatchIds);
-        let present = 0;
-        for (const key of unexamined.keys()) {
-          if ((this.#docs.get(key)?.confirmed.seq ?? 0) > 0) present += 1;
-        }
-        return present;
-        // deno-coverage-ignore-start -- the refresh resolves to its error
-        // and the removal swallows its own, so only a bug lands here
-      } catch {
-        await this.#removeWatchIds(watchIds);
-        // Best-effort, like the retry gate it front-runs: an unexamined
-        // absence is what this path exported before, and the commit's own
-        // verdict still decides.
-        return 0;
-      }
-      // deno-coverage-ignore-stop
-    })();
   }
 
   #buildReads(
@@ -8228,12 +8021,24 @@ const toRejectedError = (
   ) {
     const retryAfterSeq = (error as { retryAfterSeq?: unknown })?.retryAfterSeq;
     const readyToRetry = (error as { readyToRetry?: unknown })?.readyToRetry;
-    // The conflicted entity: structured field when the error is in-process;
-    // parsed from the message when it crossed the wire (Error fields do not
-    // survive serialization, the message does — its format is owned by
-    // memory/v2/engine.ts's ConflictError construction).
-    const staleReadOf = (error as { of?: unknown })?.of ??
-      message.match(/stale confirmed read: (\S+) at seq/)?.[1];
+    // Stale-read descriptors cross current protocol boundaries structurally.
+    // Parsing every clause keeps conflict repair compatible with an error
+    // transported through a boundary that retained only its message.
+    const structuredConflicts = (error as { conflicts?: unknown })?.conflicts;
+    const structuredStaleReadIds = Array.isArray(structuredConflicts)
+      ? structuredConflicts.flatMap((conflict) => {
+        const of = (conflict as { of?: unknown })?.of;
+        return typeof of === "string" ? [of] : [];
+      })
+      : [];
+    const staleReadIds = structuredStaleReadIds.length > 0
+      ? structuredStaleReadIds
+      : Array.from(
+        message.matchAll(/stale confirmed read: (\S+) at seq/g),
+        (match) => match[1],
+      );
+    const staleReadOf = staleReadIds[0] ??
+      (error as { of?: unknown })?.of;
     const firstOperation = commit.operations?.[0];
     const firstOperationId = firstOperation && "id" in firstOperation
       ? firstOperation.id
@@ -8242,9 +8047,8 @@ const toRejectedError = (
       name: "ConflictError",
       message,
       transaction: commit,
-      // Conflict descriptor: for stale-read conflicts `of` is authoritative
-      // (the memory engine names the conflicted entity structurally), so a
-      // retrier can pull exactly that doc before re-running. `the` remains a
+      // Primary conflict descriptor for consumers of the singular interface.
+      // `conflicts` below carries the complete stale-read set. `the` remains a
       // placeholder.
       conflict: {
         space,
@@ -8253,6 +8057,13 @@ const toRejectedError = (
           firstOperationId ?? "of:unknown") as Entity,
       },
     };
+    if (staleReadIds.length > 0) {
+      rejected.conflicts = staleReadIds.map((of) => ({
+        space,
+        the: DOCUMENT_MIME,
+        of: of as Entity,
+      }));
+    }
     // retryAfterSeq is carried for diagnostics; retry gating is by caughtUpLocalSeq
     // (readyToRetry), and downstream only uses retryAfterSeq's presence to mark
     // the conflict retryable.

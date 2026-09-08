@@ -3054,6 +3054,25 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
   const messages: ServerMessage[] = [];
   const connection = server.connect((message) => messages.push(message));
   const space = "did:key:z6Mk-memory-v2-conflict-flush";
+  const linkTo = (id: string) => ({
+    "/": { "link@1": { id, path: [], space } },
+  });
+  const linkedSchema = {
+    type: "object",
+    properties: {
+      linked: { $ref: "#/$defs/node" },
+    },
+    required: ["linked"],
+    additionalProperties: false,
+    $defs: {
+      node: {
+        type: "object",
+        properties: { name: { type: "string" } },
+        required: ["name"],
+        additionalProperties: false,
+      },
+    },
+  } as const;
 
   try {
     await connection.receive(encodeMemoryBoundary(HELLO));
@@ -3082,7 +3101,7 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
             id: "of:doc:1",
             selector: {
               path: [],
-              schema: false,
+              schema: linkedSchema,
             },
           }],
         },
@@ -3109,7 +3128,19 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
         operations: [{
           op: "set",
           id: "of:doc:1",
+          value: { value: { linked: linkTo("of:doc:B") } },
+        }, {
+          op: "set",
+          id: "of:doc:2",
           value: { value: { version: 1 } },
+        }, {
+          op: "set",
+          id: "of:doc:B",
+          value: { value: { name: "B" } },
+        }, {
+          op: "set",
+          id: "of:doc:C",
+          value: { value: { name: "C" } },
         }],
       },
     }));
@@ -3129,6 +3160,10 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
         operations: [{
           op: "set",
           id: "of:doc:1",
+          value: { value: { linked: linkTo("of:doc:C") } },
+        }, {
+          op: "set",
+          id: "of:doc:2",
           value: { value: { version: 3 } },
         }],
       },
@@ -3144,11 +3179,18 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
       commit: {
         localSeq: 3,
         reads: {
-          confirmed: [{
-            id: "of:doc:1",
-            path: [],
-            seq: 1,
-          }],
+          confirmed: [
+            {
+              id: "of:doc:1",
+              path: [],
+              seq: 1,
+            },
+            {
+              id: "of:doc:2",
+              path: [],
+              seq: 1,
+            },
+          ],
           pending: [],
         },
         operations: [{
@@ -3163,8 +3205,36 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
     assertEquals(rejected.requestId, "tx-3");
     assertEquals(rejected.error, {
       name: "ConflictError",
-      message: "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2",
+      message:
+        "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2; " +
+        "stale confirmed read: of:doc:2 at seq 1 conflicted with seq 2",
       retryAfterSeq: 2,
+      conflicts: [
+        { of: "of:doc:1", seq: 1, conflictSeq: 2 },
+        { of: "of:doc:2", seq: 1, conflictSeq: 2 },
+      ],
+      conflictWatches: [
+        {
+          id: 'conflict:["","space","of:doc:1"]',
+          kind: "graph",
+          query: {
+            roots: [{
+              id: "of:doc:1",
+              selector: { path: [], schema: false },
+            }],
+          },
+        },
+        {
+          id: 'conflict:["","space","of:doc:2"]',
+          kind: "graph",
+          query: {
+            roots: [{
+              id: "of:doc:2",
+              selector: { path: [], schema: false },
+            }],
+          },
+        },
+      ],
     });
     assertEquals(messages.length, 0);
 
@@ -3173,22 +3243,25 @@ Deno.test("memory v2 server returns conflicts before deferred caught-up session 
     const effect = assertEffect(shiftMessage(messages));
     assertEquals(effect.effect.caughtUpLocalSeq, 3);
     assertEquals(effect.effect.toSeq, 2);
-    assertEquals(effect.effect.upserts, [{
-      branch: "",
-      id: "of:doc:1",
-      scope: "space",
-      seq: 2,
-      doc: {
-        value: { version: 3 },
-      },
-    }]);
+    assertEquals(
+      effect.effect.upserts.map((entry) => entry.id),
+      ["of:doc:1", "of:doc:2", "of:doc:C"],
+    );
+    assertEquals(
+      effect.effect.upserts.find((entry) => entry.id === "of:doc:1")?.doc,
+      { value: { linked: linkTo("of:doc:C") } },
+    );
+    assertEquals(
+      effect.effect.upserts.find((entry) => entry.id === "of:doc:C")?.doc,
+      { value: { name: "C" } },
+    );
     assertEquals(messages.length, 0);
   } finally {
     await server.close();
   }
 });
 
-Deno.test("memory v2 server empty caught-up sync preserves previous fromSeq", async () => {
+Deno.test("memory v2 server conflict-watch catch-up preserves previous fromSeq", async () => {
   // Verdict-first is the design (CT-1927): the rejection returns inline and
   // the deferred sync (with its marker) follows on the batch pass.
   const server = createServer(
@@ -3263,7 +3336,13 @@ Deno.test("memory v2 server empty caught-up sync preserves previous fromSeq", as
       type: "sync",
       fromSeq: 0,
       toSeq: 1,
-      upserts: [],
+      upserts: [{
+        branch: "",
+        id: "of:doc:1",
+        scope: "space",
+        seq: 1,
+        doc: { value: { version: 1 } },
+      }],
       removes: [],
       caughtUpLocalSeq: 2,
     });
@@ -3401,6 +3480,16 @@ Deno.test("memory v2 server processes back-to-back websocket messages in receive
       name: "ConflictError",
       message: "stale confirmed read: of:doc:1 at seq 1 conflicted with seq 2",
       retryAfterSeq: 2,
+      conflictWatches: [{
+        id: "root",
+        kind: "graph",
+        query: {
+          roots: [{
+            id: "of:doc:1",
+            selector: { path: [], schema: false },
+          }],
+        },
+      }],
     });
     assertEquals(messages.length, 0);
 

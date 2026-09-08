@@ -1030,19 +1030,34 @@ export class ConflictError extends Error {
 
   readonly seq?: number;
   readonly conflictSeq?: number;
+  readonly conflicts?: readonly ConfirmedReadConflict[];
   constructor(
     message: string,
-    details?: { of: string; seq: number; conflictSeq: number },
+    details?: ConfirmedReadConflict | readonly ConfirmedReadConflict[],
   ) {
     super(message);
     this.name = "ConflictError";
-    if (details !== undefined) {
-      this.of = details.of;
-      this.seq = details.seq;
-      this.conflictSeq = details.conflictSeq;
+    const conflicts = details === undefined
+      ? undefined
+      : Array.isArray(details)
+      ? details as readonly ConfirmedReadConflict[]
+      : [details as ConfirmedReadConflict];
+    if (conflicts !== undefined && conflicts.length > 0) {
+      this.conflicts = [...conflicts];
+      this.of = conflicts[0].of;
+      this.seq = conflicts[0].seq;
+      this.conflictSeq = conflicts[0].conflictSeq;
     }
   }
 }
+
+export type ConfirmedReadConflict = {
+  of: string;
+  seq: number;
+  conflictSeq: number;
+  /** Index of the stale entry in `ClientCommit.reads.confirmed`. */
+  readIndex: number;
+};
 
 export class PreconditionFailedError extends Error {
   readonly precondition: "origin-committed" | "receipt-exists";
@@ -6156,7 +6171,8 @@ const validateConfirmedReads = (
   // Every confirmed read in the commit resolves declared user/session scope
   // against that writer identity, even when the read points at another branch.
   // Cross-branch reads inherit this same principal context.
-  for (const read of commit.reads.confirmed) {
+  const conflicts: ConfirmedReadConflict[] = [];
+  for (const [readIndex, read] of commit.reads.confirmed.entries()) {
     const readBranch = read.branch ?? branch;
     ensureReadableBranch(engine, readBranch);
     const scopeKey = resolveScopeKey(read.scope, scopeContext);
@@ -6170,11 +6186,16 @@ const validateConfirmedReads = (
       read.nonRecursive ?? false,
     );
     if (conflictSeq !== null) {
-      throw new ConflictError(
-        `stale confirmed read: ${read.id} at seq ${read.seq} conflicted with seq ${conflictSeq}`,
-        { of: read.id, seq: read.seq, conflictSeq },
-      );
+      conflicts.push({ of: read.id, seq: read.seq, conflictSeq, readIndex });
     }
+  }
+  if (conflicts.length > 0) {
+    throw new ConflictError(
+      conflicts.map(({ of, seq, conflictSeq }) =>
+        `stale confirmed read: ${of} at seq ${seq} conflicted with seq ${conflictSeq}`
+      ).join("; "),
+      conflicts,
+    );
   }
 };
 

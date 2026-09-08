@@ -1735,6 +1735,16 @@ export type V2Error = {
   precondition?: string;
   retryAfterSeq?: number;
 
+  /** Every stale confirmed read when one commit has more than one. */
+  conflicts?: Array<{
+    of: string;
+    seq: number;
+    conflictSeq: number;
+  }>;
+
+  /** Root-only watches in effect for the stale confirmed reads. */
+  conflictWatches?: WatchSpec[];
+
   /**
    * Present on an `AuthorizationError` that a fresh handshake can heal — the
    * connection-challenge and invocation-freshness anti-replay races (an expired,
