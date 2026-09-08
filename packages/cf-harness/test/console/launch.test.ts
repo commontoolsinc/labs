@@ -1,6 +1,8 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE } from "../../src/config.ts";
+
 import {
   type ConsoleLaunchIo,
   type ConsoleLaunchRecords,
@@ -270,7 +272,7 @@ describe("launch", () => {
         "persist",
       );
       expect(plan.environment.CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE).toBe(
-        "enforce-explicit",
+        DEFAULT_HARNESS_CFC_ENFORCEMENT_MODE,
       );
     });
 
