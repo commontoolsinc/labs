@@ -10,7 +10,7 @@
     "entry names one check on one run shape, so a check that starts failing on a",
     "shape nobody enumerated is still a red run.",
     "Each entry names the runs it speaks for as an anchored regular expression over the run id. `runShape` is prose for a reader; `runs` is what matching uses, so an entry written for one shape cannot suppress the same message on a run nobody considered.",
-    "The cell-labels entry is now AUD-24's, not AUD-9's: AH-CFC-16 enumerates six artifacts to retain and a cell-labels read is not among them, so AUD-9 was split and the finding moved to a check citing the clause as `extends`. AUD-9's retention headline is therefore already the spec-backed number; the historic count of runs that fell only on the cell-labels component wants re-measuring against the split rather than carrying forward."
+    "The cell-labels entry is now AUD-24's, not AUD-9's: AH-CFC-16 enumerates six categories of evidence and a cell-labels read is not among them, so AUD-9 was split and the finding moved to a check citing the clause as `extends`. AUD-9's retention headline is therefore already the spec-backed number; the historic count of runs that fell only on the cell-labels component wants re-measuring against the split rather than carrying forward."
   ],
   "expected": [
     {
@@ -18,7 +18,7 @@
       "runShape": "a sandbox-only episode: a run that minted no handle, so the engine never read a cell label for it",
       "runs": "authority-.+|influence|no-silent-fallback",
       "detail": "recorded no read of its space's cell labels",
-      "why": "CT-2210's substance — AH-CFC-16 enumerates six artifacts to retain and a cell-labels read is not among them, so AUD-9 demanding one under a `required-by` citation was the check overclaiming — is closed by the split that produced AUD-24, not by any change to what a run records. What is left open is narrower and is AUD-24's own: the engine reads a space's cell labels only for the refs its handle table holds, so a run that minted no handle has nothing to record, and whether an audit should report that at all is undecided.",
+      "why": "CT-2210's substance — AH-CFC-16 enumerates six categories of evidence and a cell-labels read is not among them, so AUD-9 demanding one under a `required-by` citation was the check overclaiming — is closed by the split that produced AUD-24, not by any change to what a run records. What is left open is narrower and is AUD-24's own: the engine reads a space's cell labels only for the refs its handle table holds, so a run that minted no handle has nothing to record, and whether an audit should report that at all is undecided.",
       "issue": "CT-2210"
     },
     {

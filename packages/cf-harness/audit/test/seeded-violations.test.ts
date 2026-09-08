@@ -971,7 +971,7 @@ describe("seeded violations", () => {
   describe("AUD-24 cell-labels snapshot", () => {
     it("warns a run that recorded no cell-labels read and attempted none", () => {
       // And AUD-9 does not move, which is the point of the split. The
-      // cell-labels snapshot is not among the six artifacts AH-CFC-16
+      // cell-labels snapshot is not among the six categories of evidence AH-CFC-16
       // enumerates, so a run missing it has not failed that clause.
       turnsOnly("AUD-24", "warn", (root) => {
         root.cellLabels = {
