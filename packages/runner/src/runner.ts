@@ -2065,12 +2065,15 @@ export class Runner {
   /**
    * Pieces this runner has named before running them — set up elsewhere and
    * reached through a link crossing — keyed by result: the name-sync while
-   * it is in flight, `landed` once it has settled.
+   * it is in flight, and once it has landed the identity of the pattern it
+   * landed for. A run under another pattern probes again: an upgrade can add
+   * an internal cell the crossing never delivered. Bounded like the other
+   * result shortcuts; an evicted entry costs a probe, never a wrong verdict.
    */
-  readonly #namedFamilies = new Map<
+  readonly #namedFamilies = new BoundedKeyMap<
     `${MemorySpace}/${ScopeKey}/${URI}`,
-    Promise<void> | "landed"
-  >();
+    { pending: Promise<void> } | { landed: string }
+  >(RESULT_SHORTCUT_LIMIT);
 
   /**
    * Two-level memo of what each result cell holds: outer key the result _doc_
@@ -5184,55 +5187,69 @@ export class Runner {
    * document the run reads — one the argument links to, through the redirect
    * chains those links form, or a derived internal cell of the pattern or of
    * a sub-piece it instantiates — is absent here. A piece with no setup
-   * evidence is one the run sets up itself, family included, and a piece
-   * whose pattern cannot be resolved has nothing to name it with; both
-   * return nothing. A piece this runner has named is never held again once
-   * the name-sync has landed: whatever the store lacked, it lacks, and the
-   * run reports it as it always has.
+   * evidence is one the run sets up itself, family included, and returns
+   * nothing; a stored pattern pointer this session cannot resolve throws,
+   * as setup's own resolution does. A piece this runner has named is not
+   * held again once the name-sync has landed for the same pattern: whatever
+   * the store lacked, it lacks, and the run reports it as it always has.
    */
   #patternToNameBeforeRun(
     patternOrModule: Pattern | Module | undefined,
     argument: unknown,
+    tx: IExtendedStorageTransaction,
     resultCell: Cell<any>,
-  ): Pattern | undefined {
+  ): { pattern: Pattern; entryKey: string } | undefined {
     const key = this.#getDocKey(resultCell);
-    const named = this.#namedFamilies.get(key);
-    if (named === "landed") return undefined;
-    // A result this runner prepared has its family here already, however
-    // much of it the store holds; a missing entry costs a probe, never a
-    // wrong verdict.
-    if (this.#locallyPreparedResults.has(key)) return undefined;
-    // Presence probes on a read transaction of their own, so an absent
-    // document enters neither the caller's dependencies nor its commit's
-    // read set: the run that follows the name-sync reads these for real.
-    const readTx = this.#runtime.readTx();
-    const cell = resultCell.withTx(readTx);
-    const argumentLink = getMetaLink(cell, "argument");
+    // Setup reads these through the caller's transaction too, so they can
+    // be read there: a fresh piece leaves here before anything is minted.
+    const argumentLink = getMetaLink(resultCell.withTx(tx), "argument");
     if (argumentLink === undefined) return undefined;
     const resolved = this.#resolveSetupPattern(
       patternOrModule,
-      getPatternIdentityRef(cell) ?? this.#sessionPatternPointers.get(key),
+      getPatternIdentityRef(resultCell.withTx(tx)) ??
+        this.#sessionPatternPointers.get(key),
     );
     if (resolved === undefined) return undefined;
-    if (named !== undefined) return resolved.pattern;
-    // The document itself, not a value read through a schema, which would
-    // answer an absent document with the schema's default.
+    const entryKey = patternIdentityKey(resolved.entryRef);
+    const named = this.#namedFamilies.get(key);
+    if (named !== undefined && "pending" in named) {
+      return { pattern: resolved.pattern, entryKey };
+    }
+    if (named?.landed === entryKey) return undefined;
+    // A result this runner prepared under this pattern has its family here
+    // already, however much of it the store holds; a missing entry costs a
+    // probe, never a wrong verdict.
+    if (this.#locallyPreparedResults.get(key) === entryKey) return undefined;
+    // Presence probes on a read transaction of their own, so an absent
+    // document enters neither the caller's dependencies nor its commit's
+    // read set: the run that follows the name-sync reads these for real.
+    // The document itself is what is probed, not a value read through a
+    // schema, which answers an absent document with the schema's default.
+    // A cell nothing has written yet — a derived cell whose producer never
+    // ran — reads absent here too, and holds the run once; the probes stop
+    // at a budget, and a budget spent reads absent as well: a hold costs one
+    // name-sync, a wrong local verdict costs a conflicting commit.
+    const readTx = this.#runtime.readTx();
+    const cell = resultCell.withTx(readTx);
+    let probes = 256;
     const present = (link: NormalizedFullLink): boolean =>
+      probes-- > 0 &&
       readTx.readOrThrow(
-        {
-          space: link.space,
-          id: link.id,
-          path: ["value"],
-          ...(link.scope !== undefined && { scope: link.scope }),
-        },
-        { meta: ignoreReadForScheduling },
-      ) !== undefined;
-    if (!present(argumentLink)) return resolved.pattern;
+          {
+            space: link.space,
+            id: link.id,
+            path: ["value"],
+            ...(link.scope !== undefined && { scope: link.scope }),
+          },
+          { meta: ignoreReadForScheduling },
+        ) !== undefined;
+    const held = { pattern: resolved.pattern, entryKey };
+    if (!present(argumentLink)) return held;
     // What the run reads through the argument: every document the caller's
     // argument and the stored argument link to, followed through the
     // targets those links resolve into — a coordinator's element link is a
-    // chain of redirects, and setup reads each hop. Bounded by depth and by
-    // a document being probed once.
+    // chain of redirects, and setup reads each hop. Bounded by depth, by a
+    // document being probed once, and by the probe budget.
     const probed = new Set<string>();
     const linksAbsent = (value: unknown, depth: number): boolean => {
       const link = parseLink(value, resultCell);
@@ -5263,7 +5280,7 @@ export class Runner {
       }
       return false;
     };
-    if (linksAbsent(argument, 4)) return resolved.pattern;
+    if (linksAbsent(argument, 4)) return held;
     if (
       linksAbsent(
         readTx.readOrThrow(
@@ -5279,7 +5296,7 @@ export class Runner {
         4,
       )
     ) {
-      return resolved.pattern;
+      return held;
     }
     // The owned cells the run reads: the pattern's derived internal cells
     // and, through each nested sub-pattern's result spot, those of the
@@ -5294,9 +5311,7 @@ export class Runner {
       readTx,
     );
     for (const ownedCell of owned) {
-      if (!present(ownedCell.getAsNormalizedFullLink())) {
-        return resolved.pattern;
-      }
+      if (!present(ownedCell.getAsNormalizedFullLink())) return held;
     }
     return undefined;
   }
@@ -5306,47 +5321,56 @@ export class Runner {
    * delivers what running `pattern` over it reads — and runs the piece once
    * that sync has landed, in a transaction of its own. Ownership of the
    * start begins now, as a commit-gated start's does, so a release before
-   * the run cancels it. Returns the cancel.
+   * the run cancels it. A run that fails is reported the way a piece-start
+   * commit failure is: loud, and to the serving runtime's observer. Returns
+   * the cancel.
    */
   #runAfterNamedFamilyLands<T, R>(
     tx: IExtendedStorageTransaction,
     patternOrModule: Pattern | Module | undefined,
-    pattern: Pattern,
+    named: { pattern: Pattern; entryKey: string },
     argument: T,
     resultCell: Cell<R>,
     options: RunnerRunOptions,
   ): Cancel {
     const key = this.#getDocKey(resultCell);
     const resultLink = resultCell.getAsNormalizedFullLink();
+    const actionId = `piece-run/${resultLink.id}`;
     const startLifecycleEpoch = this.#lifecycleEpoch;
     const ownership = this.#createDeferredStartOwnership(resultCell);
     const navigateContext = navigateEventContextFromRunInfo(
       waveRunContextOf(tx) ?? speculationRunContextOf(tx),
     );
-    let named = this.#namedFamilies.get(key);
-    if (named === undefined || named === "landed") {
-      named = this.#syncCellsForRunningPattern(resultCell, pattern, argument)
-        .then(
-          () => {},
-          (error: unknown) => {
-            logger.warn(
-              "runner-start",
-              "naming a piece before its run rejected",
-              [resultLink.id, error],
-            );
-          },
-        ).then(() => {
-          this.#namedFamilies.set(key, "landed");
-        });
-      this.#namedFamilies.set(key, named);
+    const inFlight = this.#namedFamilies.get(key);
+    let pending: Promise<void>;
+    if (inFlight !== undefined && "pending" in inFlight) {
+      pending = inFlight.pending;
+    } else {
+      pending = this.#syncCellsForRunningPattern(
+        resultCell,
+        named.pattern,
+        argument,
+      ).then(
+        () => {},
+        (error: unknown) => {
+          logger.warn(
+            "runner-start",
+            "naming a piece before its run rejected",
+            [resultLink.id, error],
+          );
+        },
+      ).then(() => {
+        this.#namedFamilies.set(key, { landed: named.entryKey });
+      });
+      this.#namedFamilies.set(key, { pending });
     }
-    const work = named.then(() => {
+    const work = pending.then(() => {
       if (ownership.isCancelled()) return;
       const startTx = this.#runtime.edit();
       // Minted outside any scheduler run; the run's setup and node wiring
       // are piece machinery, stamped bookkeeping per serving-loop.md §3d.
       this.#runtime.stampServerRun(startTx, {
-        actionId: `piece-run/${resultLink.id}`,
+        actionId,
         kind: "bookkeeping",
       });
       if (navigateContext !== undefined) {
@@ -5382,17 +5406,13 @@ export class Runner {
               return;
             }
             ownership.cancel();
-            logger.error(
-              "tx-commit-error",
-              "Error committing the run of a named piece",
-              error,
-            );
+            this.#reportPieceStartCommitFailure(actionId, error);
           },
         );
       } catch (error) {
         startTx.abort(error);
         ownership.cancel();
-        logger.error("runner-start", "The run of a named piece failed", error);
+        this.#reportPieceStartCommitFailure(actionId, error);
         throw error;
       }
     });
@@ -5919,16 +5939,17 @@ export class Runner {
     // both the setup re-check and the instantiation below read them. Name
     // it, and run it — setup and start alike — once the name-sync has
     // landed, in a transaction of its own.
-    const patternToName = this.#patternToNameBeforeRun(
+    const toName = this.#patternToNameBeforeRun(
       patternOrModule,
       argument,
+      tx,
       resultCell,
     );
-    if (patternToName !== undefined) {
+    if (toName !== undefined) {
       const cancelDeferredStart = this.#runAfterNamedFamilyLands(
         tx,
         patternOrModule,
-        patternToName,
+        toName,
         argument,
         resultCell,
         options,

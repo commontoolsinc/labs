@@ -53,12 +53,29 @@ const HOST_SRC = [
   "  return { items, cards, addItem: addItem({ items }) };",
   "});",
 ].join("\n");
+// The card upgraded: a second handler, whose marker is another internal cell.
+const CARD_V2_SRC = [
+  "import { pattern, computed, handler, type Stream, Writable } from 'commonfabric';",
+  "const bump = handler<unknown, { count: Writable<number> }>((_, { count }) => {",
+  "  count.set(count.get() + 1);",
+  "});",
+  "const poke = handler<unknown, { count: Writable<number> }>((_, { count }) => {",
+  "  count.set(count.get() + 10);",
+  "});",
+  "export default pattern<{ item: { seed: string } }, { label: string; count: number; bump: Stream<unknown>; poke: Stream<unknown>; item: { seed: string } }>(({ item }) => {",
+  "  const label = computed(() => `card-${item.seed}`);",
+  "  const count = new Writable(0).for('count');",
+  "  return { label, count, bump: bump({ count }), poke: poke({ count }), item };",
+  "});",
+].join("\n");
 const FILES = [
   { name: "/main.tsx", contents: HOST_SRC },
   { name: "/card.tsx", contents: CARD_SRC },
+  { name: "/card-v2.tsx", contents: CARD_V2_SRC },
 ];
 const HOST_PROGRAM: RuntimeProgram = { main: "/main.tsx", files: FILES };
 const CARD_PROGRAM: RuntimeProgram = { main: "/card.tsx", files: FILES };
+const CARD_V2_PROGRAM: RuntimeProgram = { main: "/card-v2.tsx", files: FILES };
 const RESULT_CAUSE = "piece named before start host";
 const CARDS_SCHEMA = {
   type: "array",
@@ -77,7 +94,7 @@ const CARDS_ITEM_SCHEMA = {
   },
 } as const;
 // One card per case, each cold on the replica that runs it.
-const CARD_COUNT = 7;
+const CARD_COUNT = 8;
 
 type EventCommitMarker = {
   type: "scheduler.event.commit";
@@ -243,7 +260,7 @@ describe("piece-named-before-start", () => {
     cardB: Cell<Record<string, unknown>>;
     itemB: Cell<{ seed: string }>;
     argumentId: string;
-    key: string;
+    key: ReturnType<typeof entityKey>;
   } {
     const hostValue = replicaB.getDocument(rcB.getAsNormalizedFullLink().id)
       ?.value as { cards: unknown; items: unknown };
@@ -325,16 +342,21 @@ describe("piece-named-before-start", () => {
     for (const target of targets) await nameLinkChain(target, depth - 1);
   }
 
-  /** Sends the card's event from B and reads the count B's handler moved. */
-  async function bump(cardB: Cell<Record<string, unknown>>): Promise<unknown> {
-    const bumpTx = b.edit();
+  /** Sends the card's `stream` event from B and reads the count B's handler moved. */
+  async function send(
+    cardB: Cell<Record<string, unknown>>,
+    stream: "bump" | "poke",
+  ): Promise<unknown> {
+    const sendTx = b.edit();
     const committedB = waitForEventCommit(b);
-    cardB.withTx(bumpTx).key("bump").send({});
-    await bumpTx.commit();
+    cardB.withTx(sendTx).key(stream).send({});
+    await sendTx.commit();
     await committedB;
     await quiesce(b);
     return cardB.key("count").get();
   }
+
+  const bump = (cardB: Cell<Record<string, unknown>>) => send(cardB, "bump");
 
   it("names a piece set up elsewhere before running it, so its handler marker is present", async () => {
     const { cardB, itemB, argumentId, key } = locateCard(0);
@@ -412,6 +434,16 @@ describe("piece-named-before-start", () => {
 
   it("holds a second run of the same piece while its name-sync is in flight", async () => {
     const { cardB, itemB, key } = locateCard(3);
+    let syncs = 0;
+    b.runner.accessForTestingOnly.dependencySyncer = (
+      resultCell,
+      pattern,
+      inputs,
+      sync,
+    ) => {
+      syncs++;
+      return sync(resultCell, pattern, inputs);
+    };
     const settled = waitForDeferredStart(
       b,
       "runner.deferred-start.settled",
@@ -420,13 +452,27 @@ describe("piece-named-before-start", () => {
     await runCard(cardB, itemB, 2);
     expect((await settled).outcome).toBe("installed");
     await quiesce(b);
-    // One registration, one handler: the event is handled once.
+    // One name-sync, one registration, one handler: the event is handled
+    // once.
+    expect(syncs).toBe(1);
     expect(await bump(cardB)).toBe(1);
     expect(errors.get(b)!.map((error) => error.message)).toEqual([]);
   });
 
   it("cancels the run when the piece is released before its name-sync lands", async () => {
     const { cardB, itemB, key } = locateCard(4);
+    // The name-sync is held open until the release has landed, so the order
+    // is the test's, not the wire's.
+    const landing = Promise.withResolvers<void>();
+    b.runner.accessForTestingOnly.dependencySyncer = async (
+      resultCell,
+      pattern,
+      inputs,
+      sync,
+    ) => {
+      await landing.promise;
+      return await sync(resultCell, pattern, inputs);
+    };
     const settled = waitForDeferredStart(
       b,
       "runner.deferred-start.settled",
@@ -435,8 +481,9 @@ describe("piece-named-before-start", () => {
     await runCard(cardB, itemB);
     b.runner.releaseChild(cardB, undefined);
     expect((await settled).outcome).toBe("cancelled");
+    landing.resolve();
     await quiesce(b);
-    expect(b.runner.cancels.has(key as never)).toBe(false);
+    expect(b.runner.cancels.has(key)).toBe(false);
     expect(errors.get(b)!.map((error) => error.message)).toEqual([]);
   });
 
@@ -488,6 +535,62 @@ describe("piece-named-before-start", () => {
     await runCard(cardB, itemB);
     expect((await settled).outcome).toBe("installed");
     await quiesce(b);
-    expect(b.runner.cancels.has(key as never)).toBe(false);
+    expect(b.runner.cancels.has(key)).toBe(false);
+  });
+
+  it("runs a piece under a pattern it was upgraded to elsewhere after an earlier landing", async () => {
+    const { cardB, itemB, key } = locateCard(7);
+    const landedV1 = waitForDeferredStart(
+      b,
+      "runner.deferred-start.settled",
+      key,
+    );
+    await runCard(cardB, itemB);
+    expect((await landedV1).outcome).toBe("installed");
+    await quiesce(b);
+    expect(await bump(cardB)).toBe(1);
+
+    // Replica C upgrades the card: its setup under the new pattern writes the
+    // second handler's marker, which B's crossing never delivers.
+    const c = replica();
+    const cardV2 = await c.patternManager.compilePattern(CARD_V2_PROGRAM, {
+      space,
+    }) as Pattern;
+    const cardC = c.getCellFromEntityId<Record<string, unknown>>(
+      space,
+      cardB.getAsNormalizedFullLink().id,
+    );
+    const itemC = c.getCellFromEntityId<{ seed: string }>(
+      space,
+      itemB.getAsNormalizedFullLink().id,
+    );
+    // C names the card and what it reads, so its upgrade runs at once.
+    await cardC.sync();
+    await itemC.sync();
+    await quiesce(c);
+    const upgradeTx = c.edit();
+    c.runner.run(upgradeTx, cardV2, { item: itemC }, cardC);
+    c.prepareTxForCommit(upgradeTx);
+    expect((await upgradeTx.commit()).error).toBeUndefined();
+    await quiesce(c);
+    await c.storageManager.synced();
+    await c.dispose({ closeStorage: false });
+    runtimes.splice(runtimes.indexOf(c), 1);
+
+    // B runs the card under the upgraded pattern, as its map would once the
+    // pointer moved. The name B gave the card stands, so the marker C wrote
+    // arrives as family and the run needs no hold; were the name gone, the
+    // earlier landing was for the old pattern and the run is held again.
+    // Either way the new handler runs on B.
+    const cardV2B = await b.patternManager.compilePattern(CARD_V2_PROGRAM, {
+      space,
+    }) as Pattern;
+    const runTx = b.edit();
+    b.runner.run(runTx, cardV2B, { item: itemB }, cardB);
+    b.prepareTxForCommit(runTx);
+    expect((await runTx.commit()).error).toBeUndefined();
+    await quiesce(b);
+    expect(await send(cardB, "poke")).toBe(11);
+    expect(errors.get(b)!.map((error) => error.message)).toEqual([]);
   });
 });
