@@ -5,7 +5,7 @@ import type {
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
 
-import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
+import { BaseFabricPrimitive, VALUE_TAG } from "@/fabric-bases/BaseFabricPrimitive.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
@@ -19,6 +19,7 @@ import {
 } from "@/codec-interface/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import type { FabricValue } from "@/interface.ts";
+import { VALUE_TAGS, ValueTag } from "@/VALUE_TAGS.ts";
 
 /** The only regex flavor currently representable as a native `RegExp`. */
 const DEFAULT_FLAVOR = "es2025";
@@ -108,6 +109,15 @@ export class FabricRegExp extends BaseFabricPrimitive
     this.#value = (this.#flavor === DEFAULT_FLAVOR)
       ? new RegExp(this.#source, this.#flags)
       : undefined;
+  }
+
+  //
+  // Instance members
+  //
+
+  /** @inheritDoc */
+  get [VALUE_TAG](): ValueTag {
+    return VALUE_TAGS.FabricRegExp;
   }
 
   /** The pattern source text. */

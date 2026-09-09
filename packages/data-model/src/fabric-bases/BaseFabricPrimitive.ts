@@ -11,23 +11,12 @@
 
 import { FabricPrimitive } from "@/interface.ts";
 import { toCompactDebugString } from "@/value-debug.ts";
+import { ValueTag } from "@/VALUE_TAGS.ts";
 
 /**
- * Well-known symbol seeding `BaseFabricPrimitive`'s symbol-keyed member set.
- *
- * `BaseFabricPrimitive` is intended to accumulate symbol-keyed "implementation
- * plumbing" members over time -- the same regular-name-for-clients /
- * unique-symbol-for-plumbing pattern that `BaseFabricInstance` uses for
- * `[DEEP_FREEZE]` / `[IS_DEEP_FROZEN]`. This is a deliberate placeholder seed:
- * it gives the class one concrete member today so that its instance type is
- * non-empty, which is what lets `BaseFabricPrimitive.isInstance()` narrow as an
- * ordinary `value is` guard (a structurally-empty type makes such a guard's
- * negative branch collapse to `never`). Replace it with the first real
- * primitive-plumbing member once one is identified.
+ * Well-known symbol used for the `FabricPrimitive` getter defined below.
  */
-export const EXAMPLE_METHOD: unique symbol = Symbol(
-  "data-model.exampleMethod",
-);
+export const VALUE_TAG: unique symbol = Symbol("data-model.valueTag");
 
 /**
  * Abstract base class for `FabricPrimitive` subclasses. Concrete
@@ -55,6 +44,16 @@ export abstract class BaseFabricPrimitive extends FabricPrimitive {
   }
 
   //
+  // Subclass contract
+  //
+
+  /**
+   * The value tag associated with this instance, as returned from `tagFrom*()`
+   * functions.
+   */
+  abstract get [VALUE_TAG](): ValueTag;
+
+  //
   // Instance members
   //
 
@@ -72,19 +71,6 @@ export abstract class BaseFabricPrimitive extends FabricPrimitive {
    */
   [Symbol.for("Deno.customInspect")](): string {
     return toCompactDebugString(this);
-  }
-
-  /**
-   * Placeholder seed member (a throwing stub). Its only purpose today is to
-   * give `BaseFabricPrimitive` a non-empty instance type so `isInstance()`
-   * narrows normally; it has no callers and no real behavior yet, and is the
-   * first of the intended symbol-keyed primitive-plumbing members. Replace it
-   * with a real member once one is identified.
-   *
-   * @throws Always -- it is not implemented.
-   */
-  [EXAMPLE_METHOD](): never {
-    throw new Error("Not implemented: `[EXAMPLE_METHOD]` is a placeholder.");
   }
 
   //

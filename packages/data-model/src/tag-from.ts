@@ -1,15 +1,8 @@
-import { constructorOfPrototype } from "@commonfabric/utils/objects";
-
 import { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
 import { FabricInstance, FabricPrimitive, type FabricValue } from "./interface.ts";
 import { isFabricArray, isFabricPlainObject } from "./type-check.ts";
 import { toCompactDebugString } from "./value-debug.ts";
-import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
-import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
-import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
-import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
-import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { BaseFabricPrimitive, VALUE_TAG } from "@/fabric-bases/BaseFabricPrimitive.ts";
 
 /**
  * Maps a `FabricPrimitive` to its tag. This `throw`s if it determines that the
@@ -31,43 +24,15 @@ export function tagFromFabricPrimitive(value: FabricPrimitive): ValueTag {
  * turns out not to be valid.
  */
 export function tagFromFabricPrimitiveElseNull(value: FabricPrimitive): ValueTag | null {
-  if (!(value instanceof FabricPrimitive)) {
+  if (!(value instanceof BaseFabricPrimitive)) {
     return null;
   }
 
-  // `!` because due to the object check above, we know we've got a proto.
-  const proto = Object.getPrototypeOf(value)!;
-  const constructorFn = constructorOfPrototype(proto);
+  const tag = value[VALUE_TAG];
 
-  switch (constructorFn) {
-    case FabricBytes: {
-      return VALUE_TAGS.FabricBytes;
-    }
-
-    case FabricEpochNsec: {
-      return VALUE_TAGS.EpochNsec;
-    }
-
-    case FabricEpochDay: {
-      return VALUE_TAGS.EpochDay;
-    }
-
-    case FabricHash: {
-      return VALUE_TAGS.Hash;
-    }
-
-    case FabricKeyPair: {
-      return VALUE_TAGS.FabricKeyPair;
-    }
-
-    case FabricRegExp: {
-      return VALUE_TAGS.FabricRegExp;
-    }
-
-    default: {
-      return null;
-    }
-  }
+  return ((typeof tag === "string") && (tag in VALUE_TAGS))
+    ? tag
+    : null;
 }
 
 /**

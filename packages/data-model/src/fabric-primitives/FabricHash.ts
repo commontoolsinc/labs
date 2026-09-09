@@ -10,7 +10,7 @@ import { toOwnedUint8Array } from "@commonfabric/utils/buffers";
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isPlainObject } from "@commonfabric/utils/types";
 
-import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
+import { BaseFabricPrimitive, VALUE_TAG } from "@/fabric-bases/BaseFabricPrimitive.ts";
 import { ProblematicValue } from "@/codec-common/ProblematicValue.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
@@ -24,6 +24,7 @@ import {
 } from "@/codec-interface/interface.ts";
 import type { RealmCodecValue } from "@/codec-realm/interface.ts";
 import type { FabricValue } from "@/interface.ts";
+import { VALUE_TAGS, ValueTag } from "@/VALUE_TAGS.ts";
 
 /**
  * The encoded state of a {@link FabricHash}: the algorithm tag, and the digest
@@ -80,6 +81,15 @@ export class FabricHash extends BaseFabricPrimitive implements ApiFabricHash {
     this.#tag = tag;
     this.#justHashString = toUnpaddedBase64url(this.#hash);
     this.#fullStringForm = `${tag}:${this.#justHashString}`;
+  }
+
+  //
+  // Instance members
+  //
+
+  /** @inheritDoc */
+  get [VALUE_TAG](): ValueTag {
+    return VALUE_TAGS.Hash;
   }
 
   /** Defensive copy of the raw hash bytes. */
