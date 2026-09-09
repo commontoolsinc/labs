@@ -1609,8 +1609,8 @@ too noisy to judge a change by. `main` still runs it, the dashboard still
 shows it, and it appears on a work queue. This replaces the usual
 quarantine list, and it is better than one in three ways: it is derived
 from measurement rather than from somebody's judgement at one moment, it
-needs no owner or expiry to stop it rotting, and it reverses on its own
-once the test is fixed. The exception is a change that edits the test
+needs no owner or expiry to stop it rotting, and it reverses on its own as
+the test goes back to passing. The exception is a change that edits the test
 itself, or that the test's suite maps onto its unit, which is very likely
 a fix and has to be allowed to prove itself.
 
@@ -1828,7 +1828,34 @@ expect that to bound the over-crediting, because a test flaky enough on
 `main` to matter is being run far more often on pull requests, but nothing
 here measures it.
 
-`flakeRate` is the share of a test's failures that fall under either rule.
+`flakeRate` is how often a test was seen falling under either rule, as a
+share of the runs it took part in rather than of the failures among them.
+What the rate decides is whether running the test once fails somebody's
+change for something its author cannot act on, and that is a chance per
+run: a test that failed once in ten thousand runs and passed on the rerun
+has every one of its failures a flake, and a share of failures would read
+it as wholly unreliable. Counting runs is also what lets an exclusion
+reverse, since a run that does not disagree lowers the share.
+
+Nothing is charged against the count. A disagreement is a proof rather
+than a sample, since a deterministic test cannot pass and fail at one
+commit, so shrinking the share toward zero would shrink it toward what
+the observation has already ruled out. A test seen twice that disagreed once
+reads a half; one that disagreed once in ten thousand runs reads a
+ten-thousandth. What separates them is how much each has been run.
+
+A disagreement's weight halves every `FLAKE_HALF_LIFE_RUNS` runs that
+follow it. A test that disagreed twice and then passed two hundred times
+has settled; one that passed two hundred times and then disagreed twice
+has just started. Those are the same counts and not the same test, and a
+flat sum over the window gives them the same number. Runs rather than
+days, because what shows a test has settled is running without
+disagreeing, and a test left untouched for three weeks has shown nothing.
+
+Both counts are published beside the share. A share cannot be weighed
+without them, and everything that shows a person this figure — the wall
+and the report a red `main` leaves — shows the counts with it. They are
+counted flat, so they are not what the share divides.
 
 Two things follow from knowing it.
 
@@ -3018,9 +3045,10 @@ observation about it:
   When a test was not selected, the honest statement is that this design
   traded that coverage away, and the comment says so in those words. The
   author did not miss anything; the selector did.
-- **It is accurate about flakes.** A test with a known flake rate is
-  labelled as one, so nobody is told they broke something that breaks on
-  its own.
+- **It is accurate about flakes.** A test the store has seen disagreeing
+  with itself is labelled as one, with the counts behind the label, so
+  nobody is told they broke something that breaks on its own and nobody
+  is asked to take that on trust.
 - **It is actionable and it ends.** Every comment says what to do, and it
   is edited in place rather than repeated when the same thing recurs.
 

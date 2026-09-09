@@ -58,8 +58,21 @@ export interface ManifestEntry {
   /** The inputs behind that score, so a manifest explains itself. */
   inputs: ScoreInputs;
 
-  /** How often it disagrees with itself. */
+  /**
+   * The share of the runs it took part in that it was seen disagreeing
+   * with itself over, rather than the share of the failures among them.
+   */
   flakeRate: number;
+
+  /**
+   * The evidence behind that share, so a manifest explains this figure
+   * as it does the score. Counted flat, where the share weights recent
+   * days more heavily, so the share is not these divided. Absent from a
+   * manifest written before they were published: a reader shows nothing
+   * for it, since refusing the manifest would cost every test its score
+   * to save one column.
+   */
+  flakeEvidence?: FlakeEvidence;
 
   /** How many times a lane runs it. Every one of them must pass. */
   repeats: number;
@@ -77,6 +90,19 @@ export interface ManifestEntry {
    * it has, its siblings are not skipped and the unit is what runs.
    */
   independent?: boolean;
+}
+
+/**
+ * What a flake share was measured over. A share alone cannot be weighed:
+ * one disagreement in two runs and a thousand in two thousand are the
+ * same ratio and not the same claim.
+ */
+export interface FlakeEvidence {
+  /** Runs seen to disagree with another run of the same commit. */
+  flakes: number;
+
+  /** Runs they were seen among, inside the flake window. */
+  runs: number;
 }
 
 /** Why an identity is not selectable on a pull request. */
@@ -294,6 +320,10 @@ function parseEntry(value: unknown): ManifestEntry | undefined {
   if (value.lastRun !== undefined && !isNonEmptyString(value.lastRun)) {
     return undefined;
   }
+  const evidence = parseFlakeEvidence(value.flakeEvidence);
+  if (value.flakeEvidence !== undefined && evidence === undefined) {
+    return undefined;
+  }
   const entry: ManifestEntry = {
     test,
     suite: value.suite,
@@ -306,7 +336,26 @@ function parseEntry(value: unknown): ManifestEntry | undefined {
   };
   if (value.lastRun !== undefined) entry.lastRun = value.lastRun;
   if (value.independent !== undefined) entry.independent = value.independent;
+  if (evidence !== undefined) entry.flakeEvidence = evidence;
   return entry;
+}
+
+/**
+ * Validates the counts behind a flake share. Counts of runs, so neither
+ * is fractional or negative, and a test cannot disagree with itself more
+ * often than it ran.
+ */
+function parseFlakeEvidence(value: unknown): FlakeEvidence | undefined {
+  if (!isRecord(value)) return undefined;
+  const { flakes, runs } = value;
+  if (
+    !isFiniteNumber(flakes) || !Number.isInteger(flakes) || flakes < 0 ||
+    !isFiniteNumber(runs) || !Number.isInteger(runs) || runs < 0 ||
+    flakes > runs
+  ) {
+    return undefined;
+  }
+  return { flakes, runs };
 }
 
 /**
