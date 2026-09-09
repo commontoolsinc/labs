@@ -1,6 +1,8 @@
 /**
  * Tests MailboxMonthHeaders: the tombstone rule, the month window, the sender
- * join, the row ceiling against a hostile limit, and the rendered list.
+ * join, a hostile limit, the failure text, and the rendered list. The row
+ * ceiling needs a month with more rows than it admits, so it is stated in
+ * mailbox-month-headers-ceiling.test.tsx instead.
  *
  * The atom takes no `reactOn`, because a database it only reads has nothing to
  * react to. Its `month` and `limit` inputs are reactive, so a test seeds the
@@ -22,6 +24,7 @@ import {
   Writable,
 } from "commonfabric";
 import {
+  findElement,
   findElementByText,
   findNodeByProp,
   textContent,
@@ -106,11 +109,21 @@ const seedMailbox = handler<void, { db: SqliteDb }>((_, { db }) => {
 });
 
 /**
- * A messages table missing the columns the atom projects, which is what a
- * handle wired to a store of another shape looks like from inside the query.
+ * A messages table carrying every column the join, the filter and the ordering
+ * need, and missing one the atom projects. That is what makes the diagnostic
+ * name the projected column rather than a table the query could not find, so a
+ * later unrelated missing-table failure cannot satisfy the assertion.
  */
 const narrowMessagesTable = () =>
-  table({ id: "integer primary key", received_at: "text" });
+  table({
+    id: "integer primary key",
+    snippet: "text",
+    received_at: "text",
+    sent_at: "text",
+    internal_date: "text",
+    sender_id: "integer",
+    deleted_at: "text",
+  });
 
 /** One row, so the query over the narrow table has a reason to run. */
 const seedNarrow = handler<void, { db: SqliteDb }>((_, { db }) => {
@@ -118,21 +131,6 @@ const seedNarrow = handler<void, { db: SqliteDb }>((_, { db }) => {
     1,
     "2026-03-01T09:00:00Z",
   ]);
-});
-
-/**
- * Seeds 600 live messages in June through one recursive-CTE insert, so the
- * 500-row ceiling has more rows to refuse than it admits. `received_at`
- * encodes the row number, so lexicographic order is row order.
- */
-const seedBulk = handler<void, { db: SqliteDb }>((_, { db }) => {
-  db.exec(
-    "INSERT INTO messages (id, subject, snippet, received_at, sender_id, " +
-      "deleted_at) WITH RECURSIVE c(n) AS (SELECT 1000 UNION ALL " +
-      "SELECT n + 1 FROM c WHERE n < 1599) " +
-      "SELECT n, 'Bulk ' || n, '', " +
-      "'2026-06-01T00:00:00.' || printf('%04d', n) || 'Z', 1, NULL FROM c",
-  );
 });
 
 export default pattern(() => {
@@ -147,12 +145,14 @@ export default pattern(() => {
   const limit = new Writable(200);
   const mailbox = MailboxMonthHeaders({ mail: db, month, limit });
 
-  // A store whose messages table does not carry the columns the atom
-  // projects, and which has no participants table to join.
+  // A store whose messages table is missing a column the atom projects,
+  // everything the join and the window need being present.
   const narrow = sqliteDatabase({
-    tables: { messages: narrowMessagesTable() },
+    tables: {
+      messages: narrowMessagesTable(),
+      participants: participantsTable(),
+    },
   });
-  const seedBulkRows = seedBulk({ db });
   const seedNarrowRow = seedNarrow({ db: narrow });
   const brokenMonth = new Writable("1970-01");
   const broken = MailboxMonthHeaders({ mail: narrow, month: brokenMonth });
@@ -177,6 +177,11 @@ export default pattern(() => {
       // A store of another shape reports why rather than an empty month, and
       // the view says so.
       { assertion: assert(() => broken.errorMessage !== "") },
+      {
+        assertion: assert(() =>
+          broken.errorMessage.includes("no such column: m.subject")
+        ),
+      },
       { assertion: assert(() => broken.headerCount === 0) },
       {
         assertion: assert(() =>
@@ -193,6 +198,15 @@ export default pattern(() => {
       { assertion: assert(() => mailbox.month === "2026-03") },
       { assertion: assert(() => mailbox.errorMessage === "") },
       { assertion: assert(() => mailbox[NAME] === "Mail 2026-03 (3)") },
+
+      // A read that did not fail renders no alert, which is the other half of
+      // the failing-store case: without this, an alert shown over empty text
+      // would satisfy that one.
+      {
+        assertion: assert(() =>
+          findElement(mailbox[UI], "cf-alert") === undefined
+        ),
+      },
 
       // The sender comes from the joined participant, and the snippet from
       // the message; no body column is projected to carry one.
@@ -237,23 +251,9 @@ export default pattern(() => {
       { assertion: assert(() => mailbox.headerCount === 1) },
       { assertion: assert(() => mailbox.errorMessage === "") },
 
-      // A limit past the ceiling reads to the ceiling rather than refusing.
-      // June holds 600 live messages, so 500 is a bound the rows can reach:
-      // the newest 500 come back, and the 501st is not among them.
-      { action: action(() => seedBulkRows.send()) },
-      { action: action(() => limit.set(100000)) },
-      { action: action(() => month.set("2026-06")) },
-      { assertion: assert(() => mailbox.errorMessage === "") },
-      { assertion: assert(() => mailbox.headerCount === 500) },
-      { assertion: assert(() => mailbox.headers[0].subject === "Bulk 1599") },
-      { assertion: assert(() => mailbox.headers[499].subject === "Bulk 1100") },
-
-      // The ceiling named exactly reads the same 500, so the clamp neither
-      // narrows a limit that already sits on it nor lets one past.
-      { action: action(() => limit.set(500)) },
-      { assertion: assert(() => mailbox.headerCount === 500) },
-      { assertion: assert(() => mailbox.headers[0].subject === "Bulk 1599") },
-      { assertion: assert(() => mailbox.headers[499].subject === "Bulk 1100") },
+      // The ceiling a limit past it reads to is stated in
+      // mailbox-month-headers-ceiling.test.tsx, where the month holds more
+      // rows than the ceiling admits.
 
       // A month the seed left empty reads back empty rather than stale, and
       // the view says so.

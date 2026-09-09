@@ -22,6 +22,7 @@ import {
   Writable,
 } from "commonfabric";
 import {
+  findElement,
   findElementByText,
   findNodeByProp,
   textContent,
@@ -167,6 +168,9 @@ export default pattern(() => {
       // A store of another shape reports why rather than an empty month, and
       // the view says so.
       { assertion: assert(() => broken.errorMessage !== "") },
+      {
+        assertion: assert(() => broken.errorMessage.includes("no such column")),
+      },
       { assertion: assert(() => broken.rowCount === 0) },
       {
         assertion: assert(() =>
@@ -188,6 +192,15 @@ export default pattern(() => {
       { assertion: assert(() => ledger.month === "2026-03") },
       { assertion: assert(() => ledger.errorMessage === "") },
       { assertion: assert(() => ledger[NAME] === "Transactions 2026-03 (1)") },
+
+      // A read that did not fail renders no alert, which is the other half of
+      // the failing-store case: without this, an alert shown over empty text
+      // would satisfy that one.
+      {
+        assertion: assert(() =>
+          findElement(ledger[UI], "cf-alert") === undefined
+        ),
+      },
 
       // The rendered list states the same row: its merchant, and the amount
       // formatted under the row's own currency.

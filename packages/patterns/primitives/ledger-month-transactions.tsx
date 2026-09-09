@@ -127,14 +127,9 @@ export const LedgerMonthTransactions = pattern<
   const rowCount = computed(() => (rowsRead.result ?? []).length);
   const pending = computed(() => rowsRead.pending === true);
   const errorMessage = computed(() => errorText(rowsRead.error));
-  // Each of these reads the envelope rather than the cells above it: `!` and
-  // `!==` applied to a computed act on the cell object, which is always
-  // truthy and never equal to a string, so a view gated on one would be
-  // gated on nothing.
-  const hasError = computed(() => errorText(rowsRead.error) !== "");
+  const hasError = computed(() => errorMessage !== "");
   const isEmpty = computed(() =>
-    rowsRead.pending !== true && errorText(rowsRead.error) === "" &&
-    (rowsRead.result ?? []).length === 0
+    !pending && !hasError && (rowsRead.result ?? []).length === 0
   );
 
   const listRows = rows.map((row: LedgerTransaction) => (
