@@ -73,13 +73,18 @@ export type GraphQueryWalkStats = {
 
 /**
  * The rails a crossing-reached document still chases: the ones computed
- * values are supplied through. A plain subscriber whose walk crosses into
- * a piece reads what the piece computes off `result`, and `internal`
- * carries the sub-piece manifests those computations hang off. The
- * remaining rails — pattern, argument, cfc — serve loading and running a
+ * values and their policy closure are supplied through. A plain subscriber
+ * whose walk crosses into a piece reads what the piece computes off `result`,
+ * `internal` carries the sub-piece manifests those computations hang off, and
+ * `cfc` keeps every delivered document's schema policy available with it. The
+ * remaining rails — `pattern` and `argument` — serve loading and running a
  * piece, which is the intent of naming one, not of reaching one.
  */
-const CROSSING_META_RAILS: readonly MetaRail[] = ["result", "internal"];
+const CROSSING_META_RAILS: readonly MetaRail[] = [
+  "cfc",
+  "result",
+  "internal",
+];
 
 export const createGraphQueryWalkStats = (): GraphQueryWalkStats => ({
   coveredSelectorSkips: 0,
@@ -220,16 +225,16 @@ export class GraphQueryWalk {
       },
       undefined,
       undefined,
-      // A document this walk loads through a link crossing chases only the
-      // rails computed values arrive through — `result` and `internal` —
-      // so a subscriber reading THROUGH a piece still receives and stays
-      // subscribed to what the piece computes. The full family belongs to
-      // the documents a query names: `visit()` chases every rail for its
-      // named document, which is what a caller that intends to load and
-      // run one — a piece resume, a setsrc staging read — relies on.
-      // Chasing every rail at every crossing instead multiplies a wide
-      // walk by each visited piece's whole doc set (pattern, argument,
-      // cfc and their recursion) for documents nothing asked to run.
+      // A document this walk loads through a link crossing chases the rails
+      // computed values arrive through — `result` and `internal` — plus the
+      // `cfc` policy closure that accompanies its value. A subscriber reading
+      // THROUGH a piece therefore receives what the piece computes with the
+      // schema needed to interpret its restrictions. The execution family
+      // belongs to documents a query names: `visit()` additionally chases
+      // `pattern` and `argument` for a named document, which is what a caller
+      // that intends to load and run one — a piece resume, a setsrc staging
+      // read — relies on. Chasing those rails at every crossing would multiply
+      // a wide walk by each visited piece's executable inputs.
       CROSSING_META_RAILS,
       // With a sink, the internal rail is registered rather than loaded:
       // a crossed piece's derived cells stay subscribed without shipping
@@ -246,7 +251,8 @@ export class GraphQueryWalk {
    * reaches in the walk's schema tracker. The named document's own metadata
    * family — pattern, source, cfc, and the rest — is recorded with it;
    * documents the walk merely reaches through link crossings are recorded
-   * under the selectors that reached them, without their families.
+   * under the selectors that reached them, with their policy and computed
+   * metadata but without their execution family.
    *
    * The document records under `schemaTrackerKey` over the walk's identity
    * unless the caller passes `docKey`: a caller that named an explicit

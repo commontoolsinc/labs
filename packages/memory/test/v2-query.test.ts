@@ -2327,10 +2327,20 @@ Deno.test("memory v2 extendTrackedGraph attributes the roots it adds", async () 
   }
 });
 
-Deno.test("memory v2 query chases metadata for named roots, not crossings", async () => {
+Deno.test("memory v2 query chases CFC metadata for crossings", async () => {
   const { engine, path } = await createEngine();
   const space = "did:key:z6Mk-memory-v2-query-meta-roots";
   const link = (id: string) => ({ "/": { "link@1": { id, path: [], space } } });
+  const crossingSchema = {
+    type: "object",
+    properties: {
+      name: {
+        type: "string",
+        ifc: { confidentiality: ["crossing-policy"] },
+      },
+    },
+  } as const;
+  const crossingSchemaHash = internSchemaAsTaggedHashString(crossingSchema);
 
   try {
     applyCommit(engine, {
@@ -2358,9 +2368,18 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
           value: { value: { derived: "target cell" } },
         }, {
           op: "set",
+          id: `cid:${crossingSchemaHash}`,
+          value: { value: crossingSchema },
+        }, {
+          op: "set",
           id: "of:crossing-target",
           value: {
             value: { name: "target" },
+            cfc: {
+              version: 1,
+              schemaHash: crossingSchemaHash,
+              labelMap: { version: 1, entries: [] },
+            },
             pattern: link("of:target-family"),
             result: link("of:target-result"),
             internal: [{ link: link("of:target-cell") }, {
@@ -2431,6 +2450,7 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
     assert(ids.has("of:crossing-target"));
     assert(ids.has("of:root-family"));
     assert(ids.has("of:target-result"));
+    assert(ids.has(`cid:${crossingSchemaHash}`));
     assert(!ids.has("of:target-family"));
     // The crossed piece's derived cell is registered, not delivered: its
     // bytes ride its next commit rather than every subscription that can
@@ -2626,6 +2646,19 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
     // document re-walks it WITHOUT promoting it to a named root's
     // family, so what a subscriber holds does not depend on update
     // history.
+    const refreshedSchema = {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          ifc: { confidentiality: ["crossing-policy"] },
+        },
+        revision: { type: "number" },
+      },
+    } as const;
+    const refreshedSchemaHash = internSchemaAsTaggedHashString(
+      refreshedSchema,
+    );
     applyCommit(engine, {
       sessionId: "session:writer",
       invocation: invocationFor(3),
@@ -2635,9 +2668,18 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
         reads: { confirmed: [], pending: [] },
         operations: [{
           op: "set",
+          id: `cid:${refreshedSchemaHash}`,
+          value: { value: refreshedSchema },
+        }, {
+          op: "set",
           id: "of:crossing-target",
           value: {
-            value: { name: "target, renamed" },
+            value: { name: "target, renamed", revision: 2 },
+            cfc: {
+              version: 1,
+              schemaHash: refreshedSchemaHash,
+              labelMap: { version: 1, entries: [] },
+            },
             pattern: link("of:target-family"),
             result: link("of:target-result"),
             internal: [{ link: link("of:target-cell") }],
@@ -2652,6 +2694,11 @@ Deno.test("memory v2 query chases metadata for named roots, not crossings", asyn
       new Set([toDirtyKey("of:crossing-target")]),
     );
     assertExists(crossingRefreshed);
+    assert(
+      crossingRefreshed.updates.has(
+        `${space}/space/cid:${refreshedSchemaHash}`,
+      ),
+    );
     assert(
       !lazyTracked.state.tracker.has(`${space}/space/of:target-family`),
     );
