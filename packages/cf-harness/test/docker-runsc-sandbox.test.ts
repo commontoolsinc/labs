@@ -1224,9 +1224,10 @@ Deno.test("DockerRunscSandboxRuntime reports an unrunnable docker info as indete
 
 Deno.test("DockerRunscSandboxRuntime holds the directories its readiness verdict was read against", async () => {
   // `readonly` is erased at runtime, so it cannot stop a JavaScript caller, a
-  // cast, or `any`. The runtime copies both directories at construction, so a
-  // memoized verdict can never be served for a directory it was not read
-  // against: the drift is not refused, it simply cannot reach anything.
+  // cast, or `any`. What holds is that the runtime takes its own copy at
+  // construction: the caller keeps the object it handed over and can still
+  // write to it, and a memoized verdict can never be served for a directory
+  // it was not read against, because nothing reads that object again.
   const original = await Deno.makeTempDir();
   try {
     const cfcInvocationContext = await enforcingInvocationContext();
@@ -1239,21 +1240,27 @@ Deno.test("DockerRunscSandboxRuntime holds the directories its readiness verdict
       wait!,
       remove!,
     ]);
-    const runtime = new DockerRunscSandboxRuntime(
-      resolveDockerRunscSandboxConfig({
+    // The object the CALLER keeps, mutable as any hand-built config is.
+    const held = {
+      ...resolveDockerRunscSandboxConfig({
         workspaceHostPath: "/host/project",
         cfcInvocationContextDir: original,
       }),
-      runner,
-    );
+    };
+    const runtime = new DockerRunscSandboxRuntime(held, runner);
 
     assertEquals(
       (await runtime.probeCfcTransportReadiness())["invocation-context"]
         ?.status,
       "registered",
     );
-    (runtime.config as { cfcInvocationContextDir?: string })
-      .cfcInvocationContextDir = "/host/drifted";
+    held.cfcInvocationContextDir = "/host/drifted";
+    // And the runtime's own copy is past reach entirely, so the drift cannot
+    // even be written there.
+    assertThrows(() => {
+      (runtime.config as { cfcInvocationContextDir?: string })
+        .cfcInvocationContextDir = "/host/drifted";
+    }, TypeError);
 
     const result = await runtime.run({
       argv: ["/bin/echo", "hello"],

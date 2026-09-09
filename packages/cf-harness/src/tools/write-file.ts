@@ -1,6 +1,9 @@
 import type { JSONSchema } from "@commonfabric/api";
 import type { CfcLabelView, CfcSandboxResult } from "@commonfabric/runner/cfc";
-import type { CfcSandboxResultOrigin } from "../sandbox/types.ts";
+import {
+  CFC_SANDBOX_RESULT_ORIGINS,
+  type CfcSandboxResultOrigin,
+} from "../sandbox/types.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 import {
@@ -29,47 +32,84 @@ export interface WriteFileToolInput {
   cfcInputLabels?: CfcLabelView;
 }
 
-export interface WriteFileToolSuccessOutput {
+/**
+ * The sandbox's record of what one write was exposed to: result and origin,
+ * never one without the other.
+ *
+ * A PERSISTED EVIDENCE SURFACE, and one of two this package adds. It is NOT
+ * what the run's taint is read from — that is collected at the sandbox
+ * invocation boundary, precisely so a tool cannot lose it by dropping a
+ * field. Nothing reads this as a source of labels. It is evidence for a
+ * reader of the run, and a write whose result is absent here costs the record
+ * rather than any decision.
+ *
+ * The two travel together because the origin is what separates the two
+ * records a reader cannot otherwise tell apart: a result the runtime
+ * synthesized carries an empty label, and so does runsc's report of a public
+ * container. A result on its own would be read as the second, which is the
+ * "we had nothing to say" that reads as "nothing was carried". Declared as a
+ * pair rather than as two optional fields so that a record holding one of
+ * them is a value this cannot construct.
+ */
+export interface WriteFileToolCfcEvidence {
+  cfcResult: CfcSandboxResult;
+  cfcResultOrigin: CfcSandboxResultOrigin;
+}
+
+/** `T`, carrying the evidence pair or carrying neither half of it. */
+export type WithCfcEvidence<T> =
+  | (T & WriteFileToolCfcEvidence)
+  | (T & { cfcResult?: never; cfcResultOrigin?: never });
+
+export interface WriteFileToolWroteOutput {
   outputId: string;
   path: string;
   mode: WriteFileMode;
-
-  /**
-   * The sandbox's own CFC result for the write. Kept on the output — and
-   * stripped before the model sees it — as the run's record of what the write
-   * was exposed to.
-   *
-   * A PERSISTED EVIDENCE SURFACE, and one of two this package adds. It is
-   * NOT what the run's taint is read from: that is collected at the sandbox
-   * invocation boundary, precisely so a tool cannot lose it by dropping a
-   * field. Nothing reads this as a source of labels. It is evidence for a
-   * reader of the run, and a write whose result is absent here costs the
-   * record rather than any decision.
-   */
-  cfcResult?: CfcSandboxResult;
-
-  /**
-   * Where that result came from: runsc's own report, or a value the runtime
-   * synthesized because it had none.
-   *
-   * It travels with the result because it is what separates the two records
-   * a reader cannot otherwise tell apart. A synthesized denied result carries
-   * an empty label, and so does a runsc report of a public container; without
-   * the origin beside it, a reader of this artifact would read "the runtime
-   * had nothing to say" as "the container was public". Absent whenever
-   * `cfcResult` is.
-   */
-  cfcResultOrigin?: CfcSandboxResultOrigin;
 }
+
+export type WriteFileToolSuccessOutput = WithCfcEvidence<
+  WriteFileToolWroteOutput
+>;
+
+/**
+ * A failed write carries the evidence too: a command that exited non-zero may
+ * still have truncated or partly written its target, so what that write was
+ * exposed to is worth the same here as on the success path.
+ */
+export type WriteFileToolFailureOutput = WithCfcEvidence<
+  StructuredFileToolErrorOutput
+>;
 
 export type WriteFileToolOutput =
   | WriteFileToolSuccessOutput
-  | StructuredFileToolErrorOutput;
+  | WriteFileToolFailureOutput;
 
 export const WRITE_FILE_MODES: readonly WriteFileMode[] = [
   "replace",
   "append",
 ];
+
+/**
+ * The evidence pair as schema, for both arms of the output.
+ *
+ * `dependentRequired` is the pair stated where a validator can act on it: a
+ * record holding one half is refused rather than accepted as a record that
+ * happens to be missing a field. The failure arm needs these declared as much
+ * as the success arm does — its schema closes to additional properties, so
+ * evidence on a failed write would otherwise make the persisted shape
+ * something the declared contract rejects.
+ */
+const CFC_EVIDENCE_SCHEMA_PROPERTIES = {
+  cfcResult: { type: "object" },
+  cfcResultOrigin: { type: "string", enum: [...CFC_SANDBOX_RESULT_ORIGINS] },
+} as const;
+
+const CFC_EVIDENCE_SCHEMA_DEPENDENCIES = {
+  dependentRequired: {
+    cfcResult: ["cfcResultOrigin"],
+    cfcResultOrigin: ["cfcResult"],
+  },
+} as const;
 
 export const writeFileToolDescriptor: HarnessToolDescriptor = {
   toolId: "write_file",
@@ -95,12 +135,19 @@ export const writeFileToolDescriptor: HarnessToolDescriptor = {
         outputId: { type: "string" },
         path: { type: "string" },
         mode: { type: "string", enum: [...WRITE_FILE_MODES] },
-        cfcResult: { type: "object" },
-        cfcResultOrigin: { type: "string" },
+        ...CFC_EVIDENCE_SCHEMA_PROPERTIES,
       },
       required: ["outputId", "path", "mode"],
       additionalProperties: false,
-    }, structuredFileToolErrorOutputSchema],
+      ...CFC_EVIDENCE_SCHEMA_DEPENDENCIES,
+    }, {
+      ...structuredFileToolErrorOutputSchema,
+      properties: {
+        ...structuredFileToolErrorOutputSchema.properties,
+        ...CFC_EVIDENCE_SCHEMA_PROPERTIES,
+      },
+      ...CFC_EVIDENCE_SCHEMA_DEPENDENCIES,
+    }],
   } satisfies JSONSchema,
   tags: ["file", "write", "vm"],
 };
@@ -119,12 +166,15 @@ const cfcEvidenceOf = (
     cfcResult?: CfcSandboxResult;
     cfcResultOrigin?: CfcSandboxResultOrigin;
   },
-): { cfcResult?: CfcSandboxResult; cfcResultOrigin?: CfcSandboxResultOrigin } =>
+): WriteFileToolCfcEvidence | Record<PropertyKey, never> =>
   result.cfcResult === undefined ? {} : {
     cfcResult: result.cfcResult,
-    ...(result.cfcResultOrigin !== undefined
-      ? { cfcResultOrigin: result.cfcResultOrigin }
-      : {}),
+    // A runtime that reported a result and no origin did not say where it came
+    // from, and the taint reader already reads that silence as synthetic —
+    // only `runsc-taint` counts as runsc's own. Writing it down here rather
+    // than leaving the field off keeps the record self-describing, and keeps
+    // "the runtime had nothing to say" from reading as a public container.
+    cfcResultOrigin: result.cfcResultOrigin ?? "synthetic",
   };
 
 export const writeFileTool: HarnessToolDefinition<

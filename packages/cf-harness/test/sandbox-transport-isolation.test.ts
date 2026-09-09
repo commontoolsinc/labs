@@ -15,7 +15,11 @@ import { describe, it } from "@std/testing/bdd";
 import { runCfHarnessCli } from "../src/cli.ts";
 import { createFileSystemHarnessArtifactStore } from "../src/artifacts.ts";
 import { CfHarnessEngine } from "../src/engine.ts";
-import { resolveDockerRunscSandboxConfig } from "../src/sandbox/docker-runsc.ts";
+import {
+  DockerRunscSandboxRuntime,
+  resolveDockerRunscSandboxConfig,
+} from "../src/sandbox/docker-runsc.ts";
+import type { DockerRunscAdditionalMount } from "../src/sandbox/types.ts";
 
 describe("CFC sidecar transport isolation", () => {
   // The harness writes the invocation context a container starts tainted
@@ -23,6 +27,62 @@ describe("CFC sidecar transport isolation", () => {
   // Neither claim survives the directory being writable by the workload it
   // describes: a container that can rewrite its own result sidecar names its
   // own taint.
+
+  it("decides on the workspace path it was first given, and emits that one", () => {
+    // The caller's object is data, and a property on it can be an accessor.
+    // Checking one read and building the config from another is the whole
+    // failure: the containment check passes against a workspace that never
+    // reaches the mount, and the launch binds the one it never saw.
+    let reads = 0;
+    const options = {
+      get workspaceHostPath() {
+        reads += 1;
+        return reads === 1 ? "/host/project" : "/host/sidecars";
+      },
+      cfcResultDir: "/host/sidecars/results",
+    };
+
+    const config = resolveDockerRunscSandboxConfig(options);
+
+    expect(reads).toBe(1);
+    expect(config.workspaceHostPath).toBe("/host/project");
+    expect(config.cfcResultDir).toBe("/host/sidecars/results");
+  });
+
+  it("launches from mounts no later hand can move", () => {
+    // The check runs once over these paths and the launch reads them again.
+    // A caller holding the config it constructed the runtime with must not be
+    // able to move a mount between those two reads, push another, or flip a
+    // checked read-only mount to writable.
+    const config = resolveDockerRunscSandboxConfig({
+      workspaceHostPath: "/host/project",
+      additionalMounts: [{
+        kind: "host-bind",
+        name: "docs",
+        hostPath: "/host/docs",
+        sandboxPath: "/docs",
+        readOnly: true,
+      }],
+    });
+    const mutable = {
+      ...config,
+      additionalMounts: config.additionalMounts.map((mount) => ({ ...mount })),
+    };
+    const runtime = new DockerRunscSandboxRuntime(mutable);
+
+    mutable.workspaceHostPath = "/host/elsewhere";
+    (mutable.additionalMounts as DockerRunscAdditionalMount[])[0] = {
+      kind: "host-bind",
+      name: "docs",
+      hostPath: "/host/docs",
+      sandboxPath: "/docs",
+      readOnly: false,
+    };
+
+    const mounts = runtime.describe().cfc?.mounts ?? [];
+    expect(mounts[0]?.hostPath).toBe("/host/project");
+    expect(mounts[1]?.readOnly).toBe(true);
+  });
 
   it("refuses to resolve a host path it could not read", () => {
     // The comparison is on REAL paths, so a failure to resolve one is not a

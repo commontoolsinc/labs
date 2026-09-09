@@ -73,6 +73,32 @@ const HIDDEN_LABEL_CLAUSE: HiddenKeyRule = (key) =>
  */
 const HIDDEN_ARRAY_MEMBER: HiddenKeyRule = (key) => key !== "length";
 
+/** One past the largest array index ECMAScript defines. */
+const ARRAY_INDEX_LIMIT = 2 ** 32 - 1;
+
+/**
+ * How many members an array says it has, or `undefined` when it will not say.
+ *
+ * A list's length is data about it that no walk over its keys recovers: a hole
+ * leaves no key at all, so `[ , ]` and `[]` enumerate identically while the
+ * first says it holds two members and the second none. Everything downstream
+ * reads a clause by iterating it, and iterating the shorter copy is one
+ * requirement fewer than the source states. Taken once, through the
+ * descriptor, like every other value here — a `get` trap never sees it, and a
+ * second answer has nothing left to change.
+ */
+const inertArrayLength = (container: object): number | undefined => {
+  const descriptor = Object.getOwnPropertyDescriptor(container, "length");
+  if (descriptor === undefined || !("value" in descriptor)) {
+    return undefined;
+  }
+  const { value } = descriptor;
+  return typeof value === "number" && Number.isInteger(value) &&
+      value >= 0 && value < ARRAY_INDEX_LIMIT
+    ? value
+    : undefined;
+};
+
 /**
  * The own enumerable DATA entries of a container, read once.
  *
@@ -161,11 +187,15 @@ const inertJsonCopy = (
     if (!isInertContainer(container)) {
       return undefined;
     }
+    const isArray = Array.isArray(container);
     const entries = inertEntries(
       container,
-      Array.isArray(container) ? HIDDEN_ARRAY_MEMBER : SKIP_HIDDEN,
+      isArray ? HIDDEN_ARRAY_MEMBER : SKIP_HIDDEN,
     );
     if (entries === undefined) {
+      return undefined;
+    }
+    if (isArray && inertArrayLength(container) !== entries.length) {
       return undefined;
     }
     open.add(container);
@@ -210,9 +240,6 @@ const inertJsonCopy = (
   return { value: first.target };
 };
 
-/** One past the largest array index ECMAScript defines. */
-const ARRAY_INDEX_LIMIT = 2 ** 32 - 1;
-
 /**
  * Writes one entry into the copy, or reports that it cannot be written.
  *
@@ -222,7 +249,9 @@ const ARRAY_INDEX_LIMIT = 2 ** 32 - 1;
  * number: it is past the last index ECMAScript defines, so assigning it
  * leaves a list that still iterates as empty. A gap is refused for the same
  * reason a hidden member is — the copy would carry fewer members than the
- * source, which is data the merge reads as one requirement fewer.
+ * source, which is data the merge reads as one requirement fewer. A gap at
+ * the END leaves no key to catch it here, which is what the length check at
+ * the frame is for.
  *
  * `defineProperty` rather than assignment, so that what lands is an own data
  * property whatever the key is. `__proto__` is the one that makes the

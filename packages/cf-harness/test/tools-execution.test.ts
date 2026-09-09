@@ -34,7 +34,12 @@ import {
   toModelFacingWebFetchOutput,
 } from "../src/tools/web-fetch.ts";
 import { viewImageTool } from "../src/tools/view-image.ts";
-import { writeFileTool } from "../src/tools/write-file.ts";
+import {
+  writeFileTool,
+  writeFileToolDescriptor,
+} from "../src/tools/write-file.ts";
+import { isStructuredFileToolErrorOutput } from "../src/tools/file-errors.ts";
+import { CFC_SANDBOX_RESULT_ORIGINS } from "../src/sandbox/types.ts";
 import type { HarnessToolContext } from "../src/tools/types.ts";
 import type {
   ProcessRunner,
@@ -3188,11 +3193,62 @@ Deno.test("write_file keeps the sandbox's evidence, origin and all, on a failed 
   const output = await writeFileTool.invoke(createContext(sandbox), {
     path: "notes/todo.txt",
     content: "line one\n",
-  }) as unknown as Record<string, unknown>;
+  });
 
+  // Read off the declared type rather than through a cast: the failure arm
+  // carries the pair, and a cast here would hide it if it stopped doing so.
   assertEquals(output.cfcResult, cfcResult);
   assertEquals(output.cfcResultOrigin, "synthetic");
-  assertEquals(output.ok, false);
+  assertEquals(isStructuredFileToolErrorOutput(output), true);
+});
+
+Deno.test("write_file attributes a result whose origin the runtime withheld", async () => {
+  // A result with no origin is a record its reader cannot place, and the
+  // taint reader already treats that silence as synthetic — only
+  // `runsc-taint` counts as runsc's own. Writing it down keeps "the runtime
+  // had nothing to say" from being read as a public container.
+  const cfcResult = observedCfcResult("");
+  const sandbox = new FakeSandboxRuntime([{
+    stdout: "",
+    stderr: "",
+    exitCode: 0,
+    cfcResult,
+  }]);
+
+  const output = await writeFileTool.invoke(createContext(sandbox), {
+    path: "notes/todo.txt",
+    content: "line one\n",
+  });
+
+  assertEquals(output.cfcResultOrigin, "synthetic");
+});
+
+Deno.test("write_file declares the evidence pair on both arms of its output", async () => {
+  // The persisted shape has to be one the declared contract accepts, on the
+  // failure arm as much as the success arm — that arm closes to additional
+  // properties, so evidence on a failed write would otherwise be a record the
+  // tool's own schema rejects. And each half has to bring the other, or a
+  // result-only record validates and a reader cannot place it.
+  const branches = (writeFileToolDescriptor.outputSchema as unknown as {
+    oneOf: Array<{
+      properties?: Record<string, unknown>;
+      dependentRequired?: Record<string, readonly string[]>;
+    }>;
+  }).oneOf;
+
+  assertEquals(branches.length, 2);
+  for (const branch of branches) {
+    assertEquals(typeof branch.properties?.cfcResult, "object");
+    assertEquals(
+      branch.properties?.cfcResultOrigin,
+      { type: "string", enum: [...CFC_SANDBOX_RESULT_ORIGINS] },
+    );
+    assertEquals(branch.dependentRequired, {
+      cfcResult: ["cfcResultOrigin"],
+      cfcResultOrigin: ["cfcResult"],
+    });
+  }
+  await Promise.resolve();
 });
 
 Deno.test("write_file tool merges explicit trusted CFC labels with write inputs", async () => {

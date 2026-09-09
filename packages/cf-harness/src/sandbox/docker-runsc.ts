@@ -349,9 +349,63 @@ const refuseSandboxVisibleTransportDir = (
   }
 };
 
-export const resolveDockerRunscSandboxConfig = (
+/**
+ * Every option taken once, before anything is checked against it.
+ *
+ * The caller's object is data from outside this function, and a property on
+ * it can be an accessor. Validating one read and building the config from
+ * another is the shape this whole change exists to close: the containment
+ * check would pass against a workspace path that never reaches the mount, and
+ * the launch would bind the one it did not see. Nothing below reads
+ * `options` again — this is what the rest of the resolver works from.
+ */
+const snapshotResolveOptions = (
   options: ResolveDockerRunscSandboxConfigOptions,
+): ResolveDockerRunscSandboxConfigOptions => ({
+  dockerBinary: options.dockerBinary,
+  runtimeName: options.runtimeName,
+  image: options.image,
+  containerUser: options.containerUser,
+  workspaceHostPath: options.workspaceHostPath,
+  workspaceMountPath: options.workspaceMountPath,
+  shellPath: options.shellPath,
+  dockerNetworkMode: options.dockerNetworkMode,
+  additionalMounts: options.additionalMounts === undefined
+    ? undefined
+    : [...options.additionalMounts],
+  extraDockerArgs: options.extraDockerArgs === undefined
+    ? undefined
+    : [...options.extraDockerArgs],
+  cfcResultDir: options.cfcResultDir,
+  cfcInvocationContextDir: options.cfcInvocationContextDir,
+  artifactRootHostPath: options.artifactRootHostPath,
+});
+
+/**
+ * A config the runtime owns, past the reach of whoever handed it over.
+ *
+ * The containment check runs once, over the paths this holds; the launch
+ * reads them again to build the Docker command. A field that can change
+ * between those two reads is a mount nothing checked, so the object the
+ * launch reads from is frozen — the mounts array and each mount with it,
+ * since pushing one is as good as changing one. `readonly` says this in the
+ * type, which is worth having and is not a runtime boundary; this is.
+ */
+const frozenSandboxConfig = (
+  config: DockerRunscSandboxConfig,
 ): DockerRunscSandboxConfig => {
+  for (const mount of config.additionalMounts) {
+    Object.freeze(mount);
+  }
+  Object.freeze(config.additionalMounts);
+  Object.freeze(config.extraDockerArgs);
+  return Object.freeze(config);
+};
+
+export const resolveDockerRunscSandboxConfig = (
+  given: ResolveDockerRunscSandboxConfigOptions,
+): DockerRunscSandboxConfig => {
+  const options = snapshotResolveOptions(given);
   const containerUser = options.containerUser ?? resolveDefaultContainerUser();
   const workspaceMountPath = validateSandboxRoot(
     options.workspaceMountPath ?? DEFAULT_WORKSPACE_MOUNT_PATH,
@@ -430,7 +484,7 @@ export const resolveDockerRunscSandboxConfig = (
       writableMounts,
     );
   }
-  return {
+  return frozenSandboxConfig({
     dockerBinary: options.dockerBinary ?? DEFAULT_DOCKER_BINARY,
     runtimeName: options.runtimeName ?? DEFAULT_DOCKER_RUNTIME_NAME,
     image: options.image ?? DEFAULT_DOCKER_RUNSC_IMAGE,
@@ -447,7 +501,7 @@ export const resolveDockerRunscSandboxConfig = (
     ...(cfcInvocationContextDir !== undefined
       ? { cfcInvocationContextDir }
       : {}),
-  };
+  });
 };
 
 /**
@@ -1031,10 +1085,28 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
   readonly #extraDockerArgs: readonly string[];
   readonly #runner: ProcessRunner;
 
+  /**
+   * The config this runtime launches from: its OWN copy, frozen.
+   *
+   * A caller keeps a reference to whatever it constructed this with, and the
+   * mounts are read again at launch, so a config that stayed the caller's
+   * would let the workspace path move — or a mount be pushed, or a checked
+   * read-only one flipped writable — after the containment check had already
+   * passed on it. Copied here rather than trusted to have been frozen by the
+   * resolver, because a hand-built config never went through it.
+   */
+  readonly config: DockerRunscSandboxConfig;
+
   constructor(
-    readonly config: DockerRunscSandboxConfig,
+    config: DockerRunscSandboxConfig,
     runner: ProcessRunner = new DenoProcessRunner(),
   ) {
+    this.config = frozenSandboxConfig({
+      ...config,
+      additionalMounts: config.additionalMounts.map((mount) => ({ ...mount })),
+      extraDockerArgs: [...config.extraDockerArgs],
+    });
+    config = this.config;
     this.#cfcInvocationContextDir = config.cfcInvocationContextDir;
     this.#cfcResultDir = config.cfcResultDir;
     this.#dockerBinary = config.dockerBinary;

@@ -178,7 +178,13 @@ export type CfcTransportReadiness = {
  * would let unreadable evidence mint an unlabeled cell. Absent means the same
  * as `synthetic`: nothing established where it came from.
  */
-export type CfcSandboxResultOrigin = "runsc-taint" | "synthetic";
+/** Every origin a sandbox result can be attributed to. */
+export const CFC_SANDBOX_RESULT_ORIGINS = [
+  "runsc-taint",
+  "synthetic",
+] as const;
+
+export type CfcSandboxResultOrigin = typeof CFC_SANDBOX_RESULT_ORIGINS[number];
 
 export interface SandboxCommandRequest {
   argv: string[];

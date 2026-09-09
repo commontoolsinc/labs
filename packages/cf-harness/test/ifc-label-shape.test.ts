@@ -141,8 +141,8 @@ describe("inertLabelSnapshot()", () => {
     // whatever check runs first, then reports something else when the value
     // is read again. The answer is not to detect the lie — a proxy can trap
     // any read — but to read each thing ONCE, through descriptors, and copy
-    // as we go. A `length` that changes between reads then has nothing to act
-    // on, because it was never consulted.
+    // as we go. The length is taken from its descriptor, so a `get` trap on
+    // it never runs and a second answer has nothing left to change.
     let lengthReads = 0;
     const lying = new Proxy(["finance"], {
       get(target, key, receiver) {

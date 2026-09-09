@@ -189,6 +189,18 @@ describe("a run's accumulated sandbox taint", () => {
           return clause;
         })(),
       ],
+      // A gap at the END leaves no key behind at all, so nothing in a walk
+      // over the keys catches it: the list says it holds members and
+      // enumerates fewer. Only what it says about its own length does.
+      [
+        "a gap where the last member should be",
+        (() => {
+          const clause: unknown[] = ["finance"];
+          clause.length = 3;
+          return clause;
+        })(),
+      ],
+      ["nothing but the gap", new Array(1)],
     ];
 
     for (const [shape, confidentiality] of lists) {
