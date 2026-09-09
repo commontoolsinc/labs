@@ -192,9 +192,10 @@ export interface HarnessRunState {
    * channel out of the container itself is one that workload can write, so
    * nothing read from inside contributes here.
    *
-   * A record for a reader of the run: it is how a reader of the artifacts
-   * learns what the run's sandbox work was exposed to, and what a resumed run
-   * seeds its own state from.
+   * Observability rather than authority: nothing in this package reads it as
+   * a source of labels. It is how a reader of the artifacts learns what the
+   * run's sandbox work was exposed to, and what a resumed run seeds its own
+   * state from.
    */
   cfcSandboxTaint?: HarnessSandboxTaint;
 

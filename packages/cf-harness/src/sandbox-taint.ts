@@ -1,23 +1,25 @@
 /**
- * What a run run's sandbox work is known to have been exposed to, and
- * whether that knowledge is complete.
+ * What a run's sandbox work is known to have been exposed to, and whether
+ * that knowledge is complete.
  *
- * `ingest_sandbox_file` mints a cell's label from this and nothing else, so
- * two things have to hold at once: every sandbox invocation the run ran
- * must have contributed, and any invocation that ran without leaving trusted
- * evidence must be visible as a hole rather than as an absence of taint. The
- * second is why this is a state rather than a label. An invocation whose
- * result carries no readable container taint could have written anything under
- * any label, so the run's knowledge is not "clean" — it is gone, and it
- * does not come back within the run. There is no recovery, because nothing
- * later can establish what that invocation did.
+ * OBSERVABILITY, NOT AUTHORITY. Nothing in this package consumes this as a
+ * source of labels: no value is minted from it and no decision turns on it.
+ * It is what a reader of a run learns about the containers that run started —
+ * which requirements their work carried, and whether the harness can still
+ * account for all of them. Kept honest to that standard rather than a weaker
+ * one because the moment something DOES read it as authority, the difference
+ * between "nothing was carried" and "we cannot say" becomes the difference
+ * between a correct label and a silently wrong one, and a record built on the
+ * weaker standard would already be wrong by then.
  *
- * Held per run, keyed by the root run's id, because a delegated child
- * shares its parent's workspace and sandbox: a child's taint has to reach its
- * parent's ingest and the parent's has to reach the child's.
+ * That is why this is a state rather than a label. An invocation whose result
+ * carries no readable container taint could have done anything, so the run's
+ * knowledge is not "clean" — it is gone, and it does not come back within the
+ * run. There is no recovery, because nothing later can establish what that
+ * invocation did.
  *
  * Module-private, and reachable only through these functions. The state is
- * trusted evidence about untrusted work, so nothing that a tool input or a
+ * trusted evidence about untrusted work, so nothing a tool input or a
  * sandboxed workload can reach may set it.
  */
 

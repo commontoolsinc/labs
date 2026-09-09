@@ -1188,7 +1188,14 @@ export class CfHarnessEngine {
     return structuredClone(this.#syncSandboxTaint());
   }
 
-  /** What is known about this run's sandbox work, and how completely. */
+  /**
+   * What is known about this run's sandbox work, and how completely.
+   *
+   * Observability rather than authority: nothing here mints a value from it
+   * or decides anything by it. It is evidence about the containers this run
+   * started, held to the standard a label source would need so that it is
+   * already correct if something ever becomes one.
+   */
   get sandboxTaint(): HarnessSandboxTaint {
     return sandboxTaint(this.#runState.runId);
   }
