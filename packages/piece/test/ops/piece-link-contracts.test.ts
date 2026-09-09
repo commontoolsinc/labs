@@ -4,7 +4,7 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 
 import { valueEqual } from "@commonfabric/data-model";
-import { createSession, Identity } from "@commonfabric/identity";
+import { createSession, Identity, type Session } from "@commonfabric/identity";
 import {
   isLink,
   parseLinkOrThrow,
@@ -78,8 +78,20 @@ describe("PiecesController", () => {
   describe("instance members", () => {
     describe("link()", () => {
       let storage: ReturnType<typeof StorageManager.emulate>;
+      let session: Session;
       let runtime: Runtime;
       let pieces: PiecesController;
+
+      /** Opens the stored pieces in a runtime with no running graphs. */
+      async function reopenPieces(): Promise<void> {
+        await runtime.dispose({ closeStorage: false });
+        runtime = new Runtime({
+          apiUrl: new URL("http://toolshed.test"),
+          storageManager: storage,
+        });
+        pieces = new PiecesController(session, runtime);
+        await pieces.synced();
+      }
 
       beforeEach(async () => {
         storage = StorageManager.emulate({ as: signer });
@@ -87,19 +99,75 @@ describe("PiecesController", () => {
           apiUrl: new URL("http://toolshed.test"),
           storageManager: storage,
         });
-        pieces = new PiecesController(
-          await createSession({
-            identity: signer,
-            spaceName: crypto.randomUUID(),
-          }),
-          runtime,
-        );
+        session = await createSession({
+          identity: signer,
+          spaceName: crypto.randomUUID(),
+        });
+        pieces = new PiecesController(session, runtime);
         await pieces.synced();
       });
 
       afterEach(async () => {
         await runtime.dispose();
         await storage.close();
+      });
+
+      it("starts a cold target and materializes the admitted binding by default", async () => {
+        const source = await pieces.create(rowProducer());
+        const targetId = (await pieces.create(rowConsumer("ReadonlyCell"))).id;
+        await reopenPieces();
+        const target = await pieces.get(targetId, false);
+        expect(runtime.runner.cancels.size).toBe(0);
+        expect(pieces.getResult(target.getCell()).get()).toEqual({
+          label: "empty",
+        });
+
+        await pieces.link(source.id, ["rows"], target.id, ["rows"]);
+
+        expect(pieces.getResult(target.getCell()).get()).toEqual({
+          label: "A",
+        });
+        expect(runtime.runner.cancels.size).toBeGreaterThan(0);
+      });
+
+      it("stores an admitted binding with start false while the cold target stays stopped", async () => {
+        const source = await pieces.create(rowProducer());
+        const targetId = (await pieces.create(rowConsumer("ReadonlyCell"))).id;
+        await reopenPieces();
+        const target = await pieces.get(targetId, false);
+        expect(runtime.runner.cancels.size).toBe(0);
+
+        await pieces.link(source.id, ["rows"], target.id, ["rows"], {
+          start: false,
+        });
+
+        expect(runtime.runner.cancels.size).toBe(0);
+        const argument = pieces.getArgument(target.getCell());
+        const link = parseLinkOrThrow(argument.key("rows").getRaw(), argument);
+        expect(link.id).toBe(source.getCell().getAsNormalizedFullLink().id);
+        expect(link.path).toEqual(["rows"]);
+        expect(pieces.getResult(target.getCell()).get()).toEqual({
+          label: "empty",
+        });
+      });
+
+      it("leaves a cold target stopped and unchanged when admission fails", async () => {
+        const source = await pieces.create(rowProducer());
+        const targetId = (await pieces.create(rowConsumer("Writable"))).id;
+        await reopenPieces();
+        const target = await pieces.get(targetId, false);
+        const argument = pieces.getArgument(target.getCell());
+        const before = argument.getRawUntyped();
+        expect(runtime.runner.cancels.size).toBe(0);
+
+        await expect(pieces.link(source.id, ["rows"], target.id, ["rows"]))
+          .rejects.toThrow("rows[].piece");
+
+        expect(runtime.runner.cancels.size).toBe(0);
+        expect(valueEqual(argument.getRawUntyped(), before)).toBe(true);
+        expect(pieces.getResult(target.getCell()).get()).toEqual({
+          label: "empty",
+        });
       });
 
       it("refuses a writable row projection before changing either endpoint", async () => {

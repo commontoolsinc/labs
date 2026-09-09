@@ -2348,14 +2348,15 @@ export function assertSuppliedLinkSchemasCompatible(
 
     /**
      * The prior pattern's argument schema, supplied only on a pattern update
-     * over existing state. A linked document with no producer-owned metadata —
+     * over existing state. For callers without `allowUnprovenSource`, a
+     * linked document with no producer-owned metadata —
      * e.g. a mergeable-push element doc, which is created under the piece's
      * own write authority and never carries any — is then held to the prior
      * contract at the link's own path instead of failing closed outright: the
      * proof becomes prior-contract ⊆ candidate, so a candidate that narrows
-     * away values the piece may already hold is still rejected. Without this
-     * prior contract or an explicit `allowUnprovenSource`, a source without
-     * durable metadata is refused.
+     * away values the piece may already hold is still rejected. Absent this
+     * option (every non-update flow), an unprovable source stays a hard error,
+     * so a fresh link to an arbitrary contract-less document is still refused.
      */
     priorArgumentSchema?: JSONSchema;
 

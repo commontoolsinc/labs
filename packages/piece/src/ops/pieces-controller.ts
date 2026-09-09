@@ -1834,6 +1834,7 @@ export class PiecesController<T = unknown> {
     }
 
     if (targetIsPiece && start) {
+      await this.runtime.start(targetCell);
       await this.getResult(targetCell).pull();
     }
     await this.synced();

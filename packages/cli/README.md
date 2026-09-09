@@ -447,6 +447,10 @@ target piece's argument. Rebinding a terminal path replaces that connection; it
 does not write through the previous producer. Binding a Stream stores its handle
 without sending an event.
 
+After the binding commits, linking starts the target piece and materializes its
+result. `--no-start` stores the binding without starting the target. A rejected
+binding leaves a stopped target stopped.
+
 The Piece API checks the binding before committing it. A producer with durable
 schema metadata must supply values the consumer can read. A writable consumer
 must also restrict its writes to values the producer accepts. Capability and
