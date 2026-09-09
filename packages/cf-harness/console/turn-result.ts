@@ -16,7 +16,10 @@ import type {
   HarnessChatEventEnvelope,
   HarnessChatStructuredEvent,
 } from "../src/contracts/interactive-chat.ts";
-import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
+import type {
+  HarnessToolTranscriptMessage,
+  HarnessTranscriptMessage,
+} from "../src/contracts/transcript.ts";
 
 /** A named piece a completed console turn made openable. */
 export interface ConsoleTurnResultPiece {
@@ -124,9 +127,8 @@ interface TurnRunArtifacts {
 const callArguments = (
   artifacts: TurnRunArtifacts,
   resultIndex: number,
+  result: HarnessToolTranscriptMessage,
 ): Record<string, unknown> | undefined => {
-  const result = artifacts.transcript[resultIndex];
-  if (result.role !== "tool") return undefined;
   const matches = artifacts.transcript.flatMap((message, index) => {
     if (
       index >= resultIndex || !artifacts.currentTranscriptIndexes.has(index) ||
@@ -284,7 +286,7 @@ export const readConsoleTurnResult = async (
     try {
       const output: unknown = JSON.parse(message.content);
       if (!isLoomAuthoredObservation(output)) return [];
-      const args = callArguments(artifacts, index);
+      const args = callArguments(artifacts, index, message);
       const ids = output.receipt.component_ids as string[];
       // compose preserves request order in component_ids. This correlation
       // needs both the matching successful call and its exact receipt; it is
@@ -317,12 +319,15 @@ export const readConsoleTurnResult = async (
       : {}),
     looms,
     pieces: artifacts.transcript.flatMap((message, index) => {
-      if (!artifacts.currentTranscriptIndexes.has(index)) {
+      if (
+        !artifacts.currentTranscriptIndexes.has(index) ||
+        message.role !== "tool"
+      ) {
         return [];
       }
       const piece = pieceFromAssignSlug(message);
       if (piece === undefined) return [];
-      const args = callArguments(artifacts, index);
+      const args = callArguments(artifacts, index, message);
       const coverage = typeof args?.token === "string"
         ? membership.get(args.token)
         : undefined;
