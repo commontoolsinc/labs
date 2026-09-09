@@ -741,11 +741,11 @@ without reading pattern source. The pieces exist:
   `packages/cli/lib/callable.ts`).
 - **Enumeration**: `cf piece verbs --json` lists every callable — name, kind
   (handler/tool), which cell it lives on, and its input schema (tools also
-  carry their output schema) — walking result-then-input with the same
-  classification `cf piece call` resolves through, so the listing and the
-  dispatcher cannot disagree. FUSE independently classifies the same entries
-  (`classifyCallableEntry`, `packages/fuse/callables.ts`) into `.handler` /
-  `.tool` files plus a
+  carry their output schema) — read off the compiled pattern the piece is
+  pinned to: its declared result type, its result graph, and its declared
+  argument type, with no read of the piece's data. FUSE independently
+  classifies the same entries (`classifyCallableEntry`,
+  `packages/fuse/callables.ts`) into `.handler` / `.tool` files plus a
   `.handlers` listing — flagged on the board as neither universal nor
   complete.
 

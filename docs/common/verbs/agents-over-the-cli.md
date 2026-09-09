@@ -64,8 +64,8 @@ as `cf cell get`, so a survey can be narrowed on the way out.
 it names the deployed pattern and lists every callable verb with its prose and
 the schemas a payload is judged against, which is what a caller needs to act.
 Each of the reads below is its own cold CLI process. `verbs` and `describe` load
-the stored callable surface and pattern metadata without starting the piece;
-they are still not a preflight to run together, so reach for the others when
+the compiled pattern without starting the piece or reading its data; they are
+still not a preflight to run together, so reach for the others when
 the question they answer comes up. `cf piece describe` prints the piece's man
 page — what it is, what it holds, what a caller supplies, and what it can do —
 with every sentence compiled from the pattern's own doc comments:
@@ -168,9 +168,10 @@ Every command here can return an empty or absent answer for a reason other than
 the one a caller expects. These are the conclusions the surface does not support:
 
 **An empty verb listing is not proof that no such verb exists.** A listing can
-be short in three ways. A handler whose stored schema carries no stream marker
-is callable but not listed at all. A listing whose compiled pattern could not be
-read reports `incomplete` rather than passing a short list off as the surface.
+be short in three ways. A handler the piece stores that its pinned pattern
+neither declares nor wires is callable by name but not listed at all. A listing
+whose compiled pattern could not be read is empty, and reports `incomplete`
+rather than passing that emptiness off as the surface.
 And the default view withholds wrapper-tier and deprecated verbs, reporting the
 count under `hidden`. Only the third is recoverable — `--all` lists those rows;
 nothing recovers a verb the pattern could not be read to name.
