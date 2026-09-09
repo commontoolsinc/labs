@@ -32,7 +32,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
-import type { FabricValue } from "@commonfabric/api";
+import type { FabricValue, JSONSchema } from "@commonfabric/api";
 import type { Signer, URI } from "@commonfabric/memory/interface";
 import {
   decodeMemoryBoundary,
@@ -41,11 +41,13 @@ import {
   type SessionSync,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
+import { mapLinkSchemas } from "@commonfabric/memory/v2/schema-table-links";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import type { SessionFactory, SpaceReplica } from "../src/storage/v2.ts";
 import { Runtime, type RuntimeFetch } from "../src/runtime.ts";
+import { collectExternalSchemaRefHashes } from "../src/schema-decompose.ts";
 import type {
   IExtendedStorageTransaction,
   MemorySpace,
@@ -97,9 +99,10 @@ function rootSource(marker: string): string {
  * A loopback session factory whose frames reach the client with every `cid:`
  * upsert dropped, the absorb defect placed at the wire: the replica applies
  * exactly the frames a defective client would hand it. Counts what it
- * dropped and records the ids of the documents it let through that
- * mention a `cid:` schema — the ones the replica's arrival validation
- * has to hold against the dropped schema.
+ * dropped and records the ids of the documents it let through whose link
+ * schemas reference a `cid:` schema document — the delivery obligation the
+ * replica's arrival validation holds each one to, which the dropped
+ * schema leaves unmet.
  */
 class CidDroppingSessionFactory implements SessionFactory {
   droppedCids = 0;
@@ -182,8 +185,15 @@ class CidDroppingSessionFactory implements SessionFactory {
         this.droppedCids += 1;
         return false;
       }
-      if (JSON.stringify(upsert).includes("cid:")) {
-        this.cidMentioningIds.add(upsert.id);
+      if (upsert.doc !== undefined && upsert.doc !== null) {
+        // The validator's own predicate: a `cid:` reference in a link-schema
+        // position is an obligation; one in plain data is not.
+        mapLinkSchemas(upsert.doc as FabricValue, (schema) => {
+          if (collectExternalSchemaRefHashes(schema as JSONSchema).size > 0) {
+            this.cidMentioningIds.add(upsert.id);
+          }
+          return schema;
+        });
       }
       return true;
     });

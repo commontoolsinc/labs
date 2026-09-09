@@ -215,11 +215,16 @@ export class GraphQueryWalk {
    * Tracker keys of every document whose metadata family this walk has
    * chased: each named document a `visit()` was owed the family of, and
    * each document loaded as a member of such a family, whose own family
-   * the chase followed in turn. A caller keeping watch state records these
-   * so a later re-walk of a member chases its family again.
+   * the chase followed in turn. A document a caller named under its own
+   * `docKey` is reported under that key. A caller keeping watch state
+   * records these so a later re-walk of a member chases its family again.
    */
   get chasedFamilyKeys(): ReadonlySet<string> {
-    return this.#context.metaDocsVisited;
+    const keys = new Set<string>();
+    for (const key of this.#context.metaDocsVisited) {
+      keys.add(this.#keyOverrides.get(key) ?? key);
+    }
+    return keys;
   }
 
   /**

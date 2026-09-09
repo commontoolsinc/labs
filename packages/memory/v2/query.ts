@@ -96,7 +96,10 @@ export type TrackedGraphState = {
    * root a walk has visited, and every document loaded as a member of
    * such a family, whose own family the chase followed in turn. A
    * refresh re-walk of a key here chases the family again, so a member
-   * whose metadata link moved delivers the new target. A crossing records
+   * whose metadata link moved delivers the new target. Keys are never
+   * released: the tracker keeps a delivered document for the state's
+   * lifetime too, so a member whose parent's link moved on stays
+   * delivered, and chased, until the state ends. A crossing records
    * reach in the tracker and none of the family, so coverage of a later
    * query that names a document requires its key here too: reach without
    * family is not coverage for a root (see isGraphQueryCoveredByState). */
@@ -1763,7 +1766,7 @@ export const refreshTrackedGraph = (
   const recordChased = (
     key: QueryDocKey,
     role: "root" | "crossing",
-    evaluated: { chasedFamilyKeys: ReadonlySet<string> } | null,
+    evaluated: EvaluatedDocument | null,
   ) => {
     if (evaluated === null || role !== "root") return;
     state.chased.add(key);
@@ -1899,6 +1902,12 @@ export const refreshTrackedGraph = (
   };
 };
 
+/** What `evaluateTrackedDocument` reports of a document it found present. */
+type EvaluatedDocument = {
+  /** The walk's `GraphQueryWalk.chasedFamilyKeys`. */
+  chasedFamilyKeys: ReadonlySet<string>;
+};
+
 const evaluateTrackedDocument = (
   space: string,
   manager: EngineObjectManager,
@@ -1920,7 +1929,7 @@ const evaluateTrackedDocument = (
   // caller passes a sink the wire never sees.
   absentSink: MapSetStringToPathSelectors = schemaTracker,
   role: "root" | "crossing" = "root",
-): { chasedFamilyKeys: ReadonlySet<string> } | null => {
+): EvaluatedDocument | null => {
   const docKey: QueryDocKey = address.scopeKey !== undefined
     ? `${space}/${address.scopeKey}/${address.id}`
     : toDocKey(
