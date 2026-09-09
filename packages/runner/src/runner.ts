@@ -5,6 +5,7 @@ import {
   hashOf,
   hashStringOf,
   isDeepFrozen,
+  isKeyableObjectOrArray,
   nativeFromFabricValue,
   toCompactDebugString,
   valueEqual,
@@ -2059,6 +2060,16 @@ export class Runner {
   readonly #pendingDeferredStarts = new Map<
     `${MemorySpace}/${ScopeKey}/${URI}`,
     Set<DeferredCancelOwnership>
+  >();
+
+  /**
+   * Pieces this runner has named before running them — set up elsewhere and
+   * reached through a link crossing — keyed by result: the name-sync while
+   * it is in flight, `landed` once it has settled.
+   */
+  readonly #namedFamilies = new Map<
+    `${MemorySpace}/${ScopeKey}/${URI}`,
+    Promise<void> | "landed"
   >();
 
   /**
@@ -5167,6 +5178,229 @@ export class Runner {
   }
 
   /**
+   * The pattern to name `resultCell` with before running it, when it is a
+   * piece set up elsewhere whose execution family this replica has yet to
+   * receive: its `argument` link names a document, and that document or a
+   * document the run reads — one the argument links to, through the redirect
+   * chains those links form, or a derived internal cell of the pattern or of
+   * a sub-piece it instantiates — is absent here. A piece with no setup
+   * evidence is one the run sets up itself, family included, and a piece
+   * whose pattern cannot be resolved has nothing to name it with; both
+   * return nothing. A piece this runner has named is never held again once
+   * the name-sync has landed: whatever the store lacked, it lacks, and the
+   * run reports it as it always has.
+   */
+  #patternToNameBeforeRun(
+    patternOrModule: Pattern | Module | undefined,
+    argument: unknown,
+    resultCell: Cell<any>,
+  ): Pattern | undefined {
+    const key = this.#getDocKey(resultCell);
+    const named = this.#namedFamilies.get(key);
+    if (named === "landed") return undefined;
+    // A result this runner prepared has its family here already, however
+    // much of it the store holds; a missing entry costs a probe, never a
+    // wrong verdict.
+    if (this.#locallyPreparedResults.has(key)) return undefined;
+    // Presence probes on a read transaction of their own, so an absent
+    // document enters neither the caller's dependencies nor its commit's
+    // read set: the run that follows the name-sync reads these for real.
+    const readTx = this.#runtime.readTx();
+    const cell = resultCell.withTx(readTx);
+    const argumentLink = getMetaLink(cell, "argument");
+    if (argumentLink === undefined) return undefined;
+    const resolved = this.#resolveSetupPattern(
+      patternOrModule,
+      getPatternIdentityRef(cell) ?? this.#sessionPatternPointers.get(key),
+    );
+    if (resolved === undefined) return undefined;
+    if (named !== undefined) return resolved.pattern;
+    // The document itself, not a value read through a schema, which would
+    // answer an absent document with the schema's default.
+    const present = (link: NormalizedFullLink): boolean =>
+      readTx.readOrThrow(
+        {
+          space: link.space,
+          id: link.id,
+          path: ["value"],
+          ...(link.scope !== undefined && { scope: link.scope }),
+        },
+        { meta: ignoreReadForScheduling },
+      ) !== undefined;
+    if (!present(argumentLink)) return resolved.pattern;
+    // What the run reads through the argument: every document the caller's
+    // argument and the stored argument link to, followed through the
+    // targets those links resolve into — a coordinator's element link is a
+    // chain of redirects, and setup reads each hop. Bounded by depth and by
+    // a document being probed once.
+    const probed = new Set<string>();
+    const linksAbsent = (value: unknown, depth: number): boolean => {
+      const link = parseLink(value, resultCell);
+      if (link !== undefined) {
+        const probeKey = `${link.space}/${link.id}`;
+        if (probed.has(probeKey)) return false;
+        probed.add(probeKey);
+        if (!present(link)) return true;
+        if (depth === 0) return false;
+        return linksAbsent(
+          readTx.readOrThrow(
+            {
+              space: link.space,
+              id: link.id,
+              path: ["value", ...link.path],
+              ...(link.scope !== undefined && { scope: link.scope }),
+            },
+            { meta: ignoreReadForScheduling },
+          ),
+          depth - 1,
+        );
+      }
+      if (!isKeyableObjectOrArray(value)) return false;
+      for (const field in value) {
+        if (linksAbsent((value as Record<string, unknown>)[field], depth)) {
+          return true;
+        }
+      }
+      return false;
+    };
+    if (linksAbsent(argument, 4)) return resolved.pattern;
+    if (
+      linksAbsent(
+        readTx.readOrThrow(
+          {
+            space: argumentLink.space,
+            id: argumentLink.id,
+            path: ["value"],
+            ...(argumentLink.scope !== undefined &&
+              { scope: argumentLink.scope }),
+          },
+          { meta: ignoreReadForScheduling },
+        ),
+        4,
+      )
+    ) {
+      return resolved.pattern;
+    }
+    // The owned cells the run reads: the pattern's derived internal cells
+    // and, through each nested sub-pattern's result spot, those of the
+    // sub-pieces the run instantiates — the same walk the resume pre-sync
+    // syncs by name.
+    const owned: Cell<any>[] = [];
+    this.#collectResumeOwnedCells(
+      resolved.pattern,
+      cell,
+      owned,
+      new Set(),
+      readTx,
+    );
+    for (const ownedCell of owned) {
+      if (!present(ownedCell.getAsNormalizedFullLink())) {
+        return resolved.pattern;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Names `resultCell` — the dependency pre-sync a resumed piece pays, which
+   * delivers what running `pattern` over it reads — and runs the piece once
+   * that sync has landed, in a transaction of its own. Ownership of the
+   * start begins now, as a commit-gated start's does, so a release before
+   * the run cancels it. Returns the cancel.
+   */
+  #runAfterNamedFamilyLands<T, R>(
+    tx: IExtendedStorageTransaction,
+    patternOrModule: Pattern | Module | undefined,
+    pattern: Pattern,
+    argument: T,
+    resultCell: Cell<R>,
+    options: RunnerRunOptions,
+  ): Cancel {
+    const key = this.#getDocKey(resultCell);
+    const resultLink = resultCell.getAsNormalizedFullLink();
+    const startLifecycleEpoch = this.#lifecycleEpoch;
+    const ownership = this.#createDeferredStartOwnership(resultCell);
+    const navigateContext = navigateEventContextFromRunInfo(
+      waveRunContextOf(tx) ?? speculationRunContextOf(tx),
+    );
+    let named = this.#namedFamilies.get(key);
+    if (named === undefined || named === "landed") {
+      named = this.#syncCellsForRunningPattern(resultCell, pattern, argument)
+        .then(
+          () => {},
+          (error: unknown) => {
+            logger.warn(
+              "runner-start",
+              "naming a piece before its run rejected",
+              [resultLink.id, error],
+            );
+          },
+        ).then(() => {
+          this.#namedFamilies.set(key, "landed");
+        });
+      this.#namedFamilies.set(key, named);
+    }
+    const work = named.then(() => {
+      if (ownership.isCancelled()) return;
+      const startTx = this.#runtime.edit();
+      // Minted outside any scheduler run; the run's setup and node wiring
+      // are piece machinery, stamped bookkeeping per serving-loop.md §3d.
+      this.#runtime.stampServerRun(startTx, {
+        actionId: `piece-run/${resultLink.id}`,
+        kind: "bookkeeping",
+      });
+      if (navigateContext !== undefined) {
+        setNavigateEventContext(startTx, navigateContext);
+      }
+      try {
+        const started = this.#runWithStartOwnership(
+          startTx,
+          patternOrModule,
+          argument,
+          this.#runtime.getCellFromLink<R>(resultLink, undefined, startTx),
+          options,
+        );
+        if (ownership.markInstalled(started.installedCancel)) {
+          startTx.abort("Deferred runner start was cancelled");
+          return;
+        }
+        this.#runtime.prepareTxForCommit(startTx);
+        return this.#commitDeferredStart(startTx, resultCell).then(
+          ({ error }) => {
+            if (!error) return;
+            if (
+              this.#catchUpAndStartOnStaleRead(
+                error,
+                resultCell,
+                "start",
+                startLifecycleEpoch,
+                false,
+                ownership,
+                started.installedCancel,
+              )
+            ) {
+              return;
+            }
+            ownership.cancel();
+            logger.error(
+              "tx-commit-error",
+              "Error committing the run of a named piece",
+              error,
+            );
+          },
+        );
+      } catch (error) {
+        startTx.abort(error);
+        ownership.cancel();
+        logger.error("runner-start", "The run of a named piece failed", error);
+        throw error;
+      }
+    });
+    this.#runtime.scheduler.trackBackgroundTask(work);
+    return ownership.cancel;
+  }
+
+  /**
    * The catch-up recovery a commit-gated start earns when its transaction
    * is refused for a STALE CONFIRMED READ under server execution — the
    * seat of the OW45 arm-B client-start fix (verification-coverage.md;
@@ -5679,6 +5913,32 @@ export class Runner {
       `providedTx=${Boolean(providedTx)}`,
     ]);
 
+    // A piece set up elsewhere, reached here through a link crossing, has
+    // arrived as its document alone: the argument document and the internal
+    // cells its setup wrote belong to whoever names it (05-queries.md), and
+    // both the setup re-check and the instantiation below read them. Name
+    // it, and run it — setup and start alike — once the name-sync has
+    // landed, in a transaction of its own.
+    const patternToName = this.#patternToNameBeforeRun(
+      patternOrModule,
+      argument,
+      resultCell,
+    );
+    if (patternToName !== undefined) {
+      const cancelDeferredStart = this.#runAfterNamedFamilyLands(
+        tx,
+        patternOrModule,
+        patternToName,
+        argument,
+        resultCell,
+        options,
+      );
+      if (!providedTx) {
+        this.#runtime.prepareTxForCommit(tx);
+        tx.commit();
+      }
+      return { resultCell, cancelDeferredStart };
+    }
     // A creation revision belongs to the run that creates the piece. A run of
     // one that is already there changes neither its source state nor its
     // origin: that is a source transition's to decide, and a run reaching a
