@@ -409,6 +409,37 @@ export default pattern<{seed?: ${seedType}}>(() => {
           true,
         );
         expect(await invokeSetName(coldPiece, "cold")).toBe("v3:cold");
+
+        const recoveredVersion = "setsrc-delegation-source-recovery";
+        const restoreRecoveredVersion = setCompileCacheRuntimeVersionForTesting(
+          recoveredVersion,
+        );
+        try {
+          const recoveredRuntime = createFreshRuntime();
+          const recoveredPieces = await createFreshPieces(recoveredRuntime);
+          const recoveredPiece = await recoveredPieces.get(first.id, true);
+          expect(await invokeSetName(recoveredPiece, "recovered"))
+            .toBe("v3:recovered");
+          await recoveredRuntime.patternManager.flushCompileCacheWrites();
+          const recoveredTx = recoveredRuntime.edit();
+          try {
+            const compiled = await loadCompiledClosure(
+              recoveredRuntime,
+              patternSpace,
+              successorRef.identity,
+              { runtimeVersion: recoveredVersion },
+              recoveredTx,
+            );
+            for (const [identity, sourceDoc] of successorClosure!) {
+              expect(compiled.get(identity)?.delegatedModuleIdentities)
+                .toEqual(sourceDoc.delegatedModuleIdentities);
+            }
+          } finally {
+            recoveredTx.abort();
+          }
+        } finally {
+          restoreRecoveredVersion();
+        }
       } finally {
         restoreRuntimeVersion();
       }

@@ -1106,7 +1106,9 @@ export async function loadVerifiedSourceClosure(
     closure,
     runtimeFingerprint,
   );
-  if (verified !== undefined) {
+  // A transaction with writes may expose staged grants. Only a read of durable
+  // metadata can publish authority independently of the transaction's verdict.
+  if (verified !== undefined && !tx.hasWrites()) {
     runtime.registerModuleDelegations(
       space,
       moduleDelegationsFromDocs(verified),
@@ -1882,6 +1884,8 @@ export async function loadCompiledClosure(
       imports,
     });
   }
-  runtime.registerModuleDelegations(space, moduleDelegationsFromDocs(out));
+  if (!tx.hasWrites()) {
+    runtime.registerModuleDelegations(space, moduleDelegationsFromDocs(out));
+  }
   return out;
 }

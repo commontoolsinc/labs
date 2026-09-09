@@ -2153,6 +2153,38 @@ describe("setup/start", () => {
     }
   });
 
+  it("runSynced refuses to grant update authority in a caller-owned transaction", async () => {
+    const resultCell = runtime.getCell(space, "bound source authority");
+    const initial = await compileReceiptPattern(runtime, "v1");
+    const candidate = await compileReceiptPattern(runtime, "v2");
+    await runtime.runSynced(resultCell, initial, {});
+    const before = receiptSourceSnapshot(runtime, resultCell);
+    const transition = await receiptSourceTransition(runtime, resultCell);
+    const tx = runtime.edit();
+    try {
+      await expect(runtime.runSynced(resultCell.withTx(tx), candidate, {}, {
+        expectedPatternIdentity: before.pattern,
+        pieceSourceTransition: transition,
+      })).rejects.toThrow(
+        "source update authority requires an owned setup transaction",
+      );
+      expect(receiptSourceSnapshot(runtime, resultCell)).toEqual(before);
+    } finally {
+      tx.abort();
+    }
+    const successor = runtime.patternManager.getArtifactEntryRef(candidate)!;
+    const storedTx = runtime.edit();
+    try {
+      expect(
+        storedTx.getCfcState().moduleDelegations.get(space)?.get(
+          successor.identity,
+        ),
+      ).toBeUndefined();
+    } finally {
+      storedTx.abort();
+    }
+  });
+
   it("runSyncedWithCommit refuses a result cell bound to an open transaction", async () => {
     // Writes staged in a transaction the caller still owns have no storage
     // verdict yet — the caller decides their fate — so there is nothing to

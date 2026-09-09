@@ -167,6 +167,41 @@ describe("ESM compile via content-addressed cell cache", () => {
     }
   }
 
+  it("returns undefined for a missing preview export without scheduling cache repair", async () => {
+    const pattern = await runtime.patternManager.compilePattern(PROGRAM, {
+      space,
+    });
+    const entry = runtime.patternManager.getArtifactEntryRef(pattern)!;
+    const reader = newRuntime();
+    let writes = 0;
+    reader.patternManager.accessForTestingOnly.compileCacheWriter = () => {
+      writes++;
+      return Promise.resolve();
+    };
+    try {
+      expect(
+        await reader.patternManager.loadPatternByIdentity(
+          entry.identity,
+          "missing",
+          space,
+          { repairCache: false },
+        ),
+      ).toBeUndefined();
+      await reader.patternManager.flushCompileCacheWrites();
+      expect(writes).toBe(0);
+      expect(
+        await reader.patternManager.loadPatternByIdentity(
+          entry.identity,
+          "default",
+          space,
+          { repairCache: false },
+        ),
+      ).toBeDefined();
+    } finally {
+      await reader.dispose({ closeStorage: false });
+    }
+  });
+
   it("cold compile writes back, warm compile is a hit, both run correctly", async () => {
     const pm = runtime.patternManager;
 

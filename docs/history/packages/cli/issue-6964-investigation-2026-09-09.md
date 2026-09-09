@@ -2,7 +2,7 @@
 status: historical
 created: 2026-09-09
 archived: 2026-09-09
-superseded-by: issue-6964-authority-follow-up-2026-09-09.md
+superseded-by: docs/history/packages/cli/issue-6964-authority-follow-up-2026-09-09.md
 reason: "Investigation of source-preflight store writes and the remaining operator documentation gap in #6964."
 ---
 
