@@ -133,12 +133,15 @@ describe("what the wrappers do once a capture is installed", () => {
   it("passes a call it cannot read straight through", () => {
     // An unfamiliar overload still runs and still reports its own
     // error, rather than being dropped by a wrapper that did not
-    // recognize it.
+    // recognize it. A `describe` carrying neither a name nor a body is
+    // one: it opens no chain and hands back no suite this module can
+    // put a chain against. A `describe` carrying a name but no body is
+    // not, since that call is where a suite handle comes from.
     const seen: unknown[][] = [];
     const through = (...args: unknown[]) => seen.push(args);
-    wrapDescribe(through)("a name with no body");
+    wrapDescribe(through)();
     wrapIt(through, () => {}, capturing())({ no: "name" });
-    expect(seen).toEqual([["a name with no body"], [{ no: "name" }]]);
+    expect(seen).toEqual([[], [{ no: "name" }]]);
   });
 
   it("encloses a leaf in the chain of a suite declared as one definition", () => {
