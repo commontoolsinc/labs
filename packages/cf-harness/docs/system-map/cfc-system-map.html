@@ -669,7 +669,7 @@
     // ------------------------------------------------------------------ layout data
     // The state of this repository the map describes. Bump both when the
     // map is re-verified; the stamp is drawn in the canvas's top-left corner.
-    const SNAPSHOT = { date: "2026-09-10", sha: "7a91df12f + sandbox evidence" };
+    const SNAPSHOT = { date: "2026-09-10", sha: "c2394df33 + sandbox evidence" };
     const W = 2760, H = 1840;
     const bands = [
       {
@@ -2064,7 +2064,7 @@
           "The sandbox's taint store and the runner's label store are two different systems that do not yet speak.",
         close: [
           "Real sidecar evidence for every exposed observation, so Loom and Pattern Factory can leave <code>observe</code> mode (deviation 2).",
-          "The mediation depends on how the operator registered <code>runsc-cfc</code>: without <code>--cfc-invocation-context-dir</code> the harness writes invocation contexts nothing reads and input labels drop silently. The guard now requires each transport directory to be an absolute host path and refuses one resolving inside the workspace, any writable mount or the run\u2019s artifact root, and refuses an invocation-context directory it knows the registration does not name; what it still cannot check is whether the registration reads the directory it was given, or how the container\u2019s own view maps it (CT-2105).",
+          "The mediation depends on how the operator registered <code>runsc-cfc</code>: without <code>--cfc-invocation-context-dir</code> the harness writes invocation contexts nothing reads and input labels drop silently. The guard now requires each transport directory to be an absolute host path and refuses one resolving inside the workspace, any writable mount or the run\u2019s artifact root, and refuses an invocation-context directory it knows the registration does not name. That verdict reaches the launch it governs: the resolver reads each option once before checking it, and the runtime launches from a frozen config of its own, so the mounts compared are the mounts bound. What it still cannot check is whether the registration reads the directory it was given, or how the container\u2019s own view maps it (CT-2105).",
           "Reserve the artifact root from the sandbox (CT-2117).",
         ],
         threats: ["t5", "t12"],
