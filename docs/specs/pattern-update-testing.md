@@ -130,15 +130,18 @@ itself must still compare equal across an update: a changed `asCell` or
 invalidate, such as `maxProperties`, continue to require equal defaults
 beneath them.
 
-A verb's event is the one place inside a result where that reasoning does not
-hold, and the direction is decided by which side supplies the value rather
-than by where the node sits. A verb declares its event below a stream marker
-in the result, but the pattern does not generate the event — a caller does. So
-a field the candidate event newly requires is a demand on every call already
-written. Below a verb node a newly required field therefore needs a valid
-default, exactly as an argument does. Dispatch fills missing fields in a
-present event object from defaults; an entirely absent event payload remains
-absent.
+The semantic-extension classification is conservative: `readOnly`, `writeOnly`,
+and `ifc` still require equal defaults beneath them. Extending default-stability
+to these markers requires a separate proof of their default-materialization
+behavior; the classification does not assert that default insertion through
+them is inherently unsafe.
+
+A verb's event follows argument compatibility rules even when declared in a
+result. A caller supplies the event, so it does not receive the result-side
+exemption for newly required fields that a pattern generates itself. A field
+the candidate event newly requires therefore needs a valid default, exactly
+as an argument does. Dispatch fills missing fields in a present event object
+from defaults; an entirely absent event payload remains absent.
 
 ## Tier 2 — state continuity
 

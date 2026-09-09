@@ -853,6 +853,9 @@ function schemaSubsetIssue(
 const DEFAULT_STABLE_SCHEMA_KEYS = new Set([
   ...ANNOTATION_KEYS,
   // Cell wrappers and storage scopes do not constrain descendant values.
+  // The classification is conservative: `readOnly`, `writeOnly`, and `ifc`
+  // remain default-unstable until their compatibility with default insertion
+  // is verified.
   // Changes to the metadata itself are checked by `SEMANTIC_EXTENSION_KEYS`.
   "asCell",
   "scope",
@@ -1037,15 +1040,15 @@ function objectSubsetIssue(
     // A verb's event is the exception, and it is one of location rather than of
     // principle. The node sits in the result, so this covariant comparison
     // reaches it — but the pattern does not produce the event, the CALLER
-    // supplies it. Requiring a field the previous event did not is therefore a
-    // demand made of every call already written, and each one that omits it is
-    // refused at dispatch once the update has landed. Below a verb node the
-    // rule is the argument side's, stated in this comparison's direction:
-    // `source` is the candidate here, where `target` is the candidate there.
-    // The rescue uses the field's own default even when an ancestor forbids
-    // changed defaults. An unchanged default still materializes the field for
-    // a caller that omits it; the default-comparison check separately rejects
-    // changed defaults beneath constraints that are not default-stable.
+    // supplies it. Requiring a field the previous event did not adds a demand
+    // on callers. Below a verb node the rule is the argument side's, stated in
+    // this comparison's direction: `source` is the candidate here, where
+    // `target` is the candidate there.
+    // A valid default on the candidate field rescues the new requirement,
+    // whether that default is retained, introduced, or changed. The stream
+    // marker permits default insertion, and dispatch fills missing fields in
+    // a present event object from defaults. Other ancestor constraints still
+    // apply their own default-stability checks.
     if (context.verbEvent) {
       for (const property of sourceRequired) {
         if (
