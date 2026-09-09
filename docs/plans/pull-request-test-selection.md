@@ -1284,7 +1284,6 @@ publisher computes:
   halved every 14 days as they age.
 - `flakeRate` — how often it disagrees with itself; see
   [Flakes and repeats](#flakes-and-repeats).
-- `mainRed` — whether it failed in the most recent `main` run.
 - `cost` — the ninetieth percentile of its measured durations over the
   last seven days. The ninetieth percentile rather than the maximum,
   because one unlucky runner should not permanently inflate an estimate,
@@ -1292,10 +1291,10 @@ publisher computes:
   blows the time budget.
 
 Variants never fold into one another for scoring. A default test and its
-`server-execution` counterpart have independent catches, flake rates,
-costs, and red-on-`main` state. They may both be selected when their own
-records justify it. History from one configuration does not make an
-unseen configuration look established.
+`server-execution` counterpart have independent catches, flake rates, and
+costs. They may both be selected when their own records justify it.
+History from one configuration does not make an unseen configuration look
+established.
 
 ### The formula
 
@@ -1411,16 +1410,10 @@ B still scores well overall — its catches are permanent — which is exactly
 the intended behavior. What decays is the claim that something is wrong
 *now*, not the claim that the test is good.
 
-### Two rules that keep a test out
+### The rule that keeps a test out
 
-Both of these are subtractions from the selectable set, and both make pull
-requests less red rather than more.
-
-**A test that failed in the most recent `main` run is not selected.** It
-is already known to be broken, `main` owns it, and running it on a pull
-request would fail that pull request for a reason its author cannot act
-on. The exception is a pull request that touches files the failing test
-covers, which is very likely a fix and must be allowed to prove itself.
+This is a subtraction from the selectable set, and it makes pull requests
+less red rather than more.
 
 **A test whose flake rate is above the threshold is not selected.** It is
 too noisy to judge a change by. `main` still runs it, the dashboard still
@@ -1428,22 +1421,22 @@ shows it, and it appears on a work queue. This replaces the usual
 quarantine list, and it is better than one in three ways: it is derived
 from measurement rather than from somebody's judgement at one moment, it
 needs no owner or expiry to stop it rotting, and it reverses on its own
-the moment the test is fixed.
+once the test is fixed. The exception is a change that edits the test
+itself, or that the test's suite maps onto its unit, which is very likely
+a fix and has to be allowed to prove itself.
 
-**Both rules reach a repository gate as well.** Formatting, linting and
-the drift guard are tests of the tree, and neither rule says anything
-about one of them that it does not say about a unit test. A gate failing
-in the latest `main` run leaves the selectable set, because a pull request
-red on it is red for something its author cannot act on. A gate above the
-flake threshold leaves the set too, and appears on the wall as the defect
-in the gate that it is.
+**The rule reaches a repository gate as well.** Formatting, linting and
+the drift guard are tests of the tree, and the rule says nothing about
+one of them that it does not say about a unit test. A gate above the
+flake threshold leaves the selectable set, and appears on the wall as the
+defect in the gate that it is.
 
-The exception both rules carry cannot fire for a gate. A gate's unit is
+The exception the rule carries cannot fire for a gate. A gate's unit is
 the name of a gate rather than a path, and its suite maps no change onto
-its units, so nothing a pull request touches reaches one. A gate red on
-`main` therefore stays out of pull requests until `main` is green, and
-`main`, which runs the whole corpus, is where it goes on failing until
-somebody fixes it.
+its units, so nothing a pull request touches reaches one. A flaky gate
+therefore stays out of pull requests until it stops disagreeing with
+itself, and `main`, which runs the whole corpus, is where it goes on
+running until somebody fixes it.
 
 What the lane owes people in exchange is clarity about whose problem it
 is. The job summary names what was withheld and why, and says of each
@@ -1631,8 +1624,8 @@ here measures it.
 Two things follow from knowing it.
 
 **Too flaky to judge by, so not selected.** Above the threshold, an item
-leaves the pull-request selectable set entirely, for the reason in [Two
-rules that keep a test out](#two-rules-that-keep-a-test-out). It keeps
+leaves the pull-request selectable set entirely, for the reason in [The
+rule that keeps a test out](#the-rule-that-keeps-a-test-out). It keeps
 running on `main`, and it keeps appearing on the deflake work queue until
 somebody fixes it.
 
@@ -1754,10 +1747,9 @@ budget does not fit its bound.
 
 ### Choosing what to run
 
-The packer starts by removing what must not run: items failing in the
-latest `main` run, and items above the flake exclusion rate. Both are
-listed in the job summary, so what was withheld is visible rather than
-quietly absent.
+The packer starts by removing what must not run: the items above the
+flake exclusion rate. They are listed in the job summary, so what was
+withheld is visible rather than quietly absent.
 
 From what is left, given every item's value and cost and a budget of five
 lanes times 230 seconds each, it fills in four passes.
@@ -2042,8 +2034,8 @@ The object carries:
   included, its suite, its file, its cost, its score, the inputs behind
   that score, its flake rate, its repeat count, and the last day
   anything ran it, which is what orders the exploration draw;
-- the withheld sets — failing on `main`, and above the flake exclusion
-  rate — each with the reason, so a lane can say why something is absent;
+- the withheld set — the items above the flake exclusion rate — with the
+  reason, so a lane can say why something is absent;
 - the tests declared unavailable in a configuration-specific skip
   registry, with their suite, variant, phase, and reason;
 - the reference packing into five lanes;
@@ -2846,13 +2838,16 @@ the job and the rules that read it rather than redesigning the packer.
 
 **Pull requests should get *less* red, not more.** This is the opposite of
 what an early draft of this design predicted, and the difference is the
-two exclusion rules. A test that is currently failing on `main` is not
-selected, so nobody's pull request fails for a break somebody else landed.
-A test too flaky to judge by is not selected either. What is left to block
-a pull request is stable tests with a record of catching real things —
-which is the only category where a red build is worth having. Set against
-that, a flaky-but-not-excluded item repeated three times fails three times
-as often as it would have. The net is an empirical question and the
+exclusion rule. A test too flaky to judge by is not selected, so nobody's
+pull request fails for a test that disagrees with itself. Three kinds of
+test are left that can turn one red. One the packing made mandatory,
+which is a test the change touches or one the store has never seen. One
+the score reached, which is the category where a red build is worth
+having. And one the default branch is already failing, which nothing
+holds back; that failure belongs to the default branch, and fixing it
+there is what clears it. Set against all of that, a
+flaky-but-not-excluded item repeated three times fails three times as
+often as it would have. The net is an empirical question and the
 dashboard is where it gets answered.
 
 **Coverage stops being enforced across the repository, and stays enforced
@@ -2902,7 +2897,7 @@ is pinned to the commit's date. And if none of that settles it,
 | A fork pull request | Works unchanged. The manifest is world-readable, and the existing member gate decides whether the fork's records ship. |
 | A re-run of one failed lane | Runs the same set, because the manifest is resolved by the commit's date, which no attempt changes. |
 | Both `pr-tests` and `full-tests` skip | `Status` fails. Its second clause requires one of them to have succeeded, so a pull request that ran no tests can never report green. |
-| `main` is broken and stays broken | Every test failing in the latest `main` run leaves the selectable set, so pull requests are unaffected while it is fixed. They come back on their own. |
+| `main` is broken and stays broken | Nothing holds a test back for having failed on `main`, so a pull request that selects the broken test fails on it. The failure belongs to the default branch, and fixing it there is what clears it. |
 | The reporter cannot find the pull request behind a `main` commit | It logs the commit and posts nothing. A direct push to `main` with no pull request behind it is the ordinary case for this. |
 | The reporter would comment on a test that is known flaky | It says so in the comment rather than implying the change caused it. |
 | Somebody games the coverage number | There is nothing to game: no gate, no per-change target, and a tile that shows a multi-week direction rather than a figure. |

@@ -217,14 +217,6 @@ function resolvePendingMain(
   creditCatch(state, "main", first.day, first.source);
 }
 
-/** How a batch of observations was judged. */
-export interface FoldResult {
-  states: Map<string, IdentityState>;
-
-  /** Identities failing in the most recent `main` run that named them. */
-  mainRed: Set<string>;
-}
-
 /**
  * The cross-batch context two of the rules need. A batch cannot be judged
  * on its own: whether an identity disagreed with itself at a commit, and
@@ -453,11 +445,14 @@ export interface FoldOptions {
  * replay it each time. A one-shot iterator would leave every pass after
  * the first with nothing to read and score the batch as though most of it
  * had never run, so one is refused rather than folded.
+ *
+ * Returns the state each identity was folded into, which is the map
+ * `options.prior` names when a caller carries one across batches.
  */
 export function foldObservations(
   observations: Iterable<Observation>,
   options: FoldOptions = {},
-): FoldResult {
+): Map<string, IdentityState> {
   // An iterator is its own iterable, which is what tells the two apart.
   if (Object.is(observations[Symbol.iterator](), observations)) {
     throw new Error(
@@ -570,10 +565,9 @@ export function foldObservations(
     // about the test and nothing about the change, so it does not reach
     // `lastMainOutcome` either: a test skipped on the default branch has
     // not been shown to be fixed, and the last run that did execute it is
-    // the last thing known about it. That keeps a still-broken test out of
-    // every pull request, which is the direction this design takes
-    // whenever the two errors are a lost signal and a change that cannot
-    // go green.
+    // the last thing known about it. A failure elsewhere therefore goes
+    // on being read as the default branch's, and is not credited to the
+    // change in front of it.
     if (observation.outcome === "skip") continue;
 
     bump(state.runsByDay, day);
@@ -623,11 +617,7 @@ export function foldObservations(
     creditCatch(state, observation.place, day, observation.source);
   }
 
-  const mainRed = new Set<string>();
-  for (const [key, state] of states) {
-    if (state.lastMainOutcome === "fail") mainRed.add(key);
-  }
-  return { states, mainRed };
+  return states;
 }
 
 /**

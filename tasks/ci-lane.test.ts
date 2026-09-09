@@ -946,27 +946,26 @@ describe("running a lane's work", () => {
   });
 
   it("names what the manifest withheld, and what came back", () => {
-    const red = { k: "unit", s: "bakery", n: "glaze > sets" };
-    const flaky = { k: "unit", s: "bakery", n: "proof > rises" };
+    const touched = { k: "unit", s: "bakery", n: "glaze > sets" };
+    const untouched = { k: "unit", s: "bakery", n: "proof > rises" };
     const lines: string[] = [];
     const log = console.log;
     console.log = (line: string) => lines.push(line);
     try {
       describeWithheld(
         [
-          { test: red, suite: "workspace-unit", reason: "main-red" },
-          { test: flaky, suite: "workspace-unit", reason: "flaky" },
+          { test: touched, suite: "workspace-unit", reason: "flaky" },
+          { test: untouched, suite: "workspace-unit", reason: "flaky" },
         ],
-        new Map([[testIdentityKey(red), "changed"]]),
+        new Map([[testIdentityKey(touched), "changed"]]),
       );
     } finally {
       console.log = log;
     }
     const printed = lines.join("\n");
-    expect(printed).toContain("already failing in the latest run on `main`");
     expect(printed).toContain("too noisy to judge a change by");
-    // The change reaches the failing one, which is very likely a fix, so
-    // it runs in spite of being withheld.
+    // The change reaches one of them, which is very likely a fix, so it
+    // runs in spite of being withheld.
     expect(printed).toContain("yes, the change reaches it");
     expect(printed).toContain("| no |");
   });

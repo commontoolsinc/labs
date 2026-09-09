@@ -184,18 +184,13 @@ describe("report", () => {
 
     it("separates each reason a run did not reach a test", () => {
       const view = knows(["bakes"], {
-        withheld: new Map([
-          [key("kneads"), "flaky" as const],
-          [key("proves"), "main-red" as const],
-        ]),
+        withheld: new Map([[key("kneads"), "flaky" as const]]),
         flakeRates: new Map([
           [key("kneads"), 0],
-          [key("proves"), 0],
           [key("bakes"), 0],
         ]),
       });
       expect(selectionOf(view, key("kneads"))).toBe("withheld-flaky");
-      expect(selectionOf(view, key("proves"))).toBe("withheld-main-red");
       expect(selectionOf(view, key("bakes"))).toBe("not-selected");
     });
 

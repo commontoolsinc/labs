@@ -153,7 +153,6 @@ export type Selection =
   | "failed-there"
   | "skipped-there"
   | "withheld-flaky"
-  | "withheld-main-red"
   | "not-selected"
   | "unrecorded"
   | "did-not-run"
@@ -302,7 +301,6 @@ export function selectionOf(
   // not say either way.
   const withheld = view.withheld.get(key);
   if (withheld === "flaky") return "withheld-flaky";
-  if (withheld === "main-red") return "withheld-main-red";
   // With a manifest, the packing says whether the test was to have run:
   // an identity the packing reached, and one the store has never seen,
   // are both identities that run.
@@ -715,9 +713,6 @@ const SELECTION_PROSE: Record<ReportedSelection, string> = {
     "its score, so the next change in this area will run it.",
   "withheld-flaky": "This pull request could not have run it: the store " +
     "holds it back as too flaky to judge a change by.",
-  "withheld-main-red": "This pull request could not have run it: it was " +
-    "already failing on the default branch when the pull request ran, so " +
-    "selection held it back.",
   unrecorded: "This pull request's own run was to have run it and " +
     "recorded nothing for it, so what it did there is not known. A test " +
     "job that fails before it uploads leaves its share of a run's records " +

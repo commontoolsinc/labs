@@ -95,7 +95,7 @@ function identityCells(test: TestIdentity): string {
 interface TestRow {
   test: TestIdentity;
 
-  /** What the leading column says, where the table has one to say. */
+  /** What the leading column says, absent where nothing measured it. */
   measure?: string;
 }
 
@@ -104,26 +104,26 @@ function testSection(section: {
   heading: string;
   id?: string;
   lead: string;
-  /** The leading column's heading, where the rows carry a measurement. */
-  measure?: string;
+
+  /** The leading column's heading. */
+  measure: string;
+
   rows: TestRow[];
 }): string {
   if (section.rows.length === 0) return "";
-  // The column and the cells are decided together, so a row that carries no
-  // measurement leaves a gap in the table rather than shifting it.
-  const measured = section.measure !== undefined;
-  const head = measured ? `<th>${escapeHtml(section.measure!)}</th>` : "";
+  // A row carrying no measurement leaves a gap in the table rather than
+  // shifting it.
   const body = section.rows.map((row) =>
-    `<tr>${
-      measured
-        ? `<td class="measure">${escapeHtml(row.measure ?? "—")}</td>`
-        : ""
-    }${identityCells(row.test)}</tr>`
+    `<tr><td class="measure">${
+      escapeHtml(row.measure ?? "—")
+    }</td>${identityCells(row.test)}</tr>`
   ).join("");
   const id = section.id === undefined ? "" : ` id="${section.id}"`;
   return `<h2${id}>${escapeHtml(section.heading)} · ${section.rows.length}</h2>
   <p class="lead">${escapeHtml(section.lead)}</p>
-  <table><thead><tr>${head}<th>kind</th><th>member</th><th>test</th></tr></thead><tbody>${body}</tbody></table>`;
+  <table><thead><tr><th>${
+    escapeHtml(section.measure)
+  }</th><th>kind</th><th>member</th><th>test</th></tr></thead><tbody>${body}</tbody></table>`;
 }
 
 /**
@@ -152,7 +152,7 @@ function flakeLead(manifest: Manifest): string {
     "once it stops disagreeing.";
 }
 
-/** The tests held back as flaky, worst-measured first. *//** The tests held back as flaky, worst-measured first. */
+/** The tests held back as flaky, worst-measured first. */
 function flakyRows(manifest: Manifest): TestRow[] {
   const rates = new Map(
     manifest.entries.map((entry) => [
@@ -171,13 +171,6 @@ function flakyRows(manifest: Manifest): TestRow[] {
       test,
       measure: rate === undefined ? undefined : percent(rate),
     }));
-}
-
-/** The tests main being red held back, in the order the manifest names them. */
-function mainRedRows(manifest: Manifest): TestRow[] {
-  return manifest.withheld
-    .filter((entry) => entry.reason === "main-red")
-    .map((entry) => ({ test: entry.test }));
 }
 
 /** The lanes a pull request would run, each against the budget it was packed to. */
@@ -258,15 +251,6 @@ export function testSelectionPage(
         lead: flakeLead(manifest),
         measure: "flake share",
         rows: flakyRows(manifest),
-      })
-    }
-  ${
-      testSection({
-        heading: "Held back while main is red",
-        id: "main-red",
-        lead:
-          "Already failing on main, so a pull request learns nothing from running them.",
-        rows: mainRedRows(manifest),
       })
     }
   ${

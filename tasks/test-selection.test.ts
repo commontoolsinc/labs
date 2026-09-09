@@ -121,16 +121,15 @@ describe("test-selection", () => {
     });
 
     it("says why an identity was withheld", () => {
-      for (
-        const [reason, said] of [
-          ["main-red", "failing in the newest run on main"],
-          ["flaky", "too flaky to judge a change by"],
-        ] as const
-      ) {
-        const held = manifest();
-        held.withheld = [{ test: TEST, suite: "workspace-unit", reason }];
-        expect(explainLines(held, TEST).join("\n")).toContain(said);
-      }
+      const held = manifest();
+      held.withheld = [{
+        test: TEST,
+        suite: "workspace-unit",
+        reason: "flaky",
+      }];
+      expect(explainLines(held, TEST).join("\n")).toContain(
+        "too flaky to judge a change by",
+      );
     });
 
     it("reports the repeat count the packing settled on", () => {
