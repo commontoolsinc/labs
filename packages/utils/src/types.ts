@@ -84,8 +84,15 @@
  * `isFabricObjectOrArray()` for the same reason.
  */
 
-/** Standard type meaning constructor function, a/k/a "class object." */
-export type Constructor<T = unknown> = abstract new (...args: any[]) => T;
+/**
+ * The type of a class object, a/k/a constructor function: a class, abstract or
+ * concrete, whose instances are `T`. The `prototype` property is part of the
+ * shape so that a read of it is typed `T`; the `Function` interface alone
+ * would type it `any`.
+ */
+export type Constructor<T = unknown> =
+  & (abstract new (...args: any[]) => T)
+  & { prototype: T };
 
 /** Helper type to recursively add `readonly` properties to type `T`. */
 export type Immutable<T> = T extends ReadonlyArray<infer U>
