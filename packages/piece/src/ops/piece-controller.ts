@@ -1,5 +1,6 @@
 import type { CellKind, LinkScope } from "@commonfabric/api";
 import { taggedHashStringOf } from "@commonfabric/data-model";
+import { schemaWithProperties } from "@commonfabric/data-model-schema";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   applyPieceSourceTransition,
@@ -10,6 +11,7 @@ import {
   deepEqual,
   extractDefaultValues,
   formatFabricRef,
+  getCellOrThrow,
   getMetaLink,
   getPatternIdentityRef,
   getPatternRepository,
@@ -18,6 +20,7 @@ import {
   getPieceSourceSnapshot,
   getValueAtPath,
   isCell,
+  isCellResultForDereferencing,
   isLink,
   isStream,
   type JSONSchema,
@@ -42,7 +45,9 @@ import {
   type RuntimeProgram,
   sanitizeSchemaForLinks,
   schemaAcceptsOpaqueCellValue,
+  schemaPathSelection,
   setPieceReconciliation,
+  storedArgumentValidationIssue,
 } from "@commonfabric/runner";
 import { storedArgumentRefusalDetail } from "@commonfabric/runner/shared";
 import {
@@ -69,6 +74,7 @@ import {
   preloadCloneValue,
   snapshotCloneValue,
 } from "./clone-data-snapshot.ts";
+import { assertPieceInputPath } from "./piece-input-path.ts";
 import {
   acceptEnteredOrigin,
   qualifyFabricOrigin,
@@ -90,7 +96,7 @@ interface PieceCellIo {
     produce: (stored: unknown) => { value: unknown } | undefined,
     path?: CellPath,
   ): Promise<{ wrote: boolean }>;
-  getCell(): Promise<Cell<unknown>>;
+  getCell(path?: CellPath): Promise<Cell<unknown>>;
 }
 
 interface CloneInternalSnapshot {
@@ -2885,6 +2891,21 @@ class PiecePropIo implements PieceCellIo {
 
   async get(path?: CellPath) {
     const targetCell = await this.#getTargetCell();
+    if (this.#type === "input" && path?.length) {
+      assertPieceInputPath(targetCell, path, { allowArrayLength: true });
+      const { conditionalDepth } = schemaPathSelection(
+        targetCell.getAsNormalizedFullLink().schema,
+        path,
+        { allowArrayLength: true },
+      );
+      if (conditionalDepth !== undefined) {
+        return await this.#getFromRoot(
+          targetCell.key(...path.slice(0, conditionalDepth)),
+          path.slice(conditionalDepth),
+          true,
+        );
+      }
+    }
     if (!path?.length) {
       return await this.#getFromRoot(targetCell, []);
     }
@@ -2922,7 +2943,11 @@ class PiecePropIo implements PieceCellIo {
     return selected;
   }
 
-  async #getFromRoot(targetCell: Cell<unknown>, path: CellPath) {
+  async #getFromRoot(
+    targetCell: Cell<unknown>,
+    path: CellPath,
+    requireProjection = false,
+  ) {
     // Preserve the existing missing-path diagnostics and the distinction
     // between an absent field and a schema-valid undefined value.
     await targetCell.pull();
@@ -2932,14 +2957,78 @@ class PiecePropIo implements PieceCellIo {
     // those members instead of voiding to `undefined` while every child-path
     // read succeeds. See schemaWithScopedLinkRequiredsRelaxed for the
     // #4746-compatible rationale.
-    return resolveCellPath(
-      cellWithScopedLinkRequiredsRelaxed(targetCell),
-      path,
-    );
+    let root = cellWithScopedLinkRequiredsRelaxed(targetCell);
+    if (requireProjection) {
+      // A handle is a separate read boundary: syncing its outer projection
+      // only materializes the handle, so demand its payload before choosing
+      // a branch within it.
+      while (true) {
+        const schema = root.getAsNormalizedFullLink().schema;
+        if (
+          typeof schema === "object" && schema.asCell === undefined &&
+          (schema.anyOf || schema.oneOf || schema.allOf)
+        ) {
+          const localized = localizeOuterCellContract({ schema, root: schema });
+          if (localized.issue === undefined && localized.outer !== undefined) {
+            // A union of uniform handles is one handle over a payload union.
+            // Hoisting keeps handle construction and scope enforcement in the
+            // runtime; removing the wrapper would remove its read cap.
+            const { kind, scope } = localized.outer;
+            root = root.asSchema(
+              schemaWithProperties(localized.contract.schema, {
+                asCell: [
+                  { kind, ...(scope === undefined ? {} : { scope }) },
+                  ...ContextualFlowControl.getAsCellValues(
+                    localized.contract.schema,
+                  ),
+                ],
+              }),
+            );
+          }
+        }
+        const value = root.get();
+        if (!isCell(value)) break;
+        root = cellWithScopedLinkRequiredsRelaxed(value);
+        await root.pull();
+      }
+    }
+    return resolveCellPath(root, path, { requireProjection });
   }
 
-  getCell(): Promise<Cell<unknown>> {
-    return this.#getTargetCell();
+  /** Returns the root cell, or a path admitted through the input projection. */
+  async getCell(path?: CellPath): Promise<Cell<unknown>> {
+    const cell = await this.#getTargetCell();
+    if (!path?.length) return cell;
+    const selectedCell = cell.key(...path);
+    if (this.#type === "input") {
+      assertPieceInputPath(cell, path, { allowArrayLength: true });
+      const { conditionalDepth } = schemaPathSelection(
+        cell.getAsNormalizedFullLink().schema,
+        path,
+        { allowArrayLength: true },
+      );
+      if (conditionalDepth !== undefined) {
+        const value = await this.#getFromRoot(
+          cell.key(...path.slice(0, conditionalDepth)),
+          path.slice(conditionalDepth),
+          true,
+        );
+        // A projected container's backpointer retains its active branch.
+        // Primitives have no backpointer; carry their selected default onto
+        // the original Cell so absent slots preserve the same read value.
+        if (isCellResultForDereferencing(value)) return getCellOrThrow(value);
+        if (
+          value === undefined || value === null || typeof value === "string" ||
+          typeof value === "number" || typeof value === "boolean"
+        ) {
+          return selectedCell.asSchema(schemaWithProperties(
+            selectedCell.getAsNormalizedFullLink().schema ?? true,
+            { default: value },
+          ));
+        }
+      }
+    }
+    return selectedCell;
   }
 
   async set(value: unknown, path?: CellPath) {
@@ -2987,6 +3076,7 @@ class PiecePropIo implements PieceCellIo {
       let targetCell: Cell<unknown>;
       if (this.#type === "input") {
         targetCell = pieces.getArgument(piece);
+        assertPieceInputPath(targetCell, path ?? []);
       } else {
         const resultCell = pieces.getResult(piece);
         const durableSchema = resultCell.getMetaRaw("schema") as
@@ -4802,6 +4892,42 @@ function samePieceSourceSnapshot(
 const RETAINED_INPUT_COMPATIBILITY_PREFIX =
   "piece source is incompatible with retained input: ";
 
+async function syncRetainedLinkMetadata(
+  argumentCell: Cell<unknown>,
+  pieces: PiecesController,
+): Promise<void> {
+  const roots = new Map<string, Cell<unknown>>();
+  for (const supplied of suppliedLinks(argumentCell.getRaw())) {
+    let base = argumentCell;
+    for (const segment of supplied.path) {
+      base = base.key(segment as keyof unknown) as Cell<unknown>;
+    }
+    const link = parseLinkOrThrow(supplied.value, base);
+    const root = pieces.runtime.getCellFromLink({
+      ...link,
+      path: [],
+      schema: undefined,
+    });
+    const { space, id, scope } = root.getAsNormalizedFullLink();
+    roots.set(JSON.stringify([space, id, scope]), root);
+  }
+  await Promise.all([...roots.values()].map(async (root) => {
+    // Naming the source root loads its metadata family, including the owner
+    // result of an argument/internal document. A value crossing loads only
+    // the selected value and does not establish that contract evidence.
+    await root.sync();
+    const link = root.getAsNormalizedFullLink();
+    if (
+      link.scope !== "space" && root.getMetaRaw("schema") === undefined &&
+      root.getMetaRaw("result") === undefined
+    ) {
+      // Scoped input redirects keep their producer metadata in base scope;
+      // scoped results instead own their metadata in the selected partition.
+      await pieces.runtime.getCellFromLink({ ...link, scope: "space" }).sync();
+    }
+  }));
+}
+
 function assertPieceSourceRetainedLinksCompatible(
   argumentCell: Cell<unknown>,
   candidateSchema: JSONSchema,
@@ -4892,19 +5018,14 @@ async function pieceSourceCompatibilityReview(
   }
 
   const argumentCell = pieces.getArgument(piece);
-  await argumentCell.sync();
-  const materializedArgument = argumentCell.asSchema(undefined).get();
-  const validationArgument = mergeSchemaDefaults(
-    materializedArgument,
+  // The candidate can select inputs the current pattern does not expose.
+  // Sync its projection before validating the newly selected values.
+  await argumentCell.asSchema(candidate.argumentSchema).sync();
+  const validationFailure = storedArgumentValidationIssue(
+    argumentCell,
+    candidate.argumentSchema,
     extractDefaultValues(candidate.argumentSchema),
-    candidate.argumentSchema,
-    { mergeMaterializedLinks: true },
-  );
-  const validationFailure = validateSchemaValue(
-    candidate.argumentSchema,
-    validationArgument,
-    candidate.argumentSchema,
-    { acceptOpaqueValue: schemaAcceptsOpaqueCellValue },
+    pieces.runtime.readTx(),
   );
   if (validationFailure !== undefined) {
     issues.argument =
@@ -4912,6 +5033,7 @@ async function pieceSourceCompatibilityReview(
   }
 
   try {
+    await syncRetainedLinkMetadata(argumentCell, pieces);
     assertPieceSourceRetainedLinksCompatible(
       argumentCell,
       candidate.argumentSchema,

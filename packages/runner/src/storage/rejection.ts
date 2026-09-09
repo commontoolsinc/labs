@@ -36,12 +36,14 @@ export function isPermanentRejection(
  *   before storage ever saw the commit (`rejectCommitBeforeStorage` in
  *   extended-storage-transaction.ts). Carries the prepare refusal reasons
  *   as a structured `reasons` array. Never crosses the wire either.
- *   VERDICTS only, and every recorded reason must be one. A reason is a
- *   verdict when its producer tags it (`cfc/verdict-reason.ts`); an
- *   untagged reason — an input prepare could not evaluate, a resolution
- *   that failed, a prepared state a caller disturbed through
- *   `invalidateCfc` — keeps the retryable `StorageTransactionAborted`
- *   name, because a fresh attempt can decide differently.
+ *   The name is reserved for a refusal that recorded reasons and tagged
+ *   every one of them a verdict (`cfc/verdict-reason.ts`). The retryable
+ *   `StorageTransactionAborted` name goes to reasons that are not all
+ *   verdicts, to an enforcing transaction whose prepared digest changed
+ *   under it, and to a relevant transaction that reaches commit
+ *   unprepared, which records no reasons at all. A crash inside commit
+ *   preparation takes `CommitPreparationError`, checked before the
+ *   reasons are read.
  */
 const TERMINAL_REJECTION_NAMES: ReadonlySet<string> = new Set([
   "RowLabelCommitError",
@@ -317,9 +319,10 @@ export function isCfcEnforcementRejection<
  * genuinely new attempt, and — unlike every other rejection class — a
  * discarded attempt costs no round-trip and no `finalizeRejection`, so
  * retrying one is local work rather than churn against the server. The CFC
- * boundary refusal shares the never-reached-storage shape but NOT the
- * convergence argument — the refusal is deterministic — so it carries its own
- * name (`CfcCommitRefusalError`) and classifies as terminal, not discarded.
+ * boundary aborts before storage too, and a refusal it produces reaches this
+ * predicate under the same name. That refusal takes the terminal
+ * `CfcCommitRefusalError` name instead when prepare recorded reasons and
+ * tagged every one of them a verdict (see {@link TERMINAL_REJECTION_NAMES}).
  *
  * NOTE the asymmetry with a callback that THROWS: `editWithRetry` aborts that
  * transaction and returns immediately without retrying, because a thrown

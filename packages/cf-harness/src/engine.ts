@@ -24,6 +24,8 @@ import {
 } from "./artifacts.ts";
 import {
   fabricSessionCfcEnforcementMode,
+  fabricSessionCfcFlowLabels,
+  fabricSessionCfcFlowLabelsSource,
   type HarnessConfig,
   type ResolvedHarnessConfig,
   resolveHarnessConfig,
@@ -790,8 +792,8 @@ export class CfHarnessEngine {
       options.runState,
     );
     // The posture the fabric session's runtime will actually run at, resolved
-    // from the same config the session factory reads. The pin/default values
-    // restate what `runtimePresets.remoteClient` and the Runtime constructor
+    // from the same config the session factory reads. The enforcement pin
+    // restates what `runtimePresets.remoteClient` and the Runtime constructor
     // supply when the dial is unset (`coreOptions` in
     // `packages/runner/src/runtime-presets.ts`).
     // A host that supplies its own session factory overrides the config the
@@ -825,15 +827,10 @@ export class CfHarnessEngine {
           this.config.fabricSession.cfcEnforcementMode !== undefined
             ? "configured" as const
             : "preset-pin" as const,
-        flowLabels: this.config.fabricSession.cfcFlowLabels ??
-          (this.config.fabricSession.cfcPosture === "max-enforcement"
-            ? "persist" as const
-            : "off" as const),
-        flowLabelsSource: this.config.fabricSession.cfcFlowLabels !== undefined
-          ? "configured" as const
-          : this.config.fabricSession.cfcPosture === "max-enforcement"
-          ? "posture" as const
-          : "default" as const,
+        flowLabels: fabricSessionCfcFlowLabels(this.config.fabricSession),
+        flowLabelsSource: fabricSessionCfcFlowLabelsSource(
+          this.config.fabricSession,
+        ),
         ...(this.config.fabricSession.cfcPosture !== undefined
           ? { posture: this.config.fabricSession.cfcPosture }
           : {}),

@@ -1,6 +1,7 @@
 import type {
   CfcConfClause,
   CfcEnforcementMode,
+  CfcFlowLabelsMode,
   CfcPostureReport,
   CfcReadOnExceed,
 } from "@commonfabric/runner/cfc";
@@ -45,6 +46,7 @@ import type {
 } from "./diagnostics.ts";
 import { selectPrimaryHarnessFailure } from "./diagnostics.ts";
 import type {
+  HarnessFabricCfcFlowLabelsSource,
   HarnessModelAuthSource,
   HarnessModelProviderId,
 } from "./config.ts";
@@ -88,13 +90,14 @@ export interface HarnessFabricSessionCfcPosture {
   /** `configured` when the operator set the dial; `preset-pin` otherwise. */
   enforcementModeSource: "configured" | "preset-pin";
 
-  flowLabels: "off" | "observe" | "persist";
+  /** The rung the session's runtime resolves to, from the whole ladder. */
+  flowLabels: CfcFlowLabelsMode;
 
   /**
    * `configured` when the operator set the dial; `posture` when the named
    * bundle below supplied it; `default` otherwise.
    */
-  flowLabelsSource: "configured" | "default" | "posture";
+  flowLabelsSource: HarnessFabricCfcFlowLabelsSource;
 
   /**
    * The named CFC posture bundle the session's runtime opted into, when the

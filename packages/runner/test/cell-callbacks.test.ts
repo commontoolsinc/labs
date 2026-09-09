@@ -23,6 +23,8 @@ import {
   type IExtendedStorageTransaction,
   type IStorageTransaction,
 } from "../src/storage/interface.ts";
+import { isCfcEnforcementRejection } from "../src/storage/rejection.ts";
+import { refuseAtCommitBoundary } from "./refused-commit.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -155,22 +157,10 @@ describe("Cell commit callbacks", () => {
   });
 
   it("should call callback when commit returns an error", async () => {
-    await runtime.dispose();
-    await storageManager.close();
-
-    storageManager = StorageManager.emulate({
-      as: signer,
-    });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
-    });
-    tx = runtime.edit();
-
     const cell = runtime.getCell<number>(
       space,
       "callback-commit-error-test",
-      { type: "number", ifc: { confidentiality: ["secret"] } } as JSONSchema,
+      undefined,
       tx,
     );
 
@@ -178,9 +168,10 @@ describe("Cell commit callbacks", () => {
     cell.set(42, (committedTx) => {
       statuses.push(committedTx.status().status);
     });
+    refuseAtCommitBoundary(tx, "the callback reports a rejected commit");
 
     const result = await tx.commit();
-    expect(result.error).toBeDefined();
+    expect(isCfcEnforcementRejection(result.error)).toBe(true);
     expect(statuses).toEqual(["error"]);
   });
 

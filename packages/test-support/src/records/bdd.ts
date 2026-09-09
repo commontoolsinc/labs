@@ -3,7 +3,9 @@
  * run one of them.
  *
  * A test's identity is the name its runner reports, which for a file
- * written this way is the describe chain joined with `" > "`.
+ * written this way is the describe chain joined with `" > "`, opening
+ * with the root suite the runner invents for a file whose hooks sit
+ * outside every `describe`.
  * Registration does not follow that shape: `describe` registers one
  * `Deno.test` and every `it` inside it is a step within that one test, so
  * the preload's wrapper around `Deno.test` sees the container and never
@@ -24,7 +26,16 @@
  * whole; see `capturing`.
  */
 
-import { describe as realDescribe, it as realIt } from "@std/testing/bdd/real";
+import {
+  after as realAfter,
+  afterAll as realAfterAll,
+  afterEach as realAfterEach,
+  before as realBefore,
+  beforeAll as realBeforeAll,
+  beforeEach as realBeforeEach,
+  describe as realDescribe,
+  it as realIt,
+} from "@std/testing/bdd/real";
 import {
   activeCapture,
   NAME_SEPARATOR,
@@ -32,15 +43,6 @@ import {
   registeringFile,
   type RegistrationCapture,
 } from "./registration.ts";
-
-export {
-  after,
-  afterAll,
-  afterEach,
-  before,
-  beforeAll,
-  beforeEach,
-} from "@std/testing/bdd/real";
 
 // A test registered through this module is the caller's, not this
 // module's, so the file attribution walks past these frames.
@@ -50,8 +52,19 @@ registerFrameworkModule(import.meta.url);
  * The describe chain enclosing whatever is being registered right now.
  * `describe` runs its body while it registers, so pushing the title
  * around that call is what makes the chain available to the `it`s inside.
+ * A hook declared outside every `describe` opens the chain with the root
+ * suite the runner invents for it, and nothing pops that one: the suite
+ * holds the rest of the file.
  */
 const chain: string[] = [];
+
+/**
+ * The name the bdd runner gives the root suite it invents. A hook
+ * declared outside every `describe` has no suite to hold it, so the
+ * runner makes one under this name and the suites the file goes on to
+ * run sit inside it.
+ */
+const ROOT_SUITE_NAME = "global";
 
 /** The name a bdd call was given, whichever way it was called. */
 export function nameOf(args: readonly unknown[]): string | undefined {
@@ -88,20 +101,25 @@ export function bodyOf(
   return undefined;
 }
 
+/** The shape every one of the bdd hooks shares. */
+type Hook = <T>(fn: (this: T) => void | Promise<void>) => void;
+
 /**
  * Wraps one `describe` entry point so the chain is pushed around the body
- * it registers. A shape this does not model reaches the real function
- * untouched, so an unfamiliar overload still runs and still reports its
- * own error.
+ * it registers. A call with no body registers nothing inside it and
+ * reaches the real function untouched, so an unfamiliar overload still
+ * runs and still reports its own error. A call carrying no title of its
+ * own is named after its body, so the wrapper answers to the body's own
+ * name and the suite is reported under it.
  *
  * Takes no capture: a wrapper is built only where one is installed, and
  * tracking the chain is the whole of what this does with it.
  */
 export function wrapDescribe(through: AnyFunction): AnyFunction {
   return (...args: unknown[]): unknown => {
-    const name = nameOf(args);
     const found = bodyOf(args);
-    if (name === undefined || found === undefined) return through(...args);
+    if (found === undefined) return through(...args);
+    const name = nameOf(args) ?? found.body.name;
     const wrapped = function (this: unknown, ...rest: unknown[]): unknown {
       chain.push(name);
       try {
@@ -110,6 +128,7 @@ export function wrapDescribe(through: AnyFunction): AnyFunction {
         chain.pop();
       }
     };
+    Object.defineProperty(wrapped, "name", { value: found.body.name });
     if (found.index >= 0) {
       const next = [...args];
       next[found.index] = wrapped;
@@ -215,3 +234,39 @@ export const it: typeof realIt = capture === undefined
 
 /** The alias `@std/testing/bdd` gives `it`. */
 export const test: typeof realIt = it;
+
+/**
+ * Wraps one hook where a capture is installed, and not otherwise.
+ *
+ * A call outside every `describe` is what makes the runner invent its
+ * root suite, so the chain opens with that suite's name from there on
+ * and every leaf is named inside it. The name goes on once the call has
+ * returned, so a hook the runner refuses — it refuses one declared after
+ * a test has started — leaves the naming alone. Deno gives each test
+ * file a realm of its own, so the chain is one file's.
+ */
+function hook(real: Hook): Hook {
+  if (capture === undefined) return real;
+  return (fn) => {
+    real(fn);
+    if (chain.length === 0) chain.push(ROOT_SUITE_NAME);
+  };
+}
+
+/** `beforeEach`, noticing a call that brings the root suite about. */
+export const beforeEach: typeof realBeforeEach = hook(realBeforeEach);
+
+/** `afterEach`, noticing the same. */
+export const afterEach: typeof realAfterEach = hook(realAfterEach);
+
+/** `beforeAll`, noticing the same. */
+export const beforeAll: typeof realBeforeAll = hook(realBeforeAll);
+
+/** `afterAll`, noticing the same. */
+export const afterAll: typeof realAfterAll = hook(realAfterAll);
+
+/** The alias `@std/testing/bdd` gives `beforeAll`. */
+export const before: typeof realBefore = hook(realBefore);
+
+/** The alias `@std/testing/bdd` gives `afterAll`. */
+export const after: typeof realAfter = hook(realAfter);

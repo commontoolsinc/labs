@@ -65,6 +65,13 @@ interface Member {
 
   /** Whether the member also names a browser half. */
   browserTest: boolean;
+
+  /**
+   * The test files the Deno-only half declines, which is what the
+   * browser half runs. The browser half is one unit whatever it holds,
+   * so these are files the topology accounts for without enumerating.
+   */
+  browserFiles: string[];
 }
 
 /** The record scope of a member: its path with `packages/` taken off. */
@@ -95,14 +102,32 @@ async function readMember(
     denoTestTask: tasks.denoTestTask ?? "test",
     denoHalf: tasks.denoHalf,
     browserTest: tasks.browserTest,
+    browserFiles: [],
   };
   if (tasks.denoTest === undefined) return member;
   // Normalized against the repository root, because a member's task may
   // name a file outside its own directory and a unit is a path anyone
   // else can resolve.
+  const relative = (file: string) =>
+    path.relative(root, path.resolve(memberDir, file));
   member.files = (await memberTestFiles(memberDir, tasks.denoTest))
-    .map((file) => path.relative(root, path.resolve(memberDir, file)));
+    .map(relative);
   member.run = { flags: tasks.denoTest.flags, env: tasks.denoTest.env };
+  if (member.browserTest) {
+    // What the Deno-only half ignores is what the browser half runs. A
+    // member that splits its halves by a name — `*.browser.test.ts` — is
+    // otherwise a member whose browser files no suite claims, because
+    // the browser unit is one unit rather than one per file. The same
+    // paths the task names, read without its ignores, so the difference
+    // is what an ignore took out rather than what the task never looked
+    // at. No member in the tree has that shape yet.
+    const everything = new Set(
+      (await memberTestFiles(memberDir, { ...tasks.denoTest, ignores: [] }))
+        .map(relative),
+    );
+    for (const file of member.files) everything.delete(file);
+    member.browserFiles = [...everything].sort();
+  }
   return member;
 }
 
@@ -150,12 +175,15 @@ function unitSuite(
     recordSurfaces.push({ kind: "browser", scope: member.scope });
   }
 
+  const sources = members.flatMap((member) => member.browserFiles);
+
   return {
     id,
     recordSurfaces,
     needs,
     units,
     unavailable: [],
+    ...(sources.length === 0 ? {} : { sources }),
 
     locate(record: LocatableRecord): Location | undefined {
       if (!claimsIdentity({ recordSurfaces }, record.test)) return undefined;
