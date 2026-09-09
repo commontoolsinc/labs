@@ -1017,17 +1017,25 @@ which it is not today: 553 test files call it directly, at 7,327 sites.
 Every one of those is the plain entry point, since `Deno.test.only`,
 `Deno.test.ignore` and `Deno.test.each` appear nowhere in the tree, so
 each site is a rename onto the registrar's own `test`. A file the rename
-misses keeps its tests and loses its file and its skippability, which is
-the direction to fail in, and a lint rule of the kind the tree already
-carries for self-imports holds the invariant afterwards.
+misses keeps its tests and keeps its file, since nothing wraps
+`Deno.test` any more and a class name names the file that called it;
+what it loses is its skippability, which is the direction to fail in. A
+lint rule of the kind the tree already carries for self-imports holds
+the invariant afterwards.
 
-What goes with the replacements is the machinery for seeing around them.
-`MACHINERY_MODULE_SUFFIXES` and `registerFrameworkModule` are two lists
-of the modules that stand in the way, kept in step by hand, and one
-registrar leaves nothing for them to name. Three readers of the call
-stack become one, which can raise `Error.stackTraceLimit` around its own
-capture and take the repository root from `Deno.cwd()` or its own
-`import.meta.url` rather than climbing to a `.git` directory.
+What goes with the replacements is the machinery for seeing around them,
+which is two registries of the modules in the way, kept in step by hand.
+`MACHINERY_MODULE_SUFFIXES` is an array of path tails that ingestion
+reads to refuse a class name naming machinery rather than a test file.
+`registerFrameworkModule` is a function each such module calls on
+itself, adding its URL to a set the stack walk reads to step past its
+frames. A module that stands in the way has to appear in both, and one
+registrar leaves neither anything to name.
+
+Three readers of the call stack become one with them, and that one can
+raise `Error.stackTraceLimit` around its own capture and take the
+repository root from `Deno.cwd()` or its own `import.meta.url` rather
+than climbing to a `.git` directory.
 
 The name map stays, because the file has to reach the process that
 writes the record and that is not the process that knows it. A record's
