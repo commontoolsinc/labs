@@ -86,6 +86,38 @@ export const poisonWorkspaceTaint = (
 };
 
 /**
+ * Seeds a family's state from a run's persisted record, on resume.
+ *
+ * The in-process map is empty when a resumed run starts, and an empty entry
+ * reads as known-clean — so a run that ended `unknown` would come back able
+ * to mint. Seeding is monotone in the same two directions the live joins are:
+ * a persisted `unknown` poisons, and a persisted label joins.
+ *
+ * A resumed run whose record says NOTHING about its taint gets `unknown`
+ * rather than clean. Its earlier invocations are not in this process's map,
+ * and a run state written before this field existed cannot say whether they
+ * were clean; that is the same absence of evidence a lost sidecar leaves.
+ */
+export const seedWorkspaceTaintFromRunState = (
+  familyRunId: string,
+  persisted: HarnessWorkspaceTaint | undefined,
+): HarnessWorkspaceTaint => {
+  if (persisted === undefined) {
+    return poisonWorkspaceTaint(
+      familyRunId,
+      "this run was resumed from a record that says nothing about what its " +
+        "earlier sandbox invocations were exposed to",
+    );
+  }
+  if (persisted.kind === "unknown") {
+    return poisonWorkspaceTaint(familyRunId, persisted.reason);
+  }
+  return persisted.label === undefined
+    ? workspaceTaint(familyRunId)
+    : joinWorkspaceTaint(familyRunId, persisted.label);
+};
+
+/**
  * Drops a family's accumulated taint. For tests, which run many families in
  * one process; a run never forgets what its sandbox was exposed to.
  */

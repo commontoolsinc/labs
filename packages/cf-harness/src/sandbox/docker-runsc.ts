@@ -1,6 +1,12 @@
 import {
+  basename as basenameHostPath,
+  dirname as dirnameHostPath,
   isAbsolute as isAbsoluteHostPath,
   join as joinHostPath,
+  normalize as normalizeHostPath,
+  parse as parseHostPath,
+  relative as relativeHostPath,
+  SEPARATOR as hostSeparator,
 } from "@std/path";
 import {
   isAbsolute as isAbsoluteSandboxPath,
@@ -29,6 +35,7 @@ import {
   type ProcessRunResult,
 } from "./process-runner.ts";
 import type {
+  CfcSandboxResultOrigin,
   CfcSidecarTransportKind,
   CfcSidecarTransportReading,
   CfcTransportReadiness,
@@ -247,6 +254,75 @@ const resolveCfcInvocationContextDir = (
     : validateAbsoluteHostDir(dir, "cfcInvocationContextDir");
 };
 
+/**
+ * Refuses a CFC sidecar transport directory the sandbox can reach.
+ *
+ * Both sidecars are trusted: the harness writes the invocation context the
+ * container starts tainted from, and reads back the final taint that
+ * `ingest_sandbox_file` mints a cell's label from. Neither claim survives the
+ * directory being writable by the workload it describes — a container that
+ * can rewrite its own result sidecar can name its own taint, and a label
+ * minted from that is one the sandbox chose.
+ *
+ * Comparison is on real paths, so a symlink into a mount is caught as one.
+ * A path that does not exist yet cannot be under a mount that does, and is
+ * compared by name; that is the ordinary case, since the harness creates
+ * these directories when it first writes to them.
+ *
+ * What this cannot check is the other side of the transport: whether the
+ * runtime is registered to read the directory named here, and whether the
+ * container's own view maps it in some way this host cannot see. That
+ * residual belongs to the runsc registration and is recorded in the package
+ * documentation rather than asserted here.
+ *
+ * @throws Error naming the directory and the mount it sits under.
+ */
+const refuseSandboxVisibleTransportDir = (
+  dir: string,
+  label: string,
+  mounts: readonly { hostPath: string; sandboxLabel: string }[],
+): void => {
+  // A directory that does not exist yet still has to be compared against one
+  // that does, and these are usually created on first write. Resolving only
+  // what exists and re-joining the rest is what makes the two comparable:
+  // resolving neither would compare a real path against a literal one, which
+  // on a host where the temporary root is itself a symlink — macOS's `/var`
+  // is `/private/var` — reports every directory as outside every mount.
+  const realOf = (path: string): string => {
+    const normalized = normalizeHostPath(path);
+    const { root } = parseHostPath(normalized);
+    const tail: string[] = [];
+    let head = normalized;
+    // Down to the deepest ancestor that exists, re-joining what does not.
+    // The walk is finite because every step drops a segment, and it never has
+    // to test the root inside the loop: the root is where it ends, and it is
+    // resolved once below.
+    while (head !== root) {
+      try {
+        return joinHostPath(Deno.realPathSync(head), ...[...tail].reverse());
+      } catch {
+        tail.push(basenameHostPath(head));
+        head = dirnameHostPath(head);
+      }
+    }
+    return joinHostPath(Deno.realPathSync(root), ...[...tail].reverse());
+  };
+
+  const realDir = realOf(dir);
+  for (const mount of mounts) {
+    const realMount = realOf(mount.hostPath);
+    const step = relativeHostPath(realMount, realDir);
+    if (step !== ".." && !step.startsWith(`..${hostSeparator}`)) {
+      throw new Error(
+        `${label} must not be inside a directory the sandbox can write: ` +
+          `${dir} resolves under ${mount.sandboxLabel} (${mount.hostPath}). ` +
+          `The sandbox would be able to rewrite the evidence the harness ` +
+          `reads back from it.`,
+      );
+    }
+  }
+};
+
 export const resolveDockerRunscSandboxConfig = (
   options: ResolveDockerRunscSandboxConfigOptions,
 ): DockerRunscSandboxConfig => {
@@ -266,6 +342,36 @@ export const resolveDockerRunscSandboxConfig = (
     options.cfcResultDir ?? readEnvVar(CFC_RESULT_DIR_ENV),
   );
   const cfcInvocationContextDir = resolveCfcInvocationContextDir(options);
+  // Every host directory this sandbox mounts read-write, including the
+  // workspace that holds the run family's output directory.
+  const writableMounts = [
+    ...(options.workspaceHostPath !== undefined
+      ? [{
+        hostPath: options.workspaceHostPath,
+        sandboxLabel: "the workspace mount",
+      }]
+      : []),
+    ...additionalMounts
+      .filter((mount) => !mount.readOnly && mount.hostPath !== undefined)
+      .map((mount) => ({
+        hostPath: mount.hostPath!,
+        sandboxLabel: `the mount at ${mount.sandboxPath}`,
+      })),
+  ];
+  if (cfcResultDir !== undefined) {
+    refuseSandboxVisibleTransportDir(
+      cfcResultDir,
+      "cfcResultDir",
+      writableMounts,
+    );
+  }
+  if (cfcInvocationContextDir !== undefined) {
+    refuseSandboxVisibleTransportDir(
+      cfcInvocationContextDir,
+      "cfcInvocationContextDir",
+      writableMounts,
+    );
+  }
   return {
     dockerBinary: options.dockerBinary ?? DEFAULT_DOCKER_BINARY,
     runtimeName: options.runtimeName ?? DEFAULT_DOCKER_RUNTIME_NAME,
@@ -586,6 +692,20 @@ const opaqueStream = (
   byteLength: byteLength(text),
 });
 
+/**
+ * A result the runtime composed because it could not read runsc's. Carried
+ * with its origin so a reader cannot mistake its empty label for a public
+ * container: an unreadable sidecar establishes nothing about the taint.
+ */
+const syntheticCfcResult = (
+  code: string,
+  message: string,
+  details: Record<string, CfcSandboxJsonValue> = {},
+): { cfcResult: CfcSandboxResult; origin: CfcSandboxResultOrigin } => ({
+  origin: "synthetic",
+  cfcResult: deniedCfcResult(code, message, details),
+});
+
 const deniedCfcResult = (
   code: string,
   message: string,
@@ -651,16 +771,16 @@ const cfcResultFromRunscSidecar = (
   parsed: RunscCfcResultSidecar,
   expectedContainerID: string,
   commandResult: SandboxCommandResult,
-): CfcSandboxResult => {
+): { cfcResult: CfcSandboxResult; origin: CfcSandboxResultOrigin } => {
   if (parsed.version !== 1) {
-    return deniedCfcResult(
+    return syntheticCfcResult(
       "runsc_cfc_sidecar_version",
       "runsc CFC result sidecar has an unsupported version",
       { containerId: expectedContainerID },
     );
   }
   if (parsed.containerId !== expectedContainerID) {
-    return deniedCfcResult(
+    return syntheticCfcResult(
       "runsc_cfc_sidecar_container_mismatch",
       "runsc CFC result sidecar did not match the Docker container ID",
       {
@@ -672,7 +792,7 @@ const cfcResultFromRunscSidecar = (
     );
   }
   if (!isObjectNotArray(parsed.cfcTaint)) {
-    return deniedCfcResult(
+    return syntheticCfcResult(
       "runsc_cfc_sidecar_missing_taint",
       "runsc CFC result sidecar did not include final CFC taint",
       { containerId: expectedContainerID },
@@ -699,40 +819,46 @@ const cfcResultFromRunscSidecar = (
 
   if (isPublicRunscTaint(cfcTaint)) {
     return {
-      version: 1,
-      stdout: observedStream("stdout", commandResult.stdout, label),
-      stderr: observedStream("stderr", commandResult.stderr, label),
-      exitCode: {
-        policy: "observed",
-        label,
-        value: commandResult.exitCode,
+      origin: "runsc-taint",
+      cfcResult: {
+        version: 1,
+        stdout: observedStream("stdout", commandResult.stdout, label),
+        stderr: observedStream("stderr", commandResult.stderr, label),
+        exitCode: {
+          policy: "observed",
+          label,
+          value: commandResult.exitCode,
+        },
+        diagnostics: [{
+          level: "info",
+          code: "runsc_cfc_result",
+          message: "runsc reported final CFC taint for sandbox output",
+          label,
+          details,
+        }],
       },
-      diagnostics: [{
-        level: "info",
-        code: "runsc_cfc_result",
-        message: "runsc reported final CFC taint for sandbox output",
-        label,
-        details,
-      }],
     };
   }
 
   return {
-    version: 1,
-    stdout: opaqueStream("stdout", commandResult.stdout, label),
-    stderr: opaqueStream("stderr", commandResult.stderr, label),
-    exitCode: {
-      policy: "opaque",
-      label,
+    origin: "runsc-taint",
+    cfcResult: {
+      version: 1,
+      stdout: opaqueStream("stdout", commandResult.stdout, label),
+      stderr: opaqueStream("stderr", commandResult.stderr, label),
+      exitCode: {
+        policy: "opaque",
+        label,
+      },
+      diagnostics: [{
+        level: "info",
+        code: "runsc_cfc_result",
+        message:
+          "runsc reported tainted sandbox output; raw streams are withheld from model context",
+        label,
+        details,
+      }],
     },
-    diagnostics: [{
-      level: "info",
-      code: "runsc_cfc_result",
-      message:
-        "runsc reported tainted sandbox output; raw streams are withheld from model context",
-      label,
-      details,
-    }],
   };
 };
 
@@ -1047,13 +1173,15 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
           : appendStderr(startResult.stderr, waitResult.stderr),
         exitCode,
       };
-      const cfcResult = await this.#readCfcResultSidecar(
+      const read = await this.#readCfcResultSidecar(
         containerID,
         commandResult,
       );
-      return cfcResult === undefined
-        ? commandResult
-        : { ...commandResult, cfcResult };
+      return read === undefined ? commandResult : {
+        ...commandResult,
+        cfcResult: read.cfcResult,
+        cfcResultOrigin: read.origin,
+      };
     } finally {
       await this.#runner.run({
         command: this.#dockerBinary,
@@ -1082,7 +1210,9 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
   async #readCfcResultSidecar(
     containerID: string,
     commandResult: SandboxCommandResult,
-  ): Promise<CfcSandboxResult | undefined> {
+  ): Promise<
+    { cfcResult: CfcSandboxResult; origin: CfcSandboxResultOrigin } | undefined
+  > {
     if (this.#cfcResultDir === undefined) {
       return undefined;
     }
@@ -1090,7 +1220,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
     try {
       sidecarPath = cfcSidecarPath(this.#cfcResultDir, containerID);
     } catch (error) {
-      return deniedCfcResult(
+      return syntheticCfcResult(
         "runsc_cfc_sidecar_container_id",
         "runsc CFC sidecar path could not be derived from the Docker container ID",
         {
@@ -1106,7 +1236,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
       if (error instanceof Deno.errors.NotFound) {
         return undefined;
       }
-      return deniedCfcResult(
+      return syntheticCfcResult(
         "runsc_cfc_sidecar_read_error",
         "failed to read runsc CFC result sidecar",
         {
@@ -1120,7 +1250,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
       const parsed = JSON.parse(text) as RunscCfcResultSidecar;
       return cfcResultFromRunscSidecar(parsed, containerID, commandResult);
     } catch (error) {
-      return deniedCfcResult(
+      return syntheticCfcResult(
         "runsc_cfc_sidecar_parse_error",
         "failed to parse runsc CFC result sidecar",
         {

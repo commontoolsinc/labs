@@ -106,10 +106,39 @@ export const ingestSandboxFileToolDescriptor: HarnessToolDescriptor = {
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-/** Whether `hostPath` sits inside `root`, by path rather than by existence. */
-const isWithin = (root: string, hostPath: string): boolean => {
-  const step = relative(root, hostPath);
-  return step !== "" && !step.startsWith("..") && !isAbsolute(step);
+/**
+ * Whether `hostPath` sits strictly inside `root`, deciding on REAL paths.
+ *
+ * A lexical comparison answers about the name a caller wrote, and the read
+ * that follows answers about the file the name reaches. A symlink planted in
+ * the output directory by the sandboxed workload — which can write there —
+ * makes those two different files, and the label would then describe a
+ * container that never wrote what was stored. Both sides are resolved, so a
+ * link out of the directory is a path out of the directory.
+ *
+ * A path that cannot be resolved is not inside anything: `undefined` says the
+ * question could not be answered, and the caller refuses rather than guessing.
+ */
+const realPathWithin = async (
+  root: string,
+  hostPath: string,
+): Promise<
+  | { kind: "within"; realPath: string }
+  | { kind: "unreadable"; error: unknown }
+  | { kind: "outside" }
+> => {
+  let realRoot: string;
+  let realPath: string;
+  try {
+    realRoot = await Deno.realPath(root);
+    realPath = await Deno.realPath(hostPath);
+  } catch (error) {
+    return { kind: "unreadable", error };
+  }
+  const step = relative(realRoot, realPath);
+  return step !== "" && !step.startsWith("..") && !isAbsolute(step)
+    ? { kind: "within", realPath }
+    : { kind: "outside" };
 };
 
 export const ingestSandboxFileTool: HarnessToolDefinition<
@@ -164,18 +193,31 @@ export const ingestSandboxFileTool: HarnessToolDefinition<
         }`,
       );
     }
-    if (!isWithin(outputRoot, hostPath)) {
+    const resolved = await realPathWithin(outputRoot, hostPath);
+    // A path that cannot be resolved is reported as the file it names, not as
+    // one outside the directory: the usual reason is that nothing is there,
+    // and answering "outside" would send a caller looking for an escape it
+    // did not attempt.
+    if (resolved.kind === "unreadable") {
+      return errorOutput(
+        `ingest_sandbox_file could not read the file: ${
+          errorMessage(resolved.error)
+        }`,
+      );
+    }
+    if (resolved.kind === "outside") {
       return errorOutput(
         `ingest_sandbox_file only reads files under this run's output ` +
           `directory (${context.sandboxOutputRootSandboxPath}, named by ` +
           `$${SANDBOX_OUTPUT_DIR_ENV} inside the sandbox). Being in the ` +
           `workspace does not establish that this run produced a file; only ` +
-          `that directory does. Write the file there and ingest it from there.`,
+          `that directory does, and a link out of it leads back to one that ` +
+          `does not. Write the file there and ingest it from there.`,
       );
     }
     let bytes: Uint8Array;
     try {
-      bytes = await Deno.readFile(hostPath);
+      bytes = await Deno.readFile(resolved.realPath);
     } catch (error) {
       return errorOutput(
         `ingest_sandbox_file could not read the file: ${errorMessage(error)}`,
@@ -186,9 +228,17 @@ export const ingestSandboxFileTool: HarnessToolDefinition<
     // the cell that were never in the file while reporting a size taken from
     // the replacement. This tool ingests text; a file that is not text is a
     // refusal until there is a binary value convention to store it under.
+    //
+    // `ignoreBOM` keeps a leading U+FEFF as content. Stripping it is the
+    // default, and it would drop three bytes from the value while `bytes`
+    // still reported the file's length — the same mismatch a lenient decode
+    // makes, arrived at from the other side.
     let content: string;
     try {
-      content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      content = new TextDecoder("utf-8", {
+        fatal: true,
+        ignoreBOM: true,
+      }).decode(bytes);
     } catch {
       return errorOutput(
         "ingest_sandbox_file reads UTF-8 text, and this file is not valid UTF-8. " +

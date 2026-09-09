@@ -24,8 +24,6 @@
  * directory rather than a claim anything trusts.
  */
 
-import type { CfcSandboxResult } from "@commonfabric/runner/cfc";
-
 import type {
   CfcTransportReadiness,
   SandboxCommandRequest,
@@ -36,11 +34,13 @@ import type {
 } from "./types.ts";
 
 /**
- * What one sandbox invocation left behind: the container's CFC result, or
- * `undefined` when it returned none and its taint cannot be established.
+ * What one sandbox invocation left behind. A result is evidence only when the
+ * runtime says runsc reported it; one the runtime synthesized because it
+ * could not read the sidecar carries an empty label that would otherwise read
+ * as a public container.
  */
 export type SandboxInvocationObserver = (
-  cfcResult: CfcSandboxResult | undefined,
+  result: SandboxCommandResult | undefined,
 ) => Promise<void>;
 
 class FamilySandboxRuntime implements SandboxRuntime {
@@ -88,14 +88,14 @@ class FamilySandboxRuntime implements SandboxRuntime {
   }
 
   async run(request: SandboxCommandRequest): Promise<SandboxCommandResult> {
-    return await this.#observed(
-      this.#inner.run({ ...request, env: this.#merged(request.env) }),
+    return await this.#observed(() =>
+      this.#inner.run({ ...request, env: this.#merged(request.env) })
     );
   }
 
   async runShell(request: SandboxShellRequest): Promise<SandboxCommandResult> {
-    return await this.#observed(
-      this.#inner.runShell({ ...request, env: this.#merged(request.env) }),
+    return await this.#observed(() =>
+      this.#inner.runShell({ ...request, env: this.#merged(request.env) })
     );
   }
 
@@ -104,20 +104,25 @@ class FamilySandboxRuntime implements SandboxRuntime {
    *
    * An invocation that THREW ran a container too — a Docker failure, a
    * timeout — and left no result to read, so it is reported before the error
-   * travels on. Reporting only on the success path would let a family lose
-   * an invocation by having it fail.
+   * travels on. Reporting only on the success path would let a family lose an
+   * invocation by having it fail.
+   *
+   * `start` is a thunk rather than a promise so that a runtime throwing
+   * SYNCHRONOUSLY is caught here as well. Evaluating the call before the
+   * `try` would let exactly one shape of failure — the one that never reaches
+   * a promise — pass unobserved.
    */
   async #observed(
-    running: Promise<SandboxCommandResult>,
+    start: () => Promise<SandboxCommandResult>,
   ): Promise<SandboxCommandResult> {
     let result: SandboxCommandResult;
     try {
-      result = await running;
+      result = await start();
     } catch (error) {
       await this.#observe(undefined);
       throw error;
     }
-    await this.#observe(result.cfcResult);
+    await this.#observe(result);
     return result;
   }
 

@@ -26,6 +26,7 @@ import {
   sandboxOutputRootSandboxPath,
 } from "../src/sandbox/output-root.ts";
 import type {
+  CfcSandboxResultOrigin,
   SandboxCommandRequest,
   SandboxCommandResult,
   SandboxRuntime,
@@ -67,15 +68,31 @@ const sandboxResult = (label: IFCLabel): CfcSandboxResult => {
   };
 };
 
+/** The shape the runtime composes when it cannot read runsc's sidecar. */
+const deniedSandboxResult = (code: string): CfcSandboxResult => ({
+  version: 1,
+  stdout: { channel: "stdout", policy: "denied", label: {}, reason: code },
+  stderr: { channel: "stderr", policy: "denied", label: {}, reason: code },
+  exitCode: { policy: "denied", label: {}, reason: code },
+  diagnostics: [{ level: "error", code, message: code }],
+});
+
 /**
  * Stands in for the gVisor sandbox. `cfcResult` is what runsc reported for
  * the container, which the harness reads out of a sidecar the sandboxed
  * workload cannot write; `env` records what each invocation was handed.
+ *
+ * `origin` is the discriminator the real runtime sets. `runsc-taint` is a
+ * report; `synthetic` is what the runtime composes when it cannot read the
+ * sidecar, and its empty label must never be read as a public container.
  */
 class FakeSandbox implements SandboxRuntime {
   readonly env: Record<string, string>[] = [];
 
-  constructor(readonly cfcResult: CfcSandboxResult | undefined) {}
+  constructor(
+    readonly cfcResult: CfcSandboxResult | undefined,
+    readonly origin: CfcSandboxResultOrigin = "runsc-taint",
+  ) {}
 
   describe(): SandboxRuntimeDescription {
     return {
@@ -107,7 +124,9 @@ class FakeSandbox implements SandboxRuntime {
       stdout: "",
       stderr: "",
       exitCode: 0,
-      ...(this.cfcResult !== undefined ? { cfcResult: this.cfcResult } : {}),
+      ...(this.cfcResult !== undefined
+        ? { cfcResult: this.cfcResult, cfcResultOrigin: this.origin }
+        : {}),
     });
   }
 
@@ -635,6 +654,263 @@ describe("ingest_sandbox_file", () => {
       );
       await Deno.remove(workspace, { recursive: true });
     }
+  });
+
+  it("refuses a symlink in the output directory that leads outside it", async () => {
+    // The sandbox can write into the output directory, so it can plant a link
+    // there. A lexical containment test passes it and the read follows it, and
+    // the cell would then hold bytes from a file no invocation of this run
+    // wrote.
+
+    await withRun(
+      { taint: FINANCE_LABEL, workspaceFiles: { "outside.txt": "not ours" } },
+      async ({ engine, outputRoot, outputDir, workspace }) => {
+        await Deno.symlink(
+          join(workspace, "outside.txt"),
+          join(outputRoot, "link.txt"),
+        );
+
+        const output = failure(await ingest(engine, `${outputDir}/link.txt`));
+
+        expect(output.message).toContain("only reads files under this run's");
+      },
+    );
+  });
+
+  it("refuses a hard link in the output directory whose target is outside", async () => {
+    // A hard link has no path back to where it was made, so containment is
+    // decided on the inode's own resolved path rather than on the name.
+
+    await withRun(
+      { taint: FINANCE_LABEL, workspaceFiles: { "outside.txt": "not ours" } },
+      async ({ engine, outputRoot, outputDir, workspace }) => {
+        await Deno.link(
+          join(workspace, "outside.txt"),
+          join(outputRoot, "hard.txt"),
+        );
+
+        // The link's own path IS under the directory, and its real path is
+        // too, so this one is admitted — what it must not do is report the
+        // outside file's bytes under a label from somewhere else. It is the
+        // symlink case above that a lexical test lets through; this pins that
+        // a hard link is not silently treated as an escape it is not.
+        const output = succeeded(
+          await ingest(engine, `${outputDir}/hard.txt`),
+        );
+
+        expect(output.labeled).toBe(true);
+      },
+    );
+  });
+
+  it("poisons the family when a sandbox result was synthesized rather than reported", async () => {
+    // The runtime composes a denied result with an EMPTY label when it cannot
+    // read the sidecar — an unsupported version, a container mismatch, a
+    // missing taint, a read or parse failure. Shaped exactly like a public
+    // container, so only its origin tells them apart.
+
+    for (
+      const synthetic of [
+        deniedSandboxResult("runsc_cfc_sidecar_version"),
+        deniedSandboxResult("runsc_cfc_sidecar_container_mismatch"),
+        deniedSandboxResult("runsc_cfc_sidecar_missing_taint"),
+        deniedSandboxResult("runsc_cfc_sidecar_read_error"),
+        deniedSandboxResult("runsc_cfc_sidecar_parse_error"),
+      ]
+    ) {
+      const runId = `ingest-sandbox-file-${crypto.randomUUID()}`;
+      const workspace = await Deno.makeTempDir({
+        prefix: "cf-harness-ingest-",
+      });
+      try {
+        const engine = new CfHarnessEngine({
+          sandboxRuntime: new FakeSandbox(synthetic, "synthetic"),
+          runId,
+          workspaceHostPath: workspace,
+          fabricSessionFactory: () =>
+            Promise.reject(new Error("no session should be opened")),
+        });
+        await engine.invokeBuiltinTool("bash", { command: "x" });
+
+        expect(engine.workspaceTaint.kind).toBe("unknown");
+        const output = await engine.invokeBuiltinTool("ingest_sandbox_file", {
+          path: `${sandboxOutputRootSandboxPath("/workspace", runId)}/x.txt`,
+        });
+        expect(
+          failure(output.output as IngestSandboxFileToolOutput).message,
+        ).toContain("cannot label anything from this run");
+      } finally {
+        forgetWorkspaceTaintForTesting(runId);
+        await Deno.remove(workspace, { recursive: true });
+      }
+    }
+  });
+
+  it("poisons the family when a result claims runsc origin but is malformed", async () => {
+    // The origin says the sidecar was read; the result says otherwise. A
+    // reader that trusted the origin alone would take a shape it cannot
+    // interpret as a container with nothing on it.
+
+    const runId = `ingest-sandbox-file-${crypto.randomUUID()}`;
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-ingest-" });
+    try {
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandbox(
+          {
+            ...sandboxResult(FINANCE_LABEL),
+            version: 2,
+          } as unknown as CfcSandboxResult,
+          "runsc-taint",
+        ),
+        runId,
+        workspaceHostPath: workspace,
+      });
+
+      await engine.invokeBuiltinTool("bash", { command: "x" });
+
+      expect(engine.workspaceTaint.kind).toBe("unknown");
+    } finally {
+      forgetWorkspaceTaintForTesting(runId);
+      await Deno.remove(workspace, { recursive: true });
+    }
+  });
+
+  it("poisons the family when a sandbox invocation throws synchronously", async () => {
+    // A runtime is free to throw before it returns a promise, and that shape
+    // of failure reaches no `catch` that awaits the call.
+
+    const runId = `ingest-sandbox-file-${crypto.randomUUID()}`;
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-ingest-" });
+    try {
+      const throwing = new FakeSandbox(sandboxResult(FINANCE_LABEL));
+      throwing.runShell = () => {
+        throw new Error("docker missing");
+      };
+      throwing.run = () => {
+        throw new Error("docker missing");
+      };
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: throwing,
+        runId,
+        workspaceHostPath: workspace,
+      });
+
+      await expect(engine.invokeBuiltinTool("bash", { command: "x" }))
+        .rejects.toThrow(/docker missing/);
+      expect(engine.workspaceTaint.kind).toBe("unknown");
+    } finally {
+      forgetWorkspaceTaintForTesting(runId);
+      await Deno.remove(workspace, { recursive: true });
+    }
+  });
+
+  it("keeps a resumed run's unknown taint unknown", async () => {
+    // The in-process map is empty when a resumed run starts, and an empty
+    // entry reads as clean. A run that ended unable to say what it saw must
+    // not come back able to mint.
+
+    const runId = `ingest-sandbox-file-${crypto.randomUUID()}`;
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-ingest-" });
+    try {
+      const first = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandbox(undefined),
+        runId,
+        workspaceHostPath: workspace,
+      });
+      await first.invokeBuiltinTool("bash", { command: "x" });
+      const persisted = first.getRunState();
+      expect(persisted.cfcWorkspaceTaint?.kind).toBe("unknown");
+      forgetWorkspaceTaintForTesting(runId);
+
+      const resumed = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandbox(sandboxResult({})),
+        runState: persisted,
+        workspaceHostPath: workspace,
+      });
+      await resumed.invokeBuiltinTool("bash", { command: "echo clean" });
+
+      expect(resumed.workspaceTaint.kind).toBe("unknown");
+    } finally {
+      forgetWorkspaceTaintForTesting(runId);
+      await Deno.remove(workspace, { recursive: true });
+    }
+  });
+
+  it("keeps a resumed run's label, and treats a record that states none as unknown", async () => {
+    const runId = `ingest-sandbox-file-${crypto.randomUUID()}`;
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-ingest-" });
+    try {
+      const first = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandbox(sandboxResult(FINANCE_LABEL)),
+        runId,
+        workspaceHostPath: workspace,
+      });
+      await first.invokeBuiltinTool("bash", { command: "x" });
+      const persisted = first.getRunState();
+      forgetWorkspaceTaintForTesting(runId);
+
+      const resumed = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandbox(sandboxResult({})),
+        runState: persisted,
+        workspaceHostPath: workspace,
+      });
+
+      expect(resumed.workspaceTaint).toEqual({
+        kind: "known",
+        label: FINANCE_LABEL,
+      });
+
+      // A record written before this field existed says nothing about what
+      // its invocations saw, which is the same absence a lost sidecar leaves.
+      forgetWorkspaceTaintForTesting(runId);
+      const { cfcWorkspaceTaint: _dropped, ...silent } = persisted;
+      const fromSilentRecord = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandbox(sandboxResult({})),
+        runState: silent,
+        workspaceHostPath: workspace,
+      });
+
+      expect(fromSilentRecord.workspaceTaint.kind).toBe("unknown");
+    } finally {
+      forgetWorkspaceTaintForTesting(runId);
+      await Deno.remove(workspace, { recursive: true });
+    }
+  });
+
+  it("stores a byte-order mark as bytes rather than dropping it", async () => {
+    // `TextDecoder` strips a leading U+FEFF by default, which would take three
+    // bytes out of the value while `bytes` still reported the file's length.
+
+    await withRun(
+      {
+        taint: {},
+        outputFiles: {
+          "bom.txt": new Uint8Array([0xef, 0xbb, 0xbf, 0x61]),
+        },
+      },
+      async ({ engine, pieces, outputDir }) => {
+        const output = succeeded(await ingest(engine, `${outputDir}/bom.txt`));
+
+        expect(output.bytes).toBe(4);
+        expect(await cellLabel(pieces, output, "\uFEFFa")).toBeUndefined();
+      },
+    );
+  });
+
+  it("reports a path that resolves but cannot be read", async () => {
+    // Resolution and the read are two syscalls, so the file can stop being a
+    // readable file between them. A directory under the output directory
+    // resolves and refuses to be read, which is the same shape.
+
+    await withRun({ taint: {} }, async ({ engine, outputRoot, outputDir }) => {
+      await Deno.mkdir(join(outputRoot, "subdir"));
+
+      const output = failure(await ingest(engine, `${outputDir}/subdir`));
+
+      expect(output.message).toMatch(
+        /^ingest_sandbox_file could not read the file: /,
+      );
+    });
   });
 
   it("declares an input schema with no property a label could arrive in", () => {

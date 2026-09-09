@@ -1,0 +1,259 @@
+/**
+ * Two conditions the run family's output directory rests on, neither of them
+ * about the tool that reads from it: that the directory exists before any
+ * child goes looking for it, and that the sidecar carrying the evidence its
+ * contents are labelled from is somewhere the sandbox cannot write.
+ */
+
+import { expect } from "@std/expect";
+import { join } from "@std/path";
+import { describe, it } from "@std/testing/bdd";
+
+import { runCfHarnessCli } from "../src/cli.ts";
+import { CfHarnessEngine } from "../src/engine.ts";
+import { CfHarnessPromptLoop } from "../src/prompt-loop.ts";
+import { resolveDockerRunscSandboxConfig } from "../src/sandbox/docker-runsc.ts";
+import { sandboxOutputRootHostPath } from "../src/sandbox/output-root.ts";
+import { forgetWorkspaceTaintForTesting } from "../src/workspace-taint.ts";
+import type {
+  SandboxCommandRequest,
+  SandboxCommandResult,
+  SandboxRuntime,
+  SandboxRuntimeDescription,
+  SandboxShellRequest,
+} from "../src/sandbox/types.ts";
+
+class SilentSandbox implements SandboxRuntime {
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: "/workspace",
+      cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+    };
+  }
+  resolvePath(path: string): string {
+    return path;
+  }
+  isPathWithinWorkspace(path: string): boolean {
+    return path.startsWith("/workspace");
+  }
+  isPathWithinAllowedRoots(path: string): boolean {
+    return path.startsWith("/workspace");
+  }
+  defaultWorkingDirectory(): string {
+    return "/workspace";
+  }
+  run(_request: SandboxCommandRequest): Promise<SandboxCommandResult> {
+    return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
+  }
+  runShell(_request: SandboxShellRequest): Promise<SandboxCommandResult> {
+    return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
+  }
+}
+
+describe("the run family's output directory", () => {
+  it("exists before the loop dispatches anything", async () => {
+    // A run whose first tool call is `delegate_task` never reaches
+    // `invokeBuiltinTool`, because the prompt loop special-cases delegation.
+    // A root established only there would be missing exactly when a child
+    // went looking for it.
+    //
+    // Driven with a signal that is already aborted, so what the assertion
+    // turns on is the ordering alone: the directory is there even though the
+    // loop never got as far as a turn, let alone a tool call. Aborted rather
+    // than failing, so the loop stops on an event rather than on a retry
+    // schedule running out.
+
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-root-" });
+    const runId = `output-root-${crypto.randomUUID()}`;
+    try {
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new SilentSandbox(),
+        runId,
+        model: "gpt-5.4",
+        workspaceHostPath: workspace,
+      });
+      const loop = new CfHarnessPromptLoop({
+        apiKey: "test-key",
+        engine,
+        fetchFn: () => Promise.reject(new Error("model never reached")),
+      });
+
+      await expect(
+        loop.runPrompt({ prompt: "Say hi.", signal: AbortSignal.abort() }),
+      ).rejects.toThrow();
+
+      const root = sandboxOutputRootHostPath(workspace, runId);
+      expect((await Deno.stat(root)).isDirectory).toBe(true);
+      expect(engine.getRunState().sandboxOutputRoot).toBe(root);
+    } finally {
+      forgetWorkspaceTaintForTesting(runId);
+      await Deno.remove(workspace, { recursive: true });
+    }
+  });
+
+  it("is the same directory a delegated child writes into", async () => {
+    // The child keys by the root run's id, so it joins the family's directory
+    // rather than making one of its own — and finds it already there.
+
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-root-" });
+    const runId = `output-root-${crypto.randomUUID()}`;
+    try {
+      const parent = new CfHarnessEngine({
+        sandboxRuntime: new SilentSandbox(),
+        runId,
+        workspaceHostPath: workspace,
+      });
+      await parent.ensureSandboxOutputRoot();
+
+      const child = new CfHarnessEngine({
+        sandboxRuntime: new SilentSandbox(),
+        runId: `${runId}.subagent.1`,
+        lineage: {
+          role: "subagent",
+          rootRunId: runId,
+          parentRunId: runId,
+          parentToolCallId: "call-1",
+          depth: 1,
+        },
+        workspaceHostPath: workspace,
+      });
+      await child.ensureSandboxOutputRoot();
+
+      expect(child.getRunState().sandboxOutputRoot).toBe(
+        sandboxOutputRootHostPath(workspace, runId),
+      );
+      expect(child.sandboxOutputRootFailure).toBeUndefined();
+    } finally {
+      forgetWorkspaceTaintForTesting(runId);
+      await Deno.remove(workspace, { recursive: true });
+    }
+  });
+});
+
+describe("CFC sidecar transport isolation", () => {
+  // The harness writes the invocation context a container starts tainted
+  // from, and reads back the final taint a cell's label is minted from.
+  // Neither claim survives the directory being writable by the workload it
+  // describes: a container that can rewrite its own result sidecar names its
+  // own taint.
+
+  it("refuses a result directory inside the workspace mount", async () => {
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-iso-" });
+    try {
+      expect(() =>
+        resolveDockerRunscSandboxConfig({
+          workspaceHostPath: workspace,
+          cfcResultDir: join(workspace, "sidecars", "results"),
+        })
+      ).toThrow(/must not be inside a directory the sandbox can write/);
+    } finally {
+      await Deno.remove(workspace, { recursive: true });
+    }
+  });
+
+  it("refuses an invocation-context directory inside a writable extra mount", async () => {
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-iso-" });
+    const extra = await Deno.makeTempDir({ prefix: "cf-harness-iso-mount-" });
+    try {
+      expect(() =>
+        resolveDockerRunscSandboxConfig({
+          workspaceHostPath: workspace,
+          additionalMounts: [{
+            kind: "host-bind",
+            name: "data",
+            hostPath: extra,
+            sandboxPath: "/data",
+            readOnly: false,
+          }],
+          cfcInvocationContextDir: join(extra, "invocation-context"),
+        })
+      ).toThrow(/must not be inside a directory the sandbox can write/);
+    } finally {
+      await Deno.remove(workspace, { recursive: true });
+      await Deno.remove(extra, { recursive: true });
+    }
+  });
+
+  it("refuses a result directory whose parent does not exist yet", async () => {
+    // These directories are created on first write, so the usual case is that
+    // neither the directory nor its parent is there when the config resolves.
+
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-iso-" });
+    try {
+      expect(() =>
+        resolveDockerRunscSandboxConfig({
+          workspaceHostPath: workspace,
+          cfcResultDir: join(workspace, "not", "yet", "made"),
+        })
+      ).toThrow(/must not be inside a directory the sandbox can write/);
+    } finally {
+      await Deno.remove(workspace, { recursive: true });
+    }
+  });
+
+  it("admits a transport directory under a root that does not exist", async () => {
+    // Nothing to resolve on either side, so the literal path is all there is
+    // to compare — and a directory whose ancestors are absent is inside no
+    // mount that exists.
+
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-iso-" });
+    try {
+      const config = resolveDockerRunscSandboxConfig({
+        workspaceHostPath: workspace,
+        cfcResultDir: "/cf-harness-absent-root/sidecars/results",
+      });
+
+      expect(config.cfcResultDir).toBe(
+        "/cf-harness-absent-root/sidecars/results",
+      );
+    } finally {
+      await Deno.remove(workspace, { recursive: true });
+    }
+  });
+
+  it("refuses an empty --cfc-result-dir", async () => {
+    const errors: string[] = [];
+    const exitCode = await runCfHarnessCli(
+      ["--prompt", "hi", "--cfc-result-dir", "  "],
+      { io: { stdout: () => {}, stderr: (line: string) => errors.push(line) } },
+    );
+
+    expect(exitCode).not.toBe(0);
+    expect(errors.join("\n")).toContain("requires a non-empty path");
+  });
+
+  it("admits a transport directory outside every writable mount", async () => {
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-iso-" });
+    const sidecars = await Deno.makeTempDir({ prefix: "cf-harness-iso-side-" });
+    try {
+      const config = resolveDockerRunscSandboxConfig({
+        workspaceHostPath: workspace,
+        cfcResultDir: sidecars,
+      });
+
+      expect(config.cfcResultDir).toBe(sidecars);
+    } finally {
+      await Deno.remove(workspace, { recursive: true });
+      await Deno.remove(sidecars, { recursive: true });
+    }
+  });
+
+  it("refuses a relative --cfc-result-dir rather than resolving it", async () => {
+    // Resolving against the working directory is how one lands inside the
+    // workspace, since the workspace defaults to that same directory.
+    const errors: string[] = [];
+    const exitCode = await runCfHarnessCli(
+      ["--prompt", "hi", "--cfc-result-dir", "sidecars/results"],
+      {
+        io: {
+          stdout: () => {},
+          stderr: (line: string) => errors.push(line),
+        },
+      },
+    );
+
+    expect(exitCode).not.toBe(0);
+    expect(errors.join("\n")).toContain("requires an absolute path");
+  });
+});

@@ -2943,6 +2943,11 @@ export class CfHarnessPromptLoop {
     options: RunHarnessTranscriptOptions,
   ): Promise<HarnessPromptLoopResult> {
     try {
+      // At family start, on the path every loop takes. A run whose first tool
+      // call is `delegate_task` never reaches `invokeBuiltinTool`, so a root
+      // established there would be missing exactly when a child went looking
+      // for it.
+      await this.engine.ensureSandboxOutputRoot();
       return await this.#runTranscript(options);
     } finally {
       await this.engine.flushPatternIndexPublications();

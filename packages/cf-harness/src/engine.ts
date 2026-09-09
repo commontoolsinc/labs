@@ -24,6 +24,7 @@ import {
   type HarnessWorkspaceTaint,
   joinWorkspaceTaint,
   poisonWorkspaceTaint,
+  seedWorkspaceTaintFromRunState,
   workspaceTaint,
 } from "./workspace-taint.ts";
 
@@ -31,7 +32,6 @@ import {
   type CfcConfClause,
   type CfcLabelView,
   type CfcPostureReport,
-  type CfcSandboxResult,
   type IFCLabel,
   inheritedCfcPostureReport,
 } from "@commonfabric/runner/cfc";
@@ -181,6 +181,7 @@ import {
 import type {
   DockerRunscAdditionalMountConfig,
   DockerRunscSandboxConfig,
+  SandboxCommandResult,
   SandboxRuntime,
 } from "./sandbox/types.ts";
 import { type BashToolInput, type BashToolOutput } from "./tools/bash.ts";
@@ -306,13 +307,24 @@ export interface BuiltinToolOutputMap {
 
 /**
  * The container taint a sandbox invocation reported, or `undefined` when it
- * returned no readable result. Every branch of `cfcResultFromRunscSidecar`
- * puts the same label on all three observations, so `stdout` answers for the
- * invocation.
+ * established none.
+ *
+ * Only a result runsc itself reported counts. One the runtime synthesized
+ * because it could not read the sidecar is rendered as a `denied` observation
+ * with an EMPTY label, which is shaped exactly like a public container; taking
+ * it as evidence would let an unreadable sidecar mint an unlabeled cell. The
+ * origin is what tells them apart, and its absence is read as synthetic.
+ *
+ * Every branch of `cfcResultFromRunscSidecar` puts the same label on all three
+ * observations, so `stdout` answers for the invocation.
  */
 const cfcSandboxTaintOfResult = (
-  cfcResult: CfcSandboxResult | undefined,
+  result: SandboxCommandResult | undefined,
 ): IFCLabel | undefined => {
+  if (result?.cfcResultOrigin !== "runsc-taint") {
+    return undefined;
+  }
+  const cfcResult = result.cfcResult;
   if (!isObjectNotArray(cfcResult) || cfcResult.version !== 1) {
     return undefined;
   }
@@ -823,7 +835,11 @@ export class CfHarnessEngine {
     this.workspaceMountPath = normalizeSandboxRoot(
       sandboxConfig?.workspaceMountPath ?? sandbox.defaultWorkingDirectory(),
     );
-    this.#familyRunId = options.lineage?.rootRunId ?? runId;
+    // The resumed run's own record first: a child resumed from state keys its
+    // family by the root it belonged to, not by its own id, or it would come
+    // back as a family of one and read none of its parent's evidence.
+    const lineage = options.runState?.lineage ?? options.lineage;
+    this.#familyRunId = lineage?.rootRunId ?? runId;
     this.#sandboxOutputRootHostPath = this.workspaceHostPath === undefined
       ? undefined
       : sandboxOutputRootHostPath(this.workspaceHostPath, this.#familyRunId);
@@ -834,11 +850,19 @@ export class CfHarnessEngine {
     // Every invocation carries the output directory, so a workload names it
     // the same way the ingest does and neither spells it out — and every one
     // reports what it left, so no tool can lose the family's evidence.
+    if (options.runState !== undefined) {
+      // Resumed. The in-process map knows nothing about what this family's
+      // earlier invocations saw, and an empty entry reads as clean.
+      seedWorkspaceTaintFromRunState(
+        this.#familyRunId,
+        options.runState.cfcWorkspaceTaint,
+      );
+    }
     this.#sandboxForDelegation = sandbox;
     this.sandbox = familySandboxRuntime(
       sandbox,
       { [SANDBOX_OUTPUT_DIR_ENV]: this.#sandboxOutputRootSandboxPath },
-      (cfcResult) => this.#recordSandboxEvidence(cfcResult),
+      (result) => this.#recordSandboxEvidence(result),
     );
     this.#hostMounts = sandboxConfig !== undefined
       ? [
@@ -1423,9 +1447,9 @@ export class CfHarnessEngine {
    * reading: a run with no trusted taint source has no honest label to mint.
    */
   #recordSandboxEvidence(
-    cfcResult: CfcSandboxResult | undefined,
+    result: SandboxCommandResult | undefined,
   ): Promise<void> {
-    const taint = cfcSandboxTaintOfResult(cfcResult);
+    const taint = cfcSandboxTaintOfResult(result);
     const next = taint === undefined
       ? poisonWorkspaceTaint(
         this.#familyRunId,
@@ -2074,7 +2098,8 @@ export class CfHarnessEngine {
     this.#assertCfcTransportReady();
     await this.ensureDiagnosticsInitialized();
     // Before the tool runs, so a sandbox invocation writes into a directory
-    // this family established rather than one it found.
+    // this family established rather than one it found. The prompt loop
+    // establishes it at family start; this covers an engine driven directly.
     await this.ensureSandboxOutputRoot();
     try {
       const output = await tool.invoke(
