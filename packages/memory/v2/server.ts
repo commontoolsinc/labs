@@ -158,6 +158,10 @@ import { assertReadOnly } from "./sqlite/guard.ts";
 import { ReadConnectionPool } from "./sqlite/read-pool.ts";
 import type { TableSchema } from "./sqlite/schema.ts";
 import { resolveSpaceStoreUrl } from "./storage-path.ts";
+import {
+  getCommitRepairFootprint,
+  resolveCommitRepairAddress,
+} from "./transaction-repair.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
 
 export { SessionRegistry } from "./session-registry.ts";
@@ -6530,23 +6534,14 @@ export class Server {
     );
     const identity = this.#sessionScopeIdentity(session);
     const ids = new Set<string>();
-    const addInstanceKey = (id: string, scope: CellScope | undefined) => {
+    for (const address of getCommitRepairFootprint(commit)) {
       // A rejected commit's scoped addresses resolve against the
       // rejected session's own identity (M4 instance keys). A scope the
       // session holds no identity for could not have applied or been
       // read by it — skip rather than throw on the repair path.
-      if (!canResolveScopeKey(scope, identity)) return;
-      ids.add(toDirtyKey(id, resolveScopeKey(scope, identity)));
-    };
-    for (const operation of commit.operations) {
-      if (operation.op === "sqlite") continue; // no entity id
-      addInstanceKey(operation.id, operation.scope);
-    }
-    for (const read of commit.reads.confirmed) {
-      addInstanceKey(read.id, read.scope);
-    }
-    for (const read of commit.reads.pending) {
-      addInstanceKey(read.id, read.scope);
+      if (!canResolveScopeKey(address.scope, identity)) continue;
+      const resolved = resolveCommitRepairAddress(address, identity);
+      ids.add(toDirtyKey(resolved.id, resolved.scopeKey));
     }
     this.markSpaceDirty(space, ids);
   }

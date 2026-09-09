@@ -51,6 +51,8 @@ entity's value hashes to a specific value.
   and commit validation.
 - `v2/server.ts` and `v2/server-sync.ts` — the WebSocket server, session
   tracking, watch sets, and catch-up sync.
+- `v2/transaction-repair.ts` — document dependencies of a rejected commit,
+  preserving branch and scope for conflict recovery.
 - `v2/client.ts` — the client half: session open and resume, optimistic commits,
   and watch subscriptions.
 - `v2/message-compression.ts` — the negotiated binary gzip envelope used by

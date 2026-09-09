@@ -72,10 +72,10 @@ The document footprint is the deduplicated union of:
 3. document operation targets.
 
 Each internal address contains space, branch, entity ID, scope, and resolved
-scope instance. Reads use their explicitly named branch or the commit branch;
-operation targets use the commit branch. Scope resolution must share the
-transaction validator's rules. An unresolvable scope is a failure to repair, not
-permission to substitute a different instance.
+scope instance. Confirmed reads use their explicitly named branch or the commit
+branch; pending reads and operation targets use the commit branch. Scope
+resolution must share the transaction validator's rules. An unresolvable scope
+is a failure to repair, not permission to substitute a different instance.
 
 The wire uses the ordinary recipient's scope vocabulary. Explicit foreign
 instance keys remain subject to the existing lease-holder read authorization.
@@ -436,10 +436,15 @@ criteria.
 Implement in the following stages. Intermediate work can be reviewed with the
 capability inactive; do not enable a partial lifecycle in deployed clients.
 
-1. [ ] Define the protocol types, shared footprint builder, recovery ownership
-       interface, and failure classification. Update memory specs for explicit
-       repair coverage, receipts, and release. Pin branch/scope resolution and
-       exact membership in focused tests.
+1. [ ] Define the protocol types, recovery ownership interface, and failure
+       classification. Update memory specs for explicit repair coverage,
+       receipts, and release. The shared footprint builder and its branch/scope
+       membership tests are implemented in
+       [transaction-repair.ts](../../packages/memory/v2/transaction-repair.ts)
+       and
+       [its unit tests](../../packages/memory/test/v2-transaction-repair.test.ts).
+       Server conflict staging uses that builder; it still repairs through graph
+       watches until the following stages supply independent coverage.
 2. [ ] Implement the server repair component and shared snapshot/schema
        assembly. Compose it into incremental/full/no-watch sync paths and
        separate execution demand from delivery holdings. Verify a direct
