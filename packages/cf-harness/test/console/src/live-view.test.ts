@@ -144,6 +144,14 @@ describe("console/src/live-view", () => {
       });
     });
 
+    it("returns the session behind the prefix a host fronts the console at", () => {
+      // loom's daemon serves the console at /harness-console on its origin;
+      // the session is still the last segment.
+      expect(consoleLiveAddress("/harness-console/live/session-1")).toEqual({
+        sessionId: "session-1",
+      });
+    });
+
     it("returns the session named with a trailing slash", () => {
       expect(consoleLiveAddress("/live/session-1/").sessionId).toBe(
         "session-1",

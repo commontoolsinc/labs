@@ -110,6 +110,7 @@ import {
 import type { CreateHarnessPromptLoopOptions } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
 import { type ConsolePolicyReport, consolePolicyReport } from "./policy.ts";
+import { liveCanonicalRedirect } from "./src/mount.ts";
 import {
   listConsoleRuns,
   readConsoleRun,
@@ -996,6 +997,20 @@ export class ConsoleServer {
     const refusal = this.#refuse(request, url);
     if (refusal !== undefined) {
       return refusal;
+    }
+    // The live pane's assets are written relative to `/live/<sessionId>`
+    // (`./src/mount.ts`), so the trailing-slash form is sent to the
+    // canonical one rather than served with a stylesheet that cannot load.
+    // Relative `Location`: it resolves under any host prefix on the client.
+    // The query rides along: `?turn=` and `?piecesBase=` are the address.
+    const canonical = request.method === "GET"
+      ? liveCanonicalRedirect(url.pathname, url.search)
+      : undefined;
+    if (canonical !== undefined) {
+      return new Response(null, {
+        status: 308,
+        headers: { location: canonical },
+      });
     }
     if (request.method === "GET" && url.pathname === "/api/health") {
       return Response.json({
