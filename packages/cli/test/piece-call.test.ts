@@ -142,12 +142,9 @@ describe("executePieceCallable", () => {
   });
 
   it("starts only the addressed piece before resolving, help page included", async () => {
-    // The dispatch arm of `loadPieceForCallables`, pinned from the outside:
-    // dispatch starts the piece it was given and leaves the space root where
-    // it stands — a verb that sends into the root's `addPiece` stream has the
-    // scheduler start the root at delivery, so no call pays for a root it
-    // never reaches. A help page rides the same path because resolution
-    // precedes parsing.
+    // A help page rides the dispatch path because resolution precedes
+    // parsing. Its only startup dependency is the addressed piece; the
+    // controller records any attempt to initialize the space root too.
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "refresh",

@@ -1605,10 +1605,10 @@ export async function newPiece(
     () => (deps.loadPieces ?? loadPieces)(config),
   );
 
-  // The default pattern is a hard requirement for this command: even when the
-  // user's pattern doesn't use it, registration below (pieces.add) sends an
-  // event to the default pattern's addPiece stream. Proceeding past a failure
-  // here can only end in "Cannot add pieces" — fail now, with the real cause.
+  // Registration through `pieces.add()` requires an existing default pattern
+  // and fails before sending if none exists. Ensuring it creates an absent
+  // root and reconciles and repairs an existing one; fail here with the cause
+  // if initialization fails.
   try {
     await timeCliPhase(
       "newPiece.ensureDefaultPattern",
@@ -2168,18 +2168,23 @@ async function tryResolveLivePieceToolCallable(
 }
 
 /**
- * Load the target piece and its pieces controller for callable resolution or
- * discovery.
+ * Helper for callable resolution and discovery, which loads the target piece
+ * and its pieces controller.
  *
- * Dispatch starts the addressed piece before resolving the requested callable,
- * and starts nothing else. The space root stays where it stands: a verb whose
- * handler sends into the root's `addPiece` stream has the scheduler start the
- * root at delivery — an event for a stream with no registered handler starts
- * the piece that owns it and looks again (`ensurePieceRunningVerdict` in
- * `packages/runner/src/ensure-piece-running.ts`). The root's start is paid by
- * the verbs that reach it, when they do, rather than by every call. `newPiece`
- * is the exception and ensures the root itself: its registration is the CLI's
- * own send, made outside any handler.
+ * Dispatch starts only the addressed piece before resolving the requested
+ * callable. A verb sending into an existing root's `addPiece` stream has the
+ * scheduler start that root at delivery through `ensurePieceRunningVerdict()`
+ * in `packages/runner/src/ensure-piece-running.ts`.
+ *
+ * Dispatch performs no separate space-root initialization. Root-dependent
+ * verbs require an initialized root: lazy start neither creates an absent root
+ * nor reconciles its source or repairs its setup. A client-side event addressed
+ * to a root with no pattern metadata is dropped with a scheduler warning.
+ *
+ * `newPiece()` ensures the root because `pieces.add()` requires an existing
+ * default pattern and fails before sending if none exists. That ensure creates
+ * an absent root and also supplies source reconciliation and cold-start setup
+ * repair for an existing one.
  *
  * Discovery (`verbs`, `describe`) only reads the addressed piece's stored
  * callable surface and pattern metadata. It neither starts the piece nor asks
