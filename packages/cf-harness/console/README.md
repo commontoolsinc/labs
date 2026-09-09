@@ -231,10 +231,16 @@ receipts, replay flags, and current versions, and is empty when the run composed
 none. Optional `originLoomId` is the turn's submitted origin. Enable the tools
 with `--loom-authoring-config` or `CF_HARNESS_LOOM_AUTHORING_CONFIG`; the
 complete contract is [Durable Loom authoring](../docs/LOOM_AUTHORING.md). Each
-entry copies only `slug` and `url` from the model-facing `assign_slug` output
-recorded in the run transcript; the console neither reconstructs the URL nor
-derives pattern metadata. `spaceName` identifies the space this console is
-configured against.
+entry copies `slug` and `url` from the successful `assign_slug` observation.
+When that same held token also appeared in a verified successful composition,
+optional `loomComponents: [{loomId, componentId}]` identifies its saved
+membership. The correlation uses unique matching current-turn tool calls and
+request-order receipt IDs, never the human slug or assistant prose. Clients
+suppress duplicate placement only after verifying that pair in a freshly opened
+manifest. Missing or ambiguous correlation keeps the ordinary placement path;
+different tokens for the same Pattern are not inferred equivalent. No cell
+address or token is added to the result. `spaceName` identifies this console's
+configured space.
 
 The route never holds a request open; it answers with where the turn stands, and
 the status code says whether asking again can change the answer:

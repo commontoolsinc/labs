@@ -25,6 +25,9 @@ export interface ConsoleTurnResultPiece {
 
   /** Openable URL returned beside the slug. */
   url: string;
+
+  /** Verified composition membership for the same held token. No cell address. */
+  loomComponents?: readonly { loomId: string; componentId: string }[];
 }
 
 /** The stable result an external console caller reads for a completed turn. */
@@ -113,6 +116,36 @@ interface TurnRunArtifacts {
   currentTranscriptIndexes: ReadonlySet<number>;
   finalText: string;
 }
+
+/**
+ * Pairs only this turn's unique, preceding assistant call with its tool result.
+ * Historical calls and malformed/duplicate pairs cannot prove membership.
+ */
+const callArguments = (
+  artifacts: TurnRunArtifacts,
+  resultIndex: number,
+): Record<string, unknown> | undefined => {
+  const result = artifacts.transcript[resultIndex];
+  if (result.role !== "tool") return undefined;
+  const matches = artifacts.transcript.flatMap((message, index) => {
+    if (
+      index >= resultIndex || !artifacts.currentTranscriptIndexes.has(index) ||
+      message.role !== "assistant" || !Array.isArray(message.toolCalls)
+    ) return [];
+    return message.toolCalls.filter((call) => call?.id === result.toolCallId);
+  });
+  if (matches.length !== 1 || matches[0].function?.name !== result.toolName) {
+    return undefined;
+  }
+  try {
+    const value: unknown = JSON.parse(matches[0].function.arguments);
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 /**
  * Returns a generated message's index, `malformed` for an invalid generated
@@ -239,34 +272,64 @@ export const readConsoleTurnResult = async (
   if (artifacts === undefined) {
     return undefined;
   }
+  const membership = new Map<
+    string,
+    { loomId: string; componentId: string }[]
+  >();
+  const looms = artifacts.transcript.flatMap((message, index) => {
+    if (
+      !artifacts.currentTranscriptIndexes.has(index) ||
+      message.role !== "tool" || message.toolName !== "loom_compose"
+    ) return [];
+    try {
+      const output: unknown = JSON.parse(message.content);
+      if (!isLoomAuthoredObservation(output)) return [];
+      const args = callArguments(artifacts, index);
+      const ids = output.receipt.component_ids as string[];
+      // compose preserves request order in component_ids. This correlation
+      // needs both the matching successful call and its exact receipt; it is
+      // not inferred from a human slug or copied out of model prose.
+      if (
+        args?.request_id === output.receipt.request_id &&
+        Array.isArray(args.components) && args.components.length === ids.length
+      ) {
+        args.components.forEach((component, position) => {
+          const token = component?.pattern_token;
+          if (typeof token !== "string" || token.length === 0) return;
+          membership.set(token, [...membership.get(token) ?? [], {
+            loomId: output.receipt.loom_id,
+            componentId: ids[position],
+          }]);
+        });
+      }
+      return [{
+        receipt: output.receipt,
+        replayed: output.replayed,
+        current_version: output.current_version,
+      }];
+    } catch {
+      return [];
+    }
+  });
   return {
     ...(options.originLoomId !== undefined
       ? { originLoomId: options.originLoomId }
       : {}),
-    looms: artifacts.transcript.flatMap((message, index) => {
-      if (
-        !artifacts.currentTranscriptIndexes.has(index) ||
-        message.role !== "tool" || message.toolName !== "loom_compose"
-      ) return [];
-      try {
-        const output: unknown = JSON.parse(message.content);
-        return isLoomAuthoredObservation(output)
-          ? [{
-            receipt: output.receipt,
-            replayed: output.replayed,
-            current_version: output.current_version,
-          }]
-          : [];
-      } catch {
-        return [];
-      }
-    }),
+    looms,
     pieces: artifacts.transcript.flatMap((message, index) => {
       if (!artifacts.currentTranscriptIndexes.has(index)) {
         return [];
       }
       const piece = pieceFromAssignSlug(message);
-      return piece === undefined ? [] : [piece];
+      if (piece === undefined) return [];
+      const args = callArguments(artifacts, index);
+      const coverage = typeof args?.token === "string"
+        ? membership.get(args.token)
+        : undefined;
+      return [{
+        ...piece,
+        ...(coverage === undefined ? {} : { loomComponents: coverage }),
+      }];
     }),
     spaceName: options.spaceName,
     finalText: artifacts.finalText,
