@@ -568,6 +568,75 @@ describe("ingest_sandbox_file", () => {
     });
   });
 
+  it("poisons the family when a sandbox invocation throws", async () => {
+    // A container that failed to start, or timed out, still ran — and left
+    // no result to read. Observing only invocations that returned would let a
+    // family lose one by having it fail.
+
+    const runId = `ingest-sandbox-file-${crypto.randomUUID()}`;
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-ingest-" });
+    try {
+      const throwing = new FakeSandbox(sandboxResult(FINANCE_LABEL));
+      throwing.run = () => Promise.reject(new Error("docker unreachable"));
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: throwing,
+        runId,
+        workspaceHostPath: workspace,
+      });
+
+      await expect(engine.invokeBuiltinTool("bash", { command: "x" }))
+        .rejects.toThrow(/docker unreachable/);
+      expect(engine.workspaceTaint.kind).toBe("unknown");
+    } finally {
+      forgetWorkspaceTaintForTesting(runId);
+      await Deno.remove(workspace, { recursive: true });
+    }
+  });
+
+  it("answers path questions as the runtime it wraps does", async () => {
+    // The instrumented view is the sandbox tools resolve paths through, so a
+    // question it answered differently would move where a tool may write.
+
+    await withRun({ taint: {} }, ({ engine }) => {
+      expect(engine.sandbox.isPathWithinWorkspace("/workspace/x")).toBe(true);
+      expect(engine.sandbox.isPathWithinWorkspace("/etc/passwd")).toBe(false);
+      expect(engine.sandbox.isPathWithinAllowedRoots("/workspace/x")).toBe(
+        true,
+      );
+      expect(engine.sandbox.defaultWorkingDirectory()).toBe("/workspace");
+      expect(engine.sandbox.describe().kind).toBe("docker-runsc-cfc");
+      return Promise.resolve();
+    });
+  });
+
+  it("reports a directory it could not create for a reason other than reuse", async () => {
+    const workspace = await Deno.makeTempDir({ prefix: "cf-harness-ingest-" });
+    const runId = `ingest-sandbox-file-${crypto.randomUUID()}`;
+    try {
+      // The parent exists and admits no children, so the leaf fails for a
+      // reason that is not "one is already there".
+      await Deno.mkdir(join(workspace, ".cf-harness", "out"), {
+        recursive: true,
+      });
+      await Deno.chmod(join(workspace, ".cf-harness", "out"), 0o500);
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandbox(sandboxResult({})),
+        runId,
+        workspaceHostPath: workspace,
+      });
+
+      await engine.ensureSandboxOutputRoot();
+
+      expect(engine.sandboxOutputRootFailure).toMatch(/[Pp]ermission denied/);
+    } finally {
+      forgetWorkspaceTaintForTesting(runId);
+      await Deno.chmod(join(workspace, ".cf-harness", "out"), 0o700).catch(
+        () => {},
+      );
+      await Deno.remove(workspace, { recursive: true });
+    }
+  });
+
   it("declares an input schema with no property a label could arrive in", () => {
     expect(ingestSandboxFileToolDescriptor.inputSchema).toEqual({
       type: "object",
