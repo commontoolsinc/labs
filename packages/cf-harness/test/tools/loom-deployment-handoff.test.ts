@@ -264,6 +264,11 @@ describe("loom-deployment-handoff", () => {
           noTarget: true,
           deployed: { receipts: [f.receipt] },
         },
+        {
+          name: "unavailable-fabric",
+          unavailableFabric: true,
+          deployed: { receipts: [f.receipt] },
+        },
         { name: "missing-list", deployed: {} },
         { name: "invalid-list", deployed: { receipts: "not a receipt array" } },
         {
@@ -271,6 +276,7 @@ describe("loom-deployment-handoff", () => {
           deployed: { receipts: [...Array(32).fill({}), f.receipt] },
         },
         ...[
+          { api_url: "not a URL" },
           { api_url: "http://toolshed.test:8001/base" },
           { api_url: "http://toolshed.test/other" },
           { api_url: "http://alias.test/base" },
@@ -315,7 +321,12 @@ describe("loom-deployment-handoff", () => {
           sandboxRuntime: sandbox,
           ...(!("noFabric" in candidate)
             ? {
-              fabricSessionFactory: () => Promise.resolve({ pieces: f.pieces }),
+              fabricSessionFactory: () =>
+                "unavailableFabric" in candidate
+                  ? Promise.reject(
+                    new Error("Synthetic unavailable Fabric session"),
+                  )
+                  : Promise.resolve({ pieces: f.pieces }),
             }
             : {}),
           ...(!("noTarget" in candidate) && !("noFabric" in candidate)
