@@ -47,6 +47,8 @@ describe("default-empty-record", () => {
           'Record<"required", never>',
           "Record<string, never[]>",
           "Record<string, never> & Record<symbol, string>",
+          "true & Record<string, never>",
+          "string & Record<string, never>",
           "{ [K in PropertyKey]: K extends string ? never : string }",
         ]
       ) {

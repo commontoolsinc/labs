@@ -1837,23 +1837,6 @@ export class CommonFabricFormatter implements TypeFormatter {
       return this.#extractValueFromTypeQuery(typeNode, context);
     }
 
-    // Handle type references that represent empty objects
-    // This includes Record<string, never>, Record<K, never>, and similar mapped types
-    if (ts.isTypeReferenceNode(typeNode) && typeNode.typeArguments) {
-      // For mapped types like Record<K, V>, if V is never, the result is an empty object
-      // Check the last type argument (the value type in mapped types)
-      const lastTypeArg =
-        typeNode.typeArguments[typeNode.typeArguments.length - 1];
-      if (lastTypeArg) {
-        const lastType = context.typeRegistry?.get(lastTypeArg) ??
-          context.typeChecker.getTypeFromTypeNode(lastTypeArg);
-        // If the value type is never, this represents an empty object
-        if (lastType.flags & ts.TypeFlags.Never) {
-          return {};
-        }
-      }
-    }
-
     // Handle literal types
     if (ts.isLiteralTypeNode(typeNode)) {
       const literal = typeNode.literal;

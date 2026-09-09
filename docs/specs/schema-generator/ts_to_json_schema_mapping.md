@@ -465,7 +465,7 @@ not take the alias path. (Contrast §11: CFC detection has no source check.)
 1. **Node-based** (`extractDefaultValueFromNode` + expression walk,
    `common-fabric-formatter.ts`; union-side twin
    `union-formatter.ts`): literal nodes, tuple nodes, object-literal
-   type nodes, `Record<K, never>` → `{}`, and `typeof CONST` queries resolved
+   type nodes, and `typeof CONST` queries resolved
    through import aliases to the variable initializer (unwrapping
    `as`/`satisfies`/parens/type assertions; shorthand properties via
    `getShorthandAssignmentValueSymbol`).
@@ -477,6 +477,11 @@ not take the alias path. (Contrast §11: CFC detection has no source check.)
    in both `T | Default<V>` and `Default<T, V>`. The record check does not require
    a symbol value declaration. A propertyless record with `string` or `unknown`
    values does not qualify for this check.
+   Nor does a type that merely carries a `never` type argument:
+   `Record<"required", never>` has a named property and `Array<never>` has no
+   index signature, so both yield no default. An inline `Record<K, never>` in
+   `Default<T, V>` reaches this rule through the node route's type fallback;
+   there is no name-based shortcut.
 3. **Brand-payload fallback**: `Default<T,V>` carries V in a
    `DEFAULT_MARKER`-branded payload; when the alias is resolved away
    (`T | (T & DefaultMarker<V>)`), the payload is read back type-structurally
