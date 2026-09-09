@@ -1,20 +1,32 @@
 // Why: a CFC prepare rejection is not one thing, and only one kind of it may
 // stop the scheduler.
 //
-// A VERDICT is policy evaluating this transaction's data and refusing it — a
+// A VERDICT is a refusal an immediate re-run reproduces, and two shapes
+// qualify. Policy evaluated this transaction's data and refused it — a
 // writer-fit misfit, an unprivileged write to a protected `cfc` path, an
-// exact-copy or monotonicity violation. Re-running recomputes the identical
-// refused write, so a verdict is terminal: never retried, surfaced.
+// exact-copy or monotonicity violation. Or the input the evaluation needed is
+// absent from stored state the transaction already has, so reading it again
+// returns the same absence — a link source document in hand that carries
+// neither an envelope nor a result schema. Either way re-running recomputes
+// the identical refused write, so a verdict is terminal: never retried,
+// surfaced.
+//
+// The second shape carries an obligation the first does not. It is terminal
+// over the state in hand rather than over the data, so its producer leaves the
+// run DEPENDING on the state that would change the answer. The value arriving
+// there re-triggers the reader, which is a fresh trigger with a fresh budget
+// rather than a retry. A producer that cannot establish that dependency has no
+// verdict to claim.
 //
 // Everything else that lands in `reasons` is NOT a verdict, whatever it looks
 // like. Prepare may have been unable to EVALUATE because an input was not
-// available in this transaction (a link's source metadata, a schema's
-// write-policy input, an unreadable stored envelope, a policy manifest that
-// did not resolve). The prepared state may have DRIFTED — `invalidateCfc`
-// records a read after prepare, a changed policy input — which says the
-// verdict was never reached, not that it went against the data. Both clear on
-// a fresh attempt, and terminating them strands a write that would have
-// landed.
+// available in this transaction (a link source document this replica does not
+// hold, a schema's write-policy input, an unreadable stored envelope, a policy
+// manifest that did not resolve). The prepared state may have DRIFTED —
+// `invalidateCfc` records a read after prepare, a changed policy input — which
+// says the verdict was never reached, not that it went against the data. Both
+// clear on a fresh attempt, and terminating them strands a write that would
+// have landed.
 //
 // WATCH(cfc-verdict): THE DEFAULT IS "NOT A VERDICT", AND THAT IS DELIBERATE.
 //
@@ -55,10 +67,11 @@
 
 /**
  * Stable machine token marking a CFC prepare reason as a VERDICT — policy
- * evaluated this transaction's data and refused it, so re-running recomputes
- * the identical refused write. Emitted into the prepare `reason` (see
- * `prepare.ts`) so it survives into the commit-rejection message, and read at
- * the commit boundary to decide that the rejection is terminal.
+ * evaluated this transaction's data and refused it, or the input it needed is
+ * absent from stored state the transaction already has, so re-running
+ * recomputes the identical refused write. Emitted into the prepare `reason`
+ * (see `prepare.ts`) so it survives into the commit-rejection message, and
+ * read at the commit boundary to decide that the rejection is terminal.
  */
 export const CFC_VERDICT_REASON = "cfc-verdict";
 

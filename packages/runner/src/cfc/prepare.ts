@@ -155,6 +155,19 @@ const INTERNAL_VERIFIER_META = {
   ...internalVerifierRead,
 };
 
+// The link-source schema read, which reactivity SEES. Prepare's other reads
+// carry `ignoreReadForScheduling` and are invisible to it. This one decides
+// whether a link write can be labeled at all, and the commit boundary ends
+// the retries on a refusal it cannot answer, so the run is re-triggered when
+// the member it went looking for lands. The stored `["cfc"]` envelope, the
+// other half of that decision, is a dependency of the writer already, through
+// `readStoredCfcMetadata` (cfc/metadata.ts, called from data-updating.ts when
+// the link is written). The read is a commit-time precondition either way:
+// `ignoreReadForScheduling` gates reactivity alone.
+const LINK_SOURCE_SCHEMA_META = {
+  ...internalVerifierRead,
+};
+
 const isPrefix = (
   prefix: readonly string[],
   path: readonly string[],
@@ -1108,8 +1121,11 @@ const storedMetadataFor = (
   // layer-naming half was fixed (verification-coverage.md OW47's
   // re-close; the name-draft triage's arm (c), the path half of the
   // ruled arm (b)). The read is marked as a runtime-internal verifier
-  // read, so it stays in the journal and drives reactivity while the
-  // commit's conflict set drops it (spec §18.6.2, §8.9.4).
+  // read, so the commit's conflict set drops it (spec §18.6.2, §8.9.4);
+  // it carries `ignoreReadForScheduling` besides, so reactivity skips it
+  // like every other read this pass makes. A writer that depends on the
+  // envelope reads it through `readStoredCfcMetadata` (cfc/metadata.ts),
+  // whose meta omits that marker.
   const metadata = tx.readOrThrow({
     space,
     id,
@@ -1140,6 +1156,34 @@ const storedMetadataFor = (
   }
   return metadata;
 };
+
+// Whether this transaction's view of the document has a root value.
+//
+// `storedMetadataFor` answers `undefined` both for a document that stores no
+// CFC metadata and for one whose root the transaction cannot see, and the two
+// differ in whether reading again can change the answer. `readOrThrow`
+// collapses them; the storage layer separates them by the error rather than
+// the value, so the same read is issued again here to see it: a document with
+// no root value answers every read below the root with `NotFoundError`, while
+// one with a root answers a missing `["cfc"]` slot with a successful read of
+// `undefined`. A root that cannot carry the path answers with a type mismatch
+// and counts as no root.
+//
+// The view a read resolves against includes this transaction's own writes, so
+// a document the replica never pulled reads as having a root once this
+// transaction writes into it. The address and the meta are the ones
+// `storedMetadataFor` already read, so this adds nothing to the transaction's
+// read set.
+const documentRootIsReadable = (
+  tx: IExtendedStorageTransaction,
+  space: MemorySpace,
+  id: URI,
+  scope: ReturnType<typeof normalizeCellScope>,
+  type: MediaType,
+): boolean =>
+  tx.read({ space, id, scope, type, path: ["cfc"] }, {
+    meta: INTERNAL_VERIFIER_META,
+  }).ok !== undefined;
 
 /**
  * This returns a map whose values are always interned schemas.
@@ -4792,7 +4836,7 @@ const setupResultSchemaFor = (
     type: "application/json",
     path: ["schema"],
   }, {
-    meta: INTERNAL_VERIFIER_META,
+    meta: LINK_SOURCE_SCHEMA_META,
   });
   return schema === undefined || schema === null
     ? undefined
@@ -4867,13 +4911,35 @@ const derivePersistedLinkLabel = (
     sourceMetadata === undefined && pendingSourceSchema === undefined &&
     !hasLabelValues(linkSchemaLabel) && !hasCarriedLabel
   ) {
-    return {
-      // Untagged, so retryable: the source document's metadata is not
-      // available in this transaction. It loads, and the re-run decides.
-      reason: `missing link source metadata for ${input.target.id} at /${
-        input.target.path.join("/")
-      }`,
-    };
+    // Name the SOURCE document, which is the one carrying no metadata, and
+    // the target location the link was being written into.
+    const reason = `missing link source metadata for ${input.source.id} at /${
+      input.source.path.join("/")
+    }, linked into ${input.target.id} at /${input.target.path.join("/")}`;
+    // A source whose root this transaction cannot see is what the untagged
+    // default is for: reading the document is what decides, so the reason
+    // stays retryable.
+    //
+    // Where the root IS readable, two of its members decided — `["cfc"]`
+    // above and `["schema"]` through `setupResultSchemaFor` — and the rest of
+    // the decision is the link value and the writer's own schema inputs,
+    // which a re-run reconstructs identically. So an immediate re-run refuses
+    // over the same absence, which is a verdict.
+    //
+    // Those immediate attempts are what end here, not the subscription. A
+    // later revision of the source can carry either member, and the run
+    // depends on both: `["cfc"]` through the writer's `readStoredCfcMetadata`
+    // and `["schema"]` through this pass's `LINK_SOURCE_SCHEMA_META` read. The
+    // arriving member re-triggers the reader, with the full retry budget the
+    // terminal disposition clears.
+    const sourceRootIsReadable = documentRootIsReadable(
+      tx,
+      input.source.space,
+      input.source.id as URI,
+      input.source.scope,
+      "application/json",
+    );
+    return { reason: sourceRootIsReadable ? verdictReason(reason) : reason };
   }
   if (
     sourceMetadata === undefined && pendingSourceSchema === undefined &&
