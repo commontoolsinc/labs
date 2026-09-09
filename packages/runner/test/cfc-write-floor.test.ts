@@ -530,7 +530,7 @@ describe("CFC write-side requiredIntegrity floor (D3, §8.12.4.1)", () => {
     }
   });
 
-  it("a link with no derivable source label is skipped by the floor (reason recorded elsewhere)", async () => {
+  it("a link whose source is not CFC-relevant still fails the floor", async () => {
     // The write at /out is a link whose source carries no stored metadata and
     // no schema, so nothing marks the link CFC-relevant and no link-write
     // policy input is recorded for it. The floor measures the path with no
