@@ -385,6 +385,16 @@ describe("piece-named-before-start", () => {
     // The handler runs on B: the count it owns moves.
     expect(await bump(cardB)).toBe(1);
     expect(errors.get(b)!.map((error) => error.message)).toEqual([]);
+
+    // Named once: a later run under the same pattern is not held again.
+    let heldAgain = false;
+    waitForDeferredStart(b, "runner.deferred-start.pending", key).then(() => {
+      heldAgain = true;
+    });
+    await runCard(cardB, itemB);
+    await quiesce(b);
+    expect(heldAgain).toBe(false);
+    expect(await bump(cardB)).toBe(2);
   });
 
   it("holds the run while an owned cell is absent even when the argument document is local", async () => {
