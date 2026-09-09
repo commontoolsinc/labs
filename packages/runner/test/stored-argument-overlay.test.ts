@@ -127,4 +127,53 @@ describe("runner", () => {
       runtime.runner.validateStoredArgument(runtime.readTx(), piece, schema)
     ).toThrow("name: value does not match type string");
   });
+
+  it("preserves a readable view when a raw alias reaches an active ancestor", async () => {
+    const argument = runtime.getCell(signer.did(), "argument");
+    const piece = runtime.getCell(signer.did(), "piece");
+    const name = runtime.getCell(signer.did(), "missing-name");
+    const graph = runtime.getCell(signer.did(), "graph");
+    const alias = runtime.getCell(signer.did(), "alias");
+    const { error } = await runtime.editWithRetry((tx) => {
+      graph.withTx(tx).set({ label: "Glaze", child: alias });
+      alias.withTx(tx).set(graph);
+      argument.withTx(tx).set({ name, graph });
+      piece.withTx(tx).setMetaRaw(
+        "argument",
+        argument.getAsLink(),
+        rawMetaWriteAuthorization,
+      );
+    });
+    expect(error).toBeUndefined();
+    const schema = candidate({
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        graph: {
+          type: "object",
+          properties: {
+            label: { type: "string" },
+            child: {
+              type: "object",
+              properties: { label: { type: "string" } },
+              required: ["label"],
+            },
+          },
+          required: ["label", "child"],
+        },
+      },
+      required: ["name", "graph"],
+    });
+    expect(() =>
+      runtime.runner.validateStoredArgument(runtime.readTx(), piece, schema)
+    ).not.toThrow();
+
+    const { error: invalidWrite } = await runtime.editWithRetry((tx) => {
+      graph.withTx(tx).set({ label: 42, child: alias });
+    });
+    expect(invalidWrite).toBeUndefined();
+    expect(() =>
+      runtime.runner.validateStoredArgument(runtime.readTx(), piece, schema)
+    ).toThrow("label: value does not match type string");
+  });
 });
