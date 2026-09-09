@@ -3,15 +3,14 @@ import type {
   CfcEnforcementMode,
   CfcPostureReport,
   CfcReadOnExceed,
-  IFCLabel,
 } from "@commonfabric/runner/cfc";
 import type { HarnessCfcInvocationContext } from "./contracts/cfc-invocation-context.ts";
 import {
   appendHarnessCfcModelContextObservations as appendCfcModelContextObservations,
   type HarnessCfcModelContext,
   type HarnessCfcModelContextObservationInput,
-  mergeConfidentialityOnlyLabels,
 } from "./contracts/cfc-model-context.ts";
+import type { HarnessWorkspaceTaint } from "./workspace-taint.ts";
 import type { HarnessCellLabels } from "./contracts/cell-labels.ts";
 import type { HarnessDocsCorpusRecord } from "./contracts/docs-corpus.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
@@ -185,16 +184,28 @@ export interface HarnessRunState {
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
 
   /**
-   * The confidentiality this run's sandbox invocations have accumulated: the
-   * join of the container taints gVisor reported for them, and the only
-   * label about sandboxed work the trusted side holds. Each taint arrives
-   * out of band, in the result sidecar runsc writes where the sandboxed
-   * workload cannot reach it; every channel out of the container itself is
-   * one that workload can write, so nothing read from inside contributes
-   * here. Absent until a run's first sandbox invocation reports a non-empty
-   * taint, which is what makes an unlabeled run mint unlabeled cells.
+   * What this run's FAMILY is known to have been exposed to by its sandbox
+   * work, and whether that knowledge is complete. The join of the container
+   * taints runsc reported, or `unknown` once an invocation ran whose taint
+   * could not be established. Each taint arrives out of band, in the result
+   * sidecar runsc writes where the sandboxed workload cannot reach it; every
+   * channel out of the container itself is one that workload can write, so
+   * nothing read from inside contributes here.
+   *
+   * A record for a reader of the run. The state the tools decide from lives
+   * in `workspace-taint.ts`, keyed by the family, because a delegated child
+   * writes into the same output directory its parent reads from and the two
+   * cannot each hold their own.
    */
-  cfcSandboxTaint?: IFCLabel;
+  cfcWorkspaceTaint?: HarnessWorkspaceTaint;
+
+  /**
+   * The run family's sandbox output directory on the host. The one directory
+   * whose creation the harness vouches for, and so the only one
+   * `ingest_sandbox_file` reads from. Absent until it is established, and for
+   * a run with no workspace to put one in.
+   */
+  sandboxOutputRoot?: string;
 
   /**
    * The per-cell CFC labels the run's space holds for the cells it touched.
@@ -266,7 +277,8 @@ export interface CreateHarnessRunStateOptions {
   policyTracePath?: string;
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
-  cfcSandboxTaint?: IFCLabel;
+  cfcWorkspaceTaint?: HarnessWorkspaceTaint;
+  sandboxOutputRoot?: string;
   cellLabels?: HarnessCellLabels;
   cellLabelsPath?: string;
   handleTable?: HarnessHandleTable;
@@ -382,8 +394,11 @@ export const createHarnessRunState = (
     ...(options.cfcInvocationContexts !== undefined
       ? { cfcInvocationContexts: [...options.cfcInvocationContexts] }
       : {}),
-    ...(options.cfcSandboxTaint !== undefined
-      ? { cfcSandboxTaint: structuredClone(options.cfcSandboxTaint) }
+    ...(options.cfcWorkspaceTaint !== undefined
+      ? { cfcWorkspaceTaint: structuredClone(options.cfcWorkspaceTaint) }
+      : {}),
+    ...(options.sandboxOutputRoot !== undefined
+      ? { sandboxOutputRoot: options.sandboxOutputRoot }
       : {}),
     ...(options.cellLabels !== undefined
       ? { cellLabels: structuredClone(options.cellLabels) }
@@ -517,36 +532,22 @@ export const appendHarnessCfcModelContextObservations = (
 };
 
 /**
- * Joins one sandbox invocation's container taint into the run's accumulated
- * sandbox taint.
+ * Mirrors the family's taint state onto this run's record.
  *
- * Confidentiality only. A taint's integrity component is the absence of a
- * claim rather than a claim to carry, and the checked write a cell's label
- * goes through refuses added trust, so a run that recorded one would hold a
- * component nothing downstream could apply.
- *
- * Joining rather than replacing is what makes the accumulation fail closed:
- * a run whose second invocation reported nothing still carries what its
- * first one did, so a later ingest cannot be made to mint clean by following
- * a labeled invocation with an unlabeled one.
+ * A copy for a reader of the run rather than the value anything decides from:
+ * the deciding state is the family's, shared across the engines that write
+ * into one output directory, and a per-run field could not be that.
  */
-export const joinHarnessCfcSandboxTaint = (
+export const setHarnessWorkspaceTaint = (
   state: HarnessRunState,
-  label: IFCLabel,
+  taint: HarnessWorkspaceTaint,
   now = new Date().toISOString(),
-): HarnessRunState => {
-  const cfcSandboxTaint = mergeConfidentialityOnlyLabels([
-    state.cfcSandboxTaint,
-    label,
-  ]);
-  if (
-    cfcSandboxTaint === undefined ||
-    JSON.stringify(cfcSandboxTaint) === JSON.stringify(state.cfcSandboxTaint)
-  ) {
-    return state;
-  }
-  return patchHarnessRunState(state, { cfcSandboxTaint }, now);
-};
+): HarnessRunState =>
+  patchHarnessRunState(
+    state,
+    { cfcWorkspaceTaint: structuredClone(taint) },
+    now,
+  );
 
 export const setHarnessSubagentRun = (
   state: HarnessRunState,

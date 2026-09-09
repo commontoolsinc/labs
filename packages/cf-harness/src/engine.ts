@@ -13,10 +13,25 @@ import { normalize as normalizeSandboxPath } from "@std/path/posix";
 
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
+import { familySandboxRuntime } from "./sandbox/family-sandbox.ts";
+import {
+  createSandboxOutputRoot,
+  SANDBOX_OUTPUT_DIR_ENV,
+  sandboxOutputRootHostPath,
+  sandboxOutputRootSandboxPath,
+} from "./sandbox/output-root.ts";
+import {
+  type HarnessWorkspaceTaint,
+  joinWorkspaceTaint,
+  poisonWorkspaceTaint,
+  workspaceTaint,
+} from "./workspace-taint.ts";
+
 import {
   type CfcConfClause,
   type CfcLabelView,
   type CfcPostureReport,
+  type CfcSandboxResult,
   type IFCLabel,
   inheritedCfcPostureReport,
 } from "@commonfabric/runner/cfc";
@@ -149,10 +164,10 @@ import {
   type HarnessRunState,
   type HarnessRunTerminalReason,
   isTerminalHarnessRunStatus,
-  joinHarnessCfcSandboxTaint,
   patchHarnessRunState,
   setHarnessRunStatus,
   setHarnessSubagentRun,
+  setHarnessWorkspaceTaint,
 } from "./run-state.ts";
 import {
   assertDockerRunscCfcTransportForMode,
@@ -290,18 +305,14 @@ export interface BuiltinToolOutputMap {
 }
 
 /**
- * The container taint runsc reported for a tool's sandbox invocation, or
- * `undefined` when the output carries no sandbox CFC result. Every branch of
- * `cfcResultFromRunscSidecar` puts the same label on all three observations,
- * so `stdout` answers for the invocation.
+ * The container taint a sandbox invocation reported, or `undefined` when it
+ * returned no readable result. Every branch of `cfcResultFromRunscSidecar`
+ * puts the same label on all three observations, so `stdout` answers for the
+ * invocation.
  */
-const cfcSandboxTaintOfToolOutput = (
-  output: unknown,
+const cfcSandboxTaintOfResult = (
+  cfcResult: CfcSandboxResult | undefined,
 ): IFCLabel | undefined => {
-  if (!isObjectNotArray(output) || !("cfcResult" in output)) {
-    return undefined;
-  }
-  const cfcResult = output.cfcResult;
   if (!isObjectNotArray(cfcResult) || cfcResult.version !== 1) {
     return undefined;
   }
@@ -549,6 +560,36 @@ export class CfHarnessEngine {
   readonly #spaceDbPath?: string;
   readonly #hostMounts: readonly HostSandboxMount[];
   readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
+  /**
+   * The run family this engine belongs to: the root run's id, which a
+   * delegated child inherits. The sandbox output directory and the taint
+   * accumulated over it are both the family's, because a child shares its
+   * parent's workspace and sandbox and the two have to meet in one place.
+   */
+  readonly #familyRunId: string;
+
+  /** The family's output directory on the host, when a workspace is known. */
+  readonly #sandboxOutputRootHostPath?: string;
+
+  /** The same directory as the sandbox addresses it. */
+  readonly #sandboxOutputRootSandboxPath: string;
+
+  /** Whether this engine has established the family's output directory. */
+  #sandboxOutputRootReady = false;
+
+  /** Why the family has no usable output directory, once that is settled. */
+  #sandboxOutputRootFailure?: string;
+
+  /**
+   * The sandbox as it was supplied, before this family's instrumentation.
+   *
+   * A delegated child builds its own instrumented view, and it belongs to the
+   * same family, so wrapping the parent's wrapped runtime would report every
+   * one of the child's invocations twice — one container counted as two in
+   * the family's record. The child is handed this instead.
+   */
+  readonly #sandboxForDelegation: SandboxRuntime;
+
   readonly #resumedRun: boolean;
   #runModelBound: boolean;
   #cfcTransportChecked = false;
@@ -775,13 +816,29 @@ export class CfHarnessEngine {
       ? sandboxConfig
       : undefined;
     this.hostProcessRunner = options.processRunner ?? new DenoProcessRunner();
-    this.sandbox = options.sandboxRuntime ??
+    const sandbox = options.sandboxRuntime ??
       new DockerRunscSandboxRuntime(sandboxConfig!, options.processRunner);
     this.workspaceHostPath = sandboxConfig?.workspaceHostPath ??
       options.workspaceHostPath;
     this.workspaceMountPath = normalizeSandboxRoot(
-      sandboxConfig?.workspaceMountPath ??
-        this.sandbox.defaultWorkingDirectory(),
+      sandboxConfig?.workspaceMountPath ?? sandbox.defaultWorkingDirectory(),
+    );
+    this.#familyRunId = options.lineage?.rootRunId ?? runId;
+    this.#sandboxOutputRootHostPath = this.workspaceHostPath === undefined
+      ? undefined
+      : sandboxOutputRootHostPath(this.workspaceHostPath, this.#familyRunId);
+    this.#sandboxOutputRootSandboxPath = sandboxOutputRootSandboxPath(
+      this.workspaceMountPath,
+      this.#familyRunId,
+    );
+    // Every invocation carries the output directory, so a workload names it
+    // the same way the ingest does and neither spells it out — and every one
+    // reports what it left, so no tool can lose the family's evidence.
+    this.#sandboxForDelegation = sandbox;
+    this.sandbox = familySandboxRuntime(
+      sandbox,
+      { [SANDBOX_OUTPUT_DIR_ENV]: this.#sandboxOutputRootSandboxPath },
+      (cfcResult) => this.#recordSandboxEvidence(cfcResult),
     );
     this.#hostMounts = sandboxConfig !== undefined
       ? [
@@ -1351,21 +1408,112 @@ export class CfHarnessEngine {
   }
 
   /**
-   * Joins one sandbox invocation's container taint into the run's
-   * accumulated sandbox taint, which `ingest_sandbox_file` mints from. The
-   * prompt loop calls this for every tool output carrying a sandbox CFC
-   * result, whichever policy that result took: an opaque stream is precisely
-   * the case where a taint exists, so recording only the observed ones would
-   * accumulate nothing on the runs that have something to accumulate.
+   * Records what one sandbox invocation left behind, at the boundary that ran
+   * it rather than from the tool output that reports it.
+   *
+   * The container's taint joins the family's; an invocation that returned no
+   * readable CFC result poisons it to `unknown`, and it stays there, because
+   * nothing later can establish what an invocation whose evidence was lost
+   * wrote into the output directory. Whichever policy the result took is
+   * irrelevant — an opaque stream is precisely the case where a taint exists.
+   *
+   * A run configured without the runsc CFC result transport produces no
+   * evidence at all, so its first sandbox invocation poisons the family and
+   * `ingest_sandbox_file` refuses for the rest of it. That is the intended
+   * reading: a run with no trusted taint source has no honest label to mint.
    */
-  async recordCfcSandboxTaint(label: IFCLabel): Promise<HarnessRunState> {
-    this.#runState = joinHarnessCfcSandboxTaint(
+  #recordSandboxEvidence(
+    cfcResult: CfcSandboxResult | undefined,
+  ): Promise<void> {
+    const taint = cfcSandboxTaintOfResult(cfcResult);
+    const next = taint === undefined
+      ? poisonWorkspaceTaint(
+        this.#familyRunId,
+        "a sandbox invocation returned no readable CFC result, so what it " +
+          "may have written cannot be established",
+      )
+      : joinWorkspaceTaint(this.#familyRunId, taint);
+    // Recorded onto the run without advancing its clock or forcing a write:
+    // this is a mirror of the family's state for a reader, and the tool call
+    // that ran the invocation timestamps and persists itself. Reading the
+    // clock here would make the run's timestamps depend on how many
+    // containers a tool happened to start.
+    this.#runState = setHarnessWorkspaceTaint(
       this.#runState,
-      label,
+      next,
+      this.#runState.updatedAt,
+    );
+    return Promise.resolve();
+  }
+
+  /** What is known about the family's sandbox work, and how completely. */
+  get workspaceTaint(): HarnessWorkspaceTaint {
+    return workspaceTaint(this.#familyRunId);
+  }
+
+  /**
+   * Establishes the run family's sandbox output directory, once per family.
+   *
+   * The ROOT run creates it and refuses a directory that is already there;
+   * that refusal is the whole provenance claim, since a directory this family
+   * did not create holds files it cannot account for. A delegated child does
+   * not create one — it shares its parent's, established before the child
+   * existed.
+   *
+   * A failure here is recorded, not thrown. The directory is what
+   * `ingest_sandbox_file` reads from and nothing else depends on it, so a
+   * workspace that is read-only, absent, or already holds one still runs
+   * every other tool; what it loses is the ability to ingest, and the reason
+   * travels to that refusal rather than ending the run. Ingest stays closed
+   * either way: it reads only from a directory this family made.
+   */
+  async ensureSandboxOutputRoot(): Promise<void> {
+    if (this.#sandboxOutputRootReady || this.#sandboxOutputRootFailure) {
+      return;
+    }
+    const hostPath = this.#sandboxOutputRootHostPath;
+    if (hostPath === undefined) {
+      this.#sandboxOutputRootFailure = "this run has no workspace to hold one";
+      return;
+    }
+    try {
+      if (this.#runState.lineage?.role === "subagent") {
+        const stat = await Deno.stat(hostPath).catch(() => undefined);
+        if (stat?.isDirectory !== true) {
+          throw new Error(
+            "the run family's output directory is missing, so this child " +
+              `cannot write where its parent reads: ${hostPath}`,
+          );
+        }
+      } else {
+        await createSandboxOutputRoot(hostPath);
+      }
+    } catch (error) {
+      this.#sandboxOutputRootFailure = error instanceof Error
+        ? error.message
+        : String(error);
+      return;
+    }
+    this.#sandboxOutputRootReady = true;
+    this.#runState = patchHarnessRunState(
+      this.#runState,
+      { sandboxOutputRoot: hostPath },
       this.#now(),
     );
     await this.persistRunState();
-    return this.getRunState();
+  }
+
+  /** Why this family cannot ingest, or `undefined` while it can. */
+  get sandboxOutputRootFailure(): string | undefined {
+    return this.#sandboxOutputRootFailure;
+  }
+
+  /**
+   * The sandbox to hand a delegated child: the supplied runtime, without this
+   * engine's instrumentation, which the child adds for itself.
+   */
+  get sandboxForDelegation(): SandboxRuntime {
+    return this.#sandboxForDelegation;
   }
 
   /**
@@ -1925,6 +2073,9 @@ export class CfHarnessEngine {
     }
     this.#assertCfcTransportReady();
     await this.ensureDiagnosticsInitialized();
+    // Before the tool runs, so a sandbox invocation writes into a directory
+    // this family established rather than one it found.
+    await this.ensureSandboxOutputRoot();
     try {
       const output = await tool.invoke(
         this.#createToolContext(options.signal),
@@ -1954,15 +2105,6 @@ export class CfHarnessEngine {
   ): Promise<BuiltinToolInvocationResult<TToolId>> {
     if (!isToolOutputWithId(output)) {
       throw new Error(`builtin tool did not return an outputId: ${toolId}`);
-    }
-    // Both tool-invocation paths reach here, so this is where the run learns
-    // what runsc said about the container. It is recorded whichever policy
-    // the result took: an opaque stream is precisely the case where a taint
-    // exists, so accumulating only from the observed ones would accumulate
-    // nothing on the runs that have something to accumulate.
-    const sandboxTaint = cfcSandboxTaintOfToolOutput(output);
-    if (sandboxTaint !== undefined) {
-      await this.recordCfcSandboxTaint(sandboxTaint);
     }
     const artifactPath = await this.artifactStore?.persistToolOutput(
       toolId,
@@ -2282,9 +2424,15 @@ export class CfHarnessEngine {
       browserAccess: this.config.browserAccess,
       handleValueOrigins: this.config.handleValueOrigins,
       handleTable: this.handleTable,
-      ...(this.#runState.cfcSandboxTaint !== undefined
-        ? { cfcSandboxTaint: structuredClone(this.#runState.cfcSandboxTaint) }
+      workspaceTaint: this.workspaceTaint,
+      ...(this.#sandboxOutputRootReady &&
+          this.#sandboxOutputRootHostPath !== undefined
+        ? { sandboxOutputRootHostPath: this.#sandboxOutputRootHostPath }
         : {}),
+      ...(this.#sandboxOutputRootFailure !== undefined
+        ? { sandboxOutputRootFailure: this.#sandboxOutputRootFailure }
+        : {}),
+      sandboxOutputRootSandboxPath: this.#sandboxOutputRootSandboxPath,
       ...(this.#fabricSessionFactory !== undefined
         ? { getFabricSession: this.#fabricSessionFactory }
         : {}),

@@ -4543,7 +4543,7 @@ export class CfHarnessPromptLoop {
     const childEngine = new CfHarnessEngine({
       runId: childRunId,
       lineage: childLineage,
-      sandboxRuntime: this.engine.sandbox,
+      sandboxRuntime: this.engine.sandboxForDelegation,
       sandbox: this.engine.config.sandbox,
       workspaceHostPath: this.engine.workspaceHostPath,
       processRunner: this.engine.hostProcessRunner,

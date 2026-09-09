@@ -1,7 +1,6 @@
 import type {
   CfcEnforcementMode,
   CfcLabelView,
-  IFCLabel,
 } from "@commonfabric/runner/cfc";
 import type {
   HarnessCfcInvocationContext,
@@ -18,6 +17,7 @@ import type {
   HarnessSkillScriptExecutionTarget,
 } from "../contracts/skill.ts";
 import type { HarnessBrowserAccessLease } from "../contracts/browser-access.ts";
+import type { HarnessWorkspaceTaint } from "../workspace-taint.ts";
 import type { HarnessDocsCorpus } from "../docs-corpus/corpus.ts";
 import type { HarnessExploreQueryRunner } from "../docs-corpus/explore.ts";
 import type { HarnessHandleTable } from "../contracts/handle-table.ts";
@@ -60,13 +60,31 @@ export interface HarnessToolContext {
   handleTable?: HarnessHandleTable;
 
   /**
-   * The confidentiality this run's sandbox invocations have accumulated so
-   * far, joined from the container taints runsc reported for them.
-   * `ingest_sandbox_file` mints a cell's label from this and from nothing
-   * else. Undefined until a sandbox invocation reports a non-empty taint,
-   * and an undefined taint mints an unlabeled cell.
+   * What this run's family is known to have been exposed to by its sandbox
+   * work, and whether that knowledge is complete.
+   * `ingest_sandbox_file` mints a cell's label from this and nothing else,
+   * and refuses outright once it is `unknown`.
    */
-  cfcSandboxTaint?: IFCLabel;
+  workspaceTaint: HarnessWorkspaceTaint;
+
+  /**
+   * The run family's sandbox output directory on the host, once established.
+   * The only directory `ingest_sandbox_file` reads from, because it is the
+   * only one whose creation the harness vouches for. Undefined for a run
+   * with no workspace, which can ingest nothing.
+   */
+  sandboxOutputRootHostPath?: string;
+
+  /** The same directory as the sandbox addresses it, for saying so. */
+  sandboxOutputRootSandboxPath: string;
+
+  /**
+   * Why this run family has no output directory, when it has none: a
+   * workspace that is read-only or absent, or one that already held a
+   * directory for this family and so holds files it cannot account for.
+   * `ingest_sandbox_file` refuses with it rather than inventing a reason.
+   */
+  sandboxOutputRootFailure?: string;
 
   /**
    * The run's trusted Fabric session, lazy and cached by the engine.

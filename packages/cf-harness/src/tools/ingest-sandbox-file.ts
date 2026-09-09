@@ -1,22 +1,39 @@
 /**
  * `ingest_sandbox_file`: the return half of the sandbox round trip. Work that
  * left the fabric to run under gVisor comes back as a cell, carrying the
- * confidentiality the run's sandbox invocations accumulated.
+ * confidentiality the run family's sandbox work accumulated.
  *
- * The label is the RUN's, not the file's. gVisor does label sandbox output at
- * file granularity — a `trusted.cfc.contentLabel` xattr on what the sandboxed
- * work wrote — but that xattr does not cross the gofer, so the trusted side
- * cannot read it; every channel that could carry it out of the container is
- * one the sandboxed workload writes, and a workload that can name its own
- * output's label can name a lower one. The container taint runsc reports in
- * its result sidecar is written where the workload cannot reach it, so it is
- * what this mints from. It over-approximates: a file's label is bounded above
- * by the taint of the container that wrote it, so a cell minted here carries
- * at least what its bytes require and sometimes more.
+ * Three things have to hold before a label on that cell means anything, and
+ * each of them is a refusal here rather than a caveat in a document.
+ *
+ * PROVENANCE. Containment in the workspace is not evidence that this run
+ * wrote the file: a workspace is an ordinary directory the operator names, so
+ * a file in it may predate the run entirely. Only the run family's own output
+ * directory carries that evidence, because the harness creates it fresh and
+ * refuses to reuse one, so nothing in it predates the family. A path outside
+ * it is refused however far inside the workspace it sits.
+ *
+ * EVIDENCE. The label is the join of the container taints runsc reported for
+ * the family's sandbox invocations, read from the result sidecar it writes
+ * where the sandboxed workload cannot reach it. An invocation that ran
+ * without leaving that evidence could have written anything under any label,
+ * so the family's knowledge is not clean — it is gone, and this refuses for
+ * the rest of the run. There is no recovery, because nothing later can
+ * establish what that invocation did.
+ *
+ * The label is the FAMILY's, not the file's. gVisor does label sandbox output
+ * per file — a `trusted.cfc.contentLabel` xattr on what the sandboxed work
+ * wrote — but that xattr does not cross the gofer, and every channel that
+ * could carry it out of the container is one the workload writes. It
+ * over-approximates: a file's label is bounded above by the taint of the
+ * container that wrote it, so a cell minted here carries at least what its
+ * bytes require and sometimes more.
  */
 
 import { createLLMFriendlyLink } from "@commonfabric/runner/shared";
+import { isAbsolute, relative } from "@std/path";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
+import { SANDBOX_OUTPUT_DIR_ENV } from "../sandbox/output-root.ts";
 import type { HarnessToolDefinition } from "./types.ts";
 
 export interface IngestSandboxFileToolInput {
@@ -27,10 +44,10 @@ export interface IngestSandboxFileToolSuccessOutput {
   outputId: string;
   status: "ok";
 
-  /** Reference to the cell the bytes landed in. Never the bytes themselves. */
+  /** Reference to the cell the text landed in. Never the text itself. */
   cellRef: string;
 
-  /** How many bytes were written, so a caller can tell an empty file apart. */
+  /** The file's size on disk, so a caller can tell an empty file apart. */
   bytes: number;
 
   /**
@@ -56,7 +73,7 @@ export const ingestSandboxFileToolDescriptor: HarnessToolDescriptor = {
   toolId: "ingest_sandbox_file",
   title: "Ingest Sandbox File",
   description:
-    "Write a file the sandbox produced into a new cell in this run's space, labelled with the confidentiality this run's sandbox work accumulated, and return a reference to it. Use it to keep a result that must stay in the fabric under the label its computation earned. The label is derived from the sandbox itself and cannot be passed in or chosen. The bytes are not returned: the reference is what you pass on, and a pattern is what reads it.",
+    `Write a UTF-8 text file your sandbox work produced into a new cell in this run's space, labelled with the confidentiality this run's sandbox work accumulated, and return a reference to it. Use it to keep a result that must stay in the fabric under the label its computation earned. The file must be under this run's output directory, named by $${SANDBOX_OUTPUT_DIR_ENV} inside the sandbox: write it as $${SANDBOX_OUTPUT_DIR_ENV}/name.txt and pass that same path here. A file anywhere else is refused however far inside the workspace it sits — being in the workspace does not establish that this run produced it, and only that directory does. The label is derived from the sandbox and cannot be passed in or chosen. The bytes are not returned: the reference is what you pass on, and a pattern is what reads it.`,
   effectClass: "write",
   inputSchema: {
     type: "object",
@@ -64,7 +81,7 @@ export const ingestSandboxFileToolDescriptor: HarnessToolDescriptor = {
       path: {
         type: "string",
         description:
-          "Path to the file inside the sandbox workspace, absolute or relative to the current directory.",
+          `Path to the file, under the run's output directory ($${SANDBOX_OUTPUT_DIR_ENV}); absolute or relative to the current directory.`,
       },
     },
     required: ["path"],
@@ -89,6 +106,12 @@ export const ingestSandboxFileToolDescriptor: HarnessToolDescriptor = {
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+/** Whether `hostPath` sits inside `root`, by path rather than by existence. */
+const isWithin = (root: string, hostPath: string): boolean => {
+  const step = relative(root, hostPath);
+  return step !== "" && !step.startsWith("..") && !isAbsolute(step);
+};
+
 export const ingestSandboxFileTool: HarnessToolDefinition<
   IngestSandboxFileToolInput,
   IngestSandboxFileToolOutput
@@ -108,8 +131,28 @@ export const ingestSandboxFileTool: HarnessToolDefinition<
         "ingest_sandbox_file requires a fabric session; a run without one has no space to write into",
       );
     }
+    // Before the path is even resolved: a family that lost track of what its
+    // sandbox did has no label to mint, whatever file is named.
+    const taint = context.workspaceTaint;
+    if (taint.kind === "unknown") {
+      return errorOutput(
+        `ingest_sandbox_file cannot label anything from this run: ${taint.reason}. ` +
+          `Nothing later can establish what that invocation wrote, so this run ` +
+          `ingests nothing.`,
+      );
+    }
     if (typeof input.path !== "string" || input.path.trim().length === 0) {
       return errorOutput("ingest_sandbox_file requires a path");
+    }
+    const outputRoot = context.sandboxOutputRootHostPath;
+    if (outputRoot === undefined) {
+      return errorOutput(
+        `ingest_sandbox_file has no output directory of this run's own to ` +
+          `read from, and reads from nowhere else: ${
+            context.sandboxOutputRootFailure ??
+              "this run established none"
+          }`,
+      );
     }
     let hostPath: string;
     try {
@@ -121,23 +164,38 @@ export const ingestSandboxFileTool: HarnessToolDefinition<
         }`,
       );
     }
-    // Only the workspace. A path resolving elsewhere on the host is not
-    // something the sandbox produced, so the taint this mints from would
-    // describe a different run of work than the bytes it applies to.
-    if (!await context.isHostPathWithinWorkspace(hostPath)) {
+    if (!isWithin(outputRoot, hostPath)) {
       return errorOutput(
-        "ingest_sandbox_file only reads files in the sandbox workspace",
+        `ingest_sandbox_file only reads files under this run's output ` +
+          `directory (${context.sandboxOutputRootSandboxPath}, named by ` +
+          `$${SANDBOX_OUTPUT_DIR_ENV} inside the sandbox). Being in the ` +
+          `workspace does not establish that this run produced a file; only ` +
+          `that directory does. Write the file there and ingest it from there.`,
       );
     }
-    let content: string;
+    let bytes: Uint8Array;
     try {
-      content = await Deno.readTextFile(hostPath);
+      bytes = await Deno.readFile(hostPath);
     } catch (error) {
       return errorOutput(
         `ingest_sandbox_file could not read the file: ${errorMessage(error)}`,
       );
     }
-    const confidentiality = context.cfcSandboxTaint?.confidentiality;
+    // Decoded strictly, and refused rather than repaired. A lenient decode
+    // replaces every invalid sequence with U+FFFD, which would put bytes in
+    // the cell that were never in the file while reporting a size taken from
+    // the replacement. This tool ingests text; a file that is not text is a
+    // refusal until there is a binary value convention to store it under.
+    let content: string;
+    try {
+      content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      return errorOutput(
+        "ingest_sandbox_file reads UTF-8 text, and this file is not valid UTF-8. " +
+          "Its bytes would have to be altered to store them, so nothing was written.",
+      );
+    }
+    const confidentiality = taint.label?.confidentiality;
     const labeled = Array.isArray(confidentiality) &&
       confidentiality.length > 0;
     try {
@@ -173,7 +231,7 @@ export const ingestSandboxFileTool: HarnessToolDefinition<
         outputId,
         status: "ok",
         cellRef: createLLMFriendlyLink(link, space),
-        bytes: new TextEncoder().encode(content).length,
+        bytes: bytes.byteLength,
         labeled,
       };
     } catch (error) {

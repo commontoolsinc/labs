@@ -138,12 +138,18 @@ readiness.
   over a lazy authorized session. The Fabric identity remains outside Docker,
   the session is constrained to one configured space, and the separate
   `assign_slug` tool registers a piece the run holds a handle to in that space's
-  piece list under a caller-chosen slug. Neither surface admits arbitrary host
-  commands, and both fabric-session tools are present only when a fabric session
-  is configured. Dedicated Loom tools additionally invoke three fixed command
-  ids through an operator-configured host CLI, using argv and stdin with pinned
-  routing and attribution. This is an authority-only host boundary, not a new
-  flow-aware store commit gate; see [LOOM_AUTHORING.md](LOOM_AUTHORING.md).
+  piece list under a caller-chosen slug. `ingest_sandbox_file` reads one file
+  from the run family's own output directory on that same trusted side and
+  writes it into a cell labelled with the confidentiality runsc reported for the
+  family's sandbox invocations; it reads from nowhere else, because a directory
+  the harness created fresh and refuses to reuse is what distinguishes a file
+  this run produced from one that merely sits in the workspace. Neither surface
+  admits arbitrary host commands, and every fabric-session tool is present only
+  when a fabric session is configured. Dedicated Loom tools additionally invoke
+  three fixed command ids through an operator-configured host CLI, using argv
+  and stdin with pinned routing and attribution. This is an authority-only host
+  boundary, not a new flow-aware store commit gate; see
+  [LOOM_AUTHORING.md](LOOM_AUTHORING.md).
 - Network: explicit in configuration but still provisional. Sandboxed `bash`
   applies a direct-`curl` destination guard; `web_fetch` and web child profiles
   have their own bounded request policies.

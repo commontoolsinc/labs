@@ -241,22 +241,36 @@ The current package provides:
   identity, and otherwise registers the piece in the space's piece list and
   points the slug at it, returning the slug and, when composable without a bare
   fabric identifier, an openable URL. `ingest_sandbox_file` brings sandbox
-  output back: it writes a file in the sandbox workspace into a new cell in the
-  session's space and returns a reference to it, never the bytes, applying the
-  confidentiality the run's sandbox invocations have accumulated. That label is
-  the RUN's rather than the file's, and it comes from one place — the container
-  taint runsc reports in the result sidecar it writes where the sandboxed
-  workload cannot reach it. gVisor does label sandbox output per file, in a
-  `trusted.cfc.contentLabel` xattr, but that xattr does not cross the gofer, and
-  every channel that could carry it out of the container is one the workload
-  writes; per-file precision therefore waits on an out-of-band channel from
-  `runsc-cfc` itself. The tool takes a path and nothing else: a label has no
-  property in its schema to arrive in, and a file ingested by a run whose
-  sandbox reported no taint yields a cell with no label, which the tool reports.
-  Without the session configuration all three tools are absent from the tool
-  surface, for a `default`- or `pattern-author`-profile subagent as much as for
-  the parent — a child shares the one session the parent built;
-  `--fabric-cfc-enforcement-mode` (raise-only: `enforce-explicit` or
+  output back: it writes a UTF-8 text file the run family's sandbox work
+  produced into a new cell in the session's space and returns a reference to it,
+  never the bytes, applying the confidentiality that family's sandbox work
+  accumulated. Three things have to hold before that label means anything, and
+  each is a refusal rather than a caveat. PROVENANCE: it reads only from the run
+  family's own output directory — `<workspace>/.cf-harness/out/<root run
+  id>`,
+  created fresh at family start, refused if one is already there, and named to
+  the sandbox by `CF_HARNESS_OUTPUT_DIR` on every invocation — because
+  containment in the workspace is not evidence that this run wrote a file, while
+  a directory nothing predates is. A workspace that cannot hold one costs the
+  run its ingest, not its tools. EVIDENCE: the label is the join of the
+  container taints runsc reported for the family's sandbox invocations,
+  collected at the invocation boundary so no tool can drop one, and an
+  invocation that returned no readable result poisons the family to `unknown`
+  for the rest of the run — there is no recovery, because nothing later can
+  establish what it wrote. A run configured without the runsc CFC result
+  transport therefore ingests nothing, which is the intended reading: no trusted
+  taint source, no honest label. BYTES: the file is decoded strictly, and one
+  that is not valid UTF-8 is refused rather than repaired, so nothing reaches a
+  cell that was not in the file. The label is the family's rather than the
+  file's, and it over-approximates: gVisor does label sandbox output per file,
+  in a `trusted.cfc.contentLabel` xattr, but that xattr does not cross the gofer
+  and every channel that could carry it out of the container is one the workload
+  writes, so per-file precision waits on an out-of-band channel from `runsc-cfc`
+  itself. The tool takes a path and nothing else: a label has no property in its
+  schema to arrive in. Without the session configuration all three tools are
+  absent from the tool surface, for a `default`- or `pattern-author`-profile
+  subagent as much as for the parent — a child shares the one session the parent
+  built; `--fabric-cfc-enforcement-mode` (raise-only: `enforce-explicit` or
   `enforce-strict`) and `--fabric-cfc-flow-labels` (`off`/`observe`/`persist`)
   set the session runtime's CFC dials, so with labels persisted a
   confidentiality-tainted pattern write is refused at commit under strict, and
