@@ -88,15 +88,15 @@ This catches a class the timers only see downstream of.
 **A `cf` invocation, in-process.** The CLI is a Deno process like the test
 runner, and `skills/perf-investigation/scripts/profile-cf.ts` runs one command
 inside a process that writes what it measured: the logger's timing statistics
-and counts, the spans under `CF_TIMING_MEASURES`, and a V8 CPU profile.
-`profile-toolshed.ts` beside it profiles the serving toolshed over its inspector
-port for exactly the command's lifetime and differences `/api/health/stats`
-around it. What neither says is what crossed the wire: `CF_MEMORY_FRAME_LOG`
-records every frame the memory client sends and receives, and
-`summarize-frame-log.ts` reads a capture back as watches, documents delivered,
-and commits — `docs/development/debugging/profiling.md` says how to pair them.
-On the Topics board this rung is where a survey that printed 60 KB was found
-receiving 25 MB, and
+and counts, the spans under `CF_TIMING_MEASURES`, and, with `CF_PROF_CPU=1`, a
+V8 CPU profile. `profile-toolshed.ts` beside it profiles the serving toolshed
+over its inspector port for exactly the command's lifetime and differences
+`/api/health/stats` around it. What neither says is what crossed the wire:
+`CF_MEMORY_FRAME_LOG` records every frame the memory client sends and receives,
+and `summarize-frame-log.ts` reads a capture back as watches, documents
+delivered, and commits — `docs/development/debugging/profiling.md` says how to
+pair them. On the Topics board this rung is where a survey that printed 60 KB
+was found receiving 25 MB, and
 `docs/history/development/performance/2026-09-cf-cli-topics-board-cost.md` is
 the worked case.
 

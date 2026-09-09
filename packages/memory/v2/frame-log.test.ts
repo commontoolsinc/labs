@@ -258,3 +258,119 @@ describe("frame log from the environment", () => {
     expect(JSON.parse(written[0].line).type).toBe("session.ack");
   });
 });
+
+describe("frame log document identity", () => {
+  const collect = () => {
+    const lines: Record<string, unknown>[] = [];
+    const log = createFrameLog((line) => lines.push(JSON.parse(line)));
+    return { lines, log };
+  };
+
+  it("keeps a document's scope, branch and instance on its record", () => {
+    const { lines, log } = collect();
+    log.logIncoming({
+      type: "response",
+      requestId: "req:10",
+      ok: {
+        sync: {
+          type: "sync",
+          fromSeq: 0,
+          toSeq: 2,
+          upserts: [
+            {
+              branch: "",
+              id: "of:a",
+              scope: "space",
+              seq: 1,
+              doc: { value: 1 },
+            },
+            {
+              branch: "b",
+              id: "of:a",
+              scope: "user",
+              scopeKey: "k",
+              seq: 2,
+              doc: { value: 2 },
+            },
+          ],
+          removes: [],
+        },
+      },
+    }, 10);
+    const upserts = (lines[0].sync as { upserts: Record<string, unknown>[] })
+      .upserts;
+    expect(upserts[0]).toMatchObject({
+      id: "of:a",
+      scope: "space",
+      branch: "",
+    });
+    expect(upserts[1]).toMatchObject({
+      id: "of:a",
+      scope: "user",
+      branch: "b",
+      scopeKey: "k",
+    });
+  });
+
+  it("counts reads of one id in two scopes as two documents", () => {
+    const { lines, log } = collect();
+    log.logOutgoing({
+      type: "transact",
+      requestId: "req:11",
+      commit: {
+        localSeq: 1,
+        operations: [],
+        reads: {
+          confirmed: [
+            { id: "of:a", scope: "space", path: ["value"], seq: 1 },
+            { id: "of:a", scope: "user", path: ["value"], seq: 1 },
+            { id: "of:a", scope: "user", path: ["value", "x"], seq: 1 },
+          ],
+          pending: [],
+        },
+      },
+    }, 10);
+    const reads = (lines[0].commit as { reads: Record<string, unknown> }).reads;
+    expect(reads.distinctDocs).toBe(2);
+    expect(reads.topDocs).toEqual([["of:a", 2], ["of:a", 1]]);
+    expect(reads.topDocPaths).toEqual(["value", "value/x"]);
+  });
+
+  it("names two different selectors by two different references", () => {
+    const { lines, log } = collect();
+    const root = (selector: unknown) => ({
+      id: "w",
+      kind: "graph",
+      query: { roots: [{ id: "of:a", scope: "space", selector }] },
+    });
+    log.logOutgoing({
+      type: "session.watch.add",
+      requestId: "req:12",
+      watches: [
+        root({ path: [], schema: false }),
+        root({ path: [], schema: true }),
+      ],
+    }, 10);
+    const selectors = lines.filter((line) => line.dir === "selector");
+    expect(selectors.length).toBe(2);
+    expect(selectors[0].hash).not.toBe(selectors[1].hash);
+  });
+
+  it("sizes a selector in UTF-8 bytes", () => {
+    const { lines, log } = collect();
+    log.logOutgoing({
+      type: "session.watch.add",
+      requestId: "req:13",
+      watches: [{
+        id: "w",
+        kind: "graph",
+        query: {
+          roots: [{ id: "of:a", scope: "space", selector: { path: ["é"] } }],
+        },
+      }],
+    }, 10);
+    const selector = lines.find((line) => line.dir === "selector")!;
+    // `{"path":["é"]}` is 14 UTF-16 units and 15 UTF-8 bytes.
+    expect(selector.bytes).toBe(15);
+  });
+});

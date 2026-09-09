@@ -482,18 +482,18 @@ export class Client {
     this.#helloPending = ack;
     const expectedFlags = getMemoryProtocolFlags();
     try {
-      await Promise.all([
-        this.#transport.send(encodeMemoryBoundary({
-          type: "hello",
-          protocol: MEMORY_PROTOCOL,
-          flags: {
-            ...expectedFlags,
-            messageCompressionV1: expectedFlags.messageCompressionV1 &&
-              this.#transport.supportsMessageCompression === true,
-          },
-        })),
-        ack.promise,
-      ]);
+      const hello = {
+        type: "hello",
+        protocol: MEMORY_PROTOCOL,
+        flags: {
+          ...expectedFlags,
+          messageCompressionV1: expectedFlags.messageCompressionV1 &&
+            this.#transport.supportsMessageCompression === true,
+        },
+      };
+      const encoded = encodeMemoryBoundary(hello);
+      logOutgoingFrame(hello, memoryMessageFrameBytes(encoded));
+      await Promise.all([this.#transport.send(encoded), ack.promise]);
       this.#connected = true;
       this.#noteStateChange();
     } finally {

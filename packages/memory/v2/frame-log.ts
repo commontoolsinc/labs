@@ -42,6 +42,17 @@ const jsonBytes = (value: unknown): number | undefined => {
   }
 };
 
+/**
+ * The identity a document record is grouped by: its id together with the
+ * scope, branch and explicit instance that distinguish two documents sharing
+ * an id. Absent members are left out of the key so a record carrying none
+ * groups with itself and nothing else.
+ */
+const docIdentity = (entry: Record<string, unknown>): string =>
+  [entry.id, entry.scope, entry.branch, entry.scopeKey]
+    .map((part) => part === undefined ? "" : String(part))
+    .join("\0");
+
 /** The top-level keys of a document's value, or its type when it has none. */
 const docKeys = (value: unknown): string[] | string =>
   value !== null && typeof value === "object"
@@ -69,6 +80,8 @@ const hashString = (text: string): string => {
 const summarizeReads = (confirmed: unknown[]): unknown => {
   const byKind = new Map<string, number>();
   const byDepth = new Map<number, number>();
+  // Keyed by the document's full identity; the id alone would merge two
+  // documents that share it across scopes or branches.
   const byDoc = new Map<string, number>();
   for (const read of confirmed) {
     const entry = read as Record<string, unknown>;
@@ -77,15 +90,17 @@ const summarizeReads = (confirmed: unknown[]): unknown => {
     byKind.set(kind, (byKind.get(kind) ?? 0) + 1);
     const depth = Array.isArray(entry.path) ? entry.path.length : -1;
     byDepth.set(depth, (byDepth.get(depth) ?? 0) + 1);
-    byDoc.set(id, (byDoc.get(id) ?? 0) + 1);
+    const identity = docIdentity(entry);
+    byDoc.set(identity, (byDoc.get(identity) ?? 0) + 1);
   }
-  const topDocs = [...byDoc].sort((a, b) => b[1] - a[1]).slice(0, 12);
-  const top = topDocs[0]?.[0];
+  const topDocs = [...byDoc].sort((a, b) => b[1] - a[1]).slice(0, 12)
+    .map(([identity, count]) => [identity.split("\0")[0], count] as const);
+  const top = [...byDoc].sort((a, b) => b[1] - a[1])[0]?.[0];
   const topDocPaths = new Set<string>();
   if (top !== undefined) {
     for (const read of confirmed) {
       const entry = read as Record<string, unknown>;
-      if (entry.id === top && Array.isArray(entry.path)) {
+      if (docIdentity(entry) === top && Array.isArray(entry.path)) {
         topDocPaths.add(entry.path.join("/"));
         if (topDocPaths.size >= 60) break;
       }
@@ -149,6 +164,8 @@ const summarizeSync = (sync: unknown): unknown => {
       return {
         id: entry.id,
         scope: entry.scope,
+        branch: entry.branch,
+        scopeKey: entry.scopeKey,
         seq: entry.seq,
         deleted: entry.deleted,
         bytes: doc === undefined ? 0 : jsonBytes(doc),
@@ -172,6 +189,8 @@ const summarizeEntities = (entities: unknown): unknown => {
     return {
       id: entry.id,
       scope: entry.scope,
+      branch: entry.branch,
+      scopeKey: entry.scopeKey,
       seq: entry.seq,
       ...(doc === null || doc === undefined
         ? { absent: true }
@@ -187,7 +206,12 @@ const summarizeEntities = (entities: unknown): unknown => {
  */
 export function createFrameLog(write: (line: string) => void): FrameLog {
   const started = performance.now();
-  const seenSelectors = new Set<string>();
+  // Selector text to the reference it was written under. A reference is the
+  // text's hash unless another text already holds that hash, in which case a
+  // counter is appended: a collision changes the spelling of the reference,
+  // never which selector it names.
+  const selectorRefs = new Map<string, string>();
+  const usedRefs = new Set<string>();
   const append = (record: Record<string, unknown>): void => {
     try {
       write(
@@ -203,12 +227,22 @@ export function createFrameLog(write: (line: string) => void): FrameLog {
   };
   const selectorRef = (selector: unknown): string => {
     const text = JSON.stringify(selector);
+    const known = selectorRefs.get(text);
+    if (known !== undefined) return known;
     const hash = hashString(text);
-    if (!seenSelectors.has(hash)) {
-      seenSelectors.add(hash);
-      append({ dir: "selector", hash, bytes: text.length, selector });
+    let ref = hash;
+    for (let suffix = 1; usedRefs.has(ref); suffix++) {
+      ref = `${hash}-${suffix}`;
     }
-    return hash;
+    usedRefs.add(ref);
+    selectorRefs.set(text, ref);
+    append({
+      dir: "selector",
+      hash: ref,
+      bytes: TEXT_ENCODER.encode(text).byteLength,
+      selector,
+    });
+    return ref;
   };
   const summarizeWatches = (watches: unknown): unknown => {
     if (!Array.isArray(watches)) return undefined;

@@ -334,14 +334,19 @@ asked for or which arrived — the question an over-wide sync turns on.
 the memory client appends one JSON line per frame in either direction, with
 the frame's type and size, a watch mutation's roots and selectors, a commit's
 operations and read-set shape, and every document a response delivered with
-its size and top-level keys. Selectors repeat across roots, so each distinct
-one is written once under a hash and referenced by it after.
+its size and top-level keys. The file holds a second kind of line as well:
+selectors repeat across roots, so each distinct one is written once as a
+`dir: "selector"` record the first time a root uses it, and every root after
+that names it by that record's hash. A capture therefore has more lines than
+frames, and a count of frames skips the selector lines.
 
 Read it by pairing each outgoing watch with its response by `requestId`, then
 asking three things of the pair: how many roots went out, how many documents
-came back, and what those documents were — grouping the delivered documents by
-their top-level keys is what tells a piece's stored result apart from a
-rendered tree, a link, or a schema. A commit line carries its confirmed reads
+came back, and what those documents were. Grouping the delivered documents by
+their top-level keys is a heuristic for the last: the record carries at most
+the first twelve keys, so it separates a piece's stored result from a rendered
+tree, a link, or a schema well enough to size each category, and a key absent
+from a record is not evidence the document lacks it. A commit line carries its confirmed reads
 split by document kind and path depth, and the count of reads that asserted a
 document absent: a commit that walked deep into documents it had never loaded
 is visible as depth and absence together, before the server rejects it.

@@ -72,16 +72,17 @@ The pre-sync issues twelve watch adds. Two of them are the survey:
   433 roots, about 35 per child: the child's argument and internal documents,
   8,026 link documents, 3,110 stream markers, 2,925 bare strings.
 
-Then the survey commits, 224 times, and every commit is rejected. The
-instantiation commit (690 operations, 1.9 MB) reads 1,562 documents it
+Then the survey commits 224 times, and 223 of those are rejected; the one
+that lands is the session-scope bootstrap commit sent before the board
+starts. The instantiation commit (690 operations, 1.9 MB) reads 1,562 documents it
 believes absent — the per-element cells the map re-derives — because the
 watch that requested them under the row schema went out 26 ms before the
 commit and answered 300 ms after it. The server rejects it with a stale read
 at seq 0, and the 222 per-element commits behind it fail on "pending
 dependency not resolved". The client's local result is what the command
 prints, so the answer is right; the 2.4 MB upload, the server's handling of
-239 frames, and its two 0.8 s watch-set refreshes to echo one landed commit
-are spent on nothing. The durable store gained one commit.
+239 frames, and its two 0.8 s watch-set refreshes to echo the one landed
+commit are spent on nothing. The durable store gained that one commit.
 
 ## Where `addTopic`'s twenty seconds go
 

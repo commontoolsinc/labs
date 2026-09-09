@@ -59,6 +59,9 @@ if (cpu) {
 }
 
 let finalized = false;
+// Captured before anything can replace it below.
+const realExit = Deno.exit;
+const exitProcess = (code: number): never => realExit(code);
 async function finalize(code: number): Promise<void> {
   if (finalized) return;
   finalized = true;
@@ -103,8 +106,17 @@ async function finalize(code: number): Promise<void> {
     `[profile-cf] wall ${wall.toFixed(0)}ms, exit ${code}, ` +
       `measures ${measures.length}, wrote ${out}.*`,
   );
-  Deno.exit(code);
+  exitProcess(code);
 }
+
+// A command may leave through `Deno.exit` directly rather than through the
+// exit `main` is handed; both routes end here, so the artifacts are written
+// either way. The real exit runs once finalize has flushed them.
+Deno.exit = ((code?: number): never => {
+  void finalize(code ?? Deno.exitCode ?? 0);
+  // The process ends inside finalize; nothing after this runs.
+  return undefined as never;
+}) as typeof Deno.exit;
 
 await main(Deno.args, {
   exit: (code) => {
