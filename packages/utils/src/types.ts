@@ -309,6 +309,17 @@ export function isBoolean(value: unknown): value is boolean {
 }
 
 /**
+ * Indicates whether a value is a `Primitive`: anything whose `typeof` is
+ * neither `object` nor `function`, plus `null`, which `typeof` files under
+ * `object`. This is an exact test, so its `false` branch holds every object,
+ * array, and function and nothing else.
+ */
+export function isPrimitive(value: unknown): value is Primitive {
+  const type = typeof value;
+  return value === null || (type !== "object" && type !== "function");
+}
+
+/**
  * Indicates whether `key` is one this implementation refuses to copy onto an
  * object from untrusted input. Use at boundaries where external data enters
  * the system (deserialization, structural copying).

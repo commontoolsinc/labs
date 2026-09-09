@@ -10,6 +10,7 @@ import {
   isObjectOrArray,
   isPlainContainer,
   isPlainObject,
+  isPrimitive,
   isReadonlyObjectOrArray,
   isString,
   isUnsafeObjectKey,
@@ -383,6 +384,29 @@ describe("types", () => {
       expect(isBoolean("true")).toBe(false);
       expect(isBoolean(null)).toBe(false);
       expect(isBoolean(undefined)).toBe(false);
+    });
+  });
+
+  describe("isPrimitive()", () => {
+    it("returns `true` for each primitive kind", () => {
+      expect(isPrimitive(42n)).toBe(true);
+      expect(isPrimitive(true)).toBe(true);
+      expect(isPrimitive(null)).toBe(true);
+      expect(isPrimitive(42)).toBe(true);
+      expect(isPrimitive(NaN)).toBe(true);
+      expect(isPrimitive("")).toBe(true);
+      expect(isPrimitive(Symbol("s"))).toBe(true);
+      expect(isPrimitive(Symbol.for("s"))).toBe(true);
+      expect(isPrimitive(undefined)).toBe(true);
+    });
+
+    it("returns `false` for an object, an array, and a function", () => {
+      expect(isPrimitive({})).toBe(false);
+      expect(isPrimitive(Object.create(null))).toBe(false);
+      expect(isPrimitive([])).toBe(false);
+      expect(isPrimitive(new Date())).toBe(false);
+      expect(isPrimitive(() => {})).toBe(false);
+      expect(isPrimitive(class {})).toBe(false);
     });
   });
 
