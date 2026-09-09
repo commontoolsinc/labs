@@ -1,5 +1,11 @@
 /** Checks explicit CLI configuration and per-turn Loom context isolation. */
 
+import { createLoomLocalCfHarnessHost } from "../src/loom-local-host.ts";
+import { InMemoryHarnessCredentialStore } from "../src/auth/credential-store.ts";
+import {
+  parseHarnessInteractiveChatStdioCliOptions,
+  runHarnessInteractiveChatStdioCli,
+} from "../src/interactive-chat-stdio.ts";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -80,6 +86,57 @@ describe("loom-authoring-session", () => {
       expect(ids).not.toContain("write_file");
       expect(ids).not.toContain("delegate_task");
       expect(observed[0].allowedSubagentProfiles).toEqual([]);
+    }
+  });
+
+  it("provisions authoring through both interactive executables and the host environment", async () => {
+    const home = await Deno.makeTempDir();
+    const path = home + "/authoring.json";
+    try {
+      await Deno.writeTextFile(path, JSON.stringify(authoring));
+      const observed: unknown[] = [];
+      await runHarnessInteractiveChatStdioCli(
+        ["--loom-authoring-config", path],
+        home,
+        (options) => {
+          observed.push(options.basePromptLoopOptions?.loomAuthoring);
+          return Promise.resolve();
+        },
+      );
+      for (const args of [["--loom-authoring-config=" + path], []]) {
+        const host = await createLoomLocalCfHarnessHost({
+          harnessHome: home,
+          env: {
+            CF_HARNESS_LOOM_AUTHORING_CONFIG: path,
+            CF_HARNESS_GATEWAY_AUTH_MODE: "none",
+          },
+          credentialStore: new InMemoryHarnessCredentialStore(),
+          providerSettingsStore: {
+            inspect: () =>
+              Promise.resolve({
+                state: "configured",
+                settings: {
+                  version: 1,
+                  modelProvider: "openai-compatible-gateway",
+                },
+              }),
+          },
+          interactiveStdioRunner: (options) => {
+            observed.push(options.basePromptLoopOptions?.loomAuthoring);
+            return Promise.resolve();
+          },
+        });
+        await host.runInteractive(args);
+      }
+      expect(observed).toEqual([authoring, authoring, authoring]);
+      expect(() =>
+        parseHarnessInteractiveChatStdioCliOptions(
+          ["--loom-authoring-config"],
+          {},
+        )
+      ).toThrow();
+    } finally {
+      await Deno.remove(home, { recursive: true });
     }
   });
 

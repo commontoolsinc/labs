@@ -13,10 +13,11 @@ duplicating it after an interruption.
 
 ## Host configuration
 
-The CLI and console accept `--loom-authoring-config /absolute/host-config.json`
-or `CF_HARNESS_LOOM_AUTHORING_CONFIG`. The file is supplied by the operator,
-read on the host, and never passed into the sandbox. Without it the three Loom
-tools are absent, including when an allowlist names them.
+The batch CLI, both interactive stdio entrypoints, and console accept
+`--loom-authoring-config /absolute/host-config.json` or
+`CF_HARNESS_LOOM_AUTHORING_CONFIG`. The file is supplied by the operator, read
+on the host, and never passed into the sandbox. Without it the three Loom tools
+are absent, including when an allowlist names them.
 
 A broker-backed configuration pins the existing scoped queue:
 

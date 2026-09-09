@@ -13,6 +13,10 @@
  * engine; it must not mean inventing a second way in.
  */
 
+import {
+  type HarnessLoomAuthoringConfig,
+  readLoomAuthoringConfig,
+} from "./loom-authoring.ts";
 import { dirname, isAbsolute, resolve } from "@std/path";
 import {
   isAbsolute as isAbsoluteSandboxPath,
@@ -171,18 +175,24 @@ export const parseHostMountSpecs = async (
 export const resolveInteractiveProvisioning = async (
   parsed: {
     hostMountSpecs?: readonly string[];
+    loomAuthoringConfigPath?: string;
     maxModelTurns?: number;
   },
   cwd: string,
 ): Promise<{
   additionalMounts?: readonly DockerRunscAdditionalMountConfig[];
+  loomAuthoring?: HarnessLoomAuthoringConfig;
   maxModelTurns?: number;
 }> => {
+  const loomAuthoring = await readLoomAuthoringConfig(
+    parsed.loomAuthoringConfigPath,
+  );
   const mounts = hostMountsToAdditionalMounts(
     await parseHostMountSpecs(parsed.hostMountSpecs, cwd),
   );
   return {
     ...(mounts.length > 0 ? { additionalMounts: mounts } : {}),
+    ...(loomAuthoring !== undefined ? { loomAuthoring } : {}),
     ...(parsed.maxModelTurns !== undefined
       ? { maxModelTurns: parsed.maxModelTurns }
       : {}),

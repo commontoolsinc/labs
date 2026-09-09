@@ -72,6 +72,9 @@ export interface RunHarnessInteractiveChatStdioOptions {
 }
 
 export interface HarnessInteractiveChatStdioCliOptions {
+  /** Operator-owned configuration resolved before the interactive service starts. */
+  loomAuthoringConfigPath?: string;
+
   sessionDbPath?: string;
   maxInMemoryEvents?: number;
 
@@ -110,9 +113,11 @@ Options:
   --host-mount <spec>                  Extra host bind mount, same grammar as the batch CLI
                                        (repeatable: name=<id>,source=<host>,target=<sandbox>,mode=readonly|writable)
   --max-model-turns <count>            Model turns allowed per user message (default 8)
+  --loom-authoring-config <path>       Absolute host-owned JSON file backing Loom tools
   --help                              Print this help text to stderr
 
 Environment:
+  CF_HARNESS_LOOM_AUTHORING_CONFIG     Default host authoring configuration file
   ${CHAT_SESSION_DB_ENV}                 Default SQLite chat session DB path
   ${CHAT_MAX_IN_MEMORY_EVENTS_ENV}       Default in-memory event retention cap
 `;
@@ -160,6 +165,7 @@ export const parseHarnessInteractiveChatStdioCliOptions = (
   env: Record<string, string | undefined> = Deno.env.toObject(),
 ): HarnessInteractiveChatStdioCliOptions => {
   let sessionDbPath = env[CHAT_SESSION_DB_ENV];
+  let loomAuthoringConfigPath = env.CF_HARNESS_LOOM_AUTHORING_CONFIG;
   let maxInMemoryEvents = env[CHAT_MAX_IN_MEMORY_EVENTS_ENV] === undefined ||
       env[CHAT_MAX_IN_MEMORY_EVENTS_ENV]?.trim() === ""
     ? undefined
@@ -174,6 +180,18 @@ export const parseHarnessInteractiveChatStdioCliOptions = (
     const arg = args[index];
     if (arg === "--help" || arg === "-h") {
       help = true;
+      continue;
+    }
+    if (arg === "--loom-authoring-config") {
+      index += 1;
+      loomAuthoringConfigPath = nonEmptyOptionValue(arg, args[index]);
+      continue;
+    }
+    if (arg.startsWith("--loom-authoring-config=")) {
+      loomAuthoringConfigPath = nonEmptyOptionValue(
+        "--loom-authoring-config",
+        arg.slice("--loom-authoring-config=".length),
+      );
       continue;
     }
     if (arg === "--host-mount") {
@@ -230,6 +248,9 @@ export const parseHarnessInteractiveChatStdioCliOptions = (
       ? { sessionDbPath }
       : {}),
     ...(maxInMemoryEvents !== undefined ? { maxInMemoryEvents } : {}),
+    ...(loomAuthoringConfigPath !== undefined
+      ? { loomAuthoringConfigPath }
+      : {}),
     ...(hostMountSpecs.length > 0 ? { hostMountSpecs } : {}),
     ...(maxModelTurns !== undefined ? { maxModelTurns } : {}),
     help,
