@@ -8,9 +8,10 @@
  * A **chosen** dial is a decision somebody made, and editing it is how the
  * decision changes. A **measured** dial is worked out from the data and
  * written back by the publisher, so the value here is only the seed used
- * before there is anything to measure. The two look identical in a source
- * file, which is why `DIALS` says which each one is: somebody who tunes a
- * measured value is arguing with a tape measure.
+ * before there is anything to measure. A **derived** dial is computed from
+ * other dials, and editing it means editing those. The three look
+ * identical in a source file, which is why `DIALS` says which each one is:
+ * somebody who tunes a measured value is arguing with a tape measure.
  */
 
 /** How many jobs a pull request's tests are packed into. */
@@ -117,7 +118,7 @@ export const FLAKE_WINDOW_DAYS = 60;
 /** Days of durations an item's cost estimate reads. */
 export const COST_WINDOW_DAYS = 7;
 
-/** The share of a lane's budget spent in descending value. */
+/** The share of the run's budget spent in descending value. */
 export const FILL_VALUE_SHARE = 0.60;
 
 /** The share spent in descending value per second. */
@@ -284,7 +285,7 @@ export const EXCLUDED_FROM_COVERAGE_GATE: ReadonlyMap<string, string> = new Map(
   ],
 );
 
-/** Whether a dial is a decision or a measurement. */
+/** Whether a dial is a decision, a measurement, or computed. */
 export type DialSource = "chosen" | "measured" | "derived";
 
 /** One dial, as `deno task test-selection dials` prints it. */
@@ -298,11 +299,20 @@ export interface Dial {
   why: string;
 }
 
+/** Returns `dial`'s value as one line of text. */
+export function dialValue(dial: Dial): string {
+  return Array.isArray(dial.value)
+    ? dial.value.join(", ")
+    : dial.value === undefined
+    ? "off"
+    : String(dial.value);
+}
+
 /**
  * Every dial, with the unit its value counts and the reason to move it.
  * The units matter because several dials are bare fractions that do not
  * mean the same thing: `WEIGHT_BREADTH` is a share of a test's score and
- * `FILL_DENSITY_SHARE` is a share of a lane's budget, and naming the unit
+ * `FILL_DENSITY_SHARE` is a share of the run's budget, and naming the unit
  * is what keeps them from being compared to each other.
  */
 export const DIALS: readonly Dial[] = [
@@ -324,8 +334,8 @@ export const DIALS: readonly Dial[] = [
       "Up when more should fit in a lane; down when five minutes is longer " +
       "than anybody will wait for a first answer. The lane jobs that this " +
       "bounds do not exist yet; when they do, their work-step and job " +
-      "timeouts in deno.yml have to move with it, and nothing checks that " +
-      "until they are written.",
+      "timeouts in `deno.yml` have to move with it, and nothing checks " +
+      "that until they are written.",
   },
   {
     name: "LANE_PROLOGUE_SECONDS",
@@ -368,9 +378,9 @@ export const DIALS: readonly Dial[] = [
     unit: "seconds",
     setBy: "derived",
     why: "Nothing edits this. It is the full run's bound less the same " +
-      "prologue and safety margin a pull request's lane pays, so a lane of " +
-      "either run is packed against what is left after the parts the " +
-      "packer does not control.",
+      "prologue and safety margin a pull request's lane pays, since a lane " +
+      "of either run is the same job doing the same setup on the same " +
+      "runner.",
   },
   {
     name: "FULL_RUN_LABEL",
@@ -431,9 +441,9 @@ export const DIALS: readonly Dial[] = [
     value: PROVEN_SATURATION,
     unit: "catches",
     setBy: "chosen",
-    why:
-      "Up when four catches should outrank one by more; down when one catch " +
-      "should already be worth nearly everything a test can earn.",
+    why: "Where the `proven` term reaches half its ceiling. Up when the " +
+      "term should go on telling eight catches from four; down when one " +
+      "catch should already be worth nearly everything a test can earn.",
   },
   {
     name: "FRESHNESS_HALF_LIFE_DAYS",
@@ -486,18 +496,19 @@ export const DIALS: readonly Dial[] = [
     value: BREADTH_SATURATION,
     unit: "sources",
     setBy: "chosen",
-    why:
-      "Up when four sources should outrank one by more; down when one source " +
-      "should already be worth nearly all the breadth term can give.",
+    why: "Where the `breadth` term reaches half its ceiling. Up when the " +
+      "term should go on telling eight sources from four; down when one " +
+      "source should already be worth nearly all it can give.",
   },
   {
     name: "ENVIRONMENTAL_MIN_SOURCES",
     value: ENVIRONMENTAL_MIN_SOURCES,
     unit: "sources",
     setBy: "chosen",
-    why: "Up when a genuinely broad regression is being written off as the " +
-      "environment; down when a broken runner's failures are still being " +
-      "counted as catches.",
+    why: "How many distinct sources a failure must span inside " +
+      "`CATCH_BREADTH_WINDOW_DAYS` before it reads as the environment. Up " +
+      "when a genuinely broad regression is written off; down when a " +
+      "broken runner's failures still count as catches.",
   },
   {
     name: "CHURN_HALF_LIFE_DAYS",
@@ -538,7 +549,7 @@ export const DIALS: readonly Dial[] = [
   {
     name: "FILL_VALUE_SHARE",
     value: FILL_VALUE_SHARE,
-    unit: "share of the budget",
+    unit: "share of the run's budget",
     setBy: "chosen",
     why: "Up when expensive high-value tests are crowded out by cheap ones; " +
       "down when a lane spends its budget on a few slow tests and runs " +
@@ -547,7 +558,7 @@ export const DIALS: readonly Dial[] = [
   {
     name: "FILL_DENSITY_SHARE",
     value: FILL_DENSITY_SHARE,
-    unit: "share of the budget",
+    unit: "share of the run's budget",
     setBy: "chosen",
     why: "Up when more of the cheap tail should run; down when the tail is " +
       "displacing tests with a record.",
@@ -555,7 +566,7 @@ export const DIALS: readonly Dial[] = [
   {
     name: "FILL_EXPLORATION_SHARE",
     value: FILL_EXPLORATION_SHARE,
-    unit: "share of the budget",
+    unit: "share of the run's budget",
     setBy: "chosen",
     why:
       "Up when the unselected corpus is going stale; down when lanes spend " +
@@ -577,8 +588,9 @@ export const DIALS: readonly Dial[] = [
     setBy: "chosen",
     why: "Up when repeats cost more lane time than the intermittent failures " +
       "they catch are worth; down when intermittent failures are still " +
-      "slipping through. Every band stays under FLAKE_EXCLUSION_RATE, so " +
-      "raising one past that rate means raising the rate too.",
+      "slipping through. Every band stays under `FLAKE_EXCLUSION_RATE`, or " +
+      "an item is excluded before it reaches the band and the band never " +
+      "fires.",
   },
   {
     name: "MAX_REPEATS",
@@ -671,20 +683,25 @@ export const DIALS: readonly Dial[] = [
     value: SAME_COMMIT_REACH_DAYS,
     unit: "days",
     setBy: "chosen",
-    why: "Up when reruns are landing far enough behind the run they repeat " +
-      "that their disagreement is being counted as a catch; down when the " +
-      "fold's memory is the thing that will not fit. It costs the number " +
-      "of identities that have failed times the number of commits, so it " +
-      "is the dial to check first when a run runs out of memory.",
+    why: "How far back the fold remembers a commit's outcomes, so that a " +
+      "rerun landing in a later batch than the run it repeats is still read " +
+      "as the test disagreeing with itself. Up when reruns land far enough " +
+      "behind that their disagreement is being counted as a catch; down " +
+      "when the fold's memory is the thing that will not fit. It costs the " +
+      "number of identities that have failed times the number of commits, " +
+      "so it is the dial to check first when a run runs out of memory.",
   },
   {
     name: "FLAKE_COMMIT_REACH",
     value: FLAKE_COMMIT_REACH,
     unit: "commits",
     setBy: "chosen",
-    why: "Up when reruns of a commit arrive far enough behind the run they " +
-      "repeat that their disagreement is being counted as a catch; down " +
-      "when the fold's memory is the thing that will not fit.",
+    why: "How many of the most recently observed commits the fold keeps " +
+      "every identity's outcomes at. Past that a commit keeps only the " +
+      "identities that have already failed, so this bounds a test's first " +
+      "failure: up when one lands more commits after the pass it disagrees " +
+      "with than this and is counted as a catch; down when the fold's " +
+      "memory is the thing that will not fit.",
   },
   {
     name: "RENAME_SIMILARITY",

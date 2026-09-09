@@ -24,6 +24,7 @@ import type { ManifestEntry } from "./test-selection/manifest.ts";
 import type { Suite } from "./test-topology/suite.ts";
 import {
   DIALS,
+  dialValue,
   EXCLUDED_FROM_COVERAGE_GATE,
   LANES,
 } from "./test-selection/policy.ts";
@@ -154,11 +155,18 @@ describe("test-selection", () => {
   });
 
   describe("dialLines()", () => {
-    it("prints every dial with its unit and how it is set", () => {
-      const text = dialLines().join("\n");
-      for (const dial of DIALS) expect(text).toContain(dial.name);
-      expect(text).toContain("(chosen)");
-      expect(text).toContain("(measured)");
+    it("prints every dial with its value, unit, source, and reason", () => {
+      // Three lines per dial, in `DIALS` order: the name with its value,
+      // the reason to move it, and a blank line.
+
+      const lines = dialLines();
+      DIALS.forEach((dial, index) => {
+        expect(lines[index * 3]).toContain(dial.name);
+        expect(lines[index * 3]).toContain(
+          `${dialValue(dial)} ${dial.unit} (${dial.setBy})`,
+        );
+        expect(lines[index * 3 + 1]).toContain(dial.why);
+      });
     });
 
     it("says a dial that is off is off rather than printing nothing", () => {
