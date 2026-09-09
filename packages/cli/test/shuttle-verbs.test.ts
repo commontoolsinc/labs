@@ -4696,6 +4696,27 @@ describe("verbs", () => {
       }).toEqual({ armed: 0, subscriptions: 0 });
     });
 
+    it("hands back an operand's own refusal, having armed nothing", async () => {
+      // The refusal is the place's, in the words of the thing that was wrong
+      // with the operand, and it arrives before anything is armed and before
+      // anything is subscribed to: a line that named nowhere leaves the
+      // session exactly as it found it.
+
+      const shuttle = atPiece();
+      const { deps, watched } = watching();
+      const outcome = await runLine("watch #argument", shuttle, deps);
+      expect({
+        reason: reasonOf(outcome),
+        armed: shuttle.session.watches.length,
+        subscriptions: watched.settles.length,
+      }).toEqual({
+        reason: "`#argument` selects a piece's arguments cell, so it " +
+          "follows the target it selects, as in `get topics#argument`.",
+        armed: 0,
+        subscriptions: 0,
+      });
+    });
+
     it("opens a lens onto the cell it armed the watch on", async () => {
       const shuttle = atPiece();
       const { deps } = watching();
@@ -4711,6 +4732,17 @@ describe("verbs", () => {
       const { deps, watched } = watching();
       await runLine("watch title", atPiece(), deps);
       expect(watched.settles.length).toBe(2);
+    });
+
+    it("draws in the lens what the lens's own subscription settled at", async () => {
+      // The second subscription is the lens's, and what it does with a settle
+      // is the other half of the pair: the watch writes a line above the
+      // prompt, and the lens redraws the value it is holding the screen for.
+
+      const { deps, watched } = watching();
+      const outcome = await runLine("watch title", atPiece(), deps);
+      watched.settles[1]!("a title");
+      expect(lensOf(outcome).frame(6, 40).join("\n")).toContain('"a title"');
     });
 
     it("leaves the watch armed when the lens closes, and cancels the lens's own", async () => {
@@ -4916,6 +4948,20 @@ describe("verbs", () => {
       await runLine("unwatch %1", shuttle, deps);
       await runLine("unwatch %2", shuttle, deps);
       expect(shuttle.session.watches.map((armed) => armed.label)).toEqual([]);
+    });
+
+    it("refuses a token that names no handle at all", async () => {
+      // The handle's own refusal, handed back as it stands: what is wrong with
+      // `title` is that it is not a handle, and `unwatch` has nothing to add
+      // to a reading that already says so.
+
+      const shuttle = atPiece();
+      const { deps } = watching();
+      await runLine("watch title", shuttle, deps);
+      expect(reasonOf(await runLine("unwatch title", shuttle, deps))).toBe(
+        "`title` names no handle. A handle is `%` and the number a listing " +
+          "printed beside a row, as in `%3`.",
+      );
     });
 
     it("refuses a handle naming a row of some other listing", async () => {

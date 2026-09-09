@@ -413,6 +413,39 @@ describe("watch", () => {
       ], 40)).toBe("watch cell @space: 2 changes");
     });
 
+    it("stands in for null and an object by what they are, an array by size", () => {
+      // The `kind` rung names the kind, and the size beside it where the size
+      // is the fact that put the value there: how many members an array holds
+      // is what a reader is deciding on, where an object says nothing more
+      // useful than what it is.
+
+      const narrow = (from: unknown) =>
+        eventLine("c @s", [{ at: ["a"], from, to: 1 }], 8);
+      expect([narrow(null), narrow([1, 2, 3]), narrow({ b: 1 })]).toEqual([
+        "watch c @s: a <null> → <a number>",
+        "watch c @s: a <an array of 3> → <a number>",
+        "watch c @s: a <an object> → <a number>",
+      ]);
+    });
+
+    it("stands in for a value the writer raises on", () => {
+      // A `bigint` is a value the fabric holds and JSON has no form for, and
+      // the writer says so by throwing. A line that let that out would end the
+      // run over a change it was only reporting.
+
+      expect(eventLine("c @s", [{ at: ["a"], from: 1n, to: 2 }], WIDE))
+        .toBe("watch c @s: a <a bigint> → 2");
+    });
+
+    it("stands in for a value the writer declines to write", () => {
+      // The other half of what JSON will not take, and it arrives differently:
+      // a symbol is declined with no text rather than raised on, so the line
+      // is composed from what the value is instead of from what came back.
+
+      expect(eventLine("c @s", [{ at: ["a"], from: Symbol("k"), to: 2 }], WIDE))
+        .toBe("watch c @s: a <a symbol> → 2");
+    });
+
     it("names one change however narrow the line, a count of one saying less", () => {
       // What the count replaces is the list, and a list of one has nothing to
       // gain from being counted: a line reading `1 change` names neither where

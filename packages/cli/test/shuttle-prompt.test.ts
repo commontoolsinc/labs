@@ -598,6 +598,40 @@ describe("prompt", () => {
       );
       expect(produced(writes)).toEqual(['{\n  "title": "a"\n}']);
     });
+
+    it("keeps what ended the run where the terminal will not be put back", async () => {
+      // A terminal that will not take the writing on the way out is one
+      // nothing here could put back, and a throw raised over it would replace
+      // whatever ended the run — which is the part a reader needs. So the
+      // writing is attempted and its failure goes no further, and the
+      // keyboard's own error is still what the run rejects with.
+
+      const writes: Write[] = [];
+      const terminal: PromptTerminal = {
+        ...framing(writes),
+        unframe: () => {
+          throw new Error("The terminal went.");
+        },
+        keys: (async function* (): AsyncGenerator<Key> {
+          throw new Error("The keyboard went.");
+        })(),
+        edit: (text, column) => {
+          writes.push({ kind: "edit", text, column });
+        },
+        finish: () => {
+          writes.push({ kind: "finish" });
+        },
+        announce: (text) => {
+          writes.push({ kind: "announce", text });
+        },
+        suspend: () => {
+          throw new Error("The prompt handed the terminal over.");
+        },
+      };
+      await expect(runPrompt(shuttleIn(), terminal, {})).rejects.toThrow(
+        "The keyboard went.",
+      );
+    });
   });
 
   describe("text the fabric wrote", () => {

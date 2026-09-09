@@ -128,11 +128,6 @@ export class ArmedWatch {
     }`;
   }
 
-  /** The cell it watches, which is what a lens onto it subscribes to. */
-  get target(): WatchTarget {
-    return this.#target;
-  }
-
   /** Whether it is still armed. */
   get armed(): boolean {
     return !this.#disarmed;
@@ -426,20 +421,28 @@ function pathOf(at: readonly PathSegment[]): string {
  * `undefined` is stood in for either way, JSON having no form for it and the
  * word for what a cell holds nothing at being what a reader needs — the same
  * division `renderValue` (`value.ts`) makes for the same value. So is anything
- * else the writer declines or throws on, a `bigint` among them: this line is
- * prose about a change rather than the value itself, and `get` is what reads
- * one out.
+ * else the writer declines or throws on, and it does both: a `bigint` raises,
+ * a symbol and a function are declined with no text at all. Either way this
+ * line is prose about a change rather than the value itself, and `get` is what
+ * reads one out.
+ *
+ * The two arrive by two paths and the `try` holds only the write, which is
+ * what keeps them two: a value raised on leaves through the `catch`, and one
+ * declined through the check under it. What that keeps out of the `catch` is a
+ * failure in composing the line, which is not a declined value and would read
+ * as one.
  */
 function shown(value: unknown, detail: Detail): string {
   if (detail === "kind" || value === undefined) {
     return marker(describeValue(value));
   }
+  let json: string | undefined;
   try {
-    const json = JSON.stringify(value);
-    return json === undefined ? marker(describeValue(value)) : oneLine(json);
+    json = JSON.stringify(value);
   } catch {
     return marker(describeValue(value));
   }
+  return json === undefined ? marker(describeValue(value)) : oneLine(json);
 }
 
 /**

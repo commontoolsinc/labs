@@ -480,6 +480,25 @@ describe("terminal", () => {
       expect(watched.released).toEqual(watched.listened);
     });
 
+    it("takes the mode back though the screen will not go back", async () => {
+      // The two halves of the restore are two `try`s because neither needs the
+      // other and the second must run whatever the first did. A terminal that
+      // will not take the give-back is the other way of not holding a screen,
+      // and the mode a person's next command is typed at goes back regardless.
+
+      let accepting = true;
+      const watched = await watching({
+        consoleSize: wide(40),
+        accepts: (offered) => accepting ? offered : 0,
+      }, (terminal) => {
+        terminal.frame(["a"]);
+        accepting = false;
+        return Promise.resolve();
+      });
+      expect(watched.order).toEqual(["raw", "cooked"]);
+      expect(watched.thrown).toBe(undefined);
+    });
+
     it("returns though the terminal will not come out of raw mode", async () => {
       // A terminal that has gone away is the other way of not being raw, and
       // the run has already finished. Raising here would replace whatever the
