@@ -94,6 +94,32 @@ export function assertServerExecutionCiPosture(
   }
 }
 
+/**
+ * Reads a running Toolshed server's posture and holds it to the role it
+ * was started for. A server on the other arm passes the tests it was
+ * given and proves the wrong thing, which is a green run that measured
+ * nothing anybody asked for.
+ */
+export async function verifyServerExecutionPosture(
+  role: ServerExecutionCiRole,
+  baseUrl: string,
+  fetcher: typeof fetch = fetch,
+): Promise<void> {
+  const url = baseUrl.replace(/\/$/, "");
+  const [metaResponse, statsResponse] = await Promise.all([
+    fetcher(`${url}/api/meta`),
+    fetcher(`${url}/api/health/stats`),
+  ]);
+  if (!metaResponse.ok || !statsResponse.ok) {
+    throw new Error(
+      `Posture probe failed: meta=${metaResponse.status}, stats=${statsResponse.status}`,
+    );
+  }
+  const meta = await metaResponse.json() as Record<string, unknown>;
+  const stats = await statsResponse.json() as Record<string, unknown>;
+  assertServerExecutionCiPosture(role, meta, stats);
+}
+
 /** Runs the small workflow-facing CLI. Exported so its error paths stay tested. */
 export async function runServerExecutionCiCommand(
   args: readonly string[],
@@ -109,19 +135,7 @@ export async function runServerExecutionCiCommand(
   if (command === "env") {
     log(serverExecutionCiEnvironment(role).join("\n"));
   } else if (command === "probe" && baseUrl !== undefined) {
-    const url = baseUrl.replace(/\/$/, "");
-    const [metaResponse, statsResponse] = await Promise.all([
-      fetcher(`${url}/api/meta`),
-      fetcher(`${url}/api/health/stats`),
-    ]);
-    if (!metaResponse.ok || !statsResponse.ok) {
-      throw new Error(
-        `Posture probe failed: meta=${metaResponse.status}, stats=${statsResponse.status}`,
-      );
-    }
-    const meta = await metaResponse.json() as Record<string, unknown>;
-    const stats = await statsResponse.json() as Record<string, unknown>;
-    assertServerExecutionCiPosture(role, meta, stats);
+    await verifyServerExecutionPosture(role, baseUrl, fetcher);
     log(
       `Verified ${role} server-execution lane (${
         serverExecutionCiLane(role).label

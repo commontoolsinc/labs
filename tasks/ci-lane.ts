@@ -809,11 +809,19 @@ export async function runLane(
 
   const workDir = await Deno.makeTempDir({ prefix: "ci-lane-" });
   const spool = recordsDir();
-  const opened = await openCapabilities([...needs], {
-    root: options.root,
-    dryRun: false,
-    workDir,
-  });
+  // The directory belongs to the lane from the moment it exists, and a
+  // capability that refuses to open is one of the ways the lane ends.
+  let opened;
+  try {
+    opened = await openCapabilities([...needs], {
+      root: options.root,
+      dryRun: false,
+      workDir,
+    });
+  } catch (error) {
+    await Deno.remove(workDir, { recursive: true }).catch(() => {});
+    throw error;
+  }
   if (spool !== undefined) {
     spoolRecords(
       spool,
@@ -833,7 +841,16 @@ export async function runLane(
       // A failure never stops the lane: one failing batch would otherwise
       // hide every batch and every repeat after it, and the point of a
       // lane is what it measured.
-      const result = await runBatch(batch, options, workDir, spool, opened.env);
+      const result = await runBatch(
+        batch,
+        options,
+        workDir,
+        spool,
+        // Two capabilities may export the same name and mean different
+        // things by it, and the two server-execution arms can share a
+        // lane.
+        opened.envFor(batch.suite.needs),
+      );
       if (!result.ok) ok = false;
       conflicts.push(...result.conflicts);
     }

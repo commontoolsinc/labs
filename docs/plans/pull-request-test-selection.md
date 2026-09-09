@@ -1020,13 +1020,15 @@ batches.
 | `git-history` | Unshallows the checkout | 3–10 seconds |
 | `toolshed` | A Toolshed server listening on an allocated port | see below |
 | `local-dev-servers` | The whole local dev stack, brought up by `deno task integration` on a chosen port offset | 15–20 seconds |
+| `toolshed-baked` | The same, from a compiled binary, whose baked shell a browser can drive | 42 seconds to build, or 17 to restore |
 | `toolshed-baked-opposite` | The same, from a binary whose shell carries the server-execution define opposite the default | 42 seconds to build, or 17 to restore |
 | `bg-piece-service-binary` | The compiled background service used by its deployed-topology gate | about 30 seconds to build, or under a second to restore |
 | `cf` | The `cf` command-line tool on the path | as above |
 | `compile-cache` | Restores a pattern compile byte cache | 3 seconds |
 
-Two capabilities are worth explaining, because the choice made for them is
-what keeps the five-minute budget reachable.
+The three ways of providing a Toolshed server are worth explaining,
+because the choice made among them is what keeps the five-minute budget
+reachable.
 
 **`toolshed` runs from source.** Today a job that needs a server downloads
 a compiled binary produced by a separate build job. On a pull request that
@@ -1038,20 +1040,24 @@ source costs a few seconds. The full run on `main` keeps the
 compiled-binary path, because it needs the binary anyway for attestation
 and deployment.
 
-**`toolshed-baked-opposite` cannot.** The server-execution opposite arm depends
-on a compile-time define baked into the browser shell inside the binary, and a
-source run cannot reproduce that. So that capability has a different
-provider: restore the binary from the Actions cache if the key hits, and
-build it in place if it does not. The lane workflow carries one fixed
-`actions/cache` step covering `.ci-cache`, keyed on a hash of the sources
-the binaries are built from. Everything a lane wants to keep between runs
-sits under that one directory — the built binaries, and the pattern
-compile byte cache — because one step covering one directory is what
-keeps the workflow independent of what the lane turns out to need. That step is in the workflow rather
-than in the runner because the cache service is only reachable through the
-action, and it is written once and never touched again.
+**The baked capabilities cannot.** The browser shell is a bundle compiled
+into the binary, so a server run from source answers the API and serves no
+shell, and a suite that drives a browser at one is told the shell app is
+not available. `toolshed-baked` is the server for the default arm.
+`toolshed-baked-opposite` is the server for the other arm, whose posture is
+a compile-time define baked into that same shell whichever way it goes.
+Both have a different provider: restore the binary from the Actions cache
+if the key hits, and build it in place if it does not. The lane workflow
+carries one fixed `actions/cache` step covering `.ci-cache`, keyed on a
+hash of the sources the binaries are built from. Everything a lane wants
+to keep between runs sits under that one directory — the built binaries,
+and the pattern compile byte cache — because one step covering one
+directory is what keeps the workflow independent of what the lane turns
+out to need. That step is in the workflow rather than in the runner
+because the cache service is only reachable through the action, and it is
+written once and never touched again.
 
-That split is the argument for having capabilities at all. Two ways of
+That split is the argument for having capabilities at all. Three ways of
 providing "a Toolshed server" coexist, suites say which one they need, and
 neither the workflow nor the other suites know the difference.
 
