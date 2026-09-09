@@ -269,6 +269,7 @@ export {
   stampExternalIngest,
 } from "./external-ingest.ts";
 export {
+  CFC_DIAL_LADDERS,
   cfcPostureReport,
   inheritedCfcPostureReport,
   projectedCfcPostureReport,

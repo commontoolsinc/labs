@@ -2109,10 +2109,13 @@ Group D finding is stamped `(corpus)` rather than with a run id.
 supposed to hold — dial rungs, which sinks must carry a ceiling, which may
 release ungated, whether every ungated sink must be published as a deviation.
 [audit/profiles/max-enforcement.json](audit/profiles/max-enforcement.json) is
-the first. A profile asserts only the fields it carries, and one asserting
-nothing is refused rather than passing: a spec that checks nothing is
-indistinguishable, in every line the audit prints, from a deployment whose every
-field held.
+the first. A rung field is a floor: a deployment satisfies it by sitting at the
+rung named or at a stricter one, so a profile naming the rung its deployments
+sit at today goes on holding when that rung is raised under them, and a rung
+name that is not on the dial's ladder is refused rather than compared. A profile
+asserts only the fields it carries, and one asserting nothing is refused rather
+than passing: a spec that checks nothing is indistinguishable, in every line the
+audit prints, from a deployment whose every field held.
 
 ### The known-defect checks, and the register they make
 
