@@ -39,11 +39,13 @@ export function isPermanentRejection(
  *   The name is reserved for a refusal that recorded reasons and tagged
  *   every one of them a verdict (`cfc/verdict-reason.ts`). The retryable
  *   `StorageTransactionAborted` name goes to reasons that are not all
- *   verdicts, to an enforcing transaction whose prepared digest changed
- *   under it, and to a relevant transaction that reaches commit
- *   unprepared, which records no reasons at all. A crash inside commit
- *   preparation takes `CommitPreparationError`, checked before the
- *   reasons are read.
+ *   verdicts, and to an enforcing transaction whose prepared digest
+ *   changed under it. A crash inside commit preparation takes
+ *   `CommitPreparationError`, checked before the reasons are read. The
+ *   unreasoned refusal that name also covers — a relevant transaction
+ *   reaching commit unprepared — is a fail-closed backstop rather than a
+ *   shape the commit path produces, because `commit()` prepares a relevant
+ *   transaction itself (`docs/specs/cfc-commit-preparation.md`).
  */
 const TERMINAL_REJECTION_NAMES: ReadonlySet<string> = new Set([
   "RowLabelCommitError",

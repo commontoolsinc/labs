@@ -88,6 +88,7 @@ import {
   DEFAULT_CFC_POLICY_EVALUATION_MODE,
   DEFAULT_CFC_TRIGGER_READ_GATING,
   DEFAULT_CFC_WRITE_FLOOR_MODE,
+  externalIngestStamp,
   flowLabelWorkExists,
   flowReadExcluded,
   gatedSinkRequestExists,
@@ -2313,6 +2314,96 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  /**
+   * Settle whether this transaction is CFC-relevant, and run `prepareCfc()`
+   * when it is.
+   *
+   * `commit()` runs this itself, so a transaction reaches the enforcement
+   * ladder prepared whether or not anything ran it earlier. Callers still run
+   * it early, through `Runtime.prepareTxForCommit`, when they read what
+   * prepare produces before handing the transaction to `commit()` — the CFC
+   * outbox the scheduler counts, and the label-map writes a reactivity log
+   * captured before the commit carries. A second pass finds the transaction
+   * prepared and does nothing.
+   *
+   * Two states take none of it. A transaction that is no longer open cannot
+   * commit, and everything here reaches storage through it: the flow probe
+   * reads stored metadata, and `prepareCfc` reads and writes the derived
+   * label map. A read-only transaction is skipped because `commit()` skips
+   * the whole step for one, so both call sites reach the same answer about
+   * it; a transaction that admits no writes has nothing to stamp anyway.
+   */
+  prepareForCommit(): void {
+    if (this.tx.status().status !== "ready") {
+      return;
+    }
+    if (this.isReadOnly()) {
+      return;
+    }
+    if (this.#cfcState.enforcementMode === "disabled") {
+      // A vouched ingest still needs its provenance mark minted even where
+      // CFC enforcement is disabled (an explicit `cfcEnforcementMode:
+      // "disabled"` opt-in — no shipped host today; toolshed passes no CFC
+      // options and so runs the enforce-explicit default). The mint is a
+      // builtin-authored boundary-commit step that never rejects, so run
+      // prepare for it explicitly rather than forcing the enforcement dial up
+      // (which would desync ingest txs from the runtime's real mode). The
+      // stamp already marked the tx relevant; nothing else here applies when
+      // disabled.
+      if (
+        externalIngestStamp(this) !== undefined &&
+        this.#cfcState.prepare.status === "unprepared"
+      ) {
+        this.prepareCfc();
+      }
+      return;
+    }
+    // Flow-label relevance is computed, not caller-marked: a tx that
+    // observed or wrote a labeled doc derives labels even when nothing
+    // called markCfcRelevant (S16 — value-copy laundering happens in
+    // exactly the txs nobody marked). Probe only while unprepared: the
+    // probe reads metadata, and a read after prepare would invalidate the
+    // digest of a transaction that already did its flow work.
+    // Stage C tuning T1: an earlier pass on this transaction usually asked
+    // the same question a moment ago; the memoized negative verdict answers
+    // here unless the tx journaled anything since (see probeFlowLabelWork).
+    if (
+      !this.#cfcState.relevant &&
+      this.#cfcState.prepare.status === "unprepared" &&
+      this.#cfcState.flowLabelsMode !== "off" &&
+      this.probeFlowLabelWork()
+    ) {
+      this.markCfcRelevant("flow-labels");
+    }
+    // Sink-request ceiling relevance (audit item 21): a request built from a
+    // value pulled through a schema-less link marks nothing, so the egress
+    // would otherwise commit without prepareCfc and skip the ceiling check.
+    // Independent of the flow dial. Unlike the flow-labels probe above this
+    // reads no stored metadata (only already-recorded policy inputs), so it
+    // is safe to fire even once `prepare` is `invalidated` — and it MUST: a
+    // late confidential read plus a late sink-request flips an early
+    // `prepared` to `invalidated` (see `invalidateCfc` triggers) while
+    // leaving `relevant` false, and without marking here the enforcement
+    // reject in commit() is skipped and the request flushes fail-open (Codex
+    // P2 on #4070). A genuinely `prepared` transaction either was already
+    // relevant (so this guard is moot) or read nothing confidential (consumed
+    // set empty — nothing to gate), so only the non-prepared states need
+    // this.
+    if (
+      !this.#cfcState.relevant &&
+      this.#cfcState.prepare.status !== "prepared" &&
+      gatedSinkRequestExists(this)
+    ) {
+      this.markCfcRelevant("sink-request-ceiling");
+    }
+    if (
+      this.#cfcState.relevant &&
+      this.#cfcState.prepare.status === "unprepared"
+    ) {
+      this.prepareCfc();
+    }
+  }
+
   prepareCfc(): string {
     // Verification always runs. There is deliberately no caller-supplied input
     // override: the commit-time digest recheck only confirms the prepared input
@@ -2968,53 +3059,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // here must precede any prepare, and the dedupe set makes this a
       // no-op for transactions prepareCfc() already covered.
       this.#materializeReferencedSchemaDocuments();
-      // Flow-label relevance is computed, not caller-marked: a tx that
-      // observed or wrote a labeled doc derives labels even when nothing
-      // called markCfcRelevant (S16 — value-copy laundering happens in
-      // exactly the txs nobody marked). Probe only while unprepared: the
-      // probe reads metadata, and a read after prepare would invalidate the
-      // digest of a transaction that already did its flow work.
-      // Stage C tuning T1: `Runtime.prepareTxForCommit` usually asked the
-      // same question a moment ago on this very transaction; the memoized
-      // negative verdict answers here unless the tx journaled anything
-      // since (see probeFlowLabelWork).
-      if (
-        !this.#cfcState.relevant &&
-        this.#cfcState.prepare.status === "unprepared" &&
-        this.#cfcState.flowLabelsMode !== "off" &&
-        this.#cfcState.enforcementMode !== "disabled" &&
-        this.probeFlowLabelWork()
-      ) {
-        this.markCfcRelevant("flow-labels");
-      }
-      // Sink-request ceiling relevance (audit item 21): a request built from a
-      // value pulled through a schema-less link marks nothing, so the egress
-      // would otherwise commit without prepareCfc and skip the ceiling check.
-      // Independent of the flow dial. Unlike the flow-labels probe above this
-      // reads no stored metadata (only already-recorded policy inputs), so it
-      // is safe to fire even once `prepare` is `invalidated` — and it MUST: a
-      // late confidential read plus a late sink-request flips an early
-      // `prepared` to `invalidated` (see `invalidateCfc` triggers) while
-      // leaving `relevant` false, and without marking here the enforcement
-      // reject below is skipped and the request flushes fail-open (Codex P2 on
-      // #4070). A genuinely `prepared` transaction either was already relevant
-      // (so this guard is moot) or read nothing confidential (consumed set
-      // empty — nothing to gate), so only the non-prepared states need this.
-      if (
-        !this.#cfcState.relevant &&
-        this.#cfcState.prepare.status !== "prepared" &&
-        this.#cfcState.enforcementMode !== "disabled" &&
-        gatedSinkRequestExists(this)
-      ) {
-        this.markCfcRelevant("sink-request-ceiling");
-      }
-      if (
-        this.#cfcState.relevant &&
-        this.#cfcState.enforcementMode === "observe" &&
-        this.#cfcState.prepare.status === "unprepared"
-      ) {
-        this.prepareCfc();
-      }
+      // Settle relevance and prepare, so the ladder below decides on a
+      // settled verdict: a relevant transaction arrives at it prepared.
+      this.prepareForCommit();
       if (
         this.#cfcState.relevant &&
         this.#cfcState.enforcementMode !== "disabled" &&
@@ -3032,6 +3079,10 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             },
           });
         }
+        // The step above prepares a relevant transaction, so reaching here
+        // means prepare ran and refused, recording why. The empty arm is the
+        // fail-closed backstop for a prepare state that step does not
+        // produce, and an unreasoned refusal is classified as retryable.
         const reasons = this.#cfcState.prepare.status === "invalidated"
           ? this.#cfcState.prepare.reasons
           : [];
@@ -3488,6 +3539,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
 
   recordCfcStructureContainer(address: CfcAddress): void {
     this.#wrapped.recordCfcStructureContainer(address);
+  }
+
+  prepareForCommit(): void {
+    this.#wrapped.prepareForCommit();
   }
 
   prepareCfc(): string {

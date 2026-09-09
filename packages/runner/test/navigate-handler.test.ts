@@ -367,7 +367,11 @@ Deno.test(
       );
 
       const rejectedTx = runtime.edit();
-      refuseAtCommitBoundary(rejectedTx, "navigateTo retry regression");
+      refuseAtCommitBoundary(
+        rejectedTx,
+        space,
+        "navigateTo retry regression",
+      );
       builtin.action(rejectedTx);
       const rejectedResult = await rejectedTx.commit();
       assert(isCfcEnforcementRejection(rejectedResult.error));

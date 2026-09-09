@@ -255,14 +255,13 @@ describe("CFC flow-label probe memo (stage C tuning T1)", () => {
         path: ["value", "note"],
       }, "a sibling the label map does not name");
       // Committed without `prepareTxForCommit`, so the commit chokepoint is
-      // the first to ask. The probe answers yes and marks the transaction
-      // relevant there, which leaves it relevant and unprepared, and an
-      // enforcing rung refuses that.
+      // the first to ask. The probe answers yes, marks the transaction
+      // relevant, and the same step prepares it.
       const before = probeCounts(runtime);
       expect(tx.getCfcState().relevant).toBe(false);
-      const result = await tx.commit();
+      expect((await tx.commit()).error).toBeUndefined();
       expect(tx.getCfcState().relevant).toBe(true);
-      expect(String(result.error?.message)).toContain("was not prepared");
+      expect(tx.getCfcState().prepare.status).toBe("prepared");
       const after = probeCounts(runtime);
       expect(after.computed - before.computed).toBe(1);
     } finally {
