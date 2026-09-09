@@ -4961,18 +4961,31 @@ async function syncRetainedLinkMetadata(
     roots.set(JSON.stringify([space, id, scope]), root);
   }
   await Promise.all([...roots.values()].map(async (root) => {
-    // Naming the source root loads its metadata family, including the owner
-    // result of an argument/internal document. A value crossing loads only
-    // the selected value and does not establish that contract evidence.
+    // Naming the source root loads the document with its metadata; a value
+    // crossing loads only the selected value and does not establish that
+    // contract evidence. The owner result an argument or internal document
+    // names through its `result` backlink is a document of its own, named
+    // in turn: the contract reads its metadata, and the store delivers no
+    // link target with the document that carries the link.
     await root.sync();
     const link = root.getAsNormalizedFullLink();
+    let metaRoot = root;
     if (
       link.scope !== "space" && root.getMetaRaw("schema") === undefined &&
       root.getMetaRaw("result") === undefined
     ) {
       // Scoped input redirects keep their producer metadata in base scope;
       // scoped results instead own their metadata in the selected partition.
-      await pieces.runtime.getCellFromLink({ ...link, scope: "space" }).sync();
+      metaRoot = pieces.runtime.getCellFromLink({ ...link, scope: "space" });
+      await metaRoot.sync();
+    }
+    const ownerLink = getMetaLink(metaRoot, "result");
+    if (ownerLink !== undefined) {
+      await pieces.runtime.getCellFromLink({
+        ...ownerLink,
+        path: [],
+        schema: undefined,
+      }).sync();
     }
   }));
 }
