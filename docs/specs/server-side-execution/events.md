@@ -534,15 +534,20 @@ loop's duty).
   parked on the loads the run's own reads registered when any are in
   flight (their landing re-invalidates the computation), otherwise after
   the backoff step. The requeued head takes the dependency preflight
-  again, which waits for an invalid upstream computation. Past the window
-  the handling fails loudly — `EventHandlerNotRunError` through the
-  scheduler error channel, the callback seeing the aborted transaction. A
-  one-shot (`retries: false`) is not re-run: its callback sees the aborted
-  transaction at once, and nothing reaches the error channel. Under
-  events-down a client dispatch without a served carriage is the
-  speculative echo of an entry the server re-drains itself, and takes
-  neither arm: its skip seals as an empty speculative commit that the
-  authoritative consequence replaces.
+  again, which waits for an invalid upstream computation. The requeued
+  event holds the queue's head while it waits, so a re-run with nothing
+  to park on is also counted against `HANDLER_NOT_RUN_BACKOFF_LIMIT`
+  (eight, the drain's deferral threshold): an argument nothing in flight
+  will resolve fails after those few short steps instead of holding every
+  later event for the window. Past either bound the handling fails loudly
+  — `EventHandlerNotRunError` through the scheduler error channel, the
+  callback seeing the aborted transaction. A
+  one-shot (`retries: false`) off events-down is not re-run: its callback
+  sees the aborted transaction at once, and nothing reaches the error
+  channel. Under events-down a client dispatch without a served carriage,
+  one-shot or not, is the speculative echo of an entry the server
+  re-drains itself, and takes neither arm: its skip seals as an empty
+  speculative commit that the authoritative consequence replaces.
 - A served event's typed delivery failure records a server-owned
   processing checkpoint on its stream entry. Dispatch-load and
   commit-preparation failures accumulate only intervals in which the

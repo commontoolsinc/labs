@@ -136,10 +136,24 @@ export class CommitConvergenceError extends Error {
 }
 
 /**
+ * How many times a client dispatch whose handler body did not run is re-run
+ * after a backoff step — a re-run with no load to park on — before the
+ * handling fails. A re-run parked on a load waits for that load and is not
+ * counted: what the count bounds is waiting for a change nothing has
+ * announced, which a permanently unresolvable argument never gets. The
+ * requeued event holds the event queue's head while it waits, so this bound
+ * is what keeps one such argument from blocking every later event for the
+ * whole retry window. The same threshold the serving drain applies to its
+ * deferrals.
+ */
+export const HANDLER_NOT_RUN_BACKOFF_LIMIT = 8;
+
+/**
  * Terminal failure raised when a client event's handler body never ran: every
- * dispatch within the retry window found the handler's argument unresolved
+ * dispatch found the handler's argument unresolved
  * (`tx.dispatchedHandlerNotRun`), so the event was re-run rather than sealed
- * as a skip, and the window is spent. Surfaced through the scheduler error
+ * as a skip, and either the retry window is spent or the re-runs with nothing
+ * to park on reached `HANDLER_NOT_RUN_BACKOFF_LIMIT`. Surfaced through the scheduler error
  * channel, so a dispatch that never had its effect is an error the caller
  * sees instead of a commit that looks like success.
  */

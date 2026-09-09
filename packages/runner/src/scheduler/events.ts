@@ -29,6 +29,7 @@ import {
   CommitConvergenceError,
   computeBackoffDelayMs,
   EventHandlerNotRunError,
+  HANDLER_NOT_RUN_BACKOFF_LIMIT,
 } from "./backpressure.ts";
 import type {
   SchedulerActionInfo,
@@ -1507,6 +1508,9 @@ export async function dispatchQueuedEvent(state: {
       ...(queuedEvent.served !== undefined
         ? { served: queuedEvent.served }
         : {}),
+      ...(queuedEvent.parentEventId !== undefined
+        ? { parentEventId: queuedEvent.parentEventId }
+        : {}),
     };
     insertInEnqueueOrder(state.eventQueue, requeued);
     if (requeued.originTx !== undefined) {
@@ -1527,6 +1531,7 @@ export async function dispatchQueuedEvent(state: {
     attempts: number,
     deadline: number,
     runAt: number | undefined,
+    notRunBackoffs: number | undefined = queuedEvent.notRunBackoffs,
   ): QueuedEvent => {
     // Same served-absence assert as the name-resolution requeue above:
     // served copies queue with retries: false, so a stale-basis failure
@@ -1559,6 +1564,12 @@ export async function dispatchQueuedEvent(state: {
       retryAttempts: attempts,
       retryDeadline: deadline,
       ...(runAt !== undefined ? { notBefore: runAt } : {}),
+      ...(notRunBackoffs !== undefined ? { notRunBackoffs } : {}),
+      // A cascade child stays one: the dispatch stamp reads the emitting
+      // run's id off the requeued entry as it did off the first.
+      ...(queuedEvent.parentEventId !== undefined
+        ? { parentEventId: queuedEvent.parentEventId }
+        : {}),
     };
     insertInEnqueueOrder(state.eventQueue, requeued);
     if (requeued.originTx !== undefined) {
@@ -1724,39 +1735,55 @@ export async function dispatchQueuedEvent(state: {
       // are in flight, since their landing is what re-invalidates that
       // computation; otherwise after the backoff step, so a replica with
       // nothing in flight neither busy-loops nor waits on a load that is
-      // not coming. Past the window the handling fails loudly.
-      const step = nextRetryStep(queuedEvent, state.backpressure);
-      if (step.kind === "convergence-failed") {
+      // not coming. The requeued event holds the head, so a re-run with
+      // nothing to park on is also counted against
+      // `HANDLER_NOT_RUN_BACKOFF_LIMIT`: an argument nothing in flight
+      // will resolve fails after those few short steps rather than
+      // holding every later event for the window. Either bound fails the
+      // handling loudly.
+      const failHandlerNotRun = (attempts: number, elapsedMs: number) => {
         runFinalCommitCallback();
         tx.abandonStagedWork(eventAbandonError(reason));
         state.handleError(
           new EventHandlerNotRunError({
             handlerId,
             reason,
-            attempts: step.attempts,
-            elapsedMs: step.elapsedMs,
+            attempts,
+            elapsedMs,
           }),
           action,
         );
+      };
+      const parkKeys = state.collectPendingLoadParkKeys(queuedEvent, runLog);
+      const step = nextRetryStep(queuedEvent, state.backpressure);
+      if (step.kind === "convergence-failed") {
+        failHandlerNotRun(step.attempts, step.elapsedMs);
         return;
       }
-      const parkKeys = state.collectPendingLoadParkKeys(queuedEvent, runLog);
+      const notRunBackoffs = (queuedEvent.notRunBackoffs ?? 0) +
+        (parkKeys.length === 0 ? 1 : 0);
+      if (notRunBackoffs > HANDLER_NOT_RUN_BACKOFF_LIMIT) {
+        failHandlerNotRun(
+          step.attempts,
+          state.backpressure.retryWindowMs -
+            (step.deadline - performance.now()),
+        );
+        return;
+      }
+      const wait = parkKeys.length > 0
+        ? `parked on ${parkKeys.length} load(s)`
+        : `after ${Math.round(step.delayMs)}ms`;
       logger.debug(
         "scheduler",
-        () => [
-          `Event handler did not run (${reason}); re-running ` +
-          `(attempt ${step.attempts}, ${
-            parkKeys.length > 0
-              ? `parked on ${parkKeys.length} load(s)`
-              : `after ${Math.round(step.delayMs)}ms`
-          })`,
-          { handlerId },
-        ],
+        `Event handler did not run (${reason}); re-running ` +
+          `(attempt ${step.attempts}, ${wait})`,
+        { handlerId },
       );
       const requeued = requeueForRetry(
         step.attempts,
         step.deadline,
         parkKeys.length > 0 ? undefined : step.runAt,
+        notRunBackoffs,
       );
       if (parkKeys.length > 0) {
         state.parkHeadEventForLoads(requeued, parkKeys);

@@ -1,7 +1,10 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import type { EventHandler } from "../src/scheduler.ts";
-import { EventHandlerNotRunError } from "../src/scheduler/backpressure.ts";
+import {
+  EventHandlerNotRunError,
+  HANDLER_NOT_RUN_BACKOFF_LIMIT,
+} from "../src/scheduler/backpressure.ts";
 import type { IStorageNotification } from "../src/storage/interface.ts";
 import {
   createSchedulerTestRuntime,
@@ -174,17 +177,20 @@ describe("event dispatch whose handler body did not run", () => {
     expect(callbackRuns).toBe(1);
   });
 
-  it("fails through the error channel once the retry window is spent, with the callback seeing the aborted transaction", async () => {
-    await disposeSchedulerTestRuntime(env);
-    env = createSchedulerTestRuntime(import.meta.url, {
-      commitBackpressure: { retryWindowMs: 20 },
-    });
+  // Drives a handler that never runs through its re-runs and returns what
+  // the outcome looked like from outside: how many dispatches there were,
+  // what the commit callback saw, how many commits carried a change, and
+  // what reached the error channel.
+  async function runNeverResolvingHandler(
+    cellName: string,
+  ): Promise<{
+    runs: number;
+    callbackStatuses: string[];
+    committedChanges: number;
+    errors: Error[];
+  }> {
     const { runtime, tx } = env;
-    const eventCell = runtime.getCell<number>(
-      space,
-      "not-run-window-events",
-      undefined,
-    );
+    const eventCell = runtime.getCell<number>(space, cellName, undefined);
     await tx.commit();
     env.tx = runtime.edit();
     const committedChanges = countCommittedChanges();
@@ -214,16 +220,41 @@ describe("event dispatch whose handler body did not run", () => {
     );
     await runtime.idle();
     await runtime.scheduler.idleWithPendingCommits();
+    return {
+      runs,
+      callbackStatuses,
+      committedChanges: committedChanges(),
+      errors,
+    };
+  }
 
-    expect(runs).toBeGreaterThanOrEqual(1);
-    expect(callbackStatuses).toEqual(["error"]);
-    expect(committedChanges()).toBe(0);
-    expect(errors).toHaveLength(1);
-    const error = errors[0];
+  it("fails through the error channel after `HANDLER_NOT_RUN_BACKOFF_LIMIT` re-runs with nothing to park on, with the callback seeing the aborted transaction", async () => {
+    const outcome = await runNeverResolvingHandler("not-run-limit-events");
+
+    expect(outcome.runs).toBe(HANDLER_NOT_RUN_BACKOFF_LIMIT + 1);
+    expect(outcome.callbackStatuses).toEqual(["error"]);
+    expect(outcome.committedChanges).toBe(0);
+    expect(outcome.errors).toHaveLength(1);
+    const error = outcome.errors[0];
     expect(error).toBeInstanceOf(EventHandlerNotRunError);
     expect((error as EventHandlerNotRunError).reason).toBe(NOT_RUN_REASON);
-    expect((error as EventHandlerNotRunError).attempts).toBe(runs);
+    expect((error as EventHandlerNotRunError).attempts).toBe(outcome.runs);
     expect(error.message).toContain(NOT_RUN_REASON);
+  });
+
+  it("fails on the first dispatch when the retry window is already spent", async () => {
+    await disposeSchedulerTestRuntime(env);
+    env = createSchedulerTestRuntime(import.meta.url, {
+      commitBackpressure: { retryWindowMs: 0 },
+    });
+    const outcome = await runNeverResolvingHandler("not-run-window-events");
+
+    expect(outcome.runs).toBe(1);
+    expect(outcome.callbackStatuses).toEqual(["error"]);
+    expect(outcome.committedChanges).toBe(0);
+    expect(outcome.errors).toHaveLength(1);
+    expect(outcome.errors[0]).toBeInstanceOf(EventHandlerNotRunError);
+    expect((outcome.errors[0] as EventHandlerNotRunError).attempts).toBe(1);
   });
 
   it("drops a one-shot (`retries: false`) at once, with the callback seeing the aborted transaction and nothing on the error channel", async () => {
