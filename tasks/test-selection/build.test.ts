@@ -254,6 +254,34 @@ describe("build", () => {
           .observations,
       ).toEqual([]);
     });
+
+    it("reads nothing from a lane measuring itself", () => {
+      // The lane's own measurements travel as ordinary records, so they
+      // arrive here beside the tests they were recorded with. A lane is
+      // not a test: scoring one reads the batch it ran going red as the
+      // lane disagreeing with itself, which is the shape of a flake and
+      // is nothing of the kind.
+      const read = readReport(
+        stored(CI_NAME, context(), [
+          record(),
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane batch workspace-unit" },
+            outcome: "fail",
+          }),
+          record({
+            test: { k: "gate", s: "ci", n: "ci-lane setup deno" },
+          }),
+        ]),
+        NO_ALIASES,
+      );
+      // The test beside them is read, so this is the measurements being
+      // left out rather than the whole group.
+      expect(read.observations.map((seen) => seen.test.n)).toEqual([
+        "space > writes",
+      ]);
+      expect([...read.surfaces.keys()]).toEqual([KEY]);
+      expect([...read.durations.keys()]).toEqual([KEY]);
+    });
   });
 
   describe("the fold", () => {
@@ -402,6 +430,27 @@ describe("build", () => {
       const state = second.finish().states.get(KEY)!;
       expect(state.mainCatches).toBe(0);
       expect(flakeRate(state, "2026-08-20")).toBe(1);
+    });
+
+    it("drops a lane measurement an earlier aggregate carried", () => {
+      // Nothing adds one now, and nothing has ever removed one, so an
+      // aggregate written while they were still folded would carry them
+      // for good.
+      const aggregate = emptyAggregate("2026-08-20");
+      const measurement = testIdentityKey({
+        k: "gate",
+        s: "ci",
+        n: "ci-lane batch workspace-unit",
+      });
+      aggregate.states[measurement] = emptyState();
+      aggregate.states[KEY] = emptyState();
+
+      const states = new Fold(aggregate, NO_ALIASES, "2026-08-20")
+        .finish().states;
+      expect(states.has(measurement)).toBe(false);
+      // The test beside it survives, so this drains the measurements
+      // rather than the aggregate.
+      expect(states.has(KEY)).toBe(true);
     });
 
     it("does not fold an object it has already folded", () => {
