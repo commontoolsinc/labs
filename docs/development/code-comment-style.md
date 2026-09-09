@@ -743,10 +743,12 @@ has something to say about itself again.
 under test already documents. Neither is worth the slot, and a file whose
 header would be one of those has none.
 
-The exemption is narrower than its name, in two ways. It covers the `.test.ts`
-file itself and nothing beside it: a helper module under `test/` — shared
-setup, a fake, a builder for test values — is an ordinary file, and gets a
-header on the ordinary terms. And it is a default rather than a bar. A test
+The exemption is narrower than its name, in two ways. It covers the unit test
+file itself, `.test.ts` or `.test.tsx`, and nothing beside it: a helper module
+under `test/` — shared setup, a fake, a builder for test values — is an
+ordinary file, and gets a header on the ordinary terms. A pattern test is a
+different form, as [`unit-test-coding-style.md`](unit-test-coding-style.md)
+says, and is not what this names. And it is a default rather than a bar. A test
 file that does something a reader would not guess from its name — walks a
 generated corpus, drives the code under test from a second runtime, checks two
 implementations against each other — has something to say about itself that no
