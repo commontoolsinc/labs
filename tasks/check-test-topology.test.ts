@@ -400,6 +400,24 @@ describe("what the workflow half looks at", () => {
     }
   });
 
+  it("reads a step a quoted hash with an escape in it sits ahead of", async () => {
+    // The backslash takes the quote with it, so the quoted run has not
+    // ended and the `#` inside it is still a character of the command.
+    const root = await workflows({
+      "workflows/deno.yml": [
+        "      - run: |",
+        '          echo "a \\" # b" && deno task run-recorded gate repo icing -- deno task x',
+      ].join("\n"),
+    });
+    try {
+      expect((await workflowRecords(root)).map((found) => found.test)).toEqual([
+        { k: "gate", s: "repo", n: "icing" },
+      ]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
   it("reads an identity a workflow expression stands in the middle of", async () => {
     // A lane cannot be asked for an identity that is not settled until
     // the run resolves the expression, so the guard reads what is

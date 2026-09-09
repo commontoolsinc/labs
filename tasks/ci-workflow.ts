@@ -26,7 +26,11 @@ function uncommented(line: string): string {
   for (let at = 0; at < line.length; at++) {
     const character = line[at]!;
     if (quote !== undefined) {
-      if (character === quote) quote = undefined;
+      // A backslash inside double quotes takes the next character with
+      // it, in the shell and in a double-quoted scalar alike. Inside
+      // single quotes both hand the backslash over as a character.
+      if (character === "\\" && quote === '"') at += 1;
+      else if (character === quote) quote = undefined;
       continue;
     }
     if (character === '"' || character === "'") {
