@@ -147,7 +147,7 @@ export function tagFromFabricPrimitiveElseNull(
  * Returns `object` for any other object, which has no JS type tag; its tag is
  * a question for `tagFromFabricValue()` or `tagFromNativeValueElseNull()`.
  */
-export function jsTypeTag(value: unknown): JsTypeValueTag | "object" {
+export function jsTagFromValue(value: unknown): JsTypeValueTag | "object" {
   return (value === null) ? VALUE_TAGS.null : typeof value;
 }
 
@@ -175,7 +175,7 @@ export function tagFromFabricValue(value: FabricValue): ValueTag {
 export function tagFromFabricValueElseNull(
   value: FabricValue,
 ): ValueTag | null {
-  const jsType = jsTypeTag(value);
+  const jsType = jsTagFromValue(value);
 
   if (jsType === VALUE_TAGS.function) {
     // A function is no `FabricValue`, so its tag is not one this returns.
@@ -293,7 +293,7 @@ export function tagFromNativeBuiltinClassElseNull(
  * the array rule, which alone decides what an array may be.
  */
 export function tagFromNativeValueElseNull(value: unknown): ValueTag | null {
-  const jsType = jsTypeTag(value);
+  const jsType = jsTagFromValue(value);
 
   if (jsType !== "object") {
     return jsType;

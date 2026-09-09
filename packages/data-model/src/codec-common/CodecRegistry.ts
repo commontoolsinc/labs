@@ -23,7 +23,11 @@ import {
 } from "@/codec-interface/interface.ts";
 import { BaseNonterminalCodec } from "@/codec-interface/BaseNonterminalCodec.ts";
 import { BaseTerminalCodec } from "@/codec-interface/BaseTerminalCodec.ts";
-import { jsTypeTag, type JsTypeValueTag, VALUE_TAGS } from "@/value-tags.ts";
+import {
+  jsTagFromValue,
+  type JsTypeValueTag,
+  VALUE_TAGS,
+} from "@/value-tags.ts";
 import { isCodecTypeTag } from "./isCodecTypeTag.ts";
 
 /**
@@ -283,7 +287,7 @@ export class CodecRegistry<Encoded> {
   ): CodecForFormat<Encoded> | typeof SELF_REP | undefined {
     // Primitive dispatch on the value's primitive `type` key, which is its JS
     // type tag. The type's codec is tried first, then self-representation.
-    const type = jsTypeTag(value);
+    const type = jsTagFromValue(value);
 
     if (type === VALUE_TAGS.function) {
       // Not a `FabricValue`; nothing can encode it.

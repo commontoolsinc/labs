@@ -48,7 +48,7 @@ import {
   FABRIC_PRIMITIVE_VALUE_TAGS,
   type FabricPrimitiveValueTag,
   JS_TYPE_VALUE_TAGS,
-  jsTypeTag,
+  jsTagFromValue,
   type JsTypeValueTag,
   tagFromFabricPrimitive,
   tagFromFabricPrimitiveElseNull,
@@ -205,10 +205,10 @@ describe("value-tags", () => {
     });
   });
 
-  describe("jsTypeTag()", () => {
+  describe("jsTagFromValue()", () => {
     for (const [label, value, tag] of JS_TYPE_TAGS) {
       it(`returns \`${tag}\` for ${label}`, () => {
-        expect(jsTypeTag(value)).toBe(tag);
+        expect(jsTagFromValue(value)).toBe(tag);
       });
     }
 
@@ -217,12 +217,12 @@ describe("value-tags", () => {
       // its class; a plain object, an array, and both kinds of fabric class
       // are the same to this.
 
-      expect(jsTypeTag({})).toBe("object");
-      expect(jsTypeTag([])).toBe("object");
-      expect(jsTypeTag(new Date())).toBe("object");
-      expect(jsTypeTag(new FabricHash(new Uint8Array(32), "fid1")))
+      expect(jsTagFromValue({})).toBe("object");
+      expect(jsTagFromValue([])).toBe("object");
+      expect(jsTagFromValue(new Date())).toBe("object");
+      expect(jsTagFromValue(new FabricHash(new Uint8Array(32), "fid1")))
         .toBe("object");
-      expect(jsTypeTag(FabricError.fromNativeError(new Error("x"))))
+      expect(jsTagFromValue(FabricError.fromNativeError(new Error("x"))))
         .toBe("object");
     });
   });
