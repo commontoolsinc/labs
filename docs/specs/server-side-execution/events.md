@@ -519,6 +519,25 @@ loop's duty).
   withdrawal through its abort alone — the batch marks only a
   SURVIVING lt1 run (§4), so the durable entry lands unmarked and the
   next drain delivers it once, with a `streamEntry`.
+- **A CLIENT dispatch whose handler body did not run is re-run by the
+  scheduler, never sealed.** The same skip on a client-side event has no
+  durable entry and no drain, so the scheduler is its only re-deliverer.
+  An argument that reads as `undefined` on a replica still loading what
+  the argument reaches is a cold read rather than a schema mismatch: a
+  computation reading a document the replica does not hold publishes
+  `undefined` until the load lands, by design, so a handler reading
+  through it finds its argument unresolved in exactly that window.
+  Sealing the skip would fire the commit callback on a transaction that
+  wrote nothing, which a caller reads as a completed handling. The
+  finalize withdraws the transaction and requeues the event within the
+  retry window a stale-basis rejection gets, drawing on the same budget:
+  parked on the loads the run's own reads registered when any are in
+  flight (their landing re-invalidates the computation), otherwise after
+  the backoff step. The requeued head takes the dependency preflight
+  again, which waits for an invalid upstream computation. Past the window
+  the handling fails loudly — `EventHandlerNotRunError` through the
+  scheduler error channel, the callback seeing the aborted transaction —
+  and a one-shot (`retries: false`) fails that way at once.
 - A served event's typed delivery failure records a server-owned
   processing checkpoint on its stream entry. Dispatch-load and
   commit-preparation failures accumulate only intervals in which the

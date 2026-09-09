@@ -28,6 +28,7 @@ import {
   type CommitBackpressurePolicy,
   CommitConvergenceError,
   computeBackoffDelayMs,
+  EventHandlerNotRunError,
 } from "./backpressure.ts";
 import type {
   SchedulerActionInfo,
@@ -1253,6 +1254,10 @@ export async function processPullQueuedEventDuringExecute(
       state.recordLineageEvent(originTx, event),
     getOriginLocalSeq: (originTx, space) =>
       state.getOriginLocalSeq(originTx, space),
+    collectPendingLoadParkKeys: (event, log) =>
+      state.collectPendingLoadParkKeys(event, log),
+    parkHeadEventForLoads: (event, keys) =>
+      state.parkHeadEventForLoads(event, keys),
   }, queuedEvent);
 }
 
@@ -1282,6 +1287,14 @@ export async function dispatchQueuedEvent(state: {
     originTx: IExtendedStorageTransaction,
     space: MemorySpace,
   ) => number | undefined;
+  readonly collectPendingLoadParkKeys: (
+    event: QueuedEvent,
+    log: ReactivityLog,
+  ) => string[];
+  readonly parkHeadEventForLoads: (
+    event: QueuedEvent,
+    keys: readonly string[],
+  ) => void;
 }, queuedEvent: QueuedEvent): Promise<void> {
   const { action, handler, event: eventValue, retry, onCommit } = queuedEvent;
   const handlerId = state.getActionId(handler);
@@ -1502,17 +1515,19 @@ export async function dispatchQueuedEvent(state: {
     state.queueExecution();
   };
 
-  // Re-queue a transient commit failure for a later retry. The retry is parked
-  // via notBefore so the scheduler backs off (capped exponential delay) instead
-  // of busy-looping; idle()/settled() wait for the parked head, so a converging
-  // write still completes within a settle. The retry attempt count and deadline
-  // are carried forward; `retry` is preserved untouched (it gates whether this
-  // event retries at all, which a windowed re-queue does not change).
-  const requeueForBackoff = (
+  // Re-queue a transient outcome for a later retry. With `runAt` the retry is
+  // parked via notBefore so the scheduler backs off (capped exponential delay)
+  // instead of busy-looping; without it the caller parks the requeued head on
+  // something else, such as a load. idle()/settled() wait for a parked head
+  // either way, so a converging write still completes within a settle. The
+  // retry attempt count and deadline are carried forward; `retry` is preserved
+  // untouched (it gates whether this event retries at all, which a windowed
+  // re-queue does not change).
+  const requeueForRetry = (
     attempts: number,
     deadline: number,
-    runAt: number,
-  ) => {
+    runAt: number | undefined,
+  ): QueuedEvent => {
     // Same served-absence assert as the name-resolution requeue above:
     // served copies queue with retries: false, so a stale-basis failure
     // classifies give-up "opt-out" and never reaches the backoff window —
@@ -1543,13 +1558,14 @@ export async function dispatchQueuedEvent(state: {
       onCommit,
       retryAttempts: attempts,
       retryDeadline: deadline,
-      notBefore: runAt,
+      ...(runAt !== undefined ? { notBefore: runAt } : {}),
     };
     insertInEnqueueOrder(state.eventQueue, requeued);
     if (requeued.originTx !== undefined) {
       state.recordLineageEvent(requeued.originTx, requeued);
     }
     state.queueExecution();
+    return requeued;
   };
 
   const runFinalCommitCallback = () => {
@@ -1621,48 +1637,121 @@ export async function dispatchQueuedEvent(state: {
       return;
     }
 
-    // Mark/effects atomicity (events.md §4, RULED 2026-08-27 — the a04
-    // write-side member): a SERVED dispatch whose handler body DID NOT
-    // RUN must not seal. The dispatch stamper wrote the entry's
-    // `consequenced` mark into this tx BEFORE the body ran
-    // (space-server.ts), so sealing the skipped run would commit a 1-op
-    // mark-only consequence — the entry permanently consumed with zero
-    // effects and no error (a04's seqs 53/56: two Create clicks lost to
-    // a transient argument-resolution failure). Withdraw the whole tx
-    // instead: the entry stays pending-unconsequenced, the drain
-    // re-delivers it (a drain copy's plain-deferral arm releases the
-    // in-flight guard and arms the rescan; the 8-deferral threshold
-    // hardens a permanently unresolvable argument into the visible §5
-    // DROP notice), and the retried handler's cause-derived idempotent
-    // writes converge. An LT1 in-process copy carries no onFailure —
-    // its abort alone leaves the durable entry unmarked and the next
-    // wave's drain delivers it once, WITH a streamEntry (C8b).
-    // Client/OFF dispatches carry no mark and keep the silent skip.
-    if (served !== undefined && tx.dispatchedHandlerNotRun !== undefined) {
+    // A dispatch whose handler body DID NOT RUN seals nothing (events.md
+    // §5). The runner records the skip when the handler's argument reads
+    // as `undefined`, and on a replica that is still loading what the
+    // argument reaches that is a cold read, not a schema mismatch: a
+    // computation that reads a document the replica does not hold yet
+    // publishes `undefined` until the load lands, so a handler reading
+    // through it finds its argument unresolved in exactly that window.
+    // Both arms below withdraw the transaction and run the handler again
+    // once the replica has moved; what differs is who re-delivers.
+    if (tx.dispatchedHandlerNotRun !== undefined) {
       const reason = tx.dispatchedHandlerNotRun.reason;
+      // Taken before the abort, since the read set is what the client arm
+      // parks on.
+      const runLog = txToReactivityLog(tx);
       if (tx.status().status === "ready") {
-        tx.abort(
-          new Error(`served handler did not run: ${reason}`),
-        );
+        tx.abort(new Error(`handler did not run: ${reason}`));
       }
-      reportServedEventFailure(served, {
-        kind: "deferred",
-        cause: "handler-not-run",
-        message: reason,
-      });
-      // The withdrawal is a deferral, and a deferral carries the
-      // drain's arrival-order BARRIER (events.md §2; review-6459 F1):
-      // the drain queues a pass's pending entries together, so
-      // same-space followers already sit behind this head and would
-      // dispatch — and SEAL — next, landing a later arrival's
-      // consequence ahead of the withdrawn entry's re-drain (the b01
-      // overtake: durable log ["B","A"] against arrival [a1, b1]).
-      deferLaterSameSpaceServedEvents(
-        state,
-        queuedEvent,
-        `whose served handler did not run (${reason})`,
+      if (served !== undefined) {
+        // Mark/effects atomicity (events.md §4, RULED 2026-08-27 — the
+        // a04 write-side member). The dispatch stamper wrote the entry's
+        // `consequenced` mark into this tx BEFORE the body ran
+        // (space-server.ts), so sealing the skipped run would commit a
+        // 1-op mark-only consequence — the entry permanently consumed
+        // with zero effects and no error (a04's seqs 53/56: two Create
+        // clicks lost to a transient argument-resolution failure). The
+        // withdrawal leaves the entry pending-unconsequenced, the drain
+        // re-delivers it (a drain copy's plain-deferral arm releases the
+        // in-flight guard and arms the rescan; the 8-deferral threshold
+        // hardens a permanently unresolvable argument into the visible
+        // §5 DROP notice), and the retried handler's cause-derived
+        // idempotent writes converge. An LT1 in-process copy carries no
+        // onFailure — its abort alone leaves the durable entry unmarked
+        // and the next wave's drain delivers it once, WITH a streamEntry
+        // (C8b).
+        reportServedEventFailure(served, {
+          kind: "deferred",
+          cause: "handler-not-run",
+          message: reason,
+        });
+        // The withdrawal is a deferral, and a deferral carries the
+        // drain's arrival-order BARRIER (events.md §2; review-6459 F1):
+        // the drain queues a pass's pending entries together, so
+        // same-space followers already sit behind this head and would
+        // dispatch — and SEAL — next, landing a later arrival's
+        // consequence ahead of the withdrawn entry's re-drain (the b01
+        // overtake: durable log ["B","A"] against arrival [a1, b1]).
+        deferLaterSameSpaceServedEvents(
+          state,
+          queuedEvent,
+          `whose served handler did not run (${reason})`,
+        );
+        runFinalCommitCallback();
+        return;
+      }
+      // A client dispatch has no durable entry, so the scheduler is its
+      // only re-deliverer. Sealing the skip would fire the commit callback
+      // on a transaction that wrote nothing, which a caller reads as the
+      // handling having completed. A one-shot (retries: false) is not
+      // re-run, and its callback sees the aborted transaction instead.
+      if (!retry) {
+        logger.warn(
+          "scheduler",
+          "Event handler did not run and the caller opted out of retry " +
+            "(retries: false); dropping",
+          { handlerId, reason },
+        );
+        runFinalCommitCallback();
+        tx.abandonStagedWork(eventAbandonError("retry opted out"));
+        return;
+      }
+      // Re-run within the same window a stale-basis rejection gets. The
+      // requeued head goes through the dependency preflight again, which
+      // waits for an invalid upstream computation; a computation that
+      // already settled clean on `undefined` is what the load park is
+      // for. Parked on the loads the run's own reads registered when any
+      // are in flight, since their landing is what re-invalidates that
+      // computation; otherwise after the backoff step, so a replica with
+      // nothing in flight neither busy-loops nor waits on a load that is
+      // not coming. Past the window the handling fails loudly.
+      const step = nextRetryStep(queuedEvent, state.backpressure);
+      if (step.kind === "convergence-failed") {
+        runFinalCommitCallback();
+        tx.abandonStagedWork(eventAbandonError(reason));
+        state.handleError(
+          new EventHandlerNotRunError({
+            handlerId,
+            reason,
+            attempts: step.attempts,
+            elapsedMs: step.elapsedMs,
+          }),
+          action,
+        );
+        return;
+      }
+      const parkKeys = state.collectPendingLoadParkKeys(queuedEvent, runLog);
+      logger.debug(
+        "scheduler",
+        () => [
+          `Event handler did not run (${reason}); re-running ` +
+          `(attempt ${step.attempts}, ${
+            parkKeys.length > 0
+              ? `parked on ${parkKeys.length} load(s)`
+              : `after ${Math.round(step.delayMs)}ms`
+          })`,
+          { handlerId },
+        ],
       );
-      runFinalCommitCallback();
+      const requeued = requeueForRetry(
+        step.attempts,
+        step.deadline,
+        parkKeys.length > 0 ? undefined : step.runAt,
+      );
+      if (parkKeys.length > 0) {
+        state.parkHeadEventForLoads(requeued, parkKeys);
+      }
       return;
     }
 
@@ -1859,7 +1948,7 @@ export async function dispatchQueuedEvent(state: {
               `(attempt ${disposition.attempts})`,
             { handlerId },
           );
-          requeueForBackoff(
+          requeueForRetry(
             disposition.attempts,
             disposition.deadline,
             disposition.runAt,
@@ -2115,6 +2204,20 @@ function classifyCommitDisposition(
   if (!queuedEvent.retry) {
     return { kind: "give-up", reason: "opt-out" };
   }
+  return nextRetryStep(queuedEvent, policy);
+}
+
+/**
+ * Where a client event that has to run again stands in its retry window: the
+ * next backoff step, or the window spent. The window opens at the first
+ * transient outcome and rides the requeued event, so every such outcome of one
+ * intent — a stale-basis rejection, a dispatch whose handler body did not run
+ * — draws on the same budget.
+ */
+function nextRetryStep(
+  queuedEvent: QueuedEvent,
+  policy: CommitBackpressurePolicy,
+): Extract<CommitDisposition, { kind: "backoff" | "convergence-failed" }> {
   const attempts = (queuedEvent.retryAttempts ?? 0) + 1;
   const now = performance.now();
   const deadline = queuedEvent.retryDeadline ?? (now + policy.retryWindowMs);

@@ -134,3 +134,36 @@ export class CommitConvergenceError extends Error {
     this.cause = options.cause;
   }
 }
+
+/**
+ * Terminal failure raised when a client event's handler body never ran: every
+ * dispatch within the retry window found the handler's argument unresolved
+ * (`tx.dispatchedHandlerNotRun`), so the event was re-run rather than sealed
+ * as a skip, and the window is spent. Surfaced through the scheduler error
+ * channel, so a dispatch that never had its effect is an error the caller
+ * sees instead of a commit that looks like success.
+ */
+export class EventHandlerNotRunError extends Error {
+  readonly reason: string;
+  readonly attempts: number;
+  readonly elapsedMs: number;
+
+  constructor(
+    options: {
+      handlerId?: string;
+      reason: string;
+      attempts: number;
+      elapsedMs: number;
+    },
+  ) {
+    const handlerPart = options.handlerId ? ` for ${options.handlerId}` : "";
+    super(
+      `Event handler${handlerPart} did not run in ${options.attempts} ` +
+        `dispatches over ${Math.round(options.elapsedMs)}ms: ${options.reason}`,
+    );
+    this.name = "EventHandlerNotRunError";
+    this.reason = options.reason;
+    this.attempts = options.attempts;
+    this.elapsedMs = options.elapsedMs;
+  }
+}
