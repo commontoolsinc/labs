@@ -178,6 +178,37 @@ describe("snapshot memo", () => {
     expect(inPlace.path).toEqual(["target"]);
   });
 
+  it("keeps serving a resolution across a batch write holding no writes", () => {
+    const { holder } = linkingCell("empty-batch-holder", "empty-batch-target");
+    const link = holder.key("target").getAsNormalizedFullLink();
+
+    resolveLink(runtime, tx, link);
+    const afterFirst = readCount();
+    // A batch with nothing in it writes nothing, so no value a resolution
+    // depends on has changed.
+    tx.writeValuesOrThrow!([]);
+    resolveLink(runtime, tx, link);
+
+    expect(readCount()).toBe(afterFirst);
+  });
+
+  it("keeps serving a resolution across a `set()` that changes nothing", () => {
+    const { holder, target } = linkingCell(
+      "same-set-holder",
+      "same-set-target",
+    );
+    const link = holder.key("target").getAsNormalizedFullLink();
+
+    resolveLink(runtime, tx, link);
+    // The diff behind `set()` reads the stored value to find nothing to write,
+    // so the count is taken after it.
+    target.set({ value: "same-set-target" });
+    const afterSet = readCount();
+    resolveLink(runtime, tx, link);
+
+    expect(readCount()).toBe(afterSet);
+  });
+
   it("keeps resolutions of two paths in one document apart", () => {
     const first = runtime.getCell<{ value: string }>(
       space,

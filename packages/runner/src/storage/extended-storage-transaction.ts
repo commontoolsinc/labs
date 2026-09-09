@@ -2650,7 +2650,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     >,
   ): void {
     this.#assertWritable("writeValuesOrThrow()");
-    this.#invalidateReadResultCache();
     if (this.tx.writeBatch) {
       // Keep the batch path on the same noteSystemWrite chokepoint as single
       // writes (S18). This is not inert, and never was: `#noteSystemWrite`'s
@@ -2686,6 +2685,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // batch authored nothing, so it must not record a write for the
       // transaction's write-identity summary.
       const noteWriteIdentity = () => this.#noteWriteIdentity();
+      // The read caches go the same way: dropped ahead of the first write the
+      // batch yields, and kept when it yields none. A `set()` whose diff
+      // finds nothing to write arrives here as an empty batch, and a lift
+      // that re-asserts an unchanged row per element of a scan would
+      // otherwise pay a full re-resolution of everything the scan had
+      // memoized, once per element.
+      let cachesInvalidated = false;
+      const invalidateReadCaches = () => {
+        if (cachesInvalidated) return;
+        cachesInvalidated = true;
+        this.#invalidateReadResultCache();
+      };
       // Collected while the batch consumes the generator, staged after it
       // returns: the schema-document closure behind each written link (the
       // write-side delivery guarantee, and what makes a same-transaction
@@ -2696,6 +2707,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         (function* () {
           for (const write of writes) {
             const address = toMemorySpaceAddress(write.address);
+            invalidateReadCaches();
             noteSystemWrite(address, write.value);
             noteWriteIdentity();
             if (!write.delete && getContentAddressedSchemasConfig()) {
