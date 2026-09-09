@@ -9,13 +9,34 @@
  */
 
 /**
- * Drops YAML comments. A `#` after whitespace ends a plain scalar, so
- * what is left on a line is the value the workflow carries. Applied
- * before looking for commands, so that a comment naming a command is not
- * read as one and a comment after a command is not read as part of it.
+ * Drops comments. A `#` after whitespace ends a plain scalar, and ends a
+ * command in the shell a block scalar hands its lines to. A `#` inside
+ * quotes is a character of the command, so the rest of that line stays.
+ * Applied before looking for commands, so that a comment naming a
+ * command is not read as one and a comment after a command is not read
+ * as part of it.
  */
 export function withoutComments(contents: string): string {
-  return contents.replaceAll(/(^|\s)#.*$/gm, "$1");
+  return contents.split("\n").map(uncommented).join("\n");
+}
+
+/** The part of one line that a comment does not take. */
+function uncommented(line: string): string {
+  let quote: string | undefined;
+  for (let at = 0; at < line.length; at++) {
+    const character = line[at]!;
+    if (quote !== undefined) {
+      if (character === quote) quote = undefined;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character !== "#") continue;
+    if (at === 0 || /\s/.test(line[at - 1]!)) return line.slice(0, at);
+  }
+  return line;
 }
 
 /**

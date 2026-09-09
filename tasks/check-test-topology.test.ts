@@ -382,6 +382,24 @@ describe("what the workflow half looks at", () => {
     }
   });
 
+  it("reads a step a quoted hash sits ahead of on its line", async () => {
+    // A `#` the shell is handed as a character does not end the command,
+    // so the step after it on that line still records and still counts.
+    const root = await workflows({
+      "workflows/deno.yml": [
+        "      - run: |",
+        '          echo "count # of things" && deno task run-recorded gate repo icing -- deno task x',
+      ].join("\n"),
+    });
+    try {
+      expect((await workflowRecords(root)).map((found) => found.test)).toEqual([
+        { k: "gate", s: "repo", n: "icing" },
+      ]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
   it("reads an identity a workflow expression stands in the middle of", async () => {
     // A lane cannot be asked for an identity that is not settled until
     // the run resolves the expression, so the guard reads what is
@@ -465,6 +483,51 @@ describe("what the workflow half looks at", () => {
           ".github/workflows/deno.yml",
         ],
       );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("reads no step out of a file that is not a step definition", async () => {
+    // Only the YAML under `.github` defines steps. A document beside it
+    // quoting the wrapper is prose.
+    const root = await workflows({
+      "workflows/README.md":
+        "  run: deno task run-recorded gate repo prose -- deno task prose",
+      "workflows/deno.yml":
+        "  run: deno task run-recorded gate repo real -- deno task real",
+    });
+    try {
+      expect((await workflowRecords(root)).map((found) => found.test.n))
+        .toEqual(["real"]);
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("raises on a file ending in the middle of a recording step", async () => {
+    // Three words follow the wrapper or the identity is not there to
+    // read, and reading a shorter one would invent an identity.
+    const root = await workflows({
+      "workflows/deno.yml": "  run: deno task run-recorded gate repo",
+    });
+    try {
+      await expect(workflowRecords(root)).rejects.toThrow(
+        "ends in the middle of a recording step",
+      );
+    } finally {
+      await Deno.remove(root, { recursive: true });
+    }
+  });
+
+  it("raises rather than reading a shorter list of definitions", async () => {
+    // A directory that cannot be read is not a directory that holds no
+    // steps. Treating the two alike would report success over whatever
+    // it managed to reach.
+    const root = await Deno.makeTempDir({ prefix: "obstructed-" });
+    try {
+      await Deno.writeTextFile(`${root}/.github`, "not a directory");
+      await expect(workflowRecords(root)).rejects.toThrow();
     } finally {
       await Deno.remove(root, { recursive: true });
     }

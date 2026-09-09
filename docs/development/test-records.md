@@ -356,8 +356,8 @@ is what keeps the command running once a lane takes over the job. `deno
 task check-test-topology` reads every such step and fails on one no suite
 claims, which settles it on the pull request that adds the step. A
 command with no suite to register it under is one to leave unwrapped:
-"Recording" above says that a check no lane can be asked to run is not
-recorded.
+["Recording" in the specification](../specs/test-records.md#recording)
+says that a check no lane can be asked to run is not recorded.
 
 A harness that is also a library — one this repository's own tests drive
 over fixture files — takes the decision to record from its caller, not
