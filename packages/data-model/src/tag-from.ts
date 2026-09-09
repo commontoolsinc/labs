@@ -1,3 +1,5 @@
+import { constructorOfPrototype } from "@commonfabric/utils/objects";
+
 import { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
 import {
   FabricInstance,
@@ -178,4 +180,55 @@ export function tagFromNativeBuiltinClass(
       return null;
     }
   }
+}
+
+/**
+ * Maps a JS value to its native-instance tag. Returns the tag string if the
+ * value is a recognized convertible native instance, or `null` otherwise.
+ * Non-object types (`null`, `undefined`, primitives) return `Primitive`.
+ *
+ * An array is tagged `Array` before anything else is consulted.
+ * `Array.isArray()` is realm-agnostic and sees through both a subclass and a
+ * severed prototype, so every array reaches array handling and is decided by
+ * the array rule, which alone decides what an array may be.
+ *
+ * An error is recognized next, by `Error.isError()`, which holds through a
+ * severed prototype and across realms; then a `FabricPrimitive`, by the tag
+ * its instance carries; then a `FabricInstance`, by class. A null-prototype
+ * object is tagged `Object`. What remains is decided by its class, read from
+ * its prototype, through `tagFromNativeBuiltinClass()`.
+ */
+export function tagFromNativeValue(value: unknown): ValueTag | null {
+  if (value === null || typeof value !== "object") {
+    return VALUE_TAGS.Primitive;
+  }
+
+  // Arrays first, and unconditionally: see above.
+  if (Array.isArray(value)) {
+    return VALUE_TAGS.Array;
+  } else if (Error.isError(value)) {
+    return VALUE_TAGS.Error;
+  } else if (value instanceof FabricPrimitive) {
+    return tagFromFabricPrimitiveElseNull(value);
+  } else if (value instanceof FabricInstance) {
+    return VALUE_TAGS.FabricInstance;
+  }
+
+  const proto = Object.getPrototypeOf(value);
+
+  // We treat a `null` prototype as type `Object`, because due to the checks
+  // above, it can't be a cross-realm type of any sort we attempt to recognize.
+  if (proto === null) {
+    return VALUE_TAGS.Object;
+  }
+
+  // The class is read from the PROTOTYPE, not from the value. What is being
+  // asked is which class the value is an instance of, and that is a fact about
+  // its prototype; an own `constructor` property is ordinary data that happens
+  // to share the name, and must not decide the value's type. Reading it off
+  // the value would let `{constructor: Error}` -- a plain record -- be tagged
+  // `Error` and silently rebuilt as one.
+  const ctor = constructorOfPrototype(proto);
+
+  return (ctor === undefined) ? null : tagFromNativeBuiltinClass(ctor);
 }

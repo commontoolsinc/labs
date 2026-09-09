@@ -24,7 +24,7 @@ import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { codecClasses } from "@/fabric-primitives/index.ts";
 import type { FabricValue } from "@/interface.ts";
 import { shallowFabricFromNativeValue } from "@/native-conversion.ts";
-import { tagFromNativeValue } from "@/native-type-tags.ts";
+import { tagFromNativeValue } from "@/tag-from.ts";
 import { isFabricPlainObject } from "@/type-check.ts";
 import {
   assertValidFabricValueLayer,

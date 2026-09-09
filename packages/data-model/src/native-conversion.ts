@@ -47,7 +47,7 @@ import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { VALUE_TAGS } from "./VALUE_TAGS.ts";
-import { tagFromNativeValue } from "./native-type-tags.ts";
+import { tagFromNativeValue } from "./tag-from.ts";
 import {
   assertValidFabricValueLayer,
   isValidFabricNativeObject,

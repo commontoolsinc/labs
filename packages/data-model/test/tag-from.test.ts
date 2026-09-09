@@ -19,7 +19,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { VALUE_TAGS } from "@/VALUE_TAGS.ts";
-import { tagFromNativeValue } from "@/native-type-tags.ts";
+import { tagFromNativeValue } from "@/tag-from.ts";
 import { isValidFabricNativeObject } from "@/validity-check.ts";
 import {
   tagFromFabricPrimitive,
@@ -34,7 +34,7 @@ import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { LAYER_CORPUS } from "./fabric-value-corpus.ts";
 
-describe("native-type-tags", () => {
+describe("tag-from", () => {
   describe("tagFromNativeValue()", () => {
     it("returns `Error` tag for standard `Error` subclasses", () => {
       const cases: [string, Error][] = [

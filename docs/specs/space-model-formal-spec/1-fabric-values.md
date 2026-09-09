@@ -80,7 +80,7 @@ wrapper classes (Section 1.4).
 > declarations in `interface.ts`, the conversions in `native-conversion.ts`, the
 > clone helpers in `value-clone.ts`, and the operations a value of any class is
 > subject to -- `deep-freeze.ts`, `value-hash.ts`, `value-debug.ts`, and the tag
-> vocabulary in `VALUE_TAGS.ts` and `native-type-tags.ts`. None of those is an
+> vocabulary in `VALUE_TAGS.ts` and `tag-from.ts`. None of those is an
 > exported subpath. `codec-interface/` is internal in the same way, reached
 > through `@commonfabric/data-model/codec-common`, which re-exports it.
 > `codec-common/`, `fabric-bases/` and `fabric-instances/` are exported subpaths
@@ -3252,7 +3252,7 @@ The implementation is split across several files for separation of concerns:
 
 | File | Purpose |
 |------|---------|
-| `index.ts` | Public surface, and the package's main entry point: re-exports the conversion functions (from `native-conversion.ts`), the type declarations (from `interface.ts`), the clone helpers (from `value-clone.ts`), the deep freeze (from `deep-freeze.ts`), the hash (from `value-hash.ts`), the debug renderers (from `value-debug.ts`), and the tag vocabulary (from `VALUE_TAGS.ts` and `native-type-tags.ts`); defines `valueEqual()` |
+| `index.ts` | Public surface, and the package's main entry point: re-exports the conversion functions (from `native-conversion.ts`), the type declarations (from `interface.ts`), the clone helpers (from `value-clone.ts`), the deep freeze (from `deep-freeze.ts`), the hash (from `value-hash.ts`), the debug renderers (from `value-debug.ts`), and the tag vocabulary (from `VALUE_TAGS.ts` and `tag-from.ts`); defines `valueEqual()` |
 | `native-conversion.ts` | Conversion: `fabricFromNativeValue`, `shallowFabricFromNativeValue`, `nativeFromFabricValue`, `isValidFabricConvertibleValue` |
 | `fabric-bases/` | The abstract bases a concrete `FabricValue` extends, one per branch of the type hierarchy: `BaseFabricInstance.ts`, `BaseFabricPrimitive.ts` (plus an `index.ts` barrel). These are the implementer's half of the hierarchy; `interface.ts` is the client's, and reaching it does not reach these. |
 | `fabric-instances/` | Concrete `FabricInstance` subclasses, each in its own file: `FabricNativeWrapper.ts`, `FabricError.ts`, `FabricLink.ts`, `FabricMap.ts`, `FabricSet.ts` (plus an `index.ts` barrel). `UnknownValue` and `ProblematicValue` are `FabricInstance`s too, but live in `codec-common/`, existing only as products of a decode fault. |
@@ -3834,7 +3834,7 @@ export function fabricFromNativeValue(
 
 > **Implementation: tag-based type dispatch.** The conversion functions use a
 > tag-based dispatch mechanism (`tagFromNativeValue()` in
-> `packages/data-model/native-type-tags.ts`) to classify values in O(1) via a
+> `packages/data-model/tag-from.ts`) to classify values in O(1) via a
 > `switch` on the value's constructor. This replaces sequential `instanceof`
 > chains with a single constructor lookup that returns a tag string (e.g.,
 > `"Error"`, `"Date"`, `"RegExp"`, `"Array"`, `"Object"`, `"Primitive"`,

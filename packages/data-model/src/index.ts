@@ -76,8 +76,6 @@ export {
   isValidDeepFrozenFabricValue,
 } from "./deep-freeze.ts";
 
-export { tagFromNativeValue } from "./native-type-tags.ts";
-
 export {
   toCompactDebugString,
   toDebugKindString,
@@ -94,4 +92,5 @@ export {
   tagFromFabricPrimitiveElseNull,
   tagFromFabricValue,
   tagFromFabricValueElseNull,
+  tagFromNativeValue,
 } from "./tag-from.ts";

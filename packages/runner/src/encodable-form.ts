@@ -258,7 +258,7 @@ function replace(
     // A null-prototype object is excluded too -- hence the `false` argument to
     // `isPlainObject()`. It is not a `FabricPlainObject`, so it is not the
     // walk's to rewrite. That is not the same as the conversion refusing one:
-    // `native-type-tags.ts` reports it as `Object`. Whether to accept it is the
+    // `tag-from.ts` reports it as `Object`. Whether to accept it is the
     // conversion's question, asked of the value as it stands.
     return replaced(value, hooks, seen, onCopy);
   }

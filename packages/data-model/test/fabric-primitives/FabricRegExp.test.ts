@@ -30,7 +30,7 @@ import {
 } from "@/index.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 import { isValidFabricNativeObject } from "@/validity-check.ts";
-import { tagFromNativeValue } from "@/native-type-tags.ts";
+import { tagFromNativeValue } from "@/tag-from.ts";
 import { tagFromNativeBuiltinClass } from "@/tag-from.ts";
 import { VALUE_TAGS } from "@/VALUE_TAGS.ts";
 import { hashOf } from "@/value-hash.ts";
