@@ -145,7 +145,7 @@ export function tagFromFabricPrimitiveElseNull(
  * Maps a value to its JS type tag, which is decided by `typeof` alone: the
  * `typeof` name of a non-object, and the `null` tag for the value `null`.
  * Returns `object` for any other object, which has no JS type tag; its tag is
- * a question for one of the value dispatches below.
+ * a question for `tagFromFabricValue()` or `tagFromNativeValueElseNull()`.
  */
 export function jsTypeTag(value: unknown): JsTypeValueTag | "object" {
   return (value === null) ? VALUE_TAGS.null : typeof value;
