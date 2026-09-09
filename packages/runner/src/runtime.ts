@@ -1457,6 +1457,9 @@ export class Runtime {
     this.experimental.plainResultReceipts ??= true;
     this.experimental.lazyMaterialization ??= true;
 
+    const previousModernCellRep = getModernCellRepConfig();
+    const previousCommitPreconditions = getCommitPreconditionsConfig();
+
     // Propagate experimental flags to their ambient control points, then read
     // back the effective state so `experimental.*` reflects what is actually in
     // effect (matters when the caller didn't pass an explicit value and the
@@ -1706,6 +1709,8 @@ export class Runtime {
     } catch (error) {
       this.#releaseServerExecutionEnabler();
       this.#releaseAmbientConfig();
+      setModernCellRepConfig(previousModernCellRep);
+      setCommitPreconditionsConfig(previousCommitPreconditions);
       throw error;
     }
   }
@@ -1999,8 +2004,9 @@ export class Runtime {
     try {
       await this.#disposeInner(closeStorage);
     } finally {
-      // Exception-safe: a rejecting teardown step must not leak the
-      // process-global enabler (the reset would then never fire).
+      // Release process-global flag ownership after teardown, including a
+      // failed teardown. The last runtime resets modernCellRep and
+      // commitPreconditions; the last serverExecution enabler resets that flag.
       this.#releaseServerExecutionEnabler();
       this.#releaseAmbientConfig();
     }
@@ -2097,17 +2103,7 @@ export class Runtime {
     } finally {
       this.#tearingDownWrites = true;
       this.#writeTeardown.abort();
-      // Released whatever happened above. `storageManager.close()` can reject
-      // — through a provider's `replica.close()` — and it is the one await
-      // here that can. Every statement below is synchronous field-clearing
-      // that cannot fail in turn, so running them on the error path costs
-      // nothing while skipping them strands the process: the config resets
-      // are PROCESS-GLOBAL, and one skipped leaves a non-default experimental
-      // flag set for every runtime built afterwards, with nothing to put it
-      // back.
-      //
-      // The error still propagates. What changes is how much has been
-      // released by the time it does, not whether disposal fails.
+      // Release local services after every teardown outcome.
       this.scheduler.dispose();
       this.runner.dispose();
 
@@ -2120,22 +2116,6 @@ export class Runtime {
       // Dispose the Engine (clears compiler/runtime state and the console
       // hook)
       this.harness.dispose();
-
-      // Reset experimental config to defaults. serverExecution releases
-      // this runtime's ENABLER (stage F): the flag resets only when the
-      // last live enabler process-wide goes — disposing a flag-less
-      // runtime, or parking one serving runtime of several, must not clear
-      // the ambient flag other owners and the memory server's admission
-      // still depend on (mid-wave `derived` commits would be refused as
-      // unclaimable). A single-runtime test keeps its stage-A cleanup
-      // contract: the last enabler's dispose resets. Released in
-      // #releaseServerExecutionEnabler (also called from the dispose
-      // catch), so a REJECTING async teardown cannot leak the enabler.
-      // readerSchemaPrecedence deliberately does NOT reset here: a server
-      // runs one serving runtime per space and disposes idle ones while
-      // the rest live, so a dispose-time reset would lift a rollback out
-      // from under them. The ambient changes only when a construction
-      // sets it (last construction wins).
     }
   }
 

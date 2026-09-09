@@ -1696,7 +1696,8 @@ server](#clients-that-are-not-built-alongside-their-server).
   controls. The last runtime's disposal resets `modernCellRep` and
   `commitPreconditions` to their defaults. Disposing one of several live
   runtimes preserves those settings. Failed construction and disposal also
-  release ownership, and repeated disposal releases it only once.
+  release ownership, and repeated disposal releases it only once. Failed
+  construction restores the preceding settings.
 - `serverExecution` counts explicit enablers separately. Construction acquires
   an enabler; disposal or failed construction releases it. The last enabler's
   release resets the flag.

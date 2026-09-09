@@ -259,6 +259,31 @@ describe("ExperimentalOptions", () => {
       });
     }
 
+    it("restores a surviving runtime's settings when another construction fails", async () => {
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: StorageManager.emulate({ as: signer }),
+        experimental: { modernCellRep: true, commitPreconditions: false },
+      });
+      const failedStorage = StorageManager.emulate({ as: signer });
+      try {
+        expect(() =>
+          new Runtime({
+            apiUrl: "invalid URL" as never,
+            storageManager: failedStorage,
+            experimental: { modernCellRep: false, commitPreconditions: true },
+          })
+        ).toThrow("Invalid URL");
+        expect(getModernCellRepConfig()).toBe(true);
+        expect(getCommitPreconditionsConfig()).toBe(false);
+      } finally {
+        await failedStorage.close();
+        await runtime.dispose();
+      }
+      expect(getModernCellRepConfig()).toBe(false);
+      expect(getCommitPreconditionsConfig()).toBe(true);
+    });
+
     it("releases ambient config ownership when construction or disposal fails", async () => {
       const failedStorage = StorageManager.emulate({ as: signer });
       try {
