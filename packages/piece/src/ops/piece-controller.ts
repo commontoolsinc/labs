@@ -47,7 +47,6 @@ import {
   schemaAcceptsOpaqueCellValue,
   schemaPathSelection,
   setPieceReconciliation,
-  storedArgumentValidationIssue,
 } from "@commonfabric/runner";
 import { storedArgumentRefusalDetail } from "@commonfabric/runner/shared";
 import {
@@ -65,6 +64,7 @@ import { pieceId } from "../piece-id.ts";
 import {
   assertPatternSchemasBackwardCompatible,
   assertSchemaSubset,
+  schemasHaveSameContract,
 } from "../schema-compatibility.ts";
 import {
   cloneInternalManifest,
@@ -493,13 +493,11 @@ export interface PieceSourceCompatibilityIssues {
  * validation failure, or a CFC schema-envelope rejection at the setup-commit
  * boundary — so a caller fixes one and meets the next.
  *
- * Every verdict here comes from driving the REAL rule in dry-run, never a
- * restatement of it: a preflight that reimplements the rules drifts from
- * enforcement and starts lying. It agrees with the apply path on the VERDICT
- * and the CAUSE. Not on identical prose — `setPattern` reports in
- * enforcement's own words, and making the strings match would mean running
- * this review ahead of the swap, which changes what `setPattern` accepts
- * (see the comment there, and `test/setsrc-cold-argument.test.ts`).
+ * Preflight uses the same contract checks and stored-argument validator as
+ * setup. Unreadable documents and linked slots defer to reactive reads, so a
+ * compatible verdict does not establish that every input value has loaded.
+ * Apply enforces the rules in the setup transaction and may format its
+ * refusal differently from this report.
  *
  * It is a point-in-time answer. The piece's argument, its current source, or
  * the candidate file can all move between the check and a later apply, so a
@@ -1817,9 +1815,11 @@ function linkMatchesCommittedState(
   baseCell: Cell<unknown>,
   basePath: readonly (string | number)[],
 ): boolean {
-  // No undefined guard needed: `parseLinkOrThrow` has already rejected any
-  // supplied value that is not a real link record, so `suppliedLink.value`
-  // can never equal an absent committed slot here.
+  // Live Cells prove preservation in `derivePreserveDecision`, not equality
+  // to stored bytes. They are not serialized FabricValues.
+  if (isCell(suppliedLink.value)) return false;
+  // After excluding live Cells, `parseLinkOrThrow` guarantees a serialized
+  // link, which cannot equal an absent committed slot.
   const committedRoot = baseCell.withTx().getRaw();
   const committed = getValueAtPath(committedRoot, [
     ...basePath,
@@ -2198,8 +2198,8 @@ function policePreservedEnvelope(
   // reaches here when it is identical to already-committed state, but
   // committed does not mean vetted — stored links can originate outside this
   // validator — so re-assert it: a carried wrapper's `asCell` STACK (kind
-  // and scope, per `asCellShapesMatch`; payload schemas are proved
-  // separately against the durable contracts) has to match every durable
+  // and scope, per `asCellShapesMatch`; payload compatibility is decided
+  // after these wrapper checks) has to match every durable
   // contract of the source. (Loom's injected links carry no envelope —
   // `PiecesController.link` serializes with `KeepAsCell.OnlyStream` — so the
   // real restore case is unaffected.)
@@ -2320,6 +2320,55 @@ function provePreservedContracts(
 }
 
 /**
+ * Whether an update retains both a committed handle and its input contract.
+ * The producer's policy remains on the linked document; preserving the same
+ * handle under the same contract changes neither its policy nor its authority.
+ * This proves consumer-contract continuity, not that the producer contract
+ * was checked at link creation or has stayed unchanged. Producer enforcement
+ * on access and commit governs the retained handle.
+ */
+function retainsInputHandleContract(
+  suppliedLink: SuppliedLink,
+  baseCell: Cell<unknown>,
+  basePath: readonly (string | number)[],
+  priorArgumentSchema: JSONSchema | undefined,
+  targetContracts: readonly PathSchemaContract[],
+): boolean {
+  if (
+    priorArgumentSchema === undefined ||
+    !linkMatchesCommittedState(suppliedLink, baseCell, basePath)
+  ) return false;
+  try {
+    const priorContracts = deriveTargetContracts(
+      priorArgumentSchema,
+      priorArgumentSchema,
+      false,
+      basePath,
+      suppliedLink.path,
+      suppliedLink.path.join(".") || "<root>",
+    );
+    const sameContract = (
+      prior: PathSchemaContract,
+      target: PathSchemaContract,
+    ): boolean =>
+      prior.mayBeMissing === target.mayBeMissing &&
+      schemasHaveSameContract(prior.schema, target.schema, {
+        sourceRoot: prior.root,
+        targetRoot: target.root,
+      });
+    return priorContracts.every((prior) =>
+      targetContracts.some((target) => sameContract(prior, target))
+    ) &&
+      targetContracts.every((target) =>
+        priorContracts.some((prior) => sameContract(prior, target))
+      );
+  } catch {
+    // An unprovable contract still needs the full producer-side proof.
+    return false;
+  }
+}
+
+/**
  * Validate every supplied link against the destination schema's contract,
  * one helper per concern, and return the links that preserve a direct handle
  * to their source (see `derivePreserveDecision`) — the subset a restoring
@@ -2358,6 +2407,9 @@ export function assertSuppliedLinkSchemasCompatible(
      * away values the piece may already hold is still rejected. Absent this
      * option (every non-update flow), an unprovable source stays a hard error,
      * so a fresh link to an arbitrary contract-less document is still refused.
+     * With `linksPreservedVerbatim`, this also proves an existing direct
+     * handle's consumer contract unchanged. Such a handle keeps the linked
+     * producer's policy without requiring that policy on the consumer schema.
      */
     priorArgumentSchema?: JSONSchema;
 
@@ -2453,6 +2505,17 @@ export function assertSuppliedLinkSchemasCompatible(
         preservedOuter,
         displayPath,
       );
+      if (
+        options.linksPreservedVerbatim === true &&
+        options.destinationIsStream !== true &&
+        retainsInputHandleContract(
+          suppliedLink,
+          baseCell,
+          basePath,
+          options.priorArgumentSchema,
+          targetContracts,
+        )
+      ) continue;
       provePreservedContracts(
         localized.sourceContracts,
         localized.targetContracts,
@@ -4615,18 +4678,9 @@ export class PieceController<T = unknown> {
         if (candidate === undefined) {
           throw new Error("the candidate source has no pattern identity");
         }
-        // Enforcement is this assertion plus the execute-time validators
-        // below, and it must stay that way. Do not move the aggregate
-        // compatibility review (`pieceSourceCompatibilityReview`, what
-        // `checkPattern` runs) in front of it.
-        //
-        // The review materializes and validates the stored argument. When the
-        // whole argument document is cold, Runner deliberately defers
-        // validation and preserves its bytes; running the review here would
-        // instead validate `undefined` and refuse the update.
-        //
-        // Callers who want every reason at once run `checkPattern()`, which is
-        // exactly what `--check` is for.
+        // Enforce the contract here and the stored-input checks inside the
+        // setup transaction. `checkPattern()` collects the same checks for
+        // preflight; its read-time verdict cannot replace commit-time checks.
         if (!options?.dangerouslyAllowIncompatibleSchema) {
           // Reached only when the load above succeeded: a failed load
           // without the flag rethrows there.
@@ -5004,15 +5058,14 @@ async function pieceSourceCompatibilityReview(
   // The candidate can select inputs the current pattern does not expose.
   // Sync its projection before validating the newly selected values.
   await argumentCell.asSchema(candidate.argumentSchema).sync();
-  const validationFailure = storedArgumentValidationIssue(
-    argumentCell,
-    candidate.argumentSchema,
-    extractDefaultValues(candidate.argumentSchema),
-    pieces.runtime.readTx(),
-  );
-  if (validationFailure !== undefined) {
-    issues.argument =
-      `updated arguments do not match the candidate schema: ${validationFailure}`;
+  try {
+    pieces.runtime.runner.validateStoredArgument(
+      pieces.runtime.readTx(),
+      piece,
+      candidate,
+    );
+  } catch (error) {
+    issues.argument = pieceSourceErrorMessage(error);
   }
 
   try {

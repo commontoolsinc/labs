@@ -482,7 +482,7 @@ const comparableIfc = (ifc: unknown): unknown => {
  * line between them is whether the caller will (re)instantiate the graph, not
  * whether the piece happens to be running: `Runner.#applySetupState` re-points
  * and validates the argument for a cold root and for the watcher's hot-swap,
- * both of which then instantiate; `Runner.#validateStoredArgument` checks a
+ * both of which then instantiate; `Runner.validateStoredArgument` checks a
  * piece that is being REUSED — its nodes stay as they are — and moves nothing
  * (`packages/runner/test/pattern-update-argument-validation.test.ts`).
  *
@@ -658,6 +658,35 @@ export function assertSchemaSubset(
   if (issue !== undefined) {
     throw new Error(`${label} schema is not compatible: ${issue}`);
   }
+}
+
+/**
+ * Determines whether two valid schemas describe the same resolved contract,
+ * including defaults and reference roots. Uses the contract's IFC normalization
+ * without treating defaults as a new materialization step.
+ *
+ * @internal Used to recognize a retained consumer contract. New-link admission
+ * requires `assertSchemaSubset()`, whose default-insertion checks still apply.
+ */
+export function schemasHaveSameContract(
+  source: JSONSchema,
+  target: JSONSchema,
+  options: SchemaSubsetOptions = {},
+): boolean {
+  const sourceRoot = options.sourceRoot ?? source;
+  const targetRoot = options.targetRoot ?? target;
+  if (
+    validateSchemaDefinition(source, sourceRoot) !== undefined ||
+    validateSchemaDefinition(target, targetRoot) !== undefined
+  ) return false;
+  const sourceResolution = resolveSchema(source, sourceRoot);
+  const targetResolution = resolveSchema(target, targetRoot);
+  return sourceResolution.schema !== undefined &&
+    targetResolution.schema !== undefined &&
+    schemasResolveEqually(sourceResolution.schema, targetResolution.schema, {
+      sourceRoot: sourceResolution.root,
+      targetRoot: targetResolution.root,
+    });
 }
 
 function schemaSubsetIssue(
@@ -1577,7 +1606,7 @@ function schemaSubtreesEqual(left: unknown, right: unknown): boolean {
 function schemasResolveEqually(
   source: unknown,
   target: unknown,
-  context: CompatibilityContext,
+  context: Pick<CompatibilityContext, "sourceRoot" | "targetRoot">,
 ): boolean {
   if (!schemaSubtreesEqual(source, target)) return false;
 

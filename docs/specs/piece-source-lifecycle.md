@@ -617,6 +617,39 @@ The runtime rejects that source until the input is repaired. An accepted direct
 replacement detaches the piece and appends a revision. Refollowing an accepted
 historical origin retains that origin.
 
+Preflight and setup share stored-argument validation. Optional fields holding
+`undefined` count as absent. An argument document or linked value unreadable in
+the validating transaction defers to reactive reads; a readable wrong-typed
+value is refused. Preflight does not establish that every linked value is
+available.
+
+When validation needs to distinguish unreadable links from literal absence, its
+fallback walks stored links alongside the materialized argument. It reuses
+completed subgraphs within that validation, keyed by the full normalized link
+address and materialized view so distinct defaults stay distinct. Results that
+depend on a recursion cutoff or an unavailable raw-chain read are not reused;
+cyclic graphs retain their path-dependent cutoff behavior.
+
+A source update can preserve a committed direct handle under an unchanged
+consumer input contract. The serialized link values must compare equal under
+fabric-aware value comparison, and each prior and candidate path contract must
+have an equal resolved counterpart, including defaults and reference roots.
+A newly introduced link cannot use this rule.
+The continuity proof does not treat defaults as a new materialization step;
+bidirectional value-subset proofs alone cannot establish unchanged defaults.
+The strict default-insertion checks still govern new links and changed
+contracts. The linked producer retains its own store policy and enforces it on
+accesses, so its policy does not have to be repeated on the unchanged consumer
+contract. Capability-kind and scope checks still apply. Changed handle contracts
+require the full producer-contract proof.
+
+Retaining a handle proves continuity of the consumer contract, not a historical
+producer-contract check: writes that bypass `PiecesController.link`, such as
+`setRawUntyped` and `cf cell set`, can omit that check, and the producer schema
+can change after the link is stored. The retained-handle rule relies on
+producer enforcement at access and commit time for payload and flow-policy
+constraints rather than re-proving their subset relation during the update.
+
 Whether an automatic origin update runs these comparisons turns on one
 question: did anything gate the release that produced the candidate?
 
